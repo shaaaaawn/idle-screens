@@ -1,5 +1,6 @@
 # idle-screens
 
+[![CI](https://img.shields.io/github/actions/workflow/status/shaaaaawn/idle-screens/ci.yml?branch=main&label=CI)](https://github.com/shaaaaawn/idle-screens/actions/workflows/ci.yml)
 [![core](https://img.shields.io/npm/v/@idle-screens/core?label=core)](https://www.npmjs.com/package/@idle-screens/core)
 [![saver-black-hole](https://img.shields.io/npm/v/@idle-screens/saver-black-hole?label=saver-black-hole)](https://www.npmjs.com/package/@idle-screens/saver-black-hole)
 [![savers-classic](https://img.shields.io/npm/v/@idle-screens/savers-classic?label=savers-classic)](https://www.npmjs.com/package/@idle-screens/savers-classic)
