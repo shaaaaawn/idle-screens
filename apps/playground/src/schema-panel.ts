@@ -55,7 +55,12 @@ export function buildSchemaPanel(mount: HTMLElement): void {
   };
 
   const showErrors = (lines: string[]): void => {
-    errorsEl.innerHTML = lines.map((l) => `<div>• ${l}</div>`).join('');
+    errorsEl.textContent = '';
+    for (const l of lines) {
+      const div = document.createElement('div');
+      div.textContent = `• ${l}`;
+      errorsEl.appendChild(div);
+    }
   };
   const setStatus = (ok: boolean, label: string): void => {
     status.className = 'verdict ' + (ok ? 'same' : 'diff');
