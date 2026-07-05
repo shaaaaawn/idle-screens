@@ -1,0 +1,36 @@
+{
+  "name": "@idle-screens/saver-black-hole",
+  "version": "0.0.0",
+  "description": "Passthrough black-hole screensaver for idle-screens: gravitational lensing, roams the live page and eats its content. Seeded, paramSpace, control-track.",
+  "license": "MIT",
+  "author": "Shawn Partridge",
+  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens", "directory": "packages/saver-black-hole" },
+  "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": { "access": "public" },
+  "keywords": ["screensaver", "idle", "ambient", "black-hole", "canvas", "passthrough"],
+  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "peerDependencies": {
+    "@idle-screens/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@idle-screens/core": "workspace:*"
+  }
+}

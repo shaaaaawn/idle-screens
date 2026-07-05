@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build FIRST: packages typecheck against each other's emitted dist/*.d.ts,
+      # so a clean checkout must build before `pnpm typecheck` can resolve them.
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Install Playwright
+        run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
+      - name: E2E (element + savers + determinism + config menu)
+        run: pnpm test:e2e

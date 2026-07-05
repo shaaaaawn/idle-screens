@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>idle-screens playground</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #05050a; color: #e6e8ef; font: 14px/1.5 system-ui, sans-serif; }
+      button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid #2a2a38; background: #14141d; color: #e6e8ef; cursor: pointer; }
+      button:hover { border-color: #3a86ff; }
+
+      /* ---- Workbench: fixed 100vh, no global scroll; DRAGGABLE docked panels ----
+         Track sizes are CSS vars that <wb-splitter> mutates on drag. */
+      #workbench {
+        --left: 210px; --right: 340px; --bottom: 300px; --gut: 5px;
+        display: grid;
+        grid-template-columns: var(--left) var(--gut) minmax(0, 1fr) var(--gut) var(--right);
+        grid-template-rows: 46px minmax(0, 1fr) var(--gut) var(--bottom);
+        grid-template-areas:
+          "top   top   top     top   top"
+          "left  spl   center  spr   right"
+          "left  spl   spb     spr   right"
+          "left  spl   bottom  spr   right";
+        height: 100vh; width: 100vw; gap: 0; background: #08080d;
+      }
+      #wb-top { grid-area: top; }
+      #wb-left { grid-area: left; }
+      #wb-center { grid-area: center; }
+      #wb-right { grid-area: right; }
+      #wb-bottom { grid-area: bottom; }
+      #sp-left { grid-area: spl; }
+      #sp-right { grid-area: spr; }
+      #sp-bottom { grid-area: spb; }
+
+      wb-dock { display: flex; flex-direction: column; background: #08080d; min-width: 0; min-height: 0; overflow: hidden; }
+      .dock-head { flex: 0 0 auto; padding: 7px 12px; font: 600 11px ui-monospace, monospace; text-transform: uppercase;
+        letter-spacing: .12em; opacity: .5; background: #0e0e16; border-bottom: 1px solid #17171f; user-select: none; }
+      /* localized scrolling: each panel body scrolls independently */
+      .dock-body { flex: 1 1 auto; overflow: auto; padding: 12px; min-height: 0; }
+      wb-dock[flush] .dock-body { padding: 0; position: relative; }
+
+      /* draggable dividers */
+      wb-splitter { display: block; background: #14141f; transition: background .12s; }
+      wb-splitter[axis="x"] { cursor: col-resize; }
+      wb-splitter[axis="y"] { cursor: row-resize; }
+      wb-splitter:hover, wb-splitter.dragging { background: #3a86ff; }
+
+      /* top bar */
+      #wb-top { display: flex; flex-direction: row; align-items: center; gap: 14px; padding: 0 14px; background: #0e0e16; }
+      #wb-top .wb-title { font-weight: 700; letter-spacing: .02em; }
+      #wb-top .wb-hint { margin-left: auto; opacity: .45; font: 12px ui-monospace, monospace; }
+      .toolbar { display: flex; gap: 8px; }
+
+      /* center viewport (wb-center[flush] .dock-body is the positioning context) */
+      /* inline saver preview — fills the viewport, sits over the intro copy */
+      #viewport-host { position: absolute; inset: 0; display: none; background: #04060a; overflow: hidden; }
+      #viewport-host.active { display: block; }
+      #viewport-host.passthrough { background: transparent; }
+      #viewport-host > canvas { display: block; width: 100%; height: 100%; }
+      #viewport-label { position: absolute; left: 12px; bottom: 10px; z-index: 2; font: 11px ui-monospace, monospace;
+        opacity: .6; pointer-events: none; text-shadow: 0 1px 3px #000; }
+      .content { max-width: 640px; margin: 0 auto; padding: 40px 24px 60px; }
+      .content h1 { font-size: 1.9rem; margin-top: 0; }
+      .card { background: #10101a; border: 1px solid #20202c; border-radius: 12px; padding: 16px; margin: 0 0 14px; }
+      main :is(h1,h2,h3,p,li,a,button) { will-change: auto; }
+
+      /* frame / harness fullscreen stage */
+      #stage:not([hidden]) { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 50; }
+      body.frame-mode #workbench { display: none; }
+
+      /* saver palette (left outliner) */
+      .palette { display: flex; flex-direction: column; gap: 2px; }
+      .palette-item { display: flex; align-items: center; gap: 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 10px; width: 100%; font-size: 13px; cursor: pointer; }
+      .palette-item:hover { background: #14141d; border-color: #23232f; }
+      .palette-item.active { background: #16324d; border-color: #3a86ff; }
+      .palette-label { flex: 1 1 auto; }
+      .palette-status { flex: 0 0 auto; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+
+      /* --- config panel (docked in the inspector) --- */
+      .config-panel { width: 100%; background: #0e0e16; border: 1px solid #23233150; border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
+      .config-panel h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; opacity: .6; }
+      .props-title { font-size: 15px; font-weight: 700; margin: 6px 0 10px; }
+      .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; font-size: 13px; }
+      .field > span { opacity: .85; }
+      .field select, .field input[type=number] { background: #05050a; color: #e6e8ef; border: 1px solid #2a2a38;
+        border-radius: 6px; padding: 4px 6px; font: inherit; }
+      .field input[type=number] { width: 88px; }
+      .field select { max-width: 130px; }
+      .config-actions { display: flex; gap: 8px; margin-top: 12px; }
+      .config-actions button { flex: 1; }
+      .config-note { opacity: .5; font-size: 11px; margin-top: 10px; line-height: 1.4; }
+
+      /* --- determinism demo --- */
+      .determinism .lead { opacity: .8; }
+      .det-controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 14px 0; font-size: 13px; }
+      .det-controls label { display: flex; align-items: center; gap: 7px; }
+      .det-controls input[type=number] { width: 84px; background:#05050a; color:#e6e8ef; border:1px solid #2a2a38; border-radius:6px; padding:4px 6px; font:inherit; }
+      .det-controls input[type=range] { width: 180px; }
+      .det-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+      .det-panel { display: flex; flex-direction: column; gap: 6px; }
+      .det-panel canvas { width: 264px; height: 150px; border: 1px solid #23232f; border-radius: 8px; background: #000; display: block; }
+      .det-panel figcaption { font: 11px ui-monospace, monospace; opacity: .6; margin: 0; }
+      .verdict { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+      .verdict.same { background: rgba(63,185,80,.14); color: #3fb950; border: 1px solid rgba(63,185,80,.4); }
+      .verdict.diff { background: rgba(248,81,73,.13); color: #f85149; border: 1px solid rgba(248,81,73,.4); }
+
+      /* --- safety & perf panel --- */
+      .val-out { margin-top: 14px; display: flex; flex-direction: column; gap: 7px; }
+      .val-metric { font: 12px ui-monospace, monospace; opacity: 0.75; }
+
+      /* --- declarative schema panel --- */
+      .schema-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+      .schema-cols { display: flex; flex-wrap: wrap; gap: 16px; }
+      .schema-edit { flex: 1 1 320px; min-width: 280px; }
+      .schema-edit textarea { width: 100%; height: 230px; resize: vertical; background: #05050a; color: #cfe3ff;
+        border: 1px solid #23232f; border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, monospace; }
+      .schema-errors { margin-top: 8px; font: 12px ui-monospace, monospace; color: #f0857f; display: flex; flex-direction: column; gap: 3px; }
+      .schema-preview { flex: 1 1 280px; min-width: 240px; }
+      .schema-preview #schema-host { position: relative; width: 100%; height: 230px; border: 1px solid #23232f;
+        border-radius: 8px; overflow: hidden; background: #000; }
+      .schema-preview #schema-host canvas { display: block; width: 100%; height: 100%; }
+
+      /* --- device & capabilities panel --- */
+      .cap-controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 12px 0 16px; font-size: 13px; }
+      .cap-controls label { display: flex; align-items: center; gap: 7px; }
+      .cap-controls select { background: #05050a; color: #e6e8ef; border: 1px solid #2a2a38; border-radius: 6px; padding: 4px 6px; font: inherit; }
+      .cap-cols { display: flex; flex-wrap: wrap; gap: 28px; }
+      .cap-block { min-width: 150px; }
+      .cap-block h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; opacity: .6; }
+      .cap-line { display: flex; justify-content: space-between; gap: 16px; font: 12px ui-monospace, monospace; padding: 2px 0; }
+      .cap-line > span:first-child { opacity: .7; }
+      .cap-table-wrap { overflow-x: auto; margin-top: 18px; }
+      .cap-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+      .cap-table th, .cap-table td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #1c1c26; white-space: nowrap; }
+      .cap-table th { opacity: .55; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; }
+      .cap-reason { opacity: .6; white-space: normal; font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="workbench">
+      <header id="wb-top">
+        <span class="wb-title">idle-screens</span>
+        <span class="wb-hint" id="wb-hint">drag the dividers to resize</span>
+      </header>
+
+      <wb-dock id="wb-left" label="Savers"><div id="dock-left"></div></wb-dock>
+      <wb-splitter id="sp-left" axis="x" for="--left" min="150" max="380"></wb-splitter>
+
+      <wb-dock id="wb-center" label="Viewport" flush>
+        <main class="content">
+          <h1>idle-screens</h1>
+          <p>
+            A framework-agnostic ambient-visual engine. The black hole is a passthrough saver:
+            when it sleeps it roams this workspace and eats the content. Pick a saver on the left,
+            tweak the inspector on the right, and use the tools below.
+          </p>
+          <div class="card">
+            <h3>Try it</h3>
+            <p>Press <strong>Sleep</strong> (top bar) and watch the hole devour these blocks.</p>
+            <ul>
+              <li>Seeded program: identical particle placement per seed.</li>
+              <li>Control-track: steer parameters over time, not frames.</li>
+              <li>Passthrough: overlays and reads the live workspace.</li>
+            </ul>
+          </div>
+        </main>
+        <div id="viewport-host"><span id="viewport-label"></span></div>
+      </wb-dock>
+
+      <wb-splitter id="sp-bottom" axis="y" for="--bottom" invert min="140" max="700"></wb-splitter>
+      <wb-dock id="wb-bottom" label="Tools"><div id="dock-bottom"></div></wb-dock>
+
+      <wb-splitter id="sp-right" axis="x" for="--right" invert min="240" max="560"></wb-splitter>
+      <wb-dock id="wb-right" label="Inspector"><div id="dock-right"></div></wb-dock>
+    </div>
+    <div id="stage" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

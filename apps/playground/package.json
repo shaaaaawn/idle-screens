@@ -1,0 +1,24 @@
+{
+  "name": "@idle-screens/playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:fresh": "vite --force",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@idle-screens/capabilities": "workspace:*",
+    "@idle-screens/core": "workspace:*",
+    "@idle-screens/saver-black-hole": "workspace:*",
+    "@idle-screens/savers-classic": "workspace:*",
+    "@idle-screens/schema": "workspace:*",
+    "@idle-screens/validator": "workspace:*",
+    "@preact/signals-core": "^1.8.0"
+  }
+}

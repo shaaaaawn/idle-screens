@@ -1,0 +1,36 @@
+{
+  "name": "@idle-screens/validator",
+  "version": "0.0.0",
+  "description": "Photosensitivity (WCAG 2.3.1 flash) + performance validation for idle-screens savers. Pure analysis: feed it per-tile luminance samples and frame times, get a pass/fail safety verdict.",
+  "license": "MIT",
+  "author": "Shawn Partridge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/validator"
+  },
+  "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": { "access": "public" },
+  "keywords": ["screensaver", "idle", "wcag", "flash", "photosensitivity", "validation"],
+  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  }
+}

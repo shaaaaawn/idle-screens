@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# vite
+apps/*/dist/
+.vite/
+
+# os / editor
+.DS_Store
+*.log
+
+# Never commit npm auth
+.npmrc
