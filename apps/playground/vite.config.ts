@@ -11,6 +11,7 @@ const src = (pkg: string): string =>
   fileURLToPath(new URL(`../../packages/${pkg}/src/index.ts`, import.meta.url));
 
 export default defineConfig({
+  base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
   server: { port: 5177, strictPort: true },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a
