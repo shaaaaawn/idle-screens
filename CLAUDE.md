@@ -50,12 +50,19 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 **`behavior-contract.md` is the authoritative specification.** All 97 items are implemented and tested. The vision doc and control-track spec are aspirational/historical; check their status headers.
 
-## Build and CI
+## Build, CI, and deploy
 
-- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile).
+- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main` and `develop`, plus PRs and `workflow_call`.
+- **Release** (`.github/workflows/release.yml`): uses `changesets/action` to version-bump and publish to npm on push to `main`. Requires `NPM_TOKEN` secret (granular access token with "Bypass 2FA"). Both `NPM_TOKEN` and `NODE_AUTH_TOKEN` env vars must be set (setup-node creates `.npmrc` using `NODE_AUTH_TOKEN`, overriding changesets' `NPM_TOKEN` `.npmrc`).
+- **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Changesets** for versioning/publishing. Config: `access: "public"`, `baseBranch: "main"`, playground is ignored. Run `pnpm changeset` to add a changeset before publishing.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
+
+## Branching
+
+- **`main`** -- production. Pushes trigger CI + release (changesets publish to npm) + playground deploy to GitHub Pages. Do not push directly; merge from `develop`.
+- **`develop`** -- day-to-day work. Pushes trigger CI only. Default working branch.
 
 ## Conventions
 
@@ -67,4 +74,11 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 ## Consumer integration (shawn-site)
 
-The Angular site at `~/code/shawn-site` consumes this library as vendored tarballs (`app/vendor/idle-screens-*.tgz`, `file:` deps in `package.json`). To update: `pnpm -r build`, `pnpm pack` each package, copy `.tgz` files to `shawn-site/app/vendor/`, then `npm install` in the site's `app/` directory.
+The Angular site at `~/code/shawn-site` consumes `@idle-screens/core`, `@idle-screens/saver-black-hole`, and `@idle-screens/savers-classic` from the **npm registry** (`^0.1.0` in `app/package.json`). To update: publish a new version via changesets (merge to `main`), then `npm update` in the site's `app/` directory. The old vendored-tarball approach is retired.
+
+## npm publishing
+
+- npm org: `idle-screens` (on npmjs.com). npm username: `shawnfx`.
+- All 6 packages are published at `0.1.0` with `publishConfig: { "access": "public" }`.
+- Scoped packages require the npm org to exist or publish returns 404.
+- Granular access token with "Bypass 2FA" is required for CI publishing (classic automation tokens fail with 403).
