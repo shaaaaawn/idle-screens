@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/capabilities",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Device & capability detection + saver eligibility tiering for idle-screens. Pure decide (Node-testable) + a thin browser detector.",
   "license": "MIT",
   "author": "Shawn Partridge",
