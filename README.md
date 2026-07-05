@@ -1,5 +1,12 @@
 # idle-screens
 
+[![core](https://img.shields.io/npm/v/@idle-screens/core?label=core)](https://www.npmjs.com/package/@idle-screens/core)
+[![saver-black-hole](https://img.shields.io/npm/v/@idle-screens/saver-black-hole?label=saver-black-hole)](https://www.npmjs.com/package/@idle-screens/saver-black-hole)
+[![savers-classic](https://img.shields.io/npm/v/@idle-screens/savers-classic?label=savers-classic)](https://www.npmjs.com/package/@idle-screens/savers-classic)
+[![schema](https://img.shields.io/npm/v/@idle-screens/schema?label=schema)](https://www.npmjs.com/package/@idle-screens/schema)
+[![validator](https://img.shields.io/npm/v/@idle-screens/validator?label=validator)](https://www.npmjs.com/package/@idle-screens/validator)
+[![capabilities](https://img.shields.io/npm/v/@idle-screens/capabilities?label=capabilities)](https://www.npmjs.com/package/@idle-screens/capabilities)
+
 A framework-agnostic ambient-visual (screensaver) engine for the 2026 web.
 
 `idle-screens` renders idle-time visuals as a capability-tiered, agent-operable
