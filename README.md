@@ -8,8 +8,6 @@ overlay. Its signature idea: a saver is a **seeded program** steered by a
 identical frames anywhere. Frames never cross the wire; only the program and its
 control signals do.
 
-> Status: v0, early. Extracted from the screensaver system in
-> [shawn-site](https://github.com/shaaaaawn/shawn-site).
 
 ## Architecture
 
