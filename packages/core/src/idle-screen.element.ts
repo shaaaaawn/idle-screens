@@ -2,6 +2,7 @@ import { effect } from './reactive';
 import { IdleScreensEngine } from './engine';
 import { createRng } from './rng';
 import type { IdleScreensConfig, PageContext, SaverInstance, SaverPlugin } from './types';
+import type { WorkerInbound, WorkerOutbound } from './worker-protocol';
 
 const STYLE = `
   :host { all: initial; }
@@ -70,6 +71,30 @@ const HostBase: typeof HTMLElement =
     ? HTMLElement
     : (class {} as unknown as typeof HTMLElement);
 
+// Firefox shipped transferControlToOffscreen (~105) before module workers (~114).
+// The getter-probe detects {type:'module'} support without loading a real script.
+let moduleWorkerDetected: boolean | undefined;
+function supportsModuleWorker(): boolean {
+  if (moduleWorkerDetected !== undefined) return moduleWorkerDetected;
+  moduleWorkerDetected = false;
+  try {
+    let probed = false;
+    const url = URL.createObjectURL(new Blob([], { type: 'text/javascript' }));
+    try {
+      const w = new Worker(url, {
+        get type() { probed = true; return 'module' as WorkerType; },
+      } as WorkerOptions);
+      w.terminate();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    moduleWorkerDetected = probed;
+  } catch {
+    // ignore — browser doesn't support module workers
+  }
+  return moduleWorkerDetected;
+}
+
 /**
  * `<idle-screen>` — the framework-agnostic overlay (port of the Angular
  * ScreensaverComponent). Owns the top-layer `<dialog>`, mounts the active saver
@@ -95,11 +120,18 @@ export class IdleScreenElement extends HostBase {
   private menuBuilt = false;
 
   private instance: SaverInstance | null = null;
+  private worker: Worker | null = null;
+  private cachedWorker: { worker: Worker; url: string } | null = null;
+  private currentWorkerUrl: string | null = null;
+  private cleanupWorkerHandlers: (() => void) | null = null;
+  /** @internal Force the setTimeout-based rAF polyfill in Workers (for testing). */
+  forceRafPolyfill = false;
   private mountToken = 0;
   private armed = false;
   private armTimer: ReturnType<typeof setTimeout> | null = null;
   private hintTimer: ReturnType<typeof setTimeout> | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private disposers: Array<() => void> = [];
 
   set config(c: Partial<IdleScreensConfig>) {
@@ -119,6 +151,27 @@ export class IdleScreenElement extends HostBase {
   /** The live engine (for host code / tests). */
   get idleEngine(): IdleScreensEngine | null {
     return this._engine;
+  }
+  /** Whether the currently mounted saver is running in a Web Worker. */
+  get isWorker(): boolean {
+    return this.worker !== null;
+  }
+
+  /** Request a pixel sample from the Worker to verify rendering.
+   *  Returns false if not in Worker mode or if the canvas has no content. */
+  async sampleWorkerPixels(): Promise<boolean> {
+    if (!this.worker) return false;
+    const w = this.worker;
+    return new Promise<boolean>((resolve) => {
+      const handler = (e: MessageEvent<WorkerOutbound>): void => {
+        if (e.data.type === 'sampled') {
+          w.removeEventListener('message', handler);
+          resolve(e.data.hasContent);
+        }
+      };
+      w.addEventListener('message', handler);
+      w.postMessage({ type: 'sample' } satisfies WorkerInbound);
+    });
   }
 
   connectedCallback(): void {
@@ -304,7 +357,7 @@ export class IdleScreenElement extends HostBase {
     };
   }
 
-  private async open(plugin: SaverPlugin, passthrough: boolean): Promise<void> {
+  private async open(plugin: SaverPlugin, passthrough: boolean, skipWorker = false): Promise<void> {
     const eng = this._engine!;
     this.dialog.classList.toggle('passthrough', passthrough);
     this.dialog.classList.toggle('reduced', eng.reducedMotion.value);
@@ -313,6 +366,7 @@ export class IdleScreenElement extends HostBase {
       this.dialog.showModal();
       this.arm();
       this.scheduleHint();
+      window.addEventListener('resize', this.onResize);
     }
     // (Re)mount the active saver.
     const token = ++this.mountToken;
@@ -320,25 +374,161 @@ export class IdleScreenElement extends HostBase {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const seed = eng.config.seed >>> 0;
-    const inst = await plugin.mount({
-      host: this.surface,
-      width: w,
-      height: h,
-      rng: createRng(seed),
-      seed,
-      reducedMotion: eng.reducedMotion.value,
-      page: plugin.manifest.passthrough ? this.pageContext() : undefined,
-    });
-    if (token !== this.mountToken) {
-      inst.dispose(); // superseded while awaiting
-      return;
+    const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+
+    const workerEligible = !skipWorker
+      && plugin.manifest.workerReady
+      && eng.config.workerUrl
+      && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function'
+      && supportsModuleWorker();
+
+    if (workerEligible) {
+      try {
+        const inst = await this.openInWorker(plugin, eng.config.workerUrl!, w, h, seed, dpr, eng.reducedMotion.value, passthrough);
+        if (token !== this.mountToken) {
+          inst.dispose();
+          return;
+        }
+        this.instance = inst;
+        inst.setPaused(eng.reducedMotion.value);
+        return;
+      } catch {
+        // Worker failed — fall through to main-thread mount
+        await this.disposeInstance();
+        if (token !== this.mountToken) return;
+      }
     }
-    this.instance = inst;
-    inst.setPaused(eng.reducedMotion.value);
+    {
+      const inst = await plugin.mount({
+        host: this.surface,
+        dpr,
+        width: w,
+        height: h,
+        rng: createRng(seed),
+        seed,
+        reducedMotion: eng.reducedMotion.value,
+        page: plugin.manifest.passthrough ? this.pageContext() : undefined,
+      });
+      if (token !== this.mountToken) {
+        inst.dispose();
+        return;
+      }
+      this.instance = inst;
+      inst.setPaused(eng.reducedMotion.value);
+    }
+  }
+
+  private openInWorker(
+    plugin: SaverPlugin,
+    workerUrl: string,
+    width: number,
+    height: number,
+    seed: number,
+    dpr: number,
+    reducedMotion: boolean,
+    passthrough: boolean,
+  ): Promise<SaverInstance> {
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'display:block;width:100%;height:100%';
+    this.surface.appendChild(canvas);
+
+    const offscreen = canvas.transferControlToOffscreen();
+
+    // Reuse cached worker if URL matches, otherwise create new
+    let worker: Worker;
+    if (this.cachedWorker && this.cachedWorker.url === workerUrl) {
+      worker = this.cachedWorker.worker;
+      this.cachedWorker = null;
+    } else {
+      this.terminateCachedWorker();
+      worker = new Worker(workerUrl, { type: 'module' });
+    }
+    this.worker = worker;
+    this.currentWorkerUrl = workerUrl;
+
+    const mountMsg: WorkerInbound = plugin.spec
+      ? {
+          type: 'mount-spec',
+          canvas: offscreen,
+          spec: plugin.spec,
+          width, height, seed, dpr, reducedMotion,
+          ...(this.forceRafPolyfill ? { forceRafPolyfill: true } : {}),
+        }
+      : {
+          type: 'mount',
+          canvas: offscreen,
+          saverId: plugin.manifest.id,
+          width, height, seed, dpr, reducedMotion,
+          ...(this.forceRafPolyfill ? { forceRafPolyfill: true } : {}),
+        };
+    worker.postMessage(mountMsg, [offscreen]);
+
+    let disposed = false;
+
+    const proxy: SaverInstance = {
+      setPaused: (p) => worker.postMessage({ type: 'pause', paused: p } satisfies WorkerInbound),
+      resize: (w, h, newDpr) => worker.postMessage({ type: 'resize', width: w, height: h, dpr: newDpr ?? dpr } satisfies WorkerInbound),
+      applyTrack: (track) => worker.postMessage({ type: 'track', track } satisfies WorkerInbound),
+      dispose: () => {
+        disposed = true;
+        this.cleanupWorkerHandlers?.();
+        this.cleanupWorkerHandlers = null;
+        worker.postMessage({ type: 'dispose' } satisfies WorkerInbound);
+        worker.terminate();
+        this.worker = null;
+        canvas.remove();
+      },
+    };
+
+    return new Promise<SaverInstance>((resolve, reject) => {
+      const onMessage = (e: MessageEvent<WorkerOutbound>): void => {
+        if (e.data.type === 'mounted') {
+          worker.removeEventListener('message', onMessage);
+          worker.removeEventListener('error', onError);
+
+          // Post-mount crash recovery: if the Worker errors mid-animation,
+          // fall back to main-thread rendering.
+          const onCrash = (ev: Event): void => {
+            if (disposed) return;
+            disposed = true;
+            const msg = ev instanceof ErrorEvent ? ev.message : 'Worker messageerror';
+            console.warn(`[idle-screen] Worker crashed mid-animation: ${msg}`);
+            this.cleanupWorkerHandlers?.();
+            this.cleanupWorkerHandlers = null;
+            worker.terminate();
+            this.worker = null;
+            this.instance = null;
+            this.surface?.replaceChildren();
+            void this.open(plugin, passthrough, true);
+          };
+          worker.addEventListener('error', onCrash);
+          worker.addEventListener('messageerror', onCrash);
+          this.cleanupWorkerHandlers = () => {
+            worker.removeEventListener('error', onCrash);
+            worker.removeEventListener('messageerror', onCrash);
+          };
+
+          resolve(proxy);
+        } else if (e.data.type === 'error') {
+          worker.removeEventListener('message', onMessage);
+          worker.removeEventListener('error', onError);
+          reject(new Error(e.data.message));
+        }
+      };
+      const onError = (e: ErrorEvent): void => {
+        worker.removeEventListener('message', onMessage);
+        worker.removeEventListener('error', onError);
+        reject(new Error(e.message));
+      };
+      worker.addEventListener('message', onMessage);
+      worker.addEventListener('error', onError);
+    });
   }
 
   private close(): void {
     if (!this.dialog?.open) return;
+    window.removeEventListener('resize', this.onResize);
+    if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
     this.hintEl.classList.remove('show');
     if (this.hintTimer) clearTimeout(this.hintTimer);
     void this.disposeInstance();
@@ -356,11 +546,31 @@ export class IdleScreenElement extends HostBase {
   }
 
   private async disposeInstance(): Promise<void> {
+    this.cleanupWorkerHandlers?.();
+    this.cleanupWorkerHandlers = null;
+
     if (this.instance) {
-      this.instance.dispose();
+      if (this.worker) {
+        // Worker instance: send dispose but cache the worker for reuse
+        this.worker.postMessage({ type: 'dispose' } satisfies WorkerInbound);
+        this.cachedWorker = { worker: this.worker, url: this.currentWorkerUrl! };
+        this.worker = null;
+      } else {
+        this.instance.dispose();
+      }
       this.instance = null;
+    } else if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
     }
-    this.surface?.replaceChildren(); // clear any saver DOM / canvas
+    this.surface?.replaceChildren();
+  }
+
+  private terminateCachedWorker(): void {
+    if (this.cachedWorker) {
+      this.cachedWorker.worker.terminate();
+      this.cachedWorker = null;
+    }
   }
 
   private arm(): void {
@@ -377,13 +587,26 @@ export class IdleScreenElement extends HostBase {
     this.hintTimer = setTimeout(() => this.hintEl.classList.add('show'), 3000);
   }
 
+  private readonly onResize = (): void => {
+    if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null;
+      if (!this.instance || !this.dialog?.open) return;
+      const newDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+      this.instance.resize(window.innerWidth, window.innerHeight, newDpr);
+    }, 150);
+  };
+
   private onWakeInput(): void {
     if (!this.armed) return; // grace period after sleeping
     this._engine?.wake();
   }
 
   private teardown(): void {
+    window.removeEventListener('resize', this.onResize);
+    if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
     void this.disposeInstance();
+    this.terminateCachedWorker();
     if (this.armTimer) clearTimeout(this.armTimer);
     if (this.hintTimer) clearTimeout(this.hintTimer);
     if (this.closeTimer) clearTimeout(this.closeTimer);
