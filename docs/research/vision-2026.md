@@ -74,17 +74,21 @@ Sources: [web.dev WebGPU](https://web.dev/blog/webgpu-supported-major-browsers),
    WebGPU -> WebGL2 -> Canvas2D -> CSS-only ambient. Auto-detect and pick. Honor
    `prefers-reduced-motion`, `prefers-reduced-transparency`, `Save-Data`, and
    battery / OLED. Green and accessible by construction.
-   *v0: `@idle-screens/capabilities` detects backends and tiers savers. All
-   shipped savers are Canvas2D; WebGPU/WebGL2/CSS backends are seams only.*
-2. **[FUTURE] Zero-jank by default.** OffscreenCanvas-in-a-worker as the default
-   execution model. v0 runs on the main thread; the `SaverContext` seam is
-   designed so the worker migration is additive (swap `host` for
-   `OffscreenCanvas`), not a rewrite.
+   *v0: `@idle-screens/capabilities` detects backends and tiers savers. Two
+   savers (fluid, reaction-diffusion) have WebGPU compute-shader backends that
+   auto-detect and fall back to Canvas2D. The dual-path pattern (async mount,
+   GPU probe, CPU fallback) is documented in the saver authoring skill.*
+2. **Zero-jank by default.** OffscreenCanvas-in-a-worker for canvas savers that
+   opt in via `manifest.workerReady: true`. The `SaverContext.surface` seam lets
+   the same saver code render on either an `HTMLCanvasElement` (main thread) or an
+   `OffscreenCanvas` (Worker), with automatic fallback when the browser lacks
+   `transferControlToOffscreen` or the Worker fails to start.
 3. **Framework-agnostic core, thin adapters.** Core is a Web Component
    (`<idle-screen>`) + a plain TS API. ESM, tree-shakeable, each saver its own
    lazy chunk.
-   *v0: the Angular site consumes it via vendored tarballs and `CUSTOM_ELEMENTS_SCHEMA`.
-   **[FUTURE]** React/Vue/Svelte adapters (~30-line wrappers each).*
+   *v0: the Angular site consumes published npm packages (`@idle-screens/core`,
+   `@idle-screens/saver-black-hole`, `@idle-screens/savers-classic`) via the
+   registry. **[FUTURE]** React/Vue/Svelte adapters (~30-line wrappers each).*
 4. **Ambient-aware, not just blackout.** The passthrough "overlay that reads and
    interacts with the live page" (our black hole that eats the DOM) is a signature
    primitive, with a clean "context provider" seam (palette, DOM, scroll). Most
@@ -94,7 +98,7 @@ Sources: [web.dev WebGPU](https://web.dev/blog/webgpu-supported-major-browsers),
 5. **A clean plugin contract** (see section 8): lifecycle + a capability manifest
    the runtime and tooling read without executing the saver.
    *v0: `SaverManifest` with `costTier`, `motionIntensity`, `minBackend`,
-   `passthrough`, `a11y`, optional `paramSpace`. 14 savers ship.*
+   `passthrough`, `a11y`, optional `paramSpace`. 20 savers ship.*
 6. **Deterministic + themeable.** Seedable RNG, frame-addressable rendering, CSS
    custom-property theming so a brand restyles every saver from tokens.
    *v0: seeded RNG + `renderFrame(t, seed)` + `applyTrack()` proven on the
@@ -288,7 +292,7 @@ idle-screens/
   packages/
     core/              @idle-screens/core              Engine, <idle-screen> element, idle detection, RNG, control-track, types
     saver-black-hole/  @idle-screens/saver-black-hole  Passthrough black hole (seeded, paramSpace, control-track)
-    savers-classic/    @idle-screens/savers-classic     13 classic savers (toasters, DVD, warp, fish, rain, globe, spotlight, etc.)
+    savers-classic/    @idle-screens/savers-classic     19 classic savers (toasters, DVD, warp, fish, rain, globe, spotlight, pipes, bsod, flurry, fluid, reaction-diffusion, snowfall, etc.)
     validator/         @idle-screens/validator          WCAG 2.3.1 flash + perf budget gates
     capabilities/      @idle-screens/capabilities       Device detection + saver eligibility tiering
     schema/            @idle-screens/schema             Declarative saver format: validate, compile, simulate
@@ -300,7 +304,6 @@ idle-screens/
 
 ```
     mcp/               @idle-screens/mcp               MCP server (list/set/pause/screenshot/health)
-    backend-webgpu/    @idle-screens/backend-webgpu     WebGPU compute backend
     react/             @idle-screens/react              React adapter
     vue/               @idle-screens/vue                Vue adapter
     svelte/            @idle-screens/svelte             Svelte adapter
@@ -309,6 +312,10 @@ idle-screens/
     native-windows/    WebView2 .scr wrapper
     native-tauri/      Tauri cross-platform desktop
 ```
+
+*Note: a separate `backend-webgpu` package was originally planned but is no longer
+needed. WebGPU support is handled per-saver via the dual-path pattern (async mount
+with GPU probe, canvas2d CPU fallback) — see fluid and reaction-diffusion.*
 
 ---
 
@@ -330,17 +337,18 @@ export interface SaverManifest {
   palette?: string[];
   paramSpace?: ParamSpace;
   a11y: { flashSafe: boolean; notes?: string };
+  workerReady?: boolean;
   provenance?: { prompt?: string; seed?: number; model?: string };
 }
 
 export interface SaverPlugin {
   manifest: SaverManifest;
-  mount(ctx: SaverContext): SaverInstance;
+  mount(ctx: SaverContext): SaverInstance | Promise<SaverInstance>;
 }
 
 export interface SaverInstance {
   setPaused(paused: boolean): void;
-  resize(width: number, height: number): void;
+  resize(width: number, height: number, dpr?: number): void;
   dispose(): void;
   renderFrame?(t: number, seed: number): void;
   applyTrack?(track: ControlTrack): void;
@@ -348,6 +356,8 @@ export interface SaverInstance {
 
 export interface SaverContext {
   host: HTMLElement;
+  surface?: HTMLCanvasElement | OffscreenCanvas;
+  dpr: number;
   width: number;
   height: number;
   seed: number;
@@ -359,11 +369,12 @@ export interface SaverContext {
 
 Key differences from the original sketch in this doc:
 
-- `mount()` returns a `SaverInstance` (not `void`); the plugin is a factory.
-- `SaverContext` uses `host: HTMLElement` (not `surface: OffscreenCanvas`).
-  When the Worker migration happens, `host` becomes `surface: OffscreenCanvas`
-  for worker-eligible savers; passthrough savers that read the DOM will always
-  need main-thread access.
+- `mount()` returns `SaverInstance | Promise<SaverInstance>`. Async mount is used
+  by WebGPU dual-path savers to probe for a GPU device before choosing backend.
+- `SaverContext` keeps `host: HTMLElement` and adds `surface?: HTMLCanvasElement | OffscreenCanvas`
+  plus `dpr: number`. Worker-eligible savers check `ctx.surface` first; passthrough
+  savers that read the DOM (black-hole) and WebGPU savers stay main-thread.
+- `resize` accepts an optional `dpr` parameter for browser zoom changes.
 - `setPaused` and `resize` live on the instance, not the plugin.
 - A seeded `Rng` is threaded through context (not just a seed number).
 
@@ -373,16 +384,22 @@ Key differences from the original sketch in this doc:
 
 1. ~~Lift the plugin system to a Web Component.~~ Done. `<idle-screen>` custom
    element with dialog overlay, wake arm-guard, config menu, external-engine
-   handoff. Worker migration is **[FUTURE]**.
+   handoff. Worker rendering is implemented for `workerReady` savers.
 2. ~~Formalize the manifest + capability tiers.~~ Done. `SaverManifest`,
    `@idle-screens/capabilities` with `detectCapabilities`, `computeTier`,
    `evaluateSaver`.
 3. ~~Port the signature savers.~~ Done. Black hole (deep: seeded, paramSpace,
-   control-track, passthrough) + 13 classic savers in `@idle-screens/savers-classic`.
+   control-track, passthrough) + 19 classic savers in `@idle-screens/savers-classic`
+   (toasters, DVD, warp, fish, rainstorm, hard-rain, globe, spotlight, fade-out,
+   bouncing-ball, logo, messages, messages2, pipes, bsod, flurry, fluid,
+   reaction-diffusion, snowfall).
 4. ~~Ship the a11y/perf validator.~~ Done. `@idle-screens/validator` with per-tile
    WCAG 2.3.1 flash analysis, area threshold, perf cost tiers. The MCP control
    surface is **[FUTURE]**.
-5. **[FUTURE]** Add the WebGPU backend behind the Canvas2D one.
+5. ~~Add WebGPU compute backends.~~ Done. Two savers (fluid, reaction-diffusion)
+   have WebGPU compute-shader backends with canvas2d CPU fallbacks. The dual-path
+   pattern is documented in the saver authoring skill. Async mount probes for a
+   GPU device and falls back automatically.
 6. **[FUTURE]** Native wrappers: macOS `.saver`, Windows `.scr`, Tauri desktop.
 
 ---
@@ -395,9 +412,18 @@ Key differences from the original sketch in this doc:
   `ParamDelta`, `sampleTrack`) with `step`/`linear`/`smooth` easing, `dur` ramp
   windows, and `loop`/`duration` wrapping. `expo`/`spring` eases and
   `programVersion`/`provenance` fields are deferred.
-- **[OPEN]** OffscreenCanvas + Worker: the biggest architectural gap vs the
-  vision. The seam is designed for it (`SaverContext.host` -> `OffscreenCanvas`),
-  but passthrough savers that read the DOM will always need main-thread access.
+- **[RESOLVED]** OffscreenCanvas + Worker: implemented via `SaverContext.surface`,
+  `workerReady` manifest field, `runIdleWorker()` harness, and `openInWorker()`
+  in `<idle-screen>`. Five canvas savers (warp, hard-rain, rainstorm, globe,
+  spotlight) are worker-ready. WebGPU savers (fluid, reaction-diffusion) and
+  black-hole stay main-thread (WebGPU in Workers has different API surface;
+  black-hole needs DOM access via `ctx.page`). Automatic fallback on Worker
+  failure or missing browser support. Additional hardening: Firefox module-worker
+  detection (getter-probe), Safari `requestAnimationFrame` polyfill
+  (`setTimeout`-based, tested via `forceRafPolyfill`), Worker reuse across sleep
+  cycles, post-mount crash recovery (main-thread remount), debounced window
+  resize + DPR forwarding to both main-thread and Worker instances, and runtime
+  `applyTrack` proxying.
 - **[OPEN]** WKWebView + WebKitGTK WebGPU exposure per OS version (verify before
   promising the top tier on macOS/Linux native shells).
 - **[OPEN]** Declarative schema expressiveness vs imperative freedom: where to draw
