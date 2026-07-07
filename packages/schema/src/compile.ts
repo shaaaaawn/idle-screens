@@ -33,8 +33,9 @@ interface Built {
 }
 
 class SpecInstance implements SaverInstance {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  private readonly saverCtx: SaverContext;
   private readonly seed: number;
   private w: number;
   private h: number;
@@ -47,13 +48,20 @@ class SpecInstance implements SaverInstance {
     private readonly spec: SaverSpec,
     ctx: SaverContext,
   ) {
+    this.saverCtx = ctx;
     this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%';
-    canvas.setAttribute('aria-hidden', 'true');
-    ctx.host.appendChild(canvas);
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (ctx.surface) {
+      canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%';
+      el.setAttribute('aria-hidden', 'true');
+      ctx.host.appendChild(el);
+      canvas = el;
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false });
+    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('schema saver: no 2d context');
     this.ctx = c2d;
 
@@ -68,7 +76,7 @@ class SpecInstance implements SaverInstance {
   }
 
   private sizeCanvas(): void {
-    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+    const dpr = Math.min(this.saverCtx.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -161,9 +169,10 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.saverCtx.dpr = dpr;
     this.sizeCanvas();
     this.rebuild();
     if (this.paused) this.renderFrame(0, this.seed);
@@ -171,7 +180,7 @@ class SpecInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    this.canvas.remove();
+    if (this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 
@@ -185,5 +194,6 @@ export function compileSaver(spec: unknown): SaverPlugin {
   return {
     manifest: manifestFor(valid),
     mount: (ctx: SaverContext) => new SpecInstance(valid, ctx),
+    spec: valid,
   };
 }
