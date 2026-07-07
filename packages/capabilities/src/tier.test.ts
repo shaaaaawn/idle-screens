@@ -18,6 +18,7 @@ function device(top: Backend, extra: Partial<Capabilities> = {}): Capabilities {
       canvas2d: RANK[top] >= 1,
       webgl2: RANK[top] >= 2,
       webgpu: RANK[top] >= 3,
+      offscreenCanvas: RANK[top] >= 1,
     },
     ...extra,
   };

@@ -13,6 +13,7 @@ export interface BackendSupport {
   canvas2d: boolean;
   webgl2: boolean;
   webgpu: boolean;
+  offscreenCanvas: boolean;
 }
 
 /**
