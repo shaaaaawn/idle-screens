@@ -48,7 +48,7 @@ export async function sampleSaver(saver: SaverPlugin, opts: SampleOpts = {}): Pr
   const host = offscreenHost(size);
   try {
     const inst = await Promise.resolve(
-      saver.mount({ host, width: size, height: size, rng: createRng(1), seed: 1, reducedMotion: true }),
+      saver.mount({ host, dpr: 1, width: size, height: size, rng: createRng(1), seed: 1, reducedMotion: true }),
     );
     const src = host.querySelector('canvas');
     if (!inst.renderFrame || !src) {

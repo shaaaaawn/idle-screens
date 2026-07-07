@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 interface Caps {
-  backends: { css: boolean; canvas2d: boolean; webgl2: boolean; webgpu: boolean };
+  backends: { css: boolean; canvas2d: boolean; webgl2: boolean; webgpu: boolean; offscreenCanvas: boolean };
   reducedMotion?: boolean;
   dpr?: number;
   saveData?: boolean;
@@ -45,7 +45,7 @@ test('detect() reports real backends with the right shape (assertion-light)', as
 test('a minimal (CSS-only) device blocks canvas2d + costly savers', async ({ page }) => {
   await ready(page);
   const out = await page.evaluate(() => {
-    const minimal: Caps = { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false }, saveData: true };
+    const minimal: Caps = { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false, offscreenCanvas: false }, saveData: true };
     return { tier: window.__caps!.tier(minimal), budget: window.__caps!.budget(minimal), results: window.__caps!.evaluate(minimal) };
   });
   expect(out.tier).toBe('minimal');
@@ -60,7 +60,7 @@ test('a minimal (CSS-only) device blocks canvas2d + costly savers', async ({ pag
 test('reduced-motion DEGRADES moving savers (respects fallback, does not block)', async ({ page }) => {
   await ready(page);
   const results = await page.evaluate(() => {
-    const caps: Caps = { backends: { css: true, canvas2d: true, webgl2: true, webgpu: false }, reducedMotion: true };
+    const caps: Caps = { backends: { css: true, canvas2d: true, webgl2: true, webgpu: false, offscreenCanvas: true }, reducedMotion: true };
     return window.__caps!.evaluate(caps);
   });
   const r = byId(results);

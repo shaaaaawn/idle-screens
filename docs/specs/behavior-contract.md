@@ -100,10 +100,22 @@ Coverage legend: `[U]` Vitest unit (`packages/**/src/*.test.ts`), `[E]` Playwrig
 - L11 `[E]` Built-in config menu: only present when `configMenu` enabled; hotkey toggles it;
   picking a saver sets it (and previews when `previewOnPick`); Close/Escape/backdrop close;
   `configMenu:false` → no menu, no hotkey.
+- L12 `[E]` Window resize while asleep forwards `resize(w, h, dpr)` to the active instance
+  (debounced 150ms). DPR changes from browser zoom are included. Works for both
+  main-thread and Worker instances.
+- L13 `[E]` Worker-ready savers (`manifest.workerReady`) render via OffscreenCanvas in a Web
+  Worker when `config.workerUrl` is set and the browser supports `transferControlToOffscreen`
+  + module workers. Automatic fallback to main-thread on Worker failure.
+- L14 `[E]` Worker pixel verification: `sampleWorkerPixels()` confirms the Worker is rendering
+  visible content via a 10×10 grid pixel sample.
+- L15 `[E]` Worker reuse: on wake the Worker is cached (not terminated); on the next sleep
+  with the same `workerUrl` it is reused. Terminated only on teardown or URL change.
+- L16 `[E]` Post-mount Worker crash recovery: a Worker `error` or `messageerror` after
+  successful mount terminates the Worker and remounts the saver on the main thread.
 
-## Savers — all 14 must honor the `SaverInstance` interface
+## Savers — all 20 must honor the `SaverInstance` interface
 - S1 `[E]` Every registered saver `mount()`s and renders into the host (child count > 0).
-- S2 `[E]` `resize(w,h)` and `setPaused(true/false)` never throw.
+- S2 `[E]` `resize(w, h, dpr?)` and `setPaused(true/false)` never throw.
 - S3 `[E]` `dispose()` empties the host and produces no console errors.
 - S4 `[E]` Mounting/disposing every saver in sequence logs zero page errors.
 - S5 `[E]` Passthrough **black-hole only**: mutates matching page victims while running and

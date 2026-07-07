@@ -11,12 +11,13 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
+import { compileSaver, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildCapabilitiesPanel, type CapabilitiesHandle } from './capabilities-panel';
 import { buildSchemaPanel } from './schema-panel';
 
-const ALL_SAVERS = [blackHole, ...CLASSIC_SAVERS];
+const ALL_SAVERS = [blackHole, ...CLASSIC_SAVERS, compileSaver(SNOWFALL_SPEC)];
 
 const params = new URLSearchParams(location.search);
 const stage = document.getElementById('stage') as HTMLDivElement;
@@ -90,6 +91,7 @@ function frameMode(): void {
   const frame = Number(params.get('frame') ?? 1500);
   const ctx: SaverContext = {
     host: stage,
+    dpr: 1,
     width: window.innerWidth,
     height: window.innerHeight,
     rng: createRng(seed),
@@ -126,6 +128,7 @@ function harnessMode(): void {
       const inst = await Promise.resolve(
         saver.mount({
           host: stage,
+          dpr: devicePixelRatio ?? 1,
           width: window.innerWidth,
           height: window.innerHeight,
           rng: createRng(1),
@@ -138,6 +141,7 @@ function harnessMode(): void {
       await twoFrames();
       const victimMutatedDuring = !!victim && victim.style.willChange !== before.willChange;
       inst.resize(800, 600);
+      inst.resize(640, 480, 2);
       inst.setPaused(true);
       inst.setPaused(false);
       const survivedOps = stage.childElementCount > 0 && errors.length === 0;
@@ -186,6 +190,11 @@ function liveMode(): void {
     external: params.get('engine') === 'external',
   };
 
+  const workerUrl = new URL(
+    '../../../packages/savers-classic/src/idle-worker.ts',
+    import.meta.url,
+  ).href;
+
   const toEngineConfig = (c: LiveConfig): Partial<IdleScreensConfig> => ({
     timeoutMs: c.timeoutMs,
     sleepOnBlur: c.sleepOnBlur,
@@ -195,6 +204,7 @@ function liveMode(): void {
     showClock: c.showClock,
     seed: c.seed,
     configMenu: c.configMenu,
+    workerUrl,
   });
 
   // Reduced-motion is driven by matchMedia; let the panel force it by overriding.
@@ -219,6 +229,7 @@ function liveMode(): void {
     }
     if (el) el.remove(); // disconnect -> teardown (destroys an element-owned engine)
     el = document.createElement('idle-screen') as IdleScreenElement;
+    if (params.get('forcePolyfill') === '1') el.forceRafPolyfill = true;
     document.body.appendChild(el);
     if (c.external) {
       const engine = new IdleScreensEngine(toEngineConfig(c), ALL_SAVERS);
@@ -276,6 +287,7 @@ function liveMode(): void {
     void Promise.resolve(
       saver.mount({
         host: viewportHost,
+        dpr: devicePixelRatio ?? 1,
         width: Math.round(rect.width) || 640,
         height: Math.round(rect.height) || 400,
         rng: createRng((cfg.seed >>> 0) || 1),
@@ -326,6 +338,14 @@ function buildSaverPalette(mount: HTMLElement, caps: CapabilitiesHandle, onSelec
     const label = document.createElement('span');
     label.className = 'palette-label';
     label.textContent = s.manifest.label;
+
+    if (s.manifest.workerReady) {
+      const wb = document.createElement('span');
+      wb.className = 'palette-worker';
+      wb.textContent = 'W';
+      wb.title = 'Worker-ready';
+      item.append(wb);
+    }
 
     const status = document.createElement('span');
     status.className = 'palette-status';
@@ -423,9 +443,11 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
   const render = (s: SaverPlugin): void => {
     const m = s.manifest;
     const flashSafe = m.a11y?.flashSafe;
+    const workerEligible = m.workerReady
+      && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function';
     panel.innerHTML = `
       <h3>Properties</h3>
-      <div class="props-title" id="props-name">${m.label}</div>
+      <div class="props-title" id="props-name">${m.label}${workerEligible ? '<span class="worker-badge" title="This saver renders off-main-thread via OffscreenCanvas + Web Worker">Worker</span>' : ''}</div>
       ${row('ID', `<code>${m.id}</code>`)}
       ${row('Backend', m.minBackend ?? 'css')}
       ${row('Cost', m.costTier ?? 'idle')}
@@ -433,6 +455,7 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
       ${row('Passthrough', m.passthrough ? '✓' : '✗')}
       ${row('Reduced-motion', m.reducedMotionFallback ?? 'none')}
       ${row('Flash safe', flashSafe === undefined ? '--' : flashSafe ? '✓' : '✗')}
+      ${row('Worker ready', m.workerReady ? '✓' : '✗')}
       ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
       ${m.a11y?.notes ? `<div class="config-note">${m.a11y.notes}</div>` : ''}`;
   };
@@ -598,7 +621,7 @@ function buildDeterminismDemo(mount: HTMLElement): void {
     const host = hostFor(visible.id);
     try {
       const inst = await Promise.resolve(
-        blackHole.mount({ host, width: 264, height: 172, rng: createRng(seed), seed, reducedMotion: true }),
+        blackHole.mount({ host, dpr: 1, width: 264, height: 172, rng: createRng(seed), seed, reducedMotion: true }),
       );
       if (track) inst.applyTrack?.(demoTrack);
       inst.renderFrame?.(t, seed);

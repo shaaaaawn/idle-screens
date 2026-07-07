@@ -76,12 +76,16 @@
       .palette-item:hover { background: #14141d; border-color: #23232f; }
       .palette-item.active { background: #16324d; border-color: #3a86ff; }
       .palette-label { flex: 1 1 auto; }
+      .palette-worker { flex: 0 0 auto; font-size: 9px; font-weight: 700; width: 16px; height: 16px; line-height: 16px;
+        text-align: center; border-radius: 3px; background: rgba(56,139,253,.15); color: #58a6ff; }
       .palette-status { flex: 0 0 auto; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 
       /* --- config panel (docked in the inspector) --- */
       .config-panel { width: 100%; background: #0e0e16; border: 1px solid #23233150; border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
       .config-panel h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; opacity: .6; }
-      .props-title { font-size: 15px; font-weight: 700; margin: 6px 0 10px; }
+      .props-title { font-size: 15px; font-weight: 700; margin: 6px 0 10px; display: flex; align-items: center; gap: 8px; }
+      .worker-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+        padding: 2px 7px; border-radius: 4px; background: rgba(56,139,253,.18); color: #58a6ff; border: 1px solid rgba(56,139,253,.3); }
       .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; font-size: 13px; }
       .field > span { opacity: .85; }
       .field select, .field input[type=number] { background: #05050a; color: #e6e8ef; border: 1px solid #2a2a38;
