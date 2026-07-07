@@ -113,7 +113,7 @@ Coverage legend: `[U]` Vitest unit (`packages/**/src/*.test.ts`), `[E]` Playwrig
 - L16 `[E]` Post-mount Worker crash recovery: a Worker `error` or `messageerror` after
   successful mount terminates the Worker and remounts the saver on the main thread.
 
-## Savers — all 20 must honor the `SaverInstance` interface
+## Savers — all 21 must honor the `SaverInstance` interface
 - S1 `[E]` Every registered saver `mount()`s and renders into the host (child count > 0).
 - S2 `[E]` `resize(w, h, dpr?)` and `setPaused(true/false)` never throw.
 - S3 `[E]` `dispose()` empties the host and produces no console errors.
@@ -186,6 +186,8 @@ Coverage legend: `[U]` Vitest unit (`packages/**/src/*.test.ts`), `[E]` Playwrig
 - SC6 `[E]` **Safety loop:** a compiled spec, sampled through `@idle-screens/validator`,
   PASSES the WCAG 2.3.1 flash gate and the frame budget — "flash-safe by construction" is a
   checked property, not a claim. Design invariant: the schema has NO full-field strobe
-  primitive (static background + bounded sprites).
+  primitive (static background + bounded sprites); opacity pulse is bounded (amp ≤ 0.5,
+  period ≥ 500 ms — max 2 Hz) with per-entity seeded phases so a layer cannot strobe in
+  unison.
 - SC7 `[E]` The playground panel compiles + previews a spec live and surfaces validation
   errors as you edit.

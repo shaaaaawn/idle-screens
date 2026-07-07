@@ -14,6 +14,10 @@ export interface Entity {
   bob: number; // vertical bob / horizontal sway amplitude (px)
   motion: 'drift' | 'rise' | 'bounce';
   headingLeft: boolean;
+  alpha: number; // resolved base opacity (default 1)
+  pulseAmp: number; // opacity breathing amplitude (0 = none)
+  pulsePeriod: number; // ms
+  pulsePhase: number;
 }
 
 export interface Placed {
@@ -63,9 +67,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
       vy = s * Math.sin(a);
     }
 
+    // Spawn window defaults to the full viewport. IMPORTANT (determinism/compat):
+    // optional features must only consume EXTRA rng draws when declared, so specs
+    // written before a feature existed keep bit-identical entity streams.
+    const [rx0, rx1] = layer.region?.x ?? [0, 1];
+    const [ry0, ry1] = layer.region?.y ?? [0, 1];
+
     out.push({
-      x0: rng.range(0, w),
-      y0: rng.range(0, h),
+      x0: rng.range(rx0 * w, rx1 * w),
+      y0: rng.range(ry0 * h, ry1 * h),
       size,
       spriteIndex: variants > 1 ? rng.int(0, variants - 1) : 0,
       phase: rng.range(0, Math.PI * 2),
@@ -74,9 +84,20 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
       bob,
       motion,
       headingLeft: vx < 0,
+      alpha: layer.alpha ? rng.range(layer.alpha[0], layer.alpha[1]) : 1,
+      pulseAmp: layer.pulse?.amp ?? 0,
+      pulsePeriod: layer.pulse?.period ?? 1000,
+      pulsePhase: layer.pulse ? rng.range(0, Math.PI * 2) : 0,
     });
   }
   return out;
+}
+
+/** Analytic opacity of an entity at logical time `t` (ms). Pure, clamped to 0..1. */
+export function alphaAt(e: Entity, t: number): number {
+  if (!e.pulseAmp) return e.alpha;
+  const a = e.alpha + e.pulseAmp * Math.sin((t * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
+  return a < 0 ? 0 : a > 1 ? 1 : a;
 }
 
 function wrap(v: number, min: number, max: number): number {

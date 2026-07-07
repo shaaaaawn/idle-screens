@@ -209,18 +209,28 @@ export const fluid: SaverPlugin = {
 ## Declarative schema path (`@idle-screens/schema`)
 Instead of writing imperative code, you can author a saver as a JSON `SaverSpec`
 and compile it into a `SaverPlugin` via `compileSaver()`. The schema supports:
-- **Sprite types:** `emoji`, `text`, `circle`
+- **Sprite types:** `emoji`, `text`, `circle` (`soft: true` renders a radial glow orb)
 - **Motion types:** `drift` (speed, angle, bob), `rise` (speed, sway), `bounce` (speed)
 - **Backgrounds:** solid color or gradient with stops
-- **Layers:** up to 8 layers, each with count + sprite + motion
+- **Layers:** up to 8 layers, each with count + sprite + motion, plus optional
+  `alpha: [min,max]` (per-entity opacity), `blend: 'lighter'` (additive glow),
+  `region: {x?, y?}` (fractional spawn window — composition control), and
+  `pulse: {amp, period}` (opacity breathing; amp ≤ 0.5, period ≥ 500ms, per-entity
+  seeded phases — bounded so a layer can never strobe in unison)
 
 Schema savers are flash-safe by construction (no full-field strobe primitive),
 seeded, deterministic, and `renderFrame`-addressable. They go in
 `packages/schema/src/examples.ts` and get wired into the playground's schema panel
 (`apps/playground/src/schema-panel.ts`) and `ALL_SAVERS` in `main.ts`.
 
-**Limitations:** no opacity/glow, no custom draw calls, no particle interactions.
-If a saver concept needs these, use the imperative canvas pattern instead.
+**Limitations:** no rotation/spin, no custom draw calls, no particle interactions,
+no per-pixel fields. If a saver concept needs these, use the imperative canvas
+pattern instead.
+
+**Determinism/compat rule for schema features:** optional layer fields must only
+consume EXTRA seeded-rng draws when the field is present in the spec, so specs
+written before a feature existed keep bit-identical entity streams (tested in
+`simulate.test.ts` "stream compat").
 
 ## Integration checklist (classic savers)
 When adding a saver to `packages/savers-classic/`, update ALL of these files:

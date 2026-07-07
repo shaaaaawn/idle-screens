@@ -11,13 +11,13 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { compileSaver, SNOWFALL_SPEC } from '@idle-screens/schema';
+import { compileSaver, LANTERNS_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildCapabilitiesPanel, type CapabilitiesHandle } from './capabilities-panel';
 import { buildSchemaPanel } from './schema-panel';
 
-const ALL_SAVERS = [blackHole, ...CLASSIC_SAVERS, compileSaver(SNOWFALL_SPEC)];
+const ALL_SAVERS = [blackHole, ...CLASSIC_SAVERS, compileSaver(SNOWFALL_SPEC), compileSaver(LANTERNS_SPEC)];
 
 const params = new URLSearchParams(location.search);
 const stage = document.getElementById('stage') as HTMLDivElement;

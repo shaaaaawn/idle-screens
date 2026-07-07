@@ -84,6 +84,33 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
 
+  if (layer.alpha !== undefined && (!isRange(layer.alpha) || layer.alpha[0] < 0 || layer.alpha[1] > 1)) {
+    err(`${path}.alpha`, 'must be a [min,max] range within 0..1');
+  }
+  if (layer.blend !== undefined && layer.blend !== 'lighter') err(`${path}.blend`, "must be 'lighter' when set");
+  if (layer.region !== undefined) {
+    if (!isObj(layer.region)) err(`${path}.region`, 'must be an object');
+    else {
+      for (const axis of ['x', 'y'] as const) {
+        const r = layer.region[axis];
+        if (r !== undefined && (!isRange(r) || r[0] < 0 || r[1] > 1)) {
+          err(`${path}.region.${axis}`, 'must be a [min,max] range within 0..1');
+        }
+      }
+    }
+  }
+  if (layer.pulse !== undefined) {
+    if (!isObj(layer.pulse)) err(`${path}.pulse`, 'must be an object');
+    else {
+      if (!isNum(layer.pulse.amp) || layer.pulse.amp <= 0 || layer.pulse.amp > LIMITS.maxPulseAmp) {
+        err(`${path}.pulse.amp`, `must be within 0..${LIMITS.maxPulseAmp}`);
+      }
+      if (!isNum(layer.pulse.period) || layer.pulse.period < LIMITS.minPulsePeriod) {
+        err(`${path}.pulse.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
+      }
+    }
+  }
+
   validateSprite(layer.sprite, `${path}.sprite`, err);
   validateMotion(layer.motion, `${path}.motion`, err);
 }
@@ -102,6 +129,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
   } else if (sprite.kind === 'circle') {
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     color(sprite.color, `${path}.color`, err);
+    if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
   } else {
     err(`${path}.kind`, 'must be emoji | text | circle');
   }

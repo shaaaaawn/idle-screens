@@ -6,8 +6,15 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec } from './validate';
-import { buildEntities, positionAt, type Entity } from './simulate';
+import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
 import type { LayerSpec, SaverSpec } from './types';
+
+/** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+  const n = parseInt(h.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 /** Derive a manifest so a compiled spec composes with @idle-screens/capabilities. */
 export function manifestFor(spec: SaverSpec): SaverManifest {
@@ -43,6 +50,8 @@ class SpecInstance implements SaverInstance {
   private frameId: number | null = null;
   private paused = false;
   private startT = 0;
+  private baseT = 0; // elapsed logical time carried across pause/resume
+  private lastT = 0;
 
   constructor(
     private readonly spec: SaverSpec,
@@ -99,12 +108,15 @@ class SpecInstance implements SaverInstance {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    // Freeze elapsed time so resume continues the scene instead of restarting at t=0.
+    this.baseT = this.lastT;
   }
 
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
     if (this.startT === 0) this.startT = now;
-    this.renderFrame(now - this.startT, this.seed);
+    this.lastT = now - this.startT + this.baseT;
+    this.renderFrame(this.lastT, this.seed);
   }
 
   private drawBackground(): void {
@@ -129,10 +141,21 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     const p = positionAt(e, t, this.w, this.h);
     const sprite = built.layer.sprite;
+    ctx.globalAlpha = alphaAt(e, t);
     if (sprite.kind === 'circle') {
-      ctx.fillStyle = sprite.color;
+      const r = e.size / 2;
+      if (sprite.soft) {
+        // Glow orb: solid core fading radially to transparent (pairs with blend:'lighter').
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, sprite.color);
+        g.addColorStop(0.35, hexToRgba(sprite.color, 0.75));
+        g.addColorStop(1, hexToRgba(sprite.color, 0));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = sprite.color;
+      }
       ctx.beginPath();
-      ctx.arc(p.x, p.y, e.size / 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
@@ -154,10 +177,16 @@ class SpecInstance implements SaverInstance {
 
   /** Deterministic, frame-addressable render (shared by the rAF loop). */
   renderFrame(t: number, _seed: number): void {
+    const { ctx } = this;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
     this.drawBackground();
     for (const built of this.layers) {
+      ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       for (const e of built.entities) this.drawEntity(built, e, t);
     }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   setPaused(paused: boolean): void {

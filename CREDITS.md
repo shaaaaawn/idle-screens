@@ -45,5 +45,6 @@ The following savers are original to this project:
 | BSOD | Blue screen of death. Original DOM/CSS implementation. |
 | Flurry | Particle flurry. Original canvas2d implementation. |
 | Snowfall | Snowfall particles. Original canvas2d implementation. |
+| Night Lanterns | Yi Peng festival lantern sky. Original, authored as a declarative `SaverSpec` (pure JSON) and compiled by `@idle-screens/schema`. |
 | Fluid | Navier-Stokes fluid simulation. Original canvas2d + WebGPU compute implementation. |
 | Reaction Diffusion | Gray-Scott reaction-diffusion. Original canvas2d + WebGPU compute implementation. Clean-room math — no code from external sources. |

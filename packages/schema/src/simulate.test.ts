@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { buildEntities, positionAt, spriteVariants } from './simulate';
+import { alphaAt, buildEntities, positionAt, spriteVariants } from './simulate';
 import type { LayerSpec } from './types';
 
 const W = 800;
@@ -26,6 +26,46 @@ describe('buildEntities (seeded, deterministic)', () => {
     const a = buildEntities(driftLayer, createRng(1), W, H);
     const b = buildEntities(driftLayer, createRng(2), W, H);
     expect(a).not.toEqual(b);
+  });
+
+  it('region constrains spawn; alpha resolves per entity; defaults leave both untouched', () => {
+    const regioned = buildEntities(
+      { ...driftLayer, region: { x: [0.25, 0.5], y: [0, 0.4] }, alpha: [0.3, 0.8] },
+      createRng(11), W, H,
+    );
+    for (const e of regioned) {
+      expect(e.x0).toBeGreaterThanOrEqual(0.25 * W);
+      expect(e.x0).toBeLessThanOrEqual(0.5 * W);
+      expect(e.y0).toBeLessThanOrEqual(0.4 * H);
+      expect(e.alpha).toBeGreaterThanOrEqual(0.3);
+      expect(e.alpha).toBeLessThanOrEqual(0.8);
+    }
+    const plain = buildEntities(driftLayer, createRng(11), W, H);
+    expect(plain.every((e) => e.alpha === 1 && e.pulseAmp === 0)).toBe(true);
+  });
+
+  it('optional features consume no extra rng draws when absent (stream compat)', () => {
+    // A layer written before alpha/region/pulse existed must build the exact same
+    // entities after the upgrade — the seeded stream may not shift.
+    const a = buildEntities(driftLayer, createRng(21), W, H);
+    const b = buildEntities({ ...driftLayer, alpha: undefined, region: undefined, pulse: undefined }, createRng(21), W, H);
+    expect(a).toEqual(b);
+    expect(a.map((e) => [e.x0, e.y0])).toEqual(b.map((e) => [e.x0, e.y0]));
+  });
+
+  it('alphaAt is pure, bounded 0..1, and identity without pulse', () => {
+    const [pulsed] = buildEntities(
+      { ...driftLayer, alpha: [0.7, 0.7], pulse: { amp: 0.5, period: 2000 } },
+      createRng(13), W, H,
+    );
+    for (let t = 0; t < 20_000; t += 97) {
+      const v = alphaAt(pulsed!, t);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    expect(alphaAt(pulsed!, 500)).toBe(alphaAt(pulsed!, 500));
+    const [still] = buildEntities({ ...driftLayer, alpha: [0.4, 0.4] }, createRng(13), W, H);
+    expect(alphaAt(still!, 12345)).toBe(0.4);
   });
 
   it('bidirectional produces both headings; spriteIndex spans the glyph set', () => {
