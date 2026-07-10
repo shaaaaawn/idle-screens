@@ -11,21 +11,94 @@
       button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid #2a2a38; background: #14141d; color: #e6e8ef; cursor: pointer; }
       button:hover { border-color: #3a86ff; }
 
-      /* ---- Workbench: fixed 100vh, no global scroll; DRAGGABLE docked panels ----
-         Track sizes are CSS vars that <wb-splitter> mutates on drag. */
-      #workbench {
-        --left: 210px; --right: 340px; --bottom: 300px; --gut: 5px;
+      /* ---- Top bar ---- */
+      #topbar {
+        display: flex; align-items: center; gap: 14px; padding: 0 18px;
+        height: 46px; background: #0e0e16; border-bottom: 1px solid #17171f;
+      }
+      #topbar .tb-title { font-weight: 700; letter-spacing: .02em; font-size: 15px; }
+      #topbar nav { display: flex; gap: 2px; margin-left: 32px; }
+      #topbar nav a {
+        padding: 6px 14px; border-radius: 6px; text-decoration: none; color: #e6e8ef;
+        font-size: 13px; font-weight: 500; opacity: .6; transition: opacity .15s, background .15s;
+      }
+      #topbar nav a:hover { opacity: .9; background: #14141d; }
+      #topbar nav a.active { opacity: 1; background: #1a2540; color: #7eb8ff; }
+      #topbar .tb-spacer { flex: 1; }
+      #topbar .tb-actions { display: flex; gap: 8px; }
+      #topbar .tb-actions button { padding: 4px 12px; font-size: 13px; }
+
+      /* ================================================================
+         GALLERY VIEW — grid of saver thumbnail cards
+         ================================================================ */
+      #view-gallery {
+        height: calc(100vh - 46px);
+        overflow-y: auto;
+        padding: 28px 32px;
+      }
+      #view-gallery[hidden] { display: none; }
+
+      .gallery-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 18px;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+
+      .gallery-card {
+        border-radius: 12px;
+        overflow: hidden;
+        background: #10101a;
+        border: 1px solid #20202c;
+        cursor: pointer;
+        transition: border-color .15s, box-shadow .15s;
+      }
+      .gallery-card:hover {
+        border-color: #3a86ff;
+        box-shadow: 0 0 0 1px rgba(58,134,255,.25);
+      }
+      .gallery-card.active {
+        border-color: #3a86ff;
+        box-shadow: 0 0 0 2px rgba(58,134,255,.35);
+      }
+
+      .gallery-card-preview {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 10;
+        overflow: hidden;
+        background: #000;
+      }
+      .gallery-card-preview canvas { display: block; width: 100%; height: 100%; }
+      .gallery-card-preview > div { position: absolute; inset: 0; }
+
+      .gallery-card-info {
+        padding: 10px 14px;
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      .gallery-card-label {
+        font-size: 13px; font-weight: 600;
+      }
+      .gallery-card-meta {
+        font: 11px ui-monospace, monospace; opacity: .4;
+      }
+
+      /* ================================================================
+         DEV VIEW — IDE-style workbench with docks + splitters
+         ================================================================ */
+      #view-dev {
+        --left: 210px; --right: 340px; --bottom: 260px; --gut: 5px;
         display: grid;
         grid-template-columns: var(--left) var(--gut) minmax(0, 1fr) var(--gut) var(--right);
-        grid-template-rows: 46px minmax(0, 1fr) var(--gut) var(--bottom);
+        grid-template-rows: minmax(0, 1fr) var(--gut) var(--bottom);
         grid-template-areas:
-          "top   top   top     top   top"
           "left  spl   center  spr   right"
           "left  spl   spb     spr   right"
           "left  spl   bottom  spr   right";
-        height: 100vh; width: 100vw; gap: 0; background: #08080d;
+        height: calc(100vh - 46px); width: 100vw; gap: 0; background: #08080d;
       }
-      #wb-top { grid-area: top; }
+      #view-dev[hidden] { display: none; }
       #wb-left { grid-area: left; }
       #wb-center { grid-area: center; }
       #wb-right { grid-area: right; }
@@ -37,24 +110,15 @@
       wb-dock { display: flex; flex-direction: column; background: #08080d; min-width: 0; min-height: 0; overflow: hidden; }
       .dock-head { flex: 0 0 auto; padding: 7px 12px; font: 600 11px ui-monospace, monospace; text-transform: uppercase;
         letter-spacing: .12em; opacity: .5; background: #0e0e16; border-bottom: 1px solid #17171f; user-select: none; }
-      /* localized scrolling: each panel body scrolls independently */
       .dock-body { flex: 1 1 auto; overflow: auto; padding: 12px; min-height: 0; }
       wb-dock[flush] .dock-body { padding: 0; position: relative; }
 
-      /* draggable dividers */
       wb-splitter { display: block; background: #14141f; transition: background .12s; }
       wb-splitter[axis="x"] { cursor: col-resize; }
       wb-splitter[axis="y"] { cursor: row-resize; }
       wb-splitter:hover, wb-splitter.dragging { background: #3a86ff; }
 
-      /* top bar */
-      #wb-top { display: flex; flex-direction: row; align-items: center; gap: 14px; padding: 0 14px; background: #0e0e16; }
-      #wb-top .wb-title { font-weight: 700; letter-spacing: .02em; }
-      #wb-top .wb-hint { margin-left: auto; opacity: .45; font: 12px ui-monospace, monospace; }
-      .toolbar { display: flex; gap: 8px; }
-
-      /* center viewport (wb-center[flush] .dock-body is the positioning context) */
-      /* inline saver preview — fills the viewport, sits over the intro copy */
+      /* viewport (used by dev view center) */
       #viewport-host { position: absolute; inset: 0; display: none; background: #04060a; overflow: hidden; }
       #viewport-host.active { display: block; }
       #viewport-host.passthrough { background: transparent; }
@@ -68,20 +132,30 @@
 
       /* frame / harness fullscreen stage */
       #stage:not([hidden]) { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 50; }
-      body.frame-mode #workbench { display: none; }
+      body.frame-mode #topbar,
+      body.frame-mode #view-gallery,
+      body.frame-mode #view-dev { display: none; }
 
-      /* saver palette (left outliner) */
+      /* ================================================================
+         SHARED COMPONENT STYLES
+         ================================================================ */
+
+      /* saver palette */
       .palette { display: flex; flex-direction: column; gap: 2px; }
       .palette-item { display: flex; align-items: center; gap: 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 10px; width: 100%; font-size: 13px; cursor: pointer; }
       .palette-item:hover { background: #14141d; border-color: #23232f; }
       .palette-item.active { background: #16324d; border-color: #3a86ff; }
       .palette-label { flex: 1 1 auto; }
+      .palette-worker { flex: 0 0 auto; font-size: 9px; font-weight: 700; width: 16px; height: 16px; line-height: 16px;
+        text-align: center; border-radius: 3px; background: rgba(56,139,253,.15); color: #58a6ff; }
       .palette-status { flex: 0 0 auto; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 
-      /* --- config panel (docked in the inspector) --- */
+      /* config / properties panels */
       .config-panel { width: 100%; background: #0e0e16; border: 1px solid #23233150; border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
       .config-panel h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; opacity: .6; }
-      .props-title { font-size: 15px; font-weight: 700; margin: 6px 0 10px; }
+      .props-title { font-size: 15px; font-weight: 700; margin: 6px 0 10px; display: flex; align-items: center; gap: 8px; }
+      .worker-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+        padding: 2px 7px; border-radius: 4px; background: rgba(56,139,253,.18); color: #58a6ff; border: 1px solid rgba(56,139,253,.3); }
       .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; font-size: 13px; }
       .field > span { opacity: .85; }
       .field select, .field input[type=number] { background: #05050a; color: #e6e8ef; border: 1px solid #2a2a38;
@@ -92,37 +166,70 @@
       .config-actions button { flex: 1; }
       .config-note { opacity: .5; font-size: 11px; margin-top: 10px; line-height: 1.4; }
 
-      /* --- determinism demo --- */
-      .determinism .lead { opacity: .8; }
-      .det-controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 14px 0; font-size: 13px; }
-      .det-controls label { display: flex; align-items: center; gap: 7px; }
-      .det-controls input[type=number] { width: 84px; background:#05050a; color:#e6e8ef; border:1px solid #2a2a38; border-radius:6px; padding:4px 6px; font:inherit; }
-      .det-controls input[type=range] { width: 180px; }
-      .det-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
-      .det-panel { display: flex; flex-direction: column; gap: 6px; }
-      .det-panel canvas { width: 264px; height: 150px; border: 1px solid #23232f; border-radius: 8px; background: #000; display: block; }
-      .det-panel figcaption { font: 11px ui-monospace, monospace; opacity: .6; margin: 0; }
-      .verdict { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; }
-      .verdict.same { background: rgba(63,185,80,.14); color: #3fb950; border: 1px solid rgba(63,185,80,.4); }
-      .verdict.diff { background: rgba(248,81,73,.13); color: #f85149; border: 1px solid rgba(248,81,73,.4); }
+      /* timeline panel */
+      .timeline-panel { display: flex; flex-direction: column; height: 100%; }
+      .tl-transport {
+        display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+        border-bottom: 1px solid #1c1c26; font-size: 13px; flex: 0 0 auto;
+      }
+      .tl-btn { width: 32px; height: 28px; font-size: 14px; padding: 0; display: flex; align-items: center; justify-content: center; }
+      .tl-time { font: 12px ui-monospace, monospace; opacity: .7; min-width: 110px; }
+      .tl-loop { display: flex; align-items: center; gap: 5px; font-size: 12px; opacity: .7; cursor: pointer; }
+      .tl-track-info { font: 11px ui-monospace, monospace; opacity: .4; margin-left: auto; }
 
-      /* --- safety & perf panel --- */
-      .val-out { margin-top: 14px; display: flex; flex-direction: column; gap: 7px; }
-      .val-metric { font: 12px ui-monospace, monospace; opacity: 0.75; }
+      .tl-track-area { flex: 1; position: relative; overflow-y: auto; cursor: crosshair; min-height: 0; }
 
-      /* --- declarative schema panel --- */
-      .schema-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
-      .schema-cols { display: flex; flex-wrap: wrap; gap: 16px; }
-      .schema-edit { flex: 1 1 320px; min-width: 280px; }
-      .schema-edit textarea { width: 100%; height: 230px; resize: vertical; background: #05050a; color: #cfe3ff;
-        border: 1px solid #23232f; border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, monospace; }
-      .schema-errors { margin-top: 8px; font: 12px ui-monospace, monospace; color: #f0857f; display: flex; flex-direction: column; gap: 3px; }
-      .schema-preview { flex: 1 1 280px; min-width: 240px; }
-      .schema-preview #schema-host { position: relative; width: 100%; height: 230px; border: 1px solid #23232f;
-        border-radius: 8px; overflow: hidden; background: #000; }
-      .schema-preview #schema-host canvas { display: block; width: 100%; height: 100%; }
+      .tl-ruler {
+        display: grid; grid-template-columns: 90px 1fr 60px; height: 24px;
+        border-bottom: 1px solid #1c1c26; user-select: none;
+      }
+      .tl-ruler-label { }
+      .tl-ruler-track { position: relative; }
+      .tl-mark {
+        position: absolute; transform: translateX(-50%);
+        font: 10px ui-monospace, monospace; opacity: .35; top: 6px;
+      }
 
-      /* --- device & capabilities panel --- */
+      .tl-channels { }
+      .tl-lane {
+        display: grid; grid-template-columns: 90px 1fr 60px; align-items: center;
+        height: 30px; border-bottom: 1px solid #0e0e14;
+      }
+      .tl-lane:hover { background: #0a0a14; }
+      .tl-lane-label {
+        padding: 0 10px; font: 11px ui-monospace, monospace; opacity: .55;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .tl-lane-track { position: relative; height: 100%; }
+      .tl-keyframe {
+        position: absolute; top: 50%; width: 8px; height: 8px;
+        background: #3a86ff; transform: translate(-50%, -50%) rotate(45deg);
+        border-radius: 1px; z-index: 2;
+      }
+      .tl-segment {
+        position: absolute; top: 50%; height: 2px;
+        background: rgba(58,134,255,.25); transform: translateY(-50%);
+      }
+      .tl-lane-value {
+        padding: 0 8px; font: 11px ui-monospace, monospace; opacity: .5;
+        text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .tl-playhead {
+        position: absolute; top: 0; bottom: 0; width: 1px; background: #ff6b35;
+        z-index: 5; pointer-events: none; transition: left 0s;
+      }
+      .tl-playhead::before {
+        content: ''; position: absolute; top: 0; left: -4px;
+        border-left: 5px solid transparent; border-right: 5px solid transparent;
+        border-top: 7px solid #ff6b35;
+      }
+
+      .tl-empty {
+        flex: 1; display: flex; align-items: center; justify-content: center;
+        opacity: .3; font-size: 13px;
+      }
+
+      /* device & capabilities panel */
       .cap-controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 12px 0 16px; font-size: 13px; }
       .cap-controls label { display: flex; align-items: center; gap: 7px; }
       .cap-controls select { background: #05050a; color: #e6e8ef; border: 1px solid #2a2a38; border-radius: 6px; padding: 4px 6px; font: inherit; }
@@ -136,15 +243,53 @@
       .cap-table th, .cap-table td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #1c1c26; white-space: nowrap; }
       .cap-table th { opacity: .55; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; }
       .cap-reason { opacity: .6; white-space: normal; font-family: ui-monospace, monospace; }
+
+      /* determinism demo */
+      .determinism .lead { opacity: .8; }
+      .verdict { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+      .verdict.same { background: rgba(63,185,80,.14); color: #3fb950; border: 1px solid rgba(63,185,80,.4); }
+      .verdict.diff { background: rgba(248,81,73,.13); color: #f85149; border: 1px solid rgba(248,81,73,.4); }
+
+      /* declarative schema panel */
+      .schema-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+      .schema-controls button { padding: 4px 10px; font-size: 12px; }
+      .schema-cols { display: flex; flex-direction: column; gap: 12px; }
+      .schema-edit { min-width: 0; }
+      .schema-edit textarea { width: 100%; height: 180px; resize: vertical; background: #05050a; color: #cfe3ff;
+        border: 1px solid #23232f; border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, monospace; }
+      .schema-errors { margin-top: 6px; font: 12px ui-monospace, monospace; color: #f0857f; display: flex; flex-direction: column; gap: 3px; }
+      .schema-preview { min-width: 0; }
+      .schema-preview #schema-host { position: relative; width: 100%; height: 180px; border: 1px solid #23232f;
+        border-radius: 8px; overflow: hidden; background: #000; }
+      .schema-preview #schema-host canvas { display: block; width: 100%; height: 100%; }
     </style>
   </head>
   <body>
-    <div id="workbench">
-      <header id="wb-top">
-        <span class="wb-title">idle-screens</span>
-        <span class="wb-hint" id="wb-hint">drag the dividers to resize</span>
-      </header>
+    <!-- Top bar (shared across views) -->
+    <header id="topbar">
+      <span class="tb-title">idlescreens</span>
+      <nav>
+        <a href="#" data-view="gallery" class="active">Gallery</a>
+        <a href="#dev" data-view="dev">Dev Tools</a>
+      </nav>
+      <span class="tb-spacer"></span>
+      <div class="tb-actions">
+        <button id="tb-sleep">Sleep</button>
+        <button id="tb-wake">Wake</button>
+      </div>
+    </header>
 
+    <!-- ============================================================
+         GALLERY VIEW — grid of saver thumbnail cards
+         ============================================================ -->
+    <div id="view-gallery">
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </div>
+
+    <!-- ============================================================
+         DEV VIEW — IDE-style workbench (viewport + timeline)
+         ============================================================ -->
+    <div id="view-dev" hidden>
       <wb-dock id="wb-left" label="Savers"><div id="dock-left"></div></wb-dock>
       <wb-splitter id="sp-left" axis="x" for="--left" min="150" max="380"></wb-splitter>
 
@@ -170,11 +315,12 @@
       </wb-dock>
 
       <wb-splitter id="sp-bottom" axis="y" for="--bottom" invert min="140" max="700"></wb-splitter>
-      <wb-dock id="wb-bottom" label="Tools"><div id="dock-bottom"></div></wb-dock>
+      <wb-dock id="wb-bottom" label="Timeline" flush><div id="dock-bottom"></div></wb-dock>
 
       <wb-splitter id="sp-right" axis="x" for="--right" invert min="240" max="560"></wb-splitter>
       <wb-dock id="wb-right" label="Inspector"><div id="dock-right"></div></wb-dock>
     </div>
+
     <div id="stage" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

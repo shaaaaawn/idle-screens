@@ -4,8 +4,8 @@
     {
       "name": "playground",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5177"],
-      "port": 5177,
+      "runtimeArgs": ["vite"],
+      "autoPort": true,
       "cwd": "apps/playground"
     }
   ]

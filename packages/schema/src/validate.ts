@@ -84,6 +84,45 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
 
+  if (layer.alpha !== undefined && (!isRange(layer.alpha) || layer.alpha[0] < 0 || layer.alpha[1] > 1)) {
+    err(`${path}.alpha`, 'must be a [min,max] range within 0..1');
+  }
+  if (layer.blend !== undefined && layer.blend !== 'lighter') err(`${path}.blend`, "must be 'lighter' when set");
+  if (layer.key !== undefined && (!isStr(layer.key) || layer.key.trim() === '')) {
+    err(`${path}.key`, 'must be a non-empty string');
+  }
+  if (layer.position !== undefined) {
+    if (!isObj(layer.position) || !isNum(layer.position.x) || !isNum(layer.position.y)) {
+      err(`${path}.position`, 'must be {x, y} with numbers 0..1');
+    } else {
+      if (layer.position.x < 0 || layer.position.x > 1) err(`${path}.position.x`, 'must be 0..1');
+      if (layer.position.y < 0 || layer.position.y > 1) err(`${path}.position.y`, 'must be 0..1');
+      if (isNum(layer.count) && layer.count !== 1) err(`${path}.position`, 'position requires count: 1');
+    }
+  }
+  if (layer.region !== undefined) {
+    if (!isObj(layer.region)) err(`${path}.region`, 'must be an object');
+    else {
+      for (const axis of ['x', 'y'] as const) {
+        const r = layer.region[axis];
+        if (r !== undefined && (!isRange(r) || r[0] < 0 || r[1] > 1)) {
+          err(`${path}.region.${axis}`, 'must be a [min,max] range within 0..1');
+        }
+      }
+    }
+  }
+  if (layer.pulse !== undefined) {
+    if (!isObj(layer.pulse)) err(`${path}.pulse`, 'must be an object');
+    else {
+      if (!isNum(layer.pulse.amp) || layer.pulse.amp <= 0 || layer.pulse.amp > LIMITS.maxPulseAmp) {
+        err(`${path}.pulse.amp`, `must be within 0..${LIMITS.maxPulseAmp}`);
+      }
+      if (!isNum(layer.pulse.period) || layer.pulse.period < LIMITS.minPulsePeriod) {
+        err(`${path}.pulse.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
+      }
+    }
+  }
+
   validateSprite(layer.sprite, `${path}.sprite`, err);
   validateMotion(layer.motion, `${path}.motion`, err);
 }
@@ -99,9 +138,19 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.strings`, 'must be a non-empty array of strings');
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.align !== undefined && !['left', 'center', 'right'].includes(sprite.align as string)) {
+      err(`${path}.align`, 'must be left | center | right');
+    }
+    if (sprite.baseline !== undefined && !['top', 'middle', 'bottom'].includes(sprite.baseline as string)) {
+      err(`${path}.baseline`, 'must be top | middle | bottom');
+    }
+    if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
+      err(`${path}.maxWidth`, 'must be a positive number');
+    }
   } else if (sprite.kind === 'circle') {
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     color(sprite.color, `${path}.color`, err);
+    if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
   } else {
     err(`${path}.kind`, 'must be emoji | text | circle');
   }
@@ -123,8 +172,10 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.sway !== undefined && !isNum(motion.sway)) err(`${path}.sway`, 'must be a number');
   } else if (motion.type === 'bounce') {
     speedOk(motion.speed, `${path}.speed`);
+  } else if (motion.type === 'static') {
+    // No fields to validate — static motion has no parameters.
   } else {
-    err(`${path}.type`, 'must be drift | rise | bounce');
+    err(`${path}.type`, 'must be drift | rise | bounce | static');
   }
 }
 

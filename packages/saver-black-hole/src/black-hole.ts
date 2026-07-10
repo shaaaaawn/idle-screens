@@ -139,7 +139,7 @@ class BlackHoleInstance implements SaverInstance {
     this.ay = this.h / 2 - my;
     this.hx = this.cx0;
     this.hy = this.cy0;
-    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+    const dpr = Math.min(this.ctxSaver.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -425,9 +425,10 @@ class BlackHoleInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.ctxSaver.dpr = dpr;
     this.restoreVictims();
     this.measure();
     this.collectVictims();

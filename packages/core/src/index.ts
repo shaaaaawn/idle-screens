@@ -5,3 +5,4 @@ export * from './control-track';
 export { IdleDetector } from './idle-detector';
 export { IdleScreensEngine, type EngineState } from './engine';
 export { IdleScreenElement, defineIdleScreen } from './idle-screen.element';
+export { runIdleWorker, type RunIdleWorkerOpts, type WorkerInbound, type WorkerOutbound } from './worker-protocol';

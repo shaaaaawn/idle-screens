@@ -25,6 +25,7 @@ export const globeManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true, notes: 'A slowly spinning dotted globe drifting on black; no flashing.' },
+  workerReady: true,
 };
 
 const RADIUS = 120; // globe radius (px) — matches the original 240px diameter
@@ -40,8 +41,8 @@ interface Point3 {
 
 class GlobeInstance implements SaverInstance {
   private readonly ctx: SaverContext;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly c2d: CanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly c2d: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
   private w = 0;
   private h = 0;
@@ -62,11 +63,17 @@ class GlobeInstance implements SaverInstance {
 
   constructor(ctx: SaverContext) {
     this.ctx = ctx;
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%';
-    ctx.host.appendChild(canvas);
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (ctx.surface) {
+      canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%';
+      ctx.host.appendChild(el);
+      canvas = el;
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false });
+    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('globe: no 2d context');
     this.c2d = c2d;
 
@@ -112,7 +119,7 @@ class GlobeInstance implements SaverInstance {
   }
 
   private sizeCanvas(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(this.ctx.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -213,9 +220,10 @@ class GlobeInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.ctx.dpr = dpr;
     this.sizeCanvas();
     // keep the globe inside the new bounds
     this.cx = Math.min(Math.max(this.cx, RADIUS), Math.max(RADIUS, this.w - RADIUS));
@@ -225,7 +233,7 @@ class GlobeInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 

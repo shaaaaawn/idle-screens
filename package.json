@@ -6,7 +6,10 @@
   "type": "module",
   "description": "An off-main-thread, capability-tiered, agent-operable screensaver engine for the modern web.",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens"
+  },
   "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -26,6 +29,7 @@
     "@changesets/cli": "^2.27.11",
     "@playwright/test": "^1.49.1",
     "@types/node": "^22.10.2",
+    "@webgpu/types": "^0.1.71",
     "eslint": "^9.17.0",
     "happy-dom": "^20.10.6",
     "tsup": "^8.3.5",

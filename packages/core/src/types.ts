@@ -56,6 +56,11 @@ export interface SaverContext {
    *  canvas inside it; DOM savers (toasters, DVD, messages) append elements. The
    *  host is cleared by the runtime on dispose. */
   host: HTMLElement;
+  /** Pre-created rendering surface. When present, canvas savers should use this
+   *  instead of creating their own canvas. In a Worker this is an OffscreenCanvas. */
+  surface?: HTMLCanvasElement | OffscreenCanvas;
+  /** Device pixel ratio — use instead of reading window.devicePixelRatio. */
+  dpr: number;
   width: number;
   height: number;
   /** Seeded PRNG. Use this, never Math.random(), for determinism. */
@@ -70,7 +75,7 @@ export interface SaverContext {
 export interface SaverInstance {
   /** Freeze/unfreeze the render loop (paused, reduced-motion, or screensaver end). */
   setPaused(paused: boolean): void;
-  resize(width: number, height: number): void;
+  resize(width: number, height: number, dpr?: number): void;
   /** Deterministic, frame-addressable render: draw the state at logical time `t`
    *  (ms) for `seed`. Pure w.r.t. (program, seed, applied track, t). Optional. */
   renderFrame?(t: number, seed: number): void;
@@ -94,12 +99,19 @@ export interface SaverManifest {
   a11y?: { flashSafe?: boolean; notes?: string };
   provenance?: { prompt?: string; seed?: number; model?: string };
   thumbnail?: string;
+  /** Saver renders on a provided surface (canvas/OffscreenCanvas) and avoids DOM
+   *  APIs, enabling Worker execution when the browser supports OffscreenCanvas. */
+  workerReady?: boolean;
 }
 
 /** A registered saver: manifest + a (possibly lazy/async) mount factory. */
 export interface SaverPlugin {
   manifest: SaverManifest;
   mount(ctx: SaverContext): SaverInstance | Promise<SaverInstance>;
+  /** Original schema spec (JSON-serializable). When present, the element sends
+   *  a `mount-spec` message to the Worker instead of `mount`, so the Worker can
+   *  compile and run the spec without pre-registration in its registry. */
+  spec?: unknown;
 }
 
 /** Engine configuration. */
@@ -124,6 +136,9 @@ export interface IdleScreensConfig {
   suppress?: (url: string) => boolean;
   /** Pluggable persistence (defaults to localStorage when available). */
   storage?: { get(key: string): string | null; set(key: string, value: string): void };
+  /** URL of the idle-worker script. When set, savers with `workerReady: true`
+   *  render in a Web Worker via OffscreenCanvas. Omit to disable Worker rendering. */
+  workerUrl?: string;
   /** Built-in, keyboard-opened config menu (saver picker). `true`/omitted =
    *  enabled with ⌘K / Ctrl+K; `false` = no hotkey and no built-in menu (the
    *  `configMenuOpen` signal + open/close API still work, so a host may render

@@ -16,6 +16,7 @@ export const spotlightManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true, notes: 'A soft light circle drifting over the live page; no flashing.' },
+  workerReady: true,
 };
 
 const HOLE_RADIUS = 220;
@@ -23,8 +24,9 @@ const SPEED_X = 5000;
 const SPEED_Y = 5600;
 
 class SpotlightInstance implements SaverInstance {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly c2d: CanvasRenderingContext2D;
+  private readonly ctx: SaverContext;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly c2d: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
   private w = 0;
   private h = 0;
@@ -35,11 +37,18 @@ class SpotlightInstance implements SaverInstance {
   private clock = 0;
 
   constructor(ctx: SaverContext) {
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%';
-    ctx.host.appendChild(canvas);
+    this.ctx = ctx;
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (ctx.surface) {
+      canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%';
+      ctx.host.appendChild(el);
+      canvas = el;
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: true });
+    const c2d = canvas.getContext('2d', { alpha: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('spotlight: no 2d context');
     this.c2d = c2d;
 
@@ -52,7 +61,7 @@ class SpotlightInstance implements SaverInstance {
   }
 
   private sizeCanvas(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(this.ctx.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -132,16 +141,17 @@ class SpotlightInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.ctx.dpr = dpr;
     this.sizeCanvas();
     if (this.paused) this.render();
   }
 
   dispose(): void {
     this.stop();
-    this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 

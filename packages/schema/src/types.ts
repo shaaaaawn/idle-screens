@@ -50,12 +50,47 @@ export interface LayerSpec {
   wrap?: boolean;
   /** Flip the sprite horizontally to face its heading. Default false. */
   flip?: boolean;
+  /** Per-entity opacity range, both 0..1. Default [1,1]. */
+  alpha?: [number, number];
+  /** Compositing for this layer. 'lighter' = additive (glow stacking). Default source-over. */
+  blend?: 'lighter';
+  /**
+   * Fractional spawn window (0 = left/top, 1 = right/bottom). Constrains where
+   * entities are PLACED, not where they may travel. Default full viewport.
+   */
+  region?: { x?: [number, number]; y?: [number, number] };
+  /**
+   * Sinusoidal opacity breathing. SAFETY: amp is capped (LIMITS.maxPulseAmp),
+   * period has a floor (LIMITS.minPulsePeriod — max 2 Hz), and every entity gets
+   * its own seeded phase, so a layer can never strobe in unison. Effective alpha
+   * is clamped to 0..1.
+   */
+  pulse?: { amp: number; period: number };
+  /**
+   * Addressable name for this layer. Enables `setParam` to use `key.field` paths
+   * instead of `layers.N.field` indices. Also makes specs self-documenting.
+   */
+  key?: string;
+  /**
+   * Exact fractional position {x, y} for a single entity (0 = left/top, 1 = right/bottom).
+   * Only valid when `count` is 1. Overrides `region` scatter placement.
+   */
+  position?: { x: number; y: number };
 }
 
 export type SpriteSpec =
   | { kind: 'emoji'; glyphs: string[] }
-  | { kind: 'text'; strings: string[]; color?: string; font?: string }
-  | { kind: 'circle'; radius: [number, number]; color: string };
+  | {
+      kind: 'text';
+      strings: string[];
+      color?: string;
+      font?: string;
+      align?: 'left' | 'center' | 'right';
+      baseline?: 'top' | 'middle' | 'bottom';
+      maxWidth?: number;
+    }
+  /** `soft` renders a radial falloff (glow orb) instead of a hard disc. */
+  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean };
 
 export type MotionSpec =
   /**
@@ -69,7 +104,9 @@ export type MotionSpec =
   /** Rise upward (px/sec) with an optional horizontal sway amplitude (px) — bubbles. */
   | { type: 'rise'; speed: [number, number]; sway?: number }
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
-  | { type: 'bounce'; speed: [number, number] };
+  | { type: 'bounce'; speed: [number, number] }
+  /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
+  | { type: 'static' };
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
@@ -86,6 +123,8 @@ export interface ValidationResult {
 export const LIMITS = {
   maxPerLayer: 400,
   maxTotal: 800,
-  maxLayers: 8,
+  maxLayers: 36,
   maxSpeed: 4000, // px/sec — bounds motion so nothing teleports
+  maxPulseAmp: 0.5, // opacity breathing amplitude cap
+  minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)
 } as const;

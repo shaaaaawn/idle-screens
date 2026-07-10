@@ -35,6 +35,7 @@ function detectBackendsSync(): BackendSupport {
     canvas2d: probeContext('2d'),
     webgl2: probeContext('webgl2'),
     webgpu: false, // resolved asynchronously by detectCapabilities()
+    offscreenCanvas: hasDoc && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function',
   };
 }
 
@@ -45,7 +46,7 @@ function detectBackendsSync(): BackendSupport {
  */
 export async function detectCapabilities(): Promise<Capabilities> {
   if (!hasDoc) {
-    return { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false } };
+    return { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false, offscreenCanvas: false } };
   }
   const backends = detectBackendsSync();
   backends.webgpu = await probeWebGpu();

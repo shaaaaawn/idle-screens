@@ -6,8 +6,15 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec } from './validate';
-import { buildEntities, positionAt, type Entity } from './simulate';
+import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
 import type { LayerSpec, SaverSpec } from './types';
+
+/** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+  const n = parseInt(h.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 /** Derive a manifest so a compiled spec composes with @idle-screens/capabilities. */
 export function manifestFor(spec: SaverSpec): SaverManifest {
@@ -33,8 +40,9 @@ interface Built {
 }
 
 class SpecInstance implements SaverInstance {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  private readonly saverCtx: SaverContext;
   private readonly seed: number;
   private w: number;
   private h: number;
@@ -42,18 +50,27 @@ class SpecInstance implements SaverInstance {
   private frameId: number | null = null;
   private paused = false;
   private startT = 0;
+  private baseT = 0; // elapsed logical time carried across pause/resume
+  private lastT = 0;
 
   constructor(
     private readonly spec: SaverSpec,
     ctx: SaverContext,
   ) {
+    this.saverCtx = ctx;
     this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%';
-    canvas.setAttribute('aria-hidden', 'true');
-    ctx.host.appendChild(canvas);
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (ctx.surface) {
+      canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%';
+      el.setAttribute('aria-hidden', 'true');
+      ctx.host.appendChild(el);
+      canvas = el;
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false });
+    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('schema saver: no 2d context');
     this.ctx = c2d;
 
@@ -68,7 +85,7 @@ class SpecInstance implements SaverInstance {
   }
 
   private sizeCanvas(): void {
-    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+    const dpr = Math.min(this.saverCtx.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -91,12 +108,15 @@ class SpecInstance implements SaverInstance {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    // Freeze elapsed time so resume continues the scene instead of restarting at t=0.
+    this.baseT = this.lastT;
   }
 
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
     if (this.startT === 0) this.startT = now;
-    this.renderFrame(now - this.startT, this.seed);
+    this.lastT = now - this.startT + this.baseT;
+    this.renderFrame(this.lastT, this.seed);
   }
 
   private drawBackground(): void {
@@ -121,10 +141,21 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     const p = positionAt(e, t, this.w, this.h);
     const sprite = built.layer.sprite;
+    ctx.globalAlpha = alphaAt(e, t);
     if (sprite.kind === 'circle') {
-      ctx.fillStyle = sprite.color;
+      const r = e.size / 2;
+      if (sprite.soft) {
+        // Glow orb: solid core fading radially to transparent (pairs with blend:'lighter').
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, sprite.color);
+        g.addColorStop(0.35, hexToRgba(sprite.color, 0.75));
+        g.addColorStop(1, hexToRgba(sprite.color, 0));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = sprite.color;
+      }
       ctx.beginPath();
-      ctx.arc(p.x, p.y, e.size / 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
@@ -137,19 +168,29 @@ class SpecInstance implements SaverInstance {
       ctx.font = `${e.size}px serif`;
       ctx.fillText(sprite.glyphs[e.spriteIndex] ?? sprite.glyphs[0]!, 0, 0);
     } else {
+      ctx.textAlign = sprite.align ?? 'center';
+      ctx.textBaseline = sprite.baseline ?? 'middle';
       ctx.font = sprite.font ?? `${e.size}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
-      ctx.fillText(sprite.strings[e.spriteIndex] ?? sprite.strings[0]!, 0, 0);
+      const text = sprite.strings[e.spriteIndex] ?? sprite.strings[0]!;
+      if (sprite.maxWidth) ctx.fillText(text, 0, 0, sprite.maxWidth);
+      else ctx.fillText(text, 0, 0);
     }
     ctx.restore();
   }
 
   /** Deterministic, frame-addressable render (shared by the rAF loop). */
   renderFrame(t: number, _seed: number): void {
+    const { ctx } = this;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
     this.drawBackground();
     for (const built of this.layers) {
+      ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       for (const e of built.entities) this.drawEntity(built, e, t);
     }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   setPaused(paused: boolean): void {
@@ -161,9 +202,10 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.saverCtx.dpr = dpr;
     this.sizeCanvas();
     this.rebuild();
     if (this.paused) this.renderFrame(0, this.seed);
@@ -171,7 +213,7 @@ class SpecInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 
@@ -185,5 +227,6 @@ export function compileSaver(spec: unknown): SaverPlugin {
   return {
     manifest: manifestFor(valid),
     mount: (ctx: SaverContext) => new SpecInstance(valid, ctx),
+    spec: valid,
   };
 }

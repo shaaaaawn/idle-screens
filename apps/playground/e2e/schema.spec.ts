@@ -20,7 +20,7 @@ declare global {
 }
 
 const ready = async (page: Page): Promise<void> => {
-  await page.goto('/');
+  await page.goto('/#dev');
   await page.waitForFunction(() => !!window.__schema);
 };
 

@@ -42,7 +42,7 @@ export async function buildCapabilitiesPanel(
   const effective = (): Capabilities => {
     let caps: Capabilities;
     if (sim === 'minimal') {
-      caps = { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false }, saveData: true };
+      caps = { backends: { css: true, canvas2d: false, webgl2: false, webgpu: false, offscreenCanvas: false }, saveData: true };
     } else if (sim === 'lowpower') {
       caps = { ...real, saveData: true, deviceMemoryGb: 2, hardwareConcurrency: 2 };
     } else {

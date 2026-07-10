@@ -14,7 +14,7 @@ import type {
  */
 export const messagesManifest: SaverManifest = {
   id: 'messages',
-  label: 'Messages (Out to Lunch)',
+  label: 'Messages',
   passthrough: false,
   minBackend: 'css',
   costTier: 'idle',

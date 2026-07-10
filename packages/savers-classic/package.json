@@ -4,7 +4,11 @@
   "description": "Classic screensavers for idle-screens (toasters, DVD, warp, rain, and more), ported to framework-agnostic saver plugins.",
   "license": "MIT",
   "author": "Shawn Partridge",
-  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens", "directory": "packages/savers-classic" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/savers-classic"
+  },
   "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
   "type": "module",
   "sideEffects": false,
@@ -15,12 +19,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/idle-worker.d.ts",
+      "import": "./dist/idle-worker.js"
     }
   },
-  "publishConfig": { "access": "public" },
-  "keywords": ["screensaver", "idle", "ambient", "after-dark", "canvas", "toasters", "dvd"],
-  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "screensaver",
+    "idle",
+    "ambient",
+    "after-dark",
+    "canvas",
+    "toasters",
+    "dvd"
+  ],
+  "bugs": {
+    "url": "https://github.com/shaaaaawn/idle-screens/issues"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -31,6 +53,7 @@
     "@idle-screens/core": "workspace:*"
   },
   "devDependencies": {
-    "@idle-screens/core": "workspace:*"
+    "@idle-screens/core": "workspace:*",
+    "@webgpu/types": "^0.1.71"
   }
 }

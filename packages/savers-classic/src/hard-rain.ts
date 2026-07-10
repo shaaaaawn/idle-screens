@@ -24,6 +24,7 @@ export const hardRainManifest: SaverManifest = {
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true, notes: 'Slow-expanding coloured rings on black; no flashing.' },
+  workerReady: true,
 };
 
 const CYCLE = 4500; // ms — the original `drip` duration
@@ -91,8 +92,8 @@ function hexToRgb(hex: string): string {
 
 class HardRainInstance implements SaverInstance {
   private readonly ctx: SaverContext;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly c2d: CanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly c2d: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
   private w = 0;
   private h = 0;
@@ -106,11 +107,17 @@ class HardRainInstance implements SaverInstance {
 
   constructor(ctx: SaverContext) {
     this.ctx = ctx;
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%';
-    ctx.host.appendChild(canvas);
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (ctx.surface) {
+      canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%';
+      ctx.host.appendChild(el);
+      canvas = el;
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false });
+    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('hard-rain: no 2d context');
     this.c2d = c2d;
 
@@ -139,11 +146,10 @@ class HardRainInstance implements SaverInstance {
   }
 
   private sizeCanvas(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(this.ctx.dpr, 2);
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // Original sizes were authored against a ~1280px-wide desktop.
     this.scale = Math.min(this.w, this.h * 1.4) / 900;
   }
 
@@ -211,16 +217,17 @@ class HardRainInstance implements SaverInstance {
     }
   }
 
-  resize(width: number, height: number): void {
+  resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
+    if (dpr !== undefined) this.ctx.dpr = dpr;
     this.sizeCanvas();
     if (this.paused) this.renderStill();
   }
 
   dispose(): void {
     this.stop();
-    this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 

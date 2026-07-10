@@ -1,5 +1,5 @@
 import { createRng, type SaverInstance } from '@idle-screens/core';
-import { AQUARIUM_SPEC, RAIN_SPEC, compileSaver, validateSpec, type SaverSpec } from '@idle-screens/schema';
+import { AQUARIUM_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, RAIN_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, compileSaver, validateSpec, type SaverSpec } from '@idle-screens/schema';
 import { sampleSaver, type ValidateResult } from './validate';
 
 declare global {
@@ -26,6 +26,10 @@ export function buildSchemaPanel(mount: HTMLElement): void {
       <button id="schema-run">Compile &amp; preview</button>
       <button id="schema-ex-aquarium">Load aquarium</button>
       <button id="schema-ex-rain">Load rain</button>
+      <button id="schema-ex-snowfall">Load snowfall</button>
+      <button id="schema-ex-lanterns">Load lanterns</button>
+      <button id="schema-ex-sakura">Load sakura</button>
+      <button id="schema-ex-dashboard">Load dashboard</button>
       <span id="schema-status" class="verdict">…</span>
     </div>
     <div class="schema-cols">
@@ -98,6 +102,7 @@ export function buildSchemaPanel(mount: HTMLElement): void {
     void Promise.resolve(
       compileSaver(spec).mount({
         host,
+        dpr: devicePixelRatio ?? 1,
         width: Math.round(rect.width) || 420,
         height: Math.round(rect.height) || 260,
         rng: createRng(seed),
@@ -119,11 +124,27 @@ export function buildSchemaPanel(mount: HTMLElement): void {
     ta.value = pretty(RAIN_SPEC);
     run();
   });
+  $<HTMLButtonElement>('schema-ex-snowfall').addEventListener('click', () => {
+    ta.value = pretty(SNOWFALL_SPEC);
+    run();
+  });
+  $<HTMLButtonElement>('schema-ex-lanterns').addEventListener('click', () => {
+    ta.value = pretty(LANTERNS_SPEC);
+    run();
+  });
+  $<HTMLButtonElement>('schema-ex-sakura').addEventListener('click', () => {
+    ta.value = pretty(SAKURA_SPEC);
+    run();
+  });
+  $<HTMLButtonElement>('schema-ex-dashboard').addEventListener('click', () => {
+    ta.value = pretty(DASHBOARD_SPEC);
+    run();
+  });
 
   window.__schema = {
     validate: (json: string) => validateSpec(JSON.parse(json)),
     sample: (json: string) => sampleSaver(compileSaver(JSON.parse(json)), { seconds: 1.5 }),
-    examples: { aquarium: pretty(AQUARIUM_SPEC), rain: pretty(RAIN_SPEC) },
+    examples: { aquarium: pretty(AQUARIUM_SPEC), rain: pretty(RAIN_SPEC), snowfall: pretty(SNOWFALL_SPEC), lanterns: pretty(LANTERNS_SPEC), sakura: pretty(SAKURA_SPEC), dashboard: pretty(DASHBOARD_SPEC) },
   };
 
   run();

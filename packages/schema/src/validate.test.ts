@@ -58,6 +58,24 @@ describe('validateSpec', () => {
     expect(paths({ ...base(), layers: [{ ...base().layers[0], motion: { type: 'drift', speed: [0, 99999] } }] })).toContain('layers[0].motion.speed');
   });
 
+  it('validates alpha, blend, region, and soft-circle fields', () => {
+    const layer = base().layers[0];
+    expect(paths({ ...base(), layers: [{ ...layer, alpha: [0.2, 1.4] }] })).toContain('layers[0].alpha');
+    expect(paths({ ...base(), layers: [{ ...layer, blend: 'multiply' as never }] })).toContain('layers[0].blend');
+    expect(paths({ ...base(), layers: [{ ...layer, region: { y: [0.5, 1.2] } }] })).toContain('layers[0].region.y');
+    const ok = { ...base(), layers: [{ ...layer, alpha: [0.3, 0.9] as [number, number], blend: 'lighter' as const, region: { x: [0, 0.5] as [number, number] } }] };
+    expect(validateSpec(ok)).toEqual({ valid: true, errors: [] });
+    const soft = { ...base(), layers: [{ count: 5, sprite: { kind: 'circle', radius: [2, 6], color: '#fff', soft: true }, motion: { type: 'rise', speed: [10, 20] } }] };
+    expect(validateSpec(soft).valid).toBe(true);
+  });
+
+  it('enforces pulse flash-safety caps (amp ceiling, period floor)', () => {
+    const layer = base().layers[0];
+    expect(paths({ ...base(), layers: [{ ...layer, pulse: { amp: 0.8, period: 2000 } }] })).toContain('layers[0].pulse.amp');
+    expect(paths({ ...base(), layers: [{ ...layer, pulse: { amp: 0.3, period: 200 } }] })).toContain('layers[0].pulse.period');
+    expect(validateSpec({ ...base(), layers: [{ ...layer, pulse: { amp: 0.3, period: 2000 } }] }).valid).toBe(true);
+  });
+
   it('assertValidSpec throws on invalid, returns the spec on valid', () => {
     expect(() => assertValidSpec({ schemaVersion: 1 })).toThrow(/invalid saver spec/);
     expect(assertValidSpec(base()).id).toBe('demo');
