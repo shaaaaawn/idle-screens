@@ -1,10 +1,14 @@
 {
   "name": "@idle-screens/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Engine, <idle-screen> custom element, plugin registry, seeded RNG, control-track, and types for idle-screens.",
   "license": "MIT",
   "author": "Shawn Partridge",
-  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens", "directory": "packages/core" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/core"
+  },
   "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
   "type": "module",
   "sideEffects": false,
@@ -17,10 +21,23 @@
       "import": "./dist/index.js"
     }
   },
-  "publishConfig": { "access": "public" },
-  "keywords": ["screensaver", "idle", "ambient", "web-components", "canvas", "custom-element"],
-  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "screensaver",
+    "idle",
+    "ambient",
+    "web-components",
+    "canvas",
+    "custom-element"
+  ],
+  "bugs": {
+    "url": "https://github.com/shaaaaawn/idle-screens/issues"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
