@@ -195,11 +195,12 @@ class FlurryInstance implements SaverInstance {
     if (dpr !== undefined) this.ctxSaver.dpr = dpr;
     this.sizeCanvas();
     this.clearFull();
+    if (this.paused) this.renderStill();
   }
 
   dispose(): void {
     this.stop();
-    if (this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 

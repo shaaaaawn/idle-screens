@@ -192,7 +192,7 @@ export function runIdleWorker(
           for (let c = 0; c < COLS && !hasContent; c++) {
             const x = Math.floor((cw * (c + 1)) / (COLS + 1));
             const data = c2d.getImageData(x, y, 1, 1).data;
-            if (data[0]! > 0 || data[1]! > 0 || data[2]! > 0) hasContent = true;
+            if (data[0]! > 0 || data[1]! > 0 || data[2]! > 0 || data[3]! > 0) hasContent = true;
           }
         }
         post({ type: 'sampled', hasContent });

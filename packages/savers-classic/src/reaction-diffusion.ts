@@ -172,7 +172,7 @@ class ReactionDiffusionCPU implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    if (this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 
