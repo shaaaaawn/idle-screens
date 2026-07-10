@@ -1,10 +1,14 @@
 {
   "name": "@idle-screens/capabilities",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Device & capability detection + saver eligibility tiering for idle-screens. Pure decide (Node-testable) + a thin browser detector.",
   "license": "MIT",
   "author": "Shawn Partridge",
-  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens", "directory": "packages/capabilities" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/capabilities"
+  },
   "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
   "type": "module",
   "sideEffects": false,
@@ -17,10 +21,23 @@
       "import": "./dist/index.js"
     }
   },
-  "publishConfig": { "access": "public" },
-  "keywords": ["screensaver", "idle", "capabilities", "device-detection", "webgl", "webgpu"],
-  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "screensaver",
+    "idle",
+    "capabilities",
+    "device-detection",
+    "webgl",
+    "webgpu"
+  ],
+  "bugs": {
+    "url": "https://github.com/shaaaaawn/idle-screens/issues"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
