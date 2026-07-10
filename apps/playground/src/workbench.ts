@@ -35,7 +35,7 @@ class WbSplitter extends HTMLElement {
   }
 
   private onDown = (e: PointerEvent): void => {
-    const wb = document.getElementById('workbench');
+    const wb = document.getElementById('view-dev');
     if (!wb) return;
     e.preventDefault();
     const axis = this.getAttribute('axis') ?? 'x'; // 'x' resizes a column, 'y' a row

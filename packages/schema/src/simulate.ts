@@ -12,7 +12,7 @@ export interface Entity {
   vx: number; // px/sec
   vy: number; // px/sec
   bob: number; // vertical bob / horizontal sway amplitude (px)
-  motion: 'drift' | 'rise' | 'bounce';
+  motion: 'drift' | 'rise' | 'bounce' | 'static';
   headingLeft: boolean;
   alpha: number; // resolved base opacity (default 1)
   pulseAmp: number; // opacity breathing amplitude (0 = none)
@@ -48,7 +48,9 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
     let bob = 0;
     let motion: Entity['motion'] = 'drift';
     const m = layer.motion;
-    if (m.type === 'drift') {
+    if (m.type === 'static') {
+      motion = 'static';
+    } else if (m.type === 'drift') {
       const s = rng.range(m.speed[0], m.speed[1]);
       let angle = ((m.angle ?? 0) * Math.PI) / 180;
       if (m.bidirectional && rng.next() < 0.5) angle = Math.PI - angle;
@@ -67,15 +69,24 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
       vy = s * Math.sin(a);
     }
 
-    // Spawn window defaults to the full viewport. IMPORTANT (determinism/compat):
-    // optional features must only consume EXTRA rng draws when declared, so specs
-    // written before a feature existed keep bit-identical entity streams.
-    const [rx0, rx1] = layer.region?.x ?? [0, 1];
-    const [ry0, ry1] = layer.region?.y ?? [0, 1];
+    let x0: number;
+    let y0: number;
+    if (layer.position && layer.count === 1) {
+      x0 = layer.position.x * w;
+      y0 = layer.position.y * h;
+    } else {
+      // Spawn window defaults to the full viewport. IMPORTANT (determinism/compat):
+      // optional features must only consume EXTRA rng draws when declared, so specs
+      // written before a feature existed keep bit-identical entity streams.
+      const [rx0, rx1] = layer.region?.x ?? [0, 1];
+      const [ry0, ry1] = layer.region?.y ?? [0, 1];
+      x0 = rng.range(rx0 * w, rx1 * w);
+      y0 = rng.range(ry0 * h, ry1 * h);
+    }
 
     out.push({
-      x0: rng.range(rx0 * w, rx1 * w),
-      y0: rng.range(ry0 * h, ry1 * h),
+      x0,
+      y0,
       size,
       spriteIndex: variants > 1 ? rng.int(0, variants - 1) : 0,
       phase: rng.range(0, Math.PI * 2),
@@ -115,6 +126,7 @@ function reflect(v: number, min: number, max: number): number {
 
 /** Analytic position of an entity at logical time `t` (ms). Pure & deterministic. */
 export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
+  if (e.motion === 'static') return { x: e.x0, y: e.y0, flip: false };
   const dt = t / 1000;
   const m = e.size;
   if (e.motion === 'bounce') {

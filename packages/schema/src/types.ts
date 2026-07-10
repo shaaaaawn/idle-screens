@@ -66,11 +66,29 @@ export interface LayerSpec {
    * is clamped to 0..1.
    */
   pulse?: { amp: number; period: number };
+  /**
+   * Addressable name for this layer. Enables `setParam` to use `key.field` paths
+   * instead of `layers.N.field` indices. Also makes specs self-documenting.
+   */
+  key?: string;
+  /**
+   * Exact fractional position {x, y} for a single entity (0 = left/top, 1 = right/bottom).
+   * Only valid when `count` is 1. Overrides `region` scatter placement.
+   */
+  position?: { x: number; y: number };
 }
 
 export type SpriteSpec =
   | { kind: 'emoji'; glyphs: string[] }
-  | { kind: 'text'; strings: string[]; color?: string; font?: string }
+  | {
+      kind: 'text';
+      strings: string[];
+      color?: string;
+      font?: string;
+      align?: 'left' | 'center' | 'right';
+      baseline?: 'top' | 'middle' | 'bottom';
+      maxWidth?: number;
+    }
   /** `soft` renders a radial falloff (glow orb) instead of a hard disc. */
   | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean };
 
@@ -86,7 +104,9 @@ export type MotionSpec =
   /** Rise upward (px/sec) with an optional horizontal sway amplitude (px) — bubbles. */
   | { type: 'rise'; speed: [number, number]; sway?: number }
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
-  | { type: 'bounce'; speed: [number, number] };
+  | { type: 'bounce'; speed: [number, number] }
+  /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
+  | { type: 'static' };
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
@@ -103,7 +123,7 @@ export interface ValidationResult {
 export const LIMITS = {
   maxPerLayer: 400,
   maxTotal: 800,
-  maxLayers: 8,
+  maxLayers: 36,
   maxSpeed: 4000, // px/sec — bounds motion so nothing teleports
   maxPulseAmp: 0.5, // opacity breathing amplitude cap
   minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)

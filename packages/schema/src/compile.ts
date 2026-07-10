@@ -168,9 +168,13 @@ class SpecInstance implements SaverInstance {
       ctx.font = `${e.size}px serif`;
       ctx.fillText(sprite.glyphs[e.spriteIndex] ?? sprite.glyphs[0]!, 0, 0);
     } else {
+      ctx.textAlign = sprite.align ?? 'center';
+      ctx.textBaseline = sprite.baseline ?? 'middle';
       ctx.font = sprite.font ?? `${e.size}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
-      ctx.fillText(sprite.strings[e.spriteIndex] ?? sprite.strings[0]!, 0, 0);
+      const text = sprite.strings[e.spriteIndex] ?? sprite.strings[0]!;
+      if (sprite.maxWidth) ctx.fillText(text, 0, 0, sprite.maxWidth);
+      else ctx.fillText(text, 0, 0);
     }
     ctx.restore();
   }

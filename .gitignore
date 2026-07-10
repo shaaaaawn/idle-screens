@@ -19,3 +19,10 @@ apps/*/dist/
 
 # Never commit npm auth
 .npmrc
+
+# docs
+docs/specs
+docs/research
+
+.mcp.json
+.env

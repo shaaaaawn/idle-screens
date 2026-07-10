@@ -1,4 +1,4 @@
-import './workbench'; // registers <wb-dock> + <wb-splitter> custom elements
+import './workbench';
 import {
   createRng,
   defineIdleScreen,
@@ -11,13 +11,21 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { compileSaver, LANTERNS_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
+import { compileSaver, DASHBOARD_SPEC, LANTERNS_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildCapabilitiesPanel, type CapabilitiesHandle } from './capabilities-panel';
 import { buildSchemaPanel } from './schema-panel';
+import { buildTimelinePanel } from './timeline-panel';
 
-const ALL_SAVERS = [blackHole, ...CLASSIC_SAVERS, compileSaver(SNOWFALL_SPEC), compileSaver(LANTERNS_SPEC)];
+const ALL_SAVERS = [
+  blackHole,
+  ...CLASSIC_SAVERS,
+  compileSaver(SNOWFALL_SPEC),
+  compileSaver(LANTERNS_SPEC),
+  compileSaver(SAKURA_SPEC),
+  compileSaver(DASHBOARD_SPEC),
+];
 
 const params = new URLSearchParams(location.search);
 const stage = document.getElementById('stage') as HTMLDivElement;
@@ -58,6 +66,13 @@ declare global {
 const twoFrames = (): Promise<void> =>
   new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
+const SAVER_VARIANTS: Record<string, string> = {
+  messages: 'Out to Lunch',
+  messages2: 'Macintosh',
+};
+
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard']);
+
 if (params.has('frame')) {
   frameMode();
 } else if (params.has('harness')) {
@@ -69,7 +84,7 @@ if (params.has('frame')) {
 }
 
 // ---------------------------------------------------------------------------
-// Validator harness: sample savers (or a synthetic strobe) for the e2e gate.
+// Validator harness
 // ---------------------------------------------------------------------------
 function validateMode(): void {
   window.__validate = {
@@ -82,7 +97,7 @@ function validateMode(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic single-frame render: the target of the Playwright proof.
+// Deterministic single-frame render
 // ---------------------------------------------------------------------------
 function frameMode(): void {
   document.body.classList.add('frame-mode');
@@ -96,7 +111,7 @@ function frameMode(): void {
     height: window.innerHeight,
     rng: createRng(seed),
     seed,
-    reducedMotion: true, // no rAF; we render exactly one frame
+    reducedMotion: true,
   };
   void Promise.resolve(blackHole.mount(ctx)).then((inst: SaverInstance) => {
     if (params.get('track') === 'demo') inst.applyTrack?.(demoTrack);
@@ -106,7 +121,7 @@ function frameMode(): void {
 }
 
 // ---------------------------------------------------------------------------
-// SaverInstance lifecycle harness (drives the full interface directly).
+// SaverInstance lifecycle harness
 // ---------------------------------------------------------------------------
 function harnessMode(): void {
   window.__harness = {
@@ -158,7 +173,7 @@ function harnessMode(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Live overlay + interactive config panel + determinism demo.
+// Live mode — gallery + dev views with hash routing
 // ---------------------------------------------------------------------------
 interface LiveConfig {
   saver: string;
@@ -207,7 +222,6 @@ function liveMode(): void {
     workerUrl,
   });
 
-  // Reduced-motion is driven by matchMedia; let the panel force it by overriding.
   const origMatchMedia = window.matchMedia.bind(window);
   const applyReducedMotion = (on: boolean): void => {
     (window as unknown as { matchMedia: typeof window.matchMedia }).matchMedia = on
@@ -227,7 +241,7 @@ function liveMode(): void {
       ownedExternal.destroy();
       ownedExternal = null;
     }
-    if (el) el.remove(); // disconnect -> teardown (destroys an element-owned engine)
+    if (el) el.remove();
     el = document.createElement('idle-screen') as IdleScreenElement;
     if (params.get('forcePolyfill') === '1') el.forceRafPolyfill = true;
     document.body.appendChild(el);
@@ -240,95 +254,184 @@ function liveMode(): void {
       el.plugins = ALL_SAVERS;
       el.config = toEngineConfig(c);
     }
-    // The panel's saver dropdown is the source of truth here. The engine otherwise
-    // restores the last-persisted plugin from localStorage, which would silently
-    // override (and ignore) the selection — so force it and persist the choice.
     window.__idleScreens?.setPlugin(c.saver);
   };
   rebuild(cfg);
 
-  // Dock the panels into the workbench regions (left = savers, right = inspector,
-  // bottom = tools). Each dock body scrolls locally; the window never scrolls.
-  const right = document.getElementById('dock-right')!;
-  const bottom = document.getElementById('dock-bottom')!;
-  const left = document.getElementById('dock-left')!;
+  document.getElementById('tb-sleep')?.addEventListener('click', () => window.__idleScreens?.sleep());
+  document.getElementById('tb-wake')?.addEventListener('click', () => window.__idleScreens?.wake());
 
-  const propsPanel = buildPropertiesPanel(right);
-  buildConfigPanel(cfg, rebuild, right);
-  const capsHandle = buildCapabilitiesPanel(ALL_SAVERS, right);
-  buildDeterminismDemo(bottom);
-  buildSafetyPanel(bottom);
-  buildSchemaPanel(bottom);
+  const capsPromise = buildCapabilitiesPanel(ALL_SAVERS, document.createElement('div'));
 
-  // Inline viewport preview: selecting a saver (palette or dropdown) shows it IN the
-  // center viewport, not fullscreen. The top-bar "Sleep" is what triggers fullscreen.
-  const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
-  const viewportLabel = document.getElementById('viewport-label');
-  let previewInst: SaverInstance | null = null;
-  const selectSaver = (id: string): void => {
-    const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
-    if (!saver) return;
-    cfg.saver = id;
-    rebuild(cfg);
-    propsPanel.select(saver);
-    document
-      .querySelectorAll('#dock-left .palette-item')
-      .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
-    if (!viewportHost) return;
-    if (previewInst) {
-      previewInst.dispose();
-      previewInst = null;
-    }
-    viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
-    viewportHost.classList.add('active');
-    viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
-    if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
-    const rect = viewportHost.getBoundingClientRect();
+  // ========== GALLERY VIEW (grid of thumbnail cards) ==========
+  const galleryGrid = document.getElementById('gallery-grid')!;
+  const galleryInstances: SaverInstance[] = [];
+
+  for (const saver of ALL_SAVERS) {
+    const card = document.createElement('div');
+    card.className = 'gallery-card';
+    card.dataset.id = saver.manifest.id;
+    if (saver.manifest.id === cfg.saver) card.classList.add('active');
+
+    const preview = document.createElement('div');
+    preview.className = 'gallery-card-preview';
+
+    const info = document.createElement('div');
+    info.className = 'gallery-card-info';
+    const label = document.createElement('span');
+    label.className = 'gallery-card-label';
+    label.textContent = saver.manifest.label;
+    const meta = document.createElement('span');
+    meta.className = 'gallery-card-meta';
+    meta.textContent = saver.manifest.minBackend ?? 'css';
+    info.append(label, meta);
+
+    card.append(preview, info);
+    galleryGrid.append(card);
+
+    card.addEventListener('click', () => {
+      cfg.saver = saver.manifest.id;
+      rebuild(cfg);
+      galleryGrid.querySelectorAll('.gallery-card').forEach((c) =>
+        c.classList.toggle('active', (c as HTMLElement).dataset.id === saver.manifest.id),
+      );
+      window.__idleScreens?.sleep();
+    });
+
     void Promise.resolve(
       saver.mount({
-        host: viewportHost,
-        dpr: devicePixelRatio ?? 1,
-        width: Math.round(rect.width) || 640,
-        height: Math.round(rect.height) || 400,
-        rng: createRng((cfg.seed >>> 0) || 1),
-        seed: cfg.seed,
+        host: preview,
+        dpr: 1,
+        width: 280,
+        height: 175,
+        rng: createRng(42),
+        seed: 42,
         reducedMotion: false,
       }),
-    ).then((i) => {
-      previewInst = i;
+    ).then((inst) => {
+      galleryInstances.push(inst);
     });
+  }
+
+  setTimeout(() => {
+    galleryInstances.forEach((inst) => inst.setPaused(true));
+  }, 2000);
+
+  // ========== DEV VIEW (lazy-init on first navigate) ==========
+  let devInitialized = false;
+
+  const initDev = (): void => {
+    if (devInitialized) return;
+    devInitialized = true;
+
+    const right = document.getElementById('dock-right')!;
+    const bottom = document.getElementById('dock-bottom')!;
+    const left = document.getElementById('dock-left')!;
+
+    const devProps = buildPropertiesPanel(right);
+    devProps.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
+    buildConfigPanel(cfg, rebuild, right);
+
+    void capsPromise.then(() => {
+      buildCapabilitiesPanel(ALL_SAVERS, right);
+    });
+
+    const timeline = buildTimelinePanel(bottom);
+    buildSchemaPanel(right);
+
+    const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
+    const viewportLabel = document.getElementById('viewport-label');
+    let devPreviewInst: SaverInstance | null = null;
+    let resolvedCaps: CapabilitiesHandle | null = null;
+
+    const updateDevStatus = (id: string): void => {
+      if (!resolvedCaps) return;
+      const idx = ALL_SAVERS.findIndex((s) => s.manifest.id === id);
+      const r = resolvedCaps.getResults()[idx];
+      if (r) devProps.setStatus(r.status, r.reasons);
+    };
+
+    const devSelect = (id: string): void => {
+      const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
+      if (!saver) return;
+      cfg.saver = id;
+      rebuild(cfg);
+      devProps.select(saver);
+      updateDevStatus(id);
+      document
+        .querySelectorAll('#dock-left .palette-item')
+        .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
+      if (!viewportHost) return;
+      viewportHost.classList.add('active');
+      viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
+      if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
+
+      if (devPreviewInst) devPreviewInst.dispose();
+      viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
+      const rect = viewportHost.getBoundingClientRect();
+      void Promise.resolve(
+        saver.mount({
+          host: viewportHost,
+          dpr: devicePixelRatio ?? 1,
+          width: Math.round(rect.width) || 640,
+          height: Math.round(rect.height) || 400,
+          rng: createRng((cfg.seed >>> 0) || 1),
+          seed: cfg.seed,
+          reducedMotion: false,
+        }),
+      ).then((inst) => {
+        devPreviewInst = inst;
+        timeline.setSaver(saver, inst);
+        if (saver.manifest.id === 'black-hole') {
+          timeline.loadTrack(demoTrack);
+        }
+      });
+    };
+
+    void capsPromise.then((h) => {
+      resolvedCaps = h;
+      buildSaverPalette(left, h, devSelect);
+      updateDevStatus(cfg.saver);
+      h.onChange(() => updateDevStatus(cfg.saver));
+    });
+
+    devSelect(cfg.saver);
   };
 
-  void capsHandle.then((h) => {
-    buildSaverPalette(left, h, selectSaver);
-  });
+  // ========== ROUTER ==========
+  type View = 'gallery' | 'dev';
+  const galleryView = document.getElementById('view-gallery')!;
+  const devView = document.getElementById('view-dev')!;
 
-  propsPanel.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
-  selectSaver(cfg.saver);
+  const showView = (view: View): void => {
+    galleryView.hidden = view !== 'gallery';
+    devView.hidden = view !== 'dev';
+    document.querySelectorAll('#topbar nav a').forEach((a) =>
+      a.classList.toggle('active', (a as HTMLElement).dataset.view === view),
+    );
+    if (view === 'dev') initDev();
+  };
+
+  const currentView = (): View => (location.hash === '#dev' ? 'dev' : 'gallery');
+
+  document.querySelectorAll('#topbar nav a').forEach((a) =>
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const href = (a as HTMLAnchorElement).getAttribute('href') ?? '#';
+      location.hash = href === '#' ? '' : href.replace('#', '');
+    }),
+  );
+  window.addEventListener('hashchange', () => showView(currentView()));
+  showView(currentView());
 }
 
-/** Left-dock outliner: click a saver to select it.
- *  Each item shows per-saver capability attributes (backend, cost, motion, eligibility). */
+// ---------------------------------------------------------------------------
+// Panel builders (used by dev view)
+// ---------------------------------------------------------------------------
+
 function buildSaverPalette(mount: HTMLElement, caps: CapabilitiesHandle, onSelect: (id: string) => void): void {
   const list = document.createElement('div');
   list.className = 'palette';
-
-  const statusColors: Record<string, string> = { ok: '#3fb950', degraded: '#d29922', blocked: '#f85149' };
-
-  const updateBadges = (): void => {
-    const results = caps.getResults();
-    for (let i = 0; i < ALL_SAVERS.length; i++) {
-      const item = list.children[i] as HTMLElement | undefined;
-      const r = results[i];
-      if (!item || !r) continue;
-      const badge = item.querySelector('.palette-status') as HTMLElement | null;
-      if (badge) {
-        badge.textContent = r.status;
-        badge.style.color = statusColors[r.status] ?? '';
-        badge.title = r.reasons.length ? r.reasons.join('; ') : '';
-      }
-    }
-  };
 
   for (const s of ALL_SAVERS) {
     const item = document.createElement('button');
@@ -347,88 +450,16 @@ function buildSaverPalette(mount: HTMLElement, caps: CapabilitiesHandle, onSelec
       item.append(wb);
     }
 
-    const status = document.createElement('span');
-    status.className = 'palette-status';
-    status.textContent = 'ok';
-
-    item.append(label, status);
+    item.append(label);
     item.addEventListener('click', () => onSelect(s.manifest.id));
     list.append(item);
   }
   mount.append(list);
-
-  updateBadges();
-  caps.onChange(updateBadges);
-}
-
-/**
- * "Safety & performance" panel: runs @idle-screens/validator over frames sampled from
- * the black hole's renderFrame(t), and lets you check that the flash gate actually
- * FAILS a dangerous strobe (not just rubber-stamps calm savers).
- */
-function buildSafetyPanel(mount: HTMLElement): void {
-  const section = document.createElement('section');
-  section.className = 'card safety';
-  section.innerHTML = `
-    <h2>Safety &amp; performance</h2>
-    <p class="lead">WCAG 2.3.1 flash safety (per-tile, &le;3 flashes/sec over &lt;25% area) plus a
-      frame-cost budget, computed by <code>@idle-screens/validator</code> over frames stepped
-      through <code>renderFrame(t)</code>.</p>
-    <div class="det-controls">
-      <button id="val-blackhole">Validate the black hole</button>
-      <button id="val-strobe-safe">Gate check: 3 Hz strobe</button>
-      <button id="val-strobe-danger">Gate check: 15 Hz strobe</button>
-    </div>
-    <div id="val-out" class="val-out">Click a button to run the validator.</div>`;
-  mount.append(section);
-
-  const out = section.querySelector('#val-out') as HTMLDivElement;
-  const badge = (ok: boolean, label: string): string =>
-    `<span class="verdict ${ok ? 'same' : 'diff'}">● ${label}</span>`;
-
-  const showValidate = (r: ValidateResult): void => {
-    if (!r.supported || !r.flash || !r.perf) {
-      out.innerHTML = `<em>${r.id}</em> is not frame-addressable (no <code>renderFrame</code>) — flash sampling needs a deterministic frame source.`;
-      return;
-    }
-    const f = r.flash;
-    const p = r.perf;
-    const honest = r.declaredFlashSafe === undefined || r.declaredFlashSafe === f.passes;
-    out.innerHTML = `
-      ${badge(f.passes, f.passes ? 'FLASH-SAFE (WCAG 2.3.1)' : 'FLASH RISK')}
-      <div class="val-metric">worst ${f.general.worstTileFlashesPerSecond} flashes/sec ·
-        flashing area ${(f.general.flashingAreaFraction * 100).toFixed(1)}% · ${f.tiles} tiles · ${f.fps.toFixed(0)}fps sampled</div>
-      <div class="val-metric">perf: median ${p.medianMs.toFixed(2)}ms · p95 ${p.p95Ms.toFixed(2)}ms ·
-        tier <strong>${p.costTier}</strong> · ${p.withinBudget ? 'within budget' : 'PATHOLOGICAL'}</div>
-      <div class="val-metric">manifest a11y.flashSafe = ${String(r.declaredFlashSafe)} — ${honest ? 'matches measured ✓' : 'DISAGREES with measured ✗'}</div>`;
-  };
-
-  const showStrobe = (hz: number, f: FlashReport): void => {
-    out.innerHTML = `
-      ${badge(f.passes, `${hz} Hz strobe → ${f.passes ? 'PASSES' : 'FAILS'} the gate`)}
-      <div class="val-metric">worst ${f.general.worstTileFlashesPerSecond} flashes/sec · flashing area ${(f.general.flashingAreaFraction * 100).toFixed(0)}%</div>
-      <div class="val-metric">${f.passes ? 'At/below 3 flashes/sec — allowed.' : 'Above 3 flashes/sec over the whole frame — a real gate rejects this.'}</div>`;
-  };
-
-  const busy = (): void => {
-    out.textContent = 'Sampling…';
-  };
-  section.querySelector('#val-blackhole')!.addEventListener('click', () => {
-    busy();
-    void sampleSaver(blackHole, { seconds: 2 }).then(showValidate);
-  });
-  section.querySelector('#val-strobe-safe')!.addEventListener('click', () => {
-    busy();
-    showStrobe(3, sampleStrobe(3, { seconds: 2 }));
-  });
-  section.querySelector('#val-strobe-danger')!.addEventListener('click', () => {
-    busy();
-    showStrobe(15, sampleStrobe(15, { seconds: 2 }));
-  });
 }
 
 interface PropertiesHandle {
   select(saver: SaverPlugin): void;
+  setStatus(status: string, reasons: string[]): void;
 }
 
 function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
@@ -440,15 +471,22 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
   const row = (label: string, value: string): string =>
     `<div class="cap-line"><span>${label}</span><span>${value}</span></div>`;
 
+  const statusColors: Record<string, string> = { ok: '#3fb950', degraded: '#d29922', blocked: '#f85149' };
+  let statusEl: HTMLElement | null = null;
+
   const render = (s: SaverPlugin): void => {
     const m = s.manifest;
     const flashSafe = m.a11y?.flashSafe;
     const workerEligible = m.workerReady
       && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function';
+    const variant = SAVER_VARIANTS[m.id];
+    const source = SCHEMA_IDS.has(m.id) ? 'schema' : 'classic';
     panel.innerHTML = `
       <h3>Properties</h3>
       <div class="props-title" id="props-name">${m.label}${workerEligible ? '<span class="worker-badge" title="This saver renders off-main-thread via OffscreenCanvas + Web Worker">Worker</span>' : ''}</div>
       ${row('ID', `<code>${m.id}</code>`)}
+      ${variant ? row('Variant', variant) : ''}
+      ${row('Source', source)}
       ${row('Backend', m.minBackend ?? 'css')}
       ${row('Cost', m.costTier ?? 'idle')}
       ${row('Motion', m.motionIntensity ?? 'calm')}
@@ -456,11 +494,20 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
       ${row('Reduced-motion', m.reducedMotionFallback ?? 'none')}
       ${row('Flash safe', flashSafe === undefined ? '--' : flashSafe ? '✓' : '✗')}
       ${row('Worker ready', m.workerReady ? '✓' : '✗')}
+      <div class="cap-line"><span>Eligibility</span><span id="props-status">--</span></div>
       ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
       ${m.a11y?.notes ? `<div class="config-note">${m.a11y.notes}</div>` : ''}`;
+    statusEl = panel.querySelector('#props-status');
   };
 
-  return { select: render };
+  const setStatus = (status: string, reasons: string[]): void => {
+    if (!statusEl) return;
+    statusEl.textContent = status;
+    statusEl.style.color = statusColors[status] ?? '';
+    statusEl.title = reasons.length ? reasons.join('; ') : '';
+  };
+
+  return { select: render, setStatus };
 }
 
 function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mount: HTMLElement): void {
@@ -478,7 +525,6 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
   };
   const commit = (): void => rebuild(cfg);
 
-  // Selection
   const selSel = document.createElement('select');
   selSel.id = 'cfg-selection';
   for (const v of ['fixed', 'random', 'rotate'] as const) {
@@ -557,111 +603,4 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
   panel.append(actions);
 
   mount.append(panel);
-}
-
-/**
- * Interactive determinism demo: render the SAME black-hole program into two
- * canvases and prove that identical (seed, t, control-track) yields byte-identical
- * pixels — while desyncing the seed, or scrubbing t, changes them in lockstep.
- * This is the library's headline idea ("stream the program, not the frames"),
- * made clickable.
- */
-function buildDeterminismDemo(mount: HTMLElement): void {
-  const section = document.createElement('section');
-  section.className = 'card determinism';
-  section.innerHTML = `
-    <h2>Determinism — click to prove it</h2>
-    <p class="lead">Both canvases render <code>renderFrame(t, seed)</code> of the black hole
-      independently. Same inputs → identical pixels. Desync the seed, or scrub time, and watch.</p>
-    <div class="det-controls">
-      <label>seed <input type="number" id="det-seed" value="42" /></label>
-      <label>t (ms) <input type="range" id="det-t" min="0" max="6000" step="20" value="1500" /></label>
-      <span id="det-tval" style="font:12px ui-monospace,monospace;opacity:.7">1500</span>
-      <label><input type="checkbox" id="det-track" checked /> control-track</label>
-      <label><input type="checkbox" id="det-desync" /> desync B's seed</label>
-    </div>
-    <div class="det-row">
-      <figure class="det-panel" style="margin:0"><canvas id="det-a" width="264" height="172"></canvas><figcaption id="det-capa"></figcaption></figure>
-      <figure class="det-panel" style="margin:0"><canvas id="det-b" width="264" height="172"></canvas><figcaption id="det-capb"></figcaption></figure>
-    </div>
-    <div><span class="verdict" id="det-verdict">…</span></div>
-    <div class="det-controls">
-      <button id="det-rerender">Re-render</button>
-      <button id="det-random">Random seed</button>
-    </div>`;
-  mount.append(section);
-
-  const $ = <T extends HTMLElement>(id: string): T => section.querySelector('#' + id) as T;
-  const seedIn = $<HTMLInputElement>('det-seed');
-  const tIn = $<HTMLInputElement>('det-t');
-  const tVal = $<HTMLSpanElement>('det-tval');
-  const trackIn = $<HTMLInputElement>('det-track');
-  const desyncIn = $<HTMLInputElement>('det-desync');
-  const capA = $<HTMLElement>('det-capa');
-  const capB = $<HTMLElement>('det-capb');
-  const verdict = $<HTMLElement>('det-verdict');
-
-  const hostFor = (canvasId: string): HTMLElement => {
-    // Give the saver a fresh host so its own canvas is independent; draw its result
-    // back into the visible canvas afterwards.
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:absolute;left:-99999px;width:264px;height:172px';
-    document.body.append(wrap);
-    void canvasId;
-    return wrap;
-  };
-
-  const shortHash = (s: string): string => {
-    let h = 5381;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-    return h.toString(16).padStart(8, '0');
-  };
-
-  const renderInto = async (visible: HTMLCanvasElement, seed: number, t: number, track: boolean): Promise<string> => {
-    const host = hostFor(visible.id);
-    try {
-      const inst = await Promise.resolve(
-        blackHole.mount({ host, dpr: 1, width: 264, height: 172, rng: createRng(seed), seed, reducedMotion: true }),
-      );
-      if (track) inst.applyTrack?.(demoTrack);
-      inst.renderFrame?.(t, seed);
-      const src = host.querySelector('canvas');
-      const ctx = visible.getContext('2d')!;
-      ctx.clearRect(0, 0, visible.width, visible.height);
-      if (src) ctx.drawImage(src, 0, 0, visible.width, visible.height);
-      inst.dispose();
-      return visible.toDataURL();
-    } finally {
-      host.remove();
-    }
-  };
-
-  const render = async (): Promise<void> => {
-    const seed = Number(seedIn.value);
-    const t = Number(tIn.value);
-    const track = trackIn.checked;
-    const seedB = desyncIn.checked ? seed + 1 : seed;
-    tVal.textContent = String(t);
-    const [a, b] = await Promise.all([
-      renderInto($<HTMLCanvasElement>('det-a'), seed, t, track),
-      renderInto($<HTMLCanvasElement>('det-b'), seedB, t, track),
-    ]);
-    capA.textContent = `seed ${seed} · t ${t} · ${shortHash(a)}`;
-    capB.textContent = `seed ${seedB} · t ${t} · ${shortHash(b)}`;
-    const same = a === b;
-    verdict.className = 'verdict ' + (same ? 'same' : 'diff');
-    verdict.textContent = same
-      ? '● IDENTICAL — same (program, seed, t, track) → same pixels'
-      : '● DIFFERENT — inputs diverged, so pixels diverge';
-  };
-
-  tIn.addEventListener('input', () => void render());
-  for (const c of [seedIn, trackIn, desyncIn]) c.addEventListener('change', () => void render());
-  $<HTMLButtonElement>('det-rerender').addEventListener('click', () => void render());
-  $<HTMLButtonElement>('det-random').addEventListener('click', () => {
-    seedIn.value = String(Math.floor(Math.random() * 100_000));
-    void render();
-  });
-
-  void render();
 }

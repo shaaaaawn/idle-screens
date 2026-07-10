@@ -16,7 +16,7 @@ import type {
  */
 export const messages2Manifest: SaverManifest = {
   id: 'messages2',
-  label: 'Messages (Macintosh)',
+  label: 'Messages II',
   passthrough: false,
   minBackend: 'css',
   costTier: 'idle',

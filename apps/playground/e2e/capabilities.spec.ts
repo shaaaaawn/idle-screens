@@ -70,7 +70,8 @@ test('reduced-motion DEGRADES moving savers (respects fallback, does not block)'
 });
 
 test('the panel visibly re-evaluates when you simulate a minimal device', async ({ page }) => {
-  await ready(page);
+  await page.goto('/#dev');
+  await page.waitForFunction(() => !!window.__caps);
   await page.locator('#cap-sim').scrollIntoViewIfNeeded();
   await page.locator('#cap-sim').selectOption('minimal');
   await expect.poll(() => page.locator('#cap-tier').textContent()).toBe('minimal');
