@@ -8,8 +8,16 @@ import WebKit
 /// display, dismisses on any local input, holds a display-sleep assertion while
 /// visible, and tears down on lock/sleep notifications.
 final class SaverController: NSObject, WKNavigationDelegate {
+  /// A live overlay: one per display, tracking which display it covers and
+  /// whether it follows the global saver (vs a per-display assignment).
+  private struct Overlay {
+    let key: String
+    let webView: WKWebView
+    let followsGlobal: Bool
+  }
+
   private var windows: [NSWindow] = []
-  private var webViews: [WKWebView] = []
+  private var overlays: [Overlay] = []
   private var eventMonitor: Any?
   private var fastPollTimer: Timer?
   private var cycleTimer: Timer?
@@ -24,12 +32,41 @@ final class SaverController: NSObject, WKNavigationDelegate {
   /// When set, load this remote channel instead of the bundled build. Falls
   /// back to the bundled build if the channel fails to load.
   var channelURL: URL?
+  /// Per-display saver overrides, keyed by display id (NSScreenNumber). A
+  /// display absent here follows the global pinned/cycle saver.
+  var perDisplaySaver: [String: String] = [:]
+  /// Overlay brightness 0..1 for night mode (1 = full). Passed to the engine.
+  var brightness: Double = 1.0
+  /// Favorited saver ids. When non-empty, cycle/browse draw only from these.
+  var favorites: Set<String> = []
+  /// Hidden saver ids — never shown in cycle/browse.
+  var hidden: Set<String> = []
 
+  var onShow: (() -> Void)?
   var onDismiss: (() -> Void)?
+  /// Overlay key actions (F / Delete / Return): persist in the host and push the
+  /// updated favorites/hidden/pinned back via the config.
+  var onFavorite: ((String) -> Void)?
+  var onHide: ((String) -> Void)?
+  var onPin: ((String) -> Void)?
+
+  /// Saver pool for this session: catalog minus hidden, narrowed to favorites
+  /// when any favorite is available. Snapshotted at show().
+  private var pool: [String] = []
+  /// The live saver-id catalog (from the active bundle's savers.json), injected
+  /// by the host. Falls back to the compiled catalog.
+  var catalogIds: [String] = SaverCatalog.ids
+
+  /// Display id string for a screen (stable across the session).
+  static func displayKey(_ screen: NSScreen) -> String {
+    let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    return num?.stringValue ?? "0"
+  }
 
   // Per-session coordination state.
   private var sessionSeed: UInt32 = 0
   private var currentIndex = 0
+  private var lastBrowseAt = Date.distantPast
 
   private let fadeDuration: TimeInterval = 0.9
 
@@ -63,12 +100,14 @@ final class SaverController: NSObject, WKNavigationDelegate {
     // One seed + one saver choice for the whole session, shared by every
     // display so a multi-monitor setup shows the same thing in sync.
     sessionSeed = UInt32.random(in: 0...UInt32.max)
+    pool = buildPool()
     currentIndex = startIndex()
     NSLog("[idle-screens] saver show: \(NSScreen.screens.count) screen(s), saver=\(currentSaverId ?? "channel")")
 
     buildWindows()
     NSApp.activate(ignoringOtherApps: true)
     NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+    onShow?()
 
     beginDisplaySleepAssertion()
     startCycle()
@@ -90,7 +129,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
     let closing = windows
     windows.removeAll()
-    webViews.removeAll()
+    overlays.removeAll()
     fadeOut(closing) {
       for window in closing {
         window.orderOut(nil)
@@ -112,7 +151,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
       window.contentView = nil
     }
     windows.removeAll()
-    webViews.removeAll()
+    overlays.removeAll()
     buildWindows()
   }
 
@@ -126,31 +165,53 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
   // MARK: - Saver selection / cycling
 
+  /// Catalog minus hidden, narrowed to favorites when any are available.
+  private func buildPool() -> [String] {
+    let visible = catalogIds.filter { !hidden.contains($0) }
+    let favs = visible.filter { favorites.contains($0) }
+    if !favs.isEmpty { return favs }
+    return visible.isEmpty ? catalogIds : visible
+  }
+
+  /// The global saver id (pinned or current cycle position); nil in channel mode.
   private var currentSaverId: String? {
-    guard channelURL == nil, !SaverCatalog.ids.isEmpty else { return nil }
-    return SaverCatalog.ids[currentIndex % SaverCatalog.ids.count]
+    guard channelURL == nil, !pool.isEmpty else { return nil }
+    return pool[currentIndex % pool.count]
+  }
+
+  /// Resolve the saver id for a specific display: its per-display override if
+  /// set, otherwise the global saver. nil in channel mode.
+  private func saverId(forDisplay key: String) -> String? {
+    if channelURL != nil { return nil }
+    if let override = perDisplaySaver[key], !override.isEmpty,
+      catalogIds.contains(override)
+    {
+      return override
+    }
+    return currentSaverId
   }
 
   private func startIndex() -> Int {
-    if let pinned = pinnedSaver, let i = SaverCatalog.ids.firstIndex(of: pinned) {
+    if let pinned = pinnedSaver, let i = pool.firstIndex(of: pinned) {
       return i
     }
-    return SaverCatalog.ids.isEmpty ? 0 : Int.random(in: 0..<SaverCatalog.ids.count)
+    return pool.isEmpty ? 0 : Int.random(in: 0..<pool.count)
   }
 
   private func startCycle() {
     stopCycle()
     // Only cycle for the bundled engine, when not pinned, with a positive period.
-    guard channelURL == nil, pinnedSaver == nil, cycleSeconds > 0,
-      SaverCatalog.ids.count > 1
+    guard channelURL == nil, pinnedSaver == nil, cycleSeconds > 0, pool.count > 1
     else { return }
     let t = Timer(timeInterval: cycleSeconds, repeats: true) { [weak self] _ in
       guard let self else { return }
-      self.currentIndex = (self.currentIndex + 1) % SaverCatalog.ids.count
+      self.currentIndex = (self.currentIndex + 1) % self.pool.count
       guard let id = self.currentSaverId else { return }
       let js = "window.__idleScreensMac && window.__idleScreensMac.setSaver(\(jsString(id)))"
-      for webView in self.webViews {
-        webView.evaluateJavaScript(js, completionHandler: nil)
+      // Only advance displays that follow the global saver; per-display
+      // assignments stay put.
+      for overlay in self.overlays where overlay.followsGlobal {
+        overlay.webView.evaluateJavaScript(js, completionHandler: nil)
       }
     }
     RunLoop.main.add(t, forMode: .common)
@@ -179,13 +240,17 @@ final class SaverController: NSObject, WKNavigationDelegate {
     window.acceptsMouseMovedEvents = true
     window.isReleasedWhenClosed = false
 
-    let webView = makeWebView(frame: NSRect(origin: .zero, size: screen.frame.size))
-    webViews.append(webView)
+    let key = Self.displayKey(screen)
+    let resolvedId = saverId(forDisplay: key)
+    let follows = channelURL != nil || perDisplaySaver[key]?.isEmpty != false
+      || !catalogIds.contains(perDisplaySaver[key] ?? "")
+    let webView = makeWebView(frame: NSRect(origin: .zero, size: screen.frame.size), saverId: resolvedId)
+    overlays.append(Overlay(key: key, webView: webView, followsGlobal: follows))
     window.contentView = webView
     return window
   }
 
-  private func makeWebView(frame: NSRect) -> WKWebView {
+  private func makeWebView(frame: NSRect, saverId: String?) -> WKWebView {
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
     let webView = WKWebView(frame: frame, configuration: config)
@@ -199,22 +264,23 @@ final class SaverController: NSObject, WKNavigationDelegate {
     if let channelURL {
       webView.load(URLRequest(url: channelURL))
     } else {
-      loadBundled(into: webView)
+      loadBundled(into: webView, saverId: saverId)
     }
     return webView
   }
 
-  private func loadBundled(into webView: WKWebView) {
-    // resourcePath is an absolute path string even when the executable is run
-    // directly; resourceURL can come back relative in that case, and a relative
-    // URL through URLComponents loses its file scheme (loadFileURL then throws).
-    guard let resourcePath = Bundle.main.resourcePath else { return }
-    let webRoot = URL(fileURLWithPath: resourcePath).appendingPathComponent("web")
+  private func loadBundled(into webView: WKWebView, saverId: String?) {
+    // Cached site update if present, else the shipped bundle. A file URL is
+    // required (loadFileURL throws on a relative/non-file URL).
+    guard let webRoot = BundleManager.shared.webRoot else { return }
     var components = URLComponents(
       url: webRoot.appendingPathComponent("index.html"), resolvingAgainstBaseURL: false)!
     var query = [URLQueryItem(name: "seed", value: String(sessionSeed))]
-    if let id = currentSaverId {
+    if let id = saverId {
       query.append(URLQueryItem(name: "saver", value: id))
+    }
+    if brightness < 1.0 {
+      query.append(URLQueryItem(name: "brightness", value: String(format: "%.2f", brightness)))
     }
     components.queryItems = query
     webView.loadFileURL(components.url!, allowingReadAccessTo: webRoot)
@@ -234,8 +300,104 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private func channelFallback(_ webView: WKWebView, _ error: Error) {
     guard channelURL != nil, webView.url?.isFileURL != true else { return }
     NSLog("[idle-screens] channel load failed (\(error.localizedDescription)); using bundled")
-    if currentSaverId == nil { currentIndex = startIndex() }
-    loadBundled(into: webView)
+    // channelURL is set, so saverId(forDisplay:) returns nil — force a global
+    // saver choice for the fallback.
+    if pool.isEmpty { pool = buildPool() }
+    currentIndex = startIndex()
+    let fallbackId = pool.isEmpty ? nil : pool[currentIndex % pool.count]
+    loadBundled(into: webView, saverId: fallbackId)
+  }
+
+  // Watchdog: if a WKWebView's content process crashes it goes blank. Reload
+  // that overlay so the screen self-heals instead of showing black.
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    NSLog("[idle-screens] web content process terminated; reloading overlay")
+    if let channelURL {
+      webView.load(URLRequest(url: channelURL))
+    } else if let overlay = overlays.first(where: { $0.webView === webView }) {
+      loadBundled(into: webView, saverId: saverId(forDisplay: overlay.key))
+    }
+  }
+
+  /// The saver id to cast to a channel: the pinned saver, else the one currently
+  /// showing, else the first in the catalog.
+  var castableSaverId: String? {
+    if let pinned = pinnedSaver, catalogIds.contains(pinned) { return pinned }
+    if isShowing, let showing = currentSaverId { return showing }
+    return catalogIds.first
+  }
+
+  // MARK: - Browse (arrow keys while showing)
+
+  func browse(delta: Int) {
+    guard channelURL == nil, isShowing, pool.count > 1 else { return }
+    lastBrowseAt = Date()
+    currentIndex = (currentIndex + delta + pool.count) % pool.count
+    guard let id = currentSaverId else { return }
+    // setSaver (not next/prev) keeps Swift the source of truth and cross-fades;
+    // only follow-global overlays advance (per-display assignments stay put).
+    let js = "window.__idleScreensMac && window.__idleScreensMac.setSaver(\(jsString(id)))"
+    for overlay in overlays where overlay.followsGlobal {
+      overlay.webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+    startCycle()  // reset the cycle countdown after a manual browse
+  }
+
+  /// Overlay keys while showing. Returns true if the key was handled (so the
+  /// saver stays up). 123/124 = ←/→, 3 = F, 51 = Delete, 36 = Return.
+  private func handleOverlayKey(_ keyCode: UInt16) -> Bool {
+    guard channelURL == nil, isShowing else { return false }
+    switch keyCode {
+    case 123, 124:
+      browse(delta: keyCode == 124 ? 1 : -1)
+      return true
+    case 3:  // F — toggle favorite
+      guard let id = currentSaverId else { return true }
+      lastBrowseAt = Date()
+      let nowFav = !favorites.contains(id)
+      if nowFav { favorites.insert(id) } else { favorites.remove(id) }
+      onFavorite?(id)
+      toast(nowFav ? "★ Favorited" : "☆ Unfavorited")
+      return true
+    case 51:  // Delete — hide from cycle, advance
+      guard let id = currentSaverId else { return true }
+      lastBrowseAt = Date()
+      hidden.insert(id)
+      favorites.remove(id)
+      onHide?(id)
+      pool = buildPool()
+      if currentIndex >= pool.count { currentIndex = 0 }
+      toast("Hidden from cycle")
+      if let next = currentSaverId {
+        let js = "window.__idleScreensMac && window.__idleScreensMac.setSaver(\(jsString(next)))"
+        for overlay in overlays where overlay.followsGlobal {
+          overlay.webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+      }
+      return true
+    case 36:  // Return — pin the one you're looking at
+      guard let id = currentSaverId else { return true }
+      lastBrowseAt = Date()
+      pinnedSaver = id
+      onPin?(id)
+      stopCycle()
+      toast("Pinned \(id)")
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func toast(_ text: String) {
+    showOverlayToast(text)
+  }
+
+  /// Show a brief toast on every overlay (no-op if not showing).
+  func showOverlayToast(_ text: String) {
+    let js = "window.__idleScreensMac && window.__idleScreensMac.toast(\(jsString(text)))"
+    for overlay in overlays {
+      overlay.webView.evaluateJavaScript(js, completionHandler: nil)
+    }
   }
 
   // MARK: - Fade
@@ -268,6 +430,9 @@ final class SaverController: NSObject, WKNavigationDelegate {
       matching: [.mouseMoved, .keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .otherMouseDown]
     ) { [weak self] event in
       guard let self, Date() > armed else { return event }
+      if event.type == .keyDown, self.handleOverlayKey(event.keyCode) {
+        return nil  // handled (browse/favorite/hide/pin) — don't wake
+      }
       self.dismiss()
       return nil  // swallow the wake event within our own app
     }
@@ -277,6 +442,8 @@ final class SaverController: NSObject, WKNavigationDelegate {
     // reset (e.g. input on another display's app) should also wake us.
     fastPollTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
       guard let self, self.isShowing else { return }
+      // Don't treat a recent arrow-key browse as a wake.
+      if Date().timeIntervalSince(self.lastBrowseAt) < 1.0 { return }
       if Date() > armed && IdleMonitor.secondsIdle < 0.2 {
         self.dismiss()
       }

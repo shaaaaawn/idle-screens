@@ -51,7 +51,16 @@ open dist/IdleScreens.app           # menu-bar icon appears
 ```
 
 Debug flags on the binary: `--show` (start the saver immediately), `--hold`
-(don't dismiss on input, for inspection).
+(don't dismiss on input, for inspection), `--diagnostics` (print the diagnostics
+report and exit).
+
+**Overlay keys** while the saver is showing: **← / →** browse savers, **F**
+favorite, **⌫** hide from cycle, **Return** pin the one you're viewing, any
+other key/mouse dismisses.
+
+**Saver updates.** "Check for Saver Updates" pulls a newer bundle from
+`idlescreens.com/mac/` (served by idle-server — see below) and caches it under
+Application Support; the shipped bundle is the offline fallback.
 
 The saver list in the menu is generated from `web/src/savers.ts` into
 `Sources/IdleScreens/SaverCatalog.swift` by `gen-catalog.mjs` (run automatically
@@ -83,3 +92,15 @@ needs these repo secrets:
 
 After a release, update `version` + `sha256` in `packaging/idle-screens.rb`
 (the notarize script prints the DMG SHA-256) and push it to the Homebrew tap.
+
+## Server side (idle-server)
+
+Two features talk to `~/code/idle-server`:
+
+- **Cast to Channel** — `ChannelClient` POSTs a JSON-RPC `publishScene` to
+  `idlescreens.com/mcp` (the existing MCP endpoint). No server change needed.
+- **Saver updates** — idle-server hosts a parity Mac bundle at `/mac/`
+  (`site/mac/` → `dist/site/mac/` with `manifest.json`), built from its own
+  `@idle-screens` deps. Redeploy idle-server (`npm run deploy`) to publish new
+  savers; the app pulls them via "Check for Saver Updates". Cloudflare Assets
+  serves `/mac/*` directly, so no worker routing change was required.
