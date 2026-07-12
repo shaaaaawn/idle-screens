@@ -42,6 +42,22 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)(happy-dom@20.10.6)
 
+  apps/mac/web:
+    dependencies:
+      '@idle-screens/core':
+        specifier: workspace:*
+        version: link:../../../packages/core
+      '@idle-screens/savers-classic':
+        specifier: workspace:*
+        version: link:../../../packages/savers-classic
+      '@idle-screens/schema':
+        specifier: workspace:*
+        version: link:../../../packages/schema
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+
   apps/playground:
     dependencies:
       '@idle-screens/capabilities':

@@ -13,6 +13,10 @@ playwright/.cache/
 apps/*/dist/
 .vite/
 
+# swift / macOS app
+.build/
+*.dmg
+
 # os / editor
 .DS_Store
 *.log

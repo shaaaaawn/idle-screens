@@ -1,0 +1,17 @@
+{
+  "name": "@idle-screens/mac-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@idle-screens/core": "workspace:*",
+    "@idle-screens/savers-classic": "workspace:*",
+    "@idle-screens/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
