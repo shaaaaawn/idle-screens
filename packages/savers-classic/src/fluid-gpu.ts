@@ -1,5 +1,5 @@
 /// <reference types="@webgpu/types" />
-import type { SaverContext, SaverInstance } from '@idle-screens/core';
+import type { Rng, SaverContext, SaverInstance } from '@idle-screens/core';
 import {
   DT,
   DENS_DECAY,
@@ -294,6 +294,7 @@ type FName = (typeof FIELDS)[number];
 
 export class FluidGPU implements SaverInstance {
   private device: GPUDevice;
+  private readonly rng: Rng;
   private canvas: HTMLCanvasElement;
   private gpuCtx: GPUCanvasContext;
   private format: GPUTextureFormat;
@@ -329,9 +330,12 @@ export class FluidGPU implements SaverInstance {
   private h: number;
   private frameId: number | null = null;
   private lost = false;
+  private lastPreviewMs = -1;
+  private static readonly PREVIEW_FRAME_MS = 1000 / 60;
 
   constructor(ctx: SaverContext, device: GPUDevice) {
     this.device = device;
+    this.rng = ctx.rng;
     this.w = ctx.width;
     this.h = ctx.height;
     this.dpr = Math.min(ctx.dpr, 2);
@@ -679,6 +683,42 @@ export class FluidGPU implements SaverInstance {
       this.t += DT;
       this.simStep();
     }
+    this.render();
+  }
+
+  private hardReset(): void {
+    if (this.lost) return;
+    const enc = this.device.createCommandEncoder();
+    for (const n of FIELDS) {
+      this.eScale(enc, this.f[n], this.zeroUni);
+    }
+    this.device.queue.submit([enc.finish()]);
+    this.t = 0;
+    this.emitters = buildEmitters(this.rng, GPU_N);
+    this.lastPreviewMs = -1;
+  }
+
+  previewAt(ms: number): void {
+    if (this.lost) return;
+    this.stop();
+    const frameMs = FluidGPU.PREVIEW_FRAME_MS;
+    if (ms < this.lastPreviewMs || this.lastPreviewMs < 0) {
+      this.hardReset();
+    }
+    const fromFrame = Math.floor(Math.max(0, this.lastPreviewMs) / frameMs);
+    const toFrame = Math.floor(ms / frameMs);
+    if (toFrame === 0 && fromFrame === 0) {
+      for (let i = 0; i < 200; i++) {
+        this.t += DT;
+        this.simStep();
+      }
+    } else {
+      for (let f = fromFrame; f < toFrame; f++) {
+        this.t += DT;
+        this.simStep();
+      }
+    }
+    this.lastPreviewMs = ms;
     this.render();
   }
 

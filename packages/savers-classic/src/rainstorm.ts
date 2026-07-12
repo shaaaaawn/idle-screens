@@ -196,6 +196,11 @@ class RainstormInstance implements SaverInstance {
     this.render();
   }
 
+  previewAt(t: number): void {
+    this.clock = t;
+    this.render();
+  }
+
   // ---- SaverInstance ----
   setPaused(paused: boolean): void {
     this.paused = paused;
