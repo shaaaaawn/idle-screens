@@ -9,6 +9,7 @@ export const pipesManifest: SaverManifest = {
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true },
+  workerReady: true,
 };
 
 const CELL = 20;

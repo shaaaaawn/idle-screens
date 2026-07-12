@@ -9,6 +9,7 @@ export const flurryManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true },
+  workerReady: true,
 };
 
 const STREAM_COUNT = 5;

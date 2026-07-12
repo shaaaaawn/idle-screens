@@ -31,6 +31,7 @@ export function manifestFor(spec: SaverSpec): SaverManifest {
     // Flash-safe by construction: static background + bounded sprites, no strobe
     // primitive. Proven by sampling a compiled spec through @idle-screens/validator.
     a11y: { flashSafe: true },
+    workerReady: true,
   };
 }
 

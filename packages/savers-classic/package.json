@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@idle-screens/core": "workspace:*",
+    "@idle-screens/schema": "workspace:*",
     "@webgpu/types": "^0.1.71"
   }
 }
