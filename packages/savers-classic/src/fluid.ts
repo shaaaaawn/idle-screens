@@ -1,6 +1,7 @@
 /// <reference types="@webgpu/types" />
 import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
 import { FluidGPU } from './fluid-gpu';
+import { gpuMainThreadEligible } from './gpu-eligible';
 import {
   DT,
   DENS_DECAY,
@@ -414,8 +415,7 @@ class FluidCPU implements SaverInstance {
 export const fluid: SaverPlugin = {
   manifest: fluidManifest,
   async mount(ctx: SaverContext): Promise<SaverInstance> {
-    // Worker path: CPU-only (no WebGPU device lifecycle in OffscreenCanvas Workers).
-    if (!ctx.surface) {
+    if (gpuMainThreadEligible(ctx)) {
       try {
         const adapter = await navigator.gpu?.requestAdapter();
         if (adapter) {

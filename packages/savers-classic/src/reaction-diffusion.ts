@@ -1,6 +1,7 @@
 /// <reference types="@webgpu/types" />
 import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
 import { ReactionDiffusionGPU } from './reaction-diffusion-gpu';
+import { gpuMainThreadEligible } from './gpu-eligible';
 import {
   RD_DU, RD_DV, RD_F, RD_K, RD_DT,
   SEED_R, SEED_COUNT, RESEED_INTERVAL, RESEED_BATCH,
@@ -182,12 +183,16 @@ class ReactionDiffusionCPU implements SaverInstance {
 export const reactionDiffusion: SaverPlugin = {
   manifest: reactionDiffusionManifest,
   async mount(ctx: SaverContext): Promise<SaverInstance> {
-    if (!ctx.surface) {
+    if (gpuMainThreadEligible(ctx)) {
       try {
         const adapter = await navigator.gpu?.requestAdapter();
         if (adapter) {
-          const device = await adapter.requestDevice();
-          return new ReactionDiffusionGPU(ctx, device);
+          try {
+            const device = await adapter.requestDevice();
+            return new ReactionDiffusionGPU(ctx, device);
+          } catch {
+            /* GPU init failed — fall through to canvas2d */
+          }
         }
       } catch {
         /* WebGPU unavailable — fall through to canvas2d */
