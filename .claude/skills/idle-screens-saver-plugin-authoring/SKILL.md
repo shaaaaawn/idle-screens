@@ -220,7 +220,7 @@ and compile it into a `SaverPlugin` via `compileSaver()`. The schema supports:
 
 Schema savers are flash-safe by construction (no full-field strobe primitive),
 seeded, deterministic, and `renderFrame`-addressable. They go in
-`packages/schema/src/examples.ts` and get wired into the playground's schema panel
+`packages/schema/src/examples/` (one file per spec, registered in `index.ts`) and get wired into the playground's schema panel
 (`apps/playground/src/schema-panel.ts`) and `ALL_SAVERS` in `main.ts`.
 
 **Limitations:** no rotation/spin, no custom draw calls, no particle interactions,
@@ -254,9 +254,9 @@ No edit needed to `apps/playground/src/main.ts` — classic savers auto-include 
 `...CLASSIC_SAVERS` in the `ALL_SAVERS` array.
 
 ## Integration checklist (schema savers)
-1. **Add** the spec to `packages/schema/src/examples.ts` and the `EXAMPLE_SPECS` array
+1. **Add** a spec file under `packages/schema/src/examples/` and register it in `SCHEMA_EXAMPLES` (`examples/index.ts`)
 2. **Edit** `apps/playground/src/schema-panel.ts` — add import, button, click handler,
-   and entry in `window.__schema.examples`
+   and entry in `window.__schema.examples` (or rely on `SCHEMA_EXAMPLES` via harness)
 3. **Edit** `apps/playground/src/main.ts` — add `compileSaver(MY_SPEC)` to `ALL_SAVERS`
 4. **Edit** `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
 5. **Edit** `docs/specs/behavior-contract.md` — update saver count
@@ -278,4 +278,4 @@ the canvas you create; `DestroyRef.onDestroy` -> `dispose()`; `NgZone.*` -> dele
 - **DOM/CSS cycling:** `packages/savers-classic/src/bsod.ts` (multiple screens, crossfade timer)
 - **WebGPU dual-path (Navier-Stokes):** `packages/savers-classic/src/fluid.ts` + `fluid-gpu.ts` + `fluid-shared.ts` (Jacobi solver, boundary kernel, emitter injection)
 - **WebGPU dual-path (Gray-Scott):** `packages/savers-classic/src/reaction-diffusion.ts` + `reaction-diffusion-gpu.ts` + `reaction-diffusion-shared.ts` (toroidal wrapping, per-cell reseed, no boundary kernel needed)
-- **Schema/declarative:** `packages/schema/src/examples.ts` (SaverSpec JSON definitions)
+- **Schema/declarative:** `packages/schema/src/examples/` (SaverSpec JSON definitions)
