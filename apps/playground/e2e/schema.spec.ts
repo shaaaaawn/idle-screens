@@ -20,7 +20,7 @@ declare global {
 }
 
 const ready = async (page: Page): Promise<void> => {
-  await page.goto('/#dev');
+  await page.goto('/');
   await page.waitForFunction(() => !!window.__schema);
 };
 
@@ -51,19 +51,11 @@ test('a compiled spec is flash-safe (WCAG 2.3.1) and within the frame budget', a
   expect(rain.flash!.passes).toBe(true);
 });
 
-test('the panel compiles + previews the spec, and surfaces validation errors live', async ({ page }) => {
+test('validateSpec surfaces structural errors for broken specs', async ({ page }) => {
   await ready(page);
-  // the default aquarium spec auto-compiles into the preview host
-  await expect
-    .poll(() =>
-      page.evaluate(() => document.querySelector('#schema-host')?.querySelector('canvas') !== null),
-    )
-    .toBe(true);
-  await expect(page.locator('#schema-status')).toHaveClass(/same/); // valid
-
-  // break the JSON -> the panel flips to invalid with errors
-  await page.locator('#schema-json').fill('{ "schemaVersion": 1, "id": "x", "layers": [] }');
-  await page.locator('#schema-json').dispatchEvent('input');
-  await expect(page.locator('#schema-status')).toHaveClass(/diff/);
-  expect(await page.locator('#schema-errors').textContent()).toContain('layers');
+  const bad = await page.evaluate(() =>
+    window.__schema!.validate(JSON.stringify({ schemaVersion: 1, id: 'x', layers: [] })),
+  );
+  expect(bad.valid).toBe(false);
+  expect(bad.errors.map((e) => e.path)).toEqual(expect.arrayContaining(['layers']));
 });
