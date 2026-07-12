@@ -81,6 +81,8 @@ export interface SaverInstance {
   renderFrame?(t: number, seed: number): void;
   /** Steer parameters over time. Optional. */
   applyTrack?(track: ControlTrack): void;
+  /** Seek logical animation time (ms) for workbench preview. Optional. */
+  previewAt?(t: number): void;
   /** Tear down; MUST restore any live-page mutations. */
   dispose(): void;
 }
