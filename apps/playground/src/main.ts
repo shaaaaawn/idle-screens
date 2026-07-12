@@ -14,18 +14,99 @@ import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { compileSaver, DASHBOARD_SPEC, LANTERNS_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
-import { buildCapabilitiesPanel, type CapabilitiesHandle } from './capabilities-panel';
-import { buildSchemaPanel } from './schema-panel';
-import { buildTimelinePanel } from './timeline-panel';
+import { buildDevDocs } from './dev-docs';
+import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
+import { buildBottomDock } from './bottom-dock';
+import { buildRightDock } from './right-dock';
+import { formatBackendLabel, readPreviewBackend } from './preview-backend';
 
-const ALL_SAVERS = [
-  blackHole,
-  ...CLASSIC_SAVERS,
-  compileSaver(SNOWFALL_SPEC),
-  compileSaver(LANTERNS_SPEC),
-  compileSaver(SAKURA_SPEC),
-  compileSaver(DASHBOARD_SPEC),
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard']);
+
+interface SaverGroup {
+  id: string;
+  label: string;
+  savers: SaverPlugin[];
+}
+
+const SAVER_GROUPS: SaverGroup[] = [
+  { id: 'saver-black-hole', label: '@idle-screens/saver-black-hole', savers: [blackHole] },
+  { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
+  {
+    id: 'schema',
+    label: '@idle-screens/schema',
+    savers: [
+      compileSaver(SNOWFALL_SPEC),
+      compileSaver(LANTERNS_SPEC),
+      compileSaver(SAKURA_SPEC),
+      compileSaver(DASHBOARD_SPEC),
+    ],
+  },
 ];
+
+const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
+
+const GROUP_SHORT_LABEL: Record<string, string> = {
+  'saver-black-hole': 'black-hole',
+  'savers-classic': 'classic',
+  schema: 'schema',
+};
+
+function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
+  const tree = document.createElement('div');
+  tree.className = 'palette-tree';
+
+  for (const group of SAVER_GROUPS) {
+    const details = document.createElement('details');
+    details.className = 'palette-group';
+    details.open = true;
+
+    const summary = document.createElement('summary');
+    summary.className = 'palette-group-head';
+    summary.textContent = GROUP_SHORT_LABEL[group.id] ?? group.id;
+    summary.title = group.label;
+
+    const items = document.createElement('div');
+    items.className = 'palette-group-items';
+
+    for (const s of group.savers) {
+      const item = document.createElement('button');
+      item.className = 'palette-item';
+      item.dataset.id = s.manifest.id;
+      if (s.manifest.id === activeId) item.classList.add('active');
+
+      const label = document.createElement('span');
+      label.className = 'palette-label';
+      label.textContent = s.manifest.label;
+
+      if (s.manifest.workerReady) {
+        const wb = document.createElement('span');
+        wb.className = 'palette-worker';
+        wb.textContent = 'W';
+        wb.title = 'Worker-ready';
+        item.append(wb, label);
+      } else {
+        item.append(label);
+      }
+
+      item.addEventListener('click', () => {
+        details.open = true;
+        onSelect(s.manifest.id);
+      });
+      items.append(item);
+    }
+
+    details.append(summary, items);
+    tree.append(details);
+  }
+
+  mount.append(tree);
+}
+
+function packageFor(saver: SaverPlugin): string {
+  if (saver.manifest.id === 'black-hole') return '@idle-screens/saver-black-hole';
+  if (SCHEMA_IDS.has(saver.manifest.id)) return '@idle-screens/schema';
+  return '@idle-screens/savers-classic';
+}
 
 const params = new URLSearchParams(location.search);
 const stage = document.getElementById('stage') as HTMLDivElement;
@@ -70,8 +151,6 @@ const SAVER_VARIANTS: Record<string, string> = {
   messages: 'Out to Lunch',
   messages2: 'Macintosh',
 };
-
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard']);
 
 if (params.has('frame')) {
   frameMode();
@@ -137,7 +216,7 @@ function harnessMode(): void {
         palette: (): string[] => [],
         victims: (sel: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(sel)),
       };
-      const victim = document.querySelector<HTMLElement>('.content h1');
+      const victim = document.querySelector<HTMLElement>('#topbar .tb-title');
       const before = { transform: victim?.style.transform ?? '', willChange: victim?.style.willChange ?? '' };
 
       const inst = await Promise.resolve(
@@ -259,9 +338,9 @@ function liveMode(): void {
   rebuild(cfg);
 
   document.getElementById('tb-sleep')?.addEventListener('click', () => window.__idleScreens?.sleep());
-  document.getElementById('tb-wake')?.addEventListener('click', () => window.__idleScreens?.wake());
 
-  const capsPromise = buildCapabilitiesPanel(ALL_SAVERS, document.createElement('div'));
+  void wireCapabilitiesHarness(ALL_SAVERS);
+  wireSchemaHarness();
 
   // ========== GALLERY VIEW (grid of thumbnail cards) ==========
   const galleryGrid = document.getElementById('gallery-grid')!;
@@ -310,6 +389,12 @@ function liveMode(): void {
       }),
     ).then((inst) => {
       galleryInstances.push(inst);
+      const min = saver.manifest.minBackend ?? 'css';
+      const syncMeta = (): void => {
+        const active = readPreviewBackend(saver.manifest.id, preview);
+        meta.textContent = active && active !== min ? active : min;
+      };
+      requestAnimationFrame(() => requestAnimationFrame(syncMeta));
     });
   }
 
@@ -319,37 +404,33 @@ function liveMode(): void {
 
   // ========== DEV VIEW (lazy-init on first navigate) ==========
   let devInitialized = false;
+  let docsInitialized = false;
+
+  const initDocs = (): void => {
+    if (docsInitialized) return;
+    docsInitialized = true;
+    const mount = document.getElementById('docs-main');
+    if (mount) buildDevDocs(mount);
+  };
 
   const initDev = (): void => {
     if (devInitialized) return;
     devInitialized = true;
 
-    const right = document.getElementById('dock-right')!;
-    const bottom = document.getElementById('dock-bottom')!;
+    const right = buildRightDock(document.getElementById('dock-right')!);
+    const bottom = buildBottomDock(document.getElementById('dock-bottom')!);
     const left = document.getElementById('dock-left')!;
 
-    const devProps = buildPropertiesPanel(right);
+    const devProps = buildPropertiesPanel(right.props);
     devProps.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
-    buildConfigPanel(cfg, rebuild, right);
+    buildConfigPanel(cfg, rebuild, right.engine);
 
-    void capsPromise.then(() => {
-      buildCapabilitiesPanel(ALL_SAVERS, right);
-    });
-
-    const timeline = buildTimelinePanel(bottom);
-    buildSchemaPanel(right);
+    const { debug } = right;
+    const { timeline } = bottom;
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
     let devPreviewInst: SaverInstance | null = null;
-    let resolvedCaps: CapabilitiesHandle | null = null;
-
-    const updateDevStatus = (id: string): void => {
-      if (!resolvedCaps) return;
-      const idx = ALL_SAVERS.findIndex((s) => s.manifest.id === id);
-      const r = resolvedCaps.getResults()[idx];
-      if (r) devProps.setStatus(r.status, r.reasons);
-    };
 
     const devSelect = (id: string): void => {
       const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
@@ -357,7 +438,6 @@ function liveMode(): void {
       cfg.saver = id;
       rebuild(cfg);
       devProps.select(saver);
-      updateDevStatus(id);
       document
         .querySelectorAll('#dock-left .palette-item')
         .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
@@ -367,8 +447,17 @@ function liveMode(): void {
       if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
 
       if (devPreviewInst) devPreviewInst.dispose();
+      devPreviewInst = null;
       viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
       const rect = viewportHost.getBoundingClientRect();
+      const previewCtx = {
+        saver,
+        previewActive: true,
+        previewSize: { w: Math.round(rect.width) || 640, h: Math.round(rect.height) || 400 },
+      };
+      timeline.setSaver(saver, null, cfg.seed);
+      debug.setContext(previewCtx);
+
       void Promise.resolve(
         saver.mount({
           host: viewportHost,
@@ -381,38 +470,56 @@ function liveMode(): void {
         }),
       ).then((inst) => {
         devPreviewInst = inst;
-        timeline.setSaver(saver, inst);
-        if (saver.manifest.id === 'black-hole') {
-          timeline.loadTrack(demoTrack);
-        }
+        inst.setPaused(true);
+        timeline.setSaver(saver, inst, cfg.seed);
+        requestAnimationFrame(() => {
+          devProps.refresh();
+          debug.setContext(previewCtx);
+        });
       });
     };
 
-    void capsPromise.then((h) => {
-      resolvedCaps = h;
-      buildSaverPalette(left, h, devSelect);
-      updateDevStatus(cfg.saver);
-      h.onChange(() => updateDevStatus(cfg.saver));
-    });
-
+    buildSaverPalette(left, devSelect, cfg.saver);
     devSelect(cfg.saver);
   };
 
   // ========== ROUTER ==========
-  type View = 'gallery' | 'dev';
+  type View = 'gallery' | 'dev' | 'docs';
   const galleryView = document.getElementById('view-gallery')!;
   const devView = document.getElementById('view-dev')!;
+  const docsView = document.getElementById('view-docs')!;
 
-  const showView = (view: View): void => {
-    galleryView.hidden = view !== 'gallery';
-    devView.hidden = view !== 'dev';
-    document.querySelectorAll('#topbar nav a').forEach((a) =>
-      a.classList.toggle('active', (a as HTMLElement).dataset.view === view),
-    );
-    if (view === 'dev') initDev();
+  const scrollDocsAnchor = (anchor: string | null): void => {
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+      document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
-  const currentView = (): View => (location.hash === '#dev' ? 'dev' : 'gallery');
+  const parseHash = (): { view: View; docsAnchor: string | null } => {
+    const raw = location.hash.replace(/^#/, '');
+    if (raw === 'dev') return { view: 'dev', docsAnchor: null };
+    if (raw === 'docs') return { view: 'docs', docsAnchor: null };
+    if (raw.startsWith('docs/')) return { view: 'docs', docsAnchor: raw.slice(5) };
+    if (raw.startsWith('api-')) return { view: 'docs', docsAnchor: raw };
+    return { view: 'gallery', docsAnchor: null };
+  };
+
+  const showView = (view: View, docsAnchor: string | null = null): void => {
+    galleryView.hidden = view !== 'gallery';
+    devView.hidden = view !== 'dev';
+    docsView.hidden = view !== 'docs';
+    document.querySelectorAll('#topbar nav a').forEach((a) => {
+      const on = (a as HTMLElement).dataset.view === view;
+      a.classList.toggle('active', on);
+      a.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (view === 'dev') initDev();
+    if (view === 'docs') {
+      initDocs();
+      scrollDocsAnchor(docsAnchor);
+    }
+  };
 
   document.querySelectorAll('#topbar nav a').forEach((a) =>
     a.addEventListener('click', (e) => {
@@ -421,112 +528,87 @@ function liveMode(): void {
       location.hash = href === '#' ? '' : href.replace('#', '');
     }),
   );
-  window.addEventListener('hashchange', () => showView(currentView()));
-  showView(currentView());
-}
-
-// ---------------------------------------------------------------------------
-// Panel builders (used by dev view)
-// ---------------------------------------------------------------------------
-
-function buildSaverPalette(mount: HTMLElement, caps: CapabilitiesHandle, onSelect: (id: string) => void): void {
-  const list = document.createElement('div');
-  list.className = 'palette';
-
-  for (const s of ALL_SAVERS) {
-    const item = document.createElement('button');
-    item.className = 'palette-item';
-    item.dataset.id = s.manifest.id;
-
-    const label = document.createElement('span');
-    label.className = 'palette-label';
-    label.textContent = s.manifest.label;
-
-    if (s.manifest.workerReady) {
-      const wb = document.createElement('span');
-      wb.className = 'palette-worker';
-      wb.textContent = 'W';
-      wb.title = 'Worker-ready';
-      item.append(wb);
-    }
-
-    item.append(label);
-    item.addEventListener('click', () => onSelect(s.manifest.id));
-    list.append(item);
-  }
-  mount.append(list);
+  window.addEventListener('hashchange', () => {
+    const { view, docsAnchor } = parseHash();
+    showView(view, docsAnchor);
+  });
+  const initial = parseHash();
+  showView(initial.view, initial.docsAnchor);
 }
 
 interface PropertiesHandle {
   select(saver: SaverPlugin): void;
-  setStatus(status: string, reasons: string[]): void;
+  refresh(): void;
 }
 
 function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
-  const panel = document.createElement('aside');
-  panel.className = 'config-panel';
+  const panel = document.createElement('div');
+  panel.className = 'wb-panel-content';
   panel.id = 'props-panel';
   mount.append(panel);
 
-  const row = (label: string, value: string): string =>
-    `<div class="cap-line"><span>${label}</span><span>${value}</span></div>`;
+  const viewport = (): ParentNode | null => document.getElementById('viewport-host');
+  let current: SaverPlugin | null = null;
 
-  const statusColors: Record<string, string> = { ok: '#3fb950', degraded: '#d29922', blocked: '#f85149' };
-  let statusEl: HTMLElement | null = null;
+  const row = (label: string, value: string): string =>
+    `<div class="wb-prop"><dt>${label}</dt><dd>${value}</dd></div>`;
 
   const render = (s: SaverPlugin): void => {
+    current = s;
     const m = s.manifest;
+    const minBackend = m.minBackend ?? 'css';
     const flashSafe = m.a11y?.flashSafe;
     const workerEligible = m.workerReady
       && typeof HTMLCanvasElement.prototype.transferControlToOffscreen === 'function';
     const variant = SAVER_VARIANTS[m.id];
-    const source = SCHEMA_IDS.has(m.id) ? 'schema' : 'classic';
     panel.innerHTML = `
-      <h3>Properties</h3>
-      <div class="props-title" id="props-name">${m.label}${workerEligible ? '<span class="worker-badge" title="This saver renders off-main-thread via OffscreenCanvas + Web Worker">Worker</span>' : ''}</div>
-      ${row('ID', `<code>${m.id}</code>`)}
-      ${variant ? row('Variant', variant) : ''}
-      ${row('Source', source)}
-      ${row('Backend', m.minBackend ?? 'css')}
-      ${row('Cost', m.costTier ?? 'idle')}
-      ${row('Motion', m.motionIntensity ?? 'calm')}
-      ${row('Passthrough', m.passthrough ? '✓' : '✗')}
-      ${row('Reduced-motion', m.reducedMotionFallback ?? 'none')}
-      ${row('Flash safe', flashSafe === undefined ? '--' : flashSafe ? '✓' : '✗')}
-      ${row('Worker ready', m.workerReady ? '✓' : '✗')}
-      <div class="cap-line"><span>Eligibility</span><span id="props-status">--</span></div>
-      ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
-      ${m.a11y?.notes ? `<div class="config-note">${m.a11y.notes}</div>` : ''}`;
-    statusEl = panel.querySelector('#props-status');
+      <div class="wb-object">
+        <span class="wb-object-name">${m.label}</span>
+        ${workerEligible ? '<span class="wb-badge" title="OffscreenCanvas + Web Worker">Worker</span>' : ''}
+      </div>
+      <dl class="wb-props">
+        ${row('ID', `<code>${m.id}</code>`)}
+        ${variant ? row('Variant', variant) : ''}
+        ${row('Package', `<code>${packageFor(s)}</code>`)}
+        ${row('Backend', formatBackendLabel(m.id, minBackend, viewport()))}
+        ${row('Cost', m.costTier ?? 'idle')}
+        ${row('Motion', m.motionIntensity ?? 'calm')}
+        ${row('Passthrough', m.passthrough ? 'yes' : 'no')}
+        ${row('Reduced motion', m.reducedMotionFallback ?? 'none')}
+        ${row('Flash safe', flashSafe === undefined ? '—' : flashSafe ? 'yes' : 'no')}
+        ${row('Worker ready', m.workerReady ? 'yes' : 'no')}
+        ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
+      </dl>
+      ${m.a11y?.notes ? `<p class="wb-note">${m.a11y.notes}</p>` : ''}`;
   };
 
-  const setStatus = (status: string, reasons: string[]): void => {
-    if (!statusEl) return;
-    statusEl.textContent = status;
-    statusEl.style.color = statusColors[status] ?? '';
-    statusEl.title = reasons.length ? reasons.join('; ') : '';
+  return {
+    select: render,
+    refresh: () => {
+      if (current) render(current);
+    },
   };
-
-  return { select: render, setStatus };
 }
 
 function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mount: HTMLElement): void {
-  const panel = document.createElement('aside');
-  panel.className = 'config-panel';
-  panel.innerHTML = '<h3>Engine</h3>';
+  const panel = document.createElement('div');
+  panel.className = 'wb-panel-content';
 
-  const field = (labelText: string, control: HTMLElement): HTMLElement => {
-    const row = document.createElement('label');
-    row.className = 'field';
-    const span = document.createElement('span');
-    span.textContent = labelText;
-    row.append(span, control);
+  const propRow = (labelText: string, control: HTMLElement): HTMLElement => {
+    const row = document.createElement('div');
+    row.className = 'wb-prop';
+    const dt = document.createElement('dt');
+    dt.textContent = labelText;
+    const dd = document.createElement('dd');
+    dd.append(control);
+    row.append(dt, dd);
     return row;
   };
   const commit = (): void => rebuild(cfg);
 
   const selSel = document.createElement('select');
   selSel.id = 'cfg-selection';
+  selSel.className = 'wb-input wb-select';
   for (const v of ['fixed', 'random', 'rotate'] as const) {
     const o = document.createElement('option');
     o.value = v;
@@ -543,6 +625,7 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
     const i = document.createElement('input');
     i.type = 'number';
     i.id = id;
+    i.className = 'wb-input';
     i.value = String(value);
     i.addEventListener('change', () => on(Number(i.value)));
     return i;
@@ -556,51 +639,63 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
     commit();
   });
 
-  const checkbox = (id: string, checked: boolean, on: (b: boolean) => void): HTMLInputElement => {
+  const checkRow = (id: string, labelText: string, checked: boolean, on: (b: boolean) => void): HTMLElement => {
+    const row = document.createElement('label');
+    row.className = 'wb-prop wb-prop-check';
     const c = document.createElement('input');
     c.type = 'checkbox';
     c.id = id;
     c.checked = checked;
     c.addEventListener('change', () => on(c.checked));
-    return c;
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    row.append(c, span);
+    return row;
   };
-  const blur = checkbox('cfg-blur', cfg.sleepOnBlur, (b) => {
-    cfg.sleepOnBlur = b;
-    commit();
-  });
-  const clock = checkbox('cfg-clock', cfg.showClock, (b) => {
-    cfg.showClock = b;
-    commit();
-  });
-  const menu = checkbox('cfg-menu', cfg.configMenu, (b) => {
-    cfg.configMenu = b;
-    commit();
-  });
-  const reduced = checkbox('cfg-reduced', cfg.reducedMotion, (b) => {
-    cfg.reducedMotion = b;
-    commit();
-  });
 
-  panel.append(
-    field('Selection', selSel),
-    field('Idle timeout (ms)', timeout),
-    field('Seed', seed),
-    field('Sleep on blur', blur),
-    field('Show clock', clock),
-    field('Cmd+K menu', menu),
-    field('Reduced motion', reduced),
+  const props = document.createElement('dl');
+  props.className = 'wb-props wb-props-form';
+  props.append(
+    propRow('Selection', selSel),
+    propRow('Idle timeout', timeout),
+    propRow('Seed', seed),
+  );
+
+  const toggles = document.createElement('div');
+  toggles.className = 'wb-toggles';
+  toggles.append(
+    checkRow('cfg-blur', 'Sleep on blur', cfg.sleepOnBlur, (b) => {
+      cfg.sleepOnBlur = b;
+      commit();
+    }),
+    checkRow('cfg-clock', 'Show clock', cfg.showClock, (b) => {
+      cfg.showClock = b;
+      commit();
+    }),
+    checkRow('cfg-menu', 'Cmd+K menu', cfg.configMenu, (b) => {
+      cfg.configMenu = b;
+      commit();
+    }),
+    checkRow('cfg-reduced', 'Reduced motion', cfg.reducedMotion, (b) => {
+      cfg.reducedMotion = b;
+      commit();
+    }),
   );
 
   const actions = document.createElement('div');
-  actions.className = 'config-actions';
+  actions.className = 'wb-actions';
   const sleepBtn = document.createElement('button');
-  sleepBtn.textContent = 'Sleep now';
+  sleepBtn.type = 'button';
+  sleepBtn.className = 'wb-btn wb-btn-primary';
+  sleepBtn.textContent = 'Sleep';
   sleepBtn.addEventListener('click', () => window.__idleScreens?.sleep());
   const wakeBtn = document.createElement('button');
+  wakeBtn.type = 'button';
+  wakeBtn.className = 'wb-btn';
   wakeBtn.textContent = 'Wake';
   wakeBtn.addEventListener('click', () => window.__idleScreens?.wake());
   actions.append(sleepBtn, wakeBtn);
-  panel.append(actions);
 
+  panel.append(props, toggles, actions);
   mount.append(panel);
 }

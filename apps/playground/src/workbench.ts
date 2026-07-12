@@ -10,13 +10,19 @@ class WbDock extends HTMLElement {
 
   connectedCallback(): void {
     if (this.bodyEl) return; // idempotent (survives DOM moves)
-    const head = document.createElement('div');
-    head.className = 'dock-head';
-    head.textContent = this.getAttribute('label') ?? '';
+    const label = this.getAttribute('label') ?? '';
+    const headless = this.hasAttribute('headless') || label.length === 0;
     const body = document.createElement('div');
     body.className = 'dock-body';
     while (this.firstChild) body.appendChild(this.firstChild);
-    this.append(head, body);
+    if (headless) {
+      this.append(body);
+    } else {
+      const head = document.createElement('div');
+      head.className = 'dock-head';
+      head.textContent = label;
+      this.append(head, body);
+    }
     this.bodyEl = body;
   }
 
