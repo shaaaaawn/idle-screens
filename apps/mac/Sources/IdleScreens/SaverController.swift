@@ -167,35 +167,33 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
   /// Catalog minus hidden, narrowed to favorites when any are available.
   private func buildPool() -> [String] {
-    let visible = catalogIds.filter { !hidden.contains($0) }
-    let favs = visible.filter { favorites.contains($0) }
-    if !favs.isEmpty { return favs }
-    return visible.isEmpty ? catalogIds : visible
+    SaverSelection.buildPool(catalogIds: catalogIds, hidden: hidden, favorites: favorites)
   }
 
   /// The global saver id (pinned or current cycle position); nil in channel mode.
   private var currentSaverId: String? {
-    guard channelURL == nil, !pool.isEmpty else { return nil }
-    return pool[currentIndex % pool.count]
+    guard channelURL == nil else { return nil }
+    return SaverSelection.saverAt(pool: pool, index: currentIndex)
   }
 
   /// Resolve the saver id for a specific display: its per-display override if
   /// set, otherwise the global saver. nil in channel mode.
   private func saverId(forDisplay key: String) -> String? {
-    if channelURL != nil { return nil }
-    if let override = perDisplaySaver[key], !override.isEmpty,
-      catalogIds.contains(override)
-    {
-      return override
-    }
-    return currentSaverId
+    guard channelURL == nil else { return nil }
+    return SaverSelection.saverId(
+      forDisplay: key,
+      perDisplayOverride: perDisplaySaver[key],
+      catalogIds: catalogIds,
+      globalSaverId: currentSaverId
+    )
   }
 
   private func startIndex() -> Int {
-    if let pinned = pinnedSaver, let i = pool.firstIndex(of: pinned) {
-      return i
-    }
-    return pool.isEmpty ? 0 : Int.random(in: 0..<pool.count)
+    SaverSelection.startIndex(
+      pool: pool,
+      pinnedSaver: pinnedSaver,
+      randomIndex: pool.isEmpty ? 0 : Int.random(in: 0..<pool.count)
+    )
   }
 
   private func startCycle() {

@@ -50,21 +50,11 @@ final class BundleManager {
     return try? Data(contentsOf: root.appendingPathComponent("savers.json"))
   }
 
-  private struct SaverJSON: Decodable {
-    let id: String
-    let label: String
-  }
-
   /// The saver list from the active bundle's savers.json, or the compiled
   /// catalog as a fallback. This is what lets a refreshed bundle add savers to
   /// the menu + cycle pool without an app update.
   func saverCatalog() -> [SaverEntry] {
-    if let data = saversJSONData(),
-      let decoded = try? JSONDecoder().decode([SaverJSON].self, from: data), !decoded.isEmpty
-    {
-      return decoded.map { SaverEntry(id: $0.id, label: $0.label) }
-    }
-    return SaverCatalog.all
+    SaverCatalogLoader.resolve(data: saversJSONData(), fallback: SaverCatalog.all)
   }
 
   struct Manifest: Decodable {
