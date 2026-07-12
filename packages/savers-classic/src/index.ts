@@ -18,6 +18,7 @@ import { bsod } from './bsod';
 import { flurry } from './flurry';
 import { fluid } from './fluid';
 import { reactionDiffusion } from './reaction-diffusion';
+import { mystify } from './mystify';
 
 export {
   toasters,
@@ -38,6 +39,7 @@ export {
   flurry,
   fluid,
   reactionDiffusion,
+  mystify,
 };
 
 /** All classic savers, for bulk registration. */
@@ -60,4 +62,5 @@ export const CLASSIC_SAVERS: SaverPlugin[] = [
   flurry,
   fluid,
   reactionDiffusion,
+  mystify,
 ];

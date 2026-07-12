@@ -50,3 +50,4 @@ The following savers are original to this project:
 | Dev Dashboard | Developer dashboard. Original, authored as a declarative `SaverSpec` (pure JSON) and compiled by `@idle-screens/schema`. |
 | Fluid | Navier-Stokes fluid simulation. Original canvas2d + WebGPU compute implementation. |
 | Reaction Diffusion | Gray-Scott reaction-diffusion. Original canvas2d + WebGPU compute implementation. Clean-room math — no code from external sources. |
+| Mystify | Bouncing morphing polygon trails. Original canvas2d implementation. Inspired by the Windows XP "Mystify" screensaver concept (clean-room). |
