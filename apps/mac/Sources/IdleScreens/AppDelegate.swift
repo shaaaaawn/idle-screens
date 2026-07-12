@@ -3,6 +3,10 @@ import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private var statusItem: NSStatusItem!
+  /// Process activity assertion that prevents macOS from auto-terminating /
+  /// App-Napping this windowless LSUIElement app (which would drop the
+  /// menu-bar status item on macOS 26+). Held for the lifetime of the app.
+  private var keepAliveActivity: Any?
   private let saver = SaverController()
   private lazy var idleMonitor = IdleMonitor(thresholdSeconds: savedThreshold)
 
@@ -18,6 +22,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // Hold a process activity assertion for the app's lifetime. The
+    // .userInitiatedAllowingIdleSystemSleep mask prevents App Nap, automatic
+    // termination, and sudden termination (all included in it) while still
+    // letting the system idle-sleep — which this app relies on for idle
+    // detection. Without this, macOS 26+ App-Naps the windowless LSUIElement
+    // app and drops its menu-bar status item.
+    keepAliveActivity = ProcessInfo.processInfo.beginActivity(
+      options: .userInitiatedAllowingIdleSystemSleep,
+      reason: "Keep menu bar status item presented")
+
     applyConfigToSaver()
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -40,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self?.saver.show()
       }
     }
+  }
+
+  func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+    true
   }
 
   private func applyConfigToSaver() {
