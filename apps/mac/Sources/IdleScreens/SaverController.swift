@@ -67,6 +67,12 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private var sessionSeed: UInt32 = 0
   private var currentIndex = 0
   private var lastBrowseAt = Date.distantPast
+  /// Mouse movement only wakes once the machine has genuinely gone idle.
+  private var wakeSettled = false
+  /// Rolling pointer origin; movement past `wakeMoveThreshold` from it wakes.
+  private var wakeOrigin = NSPoint.zero
+  /// Points the pointer must move (within a poll tick) to count as a wake.
+  private let wakeMoveThreshold: CGFloat = 8
 
   private let fadeDuration: TimeInterval = 0.9
 
@@ -284,16 +290,59 @@ final class SaverController: NSObject, WKNavigationDelegate {
     webView.loadFileURL(components.url!, allowingReadAccessTo: webRoot)
   }
 
-  // Channel load failed → fall back to the bundled engine so the user never
-  // sees a blank screen when offline.
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    NSLog("[idle-screens] webview loaded: \(webView.url?.lastPathComponent ?? "?")")
+  }
+
+  // Load failed → self-heal: a failed channel load falls back to the bundled
+  // engine; a failed *cached-bundle* load reverts to the shipped bundle so a
+  // corrupt cache never leaves a blank screen.
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-    channelFallback(webView, error)
+    NSLog("[idle-screens] webview didFail: \(error.localizedDescription)")
+    handleLoadFailure(webView, error)
   }
   func webView(
     _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
     withError error: Error
   ) {
-    channelFallback(webView, error)
+    NSLog("[idle-screens] webview didFailProvisional: \(error.localizedDescription)")
+    handleLoadFailure(webView, error)
+  }
+
+  private func handleLoadFailure(_ webView: WKWebView, _ error: Error) {
+    if channelURL != nil {
+      channelFallback(webView, error)
+      return
+    }
+    // A cached bundle failed to load — discard it and reload from shipped.
+    if BundleManager.shared.usingCachedBundle {
+      NSLog("[idle-screens] cached bundle load failed; reverting to shipped")
+      BundleManager.shared.resetToShipped()
+      if let overlay = overlays.first(where: { $0.webView === webView }) {
+        loadBundled(into: webView, saverId: saverId(forDisplay: overlay.key))
+      }
+    }
+  }
+
+  /// Debug: evaluate JS on the first overlay to confirm it rendered.
+  func debugProbe(_ completion: @escaping (String) -> Void) {
+    guard let webView = overlays.first?.webView else {
+      completion("no overlay")
+      return
+    }
+    let js = """
+      JSON.stringify({
+        savers: (window.__idleScreensMac && window.__idleScreensMac.savers || []).length,
+        canvas: !!document.querySelector('#host canvas'),
+        hostChildren: document.getElementById('host') ? document.getElementById('host').childElementCount : -1,
+        url: location.href
+      })
+      """
+    webView.evaluateJavaScript(js) { result, error in
+      if let error { completion("JS error: \(error.localizedDescription)") } else {
+        completion(String(describing: result))
+      }
+    }
   }
   private func channelFallback(_ webView: WKWebView, _ error: Error) {
     guard channelURL != nil, webView.url?.isFileURL != true else { return }
@@ -420,9 +469,21 @@ final class SaverController: NSObject, WKNavigationDelegate {
   // MARK: - Wake handling (no permissions needed: local monitors only)
 
   private func installWakeMonitors() {
-    // Ignore input for the first moment so the mouse jiggle that didn't quite
-    // reset the idle timer doesn't instantly dismiss us.
-    let armed = Date().addingTimeInterval(0.5)
+    // Wake model — deliberate input wakes, small pointer drift does not:
+    //   • Keys and clicks always wake (they are unambiguous).
+    //   • Mouse movement wakes only after the machine has settled (been idle a
+    //     beat — so a manual "Start Screen Saver" doesn't dismiss under the hand
+    //     that just clicked the menu) AND only when the pointer moves more than
+    //     `wakeMoveThreshold` points within a single poll window. The poll
+    //     re-baselines the origin each tick while the pointer rests, so slow
+    //     drift (e.g. a 2px trackpad twitch) never accumulates into a wake,
+    //     while a deliberate move crosses the threshold at once.
+    // The local monitor fires before view routing, so WKWebView can't swallow
+    // input ahead of us — no idle-polling backstop needed (which couldn't tell
+    // drift from a real move anyway).
+    wakeSettled = false
+    wakeOrigin = NSEvent.mouseLocation
+    let armed = Date().addingTimeInterval(0.4)
 
     eventMonitor = NSEvent.addLocalMonitorForEvents(
       matching: [.mouseMoved, .keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .otherMouseDown]
@@ -431,19 +492,25 @@ final class SaverController: NSObject, WKNavigationDelegate {
       if event.type == .keyDown, self.handleOverlayKey(event.keyCode) {
         return nil  // handled (browse/favorite/hide/pin) — don't wake
       }
+      if event.type == .mouseMoved {
+        guard self.wakeSettled else { return event }
+        let loc = NSEvent.mouseLocation
+        let moved = hypot(loc.x - self.wakeOrigin.x, loc.y - self.wakeOrigin.y)
+        if moved < self.wakeMoveThreshold { return event }  // drift, not a wake
+      }
       self.dismiss()
       return nil  // swallow the wake event within our own app
     }
 
-    // Belt and suspenders: WKWebView can consume events before the local
-    // monitor in some first-responder configurations, and system-level idle
-    // reset (e.g. input on another display's app) should also wake us.
+    // Poll only maintains settle state + re-baselines the drift origin while the
+    // pointer rests. It never dismisses.
     fastPollTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
       guard let self, self.isShowing else { return }
-      // Don't treat a recent arrow-key browse as a wake.
-      if Date().timeIntervalSince(self.lastBrowseAt) < 1.0 { return }
-      if Date() > armed && IdleMonitor.secondsIdle < 0.2 {
-        self.dismiss()
+      if IdleMonitor.secondsIdle > 0.8 { self.wakeSettled = true }
+      // Re-baseline the origin between ticks so only intra-tick movement counts.
+      let loc = NSEvent.mouseLocation
+      if hypot(loc.x - self.wakeOrigin.x, loc.y - self.wakeOrigin.y) < self.wakeMoveThreshold {
+        self.wakeOrigin = loc
       }
     }
     fastPollTimer.map { RunLoop.main.add($0, forMode: .common) }

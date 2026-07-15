@@ -135,6 +135,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
+    // Debug: --probe shows the saver, waits, and reports the webview state.
+    if CommandLine.arguments.contains("--probe") {
+      saver.show()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+        self?.saver.debugProbe { result in
+          print("PROBE: \(result)")
+          exit(0)
+        }
+      }
+      return
+    }
+
     // Debug: --show triggers the saver immediately (it will dismiss on first
     // input, so this is only useful for smoke tests and screenshots).
     if CommandLine.arguments.contains("--show") {
@@ -255,6 +267,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       title: "Check for Saver Updates", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
     update.target = self
     menu.addItem(update)
+    if BundleManager.shared.usingCachedBundle {
+      let reset = NSMenuItem(
+        title: "Reset to Built-in Savers", action: #selector(resetBundle(_:)), keyEquivalent: "")
+      reset.target = self
+      menu.addItem(reset)
+    }
     let diag = NSMenuItem(
       title: "Diagnostics…", action: #selector(showDiagnostics(_:)), keyEquivalent: "")
     diag.target = self
@@ -627,6 +645,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     defaults.removeObject(forKey: Self.castChannelKey)
     setStatusIcon(saver.isShowing ? "display.fill" : "display")
     statusItem.menu = buildMenu()
+  }
+
+  @objc private func resetBundle(_ sender: NSMenuItem) {
+    BundleManager.shared.resetToShipped()
+    applyUpdatedBundle()
+    alert("Saver Updates", "Reverted to the built-in savers.")
   }
 
   @objc private func showDiagnostics(_ sender: NSMenuItem) {

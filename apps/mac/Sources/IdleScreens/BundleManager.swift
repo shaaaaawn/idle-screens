@@ -30,16 +30,31 @@ final class BundleManager {
     return URL(fileURLWithPath: resourcePath).appendingPathComponent("web")
   }
 
-  /// True when a valid cached bundle exists and should be used.
+  /// True when a valid cached bundle exists and should be used. Requires the
+  /// core files AND that the cached saver set is at least as large as the
+  /// shipped one — so a server bundle that is behind the app (fewer savers)
+  /// never silently downgrades what the user sees.
   var usingCachedBundle: Bool {
     let fm = FileManager.default
-    return fm.fileExists(atPath: cacheRoot.appendingPathComponent("index.html").path)
-      && fm.fileExists(atPath: cacheRoot.appendingPathComponent("assets/main.js").path)
+    guard fm.fileExists(atPath: cacheRoot.appendingPathComponent("index.html").path),
+      fm.fileExists(atPath: cacheRoot.appendingPathComponent("assets/main.js").path)
+    else { return false }
+    guard let data = try? Data(contentsOf: cacheRoot.appendingPathComponent("savers.json")),
+      let cached = SaverCatalogLoader.decodeCatalog(from: data),
+      cached.count >= SaverCatalog.all.count
+    else { return false }
+    return true
   }
 
   /// The web root to load savers from (cached update or shipped).
   var webRoot: URL? {
     usingCachedBundle ? cacheRoot : shippedRoot
+  }
+
+  /// Discard any cached bundle and revert to the shipped one.
+  func resetToShipped() {
+    try? FileManager.default.removeItem(at: cacheRoot)
+    defaults.removeObject(forKey: Self.versionKey)
   }
 
   var source: String { usingCachedBundle ? "cached update" : "shipped" }
@@ -120,7 +135,14 @@ final class BundleManager {
           at: self.cacheRoot.deletingLastPathComponent(), withIntermediateDirectories: true)
         try fm.moveItem(at: staging, to: self.cacheRoot)
         self.defaults.set(manifest.version, forKey: Self.versionKey)
-        completion(true, "Updated \(manifest.files.count) files (bundle v\(manifest.version)).")
+        if self.usingCachedBundle {
+          completion(true, "Updated \(manifest.files.count) files (bundle v\(manifest.version)).")
+        } else {
+          // Downloaded bundle has fewer savers than the built-in set — keep the
+          // built-in savers and discard the download so nothing downgrades.
+          try? fm.removeItem(at: self.cacheRoot)
+          completion(false, "Your built-in savers are already up to date.")
+        }
       } catch {
         NSLog("[idle-screens] bundle install failed: \(error)")
         try? fm.removeItem(at: staging)

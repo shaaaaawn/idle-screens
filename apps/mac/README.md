@@ -52,11 +52,39 @@ open dist/IdleScreens.app           # menu-bar icon appears
 
 Debug flags on the binary: `--show` (start the saver immediately), `--hold`
 (don't dismiss on input, for inspection), `--diagnostics` (print the diagnostics
-report and exit).
+report and exit), `--check-updates` (run a bundle refresh and exit), `--probe`
+(show the saver, then print the webview's rendered state).
 
 **Overlay keys** while the saver is showing: **← / →** browse savers, **F**
-favorite, **⌫** hide from cycle, **Return** pin the one you're viewing, any
-other key/mouse dismisses.
+favorite, **⌫** hide from cycle, **Return** pin the one you're viewing. Keys and
+clicks dismiss immediately; small pointer drift does **not** (only a deliberate
+move of >8pt within a moment wakes it), so the saver won't vanish on a trackpad
+twitch.
+
+## Launch & troubleshooting
+
+**It's a menu-bar app — there is no window and no Dock icon.** After launch, look
+for the **display icon in the menu bar** (top-right). On first run a one-time
+welcome window appears; after that it's silent. If you don't see the icon, the
+app isn't running — relaunch with `open dist/IdleScreens.app`.
+
+- **"Nothing happens" when I open it** → that's expected; check the menu bar. To
+  confirm it's alive: `pgrep -x IdleScreens`.
+- **Gatekeeper blocks it** ("unidentified developer") → the app is only ad-hoc
+  signed. Right-click the app → **Open** (once), or
+  `xattr -dr com.apple.quarantine dist/IdleScreens.app`. A notarized DMG (see
+  Release, below) avoids this for end users.
+- **The saver flashes and vanishes** → fixed: pointer drift no longer dismisses
+  it. Rebuild if you're on an older build. Keys/clicks still dismiss (that's the
+  point).
+- **The saver shows a black screen** → the webview failed to load. Run
+  `.../IdleScreens --probe` to print the rendered state, and check Console for
+  `[idle-screens] webview didFail`. A bad cached bundle now self-heals to the
+  built-in one; you can also force it via the menu's **Reset to Built-in Savers**.
+- **It never starts on idle** → the display may sleep before the saver's "Start
+  After" time (the app warns about this on launch), or a gate is active
+  (Only on Power / Pause During Fullscreen / Active Hours). See **Diagnostics…**.
+- **See what's going on**: `log stream --predicate 'process == "IdleScreens"'`.
 
 **Saver updates.** "Check for Saver Updates" pulls a newer bundle from
 `idlescreens.com/mac/` (served by idle-server — see below) and caches it under
