@@ -6,12 +6,12 @@
 #     xcrun notarytool store-credentials NOTARY_PROFILE \
 #       --apple-id you@example.com --team-id TEAMID --password app-specific-pw
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 : "${DEVELOPER_ID:?Set DEVELOPER_ID to your 'Developer ID Application' identity}"
 : "${NOTARY_PROFILE:?Set NOTARY_PROFILE to your notarytool keychain profile name}"
 
-./build-app.sh --release
+./scripts/build-app.sh --release
 
 APP="dist/IdleScreens.app"
 DMG="dist/IdleScreens.dmg"

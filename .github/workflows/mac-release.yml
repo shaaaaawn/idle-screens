@@ -61,7 +61,7 @@ jobs:
         env:
           DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
           NOTARY_PROFILE: idle-notary
-        run: ./notarize.sh
+        run: ./scripts/notarize.sh
 
       - name: Publish DMG to release
         uses: softprops/action-gh-release@v2

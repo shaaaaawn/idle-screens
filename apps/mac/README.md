@@ -33,8 +33,10 @@ apps/mac/
   web/                       host page bundling @idle-screens/* savers
     src/savers.ts            single source of truth for the saver list
     build.mjs / gen-catalog.mjs
-  build-app.sh              assemble + ad-hoc sign IdleScreens.app
-  notarize.sh              Developer ID sign + notarize + DMG
+  scripts/
+    build-app.sh             assemble + ad-hoc sign IdleScreens.app
+    notarize.sh              Developer ID sign + notarize + DMG
+    setup-gh-secrets.sh      push signing secrets to GitHub
   packaging/idle-screens.rb Homebrew cask
 ```
 
@@ -46,7 +48,7 @@ pnpm install && pnpm build          # build the @idle-screens/* packages
 
 # then:
 cd apps/mac
-./build-app.sh                      # web bundle + swift build + assemble .app
+./scripts/build-app.sh              # web bundle + swift build + assemble .app
 open dist/IdleScreens.app           # menu-bar icon appears
 ```
 
@@ -92,7 +94,7 @@ Application Support; the shipped bundle is the offline fallback.
 
 The saver list in the menu is generated from `web/src/savers.ts` into
 `Sources/IdleScreens/SaverCatalog.swift` by `gen-catalog.mjs` (run automatically
-by `build-app.sh`). Edit the TS list, not the Swift file.
+by `scripts/build-app.sh`). Edit the TS list, not the Swift file.
 
 ## Release (sign + notarize)
 
@@ -103,7 +105,13 @@ export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
 xcrun notarytool store-credentials idle-notary \
   --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
 export NOTARY_PROFILE=idle-notary
-./notarize.sh                       # → dist/IdleScreens.dmg (stapled)
+./scripts/notarize.sh               # → dist/IdleScreens.dmg (stapled)
+```
+
+To push signing secrets to GitHub Actions:
+
+```bash
+./scripts/setup-gh-secrets.sh       # reads apps/mac/.secrets/ + repo .env
 ```
 
 In CI, push a `mac-v*` tag to trigger `.github/workflows/mac-release.yml`, which

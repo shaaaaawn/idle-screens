@@ -16,6 +16,7 @@ apps/*/dist/
 # swift / macOS app
 .build/
 *.dmg
+apps/mac/.secrets/
 
 # os / editor
 .DS_Store

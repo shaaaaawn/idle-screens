@@ -1,8 +1,8 @@
 #!/bin/bash
 # Assemble IdleScreens.app from the SPM build + web bundle.
-# Usage: ./build-app.sh [--release]
+# Usage: ./scripts/build-app.sh [--release]
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 CONFIG=debug
 if [[ "${1:-}" == "--release" ]]; then CONFIG=release; fi
