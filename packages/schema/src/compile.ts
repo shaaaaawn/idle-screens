@@ -1,5 +1,6 @@
 import {
   createRng,
+  type ControlTrack,
   type SaverContext,
   type SaverInstance,
   type SaverManifest,
@@ -7,6 +8,13 @@ import {
 } from '@idle-screens/core';
 import { assertValidSpec } from './validate';
 import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
+import {
+  applyDeltasToSpec,
+  easeSmooth,
+  lerpSpec,
+  structuralSignature,
+  type SteerDelta,
+} from './steer';
 import type { LayerSpec, SaverSpec } from './types';
 
 /** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
@@ -54,10 +62,17 @@ class SpecInstance implements SaverInstance {
   private baseT = 0; // elapsed logical time carried across pause/resume
   private lastT = 0;
 
+  /** The spec currently being rendered (base spec + any applied steering). */
+  private effSpec: SaverSpec;
+  /** Active glide between two resolved specs (live setParam/applyTrack). */
+  private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null = null;
+  private lastStructural = '';
+
   constructor(
     private readonly spec: SaverSpec,
     ctx: SaverContext,
   ) {
+    this.effSpec = spec;
     this.saverCtx = ctx;
     this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
     let canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -95,7 +110,8 @@ class SpecInstance implements SaverInstance {
   /** (Re)seed and place all entities — deterministic for the seed + size. */
   private rebuild(): void {
     const rng = createRng(this.seed);
-    this.layers = this.spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h) }));
+    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h) }));
+    this.lastStructural = structuralSignature(this.effSpec);
   }
 
   private start(): void {
@@ -122,7 +138,7 @@ class SpecInstance implements SaverInstance {
 
   private drawBackground(): void {
     const { ctx, w, h } = this;
-    const bg = this.spec.background;
+    const bg = this.effSpec.background;
     if (!bg || bg.type === 'solid') {
       ctx.fillStyle = bg?.color ?? '#05050a';
       ctx.fillRect(0, 0, w, h);
@@ -180,8 +196,47 @@ class SpecInstance implements SaverInstance {
     ctx.restore();
   }
 
+  /** Advance any live steering glide; rebuild entities on structural change. */
+  private stepTransition(t: number): void {
+    const tr = this.transition;
+    if (!tr) return;
+    const k = tr.dur <= 0 ? 1 : (t - tr.startT) / tr.dur;
+    this.effSpec = k >= 1 ? tr.to : lerpSpec(tr.from, tr.to, easeSmooth(k));
+    if (k >= 1) this.transition = null;
+    // Placement/motion fields are baked into entities at build time; rebuild
+    // (deterministic — same seed → same stream) only when those change.
+    const sig = structuralSignature(this.effSpec);
+    if (sig !== this.lastStructural) this.rebuild();
+    else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
+  /**
+   * Live steering: glide from what's currently rendered to the track's target
+   * state (deltas applied last-wins). Duration = the longest delta `dur`.
+   */
+  applyTrack(track: ControlTrack): void {
+    const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    const target = applyDeltasToSpec(this.spec, deltas);
+    const dur = deltas.reduce((m, d) => Math.max(m, d.dur ?? 1000), 0) || 1000;
+    this.transition = {
+      from: JSON.parse(JSON.stringify(this.effSpec)) as SaverSpec,
+      to: target,
+      startT: this.lastT,
+      dur,
+    };
+    if (this.paused) {
+      // No frames will run the glide — jump straight to the target.
+      this.transition = null;
+      this.effSpec = target;
+      if (structuralSignature(this.effSpec) !== this.lastStructural) this.rebuild();
+      else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+      this.renderFrame(this.lastT, this.seed);
+    }
+  }
+
   /** Deterministic, frame-addressable render (shared by the rAF loop). */
   renderFrame(t: number, _seed: number): void {
+    this.stepTransition(t);
     const { ctx } = this;
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
