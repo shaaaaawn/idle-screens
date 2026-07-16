@@ -63,13 +63,20 @@ first-party code. Two rules limit blast radius:
 
 - Publishing resolves to either a validated `SaverSpec` or a classic saver id
   looked up in a fixed registry. Viewers never execute published code.
-- **Known gap: publishing is unauthenticated.** Anyone who can reach `/mcp` can
-  change what a public channel shows (content vandalism, not code execution).
-  Capability-token auth is designed (see `idle-server/docs/capability-auth.md`)
-  but not yet implemented. Until then: channels are treated as public,
-  writable surfaces — don't point a display at a channel id you wouldn't
-  accept strangers writing to.
-- Channel state and history are public reads by design.
+- **Write authorization: capability tokens.** `createChannel` claims a channel
+  and returns an `isk_…` token once; the server stores only its SHA-256. Mutating
+  ops (`publishScene`, `setParam`, `applyTrack`, `setSeed`, `sleep`, `wake`,
+  `queueScene`) on a claimed channel require a matching `X-Idle-Token`; a wrong
+  or missing token is rejected (403), and claiming a taken name is rejected
+  (409). The token *is* the authorization — no accounts. Sharing it grants
+  co-authoring; losing it is like losing a password (rotation is future work).
+- **The demo channels (`default`, `lobby`, `studio`) are intentionally open** —
+  no token, anyone may write. Don't point a permanent display at them.
+- Channel state and history (including the `protected` flag, never the token)
+  are public reads by design.
+- **Residual:** no per-token rate limiting yet (abuse of the open demo channels
+  or token brute-force — 128-bit tokens make guessing infeasible, but a flood
+  is possible). Rate limiting is future work.
 
 ## Boundary 4 — the macOS app update chain
 
