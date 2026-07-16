@@ -147,3 +147,54 @@ test('L10: external-engine handoff — the element drives the caller-owned engin
   expect(await state(page)).toBe('sleeping');
   expect(await page.evaluate(() => window.__idleScreens!.active())).toBe('black-hole');
 });
+
+test('L11: host-owned fallback slot shows when a saver fails to mount', async ({ page }) => {
+  await page.goto('/');
+  await ready(page);
+
+  // Build a fresh element with a plugin whose mount() throws, plus fallback
+  // markup slotted from the light DOM (the AVAL pattern: the host owns what
+  // "broken" looks like, the runtime just reveals it).
+  const result = await page.evaluate(async () => {
+    const el = document.createElement('idle-screen') as HTMLElement & {
+      plugins: unknown[];
+      config: Record<string, unknown>;
+      idleEngine: { sleep(): void } | null;
+    };
+    el.plugins = [
+      {
+        manifest: { id: 'broken', label: 'Broken', passthrough: false },
+        mount() {
+          throw new Error('boom');
+        },
+      },
+    ];
+    el.config = { seed: 1, idleMs: 60_000, configMenu: false };
+    const fb = document.createElement('div');
+    fb.slot = 'fallback';
+    fb.id = 'my-fallback';
+    fb.textContent = 'saver unavailable';
+    el.append(fb);
+    document.body.append(el);
+
+    el.idleEngine!.sleep();
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sr = el.shadowRoot!;
+    const dialog = sr.querySelector('dialog.frame')!;
+    const fallbackWrap = sr.querySelector<HTMLElement>('.fallback')!;
+    const out = {
+      open: (dialog as HTMLDialogElement).open,
+      showFallback: dialog.classList.contains('show-fallback'),
+      fallbackDisplay: getComputedStyle(fallbackWrap).display,
+      surfaceChildren: sr.querySelector('.surface')!.childElementCount,
+    };
+    el.remove();
+    return out;
+  });
+
+  expect(result.open).toBe(true);
+  expect(result.showFallback).toBe(true);
+  expect(result.fallbackDisplay).toBe('grid');
+  expect(result.surfaceChildren).toBe(0);
+});

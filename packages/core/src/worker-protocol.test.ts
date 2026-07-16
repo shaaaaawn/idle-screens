@@ -173,8 +173,10 @@ describe('runIdleWorker', () => {
     it('sample probes the mounted canvas', () => {
       dispatch({ type: 'sample' });
       expect(outbound).toHaveLength(1);
-      expect(outbound[0]?.type).toBe('sampled');
-      expect(typeof outbound[0]?.hasContent).toBe('boolean');
+      const msg = outbound[0];
+      expect(msg?.type).toBe('sampled');
+      if (msg?.type !== 'sampled') throw new Error('expected sampled message');
+      expect(typeof msg.hasContent).toBe('boolean');
     });
 
     it('sample is false with no canvas', () => {
