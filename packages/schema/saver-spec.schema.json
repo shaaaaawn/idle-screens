@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://idlescreens.com/schemas/saver-spec-1.schema.json",
+  "title": "SaverSpec (format version 1)",
+  "description": "Declarative, agent-authorable screensaver: a static background plus layers of moving sprites. No code, no network, no strobe primitive — safety by construction. This schema is stricter than the runtime validator (unknown properties are rejected here to catch authoring typos; the runtime ignores them). Cross-field rules the schema cannot express: total entities across all layers must be <= 800; range pairs must satisfy min <= max.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "label", "layers"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1, "description": "Format version. Independent of the npm package version." },
+    "id": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Unique kebab-case saver id." },
+    "label": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Human-readable name." },
+    "seed": { "type": "number", "description": "Deterministic RNG seed. Same spec + same seed = identical frames. Falls back to the host's seed." },
+    "motionIntensity": { "enum": ["calm", "moderate", "energetic"], "description": "Advisory intensity for capability/reduced-motion gating." },
+    "background": { "$ref": "#/definitions/background" },
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 36,
+      "items": { "$ref": "#/definitions/layer" },
+      "description": "Rendered back-to-front. At most 36 layers; at most 800 entities total."
+    }
+  },
+  "definitions": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$",
+      "description": "Hex colour like #0a3a52."
+    },
+    "range01": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[min, max] with min <= max, both 0..1."
+    },
+    "positiveRange": {
+      "type": "array",
+      "items": { "type": "number", "exclusiveMinimum": 0 },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[min, max] px with 0 < min <= max."
+    },
+    "speedRange": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0, "maximum": 4000 },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[min, max] px/sec, capped at 4000 so nothing teleports."
+    },
+    "background": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "solid" },
+            "color": { "$ref": "#/definitions/hexColor" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "stops"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "gradient" },
+            "stops": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "required": ["at", "color"],
+                "additionalProperties": false,
+                "properties": {
+                  "at": { "type": "number", "minimum": 0, "maximum": 1, "description": "0 = top, 1 = bottom." },
+                  "color": { "$ref": "#/definitions/hexColor" }
+                }
+              },
+              "description": "Vertical gradient stops, top to bottom."
+            },
+            "band": {
+              "type": "object",
+              "required": ["color", "height"],
+              "additionalProperties": false,
+              "properties": {
+                "color": { "$ref": "#/definitions/hexColor" },
+                "height": { "type": "number", "exclusiveMinimum": 0, "description": "Band height in px (e.g. an aquarium seafloor)." }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "layer": {
+      "type": "object",
+      "required": ["count", "sprite", "motion"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 1, "maximum": 400, "description": "Entities in this layer (max 400 per layer, 800 total)." },
+        "sprite": { "$ref": "#/definitions/sprite" },
+        "motion": { "$ref": "#/definitions/motion" },
+        "size": { "$ref": "#/definitions/positiveRange", "description": "Sprite size range in px (font size for emoji/text; ignored for circle)." },
+        "wrap": { "type": "boolean", "description": "Wrap to the opposite edge when leaving the viewport. Default true." },
+        "flip": { "type": "boolean", "description": "Flip the sprite horizontally to face its heading. Default false." },
+        "alpha": { "$ref": "#/definitions/range01", "description": "Per-entity opacity range. Default [1, 1]." },
+        "blend": { "const": "lighter", "description": "Additive compositing (glow stacking). Omit for normal source-over." },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "$ref": "#/definitions/range01" },
+            "y": { "$ref": "#/definitions/range01" }
+          },
+          "description": "Fractional spawn window (constrains placement, not travel). Default full viewport."
+        },
+        "pulse": {
+          "type": "object",
+          "required": ["amp", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Opacity breathing amplitude, capped at 0.5." },
+            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; floor of 500 (max 2 Hz — flash-safety)." }
+          },
+          "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
+        },
+        "key": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Addressable name so setParam can use key.field paths." },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
+        }
+      },
+      "if": { "required": ["position"] },
+      "then": { "properties": { "count": { "const": 1 } } }
+    },
+    "sprite": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "glyphs"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "emoji" },
+            "glyphs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Emoji picked per entity (seeded)." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "strings"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "text" },
+            "strings": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "font": { "type": "string", "description": "CSS font shorthand, e.g. 'bold 24px monospace'." },
+            "align": { "enum": ["left", "center", "right"] },
+            "baseline": { "enum": ["top", "middle", "bottom"] },
+            "maxWidth": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "radius", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "circle" },
+            "radius": { "$ref": "#/definitions/positiveRange" },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "soft": { "type": "boolean", "description": "Radial falloff (glow orb) instead of a hard disc." }
+          }
+        }
+      ]
+    },
+    "motion": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "speed"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "drift" },
+            "speed": { "$ref": "#/definitions/speedRange" },
+            "angle": { "type": "number", "description": "Heading in degrees: 0 = right, 90 = down. Default 0." },
+            "bidirectional": { "type": "boolean", "description": "Randomly flip horizontal direction per entity (fish)." },
+            "bob": { "type": "number", "description": "Vertical wobble amplitude in px." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "rise" },
+            "speed": { "$ref": "#/definitions/speedRange" },
+            "sway": { "type": "number", "description": "Horizontal sway amplitude in px (bubbles)." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "bounce" },
+            "speed": { "$ref": "#/definitions/speedRange" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "static", "description": "Entity stays exactly where placed. Use with position for pinned elements." }
+          }
+        }
+      ]
+    }
+  }
+}
