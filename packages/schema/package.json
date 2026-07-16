@@ -1,10 +1,14 @@
 {
   "name": "@idle-screens/schema",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Declarative, agent-authorable saver format for idle-screens: validate a data spec, then compile it into a runnable, seeded, flash-safe SaverPlugin.",
   "license": "MIT",
   "author": "Shawn Partridge",
-  "repository": { "type": "git", "url": "https://github.com/shaaaaawn/idle-screens", "directory": "packages/schema" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/schema"
+  },
   "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
   "type": "module",
   "sideEffects": false,
