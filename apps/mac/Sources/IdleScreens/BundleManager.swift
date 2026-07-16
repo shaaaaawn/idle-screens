@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Resolves which web bundle to load — a locally cached update from the site,
@@ -72,9 +73,16 @@ final class BundleManager {
     SaverCatalogLoader.resolve(data: saversJSONData(), fallback: SaverCatalog.all)
   }
 
+  struct ManifestFile: Decodable {
+    let path: String
+    /// Lowercase hex SHA-256 of the file's bytes. Downloads that don't match
+    /// are rejected — a compromised host/CDN can't ship the app arbitrary code.
+    let sha256: String
+  }
+
   struct Manifest: Decodable {
     let version: Int
-    let files: [String]
+    let files: [ManifestFile]
   }
 
   /// Fetch the manifest; if newer than the cached version, download all files.
@@ -110,11 +118,20 @@ final class BundleManager {
     var ok = true
     for file in manifest.files {
       group.enter()
-      let src = baseURL.appendingPathComponent(file)
+      let src = baseURL.appendingPathComponent(file.path)
       URLSession.shared.dataTask(with: src) { data, _, _ in
         defer { group.leave() }
         guard let data else { ok = false; return }
-        let dest = staging.appendingPathComponent(file)
+        // Integrity gate: reject any file whose bytes don't hash to the
+        // manifest's SHA-256 (defends the update path against a compromised
+        // host/CDN or truncated transfer).
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard digest == file.sha256.lowercased() else {
+          NSLog("[idle-screens] integrity mismatch for \(file.path): got \(digest)")
+          ok = false
+          return
+        }
+        let dest = staging.appendingPathComponent(file.path)
         try? fm.createDirectory(
           at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         do { try data.write(to: dest) } catch { ok = false }
