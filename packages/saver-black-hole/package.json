@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/saver-black-hole",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Passthrough black-hole screensaver for idle-screens: gravitational lensing, roams the live page and eats its content. Seeded, paramSpace, control-track.",
   "license": "MIT",
   "author": "Shawn Partridge",
