@@ -1,6 +1,7 @@
 # Metaquarium → idle-screens Port Plan
 
-> Status: **active plan** (2026-07-17). Phase 1–2 in progress on `feature/saver-metaquarium`.
+> Status: **active plan** (2026-07-17). Phases 1–4 implemented on `feature/saver-metaquarium`
+> (walking skeleton + live farm pipeline + bloom + e2e). Phase 5 (idle-server) next.
 > Source artwork: `~/code/metaquarium` (Angular 17 + three.js NFT aquarium, metaquarium.xyz).
 > Channel server: `~/code/idle-server` (Cloudflare Worker + Durable Objects, idlescreens.com).
 
@@ -115,6 +116,22 @@ Verified seams in `~/code/idle-server`:
 - Rate limits (60 mutations/min/channel) and `isk_` token auth need no changes.
 - Mac app (optional, later): add to `site/mac/savers.ts` catalog; sha-256 manifest
   handles the bundle; WebGL2 works in WKWebView.
+
+## Live-endpoint findings (verified 2026-07-17)
+
+- The production farm cache is **up**: 512 fish with full OpenSea-style metadata.
+- The API **allowlists Origins server-side** — `metaquarium.xyz` works,
+  `localhost`/`idlescreens.com` are rejected. Dev uses a Vite proxy
+  (`/farm` → Lambda, wearing the metaquarium.xyz Origin); production needs either
+  an idle-server proxy route or an AWS CORS allowlist entry for idlescreens.com.
+- The `hermosa.thepartridge.net` IPFS gateway is currently **down**;
+  `ipfs.io` serves the CIDs with permissive CORS and is the default
+  `ipfsGateway` param.
+- **Live NFT fish GLBs are plain glTF — no DRACO** (only local NPC assets were
+  draco'd). The farm pipeline therefore needs no decoder; DRACO support is only
+  needed if bundled NPC breeds are added later.
+- Fish GLBs carry a `Swim` clip and `GLOW *` materials; the saver maps GLOW
+  materials to emissive so UnrealBloom picks them up (metaquarium's look).
 
 ## Phases
 

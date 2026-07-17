@@ -2,6 +2,7 @@ import {
   sampleTrack,
   defaultParams,
   type ControlTrack,
+  type ParamSpace,
   type ParamValue,
   type SaverContext,
   type SaverInstance,
@@ -25,23 +26,37 @@ import {
   Scene,
   SphereGeometry,
   SRGBColorSpace,
+  Vector2,
   Vector3,
   WebGLRenderer,
   MathUtils,
   type AnimationClip,
+  type Material,
   type Object3D,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { METAQUARIUM_PARAMS } from './manifest';
+import { farmMetadata, pickFarmFish, resolveAssetUrl } from './farm';
 import { makeFishPath, fishPose, type FishPath, type TankBounds } from './swim';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const WATER_Y = 88;
 const FISH_LENGTH = 18; // world units every model is normalized to
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
-/** Yaw correction if the model's forward axis isn't +Z (tuned per asset). */
-const MODEL_YAW_FIX = Math.PI / 2;
+const GLB_CONCURRENCY = 3;
+
+interface FishTemplate {
+  scene: Object3D;
+  clip: AnimationClip | null;
+  /** Uniform scale that normalizes the model to FISH_LENGTH. */
+  norm: number;
+  /** Yaw so the body's long axis faces +Z for lookAt. */
+  yaw: number;
+}
 
 interface Fish {
   group: Group;
@@ -54,6 +69,7 @@ interface Fish {
 
 class TankInstance implements SaverInstance {
   private readonly ctxSaver: SaverContext;
+  private readonly space: ParamSpace;
   private readonly canvas: HTMLCanvasElement;
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
@@ -63,6 +79,9 @@ class TankInstance implements SaverInstance {
   private readonly waterBase: Float32Array;
   private readonly fogColor = new Color();
   private readonly abort = new AbortController();
+  private readonly templates = new Map<string, Promise<FishTemplate | null>>();
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
   private fish: Fish[] = [];
   private disposed = false;
 
@@ -73,11 +92,13 @@ class TankInstance implements SaverInstance {
   private startT = 0;
   private t = 0;
 
-  private params: Record<string, ParamValue> = defaultParams(METAQUARIUM_PARAMS);
+  private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
 
-  constructor(ctx: SaverContext) {
+  constructor(ctx: SaverContext, space: ParamSpace) {
     this.ctxSaver = ctx;
+    this.space = space;
+    this.params = defaultParams(space);
     this.w = ctx.width;
     this.h = ctx.height;
 
@@ -130,80 +151,134 @@ class TankInstance implements SaverInstance {
     water.position.y = WATER_Y;
     this.scene.add(water);
 
-    // Fish stream in as the GLB arrives; failure falls back to procedural fish
-    // so the tank never mounts empty.
-    void this.loadFish(String(this.params.fishUrl ?? ''));
+    // Fish stream in as GLBs arrive; failures fall back to procedural fish so
+    // the tank never mounts empty.
+    void this.populate();
 
     this.paused = ctx.reducedMotion;
     if (this.paused) this.renderStill();
     else this.start();
   }
 
-  // ---- fish ----
-  private async loadFish(url: string): Promise<void> {
-    let template: Object3D | null = null;
-    let clip: AnimationClip | null = null;
-    try {
-      const res = await fetch(url, { signal: this.abort.signal });
-      if (!res.ok) throw new Error(`fish glb ${res.status}`);
-      const buf = await res.arrayBuffer();
-      const gltf = await new GLTFLoader().parseAsync(buf, '');
-      template = gltf.scene;
-      clip = gltf.animations[0] ?? null;
-    } catch {
-      if (this.disposed || this.abort.signal.aborted) return;
-      template = null; // procedural fallback below
-    }
+  // ---- fish sourcing ----
+  private str(key: string): string {
+    const v = this.params[key];
+    return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
+  }
+
+  /** Decide the tank's population: farm metadata when configured, else the
+   *  bundled single breed. Selection is seeded and stable by list index, so
+   *  which fish gets which swim path never depends on fetch arrival order. */
+  private async populate(): Promise<void> {
+    const farmUrl = this.str('farmUrl');
+    let urls: string[] = [];
+    if (farmUrl) urls = await this.farmFishUrls(farmUrl).catch(() => []);
+    if (urls.length === 0) urls = new Array<string>(MAX_FISH).fill(this.str('fishUrl'));
     if (this.disposed) return;
 
-    if (template) {
-      const size = new Box3().setFromObject(template).getSize(new Vector3());
-      const s = FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1);
-      template.scale.setScalar(s);
-    }
-
     const rng = this.ctxSaver.rng.fork(0x715);
-    for (let i = 0; i < MAX_FISH; i++) {
-      const path = makeFishPath(rng.fork(i), BOUNDS);
-      const group = new Group();
-      let mixer: AnimationMixer | null = null;
-      let tail: Object3D | null = null;
-      let clipDuration = 0;
-      if (template) {
-        const body = cloneSkinned(template);
-        body.rotation.y = MODEL_YAW_FIX;
-        group.add(body);
-        if (clip) {
-          mixer = new AnimationMixer(body);
-          mixer.clipAction(clip).play();
-          clipDuration = clip.duration;
-        }
-      } else {
-        const mat = new MeshStandardMaterial({ color: 0x3f8fbf, roughness: 0.6 });
-        const body = new Mesh(new SphereGeometry(FISH_LENGTH / 2, 12, 8), mat);
-        body.scale.set(1, 0.55, 0.4);
-        const tailMesh = new Mesh(new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8), mat);
-        tailMesh.rotation.z = Math.PI / 2;
-        tailMesh.position.x = -FISH_LENGTH * 0.62;
-        group.add(body, tailMesh);
-        group.rotation.y = 0; // procedural fish already faces +X; group yaw applied via lookAt
-        tail = tailMesh;
+    const jobs = urls.slice(0, MAX_FISH).map((url, i) => ({ url, path: makeFishPath(rng.fork(i), BOUNDS) }));
+
+    // Bounded-concurrency progressive spawn-in.
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < jobs.length && !this.disposed) {
+        const job = jobs[next++]!;
+        const tpl = await this.template(job.url);
+        if (this.disposed) return;
+        this.spawn(tpl, job.path);
       }
-      group.scale.multiplyScalar(path.scale);
-      this.scene.add(group);
-      this.fish.push({ group, path, mixer, clipDuration, tail });
-    }
+    };
+    await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
     if (this.paused) this.renderStill();
+  }
+
+  private async farmFishUrls(farmUrl: string): Promise<string[]> {
+    const res = await fetch(farmUrl, { signal: this.abort.signal });
+    if (!res.ok) throw new Error(`farm ${res.status}`);
+    const meta = farmMetadata(await res.json());
+    const tokens = this.str('tankTokens')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const picked = pickFarmFish(meta, tokens, this.ctxSaver.rng.fork(0xfa12), MAX_FISH);
+    const gateway = this.str('ipfsGateway');
+    return picked.map((f) => resolveAssetUrl(f['3d']!, gateway));
+  }
+
+  /** Fetch+parse a GLB once per URL; concurrent fish share the template. */
+  private template(url: string): Promise<FishTemplate | null> {
+    let p = this.templates.get(url);
+    if (!p) {
+      p = (async (): Promise<FishTemplate | null> => {
+        try {
+          const res = await fetch(url, { signal: this.abort.signal });
+          if (!res.ok) throw new Error(`fish glb ${res.status}`);
+          const buf = await res.arrayBuffer();
+          const gltf = await new GLTFLoader().parseAsync(buf, '');
+          const scene = gltf.scene;
+          scene.traverse((o) => {
+            const mats = (o as Partial<Mesh>).material;
+            for (const m of Array.isArray(mats) ? mats : mats ? [mats] : []) applyGlow(m);
+          });
+          const size = new Box3().setFromObject(scene).getSize(new Vector3());
+          return {
+            scene,
+            clip: gltf.animations[0] ?? null,
+            norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
+            // Long horizontal axis forward (+Z); models authored x-forward get yawed.
+            yaw: size.x > size.z ? Math.PI / 2 : 0,
+          };
+        } catch {
+          return null;
+        }
+      })();
+      this.templates.set(url, p);
+    }
+    return p;
+  }
+
+  private spawn(tpl: FishTemplate | null, path: FishPath): void {
+    const group = new Group();
+    let mixer: AnimationMixer | null = null;
+    let tail: Object3D | null = null;
+    let clipDuration = 0;
+    if (tpl) {
+      const body = cloneSkinned(tpl.scene);
+      body.scale.setScalar(tpl.norm);
+      body.rotation.y = tpl.yaw;
+      group.add(body);
+      if (tpl.clip) {
+        mixer = new AnimationMixer(body);
+        mixer.clipAction(tpl.clip).play();
+        clipDuration = tpl.clip.duration;
+      }
+    } else {
+      const mat = new MeshStandardMaterial({ color: 0x3f8fbf, roughness: 0.6 });
+      const body = new Mesh(new SphereGeometry(FISH_LENGTH / 2, 12, 8), mat);
+      body.scale.set(1, 0.55, 0.4);
+      const tailMesh = new Mesh(new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8), mat);
+      tailMesh.rotation.z = Math.PI / 2;
+      tailMesh.position.x = -FISH_LENGTH * 0.62;
+      group.add(body, tailMesh);
+      tail = tailMesh;
+    }
+    group.scale.multiplyScalar(path.scale);
+    this.scene.add(group);
+    this.fish.push({ group, path, mixer, clipDuration, tail });
+    // Observable population count for tests/tooling (main-thread only saver,
+    // so host is always a real element).
+    this.ctxSaver.host.dataset.mqFish = String(this.fish.length);
   }
 
   // ---- params / state ----
   private applyParams(t: number): void {
-    if (this.track) this.params = sampleTrack(METAQUARIUM_PARAMS, this.track, t);
+    if (this.track) this.params = sampleTrack(this.space, this.track, t);
   }
 
-  private num(key: keyof typeof METAQUARIUM_PARAMS): number {
+  private num(key: string): number {
     const v = this.params[key];
-    return typeof v === 'number' ? v : Number(METAQUARIUM_PARAMS[key].default);
+    return typeof v === 'number' ? v : Number(this.space[key]?.default ?? 0);
   }
 
   /** Everything on screen is a pure function of logical time `t` (ms). */
@@ -221,7 +296,7 @@ class TankInstance implements SaverInstance {
     );
     this.camera.lookAt(0, 38, 0);
 
-    const fogHex = String(this.params.fogColor ?? METAQUARIUM_PARAMS.fogColor.default);
+    const fogHex = String(this.params.fogColor ?? this.space.fogColor?.default ?? '#04101c');
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
     this.scene.background = this.fogColor;
@@ -251,6 +326,25 @@ class TankInstance implements SaverInstance {
     }
   }
 
+  // ---- render ----
+  private renderScene(): void {
+    const strength = this.num('bloomStrength');
+    if (strength <= 0) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    if (!this.composer) {
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.bloomPass = new UnrealBloomPass(new Vector2(this.w, this.h), strength, 0.3, 0.72);
+      this.composer.addPass(this.bloomPass);
+      this.composer.setPixelRatio(Math.min(this.ctxSaver.dpr, 2));
+      this.composer.setSize(this.w, this.h);
+    }
+    this.bloomPass!.strength = strength;
+    this.composer.render();
+  }
+
   // ---- loop ----
   private start(): void {
     if (this.frameId !== null || typeof requestAnimationFrame === 'undefined') return;
@@ -270,12 +364,12 @@ class TankInstance implements SaverInstance {
     if (this.startT === 0) this.startT = now;
     this.t = now - this.startT;
     this.setState(this.t);
-    this.renderer.render(this.scene, this.camera);
+    this.renderScene();
   }
 
   private renderStill(): void {
     this.setState(this.t);
-    this.renderer.render(this.scene, this.camera);
+    this.renderScene();
   }
 
   // ---- SaverInstance ----
@@ -294,6 +388,8 @@ class TankInstance implements SaverInstance {
     this.h = height;
     if (dpr !== undefined) this.renderer.setPixelRatio(Math.min(dpr, 2));
     this.renderer.setSize(width, height, false);
+    this.composer?.setSize(width, height);
+    if (dpr !== undefined) this.composer?.setPixelRatio(Math.min(dpr, 2));
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     if (this.paused) this.renderStill();
@@ -308,7 +404,7 @@ class TankInstance implements SaverInstance {
   renderFrame(t: number, _seed: number): void {
     this.t = t;
     this.setState(t);
-    this.renderer.render(this.scene, this.camera);
+    this.renderScene();
   }
 
   dispose(): void {
@@ -322,11 +418,22 @@ class TankInstance implements SaverInstance {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else if (mat) mat.dispose();
     });
+    this.composer?.dispose();
     this.renderer.dispose();
     if (this.ownsCanvas) this.canvas.remove();
   }
 }
 
-export function mountTank(ctx: SaverContext): SaverInstance {
-  return new TankInstance(ctx);
+/** Metaquarium's bloom cue: materials named "GLOW …" emit their base color. */
+function applyGlow(m: Material): void {
+  const mat = m as Partial<MeshStandardMaterial> & Material;
+  if (!/glow/i.test(mat.name)) return;
+  if (mat.emissive && mat.color) {
+    mat.emissive.copy(mat.color);
+    mat.emissiveIntensity = 0.9;
+  }
+}
+
+export function mountTank(ctx: SaverContext, space: ParamSpace = METAQUARIUM_PARAMS): SaverInstance {
+  return new TankInstance(ctx, space);
 }

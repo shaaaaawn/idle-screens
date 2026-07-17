@@ -87,6 +87,10 @@ importers:
       '@preact/signals-core':
         specifier: ^1.8.0
         version: 1.14.3
+    devDependencies:
+      three:
+        specifier: ^0.185.0
+        version: 0.185.1
 
   packages/capabilities: {}
 

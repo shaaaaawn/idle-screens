@@ -21,5 +21,8 @@
     "@idle-screens/schema": "workspace:*",
     "@idle-screens/validator": "workspace:*",
     "@preact/signals-core": "^1.8.0"
+  },
+  "devDependencies": {
+    "three": "^0.185.0"
   }
 }

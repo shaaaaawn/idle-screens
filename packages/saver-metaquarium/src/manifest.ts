@@ -1,4 +1,4 @@
-import type { ParamSpace, SaverManifest } from '@idle-screens/core';
+import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
 
 /**
  * Zero-dependency manifest module (type-only imports). The channel server
@@ -13,9 +13,18 @@ export const METAQUARIUM_PARAMS = {
   fishCount: { type: 'number', default: 7, min: 1, max: 24, ease: 'step' },
   swimSpeed: { type: 'number', default: 1, min: 0.2, max: 3, ease: 'smooth' },
   fogColor: { type: 'color', default: '#04101c', ease: 'smooth' },
-  /** GLB to populate the tank with. Later phases resolve tank/wallet ids to
-   *  per-fish URLs; the skeleton swims one breed. */
+  /** Full-scene bloom strength; 0 disables the composer entirely. Kept low by
+   *  default — glow, not strobe (the flash gate cares). */
+  bloomStrength: { type: 'number', default: 0.35, min: 0, max: 1.2, ease: 'smooth' },
+  /** Single-breed GLB used when no farm is configured (walking-skeleton mode). */
   fishUrl: { type: 'string', default: '/assets/metaquarium/beta-fish.glb' },
+  /** Metaquarium farm endpoint returning `{message: {metadata: [...]}}` (or a
+   *  bare metadata array). Empty = bundled-fish mode. */
+  farmUrl: { type: 'string', default: '' },
+  /** Gateway prefix that `ipfs://` asset URLs resolve through. */
+  ipfsGateway: { type: 'string', default: 'https://ipfs.io/ipfs/' },
+  /** Comma-separated token ids to show ("42,257"). Empty = seeded selection. */
+  tankTokens: { type: 'string', default: '' },
 } satisfies ParamSpace;
 
 export const metaquariumManifest: SaverManifest = {
@@ -28,6 +37,26 @@ export const metaquariumManifest: SaverManifest = {
   paramSpace: METAQUARIUM_PARAMS,
   a11y: {
     flashSafe: true,
-    notes: 'Slow ambient swim in a dark fogged tank; no strobing, no fast luminance cuts.',
+    notes: 'Slow ambient swim in a dark fogged tank; low static bloom, no strobing.',
   },
 };
+
+/** Options for {@link createMetaquarium}-style variants: a distinct id/label and
+ *  overridden param defaults (e.g. a farm-connected tank). */
+export interface MetaquariumOptions {
+  id?: string;
+  label?: string;
+  params?: Partial<Record<keyof typeof METAQUARIUM_PARAMS, ParamValue>>;
+}
+
+/** Clone the paramSpace with per-variant default overrides. */
+export function paramSpaceWith(
+  overrides: MetaquariumOptions['params'],
+): ParamSpace {
+  const out: ParamSpace = {};
+  for (const [k, def] of Object.entries(METAQUARIUM_PARAMS)) {
+    const o = overrides?.[k as keyof typeof METAQUARIUM_PARAMS];
+    out[k] = o === undefined ? def : { ...def, default: o };
+  }
+  return out;
+}

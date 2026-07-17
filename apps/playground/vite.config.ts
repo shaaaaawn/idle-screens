@@ -12,7 +12,21 @@ const src = (pkg: string): string =>
 
 export default defineConfig({
   base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
-  server: { port: 5177, strictPort: true },
+  server: {
+    port: 5177,
+    strictPort: true,
+    // The Metaquarium farm API allowlists Origins server-side (localhost is
+    // rejected), so dev fetches go through this proxy wearing the allowed
+    // Origin. Production (idlescreens.com) gets its own CORS entry or proxy.
+    proxy: {
+      '/farm': {
+        target: 'https://f0ag1g19u8.execute-api.us-west-1.amazonaws.com/production/backend',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/farm/, ''),
+        headers: { Origin: 'https://metaquarium.xyz' },
+      },
+    },
+  },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a
   // direct dep of this app so it resolves) instead of letting Vite discover it mid-load,
@@ -22,6 +36,7 @@ export default defineConfig({
     alias: {
       '@idle-screens/core': src('core'),
       '@idle-screens/saver-black-hole': src('saver-black-hole'),
+      '@idle-screens/saver-metaquarium': src('saver-metaquarium'),
       '@idle-screens/savers-classic': src('savers-classic'),
       '@idle-screens/schema': src('schema'),
       '@idle-screens/validator': src('validator'),

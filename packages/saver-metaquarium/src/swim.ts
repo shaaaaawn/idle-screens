@@ -75,7 +75,7 @@ export function fishPose(p: FishPath, tSec: number, speed = 1): FishPose {
   // Analytic tangent (d/dt), normalized enough for lookAt.
   const hx = p.rx * p.wx * Math.cos(ax);
   const hz = p.rz * p.wz * Math.cos(az);
-  const hy = p.ay * p.wy * Math.cos(ayp) * 0.35; // damp pitch so fish stay level-ish
+  const hy = p.ay * p.wy * Math.cos(ayp) * 0.2; // damp pitch so fish stay level-ish
   const m = Math.hypot(hx, hy, hz) || 1;
   return { x, y, z, hx: hx / m, hy: hy / m, hz: hz / m };
 }

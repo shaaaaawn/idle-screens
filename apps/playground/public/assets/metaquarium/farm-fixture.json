@@ -1,0 +1,24 @@
+{
+  "message": {
+    "metadata": [
+      {
+        "name": "Fish 1 of the Metaquarium",
+        "external_url": "https://eth.metaquarium.xyz/1",
+        "3d": "ipfs://beta-fish.glb",
+        "attributes": [{ "trait_type": "breed", "value": "betafish" }]
+      },
+      {
+        "name": "Fish 2 of the Metaquarium",
+        "external_url": "https://eth.metaquarium.xyz/2",
+        "3d": "ipfs://beta-fish.glb",
+        "attributes": [{ "trait_type": "breed", "value": "betafish" }]
+      },
+      {
+        "name": "Fish 3 of the Metaquarium",
+        "external_url": "https://eth.metaquarium.xyz/3",
+        "3d": "ipfs://beta-fish.glb",
+        "attributes": [{ "trait_type": "breed", "value": "betafish" }]
+      }
+    ]
+  }
+}
