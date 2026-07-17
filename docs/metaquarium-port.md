@@ -1,7 +1,12 @@
 # Metaquarium → idle-screens Port Plan
 
-> Status: **active plan** (2026-07-17). Phases 1–4 implemented on `feature/saver-metaquarium`
-> (walking skeleton + live farm pipeline + bloom + e2e). Phase 5 (idle-server) next.
+> Status: (2026-07-17) **Phases 1–5 implemented and verified end-to-end** on
+> `feature/saver-metaquarium` (this repo) + `feature/saver-metaquarium` (idle-server).
+> Verified locally: publishScene {id:"metaquarium", params} → channel page renders the
+> pinned NFT fish → live MCP setParam steering (camera/fog) with typed rejection of bad
+> params/paths → CSP report-only on channel pages. Remaining before deploy: publish
+> @idle-screens/core + /saver-metaquarium to npm and swap idle-server's file: links to
+> registry versions; Mac WKWebView smoke test; Phase 6 soak + pilot channel.
 > Source artwork: `~/code/metaquarium` (Angular 17 + three.js NFT aquarium, metaquarium.xyz).
 > Channel server: `~/code/idle-server` (Cloudflare Worker + Durable Objects, idlescreens.com).
 
