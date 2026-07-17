@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/savers-classic",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Classic screensavers for idle-screens (toasters, DVD, warp, rain, and more), ported to framework-agnostic saver plugins.",
   "license": "MIT",
   "author": "Shawn Partridge",

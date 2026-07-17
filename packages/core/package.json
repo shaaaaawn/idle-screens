@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Engine, <idle-screen> custom element, plugin registry, seeded RNG, control-track, and types for idle-screens.",
   "license": "MIT",
   "author": "Shawn Partridge",
