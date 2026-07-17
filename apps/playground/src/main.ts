@@ -11,7 +11,7 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { compileSaver, DASHBOARD_SPEC, LANTERNS_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
+import { compileSaver, DASHBOARD_SPEC, LANTERNS_SPEC, ORRERY_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
@@ -20,7 +20,7 @@ import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { formatBackendLabel, readPreviewBackend } from './preview-backend';
 
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard']);
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery']);
 
 interface SaverGroup {
   id: string;
@@ -39,6 +39,7 @@ const SAVER_GROUPS: SaverGroup[] = [
       compileSaver(LANTERNS_SPEC),
       compileSaver(SAKURA_SPEC),
       compileSaver(DASHBOARD_SPEC),
+      compileSaver(ORRERY_SPEC),
     ],
   },
 ];

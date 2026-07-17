@@ -122,6 +122,21 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       }
     }
   }
+  if (layer.spin !== undefined) {
+    if (!isNum(layer.spin)) err(`${path}.spin`, 'must be a number (degrees/sec)');
+    else if (Math.abs(layer.spin) > LIMITS.maxSpin) err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+  }
+  if (layer.grow !== undefined) {
+    if (!isObj(layer.grow)) err(`${path}.grow`, 'must be an object');
+    else {
+      if (!isNum(layer.grow.amp) || layer.grow.amp <= 0 || layer.grow.amp > LIMITS.maxGrowAmp) {
+        err(`${path}.grow.amp`, `must be within 0..${LIMITS.maxGrowAmp}`);
+      }
+      if (!isNum(layer.grow.period) || layer.grow.period < LIMITS.minPulsePeriod) {
+        err(`${path}.grow.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
+      }
+    }
+  }
 
   validateSprite(layer.sprite, `${path}.sprite`, err);
   validateMotion(layer.motion, `${path}.motion`, err);
@@ -174,8 +189,20 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     speedOk(motion.speed, `${path}.speed`);
   } else if (motion.type === 'static') {
     // No fields to validate — static motion has no parameters.
+  } else if (motion.type === 'orbit') {
+    if (!isRange(motion.speed)) err(`${path}.speed`, 'must be a [min,max] range');
+    else if (motion.speed[1] > LIMITS.maxOrbitSpeed) err(`${path}.speed`, `orbit speed exceeds cap ${LIMITS.maxOrbitSpeed} deg/sec`);
+    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (motion.center !== undefined) {
+      if (!isObj(motion.center) || !isNum(motion.center.x) || !isNum(motion.center.y)) {
+        err(`${path}.center`, 'must be {x, y} with numbers 0..1');
+      } else {
+        if (motion.center.x < 0 || motion.center.x > 1) err(`${path}.center.x`, 'must be 0..1');
+        if (motion.center.y < 0 || motion.center.y > 1) err(`${path}.center.y`, 'must be 0..1');
+      }
+    }
   } else {
-    err(`${path}.type`, 'must be drift | rise | bounce | static');
+    err(`${path}.type`, 'must be drift | rise | bounce | static | orbit');
   }
 }
 

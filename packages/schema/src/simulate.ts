@@ -12,12 +12,20 @@ export interface Entity {
   vx: number; // px/sec
   vy: number; // px/sec
   bob: number; // vertical bob / horizontal sway amplitude (px)
-  motion: 'drift' | 'rise' | 'bounce' | 'static';
+  motion: 'drift' | 'rise' | 'bounce' | 'static' | 'orbit';
   headingLeft: boolean;
   alpha: number; // resolved base opacity (default 1)
   pulseAmp: number; // opacity breathing amplitude (0 = none)
   pulsePeriod: number; // ms
   pulsePhase: number;
+  spinSpeed: number; // degrees/sec (0 = no rotation)
+  spinPhase: number; // seeded starting angle (radians)
+  growAmp: number; // size breathing amplitude as fraction (0 = none)
+  growPeriod: number; // ms
+  growPhase: number;
+  orbitR: number; // orbit radius (px, 0 = not orbiting)
+  orbitCx: number; // orbit center x (px)
+  orbitCy: number; // orbit center y (px)
 }
 
 export interface Placed {
@@ -61,12 +69,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
       motion = 'rise';
       vy = -rng.range(m.speed[0], m.speed[1]); // upward
       bob = m.sway ?? 0;
-    } else {
+    } else if (m.type === 'bounce') {
       motion = 'bounce';
       const s = rng.range(m.speed[0], m.speed[1]);
       const a = rng.range(0, Math.PI * 2);
       vx = s * Math.cos(a);
       vy = s * Math.sin(a);
+    } else if (m.type === 'orbit') {
+      motion = 'orbit';
+      vx = rng.range(m.speed[0], m.speed[1]); // angular speed in deg/sec, stored in vx
     }
 
     let x0: number;
@@ -99,6 +110,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number):
       pulseAmp: layer.pulse?.amp ?? 0,
       pulsePeriod: layer.pulse?.period ?? 1000,
       pulsePhase: layer.pulse ? rng.range(0, Math.PI * 2) : 0,
+      // New draws AFTER pulsePhase — guarded so existing specs keep identical streams.
+      spinSpeed: layer.spin ? (layer.spin * Math.PI) / 180 : 0, // deg/sec → rad/sec
+      spinPhase: layer.spin ? rng.range(0, Math.PI * 2) : 0,
+      growAmp: layer.grow?.amp ?? 0,
+      growPeriod: layer.grow?.period ?? 1000,
+      growPhase: layer.grow ? rng.range(0, Math.PI * 2) : 0,
+      orbitR: m.type === 'orbit' ? rng.range(m.radius[0], m.radius[1]) : 0,
+      orbitCx: m.type === 'orbit' ? (m.center?.x ?? 0.5) * w : 0,
+      orbitCy: m.type === 'orbit' ? (m.center?.y ?? 0.5) * h : 0,
     });
   }
   return out;
@@ -109,6 +129,19 @@ export function alphaAt(e: Entity, t: number): number {
   if (!e.pulseAmp) return e.alpha;
   const a = e.alpha + e.pulseAmp * Math.sin((t * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
   return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+
+/** Analytic size multiplier at time `t` (ms). Pure, clamped to > 0. */
+export function sizeAt(e: Entity, t: number): number {
+  if (!e.growAmp) return e.size;
+  const s = e.size * (1 + e.growAmp * Math.sin((t * 2 * Math.PI) / e.growPeriod + e.growPhase));
+  return s > 0 ? s : 0.1;
+}
+
+/** Analytic rotation angle at time `t` (ms) in radians. Pure. */
+export function rotationAt(e: Entity, t: number): number {
+  if (!e.spinSpeed) return 0;
+  return e.spinPhase + e.spinSpeed * (t / 1000);
 }
 
 function wrap(v: number, min: number, max: number): number {
@@ -127,6 +160,14 @@ function reflect(v: number, min: number, max: number): number {
 /** Analytic position of an entity at logical time `t` (ms). Pure & deterministic. */
 export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
   if (e.motion === 'static') return { x: e.x0, y: e.y0, flip: false };
+  if (e.motion === 'orbit') {
+    const angle = e.phase + (e.vx * Math.PI / 180) * (t / 1000);
+    return {
+      x: e.orbitCx + e.orbitR * Math.cos(angle),
+      y: e.orbitCy + e.orbitR * Math.sin(angle),
+      flip: false,
+    };
+  }
   const dt = t / 1000;
   const m = e.size;
   if (e.motion === 'bounce') {

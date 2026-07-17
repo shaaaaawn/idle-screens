@@ -7,7 +7,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, validateSpec } from './validate';
-import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
+import { alphaAt, buildEntities, positionAt, rotationAt, sizeAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -160,11 +160,18 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     const p = positionAt(e, t, this.w, this.h);
     const sprite = built.layer.sprite;
+    const sz = sizeAt(e, t);
+    const rot = rotationAt(e, t);
     ctx.globalAlpha = alphaAt(e, t);
     if (sprite.kind === 'circle') {
-      const r = e.size / 2;
+      const r = sz / 2;
+      ctx.save();
+      if (rot) {
+        ctx.translate(p.x, p.y);
+        ctx.rotate(rot);
+        ctx.translate(-p.x, -p.y);
+      }
       if (sprite.soft) {
-        // Glow orb: solid core fading radially to transparent (pairs with blend:'lighter').
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
         g.addColorStop(0, sprite.color);
         g.addColorStop(0.35, hexToRgba(sprite.color, 0.75));
@@ -176,20 +183,22 @@ class SpecInstance implements SaverInstance {
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
       return;
     }
     ctx.save();
     ctx.translate(p.x, p.y);
+    if (rot) ctx.rotate(rot);
     if (p.flip && built.layer.flip) ctx.scale(-1, 1);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (sprite.kind === 'emoji') {
-      ctx.font = `${e.size}px serif`;
+      ctx.font = `${sz}px serif`;
       ctx.fillText(sprite.glyphs[e.spriteIndex] ?? sprite.glyphs[0]!, 0, 0);
     } else {
       ctx.textAlign = sprite.align ?? 'center';
       ctx.textBaseline = sprite.baseline ?? 'middle';
-      ctx.font = sprite.font ?? `${e.size}px system-ui, sans-serif`;
+      ctx.font = sprite.font ?? `${sz}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       const text = sprite.strings[e.spriteIndex] ?? sprite.strings[0]!;
       if (sprite.maxWidth) ctx.fillText(text, 0, 0, sprite.maxWidth);

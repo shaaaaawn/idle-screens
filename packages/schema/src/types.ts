@@ -67,6 +67,17 @@ export interface LayerSpec {
    */
   pulse?: { amp: number; period: number };
   /**
+   * Per-entity rotation speed in degrees/sec (positive = clockwise).
+   * Each entity gets a seeded starting angle. Composes with any motion type.
+   */
+  spin?: number;
+  /**
+   * Sinusoidal size breathing, parallel to `pulse` for opacity. `amp` is a
+   * fraction of base size (0.3 = ±30 %). `period` in ms with the same
+   * flash-safety floor as pulse. Per-entity seeded phase.
+   */
+  grow?: { amp: number; period: number };
+  /**
    * Addressable name for this layer. Enables `setParam` to use `key.field` paths
    * instead of `layers.N.field` indices. Also makes specs self-documenting.
    */
@@ -106,7 +117,13 @@ export type MotionSpec =
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
   | { type: 'bounce'; speed: [number, number] }
   /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
-  | { type: 'static' };
+  | { type: 'static' }
+  /**
+   * Orbit around a center point. Each entity gets a seeded radius from `radius`
+   * and a seeded phase. `speed` is angular velocity in degrees/sec. `center` is
+   * fractional {x, y} (default {0.5, 0.5} = viewport center).
+   */
+  | { type: 'orbit'; speed: [number, number]; radius: [number, number]; center?: { x: number; y: number } };
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
@@ -127,4 +144,7 @@ export const LIMITS = {
   maxSpeed: 4000, // px/sec — bounds motion so nothing teleports
   maxPulseAmp: 0.5, // opacity breathing amplitude cap
   minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)
+  maxSpin: 360, // degrees/sec — one full revolution per second
+  maxGrowAmp: 0.8, // size breathing amplitude cap (fraction of base size)
+  maxOrbitSpeed: 180, // degrees/sec — half a revolution per second
 } as const;

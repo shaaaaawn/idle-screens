@@ -125,6 +125,8 @@ export function structuralSignature(spec: SaverSpec): string {
       l.flip,
       l.alpha,
       l.pulse,
+      l.spin,
+      l.grow,
       l.sprite.kind,
       l.sprite.kind === 'circle' ? l.sprite.radius : undefined,
       l.sprite.kind === 'emoji'

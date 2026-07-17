@@ -19,7 +19,7 @@ describe('example specs', () => {
   });
 
   it('SCHEMA_EXAMPLES catalog matches EXAMPLE_SPECS', () => {
-    expect(SCHEMA_EXAMPLES).toHaveLength(6);
+    expect(SCHEMA_EXAMPLES).toHaveLength(7);
     expect(EXAMPLE_SPECS.map((s) => s.id)).toEqual(SCHEMA_EXAMPLES.map((e) => e.id));
   });
 

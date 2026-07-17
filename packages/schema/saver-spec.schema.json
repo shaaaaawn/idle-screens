@@ -124,6 +124,17 @@
           },
           "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
         },
+        "spin": { "type": "number", "minimum": -360, "maximum": 360, "description": "Per-entity rotation speed in degrees/sec (positive = clockwise). Each entity gets a seeded starting angle." },
+        "grow": {
+          "type": "object",
+          "required": ["amp", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.8, "description": "Size breathing amplitude as fraction of base size (0.3 = ±30%)." },
+            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; same flash-safety floor as pulse." }
+          },
+          "description": "Sinusoidal size breathing. Per-entity seeded phase. Composes with any sprite kind."
+        },
         "key": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Addressable name so setParam can use key.field paths." },
         "position": {
           "type": "object",
@@ -216,6 +227,32 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "static", "description": "Entity stays exactly where placed. Use with position for pinned elements." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed", "radius"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "orbit" },
+            "speed": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 180 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[min, max] angular velocity in degrees/sec, capped at 180."
+            },
+            "radius": { "$ref": "#/definitions/positiveRange", "description": "[min, max] orbit radius in px." },
+            "center": {
+              "type": "object",
+              "required": ["x", "y"],
+              "additionalProperties": false,
+              "properties": {
+                "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                "y": { "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "description": "Orbit center as fractional viewport position. Default {0.5, 0.5}."
+            }
           }
         }
       ]
