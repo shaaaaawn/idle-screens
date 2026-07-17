@@ -4,11 +4,11 @@ import { CLASSIC_SAVERS } from './index';
 const EXPECTED_IDS = [
   'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain', 'globe',
   'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages', 'messages2',
-  'pipes', 'bsod', 'flurry', 'fluid', 'reaction-diffusion',
+  'pipes', 'bsod', 'flurry', 'fluid', 'reaction-diffusion', 'mystify',
 ];
 
 describe('CLASSIC_SAVERS manifests (M1/M2)', () => {
-  it('M2: exports exactly the expected 18 saver ids', () => {
+  it('M2: exports exactly the expected 19 saver ids', () => {
     expect(CLASSIC_SAVERS.map((s) => s.manifest.id)).toEqual(EXPECTED_IDS);
   });
 

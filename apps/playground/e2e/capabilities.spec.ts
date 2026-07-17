@@ -69,14 +69,14 @@ test('reduced-motion DEGRADES moving savers (respects fallback, does not block)'
   expect(r['globe']!.status).toBe('ok'); // calm stays full-fidelity
 });
 
-test('the panel visibly re-evaluates when you simulate a minimal device', async ({ page }) => {
-  await page.goto('/#dev');
-  await page.waitForFunction(() => !!window.__caps);
-  await page.locator('#cap-sim').scrollIntoViewIfNeeded();
-  await page.locator('#cap-sim').selectOption('minimal');
-  await expect.poll(() => page.locator('#cap-tier').textContent()).toBe('minimal');
-  // the summary must now show some blocked savers (not "14 ok · 0 blocked")
-  const summary = await page.locator('#cap-summary').textContent();
-  expect(summary).toMatch(/blocked/);
-  expect(summary).not.toMatch(/0 blocked/);
+test('evaluate() blocks canvas savers on a minimal device profile', async ({ page }) => {
+  await ready(page);
+  const blocked = await page.evaluate(() => {
+    const minimal = {
+      backends: { css: true, canvas2d: false, webgl2: false, webgpu: false, offscreenCanvas: false },
+      saveData: true,
+    };
+    return window.__caps!.evaluate(minimal).filter((r) => r.status === 'blocked').length;
+  });
+  expect(blocked).toBeGreaterThan(0);
 });

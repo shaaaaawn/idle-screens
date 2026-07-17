@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>idle-screens</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; cursor: none; }
+    #host { position: fixed; inset: 0; }
+    #hint {
+      position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%);
+      font: 500 15px/1.4 system-ui, -apple-system, sans-serif;
+      color: rgba(255,255,255,.82); letter-spacing: .01em;
+      background: rgba(0,0,0,.45); padding: 9px 18px; border-radius: 999px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      opacity: 0; transition: opacity .5s ease; pointer-events: none;
+      white-space: nowrap;
+    }
+    #hint.show { opacity: 1; }
+    #hint .sep { color: rgba(255,255,255,.35); margin: 0 8px; }
+    #hint .keys { color: rgba(255,255,255,.55); font-size: 13px; }
+    #toast {
+      position: fixed; left: 50%; top: 42px; transform: translateX(-50%);
+      font: 600 14px system-ui, sans-serif; color: #fff;
+      background: rgba(0,0,0,.55); padding: 8px 16px; border-radius: 10px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      opacity: 0; transition: opacity .35s ease; pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <div id="hint"></div>
+  <div id="toast"></div>
+  <script src="./assets/main.js"></script>
+</body>
+</html>

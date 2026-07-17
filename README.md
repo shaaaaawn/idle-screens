@@ -33,7 +33,7 @@ control signals do.
    +----------v-----------+  +-----v-----------+  +------v----------+
    | @idle-screens/       |  | @idle-screens/  |  | @idle-screens/  |
    | saver-black-hole     |  | savers-classic  |  | schema          |
-   | passthrough lensing  |  | 13 classic      |  | declarative     |
+   | passthrough lensing  |  | 19 classic      |  | declarative     |
    | saver                |  | savers          |  | saver format    |
    +----------------------+  +-----------------+  +-----------------+
 
@@ -63,7 +63,7 @@ development and testing.
 | --- | --- |
 | [`@idle-screens/core`](packages/core) | Engine + `<idle-screen>` custom element, idle detection, plugin registry, seeded RNG, control-track, types. |
 | [`@idle-screens/saver-black-hole`](packages/saver-black-hole) | The signature passthrough saver: a gravitational-lensing black hole that roams and eats the live page. Seeded + paramSpace + control-track. |
-| [`@idle-screens/savers-classic`](packages/savers-classic) | 13 classic savers (toasters, DVD, warp, fish, rain, globe, spotlight, and more) ported to framework-agnostic saver plugins. |
+| [`@idle-screens/savers-classic`](packages/savers-classic) | 19 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
 | [`@idle-screens/validator`](packages/validator) | Photosensitivity (WCAG 2.3.1 flash) + performance validation. Feed it luminance samples and frame times, get a pass/fail safety verdict. |
 | [`@idle-screens/capabilities`](packages/capabilities) | Device and capability detection + saver eligibility tiering. Pure decide (Node-testable) + a thin browser detector. |
 | [`@idle-screens/schema`](packages/schema) | Declarative, agent-authorable saver format. Validate a data spec, then compile it into a runnable, seeded, flash-safe SaverPlugin. |

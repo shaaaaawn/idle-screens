@@ -68,6 +68,7 @@ export function runIdleWorker(
   let instance: SaverInstance | null = null;
   let activeCanvas: OffscreenCanvas | null = null;
   let usingPolyfill = false;
+  let mountGen = 0;
 
   const post = (msg: WorkerOutbound): void => {
     self.postMessage(msg);
@@ -94,6 +95,7 @@ export function runIdleWorker(
       dpr: number; reducedMotion: boolean;
       refreshRate?: number; forceRafPolyfill?: boolean;
     },
+    gen: number,
   ): void => {
     if (msg.forceRafPolyfill) {
       installRafPolyfill(msg.refreshRate);
@@ -124,16 +126,26 @@ export function runIdleWorker(
       const result = plugin.mount(ctx);
       if (result instanceof Promise) {
         result.then((inst) => {
+          if (gen !== mountGen) {
+            inst.dispose();
+            return;
+          }
           instance = inst;
           post({ type: 'mounted' });
         }).catch((err: unknown) => {
+          if (gen !== mountGen) return;
           post({ type: 'error', message: String(err) });
         });
       } else {
+        if (gen !== mountGen) {
+          result.dispose();
+          return;
+        }
         instance = result;
         post({ type: 'mounted' });
       }
     } catch (err: unknown) {
+      if (gen !== mountGen) return;
       post({ type: 'error', message: String(err) });
     }
   };
@@ -147,7 +159,10 @@ export function runIdleWorker(
           post({ type: 'error', message: `unknown saver: ${msg.saverId}` });
           return;
         }
-        mountPlugin(plugin, msg.canvas, msg);
+        instance?.dispose();
+        instance = null;
+        const gen = ++mountGen;
+        mountPlugin(plugin, msg.canvas, msg, gen);
         break;
       }
       case 'mount-spec': {
@@ -157,7 +172,10 @@ export function runIdleWorker(
         }
         try {
           const plugin = opts.compiler(msg.spec);
-          mountPlugin(plugin, msg.canvas, msg);
+          instance?.dispose();
+          instance = null;
+          const gen = ++mountGen;
+          mountPlugin(plugin, msg.canvas, msg, gen);
         } catch (err: unknown) {
           post({ type: 'error', message: String(err) });
         }
@@ -199,6 +217,7 @@ export function runIdleWorker(
         break;
       }
       case 'dispose':
+        mountGen++;
         instance?.dispose();
         instance = null;
         activeCanvas = null;

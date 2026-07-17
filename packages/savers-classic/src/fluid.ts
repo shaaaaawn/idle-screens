@@ -1,6 +1,7 @@
 /// <reference types="@webgpu/types" />
 import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
 import { FluidGPU } from './fluid-gpu';
+import { gpuMainThreadEligible } from './gpu-eligible';
 import {
   DT,
   DENS_DECAY,
@@ -21,6 +22,7 @@ export const fluidManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true },
+  workerReady: true,
 };
 
 const N = 96;
@@ -38,8 +40,8 @@ class FluidCPU implements SaverInstance {
   private readonly ctxSaver: SaverContext;
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly gc: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  private readonly buf: HTMLCanvasElement;
-  private readonly bufCtx: CanvasRenderingContext2D;
+  private readonly buf: HTMLCanvasElement | OffscreenCanvas;
+  private readonly bufCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private readonly img: ImageData;
   private w = 0;
   private h = 0;
@@ -60,6 +62,8 @@ class FluidCPU implements SaverInstance {
   private t = 0;
   private frameId: number | null = null;
   private paused = false;
+  private lastPreviewMs = -1;
+  private static readonly PREVIEW_FRAME_MS = 1000 / 60;
 
   constructor(ctx: SaverContext) {
     this.ctxSaver = ctx;
@@ -85,10 +89,12 @@ class FluidCPU implements SaverInstance {
     if (!gc) throw new Error('fluid: no 2d context');
     this.gc = gc;
 
-    this.buf = document.createElement('canvas');
-    this.buf.width = N;
-    this.buf.height = N;
-    this.bufCtx = this.buf.getContext('2d')!;
+    this.buf = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(N, N)
+      : Object.assign(document.createElement('canvas'), { width: N, height: N });
+    const bc = this.buf.getContext('2d');
+    if (!bc) throw new Error('fluid: no buffer 2d context');
+    this.bufCtx = bc as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     this.img = new ImageData(N, N);
 
     this.emitters = this.buildEmitters(ctx.rng);
@@ -347,6 +353,45 @@ class FluidCPU implements SaverInstance {
     this.render();
   }
 
+  private hardReset(): void {
+    this.u.fill(0);
+    this.v.fill(0);
+    this.u0.fill(0);
+    this.v0.fill(0);
+    this.dr.fill(0);
+    this.dg.fill(0);
+    this.db.fill(0);
+    this.dr0.fill(0);
+    this.dg0.fill(0);
+    this.db0.fill(0);
+    this.t = 0;
+    this.emitters = this.buildEmitters(this.ctxSaver.rng);
+    this.lastPreviewMs = -1;
+  }
+
+  previewAt(ms: number): void {
+    this.stop();
+    const frameMs = FluidCPU.PREVIEW_FRAME_MS;
+    if (ms < this.lastPreviewMs || this.lastPreviewMs < 0) {
+      this.hardReset();
+    }
+    const fromFrame = Math.floor(Math.max(0, this.lastPreviewMs) / frameMs);
+    const toFrame = Math.floor(ms / frameMs);
+    if (toFrame === 0 && fromFrame === 0) {
+      for (let i = 0; i < 200; i++) {
+        this.t += DT;
+        this.simStep();
+      }
+    } else {
+      for (let f = fromFrame; f < toFrame; f++) {
+        this.t += DT;
+        this.simStep();
+      }
+    }
+    this.lastPreviewMs = ms;
+    this.render();
+  }
+
   setPaused(paused: boolean): void {
     this.paused = paused;
     if (paused) this.stop();
@@ -370,14 +415,20 @@ class FluidCPU implements SaverInstance {
 export const fluid: SaverPlugin = {
   manifest: fluidManifest,
   async mount(ctx: SaverContext): Promise<SaverInstance> {
-    try {
-      const adapter = await navigator.gpu?.requestAdapter();
-      if (adapter) {
-        const device = await adapter.requestDevice();
-        return new FluidGPU(ctx, device);
+    if (gpuMainThreadEligible(ctx)) {
+      try {
+        const adapter = await navigator.gpu?.requestAdapter();
+        if (adapter) {
+          try {
+            const device = await adapter.requestDevice();
+            return new FluidGPU(ctx, device);
+          } catch {
+            /* GPU init failed — fall through to canvas2d */
+          }
+        }
+      } catch {
+        /* WebGPU unavailable — fall through to canvas2d */
       }
-    } catch {
-      /* WebGPU unavailable — fall through to canvas2d */
     }
     return new FluidCPU(ctx);
   },

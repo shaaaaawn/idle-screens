@@ -1,6 +1,7 @@
 /// <reference types="@webgpu/types" />
 import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
 import { ReactionDiffusionGPU } from './reaction-diffusion-gpu';
+import { gpuMainThreadEligible } from './gpu-eligible';
 import {
   RD_DU, RD_DV, RD_F, RD_K, RD_DT,
   SEED_R, SEED_COUNT, RESEED_INTERVAL, RESEED_BATCH,
@@ -16,6 +17,7 @@ export const reactionDiffusionManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true },
+  workerReady: true,
 };
 
 const N = 256;
@@ -25,8 +27,8 @@ class ReactionDiffusionCPU implements SaverInstance {
   private readonly ctxSaver: SaverContext;
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly gc: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  private readonly buf: HTMLCanvasElement;
-  private readonly bufCtx: CanvasRenderingContext2D;
+  private readonly buf: HTMLCanvasElement | OffscreenCanvas;
+  private readonly bufCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private readonly img: ImageData;
   private w: number;
   private h: number;
@@ -65,10 +67,12 @@ class ReactionDiffusionCPU implements SaverInstance {
     if (!gc) throw new Error('reaction-diffusion: no 2d context');
     this.gc = gc;
 
-    this.buf = document.createElement('canvas');
-    this.buf.width = N;
-    this.buf.height = N;
-    this.bufCtx = this.buf.getContext('2d')!;
+    this.buf = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(N, N)
+      : Object.assign(document.createElement('canvas'), { width: N, height: N });
+    const bc = this.buf.getContext('2d');
+    if (!bc) throw new Error('reaction-diffusion: no buffer 2d context');
+    this.bufCtx = bc as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     this.img = new ImageData(N, N);
 
     this.u.fill(1);
@@ -179,14 +183,20 @@ class ReactionDiffusionCPU implements SaverInstance {
 export const reactionDiffusion: SaverPlugin = {
   manifest: reactionDiffusionManifest,
   async mount(ctx: SaverContext): Promise<SaverInstance> {
-    try {
-      const adapter = await navigator.gpu?.requestAdapter();
-      if (adapter) {
-        const device = await adapter.requestDevice();
-        return new ReactionDiffusionGPU(ctx, device);
+    if (gpuMainThreadEligible(ctx)) {
+      try {
+        const adapter = await navigator.gpu?.requestAdapter();
+        if (adapter) {
+          try {
+            const device = await adapter.requestDevice();
+            return new ReactionDiffusionGPU(ctx, device);
+          } catch {
+            /* GPU init failed — fall through to canvas2d */
+          }
+        }
+      } catch {
+        /* WebGPU unavailable — fall through to canvas2d */
       }
-    } catch {
-      /* WebGPU unavailable — fall through to canvas2d */
     }
     return new ReactionDiffusionCPU(ctx);
   },

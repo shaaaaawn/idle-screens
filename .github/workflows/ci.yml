@@ -23,7 +23,7 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      - run: pnpm test:coverage
       - name: Install Playwright
         run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
       - name: E2E (element + savers + determinism + config menu)

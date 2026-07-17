@@ -19,25 +19,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./saver-spec.schema.json": "./saver-spec.schema.json"
   },
-  "publishConfig": {
-    "access": "public"
-  },
-  "keywords": [
-    "screensaver",
-    "idle",
-    "ambient",
-    "declarative",
-    "schema",
-    "canvas"
-  ],
-  "bugs": {
-    "url": "https://github.com/shaaaaawn/idle-screens/issues"
-  },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": { "access": "public" },
+  "keywords": ["screensaver", "idle", "ambient", "declarative", "schema", "canvas"],
+  "bugs": { "url": "https://github.com/shaaaaawn/idle-screens/issues" },
+  "files": ["dist", "saver-spec.schema.json", "FORMAT.md"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -48,6 +36,7 @@
     "@idle-screens/core": "workspace:*"
   },
   "devDependencies": {
-    "@idle-screens/core": "workspace:*"
+    "@idle-screens/core": "workspace:*",
+    "ajv": "^8.17.1"
   }
 }

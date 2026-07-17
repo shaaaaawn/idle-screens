@@ -9,6 +9,7 @@ export const flurryManifest: SaverManifest = {
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
   a11y: { flashSafe: true },
+  workerReady: true,
 };
 
 const STREAM_COUNT = 5;
@@ -117,7 +118,7 @@ class FlurryInstance implements SaverInstance {
     return [x, y];
   }
 
-  private drawFrame(dt: number): void {
+  private drawFrame(_dt: number): void {
     const ctx = this.ctx;
 
     ctx.globalCompositeOperation = 'source-over';

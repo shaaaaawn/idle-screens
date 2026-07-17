@@ -131,6 +131,11 @@ class SpotlightInstance implements SaverInstance {
     ctx.fill();
   }
 
+  previewAt(t: number): void {
+    this.clock = t;
+    this.render();
+  }
+
   setPaused(paused: boolean): void {
     this.paused = paused;
     if (paused) {

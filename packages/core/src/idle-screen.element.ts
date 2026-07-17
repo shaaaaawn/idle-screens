@@ -20,6 +20,10 @@ const STYLE = `
   @keyframes ss-out { from { opacity: 1; } to { opacity: 0; } }
   .surface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   .surface > canvas { display: block; width: 100%; height: 100%; }
+  /* Host-owned fallback markup (<x slot="fallback">), shown only when the active
+     saver fails to mount — the host decides what a broken saver looks like. */
+  .fallback { position: absolute; inset: 0; display: none; place-items: center; }
+  dialog.frame.show-fallback .fallback { display: grid; }
   .clock {
     position: absolute; top: 10px; right: 12px; text-align: right;
     font-family: 'Orbitron', system-ui, sans-serif; pointer-events: none;
@@ -196,7 +200,14 @@ export class IdleScreenElement extends HostBase {
     this.hintEl = document.createElement('div');
     this.hintEl.className = 'hint';
     this.hintEl.textContent = 'press any key';
-    this.dialog.append(this.surface, this.clockEl, this.hintEl);
+    // Host-owned fallback (AVAL-style): light-DOM children with slot="fallback"
+    // render here when a saver fails to mount, instead of a black screen.
+    const fallback = document.createElement('div');
+    fallback.className = 'fallback';
+    const slot = document.createElement('slot');
+    slot.name = 'fallback';
+    fallback.append(slot);
+    this.dialog.append(this.surface, fallback, this.clockEl, this.hintEl);
     root.append(style, this.dialog);
 
     for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const) {
@@ -391,6 +402,7 @@ export class IdleScreenElement extends HostBase {
         }
         this.instance = inst;
         inst.setPaused(eng.reducedMotion.value);
+        this.dialog.classList.remove('show-fallback');
         return;
       } catch {
         // Worker failed — fall through to main-thread mount
@@ -398,7 +410,7 @@ export class IdleScreenElement extends HostBase {
         if (token !== this.mountToken) return;
       }
     }
-    {
+    try {
       const inst = await plugin.mount({
         host: this.surface,
         dpr,
@@ -415,6 +427,14 @@ export class IdleScreenElement extends HostBase {
       }
       this.instance = inst;
       inst.setPaused(eng.reducedMotion.value);
+      this.dialog.classList.remove('show-fallback');
+    } catch (err) {
+      // Saver failed to mount — show the host's fallback slot instead of a
+      // black screen. The host owns what "broken" looks like.
+      if (token !== this.mountToken) return;
+      console.warn(`[idle-screen] saver "${plugin.manifest.id}" failed to mount:`, err);
+      this.surface.replaceChildren();
+      this.dialog.classList.add('show-fallback');
     }
   }
 
@@ -529,6 +549,7 @@ export class IdleScreenElement extends HostBase {
     if (!this.dialog?.open) return;
     window.removeEventListener('resize', this.onResize);
     if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
+    this.dialog.classList.remove('show-fallback');
     this.hintEl.classList.remove('show');
     if (this.hintTimer) clearTimeout(this.hintTimer);
     void this.disposeInstance();

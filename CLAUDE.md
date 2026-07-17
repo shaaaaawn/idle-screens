@@ -55,9 +55,63 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 - **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main` and `develop`, plus PRs and `workflow_call`.
 - **Release** (`.github/workflows/release.yml`): uses `changesets/action` to version-bump and publish to npm on push to `main`. Requires `NPM_TOKEN` secret (granular access token with "Bypass 2FA"). Both `NPM_TOKEN` and `NODE_AUTH_TOKEN` env vars must be set (setup-node creates `.npmrc` using `NODE_AUTH_TOKEN`, overriding changesets' `NPM_TOKEN` `.npmrc`).
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
-- **Changesets** for versioning/publishing. Config: `access: "public"`, `baseBranch: "main"`, playground is ignored. Run `pnpm changeset` to add a changeset before publishing.
+- **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
+
+## Releasing (changesets)
+
+Changesets version and publish **only the six npm packages** in `packages/`. They
+do not gate CI, the playground, or the Mac app.
+
+### When to add a changeset
+
+Add a `.changeset/*.md` file **when merging to `main`** if the release includes
+consumer-facing changes in any publishable package:
+
+| Change | Typical package(s) | Bump |
+| --- | --- | --- |
+| Engine / element / worker API | `@idle-screens/core` | minor or patch |
+| New or changed saver | `@idle-screens/savers-classic` or `@idle-screens/saver-black-hole` | minor |
+| Schema format or compiler | `@idle-screens/schema` | minor (breaking → major) |
+| Validator or capabilities API | `@idle-screens/validator` or `@idle-screens/capabilities` | minor or patch |
+
+One changeset per release batch is fine — summarize the whole npm-facing delta in
+a single file. Run `pnpm changeset` interactively, or author the markdown by
+hand (see `.changeset/worker-savers-steering.md` for the format).
+
+### When you do **not** need a changeset
+
+- Playground / workbench UI (`apps/playground` — explicitly ignored in config)
+- Mac app (`apps/mac` — ships via `mac-v*` tag, not npm)
+- Docs, tests, CI, refactors with no published API change
+- Work that stays on `develop` and is not ready to publish
+
+No CI check enforces changesets. Forgetting one does not break the build — npm
+just won't get new versions until a changeset lands on `main`.
+
+### Day-to-day on `develop`
+
+Do **not** monitor for changesets during normal dev. Batch at release time: before
+the `develop → main` merge, ask *"did any publishable package change?"* — if yes,
+include a changeset in that PR.
+
+### Release flow
+
+```
+develop PR (includes .changeset/*.md when npm packages changed)
+    → merge to main
+release.yml runs CI, then changesets/action
+    → if pending changesets: opens "chore: version packages" PR
+    → merge that PR → pnpm changeset publish → npm
+```
+
+On the same `main` push, GitHub Pages deploys the playground independently.
+The Mac DMG is a separate manual `mac-v*` tag.
+
+Config: `.changeset/config.json` — `access: "public"`, `baseBranch: "main"`,
+`updateInternalDependencies: "patch"`. Requires `NPM_TOKEN` (+ `NODE_AUTH_TOKEN`
+for setup-node) in GitHub secrets.
 
 ## Branching
 
