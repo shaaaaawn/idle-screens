@@ -35,8 +35,16 @@ apps/mac/
     build.mjs / gen-catalog.mjs
   scripts/
     build-app.sh             assemble + ad-hoc sign IdleScreens.app
-    notarize.sh              Developer ID sign + notarize + DMG
+    lib.sh                   shared env + signing helpers
+    check-signing.sh         verify Keychain, .env, notary profile
+    generate-csr.sh          one-time Developer ID CSR
+    setup-notary.sh          store notarytool creds from .env
     setup-gh-secrets.sh      push signing secrets to GitHub
+    release-local.sh         full local sign + notarize + staple
+    notarize.sh              sign + notarize + staple (lower level)
+    staple-dmg.sh            staple after async notarization
+    tag-release.sh           push mac-v* tag for CI release
+    audit-no-secrets.sh      grep scripts for hardcoded credentials
   packaging/idle-screens.rb Homebrew cask
 ```
 
@@ -98,24 +106,61 @@ by `scripts/build-app.sh`). Edit the TS list, not the Swift file.
 
 ## Release (sign + notarize)
 
-Requires an Apple Developer account (Developer ID Application cert). Locally:
+Requires an Apple Developer account (Developer ID Application cert).
+
+### One-time setup
+
+1. Copy `.env.example` to `.env` and fill in signing fields:
+
+   ```
+   APPLE_ID=you@example.com
+   APPLE_TEAM_ID=TEAMID
+   APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+   P12_PASSWORD=strong-export-password
+   CSR_ORG=Your Org, LLC
+   ```
+
+2. Generate a CSR and create the cert at [developer.apple.com](https://developer.apple.com/account/resources/certificates/add) (**Developer ID Application**, not Apple Distribution):
+
+   ```bash
+   cd apps/mac
+   ./scripts/generate-csr.sh
+   # upload .secrets/developer-id.csr, download .cer, double-click to install
+   ```
+
+3. Store notary credentials + push GitHub secrets:
+
+   ```bash
+   ./scripts/setup-notary.sh
+   ./scripts/setup-gh-secrets.sh
+   ```
+
+4. Verify everything:
+
+   ```bash
+   ./scripts/check-signing.sh
+   ```
+
+### Every release (local)
 
 ```bash
-export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
-xcrun notarytool store-credentials idle-notary \
-  --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
-export NOTARY_PROFILE=idle-notary
-./scripts/notarize.sh               # → dist/IdleScreens.dmg (stapled)
+cd apps/mac
+./scripts/release-local.sh          # → dist/IdleScreens.dmg (stapled)
 ```
 
-To push signing secrets to GitHub Actions:
+Options:
+
+- `./scripts/notarize.sh --skip-build` — re-sign/notarize without rebuilding
+- `./scripts/staple-dmg.sh` — staple after a notarization that finished async
+
+### CI release
 
 ```bash
-./scripts/setup-gh-secrets.sh       # reads apps/mac/.secrets/ + repo .env
+./scripts/tag-release.sh            # tags mac-v{version} from Info.plist and pushes
 ```
 
-In CI, push a `mac-v*` tag to trigger `.github/workflows/mac-release.yml`, which
-needs these repo secrets:
+Or push a `mac-v*` tag manually to trigger `.github/workflows/mac-release.yml`.
+GitHub needs these repo secrets ( `./scripts/setup-gh-secrets.sh` sets all six):
 
 | Secret | What |
 |--------|------|
