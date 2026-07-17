@@ -39,7 +39,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { METAQUARIUM_PARAMS } from './manifest';
+import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import { farmMetadata, pickFarmFish, resolveAssetUrl } from './farm';
 import { makeFishPath, fishPose, type FishPath, type TankBounds } from './swim';
 
@@ -435,5 +435,7 @@ function applyGlow(m: Material): void {
 }
 
 export function mountTank(ctx: SaverContext, space: ParamSpace = METAQUARIUM_PARAMS): SaverInstance {
-  return new TankInstance(ctx, space);
+  // ctx.params (e.g. a channel's published `{id, params}`) become the mount's
+  // defaults; applyTrack steering still layers on top via sampleTrack.
+  return new TankInstance(ctx, withDefaults(space, ctx.params));
 }

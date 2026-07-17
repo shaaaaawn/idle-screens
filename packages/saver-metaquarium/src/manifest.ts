@@ -49,14 +49,21 @@ export interface MetaquariumOptions {
   params?: Partial<Record<keyof typeof METAQUARIUM_PARAMS, ParamValue>>;
 }
 
-/** Clone the paramSpace with per-variant default overrides. */
-export function paramSpaceWith(
-  overrides: MetaquariumOptions['params'],
+/** Clone a paramSpace with default overrides; unknown keys are ignored. */
+export function withDefaults(
+  space: ParamSpace,
+  overrides?: Record<string, ParamValue>,
 ): ParamSpace {
+  if (!overrides) return space;
   const out: ParamSpace = {};
-  for (const [k, def] of Object.entries(METAQUARIUM_PARAMS)) {
-    const o = overrides?.[k as keyof typeof METAQUARIUM_PARAMS];
+  for (const [k, def] of Object.entries(space)) {
+    const o = overrides[k];
     out[k] = o === undefined ? def : { ...def, default: o };
   }
   return out;
+}
+
+/** Clone the metaquarium paramSpace with per-variant default overrides. */
+export function paramSpaceWith(overrides: MetaquariumOptions['params']): ParamSpace {
+  return withDefaults(METAQUARIUM_PARAMS, overrides as Record<string, ParamValue> | undefined);
 }

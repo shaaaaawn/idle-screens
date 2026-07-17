@@ -3,6 +3,7 @@ export {
   metaquariumManifest,
   METAQUARIUM_PARAMS,
   paramSpaceWith,
+  withDefaults,
   type MetaquariumOptions,
 } from './manifest';
 export { makeFishPath, fishPose, type FishPath, type FishPose, type TankBounds } from './swim';
