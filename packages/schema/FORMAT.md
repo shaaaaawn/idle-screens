@@ -130,6 +130,6 @@ control-track (`step` | `linear` | `smooth`). See `@idle-screens/core` for
 ## Examples
 
 Shipped working specs (also exposed as `EXAMPLE_SPECS`): `aquarium`, `rain`,
-`snowfall`, `lanterns`, `sakura`, `mystify`, `dev-dashboard` — see
+`snowfall`, `lanterns`, `sakura`, `dev-dashboard` — see
 [`src/examples.ts`](./src/examples.ts). The dashboard exercises the static/HUD
 subset at scale (34 layers of keyed, positioned text).

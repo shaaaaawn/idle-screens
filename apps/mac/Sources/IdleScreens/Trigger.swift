@@ -6,6 +6,7 @@ import Carbon.HIToolbox
 final class HotkeyManager {
   private var hotKeyRef: EventHotKeyRef?
   private var handlerRef: EventHandlerRef?
+  private let hotKeyID = EventHotKeyID(signature: OSType(0x6964_7363), id: 1)  // 'idsc'
   var onTrigger: (() -> Void)?
 
   func register() {
@@ -15,16 +16,26 @@ final class HotkeyManager {
     let selfPtr = Unmanaged.passUnretained(self).toOpaque()
     InstallEventHandler(
       GetApplicationEventTarget(),
-      { _, _, userData -> OSStatus in
-        guard let userData else { return noErr }
-        Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue().onTrigger?()
+      { _, event, userData -> OSStatus in
+        guard let userData, let event else { return noErr }
+        let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+        var hkID = EventHotKeyID()
+        let status = GetEventParameter(
+          event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+          nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+        guard status == noErr, hkID.signature == manager.hotKeyID.signature,
+          hkID.id == manager.hotKeyID.id
+        else { return noErr }
+        manager.onTrigger?()
         return noErr
       }, 1, &eventType, selfPtr, &handlerRef)
 
-    let id = EventHotKeyID(signature: OSType(0x6964_7363), id: 1)  // 'idsc'
     let mods = UInt32(controlKey | optionKey | cmdKey)
-    RegisterEventHotKey(
-      UInt32(kVK_ANSI_S), mods, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+    let status = RegisterEventHotKey(
+      UInt32(kVK_ANSI_S), mods, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+    if status != noErr {
+      NSLog("HotkeyManager: RegisterEventHotKey failed with status \(status)")
+    }
   }
 
   func unregister() {

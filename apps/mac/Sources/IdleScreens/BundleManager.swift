@@ -107,8 +107,17 @@ final class BundleManager {
     task.resume()
   }
 
+  private func isSafeManifestPath(_ path: String) -> Bool {
+    guard !path.hasPrefix("/") else { return false }
+    return !path.split(separator: "/", omittingEmptySubsequences: false).contains("..")
+  }
+
   private func download(_ manifest: Manifest, completion: @escaping (Bool, String) -> Void) {
     let fm = FileManager.default
+    guard manifest.files.allSatisfy({ isSafeManifestPath($0.path) }) else {
+      completion(false, "Update rejected: invalid file path in manifest.")
+      return
+    }
     let staging = cacheRoot.deletingLastPathComponent()
       .appendingPathComponent("web-cache-staging", isDirectory: true)
     try? fm.removeItem(at: staging)

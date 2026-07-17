@@ -2,7 +2,7 @@
 
 A zero-dependency Swift menu-bar app that shows the idle-screens web engine as a
 screensaver. Not a `.saver` bundle — a standalone app that avoids the abandoned,
-sandboxed `legacyScreenSaver` substrate (see `docs/research/macos-swift-wrapper.md`).
+sandboxed `legacyScreenSaver` substrate.
 
 ## How it works
 

@@ -33,7 +33,7 @@ enum SystemInfo {
   /// True when running on battery (not plugged in).
   static var isOnBattery: Bool {
     guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return false }
-    guard let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeRetainedValue() as String?
+    guard let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String?
     else { return false }
     return type == kIOPMBatteryPowerKey
   }

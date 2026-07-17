@@ -2,7 +2,7 @@
 # Push macOS signing secrets to GitHub Actions (reads repo .env + Keychain / .secrets).
 set -euo pipefail
 # shellcheck disable=SC1091
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 load_mac_env
 require_cmd gh
@@ -19,7 +19,7 @@ DEVELOPER_ID="$(resolve_developer_id)"
 TMP="$(mktemp -d)"
 P12="$TMP/cert.p12"
 
-if [[ -n "$DEVELOPER_ID" ]] && security find-identity -v -p codesigning | rg -qF "$DEVELOPER_ID"; then
+if [[ -n "$DEVELOPER_ID" ]] && security find-identity -v -p codesigning | grep -qF "$DEVELOPER_ID"; then
   export_p12_from_keychain "$DEVELOPER_ID" "$P12" "$P12_PASSWORD"
 else
   KEY="$SECRETS_DIR/developer-id.key"
@@ -43,4 +43,4 @@ gh secret set APPLE_TEAM_ID --body "$APPLE_TEAM_ID"
 gh secret set APPLE_APP_PASSWORD --body "$APPLE_APP_PASSWORD"
 
 echo "==> GitHub secrets updated (6 signing secrets)"
-gh secret list | rg 'MACOS_|APPLE_'
+gh secret list | grep -E 'MACOS_|APPLE_'

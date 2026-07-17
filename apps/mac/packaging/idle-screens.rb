@@ -16,5 +16,6 @@ cask "idle-screens" do
 
   zap trash: [
     "~/Library/Preferences/com.idlescreens.mac.plist",
+    "~/Library/Application Support/idle-screens/",
   ]
 end

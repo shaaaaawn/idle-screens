@@ -112,7 +112,7 @@ find_developer_id_cer() {
   find "$HOME/Downloads" -maxdepth 1 -name '*.cer' -print0 2>/dev/null \
     | xargs -0 -I{} sh -c '
         openssl x509 -in "$1" -inform DER -noout -subject 2>/dev/null \
-          | rg -q "Developer ID Application" && echo "$1"
+          | grep -q "Developer ID Application" && echo "$1"
       ' _ {} \
     | head -1
 }

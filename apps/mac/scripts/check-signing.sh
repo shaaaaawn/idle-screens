@@ -52,13 +52,9 @@ for var in APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
   fi
 done
 
-for var in P12_PASSWORD MACOS_CERTIFICATE_PWD; do
-  if [[ -n "${P12_PASSWORD:-}" || -n "${MACOS_CERTIFICATE_PWD:-}" ]]; then
-    echo "  ok  P12 export password set"
-    break
-  fi
-done
-if [[ -z "${P12_PASSWORD:-}" && -z "${MACOS_CERTIFICATE_PWD:-}" ]]; then
+if [[ -n "${P12_PASSWORD:-}" || -n "${MACOS_CERTIFICATE_PWD:-}" ]]; then
+  echo "  ok  P12 export password set"
+else
   echo "  warn P12_PASSWORD not set (needed for setup-gh-secrets.sh only)" >&2
 fi
 

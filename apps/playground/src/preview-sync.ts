@@ -9,7 +9,11 @@ export function syncPreviewTime(
   loop: boolean,
 ): boolean {
   if (!inst) return false;
-  const ms = loop ? ((t % duration) + duration) % duration : Math.min(Math.max(0, t), duration);
+  const ms = duration > 0
+    ? loop
+      ? ((t % duration) + duration) % duration
+      : Math.min(Math.max(0, t), duration)
+    : 0;
 
   if (inst.renderFrame) {
     inst.setPaused(true);

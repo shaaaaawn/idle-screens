@@ -402,6 +402,7 @@ export class IdleScreenElement extends HostBase {
         }
         this.instance = inst;
         inst.setPaused(eng.reducedMotion.value);
+        this.dialog.classList.remove('show-fallback');
         return;
       } catch {
         // Worker failed — fall through to main-thread mount

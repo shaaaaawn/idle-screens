@@ -12,10 +12,13 @@ interface PathTarget {
   key: string | number;
 }
 
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Resolve a dot-path (key-aware) to its parent + final key; null if absent. */
 export function resolveSpecPath(spec: unknown, path: string): PathTarget | null {
   if (!spec || typeof spec !== 'object' || !path) return null;
   const parts = path.split('.');
+  if (parts.some((p) => UNSAFE_KEYS.has(p))) return null;
   const s = spec as { layers?: Array<Record<string, unknown>> };
   if (parts[0] !== 'layers' && parts[0] !== 'background' && Array.isArray(s.layers)) {
     const idx = s.layers.findIndex((l) => l && l.key === parts[0]);
@@ -112,6 +115,23 @@ export function easeSmooth(k: number): number {
  */
 export function structuralSignature(spec: SaverSpec): string {
   return JSON.stringify(
-    spec.layers.map((l) => [l.count, l.size, l.region, l.position, l.motion, l.wrap, l.flip, l.alpha, l.pulse]),
+    spec.layers.map((l) => [
+      l.count,
+      l.size,
+      l.region,
+      l.position,
+      l.motion,
+      l.wrap,
+      l.flip,
+      l.alpha,
+      l.pulse,
+      l.sprite.kind,
+      l.sprite.kind === 'circle' ? l.sprite.radius : undefined,
+      l.sprite.kind === 'emoji'
+        ? l.sprite.glyphs.length
+        : l.sprite.kind === 'text'
+          ? l.sprite.strings.length
+          : undefined,
+    ]),
   );
 }

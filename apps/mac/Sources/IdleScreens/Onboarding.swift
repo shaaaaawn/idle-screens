@@ -3,7 +3,7 @@ import ServiceManagement
 
 /// One-time welcome window: explains the menu-bar model and offers one-click
 /// setup (disable the system saver hint, enable launch-at-login).
-final class Onboarding: NSObject {
+final class Onboarding: NSObject, NSWindowDelegate {
   private var window: NSWindow?
   private let defaults = UserDefaults.standard
   private static let doneKey = "onboardingDone"
@@ -63,6 +63,7 @@ final class Onboarding: NSObject {
     win.contentView = content
     win.center()
     win.isReleasedWhenClosed = false
+    win.delegate = self
     window = win
 
     NSApp.activate(ignoringOtherApps: true)
@@ -89,8 +90,11 @@ final class Onboarding: NSObject {
   }
 
   @objc private func finish(_ sender: NSButton) {
-    defaults.set(true, forKey: Self.doneKey)
     window?.close()
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    defaults.set(true, forKey: Self.doneKey)
     window = nil
     onFinish?()
   }

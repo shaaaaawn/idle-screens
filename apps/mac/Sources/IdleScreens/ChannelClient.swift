@@ -47,6 +47,16 @@ enum ChannelClient {
           completion(false, "Server returned HTTP \(code).")
           return
         }
+        // MCP tool errors arrive as HTTP 2xx with result.isError in the JSON body.
+        let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let result = json?["result"] as? [String: Any]
+        if result?["isError"] as? Bool == true {
+          let message = (result?["content"] as? [[String: Any]])?
+            .compactMap { $0["text"] as? String }
+            .joined(separator: " ")
+          completion(false, (message?.isEmpty == false ? message : nil) ?? "Publish failed.")
+          return
+        }
         // The MCP result text notes confirmed=true when a viewer rendered it.
         let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let confirmed = text.contains("\"confirmed\": true") || text.contains("confirmed=true")

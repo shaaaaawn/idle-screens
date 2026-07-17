@@ -49,35 +49,48 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
     reduceMotion,
     showHint = () => {},
     dpr = 1,
-    viewport = { width: 800, height: 600 },
     fadeMs = 220,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = opts;
+  let viewport = opts.viewport ?? { width: 800, height: 600 };
 
   let instance: SaverInstance | null = null;
   let current = -1;
+  let generation = 0;
 
   const mountSaver = async (index: number, fade = true): Promise<void> => {
+    const gen = ++generation;
     const doFade = fade && !reduceMotion && instance !== null;
     if (doFade) {
       host.style.opacity = '0';
       await sleep(fadeMs);
     }
+    if (gen !== generation) return;
     instance?.dispose();
     instance = null;
     host.innerHTML = '';
     current = normalizeSaverIndex(index, savers.length);
     const plugin = savers[current]!;
     const seed = (baseSeed + current) >>> 0;
-    const inst = await plugin.mount({
-      host,
-      dpr,
-      width: viewport.width,
-      height: viewport.height,
-      rng: createRng(seed),
-      seed,
-      reducedMotion: reduceMotion,
-    });
+    let inst: SaverInstance;
+    try {
+      inst = await plugin.mount({
+        host,
+        dpr,
+        width: viewport.width,
+        height: viewport.height,
+        rng: createRng(seed),
+        seed,
+        reducedMotion: reduceMotion,
+      });
+    } catch (err) {
+      if (gen === generation) host.style.opacity = '1';
+      throw err;
+    }
+    if (gen !== generation) {
+      inst.dispose();
+      return;
+    }
     instance = inst;
     inst.setPaused(reduceMotion);
     host.style.opacity = '1';
@@ -90,6 +103,7 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
       instance?.setPaused(paused);
     },
     resize() {
+      viewport = { width: host.clientWidth, height: host.clientHeight };
       instance?.resize(viewport.width, viewport.height, dpr);
     },
     currentId() {

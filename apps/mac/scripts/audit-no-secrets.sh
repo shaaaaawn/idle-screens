@@ -15,7 +15,7 @@ while IFS= read -r match; do
 done < <(rg -n -i \
   --glob '*.sh' \
   --glob '!audit-no-secrets.sh' \
-  '@(gmail|icloud|yahoo)\.com|cfat_[a-z0-9]|ghp_[a-zA-Z0-9]|gho_[a-zA-Z0-9]|github_pat_|-----BEGIN (RSA )?PRIVATE|poti-[a-z]{4}-' \
+  '@(gmail|icloud|yahoo)\.com|cfat_[a-z0-9]|ghp_[a-zA-Z0-9]|gho_[a-zA-Z0-9]|github_pat_|-----BEGIN [A-Z ]*PRIVATE KEY|poti-[a-z]{4}-' \
   "$SCRIPTS_DIR" 2>/dev/null || true)
 
 if [[ "$FAIL" -ne 0 ]]; then

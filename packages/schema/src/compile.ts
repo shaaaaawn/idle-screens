@@ -6,7 +6,7 @@ import {
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
-import { assertValidSpec } from './validate';
+import { assertValidSpec, validateSpec } from './validate';
 import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
@@ -16,6 +16,8 @@ import {
   type SteerDelta,
 } from './steer';
 import type { LayerSpec, SaverSpec } from './types';
+
+const DEFAULT_STEER_DUR = 1000;
 
 /** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
 function hexToRgba(hex: string, alpha: number): string {
@@ -216,8 +218,11 @@ class SpecInstance implements SaverInstance {
    */
   applyTrack(track: ControlTrack): void {
     const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
-    const target = applyDeltasToSpec(this.spec, deltas);
-    const dur = deltas.reduce((m, d) => Math.max(m, d.dur ?? 1000), 0) || 1000;
+    const target = applyDeltasToSpec(this.effSpec, deltas);
+    if (!validateSpec(target).valid) return;
+    const dur = deltas.length
+      ? deltas.reduce((m, d) => Math.max(m, d.dur ?? DEFAULT_STEER_DUR), 0)
+      : DEFAULT_STEER_DUR;
     this.transition = {
       from: JSON.parse(JSON.stringify(this.effSpec)) as SaverSpec,
       to: target,
