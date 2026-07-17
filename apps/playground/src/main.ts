@@ -10,6 +10,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
+import { metaquarium } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { compileSaver, DASHBOARD_SPEC, LANTERNS_SPEC, ORRERY_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -30,6 +31,7 @@ interface SaverGroup {
 
 const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-black-hole', label: '@idle-screens/saver-black-hole', savers: [blackHole] },
+  { id: 'saver-metaquarium', label: '@idle-screens/saver-metaquarium', savers: [metaquarium] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -48,6 +50,7 @@ const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
+  'saver-metaquarium': 'metaquarium',
   'savers-classic': 'classic',
   schema: 'schema',
 };
@@ -105,6 +108,7 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
 
 function packageFor(saver: SaverPlugin): string {
   if (saver.manifest.id === 'black-hole') return '@idle-screens/saver-black-hole';
+  if (saver.manifest.id === 'metaquarium') return '@idle-screens/saver-metaquarium';
   if (SCHEMA_IDS.has(saver.manifest.id)) return '@idle-screens/schema';
   return '@idle-screens/savers-classic';
 }

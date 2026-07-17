@@ -3,7 +3,7 @@ import type { Rng } from './rng';
 /** How a parameter interpolates between control-track deltas. */
 export type Ease = 'step' | 'linear' | 'smooth';
 
-export type ParamType = 'number' | 'color' | 'bool' | 'enum';
+export type ParamType = 'number' | 'color' | 'bool' | 'enum' | 'string';
 export type ParamValue = number | string | boolean;
 
 /** One typed, ranged, interpolatable knob: an agent's steering surface. */

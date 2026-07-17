@@ -1,0 +1,63 @@
+{
+  "name": "@idle-screens/saver-metaquarium",
+  "version": "0.1.0",
+  "description": "Metaquarium screensaver for idle-screens: a three.js fish tank with seeded analytic swim, GLB fish, and a steerable camera. The screen is a tank.",
+  "license": "MIT",
+  "author": "Shawn Partridge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/saver-metaquarium"
+  },
+  "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "screensaver",
+    "idle",
+    "ambient",
+    "aquarium",
+    "metaquarium",
+    "three",
+    "webgl",
+    "fish"
+  ],
+  "bugs": {
+    "url": "https://github.com/shaaaaawn/idle-screens/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "three": "^0.185.0"
+  },
+  "peerDependencies": {
+    "@idle-screens/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@idle-screens/core": "workspace:*",
+    "@types/three": "^0.185.0"
+  }
+}
