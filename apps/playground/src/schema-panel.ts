@@ -1,5 +1,5 @@
 import { createRng, type SaverInstance } from '@idle-screens/core';
-import { AQUARIUM_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, ORRERY_SPEC, RAIN_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, compileSaver, validateSpec, type SaverSpec } from '@idle-screens/schema';
+import { AQUARIUM_SPEC, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, ORRERY_SPEC, RAIN_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, compileSaver, validateSpec, type SaverSpec } from '@idle-screens/schema';
 import { sampleSaver, type ValidateResult } from './validate';
 
 declare global {
@@ -31,6 +31,7 @@ export function buildSchemaPanel(mount: HTMLElement): void {
       <button id="schema-ex-sakura">Load sakura</button>
       <button id="schema-ex-dashboard">Load dashboard</button>
       <button id="schema-ex-orrery">Load orrery</button>
+      <button id="schema-ex-constellation">Load constellation</button>
       <span id="schema-status" class="verdict">…</span>
     </div>
     <div class="schema-cols">
@@ -145,11 +146,15 @@ export function buildSchemaPanel(mount: HTMLElement): void {
     ta.value = pretty(ORRERY_SPEC);
     run();
   });
+  $<HTMLButtonElement>('schema-ex-constellation').addEventListener('click', () => {
+    ta.value = pretty(CONSTELLATION_SPEC);
+    run();
+  });
 
   window.__schema = {
     validate: (json: string) => validateSpec(JSON.parse(json)),
     sample: (json: string) => sampleSaver(compileSaver(JSON.parse(json)), { seconds: 1.5 }),
-    examples: { aquarium: pretty(AQUARIUM_SPEC), rain: pretty(RAIN_SPEC), snowfall: pretty(SNOWFALL_SPEC), lanterns: pretty(LANTERNS_SPEC), sakura: pretty(SAKURA_SPEC), dashboard: pretty(DASHBOARD_SPEC), orrery: pretty(ORRERY_SPEC) },
+    examples: { aquarium: pretty(AQUARIUM_SPEC), rain: pretty(RAIN_SPEC), snowfall: pretty(SNOWFALL_SPEC), lanterns: pretty(LANTERNS_SPEC), sakura: pretty(SAKURA_SPEC), dashboard: pretty(DASHBOARD_SPEC), orrery: pretty(ORRERY_SPEC), constellation: pretty(CONSTELLATION_SPEC) },
   };
 
   run();

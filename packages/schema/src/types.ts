@@ -21,6 +21,8 @@ export interface SaverSpec {
   background?: BackgroundSpec;
   layers: LayerSpec[];
   motionIntensity?: 'calm' | 'moderate' | 'energetic';
+  /** Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h). */
+  units?: 'px' | 'viewport';
 }
 
 export type BackgroundSpec =
@@ -87,10 +89,21 @@ export interface LayerSpec {
    * Only valid when `count` is 1. Overrides `region` scatter placement.
    */
   position?: { x: number; y: number };
+  /**
+   * Inter-entity links: draw lines to each entity's k nearest neighbors within maxDist.
+   * Capped at LIMITS.maxLinksK. Layer count must be <= LIMITS.maxLinkLayerCount when set.
+   */
+  links?: {
+    k: number;
+    maxDist: number;
+    color?: string;
+    alpha?: number;
+    width?: number;
+  };
 }
 
 export type SpriteSpec =
-  | { kind: 'emoji'; glyphs: string[] }
+  | { kind: 'emoji'; glyphs: string[]; cycle?: CycleSpec }
   | {
       kind: 'text';
       strings: string[];
@@ -99,9 +112,15 @@ export type SpriteSpec =
       align?: 'left' | 'center' | 'right';
       baseline?: 'top' | 'middle' | 'bottom';
       maxWidth?: number;
+      cycle?: CycleSpec;
     }
   /** `soft` renders a radial falloff (glow orb) instead of a hard disc. */
-  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean };
+  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean; colors?: string[] };
+
+/** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
+export interface CycleSpec {
+  period: number;
+}
 
 export type MotionSpec =
   /**
@@ -136,6 +155,13 @@ export interface ValidationResult {
   errors: SpecError[];
 }
 
+/** An advisory warning (non-blocking). Returned by `adviseSpec`. */
+export interface SpecWarning {
+  path: string;
+  code: string;
+  message: string;
+}
+
 /** Perf/safety caps enforced by `validateSpec`. */
 export const LIMITS = {
   maxPerLayer: 400,
@@ -147,4 +173,8 @@ export const LIMITS = {
   maxSpin: 360, // degrees/sec — one full revolution per second
   maxGrowAmp: 0.8, // size breathing amplitude cap (fraction of base size)
   maxOrbitSpeed: 180, // degrees/sec — half a revolution per second
+  maxLinksK: 8,
+  maxLinkLayerCount: 200,
+  minCyclePeriod: 500, // ms — same flash-safety floor as pulse
+  referenceViewport: 1080, // for validating viewport-unit dimensional caps
 } as const;

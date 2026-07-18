@@ -1,5 +1,6 @@
 import type { SaverSpec } from '../types';
 import { AQUARIUM_SPEC } from './aquarium';
+import { CONSTELLATION_SPEC } from './constellation';
 import { DASHBOARD_SPEC } from './dev-dashboard';
 import { LANTERNS_SPEC } from './lanterns';
 import { ORRERY_SPEC } from './orrery';
@@ -8,6 +9,7 @@ import { SAKURA_SPEC } from './sakura';
 import { SNOWFALL_SPEC } from './snowfall';
 
 export { AQUARIUM_SPEC } from './aquarium';
+export { CONSTELLATION_SPEC } from './constellation';
 export { RAIN_SPEC } from './rain';
 export { SNOWFALL_SPEC } from './snowfall';
 export { LANTERNS_SPEC } from './lanterns';
@@ -31,6 +33,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'sakura', label: 'Sakura Drift', spec: SAKURA_SPEC },
   { id: 'dev-dashboard', label: 'Dev Dashboard', spec: DASHBOARD_SPEC },
   { id: 'orrery', label: 'Orrery', spec: ORRERY_SPEC },
+  { id: 'constellation', label: 'Constellation', spec: CONSTELLATION_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */

@@ -76,6 +76,44 @@ describe('validateSpec', () => {
     expect(validateSpec({ ...base(), layers: [{ ...layer, pulse: { amp: 0.3, period: 2000 } }] }).valid).toBe(true);
   });
 
+  it('validates units enum', () => {
+    expect(validateSpec({ ...base(), units: 'px' }).valid).toBe(true);
+    expect(paths({ ...base(), units: 'rem' })).toContain('units');
+  });
+
+  it('caps speed in viewport units (4000/1080 ≈ 3.7 vu/s)', () => {
+    const s = { ...base(), units: 'viewport' as const, layers: [{ count: 5, sprite: { kind: 'emoji' as const, glyphs: ['🐟'] }, size: [10, 20], motion: { type: 'drift' as const, speed: [0, 3] } }] };
+    expect(validateSpec(s).valid).toBe(true);
+    const fast = { ...s, layers: [{ ...s.layers[0], motion: { type: 'drift' as const, speed: [0, 50] } }] };
+    expect(paths(fast)).toContain('layers[0].motion.speed');
+  });
+
+  it('rejects links.k > maxLinksK (8)', () => {
+    const layer = { count: 20, sprite: { kind: 'circle' as const, radius: [2, 6], color: '#fff' }, motion: { type: 'drift' as const, speed: [10, 20] }, links: { k: 10, maxDist: 100 } };
+    expect(paths({ ...base(), layers: [layer] })).toContain('layers[0].links.k');
+    const ok = { ...layer, links: { k: 8, maxDist: 100 } };
+    expect(validateSpec({ ...base(), layers: [ok] }).valid).toBe(true);
+  });
+
+  it('rejects links on high-count layers', () => {
+    const layer = { count: 250, sprite: { kind: 'circle' as const, radius: [1, 2], color: '#fff' }, motion: { type: 'static' as const }, links: { k: 2, maxDist: 50 } };
+    expect(validateSpec({ ...base(), layers: [layer] }).errors.some((e) => /links/.test(e.path))).toBe(true);
+  });
+
+  it('validates circle colors[] hex values', () => {
+    const ok = { ...base(), layers: [{ count: 5, sprite: { kind: 'circle' as const, radius: [2, 6], color: '#fff', colors: ['#ff0000', '#00ff00'] }, motion: { type: 'static' as const } }] };
+    expect(validateSpec(ok).valid).toBe(true);
+    const bad = { ...base(), layers: [{ count: 5, sprite: { kind: 'circle' as const, radius: [2, 6], color: '#fff', colors: ['red'] }, motion: { type: 'static' as const } }] };
+    expect(paths(bad)).toContain('layers[0].sprite.colors[0]');
+  });
+
+  it('rejects cycle.period below flash-safety floor', () => {
+    const layer = { count: 5, sprite: { kind: 'emoji' as const, glyphs: ['🐟', '🐠'], cycle: { period: 200 } }, size: [20, 30], motion: { type: 'static' as const } };
+    expect(paths({ ...base(), layers: [layer] })).toContain('layers[0].sprite.cycle.period');
+    const ok = { ...layer, sprite: { ...layer.sprite, cycle: { period: 1000 } } };
+    expect(validateSpec({ ...base(), layers: [ok] }).valid).toBe(true);
+  });
+
   it('assertValidSpec throws on invalid, returns the spec on valid', () => {
     expect(() => assertValidSpec({ schemaVersion: 1 })).toThrow(/invalid saver spec/);
     expect(assertValidSpec(base()).id).toBe('demo');
