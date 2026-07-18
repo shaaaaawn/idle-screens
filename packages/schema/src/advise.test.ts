@@ -39,15 +39,6 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'invisible-layer')).toBe(true);
   });
 
-  it('warns on drift with wrap: false', () => {
-    const noWrap: SaverSpec = {
-      ...base,
-      layers: [{ count: 5, sprite: { kind: 'text', strings: ['hello'] }, size: [20, 30], motion: { type: 'drift', speed: [10, 30] }, wrap: false }],
-    };
-    const w = adviseSpec(noWrap);
-    expect(w.some((x) => x.code === 'wrap-off-drift')).toBe(true);
-  });
-
   it('warns on sparse scenes (coverage < 0.05%)', () => {
     const sparse: SaverSpec = {
       ...base,

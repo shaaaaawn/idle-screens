@@ -158,7 +158,7 @@
             "alpha": { "type": "number", "minimum": 0, "maximum": 1, "description": "Link opacity. Defaults to entity alpha." },
             "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 1." }
           },
-          "description": "Draw lines to each entity's k nearest neighbors within maxDist. Layer count must be <= 200."
+          "description": "Draw lines to each entity's k nearest neighbors within maxDist. The layer's entity count (count field) must be <= 200 for performance."
         }
       },
       "if": { "required": ["position"] },

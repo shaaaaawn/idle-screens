@@ -132,9 +132,9 @@ export function structuralSignature(spec: SaverSpec): string {
       l.sprite.kind === 'circle' ? l.sprite.radius : undefined,
       l.sprite.kind === 'circle' ? l.sprite.colors?.length : undefined,
       l.sprite.kind === 'emoji'
-        ? l.sprite.glyphs.length
+        ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
         : l.sprite.kind === 'text'
-          ? l.sprite.strings.length
+          ? [l.sprite.strings.length, l.sprite.cycle?.period]
           : undefined,
     ]),
   ]);

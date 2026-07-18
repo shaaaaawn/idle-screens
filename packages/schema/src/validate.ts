@@ -235,7 +235,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     // No fields to validate — static motion has no parameters.
   } else if (motion.type === 'orbit') {
     if (!isRange(motion.speed)) err(`${path}.speed`, 'must be a [min,max] range');
-    else if (motion.speed[1] > LIMITS.maxOrbitSpeed) err(`${path}.speed`, `orbit speed exceeds cap ${LIMITS.maxOrbitSpeed} deg/sec`);
+    else if (Math.abs(motion.speed[0]) > LIMITS.maxOrbitSpeed || Math.abs(motion.speed[1]) > LIMITS.maxOrbitSpeed) err(`${path}.speed`, `orbit speed exceeds cap ${LIMITS.maxOrbitSpeed} deg/sec`);
     if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     if (motion.center !== undefined) {
       if (!isObj(motion.center) || !isNum(motion.center.x) || !isNum(motion.center.y)) {

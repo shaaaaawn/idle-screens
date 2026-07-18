@@ -44,20 +44,6 @@ export function adviseSpec(
       }
     }
 
-    if ((isText || isEmoji) && layer.motion.type === 'drift' && layer.wrap === false) {
-      warnings.push({
-        path: `layers[${li}]`,
-        code: 'wrap-off-drift',
-        message: 'drift layer with wrap: false — entities leave the viewport and never return',
-      });
-    }
-    if (layer.motion.type === 'rise' && layer.wrap === false) {
-      warnings.push({
-        path: `layers[${li}]`,
-        code: 'wrap-off-drift',
-        message: 'rise layer with wrap: false — entities float off-screen permanently',
-      });
-    }
   }
 
   // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled"
