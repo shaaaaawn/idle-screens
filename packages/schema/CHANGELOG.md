@@ -1,5 +1,11 @@
 # @idle-screens/schema
 
+## 2.1.0
+
+### Minor Changes
+
+- cf2591b: SaverSpec format upgrades: multi-color circles (colors[]), glyph/text cycling (cycle.period), inter-entity links (links with k-nearest toroidal neighbors), viewport-relative units, sparse-scene advisory, constellation example saver, and toroidal link drawing fix.
+
 ## 2.0.0
 
 ### Minor Changes
