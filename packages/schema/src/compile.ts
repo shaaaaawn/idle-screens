@@ -7,7 +7,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, validateSpec } from './validate';
-import { alphaAt, buildEntities, positionAt, type Entity } from './simulate';
+import { alphaAt, buildEntities, linkPairs, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -112,7 +112,8 @@ class SpecInstance implements SaverInstance {
   /** (Re)seed and place all entities — deterministic for the seed + size. */
   private rebuild(): void {
     const rng = createRng(this.seed);
-    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h) }));
+    const scale = this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1;
+    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale) }));
     this.lastStructural = structuralSignature(this.effSpec);
   }
 
@@ -152,7 +153,8 @@ class SpecInstance implements SaverInstance {
     ctx.fillRect(0, 0, w, h);
     if (bg.band) {
       ctx.fillStyle = bg.band.color;
-      ctx.fillRect(0, h - bg.band.height, w, bg.band.height);
+      const bh = bg.band.height * (this.effSpec.units === 'viewport' ? Math.min(w, h) : 1);
+      ctx.fillRect(0, h - bh, w, bh);
     }
   }
 
@@ -160,39 +162,52 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     const p = positionAt(e, t, this.w, this.h);
     const sprite = built.layer.sprite;
+    const sz = sizeAt(e, t);
+    const rot = rotationAt(e, t);
     ctx.globalAlpha = alphaAt(e, t);
     if (sprite.kind === 'circle') {
-      const r = e.size / 2;
+      const r = sz / 2;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      ctx.save();
+      if (rot) {
+        ctx.translate(p.x, p.y);
+        ctx.rotate(rot);
+        ctx.translate(-p.x, -p.y);
+      }
       if (sprite.soft) {
-        // Glow orb: solid core fading radially to transparent (pairs with blend:'lighter').
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-        g.addColorStop(0, sprite.color);
-        g.addColorStop(0.35, hexToRgba(sprite.color, 0.75));
-        g.addColorStop(1, hexToRgba(sprite.color, 0));
+        g.addColorStop(0, resolvedColor);
+        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
+        g.addColorStop(1, hexToRgba(resolvedColor, 0));
         ctx.fillStyle = g;
       } else {
-        ctx.fillStyle = sprite.color;
+        ctx.fillStyle = resolvedColor;
       }
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
       return;
     }
     ctx.save();
     ctx.translate(p.x, p.y);
+    if (rot) ctx.rotate(rot);
     if (p.flip && built.layer.flip) ctx.scale(-1, 1);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (sprite.kind === 'emoji') {
-      ctx.font = `${e.size}px serif`;
-      ctx.fillText(sprite.glyphs[e.spriteIndex] ?? sprite.glyphs[0]!, 0, 0);
+      const idx = spriteIndexAt(e, t, sprite.glyphs.length);
+      ctx.font = `${sz}px serif`;
+      ctx.fillText(sprite.glyphs[idx] ?? sprite.glyphs[0]!, 0, 0);
     } else {
       ctx.textAlign = sprite.align ?? 'center';
       ctx.textBaseline = sprite.baseline ?? 'middle';
-      ctx.font = sprite.font ?? `${e.size}px system-ui, sans-serif`;
+      ctx.font = sprite.font ?? `${sz}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
-      const text = sprite.strings[e.spriteIndex] ?? sprite.strings[0]!;
-      if (sprite.maxWidth) ctx.fillText(text, 0, 0, sprite.maxWidth);
+      const idx = spriteIndexAt(e, t, sprite.strings.length);
+      const text = sprite.strings[idx] ?? sprite.strings[0]!;
+      const mw = sprite.maxWidth ? sprite.maxWidth * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1) : undefined;
+      if (mw) ctx.fillText(text, 0, 0, mw);
       else ctx.fillText(text, 0, 0);
     }
     ctx.restore();
@@ -239,6 +254,42 @@ class SpecInstance implements SaverInstance {
     }
   }
 
+  private drawLinks(built: Built, t: number): void {
+    const { links } = built.layer;
+    if (!links) return;
+    const { ctx } = this;
+    const wrap = built.layer.wrap !== false;
+    const positions = built.entities.map((e) => positionAt(e, t, this.w, this.h));
+    const pairs = linkPairs(positions, links.k, links.maxDist * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1), wrap, this.w, this.h);
+    const lw = (links.width ?? 1) * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1);
+    ctx.lineWidth = lw;
+
+    for (const [i, j] of pairs) {
+      const pi = positions[i]!;
+      const pj = positions[j]!;
+      const ei = built.entities[i]!;
+      let resolvedColor = links.color;
+      if (!resolvedColor) {
+        const sprite = built.layer.sprite;
+        if (sprite.kind === 'circle') resolvedColor = sprite.colors?.[ei.colorIndex] ?? sprite.color;
+        else resolvedColor = '#e6e8ef';
+      }
+      ctx.globalAlpha = links.alpha ?? alphaAt(ei, t);
+      ctx.strokeStyle = resolvedColor;
+      // Draw toward nearest image of pj (avoids full-canvas streaks at wrap seams)
+      let dx = pj.x - pi.x;
+      let dy = pj.y - pi.y;
+      if (wrap) {
+        if (Math.abs(dx) > this.w / 2) dx = dx > 0 ? dx - this.w : dx + this.w;
+        if (Math.abs(dy) > this.h / 2) dy = dy > 0 ? dy - this.h : dy + this.h;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pi.x, pi.y);
+      ctx.lineTo(pi.x + dx, pi.y + dy);
+      ctx.stroke();
+    }
+  }
+
   /** Deterministic, frame-addressable render (shared by the rAF loop). */
   renderFrame(t: number, _seed: number): void {
     this.stepTransition(t);
@@ -248,6 +299,7 @@ class SpecInstance implements SaverInstance {
     this.drawBackground();
     for (const built of this.layers) {
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
+      this.drawLinks(built, t);
       for (const e of built.entities) this.drawEntity(built, e, t);
     }
     ctx.globalAlpha = 1;

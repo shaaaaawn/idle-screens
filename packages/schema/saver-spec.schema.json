@@ -12,6 +12,7 @@
     "label": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Human-readable name." },
     "seed": { "type": "number", "description": "Deterministic RNG seed. Same spec + same seed = identical frames. Falls back to the host's seed." },
     "motionIntensity": { "enum": ["calm", "moderate", "energetic"], "description": "Advisory intensity for capability/reduced-motion gating." },
+    "units": { "enum": ["px", "viewport"], "description": "Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h)." },
     "background": { "$ref": "#/definitions/background" },
     "layers": {
       "type": "array",
@@ -124,6 +125,17 @@
           },
           "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
         },
+        "spin": { "type": "number", "minimum": -360, "maximum": 360, "description": "Per-entity rotation speed in degrees/sec (positive = clockwise). Each entity gets a seeded starting angle." },
+        "grow": {
+          "type": "object",
+          "required": ["amp", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.8, "description": "Size breathing amplitude as fraction of base size (0.3 = ±30%)." },
+            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; same flash-safety floor as pulse." }
+          },
+          "description": "Sinusoidal size breathing. Per-entity seeded phase. Composes with any sprite kind."
+        },
         "key": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Addressable name so setParam can use key.field paths." },
         "position": {
           "type": "object",
@@ -134,6 +146,19 @@
             "y": { "type": "number", "minimum": 0, "maximum": 1 }
           },
           "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
+        },
+        "links": {
+          "type": "object",
+          "required": ["k", "maxDist"],
+          "additionalProperties": false,
+          "properties": {
+            "k": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Connect to the k nearest neighbors." },
+            "maxDist": { "type": "number", "exclusiveMinimum": 0, "description": "Maximum link distance (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor", "description": "Link color. Defaults to per-entity color." },
+            "alpha": { "type": "number", "minimum": 0, "maximum": 1, "description": "Link opacity. Defaults to entity alpha." },
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 1." }
+          },
+          "description": "Draw lines to each entity's k nearest neighbors within maxDist. The layer's entity count (count field) must be <= 200 for performance."
         }
       },
       "if": { "required": ["position"] },
@@ -147,7 +172,8 @@
           "additionalProperties": false,
           "properties": {
             "kind": { "const": "emoji" },
-            "glyphs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Emoji picked per entity (seeded)." }
+            "glyphs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Emoji picked per entity (seeded)." },
+            "cycle": { "$ref": "#/definitions/cycle" }
           }
         },
         {
@@ -161,7 +187,8 @@
             "font": { "type": "string", "description": "CSS font shorthand, e.g. 'bold 24px monospace'." },
             "align": { "enum": ["left", "center", "right"] },
             "baseline": { "enum": ["top", "middle", "bottom"] },
-            "maxWidth": { "type": "number", "exclusiveMinimum": 0 }
+            "maxWidth": { "type": "number", "exclusiveMinimum": 0 },
+            "cycle": { "$ref": "#/definitions/cycle" }
           }
         },
         {
@@ -172,10 +199,20 @@
             "kind": { "const": "circle" },
             "radius": { "$ref": "#/definitions/positiveRange" },
             "color": { "$ref": "#/definitions/hexColor" },
-            "soft": { "type": "boolean", "description": "Radial falloff (glow orb) instead of a hard disc." }
+            "soft": { "type": "boolean", "description": "Radial falloff (glow orb) instead of a hard disc." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick). Falls back to color." }
           }
         }
       ]
+    },
+    "cycle": {
+      "type": "object",
+      "required": ["period"],
+      "additionalProperties": false,
+      "properties": {
+        "period": { "type": "number", "minimum": 500, "description": "Cycling period in ms; floor of 500 (flash-safety)." }
+      },
+      "description": "Rotate through sprite variants over time. Each entity offsets by its seeded phase."
     },
     "motion": {
       "oneOf": [
@@ -216,6 +253,32 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "static", "description": "Entity stays exactly where placed. Use with position for pinned elements." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed", "radius"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "orbit" },
+            "speed": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 180 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[min, max] angular velocity in degrees/sec, capped at 180."
+            },
+            "radius": { "$ref": "#/definitions/positiveRange", "description": "[min, max] orbit radius in px." },
+            "center": {
+              "type": "object",
+              "required": ["x", "y"],
+              "additionalProperties": false,
+              "properties": {
+                "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                "y": { "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "description": "Orbit center as fractional viewport position. Default {0.5, 0.5}."
+            }
           }
         }
       ]

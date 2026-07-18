@@ -21,6 +21,8 @@ export interface SaverSpec {
   background?: BackgroundSpec;
   layers: LayerSpec[];
   motionIntensity?: 'calm' | 'moderate' | 'energetic';
+  /** Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h). */
+  units?: 'px' | 'viewport';
 }
 
 export type BackgroundSpec =
@@ -67,6 +69,17 @@ export interface LayerSpec {
    */
   pulse?: { amp: number; period: number };
   /**
+   * Per-entity rotation speed in degrees/sec (positive = clockwise).
+   * Each entity gets a seeded starting angle. Composes with any motion type.
+   */
+  spin?: number;
+  /**
+   * Sinusoidal size breathing, parallel to `pulse` for opacity. `amp` is a
+   * fraction of base size (0.3 = ±30 %). `period` in ms with the same
+   * flash-safety floor as pulse. Per-entity seeded phase.
+   */
+  grow?: { amp: number; period: number };
+  /**
    * Addressable name for this layer. Enables `setParam` to use `key.field` paths
    * instead of `layers.N.field` indices. Also makes specs self-documenting.
    */
@@ -76,10 +89,21 @@ export interface LayerSpec {
    * Only valid when `count` is 1. Overrides `region` scatter placement.
    */
   position?: { x: number; y: number };
+  /**
+   * Inter-entity links: draw lines to each entity's k nearest neighbors within maxDist.
+   * Capped at LIMITS.maxLinksK. Layer count must be <= LIMITS.maxLinkLayerCount when set.
+   */
+  links?: {
+    k: number;
+    maxDist: number;
+    color?: string;
+    alpha?: number;
+    width?: number;
+  };
 }
 
 export type SpriteSpec =
-  | { kind: 'emoji'; glyphs: string[] }
+  | { kind: 'emoji'; glyphs: string[]; cycle?: CycleSpec }
   | {
       kind: 'text';
       strings: string[];
@@ -88,9 +112,15 @@ export type SpriteSpec =
       align?: 'left' | 'center' | 'right';
       baseline?: 'top' | 'middle' | 'bottom';
       maxWidth?: number;
+      cycle?: CycleSpec;
     }
   /** `soft` renders a radial falloff (glow orb) instead of a hard disc. */
-  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean };
+  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean; colors?: string[] };
+
+/** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
+export interface CycleSpec {
+  period: number;
+}
 
 export type MotionSpec =
   /**
@@ -106,7 +136,13 @@ export type MotionSpec =
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
   | { type: 'bounce'; speed: [number, number] }
   /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
-  | { type: 'static' };
+  | { type: 'static' }
+  /**
+   * Orbit around a center point. Each entity gets a seeded radius from `radius`
+   * and a seeded phase. `speed` is angular velocity in degrees/sec. `center` is
+   * fractional {x, y} (default {0.5, 0.5} = viewport center).
+   */
+  | { type: 'orbit'; speed: [number, number]; radius: [number, number]; center?: { x: number; y: number } };
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
@@ -119,6 +155,13 @@ export interface ValidationResult {
   errors: SpecError[];
 }
 
+/** An advisory warning (non-blocking). Returned by `adviseSpec`. */
+export interface SpecWarning {
+  path: string;
+  code: string;
+  message: string;
+}
+
 /** Perf/safety caps enforced by `validateSpec`. */
 export const LIMITS = {
   maxPerLayer: 400,
@@ -127,4 +170,11 @@ export const LIMITS = {
   maxSpeed: 4000, // px/sec — bounds motion so nothing teleports
   maxPulseAmp: 0.5, // opacity breathing amplitude cap
   minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)
+  maxSpin: 360, // degrees/sec — one full revolution per second
+  maxGrowAmp: 0.8, // size breathing amplitude cap (fraction of base size)
+  maxOrbitSpeed: 180, // degrees/sec — half a revolution per second
+  maxLinksK: 8,
+  maxLinkLayerCount: 200,
+  minCyclePeriod: 500, // ms — same flash-safety floor as pulse
+  referenceViewport: 1080, // for validating viewport-unit dimensional caps
 } as const;

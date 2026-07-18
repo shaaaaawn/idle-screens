@@ -114,7 +114,8 @@ export function easeSmooth(k: number): number {
  * are baked at build time). Colour/alpha/pulse-only changes redraw in place.
  */
 export function structuralSignature(spec: SaverSpec): string {
-  return JSON.stringify(
+  return JSON.stringify([
+    spec.units,
     spec.layers.map((l) => [
       l.count,
       l.size,
@@ -125,13 +126,16 @@ export function structuralSignature(spec: SaverSpec): string {
       l.flip,
       l.alpha,
       l.pulse,
+      l.spin,
+      l.grow,
       l.sprite.kind,
       l.sprite.kind === 'circle' ? l.sprite.radius : undefined,
+      l.sprite.kind === 'circle' ? l.sprite.colors?.length : undefined,
       l.sprite.kind === 'emoji'
-        ? l.sprite.glyphs.length
+        ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
         : l.sprite.kind === 'text'
-          ? l.sprite.strings.length
+          ? [l.sprite.strings.length, l.sprite.cycle?.period]
           : undefined,
     ]),
-  );
+  ]);
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { alphaAt, buildEntities, positionAt, spriteVariants } from './simulate';
+import { alphaAt, buildEntities, linkPairs, positionAt, spriteIndexAt, spriteVariants } from './simulate';
 import type { LayerSpec } from './types';
 
 const W = 800;
@@ -74,6 +74,97 @@ describe('buildEntities (seeded, deterministic)', () => {
     expect(es.some((e) => !e.headingLeft)).toBe(true);
     expect(new Set(es.map((e) => e.spriteIndex)).size).toBeGreaterThan(1);
     expect(spriteVariants(driftLayer.sprite)).toBe(3);
+  });
+});
+
+describe('colorIndex determinism', () => {
+  const colorLayer: LayerSpec = {
+    count: 30,
+    sprite: { kind: 'circle', radius: [2, 6], color: '#fff', colors: ['#ff0000', '#00ff00', '#0000ff'] },
+    motion: { type: 'static' },
+  };
+
+  it('same seed -> identical colorIndex assignments', () => {
+    const a = buildEntities(colorLayer, createRng(42), W, H);
+    const b = buildEntities(colorLayer, createRng(42), W, H);
+    expect(a.map((e) => e.colorIndex)).toEqual(b.map((e) => e.colorIndex));
+  });
+
+  it('colorIndex values are within bounds of colors array', () => {
+    const es = buildEntities(colorLayer, createRng(42), W, H);
+    for (const e of es) {
+      expect(e.colorIndex).toBeGreaterThanOrEqual(0);
+      expect(e.colorIndex).toBeLessThan(3);
+    }
+  });
+
+  it('colorIndex is -1 when no colors[] array', () => {
+    const noColors: LayerSpec = { count: 5, sprite: { kind: 'circle', radius: [2, 6], color: '#fff' }, motion: { type: 'static' } };
+    const es = buildEntities(noColors, createRng(42), W, H);
+    expect(es.every((e) => e.colorIndex === -1)).toBe(true);
+  });
+});
+
+describe('spriteIndexAt', () => {
+  it('returns fixed spriteIndex when no cycling', () => {
+    const singleLayer: LayerSpec = {
+      count: 5,
+      sprite: { kind: 'emoji', glyphs: ['A'] },
+      size: [20, 20],
+      motion: { type: 'static' },
+    };
+    const [e] = buildEntities(singleLayer, createRng(10), W, H);
+    expect(spriteIndexAt(e!, 0, 1)).toBe(0);
+    expect(spriteIndexAt(e!, 999999, 1)).toBe(0);
+  });
+
+  it('without cycle, returns the seeded spriteIndex regardless of time', () => {
+    const [e] = buildEntities(driftLayer, createRng(10), W, H);
+    const idx = spriteIndexAt(e!, 0, 3);
+    expect(spriteIndexAt(e!, 5000, 3)).toBe(idx);
+    expect(spriteIndexAt(e!, 99999, 3)).toBe(idx);
+  });
+
+  it('cycles through all variants when cycle period > 0', () => {
+    const cycled: LayerSpec = {
+      count: 1,
+      sprite: { kind: 'emoji', glyphs: ['A', 'B', 'C'], cycle: { period: 3000 } },
+      size: [20, 20],
+      motion: { type: 'static' },
+    };
+    const [e] = buildEntities(cycled, createRng(10), W, H);
+    const indices = new Set<number>();
+    for (let t = 0; t < 9000; t += 500) {
+      indices.add(spriteIndexAt(e!, t, 3));
+    }
+    expect(indices.size).toBe(3);
+  });
+});
+
+describe('linkPairs', () => {
+  it('finds neighbors within maxDist', () => {
+    const positions = [{ x: 10, y: 10 }, { x: 20, y: 10 }, { x: 500, y: 500 }];
+    const pairs = linkPairs(positions, 2, 50, false, W, H);
+    expect(pairs).toEqual([[0, 1]]);
+  });
+
+  it('toroidal wrap finds cross-seam neighbors', () => {
+    const positions = [{ x: 5, y: 300 }, { x: 795, y: 300 }];
+    const pairs = linkPairs(positions, 1, 50, true, W, H);
+    expect(pairs).toHaveLength(1);
+  });
+
+  it('no toroidal wrap skips cross-seam pair', () => {
+    const positions = [{ x: 5, y: 300 }, { x: 795, y: 300 }];
+    const pairs = linkPairs(positions, 1, 50, false, W, H);
+    expect(pairs).toHaveLength(0);
+  });
+
+  it('deduplicates edges (i-j and j-i)', () => {
+    const positions = [{ x: 10, y: 10 }, { x: 15, y: 10 }];
+    const pairs = linkPairs(positions, 2, 50, false, W, H);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]![0]).toBeLessThan(pairs[0]![1]);
   });
 });
 

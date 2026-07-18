@@ -24,6 +24,9 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (spec.motionIntensity !== undefined && !['calm', 'moderate', 'energetic'].includes(spec.motionIntensity as string)) {
     err('motionIntensity', 'must be calm | moderate | energetic');
   }
+  if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
+    err('units', "must be 'px' | 'viewport'");
+  }
 
   if (spec.background !== undefined) validateBackground(spec.background, err);
 
@@ -34,7 +37,7 @@ export function validateSpec(spec: unknown): ValidationResult {
     let total = 0;
     spec.layers.forEach((layer, i) => {
       total += isObj(layer) && isNum(layer.count) ? layer.count : 0;
-      validateLayer(layer, `layers[${i}]`, err);
+      validateLayer(layer, `layers[${i}]`, err, spec);
     });
     if (total > LIMITS.maxTotal) err('layers', `total entities ${total} exceeds cap ${LIMITS.maxTotal}`);
   }
@@ -71,7 +74,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void): v
   }
 }
 
-function validateLayer(layer: unknown, path: string, err: (p: string, m: string) => void): void {
+function validateLayer(layer: unknown, path: string, err: (p: string, m: string) => void, spec?: unknown): void {
   if (!isObj(layer)) return err(path, 'must be an object');
   if (!isNum(layer.count) || !Number.isInteger(layer.count) || layer.count < 1) {
     err(`${path}.count`, 'must be a positive integer');
@@ -122,9 +125,46 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       }
     }
   }
+  if (layer.spin !== undefined) {
+    if (!isNum(layer.spin)) err(`${path}.spin`, 'must be a number (degrees/sec)');
+    else if (Math.abs(layer.spin) > LIMITS.maxSpin) err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+  }
+  if (layer.grow !== undefined) {
+    if (!isObj(layer.grow)) err(`${path}.grow`, 'must be an object');
+    else {
+      if (!isNum(layer.grow.amp) || layer.grow.amp <= 0 || layer.grow.amp > LIMITS.maxGrowAmp) {
+        err(`${path}.grow.amp`, `must be within 0..${LIMITS.maxGrowAmp}`);
+      }
+      if (!isNum(layer.grow.period) || layer.grow.period < LIMITS.minPulsePeriod) {
+        err(`${path}.grow.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
+      }
+    }
+  }
+
+  if (layer.links !== undefined) {
+    if (!isObj(layer.links)) err(`${path}.links`, 'must be an object');
+    else {
+      if (!isNum(layer.links.k) || !Number.isInteger(layer.links.k) || layer.links.k < 1 || layer.links.k > LIMITS.maxLinksK) {
+        err(`${path}.links.k`, `must be an integer 1..${LIMITS.maxLinksK}`);
+      }
+      if (!isNum(layer.links.maxDist) || layer.links.maxDist <= 0) {
+        err(`${path}.links.maxDist`, 'must be > 0');
+      }
+      if (layer.links.color !== undefined) color(layer.links.color, `${path}.links.color`, err);
+      if (layer.links.alpha !== undefined && (!isNum(layer.links.alpha) || layer.links.alpha < 0 || layer.links.alpha > 1)) {
+        err(`${path}.links.alpha`, 'must be 0..1');
+      }
+      if (layer.links.width !== undefined && (!isNum(layer.links.width) || layer.links.width <= 0)) {
+        err(`${path}.links.width`, 'must be > 0');
+      }
+      if (isNum(layer.count) && layer.count > LIMITS.maxLinkLayerCount) {
+        err(`${path}.links`, `layer count must be <= ${LIMITS.maxLinkLayerCount} when links is set`);
+      }
+    }
+  }
 
   validateSprite(layer.sprite, `${path}.sprite`, err);
-  validateMotion(layer.motion, `${path}.motion`, err);
+  validateMotion(layer.motion, `${path}.motion`, err, spec);
 }
 
 function validateSprite(sprite: unknown, path: string, err: (p: string, m: string) => void): void {
@@ -133,6 +173,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (!Array.isArray(sprite.glyphs) || sprite.glyphs.length === 0 || !sprite.glyphs.every(isStr)) {
       err(`${path}.glyphs`, 'must be a non-empty array of strings');
     }
+    validateCycle(sprite, path, err);
   } else if (sprite.kind === 'text') {
     if (!Array.isArray(sprite.strings) || sprite.strings.length === 0 || !sprite.strings.every(isStr)) {
       err(`${path}.strings`, 'must be a non-empty array of strings');
@@ -147,20 +188,38 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
       err(`${path}.maxWidth`, 'must be a positive number');
     }
+    validateCycle(sprite, path, err);
   } else if (sprite.kind === 'circle') {
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     color(sprite.color, `${path}.color`, err);
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
+    if (sprite.colors !== undefined) {
+      if (!Array.isArray(sprite.colors) || sprite.colors.length === 0) {
+        err(`${path}.colors`, 'must be a non-empty array of hex colours');
+      } else {
+        sprite.colors.forEach((c: unknown, ci: number) => color(c, `${path}.colors[${ci}]`, err));
+      }
+    }
   } else {
     err(`${path}.kind`, 'must be emoji | text | circle');
   }
 }
 
-function validateMotion(motion: unknown, path: string, err: (p: string, m: string) => void): void {
+function validateCycle(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (sprite.cycle === undefined) return;
+  if (!isObj(sprite.cycle)) return err(`${path}.cycle`, 'must be an object');
+  if (!isNum(sprite.cycle.period) || sprite.cycle.period < LIMITS.minCyclePeriod) {
+    err(`${path}.cycle.period`, `must be >= ${LIMITS.minCyclePeriod} ms (flash-safety floor)`);
+  }
+}
+
+function validateMotion(motion: unknown, path: string, err: (p: string, m: string) => void, spec?: unknown): void {
   if (!isObj(motion)) return err(path, 'must be an object');
+  const isViewport = isObj(spec) && (spec as Record<string, unknown>).units === 'viewport';
+  const speedCap = isViewport ? LIMITS.maxSpeed / LIMITS.referenceViewport : LIMITS.maxSpeed;
   const speedOk = (v: unknown, p: string): void => {
     if (!isRange(v)) err(p, 'must be a [min,max] range');
-    else if (v[1] > LIMITS.maxSpeed) err(p, `speed exceeds cap ${LIMITS.maxSpeed} px/sec`);
+    else if (v[1] > speedCap) err(p, `speed exceeds cap ${isViewport ? speedCap.toFixed(2) + ' viewport-units/sec' : LIMITS.maxSpeed + ' px/sec'}`);
   };
   if (motion.type === 'drift') {
     speedOk(motion.speed, `${path}.speed`);
@@ -174,8 +233,20 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     speedOk(motion.speed, `${path}.speed`);
   } else if (motion.type === 'static') {
     // No fields to validate — static motion has no parameters.
+  } else if (motion.type === 'orbit') {
+    if (!isRange(motion.speed)) err(`${path}.speed`, 'must be a [min,max] range');
+    else if (Math.abs(motion.speed[0]) > LIMITS.maxOrbitSpeed || Math.abs(motion.speed[1]) > LIMITS.maxOrbitSpeed) err(`${path}.speed`, `orbit speed exceeds cap ${LIMITS.maxOrbitSpeed} deg/sec`);
+    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (motion.center !== undefined) {
+      if (!isObj(motion.center) || !isNum(motion.center.x) || !isNum(motion.center.y)) {
+        err(`${path}.center`, 'must be {x, y} with numbers 0..1');
+      } else {
+        if (motion.center.x < 0 || motion.center.x > 1) err(`${path}.center.x`, 'must be 0..1');
+        if (motion.center.y < 0 || motion.center.y > 1) err(`${path}.center.y`, 'must be 0..1');
+      }
+    }
   } else {
-    err(`${path}.type`, 'must be drift | rise | bounce | static');
+    err(`${path}.type`, 'must be drift | rise | bounce | static | orbit');
   }
 }
 
