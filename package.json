@@ -26,6 +26,11 @@
     "dev": "pnpm --filter @idle-screens/playground run dev",
     "changeset": "changeset"
   },
+  "pnpm": {
+    "overrides": {
+      "tsup>esbuild": ">=0.28.1"
+    }
+  },
   "devDependencies": {
     "@changesets/cli": "^2.27.11",
     "@playwright/test": "^1.49.1",
