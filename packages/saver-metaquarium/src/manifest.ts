@@ -7,15 +7,15 @@ import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
  */
 export const METAQUARIUM_PARAMS = {
   cameraAzimuth: { type: 'number', default: 35, min: 0, max: 360, ease: 'smooth' },
-  cameraElevation: { type: 'number', default: 12, min: -5, max: 60, ease: 'smooth' },
-  cameraDistance: { type: 'number', default: 170, min: 80, max: 400, ease: 'smooth' },
+  cameraElevation: { type: 'number', default: 15, min: -5, max: 60, ease: 'smooth' },
+  cameraDistance: { type: 'number', default: 140, min: 80, max: 400, ease: 'smooth' },
   autoRotate: { type: 'number', default: 1.5, min: 0, max: 12, ease: 'smooth' },
   fishCount: { type: 'number', default: 7, min: 1, max: 24, ease: 'step' },
   swimSpeed: { type: 'number', default: 1, min: 0.2, max: 3, ease: 'smooth' },
-  fogColor: { type: 'color', default: '#04101c', ease: 'smooth' },
+  fogColor: { type: 'color', default: '#020810', ease: 'smooth' },
   /** Full-scene bloom strength; 0 disables the composer entirely. Kept low by
    *  default — glow, not strobe (the flash gate cares). */
-  bloomStrength: { type: 'number', default: 0.35, min: 0, max: 1.2, ease: 'smooth' },
+  bloomStrength: { type: 'number', default: 0.35, min: 0, max: 1.5, ease: 'smooth' },
   /** Single-breed GLB used when no farm is configured (walking-skeleton mode). */
   fishUrl: { type: 'string', default: '/assets/metaquarium/beta-fish.glb' },
   /** Metaquarium farm endpoint returning `{message: {metadata: [...]}}` (or a
