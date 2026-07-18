@@ -73,11 +73,12 @@ development and testing.
 | App | What |
 | --- | --- |
 | [`playground`](apps/playground) | Vite dev workbench: saver palette, inline preview, determinism proof, safety/perf analysis, device capabilities, declarative schema editor. |
+| [`mac`](apps/mac) | Native macOS menu-bar app (Swift). One borderless overlay per display, idle detection, channel mode, saver cycling, auto-updates from idlescreens.com. See [apps/mac/README.md](apps/mac/README.md). |
 
-## Design docs
+## Docs
 
-- **[`docs/specs/`](./docs/specs)** -- authoritative specifications: the [behavior contract](./docs/specs/behavior-contract.md) (97 requirements, all tested) and the [control-track](./docs/specs/control-track.md) data model.
-- **[`docs/research/`](./docs/research)** -- original thinking: the [2026 vision](./docs/research/vision-2026.md) and the [architecture addendum](./docs/research/architecture-addendum.md) (speculative).
+- **[`docs/specs/`](./docs/specs)** -- authoritative specifications: [scene-format](./docs/specs/scene-format.md) (the SaverSpec JSON format).
+- **[`docs/research/`](./docs/research)** -- original thinking and design explorations: [roadmap](./docs/research/roadmap.md), [macOS app design](./docs/research/macos-app-roadmap.md), [channels & presence](./docs/research/presence-and-channels.md), [MCP state architecture](./docs/research/mcp-state-architecture.md), and more.
 
 ## Develop
 
