@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/schema",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Declarative, agent-authorable saver format for idle-screens: validate a data spec, then compile it into a runnable, seeded, flash-safe SaverPlugin.",
   "license": "MIT",
   "author": "Shawn Partridge",
