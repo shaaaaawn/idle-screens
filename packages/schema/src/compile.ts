@@ -16,6 +16,7 @@ import {
   type SteerDelta,
 } from './steer';
 import type { LayerSpec, SaverSpec } from './types';
+import { LIMITS } from './types';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -109,11 +110,12 @@ class SpecInstance implements SaverInstance {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /** (Re)seed and place all entities — deterministic for the seed + size. */
+  /** (Re)seed and place all entities — deterministic for the seed + viewport. */
   private rebuild(): void {
     const rng = createRng(this.seed);
     const scale = this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1;
-    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale) }));
+    const countScale = scale > 1 ? Math.min(this.w, this.h) / LIMITS.referenceViewport : 1;
+    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale, countScale) }));
     this.lastStructural = structuralSignature(this.effSpec);
   }
 

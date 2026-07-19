@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { adviseSpec } from './advise';
+import { describeScene } from './describe';
 import { EXAMPLE_SPECS } from './examples/index';
 import type { SaverSpec } from './types';
 
@@ -61,5 +62,77 @@ describe('adviseSpec', () => {
     };
     const w = adviseSpec(heavy);
     expect(w.some((x) => x.code === 'text-heavy')).toBe(true);
+  });
+
+  it('warns on link starvation', () => {
+    const starved: SaverSpec = {
+      ...base,
+      layers: [{
+        count: 10,
+        sprite: { kind: 'circle', radius: [5, 10], color: '#fff' },
+        motion: { type: 'drift', speed: [10, 30] },
+        links: { k: 4, maxDist: 1 },
+      }],
+    };
+    const w = adviseSpec(starved);
+    expect(w.some((x) => x.code === 'link-starvation')).toBe(true);
+  });
+
+  it('warns on uniform motion', () => {
+    const uniform: SaverSpec = {
+      ...base,
+      layers: [{
+        count: 20,
+        sprite: { kind: 'circle', radius: [5, 10], color: '#fff' },
+        motion: { type: 'drift', speed: [100, 100] },
+      }],
+    };
+    const w = adviseSpec(uniform);
+    expect(w.some((x) => x.code === 'uniform-motion')).toBe(true);
+  });
+});
+
+describe('describeScene', () => {
+  it('returns snapshots at requested time values', () => {
+    const desc = describeScene(base, { times: [0, 3000] });
+    expect(desc.snapshots).toHaveLength(2);
+    expect(desc.snapshots[0]!.t).toBe(0);
+    expect(desc.snapshots[1]!.t).toBe(3000);
+  });
+
+  it('reports layer count matching spec', () => {
+    const desc = describeScene(base, { times: [0] });
+    expect(desc.snapshots[0]!.layers[0]!.count).toBe(20);
+  });
+
+  it('scales count with viewport for viewport-unit specs', () => {
+    const vpSpec: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      layers: [{ count: 100, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#fff' }, motion: { type: 'drift', speed: [0.05, 0.1] } }],
+    };
+    const small = describeScene(vpSpec, { viewport: { width: 540, height: 540 }, times: [0] });
+    const large = describeScene(vpSpec, { viewport: { width: 2160, height: 2160 }, times: [0] });
+    expect(small.snapshots[0]!.layers[0]!.count).toBe(50);
+    expect(large.snapshots[0]!.layers[0]!.count).toBe(200);
+  });
+
+  it('reports link connectivity for link layers', () => {
+    const linked: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      layers: [{
+        count: 30,
+        sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#fff' },
+        motion: { type: 'drift', speed: [0.01, 0.02] },
+        links: { k: 3, maxDist: 0.3 },
+      }],
+    };
+    const desc = describeScene(linked, { times: [0] });
+    const layer = desc.snapshots[0]!.layers[0]!;
+    expect(layer.linksDrawn).toBeGreaterThan(0);
+    expect(layer.linksExpected).toBeGreaterThan(0);
+    expect(layer.connectedComponents).toBeGreaterThan(0);
+    expect(layer.isolatedNodes).not.toBeNull();
   });
 });

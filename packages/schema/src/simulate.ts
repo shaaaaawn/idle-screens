@@ -1,5 +1,6 @@
 import type { Rng } from '@idle-screens/core';
 import type { CycleSpec, LayerSpec, SpriteSpec } from './types';
+import { LIMITS } from './types';
 
 /** A seeded entity: initial state + resolved velocity. `positionAt` is a pure function
  *  of this + time, so the rAF loop and renderFrame(t) produce identical results. */
@@ -43,14 +44,21 @@ export function spriteVariants(sprite: SpriteSpec): number {
 }
 
 /** Deterministically place a layer's entities using the seeded RNG (never Math.random).
- *  `scale` multiplies every dimensional draw (default 1). Used for viewport units. */
-export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, scale = 1): Entity[] {
+ *  `scale` multiplies every dimensional draw (default 1). Used for viewport units.
+ *  `countScale` multiplies entity count for density-aware scaling (default 1). */
+export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, scale = 1, countScale = 1): Entity[] {
+  const effectiveCount = countScale === 1
+    ? layer.count
+    : Math.max(1, Math.min(
+        Math.round(layer.count * countScale),
+        layer.links ? LIMITS.maxLinkLayerCount : LIMITS.maxPerLayer,
+      ));
   const [smin, smax] = layer.size ?? [20, 40];
   const variants = spriteVariants(layer.sprite);
   const colorsLen = layer.sprite.kind === 'circle' && layer.sprite.colors ? layer.sprite.colors.length : 0;
   const cycle: CycleSpec | undefined = (layer.sprite.kind === 'emoji' || layer.sprite.kind === 'text') ? layer.sprite.cycle : undefined;
   const out: Entity[] = [];
-  for (let i = 0; i < layer.count; i++) {
+  for (let i = 0; i < effectiveCount; i++) {
     const size =
       layer.sprite.kind === 'circle'
         ? rng.range(layer.sprite.radius[0], layer.sprite.radius[1]) * 2 * scale
