@@ -16,6 +16,7 @@ import {
   type SteerDelta,
 } from './steer';
 import type { LayerSpec, SaverSpec } from './types';
+import { LIMITS } from './types';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -109,11 +110,16 @@ class SpecInstance implements SaverInstance {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /** (Re)seed and place all entities — deterministic for the seed + size. */
+  /** (Re)seed and place all entities — deterministic for the seed + viewport. */
   private rebuild(): void {
     const rng = createRng(this.seed);
     const scale = this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1;
-    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale) }));
+    let countScale = scale > 1 ? Math.min(this.w, this.h) / LIMITS.referenceViewport : 1;
+    if (countScale > 1) {
+      const rawTotal = this.effSpec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
+      if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+    }
+    this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale, countScale) }));
     this.lastStructural = structuralSignature(this.effSpec);
   }
 
@@ -139,7 +145,7 @@ class SpecInstance implements SaverInstance {
     this.renderFrame(this.lastT, this.seed);
   }
 
-  private drawBackground(): void {
+  private drawBackground(t: number): void {
     const { ctx, w, h } = this;
     const bg = this.effSpec.background;
     if (!bg || bg.type === 'solid') {
@@ -148,13 +154,77 @@ class SpecInstance implements SaverInstance {
       return;
     }
     const g = ctx.createLinearGradient(0, 0, 0, h);
-    for (const s of bg.stops) g.addColorStop(Math.max(0, Math.min(1, s.at)), s.color);
+    const drift = bg.drift;
+    for (let i = 0; i < bg.stops.length; i++) {
+      const s = bg.stops[i]!;
+      let at = s.at;
+      if (drift) {
+        const amount = drift.amount ?? 0.15;
+        const phase = (i / bg.stops.length) * Math.PI * 2;
+        at = Math.max(0, Math.min(1, at + amount * Math.sin((t * 2 * Math.PI) / drift.period + phase)));
+      }
+      g.addColorStop(at, s.color);
+    }
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
     if (bg.band) {
       ctx.fillStyle = bg.band.color;
       const bh = bg.band.height * (this.effSpec.units === 'viewport' ? Math.min(w, h) : 1);
       ctx.fillRect(0, h - bh, w, bh);
+    }
+  }
+
+  private drawTrail(built: Built, e: Entity, t: number): void {
+    const trail = built.layer.trail;
+    if (!trail) return;
+    const { ctx, w, h } = this;
+    const fade = trail.fade ?? 1;
+    const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
+    const headAlpha = alphaAt(e, t);
+    const headSize = sizeAt(e, t);
+    const sprite = built.layer.sprite;
+    const resolvedColor = sprite.kind === 'circle'
+      ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
+      : sprite.kind === 'text' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
+    const isSoft = sprite.kind === 'circle' && sprite.soft;
+    const wrap = built.layer.wrap !== false;
+
+    const head = positionAt(e, t, w, h);
+    let prevX = head.x;
+    let prevY = head.y;
+
+    for (let s = 1; s <= n; s++) {
+      const k = s / n;
+      const pastT = t - k * trail.length;
+      if (pastT < 0) break;
+      const pos = positionAt(e, pastT, w, h);
+
+      if (wrap) {
+        const dx = pos.x - prevX;
+        const dy = pos.y - prevY;
+        if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) break;
+      }
+      prevX = pos.x;
+      prevY = pos.y;
+
+      const a = headAlpha * (1 - k * fade);
+      if (a <= 0) break;
+      const r = (headSize / 2) * (1 - k * 0.7);
+      if (r < 0.2) break;
+
+      ctx.globalAlpha = a;
+      if (isSoft) {
+        const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
+        g.addColorStop(0, resolvedColor);
+        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
+        g.addColorStop(1, hexToRgba(resolvedColor, 0));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = resolvedColor;
+      }
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -296,11 +366,14 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    this.drawBackground();
+    this.drawBackground(t);
     for (const built of this.layers) {
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       this.drawLinks(built, t);
-      for (const e of built.entities) this.drawEntity(built, e, t);
+      for (const e of built.entities) {
+        this.drawTrail(built, e, t);
+        this.drawEntity(built, e, t);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';

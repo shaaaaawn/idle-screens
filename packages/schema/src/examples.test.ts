@@ -6,7 +6,7 @@ import { AQUARIUM_SPEC, RAIN_SPEC, EXAMPLE_SPECS, SCHEMA_EXAMPLES } from './exam
 describe('example specs', () => {
   it('all example specs validate', () => {
     for (const spec of EXAMPLE_SPECS) {
-      expect(validateSpec(spec), spec.id).toEqual({ valid: true, errors: [] });
+      expect(validateSpec(spec), spec.id).toEqual({ valid: true, errors: [], warnings: [] });
     }
   });
 
@@ -19,7 +19,7 @@ describe('example specs', () => {
   });
 
   it('SCHEMA_EXAMPLES catalog matches EXAMPLE_SPECS', () => {
-    expect(SCHEMA_EXAMPLES).toHaveLength(8);
+    expect(SCHEMA_EXAMPLES).toHaveLength(9);
     expect(EXAMPLE_SPECS.map((s) => s.id)).toEqual(SCHEMA_EXAMPLES.map((e) => e.id));
   });
 

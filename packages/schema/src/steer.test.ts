@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, structuralSignature } from './steer';
+import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, steerablePaths, structuralSignature } from './steer';
 import type { SaverSpec } from './types';
 
 const spec: SaverSpec = {
@@ -87,6 +87,62 @@ describe('structuralSignature', () => {
     const countChange = applyDeltasToSpec(spec, [{ t: 0, path: 'dots.count', value: 99 }]);
     expect(structuralSignature(colorOnly)).toBe(base);
     expect(structuralSignature(countChange)).not.toBe(base);
+  });
+});
+
+describe('steerablePaths', () => {
+  it('returns leaf paths for numbers, strings, and arrays', () => {
+    const paths = steerablePaths(spec);
+    expect(paths).toContain('layers.0.count');
+    expect(paths).toContain('layers.0.sprite.color');
+    expect(paths).toContain('layers.0.sprite.radius');
+    expect(paths).toContain('layers.0.motion.speed');
+    expect(paths).toContain('background.stops.0.color');
+    expect(paths).toContain('background.stops.0.at');
+    expect(paths).toContain('background.stops.1.color');
+  });
+
+  it('skips metadata fields', () => {
+    const paths = steerablePaths(spec);
+    expect(paths).not.toContain('schemaVersion');
+    expect(paths).not.toContain('id');
+    expect(paths).not.toContain('label');
+    expect(paths).not.toContain('layers.0.sprite.kind');
+    expect(paths).not.toContain('background.type');
+  });
+
+  it('handles specs with links, pulse, grow, and key', () => {
+    const rich: SaverSpec = {
+      schemaVersion: 1, id: 'r', label: 'R',
+      layers: [{
+        key: 'stars',
+        count: 40,
+        sprite: { kind: 'circle', radius: [2, 5], color: '#fff', colors: ['#aaa', '#bbb'] },
+        motion: { type: 'drift', speed: [1, 5], bidirectional: true, bob: 3 },
+        links: { k: 3, maxDist: 200, alpha: 0.15, width: 0.5 },
+        pulse: { amp: 0.2, period: 3000 },
+        grow: { amp: 0.1, period: 2000 },
+        spin: 10,
+        alpha: [0.5, 0.9],
+        blend: 'lighter',
+      }],
+    };
+    const paths = steerablePaths(rich);
+    expect(paths).toContain('layers.0.links.k');
+    expect(paths).toContain('layers.0.links.maxDist');
+    expect(paths).toContain('layers.0.links.alpha');
+    expect(paths).toContain('layers.0.pulse.amp');
+    expect(paths).toContain('layers.0.grow.period');
+    expect(paths).toContain('layers.0.spin');
+    expect(paths).toContain('layers.0.sprite.colors');
+    expect(paths).toContain('layers.0.motion.bidirectional');
+    expect(paths).toContain('layers.0.motion.bob');
+    expect(paths).not.toContain('layers.0.key');
+  });
+
+  it('returns empty for non-objects', () => {
+    expect(steerablePaths(null)).toEqual([]);
+    expect(steerablePaths(42)).toEqual([]);
   });
 });
 

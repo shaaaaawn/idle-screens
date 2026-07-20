@@ -2,20 +2,21 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Six publishable packages + one dev app:
+pnpm workspace monorepo. Six publishable packages + two apps:
 
 ```
 packages/
   core/              @idle-screens/core         -- engine, <idle-screen> element, idle detection,
                                                    plugin registry, seeded RNG, control-track, types
   saver-black-hole/  @idle-screens/saver-black-hole  -- passthrough gravitational-lensing saver
-  savers-classic/    @idle-screens/savers-classic     -- 13 classic savers (toasters, DVD, warp, etc.)
+  savers-classic/    @idle-screens/savers-classic     -- 19 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
 apps/
   playground/        Vite dev workbench (imports all 6; dev-only, not published)
-docs/                Design docs (vision, control-track spec, behavior contract)
+  mac/               Native macOS menu-bar app (Swift, not published to npm)
+docs/                Design docs (specs, research)
 ```
 
 **Dependency graph:** `core` is the foundation. `saver-black-hole`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
@@ -28,7 +29,7 @@ pnpm install
 pnpm build                  # tsup build all packages (must run before typecheck on clean checkout)
 pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
-pnpm test                   # vitest run (120 unit tests)
+pnpm test                   # vitest run (180 unit tests)
 pnpm dev                    # Vite playground at localhost:5173
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
 pnpm test:all               # build + typecheck + lint + test + e2e (the full CI gate)
@@ -48,7 +49,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 **The `<idle-screen>` custom element.** Defined by `core`, it owns the dialog overlay, idle detection, plugin mount/unmount, and fade transitions. Consumers hand it an engine instance imperatively (`el.engine = engine`).
 
-**`behavior-contract.md` is the authoritative specification.** All 97 items are implemented and tested. The vision doc and control-track spec are aspirational/historical; check their status headers.
+**The behavior contract (97 items) is fully implemented and tested.** The design docs in `docs/research/` are historical context, not implementation guidance.
 
 ## Build, CI, and deploy
 

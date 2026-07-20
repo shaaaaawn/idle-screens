@@ -27,7 +27,7 @@ export interface SaverSpec {
 
 export type BackgroundSpec =
   | { type: 'solid'; color: string }
-  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec };
+  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec; drift?: BackgroundDrift };
 
 /** A vertical gradient stop (`at` 0 = top, 1 = bottom). */
 export interface GradientStop {
@@ -40,6 +40,14 @@ export interface BandSpec {
   color: string;
   /** Band height in px. */
   height: number;
+}
+
+/** Slow oscillation of gradient stop positions — makes the background feel alive. */
+export interface BackgroundDrift {
+  /** Full cycle period in ms. Floor: LIMITS.minDriftPeriod (10 s). */
+  period: number;
+  /** How far stops shift (fraction of the 0..1 range). Default 0.15, max 0.3. */
+  amount?: number;
 }
 
 export interface LayerSpec {
@@ -100,6 +108,11 @@ export interface LayerSpec {
     alpha?: number;
     width?: number;
   };
+  /**
+   * Afterglow trail behind moving entities. Samples past positions analytically
+   * (no state, fully deterministic). `length` in ms, `fade` 0..1 (default 1 = full fade).
+   */
+  trail?: { length: number; fade?: number };
 }
 
 export type SpriteSpec =
@@ -153,6 +166,8 @@ export interface SpecError {
 export interface ValidationResult {
   valid: boolean;
   errors: SpecError[];
+  /** Non-blocking warnings about unknown/misplaced properties or likely authoring mistakes. */
+  warnings?: SpecWarning[];
 }
 
 /** An advisory warning (non-blocking). Returned by `adviseSpec`. */
@@ -177,4 +192,8 @@ export const LIMITS = {
   maxLinkLayerCount: 200,
   minCyclePeriod: 500, // ms — same flash-safety floor as pulse
   referenceViewport: 1080, // for validating viewport-unit dimensional caps
+  maxTrailLength: 5000, // ms — cap trail duration
+  maxTrailSamples: 24, // dots per trail
+  minDriftPeriod: 10000, // ms — background drift floor (10 s)
+  maxDriftAmount: 0.3, // fraction of gradient stop shift
 } as const;
