@@ -6,7 +6,7 @@ import { AQUARIUM_SPEC, RAIN_SPEC, EXAMPLE_SPECS, SCHEMA_EXAMPLES } from './exam
 describe('example specs', () => {
   it('all example specs validate', () => {
     for (const spec of EXAMPLE_SPECS) {
-      expect(validateSpec(spec), spec.id).toEqual({ valid: true, errors: [] });
+      expect(validateSpec(spec), spec.id).toEqual({ valid: true, errors: [], warnings: [] });
     }
   });
 

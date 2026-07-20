@@ -166,6 +166,8 @@ export interface SpecError {
 export interface ValidationResult {
   valid: boolean;
   errors: SpecError[];
+  /** Non-blocking warnings about unknown/misplaced properties or likely authoring mistakes. */
+  warnings?: SpecWarning[];
 }
 
 /** An advisory warning (non-blocking). Returned by `adviseSpec`. */
