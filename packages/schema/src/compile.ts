@@ -114,7 +114,11 @@ class SpecInstance implements SaverInstance {
   private rebuild(): void {
     const rng = createRng(this.seed);
     const scale = this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1;
-    const countScale = scale > 1 ? Math.min(this.w, this.h) / LIMITS.referenceViewport : 1;
+    let countScale = scale > 1 ? Math.min(this.w, this.h) / LIMITS.referenceViewport : 1;
+    if (countScale > 1) {
+      const rawTotal = this.effSpec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
+      if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+    }
     this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale, countScale) }));
     this.lastStructural = structuralSignature(this.effSpec);
   }
@@ -181,7 +185,7 @@ class SpecInstance implements SaverInstance {
     const sprite = built.layer.sprite;
     const resolvedColor = sprite.kind === 'circle'
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
-      : '#e6e8ef';
+      : sprite.kind === 'text' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
     const wrap = built.layer.wrap !== false;
 
@@ -212,7 +216,7 @@ class SpecInstance implements SaverInstance {
       if (isSoft) {
         const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
         g.addColorStop(0, resolvedColor);
-        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75 * a));
+        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
         g.addColorStop(1, hexToRgba(resolvedColor, 0));
         ctx.fillStyle = g;
       } else {

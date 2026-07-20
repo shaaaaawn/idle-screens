@@ -107,7 +107,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
           err('background.drift.period', `must be >= ${LIMITS.minDriftPeriod} ms`);
         }
         if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount <= 0 || bg.drift.amount > LIMITS.maxDriftAmount)) {
-          err('background.drift.amount', `must be within 0..${LIMITS.maxDriftAmount}`);
+          err('background.drift.amount', `must be > 0 and <= ${LIMITS.maxDriftAmount}`);
         }
       }
     }
@@ -229,7 +229,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     if (!isObj(layer.trail)) err(`${path}.trail`, 'must be an object');
     else {
       if (!isNum(layer.trail.length) || layer.trail.length <= 0 || layer.trail.length > LIMITS.maxTrailLength) {
-        err(`${path}.trail.length`, `must be 1..${LIMITS.maxTrailLength} ms`);
+        err(`${path}.trail.length`, `must be > 0 and <= ${LIMITS.maxTrailLength} ms`);
       }
       if (layer.trail.fade !== undefined && (!isNum(layer.trail.fade) || layer.trail.fade < 0 || layer.trail.fade > 1)) {
         err(`${path}.trail.fade`, 'must be 0..1');

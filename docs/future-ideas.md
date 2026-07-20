@@ -33,27 +33,6 @@
 
 ## Open ideas (not yet implemented)
 
-### B1 — Density-aware entity counts _(highest remaining payoff)_
-
-**Problem.** `LayerSpec.count` is absolute. When `units: 'viewport'`,
-sizes/positions scale to the display but count does not — so a field that reads
-as rich at 1080p looks empty at 4K and cluttered on a phone.
-
-**Proposal.** A `density?: number` field = entities per `referenceViewport²` area.
-Effective count = `clamp(round(density * area / refArea), 1, maxPerLayer)`.
-
-**Where.** `src/types.ts` (`LayerSpec`), `src/simulate.ts` (`buildEntities`),
-`src/validate.ts`.
-
-**Tradeoffs.**
-- Determinism becomes per `(spec, seed, viewport)` — still deterministic, no
-  longer resolution-invariant. Document; keep e2e proof pinned to a reference res.
-- Cap overflow when scaling: prefer proportional downscale + advisory.
-- `links` layers bounded by `maxLinkLayerCount = 200`; density must respect this.
-
-**Open questions.** Linear vs quadratic scaling? Opt-in (`density` field) vs
-opt-out (auto-scale when `units:'viewport'`)?
-
 ### B2 — Richer `links`
 
 **Problem.** Links connect to `k` nearest neighbors within `maxDist`. Two gaps:
@@ -93,47 +72,6 @@ coverage?}` — stored on channel state, surfaced in `publishScene` response and
 **Where.** Core viewer mount path, `idle-server/src/screen-channel.ts`,
 `idle-server/src/worker.ts`, MCP `getState`.
 
-### F1 — `describeScene`: deterministic scene dump _(build next)_
-
-**Problem.** A non-vision author (an LLM steering via MCP) has no text signal
-about what the rendered frame looks like. The only feedback is "did it compile?"
-
-**Proposal.** An MCP tool that calls `buildEntities(spec, seed)` and returns per
-layer: entity count, centroid, bounding box, coverage %, mean luminance, contrast
-vs background, and **links actually drawn** (computed by simulating the k-nearest
-logic). Plus warnings derived from the numbers.
-
-```jsonc
-// describeScene({ channelId, t? }) →
-{
-  "t": 0,
-  "viewport": { "w": 1920, "h": 1080 },
-  "layers": [
-    {
-      "key": "graph",
-      "count": 90,
-      "centroid": [0.51, 0.49],
-      "coverage": 0.18,
-      "meanLuminance": 0.06,
-      "contrastVsBg": 1.4,
-      "linksDrawn": 4,
-      "linksExpected": 270
-    }
-  ],
-  "warnings": [
-    "graph: linksDrawn << linksExpected — raise count or widen links.maxDist",
-    "graph: contrastVsBg 1.4 < 3:1 — likely invisible"
-  ]
-}
-```
-
-**Why this is high-leverage:** `buildEntities` already exists and is deterministic.
-This is ground truth, not a caption — no render or vision model needed. Would have
-prevented every authoring failure in the _Weights_ session.
-
-**Where.** New export in `packages/schema` (reuses `buildEntities` + link
-simulation), new MCP tool in `idle-server/src/worker.ts`.
-
 ### F2 — ASCII luminance map
 
 **Problem.** Even with F1's numbers, spatial layout isn't perceivable as text.
@@ -147,22 +85,16 @@ radii without actually rendering).
 
 ### E1 addendum — adviseSpec gaps
 
-`adviseSpec` is implemented with: invisible-layer, sparse-scene, dense-scene, and
-text-heavy checks. **Still missing** (per the original doc):
-- Link starvation: a `links` layer where expected neighbor count < `k`
+`adviseSpec` covers: invisible-layer, sparse-scene, dense-scene, text-heavy,
+link-starvation, uniform-motion, off-center, and trail-on-static. **Remaining:**
 - Contrast vs background luminance (partially covered by invisible-layer for
   circles, not for text or links)
 - Extreme alpha range warning
-
-These could be added to the existing `adviseSpec` as follow-on work.
 
 ---
 
 ## Suggested build order (remaining work)
 
-1. **F1 `describeScene`** — highest leverage, cheapest (reuses `buildEntities`)
-2. **adviseSpec gaps** (link starvation, contrast) — incremental, feeds into F1
-3. **C2 render-stat confirmation** — folds F1's signals into publish flow
-4. **B1 density-aware counts** — root cause fix for 4K sparseness
-5. **B2 richer links** — fidelity upgrade
-6. B3, F2, F3 — polish
+1. **C2 render-stat confirmation** — viewer reports stats to channel state
+2. **B2 richer links** — falloff + random mode for graph visualizations
+3. B3, F2 — polish

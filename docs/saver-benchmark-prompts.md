@@ -113,7 +113,7 @@ A SaverSpec describes layers of sprites over a background. The runtime handles r
         "key": { "type": "string", "description": "Named handle for this layer." },
         "position": { "properties": { "x": {}, "y": {} }, "description": "Exact position (requires count: 1)." },
         "trail": { "properties": { "length": { "maximum": 5000 }, "fade": { "maximum": 1 } }, "description": "Afterglow trail in ms behind moving entities." },
-        "links": { "properties": { "k": { "maximum": 8 }, "maxDist": {}, "color": {}, "alpha": {}, "width": {} }, "description": "Lines to k nearest neighbors within maxDist." }
+        "links": { "properties": { "k": { "maximum": 8 }, "maxDist": {}, "color": {}, "alpha": {}, "width": {} }, "description": "Lines to k nearest neighbors within maxDist. Layer count must be <= 200 when set." }
       }
     }
   }
