@@ -122,3 +122,149 @@ copies.
 Each P1 item is an afternoon-sized change riding the standard chain, and each
 ships with a new example spec that shows it off (examples double as regression
 baselines and as `screen://examples` inspiration for authoring agents).
+
+**Status:** trails (5) and background drift (3) landed 2026-07-19.
+
+---
+
+## Format ceiling analysis
+
+Audit of what classic screensaver families the spec can/can't express, and
+what format additions would unlock the most new territory while keeping the
+core invariants (analytic motion, no simulation state, deterministic frames).
+
+### What the spec covers well today
+
+| Family | Examples | How |
+| --- | --- | --- |
+| Drifting sprite fields | toasters, fish, DVD logo | drift + flip + wrap |
+| Particle fields | rain, snow, fireflies, stars | rise/drift + soft circles + pulse |
+| Orbital systems | orrery, electrons, spirograph-adjacent | orbit + trails |
+| Constellation / graph | network, nodes, plexus | links + drift |
+| Atmospheric scenes | lanterns, sakura, comet shower | layers + blend + trails + drift |
+| Text marquees | scrolling messages, dashboards | text sprites + drift/static |
+
+### Achievable — stays analytic, unlocks new families
+
+**15. Harmonic / Lissajous motion.** `{ type: 'harmonic', octaves: N }` where
+each entity's position is `x₀ + Σ aᵢ·sin(bᵢ·t + φᵢ)` per axis with seeded
+amplitudes/frequencies/phases. This is Flurry's core technique. Purely
+analytic, produces organic flowing curves — the visual gap between "straight
+lines" and "convincing organic motion" without needing flow-field simulation.
+The `wander` type (item 6) is a simplified version; harmonic generalizes it.
+Unlocks: Flurry-like streams, aurora, jellyfish tentacles, calligraphy.
+
+**16. Waypoint / path motion.** `{ type: 'path', points: [{x,y,t}...],
+curve: 'bezier' | 'catmull-rom' }`. Cubic spline evaluated at t mod duration —
+pure function, deterministic. Unlocks: choreographed movement, figure-8
+patterns, race tracks, roller coasters, ballet (abstract). Per-entity offset
+phase so multiple entities on the same path don't stack.
+
+**17. Perspective depth (z-axis).** `depth` field on a layer or per-entity,
+with perspective projection: `screen_x = x / (1 + z·fov)`. Stars at high z
+are small and slow; at low z, large and fast — this IS the warp starfield.
+Stays analytic (z decreases linearly or via drift in the depth axis). Unlocks:
+warp/starfield, fly-throughs, 3D parallax that's physically correct instead
+of hand-faked with multiple layers.
+
+**18. Canvas-fade trail (ghosting).** A global or per-layer
+`ghosting?: number` (0..1) that paints a semi-transparent background rect
+each frame instead of fully clearing. This is Mystify's core trick — every
+entity leaves decaying after-images without per-entity trail sampling. Very
+cheap, very atmospheric. Different from the entity-level `trail` (which
+samples past positions); this is a frame-compositing effect. Unlocks: Mystify
+polygons, paint-like smearing, long-exposure photography look.
+
+**19. Spawn timing / lifecycle.** `enter?: number` and `exit?: number` (ms)
+on a layer. Before `enter`, entities don't exist; after `exit`, they fade
+out and stop. Enables act structure: "stars appear first, then dancers enter
+at t=3000, spotlight fades in at t=5000." Pure function of t — no state.
+Unlocks: scripted sequences, narrative scenes, title cards, curtain-up
+moments.
+
+**20. Polygon / connected-vertex shapes.** A sprite kind where N vertices
+bounce or follow paths independently, connected by lines. This is exactly
+Mystify (and Qix, cat's cradle, string art). Could be a `polygon` sprite
+kind with `vertices: N` or a special layer mode where `links` connect
+entities in order (not k-nearest). Unlocks: Mystify, geometric string art,
+morphing shapes.
+
+**21. Grid layout.** `layout: 'grid'` on a layer — entities snap to a grid
+rather than scattering randomly. Combined with sprite cycling and column-aware
+spawn regions, this unlocks Matrix rain (characters in fixed columns, each
+column falling at its own speed). Also useful for tile patterns, mosaics,
+LED walls.
+
+### Beyond this schema — future schema types
+
+The current schema (schemaVersion 1) models one family well: **sprite fields**
+(layers of independently moving entities over a painted background). That
+covers a big chunk of classic screensavers, but not all of them. The patterns
+below need fundamentally different rendering models. Rather than stretching
+the sprite-field schema to breaking point, these are candidates for future
+schema types — each with its own compiler, its own invariants, and its own
+`schemaVersion`.
+
+| Pattern | Why it needs its own schema | Existing imperative saver |
+| --- | --- | --- |
+| **Fluid / smoke / lava lamp** | Navier-Stokes PDE on a velocity+density grid. Every cell depends on neighbors; no sprite decomposition. A fluid schema would specify emitters, viscosity, diffusion, color map — the compiler runs the solver. | `fluid` |
+| **Reaction-diffusion** | Gray-Scott coupled diffusion. Two chemical fields with neighbor-dependent update rules, 32+ substeps/frame, pixel-level output. Schema would specify feed/kill rates, seed regions, color mapping. | `reaction-diffusion` |
+| **Pipes / accumulative growth** | Frame-to-frame spatial state: "which cells are filled." Each step depends on history. Schema would specify grid size, growth rules, palette, segment shapes. | `pipes` |
+| **Cellular automata** | Grid where each cell's next state depends on neighbor state. Game of Life, Rule 110, Langton's ant. Schema would specify rule table, grid size, seed pattern, color map. | — |
+| **N-body gravity** | Chaotic: each body's path depends on all other bodies at every timestep. No closed-form solution for N > 2. Schema would specify masses, initial conditions, integrator params. | — |
+| **Flocking / boids** | Velocity depends on neighbors (separation, alignment, cohesion). Emergent behavior from local rules. Schema would specify neighbor radius, weights, speed limits. | — |
+| **Collision response** | Position depends on other entities' positions. Billiards, Newton's cradle, ragdoll. Schema would specify shapes, masses, restitution, constraints. | — |
+| **Growing fractals** | IFS point accumulation, fractal flames with tone mapping, Mandelbrot zoom. Either accumulative, grid-based, or re-computed each frame. Schema would specify transforms, iteration count, color mapping. | — |
+
+The pattern: each of these families has a small parameter space (a few
+knobs that control the visual) but a complex computational core. That's
+exactly what schemas are for — an agent describes WHAT it wants, the
+compiler handles HOW. The question is which families are worth building
+compilers for, and the answer will come from what agents and users
+actually try to create.
+
+The sprite-field schema is the foundation because it covers the widest
+range of aesthetics with the least computation. But the architecture
+(validate → compile → mount) works for any rendering model — the schema
+type just determines which compiler runs.
+
+### The creative frontier
+
+The most interesting new scenes live at the boundary: patterns that LOOK
+like simulation but are actually analytic. Examples:
+
+- **Fake flocking:** harmonic motion with correlated phases across entities in
+  a layer produces schooling/swarming appearance without interaction forces.
+- **Fake gravity:** orbit motion with grow/pulse gives planets and moons.
+  Waypoint paths with parabolic arcs give thrown objects. No actual gravity.
+- **Fake fluid:** many soft circles with harmonic motion, additive blend, and
+  canvas-fade ghosting produce aurora/plasma. No PDE solver.
+- **Fake collision:** bounce motion already reflects off edges. For
+  entity-entity collisions there's no analytic solution — but careful
+  path/waypoint choreography can fake a billiards sequence.
+
+The format's job is to make these "fakes" easy to author and convincing to
+watch. An agent that understands these building blocks can produce scenes
+that feel dynamic and physical while being pure functions of time.
+
+### Fractals — what fits, what doesn't
+
+Static fractals (Mandelbrot, Julia, Sierpinski, Koch, L-system trees) are
+computed once and drawn as a shape. A `fractal` sprite kind with parameters
+(type, depth, angle, branching ratio) could draw a pre-computed fractal
+glyph — then the format's motion/pulse/grow/trail animates it normally.
+A field of drifting Koch snowflakes, a breathing L-system tree, rotating
+Sierpinski triangles with trails. The fractal doesn't grow — but it's a
+visually rich sprite.
+
+Growing/evolving fractals (IFS accumulating points, fractal flames with
+tone mapping, Mandelbrot zoom re-computing the grid each frame, L-systems
+branching generation by generation) are either accumulative, grid-based,
+or computationally heavy. These stay imperative.
+
+**22. Fractal sprite kind.** `{ kind: 'fractal', type: 'koch' | 'sierpinski'
+| 'tree', depth: number, angle?: number, ratio?: number }`. Pre-computed at
+mount, drawn as a path. Depth capped for perf (Koch 6, Sierpinski 7,
+tree 10). Combined with spin + grow + pulse, a single fractal sprite is
+more visually dense than any other primitive. Low priority but high
+novelty-per-effort ratio.
