@@ -340,8 +340,8 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (!isRange(motion.speed)) err(`${path}.speed`, 'must be a [min,max] range');
     else {
       if (Math.abs(motion.speed[0]) > LIMITS.maxOrbitSpeed || Math.abs(motion.speed[1]) > LIMITS.maxOrbitSpeed) err(`${path}.speed`, `orbit speed exceeds cap ${LIMITS.maxOrbitSpeed} deg/sec`);
-      if (motion.speed[1] < 1) {
-        warn(`${path}.speed`, 'near-zero-speed', `max orbit speed is ${motion.speed[1]} deg/sec — entities will appear frozen. Typical range: 5–60 deg/sec`);
+      if (Math.max(Math.abs(motion.speed[0]), Math.abs(motion.speed[1])) < 1) {
+        warn(`${path}.speed`, 'near-zero-speed', `orbit speed is near zero — entities will appear frozen. Typical range: 5–60 deg/sec`);
       }
     }
     if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
