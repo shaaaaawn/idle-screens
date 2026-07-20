@@ -103,6 +103,42 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
   return walk(from, to) as SaverSpec;
 }
 
+/**
+ * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
+ * like "layers.0.count", "background.stops.1.color", etc. Metadata fields
+ * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
+ * they describe structure, not tuneable values.
+ *
+ * Layer keys are NOT substituted: paths always use numeric indices.
+ * Consumers can map to key-based paths via resolveSpecPath if needed.
+ */
+export function steerablePaths(spec: unknown): string[] {
+  if (!spec || typeof spec !== 'object') return [];
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units']);
+  const INDEXED = new Set(['layers', 'stops']);
+  const out: string[] = [];
+  const walk = (node: unknown, prefix: string, key: string): void => {
+    if (Array.isArray(node) && INDEXED.has(key)) {
+      node.forEach((child, i) => walk(child, `${prefix}.${i}`, ''));
+      return;
+    }
+    if (Array.isArray(node)) {
+      if (prefix) out.push(prefix);
+      return;
+    }
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (SKIP.has(k)) continue;
+        walk(v, prefix ? `${prefix}.${k}` : k, k);
+      }
+      return;
+    }
+    if (prefix) out.push(prefix);
+  };
+  walk(spec, '', '');
+  return out;
+}
+
 /** Smooth (ease-in-out) progress curve used for glides. */
 export function easeSmooth(k: number): number {
   const c = Math.max(0, Math.min(1, k));

@@ -32,6 +32,14 @@ export function adviseSpec(
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
 
+    if (layer.trail && layer.motion.type === 'static') {
+      warnings.push({
+        path: `layers[${li}].trail`,
+        code: 'trail-on-static',
+        message: 'trail has no effect on static entities — they have no past positions to draw',
+      });
+    }
+
     if (layer.sprite.kind === 'circle') {
       const maxR = entities.reduce((m, e) => Math.max(m, e.size / 2), 0);
       const maxAlpha = entities.reduce((m, e) => Math.max(m, e.alpha), 0);

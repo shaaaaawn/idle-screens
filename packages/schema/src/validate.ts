@@ -62,6 +62,17 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void): v
         color(isObj(s) ? s.color : undefined, `background.stops[${i}].color`, err);
       });
     }
+    if (bg.drift !== undefined) {
+      if (!isObj(bg.drift)) err('background.drift', 'must be an object');
+      else {
+        if (!isNum(bg.drift.period) || bg.drift.period < LIMITS.minDriftPeriod) {
+          err('background.drift.period', `must be >= ${LIMITS.minDriftPeriod} ms`);
+        }
+        if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount <= 0 || bg.drift.amount > LIMITS.maxDriftAmount)) {
+          err('background.drift.amount', `must be within 0..${LIMITS.maxDriftAmount}`);
+        }
+      }
+    }
     if (bg.band !== undefined) {
       if (!isObj(bg.band)) err('background.band', 'must be an object');
       else {
@@ -159,6 +170,18 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       }
       if (isNum(layer.count) && layer.count > LIMITS.maxLinkLayerCount) {
         err(`${path}.links`, `layer count must be <= ${LIMITS.maxLinkLayerCount} when links is set`);
+      }
+    }
+  }
+
+  if (layer.trail !== undefined) {
+    if (!isObj(layer.trail)) err(`${path}.trail`, 'must be an object');
+    else {
+      if (!isNum(layer.trail.length) || layer.trail.length <= 0 || layer.trail.length > LIMITS.maxTrailLength) {
+        err(`${path}.trail.length`, `must be 1..${LIMITS.maxTrailLength} ms`);
+      }
+      if (layer.trail.fade !== undefined && (!isNum(layer.trail.fade) || layer.trail.fade < 0 || layer.trail.fade > 1)) {
+        err(`${path}.trail.fade`, 'must be 0..1');
       }
     }
   }

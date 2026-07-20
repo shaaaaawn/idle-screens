@@ -88,6 +88,16 @@
                 "color": { "$ref": "#/definitions/hexColor" },
                 "height": { "type": "number", "exclusiveMinimum": 0, "description": "Band height in px (e.g. an aquarium seafloor)." }
               }
+            },
+            "drift": {
+              "type": "object",
+              "required": ["period"],
+              "additionalProperties": false,
+              "properties": {
+                "period": { "type": "number", "minimum": 10000, "description": "Full cycle period in ms. Floor of 10 s." },
+                "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.3, "description": "How far stops shift (fraction of 0..1 range). Default 0.15, max 0.3." }
+              },
+              "description": "Slow oscillation of gradient stop positions — makes the background feel alive."
             }
           }
         }
@@ -146,6 +156,16 @@
             "y": { "type": "number", "minimum": 0, "maximum": 1 }
           },
           "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
+        },
+        "trail": {
+          "type": "object",
+          "required": ["length"],
+          "additionalProperties": false,
+          "properties": {
+            "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000, "description": "Trail duration in ms. How far back the afterglow extends." },
+            "fade": { "type": "number", "minimum": 0, "maximum": 1, "description": "Opacity fade factor along the trail. 1 = full fade to 0 (default), 0 = uniform opacity." }
+          },
+          "description": "Afterglow trail behind moving entities. Sampled analytically — no state, fully deterministic."
         },
         "links": {
           "type": "object",
