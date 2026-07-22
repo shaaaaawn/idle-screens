@@ -115,8 +115,29 @@ fn create_for_monitor(state: &Rc<AppState>, monitor: &gdk::Monitor) {
     state.webviews.borrow_mut().push(view);
 }
 
-/// Animate window opacity with an ease-out cubic over `dur_ms`.
+/// Fade a window IN (up to opaque). If `begin_shutdown` fires mid-fade, this
+/// yields: the tick callback stops as soon as `shutting_down` is set, so the
+/// shutdown fade-out isn't fought back toward opaque by a still-running
+/// fade-in (both would otherwise drive `set_opacity` every frame). Only the
+/// fade-in needs this guard — the fade-out always wins.
+pub fn fade_in(win: &gtk::ApplicationWindow, dur_ms: u64, state: &Rc<AppState>) {
+    let guard = state.clone();
+    animate_opacity(win, 1.0, dur_ms, move || guard.shutting_down.get());
+}
+
+/// Animate window opacity to `target` with an ease-out cubic over `dur_ms`.
 pub fn fade_to(win: &gtk::ApplicationWindow, target: f64, dur_ms: u64) {
+    animate_opacity(win, target, dur_ms, || false);
+}
+
+/// Shared opacity tween. `cancel` is polled each frame; returning true stops
+/// the animation (used so a fade-in yields to a shutdown fade-out).
+fn animate_opacity(
+    win: &gtk::ApplicationWindow,
+    target: f64,
+    dur_ms: u64,
+    cancel: impl Fn() -> bool + 'static,
+) {
     let from = win.opacity();
     if (from - target).abs() < 0.001 || dur_ms == 0 {
         win.set_opacity(target);
@@ -129,6 +150,9 @@ pub fn fade_to(win: &gtk::ApplicationWindow, target: f64, dur_ms: u64) {
         .saturating_mul(1000);
     let start = Cell::new(-1_i64);
     win.add_tick_callback(move |win, clock| {
+        if cancel() {
+            return glib::ControlFlow::Break;
+        }
         let now = clock.frame_time();
         if start.get() < 0 {
             start.set(now);

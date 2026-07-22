@@ -88,7 +88,7 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
                 .root()
                 .and_then(|r| r.downcast::<gtk4::ApplicationWindow>().ok())
             {
-                crate::windows::fade_to(&win, 1.0, fade_state.settings.fade_ms);
+                crate::windows::fade_in(&win, fade_state.settings.fade_ms, &fade_state);
             }
             // Windowed dev: focus the webview so ←/→ reach the page.
             if fade_state.settings.windowed {
