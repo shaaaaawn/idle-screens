@@ -97,8 +97,20 @@ impl AppState {
 }
 
 pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -> String {
-    // WebKit needs an absolute file:// path; relative --web-root values break.
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    // WebKit needs an absolute file:// path; a relative --web-root produces an
+    // invalid URI. canonicalize() resolves + absolutizes when the dir exists;
+    // if it doesn't (e.g. a bad --web-root in channel mode, where startup only
+    // warns), still force absolute by joining the cwd rather than emitting a
+    // relative file://./… URL.
+    let root = root.canonicalize().unwrap_or_else(|_| {
+        if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(root))
+                .unwrap_or_else(|_| root.to_path_buf())
+        }
+    });
     // Percent-encode: paths with spaces/non-ASCII (or a saver id with reserved
     // characters) would otherwise produce an invalid URI and a WebKit load failure.
     let root_lossy = root.to_string_lossy();
