@@ -122,7 +122,11 @@ pub fn check_updates(settings: &Settings) -> anyhow::Result<String> {
         ));
     }
 
-    let staging = data_dir().join("web-cache-staging");
+    // PID-scoped: the tray can spawn a `check-updates` process while a
+    // separately running overlay's own launch-time check is also downloading,
+    // so a shared fixed staging dir could have one process's download clobber
+    // the other's.
+    let staging = data_dir().join(format!("web-cache-staging-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging)?;
 
@@ -159,19 +163,39 @@ pub fn check_updates(settings: &Settings) -> anyhow::Result<String> {
         return Err(e);
     }
 
-    // Atomic swap, then re-validate (the anti-downgrade rule applies to the
-    // fresh cache too — a server bundle with fewer savers gets discarded).
+    // Swap, then re-validate (the anti-downgrade rule applies to the fresh
+    // cache too — a server bundle with fewer savers gets discarded). Back up
+    // the previous cache first so a bad swap restores it instead of leaving
+    // the session on `shipped` — a working newer cache shouldn't be lost to
+    // a failed *later* update attempt.
     let cache = cache_root();
-    let _ = std::fs::remove_dir_all(&cache);
-    std::fs::rename(&staging, &cache).context("installing staged bundle")?;
+    let backup = data_dir().join("web-cache-backup");
+    let _ = std::fs::remove_dir_all(&backup);
+    let had_previous_cache = cache.exists();
+    if had_previous_cache {
+        std::fs::rename(&cache, &backup).context("backing up previous cache")?;
+    }
+
+    if let Err(e) = std::fs::rename(&staging, &cache).context("installing staged bundle") {
+        if had_previous_cache {
+            let _ = std::fs::rename(&backup, &cache);
+        }
+        return Err(e);
+    }
     std::fs::write(version_file(), manifest.version.to_string())?;
 
     if !cache_is_valid(&cache, &shipped_root()) {
         let _ = std::fs::remove_dir_all(&cache);
         let _ = std::fs::remove_file(version_file());
+        if had_previous_cache {
+            let _ = std::fs::rename(&backup, &cache);
+            std::fs::write(version_file(), current.to_string())?;
+            bail!("downloaded bundle failed validation (anti-downgrade); kept previous cache v{current}");
+        }
         bail!("downloaded bundle failed validation (anti-downgrade); keeping shipped");
     }
 
+    let _ = std::fs::remove_dir_all(&backup);
     Ok(format!("updated to v{}", manifest.version))
 }
 
