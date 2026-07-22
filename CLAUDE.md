@@ -2,7 +2,7 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Six publishable packages + two apps:
+pnpm workspace monorepo. Six publishable packages + three apps:
 
 ```
 packages/
@@ -16,6 +16,7 @@ packages/
 apps/
   playground/        Vite dev workbench (imports all 6; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
+  linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
 docs/                Design docs (specs, research)
 ```
 
@@ -37,6 +38,8 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 **Important:** `pnpm build` must run before `pnpm typecheck` on a clean checkout. Packages typecheck against each other's emitted `dist/*.d.ts`, so the declarations must exist first.
 
+**Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. See `apps/linux/README.md` for Arch deps (`webkitgtk-6.0`, etc.), hypridle wiring, and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
+
 ## Architecture notes
 
 **The saver plugin contract.** A saver is a `SaverPlugin` with a `manifest` (id, label, passthrough flag, paramSpace) and a `mount(ctx: SaverContext): SaverInstance` function. `SaverContext` provides `host` (an HTMLElement to render into), `width`/`height`, a seeded `Rng` (NEVER use `Math.random()`), and optional `page` (for passthrough savers that eat the live page). `SaverInstance` returns `setPaused`, `resize`, and optionally `renderFrame(t, seed)` for deterministic frame-addressable rendering. See `.claude/skills/idle-screens-saver-plugin-authoring/` for the full contract.
@@ -57,6 +60,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 - **Release** (`.github/workflows/release.yml`): uses `changesets/action` to version-bump and publish to npm on push to `main`. Requires `NPM_TOKEN` secret (granular access token with "Bypass 2FA"). Both `NPM_TOKEN` and `NODE_AUTH_TOKEN` env vars must be set (setup-node creates `.npmrc` using `NODE_AUTH_TOKEN`, overriding changesets' `NPM_TOKEN` `.npmrc`).
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
+- **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test in an Arch container. Triggers on `apps/linux/**` changes on `main` and `develop`.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
 
@@ -85,6 +89,7 @@ hand (see `.changeset/worker-savers-steering.md` for the format).
 
 - Playground / workbench UI (`apps/playground` — explicitly ignored in config)
 - Mac app (`apps/mac` — ships via `mac-v*` tag, not npm)
+- Linux app (`apps/linux` — ships via PKGBUILD / manual install, not npm)
 - Docs, tests, CI, refactors with no published API change
 - Work that stays on `develop` and is not ready to publish
 

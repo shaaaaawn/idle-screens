@@ -75,6 +75,19 @@ fn create_for_monitor(state: &Rc<AppState>, monitor: &gdk::Monitor) {
     if state.settings.windowed {
         win.set_default_size(1280, 800);
         win.set_title(Some("idle-screens (windowed dev)"));
+
+        // Fallback when focus isn't on the webview.
+        let esc_state = state.clone();
+        let key = gtk::EventControllerKey::new();
+        key.connect_key_pressed(move |_, key, _, modifiers| {
+            if key == gdk::Key::Escape && modifiers.is_empty() {
+                esc_state.begin_shutdown();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        win.add_controller(key);
     } else {
         // Layer-shell setup must happen before the window is realized.
         win.init_layer_shell();

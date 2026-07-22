@@ -8,6 +8,7 @@ mod webview;
 mod windows;
 
 use clap::Parser;
+use glib_unix::unix_signal_add_local;
 use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -69,11 +70,17 @@ fn main() -> anyhow::Result<()> {
         }
 
         windows::create_all(&state);
-        idle::spawn_watcher();
+        // Windowed dev: keep open until you close the window or send SIGTERM.
+        // Overlay (hypridle): exit on the first input after the session is armed.
+        if state.settings.windowed {
+            log::info!("windowed dev mode: idle input watcher disabled (close via window manager or Ctrl+C)");
+        } else {
+            idle::spawn_watcher();
+        }
 
         // hypridle convention: on-resume sends SIGTERM.
         for signum in [libc::SIGTERM, libc::SIGINT] {
-            glib::unix_signal_add_local(signum, || {
+            unix_signal_add_local(signum, || {
                 state::with_state(|s| s.begin_shutdown());
                 glib::ControlFlow::Continue
             });

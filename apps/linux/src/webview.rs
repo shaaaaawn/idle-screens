@@ -4,9 +4,12 @@ use gtk4::gdk;
 use gtk4::gio;
 use gtk4::prelude::*;
 use webkit6::prelude::*;
+use webkit6::{NavigationPolicyDecision, PolicyDecisionType};
 
 use crate::config::Mode;
 use crate::state::AppState;
+
+const QUIT_URI: &str = "idle-screens://quit";
 
 /// Build a webview showing the session URL, wired for fade-in, crash recovery,
 /// and channel→bundled fallback.
@@ -18,10 +21,37 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&view) {
         settings.set_enable_webgl(true);
         settings.set_media_playback_requires_user_gesture(false);
+        // Bundled mode loads file://; allow sibling assets under the web root.
+        settings.set_allow_file_access_from_file_urls(true);
+        settings.set_allow_universal_access_from_file_urls(true);
     }
 
     // A screensaver has no right-click menu.
     view.connect_context_menu(|_, _, _| true);
+
+    // Windowed dev: Escape in the webview → native quit via custom URI.
+    if state.settings.windowed {
+        let quit_state = state.clone();
+        view.connect_decide_policy(move |_, decision, decision_type| {
+            if decision_type != PolicyDecisionType::NavigationAction {
+                decision.use_();
+                return false;
+            }
+            let is_quit = decision
+                .downcast_ref::<NavigationPolicyDecision>()
+                .and_then(|nav| nav.navigation_action())
+                .and_then(|action| action.request())
+                .and_then(|req| req.uri())
+                .is_some_and(|uri| uri.starts_with(QUIT_URI));
+            if is_quit {
+                decision.ignore();
+                quit_state.begin_shutdown();
+            } else {
+                decision.use_();
+            }
+            false
+        });
+    }
 
     // Web content process died → reload (Mac watchdog parity).
     let crash_state = state.clone();
@@ -59,6 +89,10 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
                 .and_then(|r| r.downcast::<gtk4::ApplicationWindow>().ok())
             {
                 crate::windows::fade_to(&win, 1.0, fade_state.settings.fade_ms);
+            }
+            // Windowed dev: focus the webview so ←/→ reach the page.
+            if fade_state.settings.windowed {
+                view.grab_focus();
             }
         }
     });

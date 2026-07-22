@@ -19,12 +19,15 @@ if (brightness < 1) host.style.filter = `brightness(${brightness})`;
 host.style.transition = 'opacity 220ms ease';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const showHints = params.get('hints') !== '0';
+const showBrowseHint = params.get('browse') !== '0';
 
 const hintEl = document.getElementById('hint');
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
 function showHint(label: string): void {
   if (!hintEl || !showHints) return;
-  hintEl.innerHTML = `${label}<span class="sep">·</span><span class="keys">← → to browse</span>`;
+  hintEl.innerHTML = showBrowseHint
+    ? `${label}<span class="sep">·</span><span class="keys">← → browse · Esc exit</span>`
+    : label;
   hintEl.classList.add('show');
   if (hintTimer) clearTimeout(hintTimer);
   hintTimer = setTimeout(() => hintEl.classList.remove('show'), 3500);
@@ -76,6 +79,24 @@ declare global {
   }
 }
 window.__idleScreensMac = controller.createBridge(showToast);
+
+// Hosts without native key routing (Linux windowed dev) handle browse + quit here.
+// Mac handles ←/→ in Swift; duplicate calls are harmless (same saver index).
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    window.location.href = 'idle-screens://quit';
+    return;
+  }
+  if (!showBrowseHint) return;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    window.__idleScreensMac.prev();
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    window.__idleScreensMac.next();
+  }
+});
 
 const start = pinned ? Math.max(0, saverIndex(pinned, ALL_SAVERS)) : Math.floor(Math.random() * ALL_SAVERS.length);
 void controller.mountSaver(start);

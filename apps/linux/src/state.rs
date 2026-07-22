@@ -25,7 +25,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(app: &gtk::Application, settings: Settings) -> Rc<Self> {
-        let seed = settings.seed.unwrap_or_else(fastrand::u32);
+        let seed = settings.seed.unwrap_or_else(|| fastrand::u32(..));
         Rc::new(AppState {
             settings,
             seed,
@@ -80,6 +80,8 @@ impl AppState {
 }
 
 pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -> String {
+    // WebKit needs an absolute file:// path; relative --web-root values break.
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut url = format!("file://{}/index.html?seed={}", root.display(), seed);
     if let Some(saver) = &settings.saver {
         url.push_str(&format!("&saver={saver}"));
@@ -92,6 +94,10 @@ pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -
     }
     if !settings.hints {
         url.push_str("&hints=0");
+    }
+    if !settings.windowed {
+        // Overlay uses KeyboardMode::None — keys never reach the webview.
+        url.push_str("&browse=0");
     }
     url
 }
@@ -150,6 +156,14 @@ mod tests {
     #[test]
     fn bundled_url_defaults_are_minimal() {
         let url = bundled_url_for(std::path::Path::new("/opt/web"), 42, &settings());
+        assert_eq!(url, "file:///opt/web/index.html?seed=42&browse=0");
+    }
+
+    #[test]
+    fn bundled_url_windowed_allows_browse_hint() {
+        let mut s = settings();
+        s.windowed = true;
+        let url = bundled_url_for(std::path::Path::new("/opt/web"), 42, &s);
         assert_eq!(url, "file:///opt/web/index.html?seed=42");
     }
 
@@ -163,7 +177,7 @@ mod tests {
         let url = bundled_url_for(std::path::Path::new("/w"), 7, &s);
         assert_eq!(
             url,
-            "file:///w/index.html?seed=7&saver=warp&cycle=0&brightness=0.50&hints=0"
+            "file:///w/index.html?seed=7&saver=warp&cycle=0&brightness=0.50&hints=0&browse=0"
         );
     }
 }

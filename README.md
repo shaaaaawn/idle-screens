@@ -74,6 +74,7 @@ development and testing.
 | --- | --- |
 | [`playground`](apps/playground) | Vite dev workbench: saver palette, inline preview, determinism proof, safety/perf analysis, device capabilities, declarative schema editor. |
 | [`mac`](apps/mac) | Native macOS menu-bar app (Swift). One borderless overlay per display, idle detection, channel mode, saver cycling, auto-updates from idlescreens.com. See [apps/mac/README.md](apps/mac/README.md). |
+| [`linux`](apps/linux) | Native Wayland/Hyprland overlay (Rust + WebKitGTK 6). Layer-shell fullscreen saver, channel or bundled engine, hypridle integration. On the `develop` branch — see [apps/linux/README.md](apps/linux/README.md). |
 
 ## Docs
 
@@ -93,6 +94,18 @@ pnpm dev                  # the Vite playground
 pnpm test:e2e             # Playwright (incl. the determinism proof)
 pnpm test:all             # build + typecheck + lint + test + e2e
 ```
+
+### Linux app (Wayland / Hyprland, `develop` branch)
+
+```bash
+git checkout develop
+cd apps/linux
+./scripts/check-deps.sh
+./scripts/dev-run.sh --windowed --saver warp   # dev window
+```
+
+See [apps/linux/README.md](apps/linux/README.md) for install, hypridle wiring,
+and troubleshooting.
 
 ## Attribution
 
