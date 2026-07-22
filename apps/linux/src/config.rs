@@ -135,12 +135,23 @@ impl Settings {
             dmabuf,
             update_on_launch: !cli.no_update_check
                 && file.update.check.as_deref().unwrap_or("launch") == "launch",
-            update_base_url: file
-                .update
-                .base_url
-                .unwrap_or_else(|| DEFAULT_UPDATE_BASE.to_string()),
+            update_base_url: with_trailing_slash(
+                file.update
+                    .base_url
+                    .unwrap_or_else(|| DEFAULT_UPDATE_BASE.to_string()),
+            ),
         }
     }
+}
+
+/// bundle.rs builds `{base}manifest.json` / `{base}{file.path}` by plain
+/// concatenation; a base URL without a trailing slash would drop the '/'
+/// separator and 404 on every fetch.
+fn with_trailing_slash(mut url: String) -> String {
+    if !url.ends_with('/') {
+        url.push('/');
+    }
+    url
 }
 
 /// A channel value is either a bare id ("ballet") or a full URL passed through.
@@ -232,5 +243,22 @@ mod tests {
         assert!(!Settings::merge(&cli(&[]), file).update_on_launch);
         let s = Settings::merge(&cli(&[]), FileConfig::default());
         assert!(s.update_on_launch);
+    }
+
+    #[test]
+    fn update_base_url_always_ends_with_a_slash() {
+        let s = Settings::merge(&cli(&[]), FileConfig::default());
+        assert_eq!(s.update_base_url, DEFAULT_UPDATE_BASE);
+        assert!(s.update_base_url.ends_with('/'));
+
+        let file: FileConfig =
+            toml::from_str("[update]\nbase_url = \"https://example.com/bundle\"").unwrap();
+        let s = Settings::merge(&cli(&[]), file);
+        assert_eq!(s.update_base_url, "https://example.com/bundle/");
+
+        let file: FileConfig =
+            toml::from_str("[update]\nbase_url = \"https://example.com/bundle/\"").unwrap();
+        let s = Settings::merge(&cli(&[]), file);
+        assert_eq!(s.update_base_url, "https://example.com/bundle/");
     }
 }
