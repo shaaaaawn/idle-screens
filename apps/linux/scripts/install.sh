@@ -20,8 +20,9 @@ if [ ! -f "$config_dir/config.toml" ]; then
   echo "Created $config_dir/config.toml"
 fi
 
-mkdir -p "$HOME/.config/autostart"
-cp packaging/omarchy/idle-screens-tray.desktop "$HOME/.config/autostart/"
+autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+mkdir -p "$autostart_dir"
+cp packaging/omarchy/idle-screens-tray.desktop "$autostart_dir/"
 
 echo "Done. Optional next steps:"
 echo "  • Omarchy hypridle: ./packaging/omarchy/install-hypridle.sh"
