@@ -44,7 +44,7 @@ export interface GradientStop {
 /** An optional solid band at the bottom (e.g. an aquarium seafloor). */
 export interface BandSpec {
   color: string;
-  /** Band height in px. */
+  /** Band height — px or a viewport fraction, per the spec's `units`. */
   height: number;
 }
 
