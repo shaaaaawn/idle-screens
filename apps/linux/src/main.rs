@@ -36,9 +36,18 @@ fn main() -> anyhow::Result<()> {
     // mode should exit cleanly with a clear error, not fall through to a
     // black/failed overlay.
     let web_root = bundle::resolve_web_root(&settings);
-    if matches!(settings.mode, Mode::Savers) && !web_root.join("index.html").is_file() {
+    let has_bundle = web_root.join("index.html").is_file();
+    if matches!(settings.mode, Mode::Savers) && !has_bundle {
         anyhow::bail!(
             "no web bundle at {} — install the package or pass --web-root/--channel",
+            web_root.display()
+        );
+    }
+    if matches!(settings.mode, Mode::Channel(_)) && !has_bundle {
+        // Not fatal — channel mode doesn't need the bundle on the happy path —
+        // but a failed channel load has nothing to fall back to.
+        log::warn!(
+            "no web bundle at {} — a channel load failure would have no fallback to switch to",
             web_root.display()
         );
     }
