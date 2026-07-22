@@ -25,9 +25,16 @@ const hintEl = document.getElementById('hint');
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
 function showHint(label: string): void {
   if (!hintEl || !showHints) return;
-  hintEl.innerHTML = showBrowseHint
-    ? `${label}<span class="sep">·</span><span class="keys">← → browse · Esc exit</span>`
-    : label;
+  hintEl.replaceChildren(document.createTextNode(label));
+  if (showBrowseHint) {
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '·';
+    const keys = document.createElement('span');
+    keys.className = 'keys';
+    keys.textContent = '← → browse · Esc exit';
+    hintEl.append(sep, keys);
+  }
   hintEl.classList.add('show');
   if (hintTimer) clearTimeout(hintTimer);
   hintTimer = setTimeout(() => hintEl.classList.remove('show'), 3500);
