@@ -69,4 +69,6 @@ pub struct Cli {
 pub enum Command {
     /// Fetch, verify, and install the latest web bundle, then exit
     CheckUpdates,
+    /// Run a StatusNotifier tray (manual launch, updates, quit)
+    Tray,
 }

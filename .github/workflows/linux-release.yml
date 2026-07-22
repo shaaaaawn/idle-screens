@@ -1,0 +1,60 @@
+name: Linux Release
+
+# Tag a release as linux-vX.Y.Z to build and publish the Arch binary tarball.
+on:
+  push:
+    tags:
+      - 'linux-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain + deps
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel rustup git pkgconf nodejs npm \
+            gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita
+          rustup default stable
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/linux
+
+      - name: Build release tarball
+        working-directory: apps/linux
+        run: ./scripts/make-release.sh
+
+      - name: Extract version from tag
+        id: ver
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "version=${GITHUB_REF_NAME#linux-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(grep -m1 '^version' apps/linux/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('linux-v{0}', steps.ver.outputs.version) }}
+          name: idle-screens-wayland ${{ steps.ver.outputs.version }} (Linux)
+          draft: ${{ github.ref_type != 'tag' }}
+          files: |
+            apps/linux/dist/idle-screens-wayland-${{ steps.ver.outputs.version }}-x86_64.tar.gz
+            apps/linux/dist/idle-screens-wayland-${{ steps.ver.outputs.version }}-src.tar.gz
+          fail_on_unmatched_files: true
+          generate_release_notes: true

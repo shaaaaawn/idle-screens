@@ -1,0 +1,14 @@
+# Replace the screensaver listener block in hypridle with this (Omarchy / Hyprland).
+# Or run: ./packaging/omarchy/install-hypridle.sh
+
+listener {
+    timeout = 150
+    on-timeout = pidof hyprlock || omarchy-idle-screens
+    on-resume = pkill -TERM -x idle-screens-wayland
+}
+
+# Kiosk (mouse does not dismiss): use omarchy-idle-screens --kiosk and omit on-resume.
+# listener {
+#     timeout = 150
+#     on-timeout = pidof idle-screens-wayland || omarchy-idle-screens --kiosk
+# }

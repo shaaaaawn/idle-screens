@@ -61,6 +61,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
 - **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test in an Arch container. Triggers on `apps/linux/**` changes on `main` and `develop`.
+- **Linux release** (`.github/workflows/linux-release.yml`): tag `linux-v*` → release tarball + GitHub Release.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
 

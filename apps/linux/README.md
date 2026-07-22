@@ -74,31 +74,88 @@ SKIP_WEB=1 ./scripts/dev-run.sh --windowed --saver warp
 | `SKIP_WEB=1 ./scripts/dev-run.sh …` | Skip web bundle rebuild |
 | `cargo test` | Unit tests (config, bundle paths, URL builder) |
 | `cargo build --release` | Production binary → `target/release/idle-screens-wayland` |
+| `idle-screens-wayland tray` | StatusNotifier tray (manual launch / updates) |
+| `./scripts/make-release.sh` | Build release tarball locally (same as CI) |
+
+## Release (maintainers)
+
+Tag `linux-v0.1.0` on `develop`/`main` to trigger `.github/workflows/linux-release.yml`:
+
+```bash
+git tag linux-v0.1.0
+git push origin linux-v0.1.0
+```
+
+CI builds the binary + web bundle and publishes:
+
+- `idle-screens-wayland-<ver>-x86_64.tar.gz` — installable bundle (`install.sh`)
+- `idle-screens-wayland-<ver>-src.tar.gz` — AUR source tarball
+
+Local dry run: `./scripts/make-release.sh`
 
 ## Install (production)
 
-### Option A — manual
+### Option A — GitHub release tarball
+
+Download `idle-screens-wayland-<version>-x86_64.tar.gz` from
+[GitHub Releases](https://github.com/shaaaaawn/idle-screens/releases) (tag `linux-v*`),
+extract, and run:
+
+```bash
+./install.sh
+```
+
+Set `PREFIX=/usr` to install system-wide (default is `/usr/local`).
+
+### Option B — manual (from source)
 
 ```bash
 cd apps/linux
-./scripts/sync-web.sh              # or use a release tarball that includes webroot/
+./scripts/sync-web.sh
 cargo build --release --locked
 sudo install -Dm755 target/release/idle-screens-wayland /usr/bin/
 sudo mkdir -p /usr/share/idle-screens/web
 sudo cp -r webroot/. /usr/share/idle-screens/web/
-sudo install -Dm644 packaging/config.toml.example \
-  -t /etc/skel/.config/idle-screens/   # optional: seed default config
 ```
 
-### Option B — PKGBUILD / AUR-style
+### Option C — PKGBUILD / AUR-style
 
 ```bash
-./scripts/make-src-tarball.sh        # → dist/idle-screens-wayland-<v>-src.tar.gz
-# point packaging/PKGBUILD source= at the tarball, then:
-makepkg -si
+./scripts/make-src-tarball.sh
+makepkg -si   # using packaging/PKGBUILD
 ```
 
-### Wire hypridle
+### Omarchy integration
+
+After installing the binary:
+
+```bash
+# From an extracted release tarball:
+./packaging/omarchy/install-omarchy.sh
+
+# Or step by step:
+./install.sh
+./packaging/omarchy/install-hypridle.sh   # patches ~/.config/hypr/hypridle.conf
+```
+
+This replaces `omarchy-launch-screensaver` with `omarchy-idle-screens` (TTE
+terminal saver → WebKit overlay), adds `on-resume = pkill -TERM -x idle-screens-wayland`,
+installs the tray autostart entry, and seeds `~/.config/idle-screens/config.toml`.
+
+Manual hypridle snippet: `packaging/omarchy/hypridle.listener.snippet`
+
+### System tray
+
+```bash
+idle-screens-wayland tray          # StatusNotifier icon (Waybar tray)
+```
+
+Menu: show saver, kiosk mode, check updates, open config, quit tray.
+Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by `install.sh`).
+
+Hypridle still handles idle-triggered launch; the tray is for manual control.
+
+### Wire hypridle (non-Omarchy)
 
 Add to `~/.config/hypr/hypridle.conf` (see `packaging/hypridle.conf.example`
 for hyprlang, or `packaging/hypridle.lua.example` for Lua config):
@@ -224,5 +281,6 @@ lock/DPMS timers.
 
 ## Not here on purpose
 
-Idle scheduling (hypridle), locking (hyprlock), launch-at-login, tray UI —
-the Linux environment already provides them. This binary just draws and exits.
+Idle scheduling (hypridle), locking (hyprlock), launch-at-login beyond tray
+autostart — the Linux environment already provides most of this. The binary
+draws the overlay and exits; the tray adds manual launch and updates only.

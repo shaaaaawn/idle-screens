@@ -4,6 +4,7 @@ mod config;
 mod idle;
 mod platform;
 mod state;
+mod tray;
 mod webview;
 mod windows;
 
@@ -18,6 +19,11 @@ use crate::config::{Mode, Settings};
 fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
     platform::init_logging(cli.verbose);
+
+    if let Some(cli::Command::Tray) = cli.command {
+        return tray::run(cli.kiosk);
+    }
+
     let settings = Settings::load(&cli)?;
 
     if let Some(cli::Command::CheckUpdates) = cli.command {

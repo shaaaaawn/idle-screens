@@ -1,0 +1,22 @@
+#!/bin/bash
+# Omarchy-compatible launcher — drop-in replacement for omarchy-launch-screensaver.
+# Respects screensaver-off toggle; exits if already running or hyprlock is up.
+
+if ! command -v idle-screens-wayland &>/dev/null; then
+  notify-send -u low "idle-screens" "idle-screens-wayland not installed"
+  exit 1
+fi
+
+pgrep -x idle-screens-wayland >/dev/null && exit 0
+pidof hyprlock >/dev/null && exit 0
+
+if command -v omarchy-toggle-enabled &>/dev/null; then
+  if omarchy-toggle-enabled screensaver-off && [[ ${1:-} != "force" ]]; then
+    exit 1
+  fi
+fi
+
+# Silently quit Walker on overlay (matches omarchy-launch-screensaver).
+command -v walker &>/dev/null && walker -q 2>/dev/null || true
+
+exec idle-screens-wayland "$@"
