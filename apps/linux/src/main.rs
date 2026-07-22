@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
     platform::init_logging(cli.verbose);
 
     if let Some(cli::Command::Tray) = cli.command {
-        return tray::run(cli.kiosk);
+        return tray::run(cli.kiosk, cli.forwardable_args());
     }
 
     let settings = Settings::load(&cli)?;

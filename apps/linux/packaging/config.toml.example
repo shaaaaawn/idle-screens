@@ -14,8 +14,9 @@ channel = "ballet"
 #brightness = 1.0
 # Show the saver-name hint overlay
 #hints = true
-# Hold a Wayland idle inhibitor while showing.
-# WARNING: on Hyprland this pauses ALL hypridle listeners (lock, DPMS, suspend).
+# Reserved: not yet implemented (currently a no-op, only logs a warning).
+# Would hold a Wayland idle inhibitor while showing — WARNING: on Hyprland
+# that pauses ALL hypridle listeners (lock, DPMS, suspend).
 #inhibit = false
 # Fade-in duration in milliseconds (fade-out is half)
 #fade_ms = 900

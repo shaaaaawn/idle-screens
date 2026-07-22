@@ -47,8 +47,9 @@ pub struct Cli {
     #[arg(long)]
     pub web_root: Option<std::path::PathBuf>,
 
-    /// Hold a Wayland idle inhibitor while showing.
-    /// WARNING: on Hyprland this pauses ALL hypridle listeners (lock, DPMS, suspend).
+    /// Reserved: not yet implemented (currently a no-op, only logs a warning).
+    /// Would hold a Wayland idle inhibitor while showing — WARNING: on
+    /// Hyprland that pauses ALL hypridle listeners (lock, DPMS, suspend).
     #[arg(long)]
     pub inhibit: bool,
 
@@ -65,10 +66,104 @@ pub struct Cli {
     pub verbose: bool,
 }
 
+impl Cli {
+    /// Overrides that should carry through to a saver process the tray
+    /// spawns, so `idle-screens-wayland --channel foo tray` keeps applying
+    /// `--channel foo` to every "Show saver now" launch, not just the tray
+    /// itself. `--kiosk` is handled separately by the caller (it toggles
+    /// per menu item, not just per tray session).
+    pub fn forwardable_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(v) = &self.channel {
+            args.push("--channel".into());
+            args.push(v.clone());
+        }
+        if let Some(v) = &self.saver {
+            args.push("--saver".into());
+            args.push(v.clone());
+        }
+        if let Some(v) = self.cycle {
+            args.push("--cycle".into());
+            args.push(v.to_string());
+        }
+        if let Some(v) = self.brightness {
+            args.push("--brightness".into());
+            args.push(v.to_string());
+        }
+        if let Some(v) = self.seed {
+            args.push("--seed".into());
+            args.push(v.to_string());
+        }
+        if let Some(v) = &self.web_root {
+            args.push("--web-root".into());
+            args.push(v.display().to_string());
+        }
+        if let Some(v) = &self.config {
+            args.push("--config".into());
+            args.push(v.display().to_string());
+        }
+        if self.no_update_check {
+            args.push("--no-update-check".into());
+        }
+        args
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Fetch, verify, and install the latest web bundle, then exit
     CheckUpdates,
     /// Run a StatusNotifier tray (manual launch, updates, quit)
     Tray,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwardable_args_is_empty_by_default() {
+        let cli = Cli::parse_from(["idle-screens-wayland", "tray"]);
+        assert!(cli.forwardable_args().is_empty());
+    }
+
+    #[test]
+    fn forwardable_args_carries_channel_and_config_to_tray_launches() {
+        let cli = Cli::parse_from([
+            "idle-screens-wayland",
+            "--channel",
+            "ballet",
+            "--config",
+            "/tmp/custom.toml",
+            "--no-update-check",
+            "tray",
+        ]);
+        assert_eq!(
+            cli.forwardable_args(),
+            vec![
+                "--channel",
+                "ballet",
+                "--config",
+                "/tmp/custom.toml",
+                "--no-update-check"
+            ]
+        );
+    }
+
+    #[test]
+    fn forwardable_args_excludes_session_only_flags() {
+        // --kiosk, --windowed, --output, --inhibit, -v are session-specific;
+        // the tray/spawn_saver caller handles --kiosk on its own.
+        let cli = Cli::parse_from([
+            "idle-screens-wayland",
+            "--kiosk",
+            "--windowed",
+            "--output",
+            "DP-1",
+            "--inhibit",
+            "-v",
+            "tray",
+        ]);
+        assert!(cli.forwardable_args().is_empty());
+    }
 }

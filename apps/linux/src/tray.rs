@@ -8,6 +8,10 @@ use ksni::{MenuItem, Tray, TrayMethods};
 
 struct IdleScreensTray {
     kiosk: bool,
+    /// CLI overrides (--channel, --saver, --config, ...) the tray itself was
+    /// started with, forwarded to every saver it spawns — see
+    /// `Cli::forwardable_args`.
+    forwarded_args: Vec<String>,
 }
 
 impl IdleScreensTray {
@@ -23,6 +27,7 @@ impl IdleScreensTray {
         if self.kiosk {
             cmd.arg("--kiosk");
         }
+        cmd.args(&self.forwarded_args);
         cmd.args(extra);
         match cmd.spawn() {
             Ok(_) => log::info!("launched saver"),
@@ -32,6 +37,13 @@ impl IdleScreensTray {
 
     fn spawn_background(&self, args: &[&str]) {
         let mut cmd = Command::new(self.exe());
+        // Forward --config so "Check for saver updates" checks the same
+        // config.toml (and thus the same [update] base_url) the tray uses.
+        if let Some(pos) = self.forwarded_args.iter().position(|a| a == "--config") {
+            if let Some(path) = self.forwarded_args.get(pos + 1) {
+                cmd.args(["--config", path]);
+            }
+        }
         cmd.args(args);
         if let Err(e) = cmd.spawn() {
             log::error!("spawn failed: {e}");
@@ -97,9 +109,10 @@ impl Tray for IdleScreensTray {
     }
 }
 
-pub fn run(kiosk_default: bool) -> anyhow::Result<()> {
+pub fn run(kiosk_default: bool, forwarded_args: Vec<String>) -> anyhow::Result<()> {
     let tray = IdleScreensTray {
         kiosk: kiosk_default,
+        forwarded_args,
     };
     log::info!("starting status notifier tray");
 
