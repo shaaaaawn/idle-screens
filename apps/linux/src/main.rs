@@ -70,10 +70,12 @@ fn main() -> anyhow::Result<()> {
         }
 
         windows::create_all(&state);
-        // Windowed dev: keep open until you close the window or send SIGTERM.
-        // Overlay (hypridle): exit on the first input after the session is armed.
+        // Windowed dev / kiosk: no exit-on-input watcher. Normal overlay dismisses
+        // on the first input after the session is armed (~1 s still).
         if state.settings.windowed {
             log::info!("windowed dev mode: idle input watcher disabled (close via window manager or Ctrl+C)");
+        } else if state.settings.kiosk {
+            log::info!("kiosk mode: idle input watcher disabled (exit via pkill/SIGTERM or hyprland binding)");
         } else {
             idle::spawn_watcher();
         }

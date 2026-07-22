@@ -113,6 +113,38 @@ listener {
 
 The saver runs at 150 s idle; hyprlock layers on top ~2 s later, untouched.
 
+### Kiosk mode (mouse doesn't dismiss)
+
+Two things dismiss the saver today: the app's idle watcher **and** hypridle's
+`on-resume = pkill …`. Kiosk needs both disabled.
+
+**1. Config or flag:**
+
+```toml
+# ~/.config/idle-screens/config.toml
+kiosk = true
+```
+
+or pass `--kiosk` on the command line.
+
+**2. hypridle listener without `on-resume`** (see `packaging/hypridle-kiosk.conf.example`):
+
+```ini
+listener {
+    timeout = 150
+    on-timeout = pidof idle-screens-wayland || idle-screens-wayland --kiosk
+}
+```
+
+Exit manually when needed:
+
+```bash
+pkill -TERM -x idle-screens-wayland
+```
+
+Or bind a Hyprland shortcut to that command. `--windowed` dev mode also ignores
+mouse for exit, but draws a normal window instead of a fullscreen overlay.
+
 ## Configuration
 
 `~/.config/idle-screens/config.toml` — see `packaging/config.toml.example`.

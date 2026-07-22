@@ -1,0 +1,13 @@
+# idle-screens-wayland — kiosk / always-on display
+#
+# Mouse and keyboard do NOT dismiss the saver. Exit manually:
+#   pkill -TERM -x idle-screens-wayland
+# or bind a Hyprland shortcut to that command.
+#
+# Requires idle-screens-wayland --kiosk (or kiosk = true in config.toml).
+# Do NOT use on-resume here — hypridle would kill the saver on any input.
+
+listener {
+    timeout = 150
+    on-timeout = pidof idle-screens-wayland || idle-screens-wayland --kiosk
+}

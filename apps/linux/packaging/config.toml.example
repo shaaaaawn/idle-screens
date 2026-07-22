@@ -19,6 +19,8 @@ channel = "ballet"
 #inhibit = false
 # Fade-in duration in milliseconds (fade-out is half)
 #fade_ms = 900
+# Fullscreen overlay that ignores mouse/keyboard for exit (see hypridle-kiosk.conf.example)
+#kiosk = false
 
 [webkit]
 # "auto" disables WebKit's DMA-BUF renderer on the NVIDIA proprietary driver

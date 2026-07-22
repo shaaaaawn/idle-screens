@@ -144,6 +144,7 @@ mod tests {
             inhibit: false,
             fade_ms: 900,
             windowed: false,
+            kiosk: false,
             output: None,
             web_root_override: None,
             seed: None,

@@ -20,6 +20,7 @@ struct FileConfig {
     hints: Option<bool>,
     inhibit: Option<bool>,
     fade_ms: Option<u64>,
+    kiosk: Option<bool>,
     #[serde(default)]
     webkit: WebkitConfig,
     #[serde(default)]
@@ -65,6 +66,7 @@ pub struct Settings {
     pub inhibit: bool,
     pub fade_ms: u64,
     pub windowed: bool,
+    pub kiosk: bool,
     pub output: Option<String>,
     pub web_root_override: Option<PathBuf>,
     pub seed: Option<u32>,
@@ -126,6 +128,7 @@ impl Settings {
             inhibit: cli.inhibit || file.inhibit.unwrap_or(false),
             fade_ms: file.fade_ms.unwrap_or(900),
             windowed: cli.windowed,
+            kiosk: cli.kiosk || file.kiosk.unwrap_or(false),
             output: cli.output.clone(),
             web_root_override: cli.web_root.clone(),
             seed: cli.seed,
