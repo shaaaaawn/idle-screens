@@ -1,6 +1,7 @@
 //! StatusNotifier tray — manual launch, updates, quit.
 //! Uses DBus only (no GTK/WebKit init).
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -10,8 +11,8 @@ struct IdleScreensTray {
     kiosk: bool,
     /// CLI overrides (--channel, --saver, --config, ...) the tray itself was
     /// started with, forwarded to every saver it spawns — see
-    /// `Cli::forwardable_args`.
-    forwarded_args: Vec<String>,
+    /// `Cli::forwardable_args`. `OsString` so non-UTF-8 paths survive.
+    forwarded_args: Vec<OsString>,
 }
 
 impl IdleScreensTray {
@@ -39,9 +40,15 @@ impl IdleScreensTray {
         let mut cmd = Command::new(self.exe());
         // Forward --config so "Check for saver updates" checks the same
         // config.toml (and thus the same [update] base_url) the tray uses.
-        if let Some(pos) = self.forwarded_args.iter().position(|a| a == "--config") {
+        // Flag names are always UTF-8; the path value may not be, so it's
+        // forwarded as the raw OsString.
+        if let Some(pos) = self
+            .forwarded_args
+            .iter()
+            .position(|a| a.to_str() == Some("--config"))
+        {
             if let Some(path) = self.forwarded_args.get(pos + 1) {
-                cmd.args(["--config", path]);
+                cmd.arg("--config").arg(path);
             }
         }
         cmd.args(args);
@@ -109,7 +116,7 @@ impl Tray for IdleScreensTray {
     }
 }
 
-pub fn run(kiosk_default: bool, forwarded_args: Vec<String>) -> anyhow::Result<()> {
+pub fn run(kiosk_default: bool, forwarded_args: Vec<OsString>) -> anyhow::Result<()> {
     let tray = IdleScreensTray {
         kiosk: kiosk_default,
         forwarded_args,

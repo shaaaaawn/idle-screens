@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+
 use clap::{Parser, Subcommand};
 
 /// idle-screens screensaver overlay for Wayland/Hyprland.
@@ -72,35 +74,38 @@ impl Cli {
     /// `--channel foo` to every "Show saver now" launch, not just the tray
     /// itself. `--kiosk` is handled separately by the caller (it toggles
     /// per menu item, not just per tray session).
-    pub fn forwardable_args(&self) -> Vec<String> {
-        let mut args = Vec::new();
+    ///
+    /// Returns `OsString`s so `--web-root` / `--config` paths forward
+    /// losslessly — `display().to_string()` would mangle non-UTF-8 paths.
+    pub fn forwardable_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = Vec::new();
         if let Some(v) = &self.channel {
             args.push("--channel".into());
-            args.push(v.clone());
+            args.push(v.into());
         }
         if let Some(v) = &self.saver {
             args.push("--saver".into());
-            args.push(v.clone());
+            args.push(v.into());
         }
         if let Some(v) = self.cycle {
             args.push("--cycle".into());
-            args.push(v.to_string());
+            args.push(v.to_string().into());
         }
         if let Some(v) = self.brightness {
             args.push("--brightness".into());
-            args.push(v.to_string());
+            args.push(v.to_string().into());
         }
         if let Some(v) = self.seed {
             args.push("--seed".into());
-            args.push(v.to_string());
+            args.push(v.to_string().into());
         }
         if let Some(v) = &self.web_root {
             args.push("--web-root".into());
-            args.push(v.display().to_string());
+            args.push(v.clone().into_os_string());
         }
         if let Some(v) = &self.config {
             args.push("--config".into());
-            args.push(v.display().to_string());
+            args.push(v.clone().into_os_string());
         }
         if self.no_update_check {
             args.push("--no-update-check".into());
@@ -138,8 +143,15 @@ mod tests {
             "--no-update-check",
             "tray",
         ]);
+        // Inputs are all UTF-8, so lossy stringification is exact here — the
+        // OsString return type only matters for non-UTF-8 paths.
+        let args: Vec<String> = cli
+            .forwardable_args()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(
-            cli.forwardable_args(),
+            args,
             vec![
                 "--channel",
                 "ballet",
