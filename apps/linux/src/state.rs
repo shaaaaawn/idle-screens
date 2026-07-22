@@ -101,7 +101,8 @@ pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     // Percent-encode: paths with spaces/non-ASCII (or a saver id with reserved
     // characters) would otherwise produce an invalid URI and a WebKit load failure.
-    let root_str = utf8_percent_encode(&root.to_string_lossy(), PATH_SAFE);
+    let root_lossy = root.to_string_lossy();
+    let root_str = utf8_percent_encode(&root_lossy, PATH_SAFE);
     let mut url = format!("file://{root_str}/index.html?seed={seed}");
     if let Some(saver) = &settings.saver {
         let saver = utf8_percent_encode(saver, QUERY_SAFE);
