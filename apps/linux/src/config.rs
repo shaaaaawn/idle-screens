@@ -92,6 +92,11 @@ impl Settings {
     }
 
     fn merge(cli: &Cli, file: FileConfig) -> Self {
+        if let Some(m) = &file.mode {
+            if m != "savers" && m != "channel" {
+                log::warn!("config: unrecognized mode {m:?} (expected \"savers\" | \"channel\"); defaulting to \"savers\"");
+            }
+        }
         let channel_choice = cli.channel.clone().or_else(|| {
             if file.mode.as_deref() == Some("channel") {
                 file.channel.clone().filter(|c| !c.is_empty())
@@ -107,7 +112,11 @@ impl Settings {
         let dmabuf = match file.webkit.disable_dmabuf.as_deref() {
             Some("always") => DmabufPolicy::Always,
             Some("never") => DmabufPolicy::Never,
-            _ => DmabufPolicy::Auto,
+            Some("auto") | None => DmabufPolicy::Auto,
+            Some(v) => {
+                log::warn!("config: unrecognized webkit.disable_dmabuf {v:?} (expected \"auto\" | \"always\" | \"never\"); defaulting to \"auto\"");
+                DmabufPolicy::Auto
+            }
         };
 
         let brightness = cli
@@ -115,6 +124,12 @@ impl Settings {
             .or(file.brightness)
             .unwrap_or(1.0)
             .clamp(0.1, 1.0);
+
+        if let Some(c) = &file.update.check {
+            if c != "launch" && c != "never" {
+                log::warn!("config: unrecognized update.check {c:?} (expected \"launch\" | \"never\"); defaulting to \"launch\"");
+            }
+        }
 
         Settings {
             mode,
@@ -260,5 +275,19 @@ mod tests {
             toml::from_str("[update]\nbase_url = \"https://example.com/bundle/\"").unwrap();
         let s = Settings::merge(&cli(&[]), file);
         assert_eq!(s.update_base_url, "https://example.com/bundle/");
+    }
+
+    #[test]
+    fn typo_d_enum_values_fall_back_to_their_safe_defaults() {
+        // A misspelled value should never silently select unrelated behavior
+        // (e.g. "launhc" disabling update checks) — it warns and defaults.
+        let file: FileConfig = toml::from_str("mode = \"channe\"\nchannel = \"ballet\"").unwrap();
+        assert_eq!(Settings::merge(&cli(&[]), file).mode, Mode::Savers);
+
+        let file: FileConfig = toml::from_str("[webkit]\ndisable_dmabuf = \"alwyas\"").unwrap();
+        assert_eq!(Settings::merge(&cli(&[]), file).dmabuf, DmabufPolicy::Auto);
+
+        let file: FileConfig = toml::from_str("[update]\ncheck = \"launhc\"").unwrap();
+        assert!(Settings::merge(&cli(&[]), file).update_on_launch);
     }
 }
