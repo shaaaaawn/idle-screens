@@ -18,20 +18,20 @@ export const AQUARIUM_SPEC: SaverSpec = {
       { at: 0.6, color: '#062534' },
       { at: 1, color: '#02141d' },
     ],
-    band: { color: '#0b1a12', height: 24 },
+    band: { color: '#0b1a12', height: 0.02222 },
   },
   layers: [
     {
       count: 14,
       sprite: { kind: 'emoji', glyphs: ['🐟', '🐠', '🐡', '🦈', '🐙'] },
-      size: [34, 72],
-      motion: { type: 'drift', speed: [30, 110], bidirectional: true, bob: 6 },
+      size: [0.03148, 0.06667],
+      motion: { type: 'drift', speed: [0.02778, 0.1019], bidirectional: true, bob: 0.005556 },
       flip: true,
     },
     {
       count: 22,
-      sprite: { kind: 'circle', radius: [2, 7], color: '#c8ebff' },
-      motion: { type: 'rise', speed: [24, 78], sway: 8 },
+      sprite: { kind: 'circle', radius: [0.001852, 0.006481], color: '#c8ebff' },
+      motion: { type: 'rise', speed: [0.02222, 0.07222], sway: 0.007407 },
     },
   ],
 };

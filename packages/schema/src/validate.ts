@@ -8,7 +8,7 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'background', 'layers']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
@@ -55,6 +55,11 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");
+  }
+  if (spec.referenceViewport !== undefined) {
+    if (!isNum(spec.referenceViewport) || spec.referenceViewport < 100 || spec.referenceViewport > 8640) {
+      err('referenceViewport', 'must be a number between 100 and 8640');
+    }
   }
 
   for (const k of unknownKeys(spec, KNOWN_TOP)) {
@@ -303,8 +308,9 @@ function validateCycle(sprite: Record<string, unknown>, path: string, err: (p: s
 
 function validateMotion(motion: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec?: unknown): void {
   if (!isObj(motion)) return err(path, 'must be an object');
-  const isViewport = isObj(spec) && (spec as Record<string, unknown>).units === 'viewport';
-  const speedCap = isViewport ? LIMITS.maxSpeed / LIMITS.referenceViewport : LIMITS.maxSpeed;
+  const isViewport = !isObj(spec) || (spec as Record<string, unknown>).units !== 'px';
+  const refVp = isObj(spec) && isNum((spec as Record<string, unknown>).referenceViewport) ? (spec as Record<string, unknown>).referenceViewport as number : LIMITS.referenceViewport;
+  const speedCap = isViewport ? LIMITS.maxSpeed / refVp : LIMITS.maxSpeed;
   const speedOk = (v: unknown, p: string): void => {
     if (!isRange(v)) err(p, 'must be a [min,max] range');
     else if (v[1] > speedCap) err(p, `speed exceeds cap ${isViewport ? speedCap.toFixed(2) + ' viewport-units/sec' : LIMITS.maxSpeed + ' px/sec'}`);

@@ -6,6 +6,7 @@ const base = (): SaverSpec => ({
   schemaVersion: 1,
   id: 'demo',
   label: 'Demo',
+  units: 'px',
   background: { type: 'gradient', stops: [{ at: 0, color: '#0a3a52' }, { at: 1, color: '#02141d' }] },
   layers: [
     { count: 10, sprite: { kind: 'emoji', glyphs: ['🐟'] }, size: [30, 60], motion: { type: 'drift', speed: [30, 90], bidirectional: true }, flip: true },

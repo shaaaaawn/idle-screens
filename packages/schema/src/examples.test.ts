@@ -15,7 +15,7 @@ describe('example specs', () => {
     expect(AQUARIUM_SPEC.layers[0].motion.type).toBe('drift');
     expect(AQUARIUM_SPEC.layers[0].flip).toBe(true);
     expect(AQUARIUM_SPEC.layers[1].motion.type).toBe('rise');
-    expect(AQUARIUM_SPEC.background).toMatchObject({ type: 'gradient', band: { height: 24 } });
+    expect(AQUARIUM_SPEC.background).toMatchObject({ type: 'gradient', band: { height: 0.02222 } });
   });
 
   it('SCHEMA_EXAMPLES catalog matches EXAMPLE_SPECS', () => {

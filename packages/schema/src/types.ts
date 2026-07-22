@@ -21,8 +21,14 @@ export interface SaverSpec {
   background?: BackgroundSpec;
   layers: LayerSpec[];
   motionIntensity?: 'calm' | 'moderate' | 'energetic';
-  /** Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h). */
-  units?: 'px' | 'viewport';
+  /** Dimensional unit system. 'viewport' (default) = all sizes/speeds/distances are fractions of min(w,h). */
+  units?: 'viewport' | 'px';
+  /**
+   * Resolution at which this spec was designed. Density scaling kicks in above this
+   * threshold: entity counts scale by min(w,h) / referenceViewport. Default: 1080.
+   * Set to your design resolution so a spec authored at 4K doesn't over-densify.
+   */
+  referenceViewport?: number;
 }
 
 export type BackgroundSpec =

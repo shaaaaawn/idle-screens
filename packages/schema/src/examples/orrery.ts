@@ -24,7 +24,7 @@ export const ORRERY_SPEC: SaverSpec = {
     // Distant stars
     {
       count: 80,
-      sprite: { kind: 'circle', radius: [0.3, 1.2], color: '#8899cc' },
+      sprite: { kind: 'circle', radius: [0.0002778, 0.001111], color: '#8899cc' },
       alpha: [0.2, 0.8],
       pulse: { amp: 0.3, period: 3000 },
       motion: { type: 'static' },
@@ -33,7 +33,7 @@ export const ORRERY_SPEC: SaverSpec = {
     {
       key: 'corona',
       count: 1,
-      sprite: { kind: 'circle', radius: [60, 60], color: '#ffaa22', soft: true },
+      sprite: { kind: 'circle', radius: [0.05556, 0.05556], color: '#ffaa22', soft: true },
       blend: 'lighter',
       alpha: [0.6, 0.6],
       grow: { amp: 0.15, period: 4000 },
@@ -45,7 +45,7 @@ export const ORRERY_SPEC: SaverSpec = {
       key: 'sun',
       count: 1,
       sprite: { kind: 'emoji', glyphs: ['☀️'] },
-      size: [48, 48],
+      size: [0.04444, 0.04444],
       grow: { amp: 0.08, period: 4000 },
       motion: { type: 'static' },
       position: { x: 0.5, y: 0.5 },
@@ -55,36 +55,36 @@ export const ORRERY_SPEC: SaverSpec = {
       key: 'inner',
       count: 3,
       sprite: { kind: 'emoji', glyphs: ['🪨', '🔴', '🟠'] },
-      size: [16, 22],
+      size: [0.01481, 0.02037],
       spin: 30,
-      motion: { type: 'orbit', speed: [28, 42], radius: [80, 120] },
+      motion: { type: 'orbit', speed: [28, 42], radius: [0.07407, 0.1111] },
     },
     // Middle ring — gas giants
     {
       key: 'middle',
       count: 2,
       sprite: { kind: 'emoji', glyphs: ['🟤', '🪐'] },
-      size: [28, 38],
+      size: [0.02593, 0.03519],
       spin: -15,
-      motion: { type: 'orbit', speed: [12, 20], radius: [160, 200] },
+      motion: { type: 'orbit', speed: [12, 20], radius: [0.1481, 0.1852] },
     },
     // Outer ring — ice giants
     {
       key: 'outer',
       count: 2,
       sprite: { kind: 'emoji', glyphs: ['🔵', '💎'] },
-      size: [22, 30],
+      size: [0.02037, 0.02778],
       spin: 10,
-      motion: { type: 'orbit', speed: [5, 10], radius: [240, 300] },
+      motion: { type: 'orbit', speed: [5, 10], radius: [0.2222, 0.2778] },
     },
     // Orbital dust ring (soft glow particles orbiting slowly)
     {
       count: 24,
-      sprite: { kind: 'circle', radius: [1, 3], color: '#ccaa66', soft: true },
+      sprite: { kind: 'circle', radius: [0.0009259, 0.002778], color: '#ccaa66', soft: true },
       alpha: [0.15, 0.4],
       blend: 'lighter',
       pulse: { amp: 0.2, period: 2500 },
-      motion: { type: 'orbit', speed: [2, 8], radius: [100, 320] },
+      motion: { type: 'orbit', speed: [2, 8], radius: [0.09259, 0.2963] },
     },
   ],
 };

@@ -24,7 +24,7 @@ export const COMETS_SPEC: SaverSpec = {
     {
       key: 'stars',
       count: 120,
-      sprite: { kind: 'circle', radius: [0.5, 2], color: '#ffffff', soft: true },
+      sprite: { kind: 'circle', radius: [0.000463, 0.001852], color: '#ffffff', soft: true },
       motion: { type: 'static' },
       alpha: [0.3, 0.7],
       pulse: { amp: 0.15, period: 3000 },
@@ -32,8 +32,8 @@ export const COMETS_SPEC: SaverSpec = {
     {
       key: 'comets',
       count: 8,
-      sprite: { kind: 'circle', radius: [3, 8], color: '#88ccff', soft: true },
-      motion: { type: 'drift', speed: [80, 200], angle: 225 },
+      sprite: { kind: 'circle', radius: [0.002778, 0.007407], color: '#88ccff', soft: true },
+      motion: { type: 'drift', speed: [0.07407, 0.1852], angle: 225 },
       alpha: [0.7, 1],
       blend: 'lighter',
       trail: { length: 1500, fade: 1 },
@@ -41,8 +41,8 @@ export const COMETS_SPEC: SaverSpec = {
     {
       key: 'fireflies',
       count: 20,
-      sprite: { kind: 'circle', radius: [2, 5], color: '#ffdd44', soft: true },
-      motion: { type: 'drift', speed: [10, 30], bidirectional: true, bob: 20 },
+      sprite: { kind: 'circle', radius: [0.001852, 0.00463], color: '#ffdd44', soft: true },
+      motion: { type: 'drift', speed: [0.009259, 0.02778], bidirectional: true, bob: 0.01852 },
       alpha: [0.4, 0.8],
       pulse: { amp: 0.3, period: 2000 },
       blend: 'lighter',

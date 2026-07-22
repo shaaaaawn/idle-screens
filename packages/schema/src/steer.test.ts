@@ -6,6 +6,7 @@ const spec: SaverSpec = {
   schemaVersion: 1,
   id: 't',
   label: 'T',
+  units: 'px',
   background: {
     type: 'gradient',
     stops: [
