@@ -1,0 +1,44 @@
+name: Linux CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/linux/**'
+      - '.github/workflows/linux-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/linux/**'
+      - '.github/workflows/linux-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (Arch container)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 25
+    steps:
+      - name: Install toolchain + native deps
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel rustup git pkgconf \
+            gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita
+          rustup default stable
+          rustup component add clippy rustfmt
+
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/linux
+
+      - name: fmt / clippy / build / test
+        working-directory: apps/linux
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo build --release --locked
+          cargo test --locked

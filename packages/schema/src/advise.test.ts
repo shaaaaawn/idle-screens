@@ -8,6 +8,7 @@ const base: SaverSpec = {
   schemaVersion: 1,
   id: 'test',
   label: 'Test',
+  units: 'px',
   layers: [
     { count: 20, sprite: { kind: 'circle', radius: [5, 10], color: '#fff' }, motion: { type: 'drift', speed: [10, 30] } },
   ],

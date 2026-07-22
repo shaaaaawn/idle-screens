@@ -1,0 +1,34 @@
+# idle-screens-wayland — ~/.config/idle-screens/config.toml
+# Every key is optional; CLI flags override the file.
+
+# "savers" = bundled offline engine, "channel" = live idlescreens.com channel
+mode = "channel"
+# channel id (e.g. "ballet") or a full URL
+channel = "ballet"
+
+# Pin one bundled saver by id (see /usr/share/idle-screens/web/savers.json)
+#saver = "warp"
+# Cycle interval in minutes for bundled savers; <= 0 disables
+#cycle_minutes = 10
+# Dim the saver 0.1..1.0 (night mode)
+#brightness = 1.0
+# Show the saver-name hint overlay
+#hints = true
+# Reserved: not yet implemented (currently a no-op, only logs a warning).
+# Would hold a Wayland idle inhibitor while showing — WARNING: on Hyprland
+# that pauses ALL hypridle listeners (lock, DPMS, suspend).
+#inhibit = false
+# Fade-in duration in milliseconds (fade-out is half)
+#fade_ms = 900
+# Fullscreen overlay that ignores mouse/keyboard for exit (see hypridle-kiosk.conf.example)
+#kiosk = false
+
+[webkit]
+# "auto" disables WebKit's DMA-BUF renderer on the NVIDIA proprietary driver
+# (known flicker); "always" / "never" force it.
+disable_dmabuf = "auto"
+
+[update]
+# Check for a newer web bundle at launch: "launch" | "never"
+check = "launch"
+#base_url = "https://idlescreens.com/mac/"

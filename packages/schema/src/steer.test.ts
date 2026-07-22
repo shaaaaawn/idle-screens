@@ -6,6 +6,7 @@ const spec: SaverSpec = {
   schemaVersion: 1,
   id: 't',
   label: 'T',
+  units: 'px',
   background: {
     type: 'gradient',
     stops: [
@@ -109,6 +110,7 @@ describe('steerablePaths', () => {
     expect(paths).not.toContain('label');
     expect(paths).not.toContain('layers.0.sprite.kind');
     expect(paths).not.toContain('background.type');
+    expect(paths).not.toContain('units');
   });
 
   it('handles specs with links, pulse, grow, and key', () => {

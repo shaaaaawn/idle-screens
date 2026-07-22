@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=idle-screens tray
+Comment=Menu-bar control for idle-screens Wayland saver
+Exec=idle-screens-wayland tray
+Icon=preferences-desktop-screensaver
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

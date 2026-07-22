@@ -18,18 +18,18 @@ export const SNOWFALL_SPEC: SaverSpec = {
   layers: [
     {
       count: 50,
-      sprite: { kind: 'circle', radius: [1, 2.5], color: '#8899aa' },
-      motion: { type: 'drift', angle: 90, speed: [15, 40], bob: 3 },
+      sprite: { kind: 'circle', radius: [0.0009259, 0.002315], color: '#8899aa' },
+      motion: { type: 'drift', angle: 90, speed: [0.01389, 0.03704], bob: 0.002778 },
     },
     {
       count: 35,
-      sprite: { kind: 'circle', radius: [2, 4.5], color: '#c0cdd8' },
-      motion: { type: 'drift', angle: 85, speed: [35, 80], bob: 6 },
+      sprite: { kind: 'circle', radius: [0.001852, 0.004167], color: '#c0cdd8' },
+      motion: { type: 'drift', angle: 85, speed: [0.03241, 0.07407], bob: 0.005556 },
     },
     {
       count: 15,
-      sprite: { kind: 'circle', radius: [3.5, 7], color: '#e8eff5' },
-      motion: { type: 'drift', angle: 82, speed: [55, 120], bob: 10 },
+      sprite: { kind: 'circle', radius: [0.003241, 0.006481], color: '#e8eff5' },
+      motion: { type: 'drift', angle: 82, speed: [0.05093, 0.1111], bob: 0.009259 },
     },
   ],
 };

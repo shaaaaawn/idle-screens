@@ -1,0 +1,241 @@
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use gtk4 as gtk;
+use gtk4::glib;
+use gtk4::prelude::*;
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+
+use crate::config::{Mode, Settings};
+
+/// RFC 3986 unreserved chars, plus `/` left bare as the path-segment separator.
+/// Escapes spaces/non-ASCII in `--web-root` paths without mangling the structure.
+const PATH_SAFE: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'/')
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// RFC 3986 unreserved chars, safe to leave bare in a query value.
+const QUERY_SAFE: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// Session-wide state. Lives on the GTK main thread only; other threads reach it
+/// through `invoke_on_main` + the thread-local registry below.
+pub struct AppState {
+    pub settings: Settings,
+    /// One seed per session, shared by every monitor so displays render in lockstep.
+    pub seed: u32,
+    pub web_root: RefCell<Option<PathBuf>>,
+    /// Set once when a channel load fails; flips every window to the bundled URL.
+    pub channel_fell_back: Cell<bool>,
+    pub shutting_down: Cell<bool>,
+    pub app: gtk::Application,
+    pub windows: RefCell<Vec<gtk::ApplicationWindow>>,
+    pub webviews: RefCell<Vec<webkit6::WebView>>,
+}
+
+impl AppState {
+    pub fn new(app: &gtk::Application, settings: Settings) -> Rc<Self> {
+        let seed = settings.seed.unwrap_or_else(|| fastrand::u32(..));
+        Rc::new(AppState {
+            settings,
+            seed,
+            web_root: RefCell::new(None),
+            channel_fell_back: Cell::new(false),
+            shutting_down: Cell::new(false),
+            app: app.clone(),
+            windows: RefCell::new(Vec::new()),
+            webviews: RefCell::new(Vec::new()),
+        })
+    }
+
+    /// The URL every window should currently show.
+    pub fn current_url(&self) -> String {
+        match &self.settings.mode {
+            Mode::Channel(url) if !self.channel_fell_back.get() => url.clone(),
+            _ => self.bundled_url(),
+        }
+    }
+
+    /// file:// URL for the bundled engine, mirroring the Mac app's query contract.
+    pub fn bundled_url(&self) -> String {
+        let root = self
+            .web_root
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        bundled_url_for(&root, self.seed, &self.settings)
+    }
+
+    /// Begin the fade-out → quit sequence. Idempotent (input + SIGTERM can race).
+    pub fn begin_shutdown(self: &Rc<Self>) {
+        if self.shutting_down.replace(true) {
+            return;
+        }
+        log::info!("shutting down");
+        let out_ms = (self.settings.fade_ms / 2).max(150);
+        for win in self.windows.borrow().iter() {
+            crate::windows::fade_to(win, 0.0, out_ms);
+        }
+        // Quit after the fade; hard watchdog in case frame callbacks stall
+        // (this can run underneath hyprlock — a stuck saver there is the worst case).
+        let app = self.app.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(out_ms + 100), move || {
+            app.quit();
+        });
+        let app = self.app.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1000), move || {
+            app.quit();
+        });
+    }
+}
+
+pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -> String {
+    // WebKit needs an absolute file:// path; a relative --web-root produces an
+    // invalid URI. canonicalize() resolves + absolutizes when the dir exists;
+    // if it doesn't (e.g. a bad --web-root in channel mode, where startup only
+    // warns), still force absolute by joining the cwd rather than emitting a
+    // relative file://./… URL.
+    let root = root.canonicalize().unwrap_or_else(|_| {
+        if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(root))
+                .unwrap_or_else(|_| root.to_path_buf())
+        }
+    });
+    // Percent-encode: paths with spaces/non-ASCII (or a saver id with reserved
+    // characters) would otherwise produce an invalid URI and a WebKit load failure.
+    let root_lossy = root.to_string_lossy();
+    let root_str = utf8_percent_encode(&root_lossy, PATH_SAFE);
+    let mut url = format!("file://{root_str}/index.html?seed={seed}");
+    if let Some(saver) = &settings.saver {
+        let saver = utf8_percent_encode(saver, QUERY_SAFE);
+        url.push_str(&format!("&saver={saver}"));
+    }
+    if settings.cycle_minutes != 10 {
+        url.push_str(&format!("&cycle={}", settings.cycle_minutes));
+    }
+    if settings.brightness < 1.0 {
+        url.push_str(&format!("&brightness={:.2}", settings.brightness));
+    }
+    if !settings.hints {
+        url.push_str("&hints=0");
+    }
+    if !settings.windowed {
+        // Overlay uses KeyboardMode::None — keys never reach the webview.
+        url.push_str("&browse=0");
+    }
+    url
+}
+
+// ---- cross-thread dispatch -------------------------------------------------
+//
+// The idle watcher lives on its own thread; `glib::idle_add_once` needs a Send
+// closure, but AppState is main-thread-only. The closure runs on the main
+// thread, so it can recover the state from this thread-local registry.
+
+thread_local! {
+    static STATE: RefCell<Option<Rc<AppState>>> = const { RefCell::new(None) };
+}
+
+pub fn register_state(state: &Rc<AppState>) {
+    STATE.with(|s| *s.borrow_mut() = Some(state.clone()));
+}
+
+pub fn with_state(f: impl FnOnce(&Rc<AppState>)) {
+    STATE.with(|s| {
+        if let Some(state) = s.borrow().as_ref() {
+            f(state);
+        }
+    });
+}
+
+/// Callable from any thread; `f` runs on the GTK main thread with the state.
+pub fn invoke_on_main(f: impl Fn(&Rc<AppState>) + Send + 'static) {
+    glib::idle_add_once(move || with_state(|s| f(s)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{DmabufPolicy, Mode};
+
+    fn settings() -> Settings {
+        Settings {
+            mode: Mode::Savers,
+            saver: None,
+            cycle_minutes: 10,
+            brightness: 1.0,
+            hints: true,
+            inhibit: false,
+            fade_ms: 900,
+            windowed: false,
+            kiosk: false,
+            output: None,
+            web_root_override: None,
+            seed: None,
+            dmabuf: DmabufPolicy::Auto,
+            update_on_launch: false,
+            update_base_url: String::new(),
+        }
+    }
+
+    #[test]
+    fn bundled_url_defaults_are_minimal() {
+        let url = bundled_url_for(std::path::Path::new("/opt/web"), 42, &settings());
+        assert_eq!(url, "file:///opt/web/index.html?seed=42&browse=0");
+    }
+
+    #[test]
+    fn bundled_url_windowed_allows_browse_hint() {
+        let mut s = settings();
+        s.windowed = true;
+        let url = bundled_url_for(std::path::Path::new("/opt/web"), 42, &s);
+        assert_eq!(url, "file:///opt/web/index.html?seed=42");
+    }
+
+    #[test]
+    fn bundled_url_includes_optional_params() {
+        let mut s = settings();
+        s.saver = Some("warp".into());
+        s.cycle_minutes = 0;
+        s.brightness = 0.5;
+        s.hints = false;
+        let url = bundled_url_for(std::path::Path::new("/w"), 7, &s);
+        assert_eq!(
+            url,
+            "file:///w/index.html?seed=7&saver=warp&cycle=0&brightness=0.50&hints=0&browse=0"
+        );
+    }
+
+    #[test]
+    fn bundled_url_encodes_spaces_in_web_root() {
+        // canonicalize() fails on this nonexistent path, so the raw string is
+        // encoded as-is — proves the space in the directory name is escaped
+        // rather than producing an invalid file:// URI.
+        let url = bundled_url_for(std::path::Path::new("/opt/my web root"), 1, &settings());
+        assert_eq!(
+            url,
+            "file:///opt/my%20web%20root/index.html?seed=1&browse=0"
+        );
+    }
+
+    #[test]
+    fn bundled_url_encodes_reserved_chars_in_saver_id() {
+        let mut s = settings();
+        s.saver = Some("a saver&b=c".into());
+        let url = bundled_url_for(std::path::Path::new("/w"), 1, &s);
+        assert_eq!(
+            url,
+            "file:///w/index.html?seed=1&saver=a%20saver%26b%3Dc&browse=0"
+        );
+    }
+}

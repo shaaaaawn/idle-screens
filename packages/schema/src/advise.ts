@@ -13,8 +13,9 @@ export function adviseSpec(
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
-  const scale = spec.units === 'viewport' ? Math.min(w, h) : 1;
-  const countScale = scale > 1 ? Math.min(w, h) / LIMITS.referenceViewport : 1;
+  const scale = spec.units === 'px' ? 1 : Math.min(w, h);
+  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
+  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
   const rng = createRng(spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
 

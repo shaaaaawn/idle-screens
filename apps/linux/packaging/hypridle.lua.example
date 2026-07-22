@@ -1,0 +1,10 @@
+-- idle-screens-wayland — hypridle integration (Hyprland Lua config syntax)
+--
+-- For setups on Hyprland's newer Lua-based config (Omarchy dev branch).
+-- Keep the existing hyprlock and DPMS listeners untouched.
+
+hypridle.listener({
+  timeout = 150,
+  on_timeout = "pidof hyprlock || idle-screens-wayland",
+  on_resume = "pkill -TERM -x idle-screens-wayland",
+})

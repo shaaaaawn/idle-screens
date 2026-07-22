@@ -113,8 +113,9 @@ class SpecInstance implements SaverInstance {
   /** (Re)seed and place all entities — deterministic for the seed + viewport. */
   private rebuild(): void {
     const rng = createRng(this.seed);
-    const scale = this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1;
-    let countScale = scale > 1 ? Math.min(this.w, this.h) / LIMITS.referenceViewport : 1;
+    const scale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
+    const refVp = this.effSpec.referenceViewport ?? LIMITS.referenceViewport;
+    let countScale = scale > 1 ? Math.min(this.w, this.h) / refVp : 1;
     if (countScale > 1) {
       const rawTotal = this.effSpec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
       if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
@@ -169,7 +170,7 @@ class SpecInstance implements SaverInstance {
     ctx.fillRect(0, 0, w, h);
     if (bg.band) {
       ctx.fillStyle = bg.band.color;
-      const bh = bg.band.height * (this.effSpec.units === 'viewport' ? Math.min(w, h) : 1);
+      const bh = bg.band.height * (this.effSpec.units === 'px' ? 1 : Math.min(w, h));
       ctx.fillRect(0, h - bh, w, bh);
     }
   }
@@ -276,7 +277,7 @@ class SpecInstance implements SaverInstance {
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       const idx = spriteIndexAt(e, t, sprite.strings.length);
       const text = sprite.strings[idx] ?? sprite.strings[0]!;
-      const mw = sprite.maxWidth ? sprite.maxWidth * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1) : undefined;
+      const mw = sprite.maxWidth ? sprite.maxWidth * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h)) : undefined;
       if (mw) ctx.fillText(text, 0, 0, mw);
       else ctx.fillText(text, 0, 0);
     }
@@ -330,8 +331,8 @@ class SpecInstance implements SaverInstance {
     const { ctx } = this;
     const wrap = built.layer.wrap !== false;
     const positions = built.entities.map((e) => positionAt(e, t, this.w, this.h));
-    const pairs = linkPairs(positions, links.k, links.maxDist * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1), wrap, this.w, this.h);
-    const lw = (links.width ?? 1) * (this.effSpec.units === 'viewport' ? Math.min(this.w, this.h) : 1);
+    const pairs = linkPairs(positions, links.k, links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h)), wrap, this.w, this.h);
+    const lw = (links.width ?? 1) * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
     ctx.lineWidth = lw;
 
     for (const [i, j] of pairs) {

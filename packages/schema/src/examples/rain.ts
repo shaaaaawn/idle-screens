@@ -12,8 +12,8 @@ export const RAIN_SPEC: SaverSpec = {
     {
       count: 140,
       sprite: { kind: 'text', strings: ['│'], color: '#9fd0ff' },
-      size: [12, 26],
-      motion: { type: 'drift', angle: 90, speed: [520, 900] },
+      size: [0.01111, 0.02407],
+      motion: { type: 'drift', angle: 90, speed: [0.4815, 0.8333] },
     },
   ],
 };

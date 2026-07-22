@@ -6,6 +6,7 @@ const base = (): SaverSpec => ({
   schemaVersion: 1,
   id: 'demo',
   label: 'Demo',
+  units: 'px',
   background: { type: 'gradient', stops: [{ at: 0, color: '#0a3a52' }, { at: 1, color: '#02141d' }] },
   layers: [
     { count: 10, sprite: { kind: 'emoji', glyphs: ['🐟'] }, size: [30, 60], motion: { type: 'drift', speed: [30, 90], bidirectional: true }, flip: true },
@@ -86,6 +87,32 @@ describe('validateSpec', () => {
     expect(validateSpec(s).valid).toBe(true);
     const fast = { ...s, layers: [{ ...s.layers[0], motion: { type: 'drift' as const, speed: [0, 50] } }] };
     expect(paths(fast)).toContain('layers[0].motion.speed');
+  });
+
+  it('validates referenceViewport bounds (100..8640)', () => {
+    expect(validateSpec({ ...base(), referenceViewport: 100 }).valid).toBe(true);
+    expect(validateSpec({ ...base(), referenceViewport: 8640 }).valid).toBe(true);
+    expect(paths({ ...base(), referenceViewport: 99 })).toContain('referenceViewport');
+    expect(paths({ ...base(), referenceViewport: 8641 })).toContain('referenceViewport');
+    expect(paths({ ...base(), referenceViewport: 'huge' as never })).toContain('referenceViewport');
+  });
+
+  it('scales the viewport speed cap by a non-default referenceViewport', () => {
+    // Default referenceViewport (1080): cap = 4000/1080 ≈ 3.70 vu/s — speed 3 fits.
+    const atDefaultCap = {
+      ...base(),
+      units: 'viewport' as const,
+      layers: [{ count: 5, sprite: { kind: 'emoji' as const, glyphs: ['🐟'] }, size: [10, 20], motion: { type: 'drift' as const, speed: [0, 3] } }],
+    };
+    expect(validateSpec(atDefaultCap).valid).toBe(true);
+
+    // referenceViewport: 2160 halves the cap to ≈1.85 vu/s — the same speed now exceeds it.
+    const tighterCap = { ...atDefaultCap, referenceViewport: 2160 };
+    expect(paths(tighterCap)).toContain('layers[0].motion.speed');
+
+    // A speed that respects the tighter cap still passes.
+    const withinTighterCap = { ...tighterCap, layers: [{ ...tighterCap.layers[0], motion: { type: 'drift' as const, speed: [0, 1] } }] };
+    expect(validateSpec(withinTighterCap).valid).toBe(true);
   });
 
   it('rejects links.k > maxLinksK (8)', () => {
