@@ -122,7 +122,11 @@ pub fn fade_to(win: &gtk::ApplicationWindow, target: f64, dur_ms: u64) {
         win.set_opacity(target);
         return;
     }
-    let dur_us = (dur_ms as i64) * 1000;
+    // Saturate instead of wrapping: a pathological `fade_ms` config value
+    // (u64) could otherwise overflow the µs conversion.
+    let dur_us = i64::try_from(dur_ms)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000);
     let start = Cell::new(-1_i64);
     win.add_tick_callback(move |win, clock| {
         let now = clock.frame_time();
