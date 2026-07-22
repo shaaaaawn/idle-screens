@@ -1,0 +1,12 @@
+# idle-screens-wayland — hypridle integration (hyprlang syntax)
+#
+# Add to ~/.config/hypr/hypridle.conf. On Omarchy, this replaces the default
+# screensaver listener (the one running omarchy-launch-screensaver); keep the
+# hyprlock and DPMS listeners untouched — the lock screen layers on top of the
+# saver by design.
+
+listener {
+    timeout = 150
+    on-timeout = pidof hyprlock || idle-screens-wayland
+    on-resume = pkill -TERM -x idle-screens-wayland
+}
