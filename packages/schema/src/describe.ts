@@ -43,7 +43,8 @@ export function describeScene(
   const seed = options.seed ?? spec.seed ?? 42;
   const times = options.times ?? [0, 5000, 15000];
   const scale = spec.units === 'viewport' ? Math.min(w, h) : 1;
-  const countScale = scale > 1 ? Math.min(w, h) / LIMITS.referenceViewport : 1;
+  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
+  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
 
   const rng = createRng(seed);
   const builtLayers = spec.layers.map((layer) => ({
