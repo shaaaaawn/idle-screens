@@ -125,11 +125,17 @@ impl Settings {
             .unwrap_or(1.0)
             .clamp(0.1, 1.0);
 
-        if let Some(c) = &file.update.check {
-            if c != "launch" && c != "never" {
-                log::warn!("config: unrecognized update.check {c:?} (expected \"launch\" | \"never\"); defaulting to \"launch\"");
+        // "launch" (the default) checks at startup; "never" disables it. A typo
+        // warns and falls back to the default rather than silently disabling
+        // updates (which a bare `!= "launch"` comparison would do).
+        let check_enabled = match file.update.check.as_deref() {
+            Some("never") => false,
+            Some("launch") | None => true,
+            Some(other) => {
+                log::warn!("config: unrecognized update.check {other:?} (expected \"launch\" | \"never\"); defaulting to \"launch\"");
+                true
             }
-        }
+        };
 
         Settings {
             mode,
@@ -148,8 +154,7 @@ impl Settings {
             web_root_override: cli.web_root.clone(),
             seed: cli.seed,
             dmabuf,
-            update_on_launch: !cli.no_update_check
-                && file.update.check.as_deref().unwrap_or("launch") == "launch",
+            update_on_launch: !cli.no_update_check && check_enabled,
             update_base_url: with_trailing_slash(
                 file.update
                     .base_url
