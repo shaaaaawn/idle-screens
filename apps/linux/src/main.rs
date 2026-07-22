@@ -32,6 +32,17 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Resolve the web root before touching GTK: a missing bundle in bundled
+    // mode should exit cleanly with a clear error, not fall through to a
+    // black/failed overlay.
+    let web_root = bundle::resolve_web_root(&settings);
+    if matches!(settings.mode, Mode::Savers) && !web_root.join("index.html").is_file() {
+        anyhow::bail!(
+            "no web bundle at {} — install the package or pass --web-root/--channel",
+            web_root.display()
+        );
+    }
+
     // Must be decided before GTK/WebKit initialize.
     if platform::should_disable_dmabuf(&settings) {
         log::info!("disabling WebKit DMA-BUF renderer");
@@ -52,17 +63,7 @@ fn main() -> anyhow::Result<()> {
     app.connect_activate(move |app| {
         let state = state::AppState::new(app, settings.clone());
         state::register_state(&state);
-
-        // Bundled mode needs a resolved web root; channel mode needs it only
-        // for fallback, so resolve it up front either way.
-        let root = bundle::resolve_web_root(&state.settings);
-        if matches!(state.settings.mode, Mode::Savers) && !root.join("index.html").is_file() {
-            log::error!(
-                "no web bundle at {} — install the package or pass --web-root/--channel",
-                root.display()
-            );
-        }
-        *state.web_root.borrow_mut() = Some(root);
+        *state.web_root.borrow_mut() = Some(web_root.clone());
 
         // Black window background even before the webview paints.
         let css = gtk::CssProvider::new();
