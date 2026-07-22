@@ -28,8 +28,10 @@ chmod +x "$root/install.sh" "$root/packaging/omarchy/"*.sh 2>/dev/null || true
 tar -czf "$out" -C "$staging" "$bundle"
 ( cd dist && sha256sum "$(basename "$out")" ) | tee dist/SHA256SUMS
 
-# Source tarball for AUR (reuse existing script output name)
-./scripts/make-src-tarball.sh >/dev/null
+# Source tarball for AUR (reuse existing script output name). Reuses the
+# webroot/ staged above instead of rebuilding it a second time.
+SKIP_WEB=1 ./scripts/make-src-tarball.sh
+( cd dist && sha256sum "idle-screens-wayland-${version}-src.tar.gz" ) | tee -a dist/SHA256SUMS
 
 echo "release artifacts:"
 ls -la dist/*.tar.gz dist/SHA256SUMS 2>/dev/null || ls -la dist/

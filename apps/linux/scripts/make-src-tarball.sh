@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Produce a release source tarball containing the crate + prebuilt webroot,
 # so the AUR build needs no node/pnpm toolchain.
+#
+#   SKIP_WEB=1 ./scripts/make-src-tarball.sh   # reuse an already-staged webroot/
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -8,7 +10,7 @@ version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
 name="idle-screens-wayland-$version"
 out="dist/$name-src.tar.gz"
 
-./scripts/sync-web.sh
+[ "${SKIP_WEB:-}" ] || ./scripts/sync-web.sh
 [ -f webroot/index.html ] || { echo "webroot missing after sync"; exit 1; }
 
 mkdir -p dist
