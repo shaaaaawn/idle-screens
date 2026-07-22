@@ -1035,6 +1035,7 @@ dependencies = [
  "ksni",
  "libc",
  "log",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sha2",
