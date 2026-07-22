@@ -28,6 +28,7 @@ apps/mac/.secrets/
 # docs
 docs/specs
 docs/research
+docs/*.md
 
 .mcp.json
 .env
