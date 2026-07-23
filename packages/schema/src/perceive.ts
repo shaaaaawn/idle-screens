@@ -51,7 +51,11 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const seed = opts.seed ?? spec.seed ?? 42;
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
   const rng = createRng(seed);
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();

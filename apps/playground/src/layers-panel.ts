@@ -323,6 +323,7 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
 
   return {
     setSaver(id: string) {
+      clearTimeout(debounceId);
       const orig = EXAMPLE_BY_ID[id] as SaverSpec | undefined;
       if (!orig) {
         spec = null;
