@@ -379,9 +379,9 @@ describe('detectCapabilities', () => {
       vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
         const el = originalCreateElement(tag);
         if (tag === 'canvas') {
-          el.getContext = () => {
+          (el as HTMLCanvasElement).getContext = (() => {
             throw new Error('context creation failed');
-          };
+          }) as HTMLCanvasElement['getContext'];
         }
         return el;
       });
@@ -453,9 +453,9 @@ describe('detectCapabilities', () => {
       vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
         const el = originalCreateElement(tag);
         if (tag === 'canvas') {
-          el.getContext = () => {
+          (el as HTMLCanvasElement).getContext = (() => {
             throw new TypeError('no canvas for you');
-          };
+          }) as HTMLCanvasElement['getContext'];
         }
         return el;
       });
