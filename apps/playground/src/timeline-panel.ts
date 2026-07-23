@@ -11,6 +11,7 @@ import { isPreviewDriven, syncPreviewTime } from './preview-sync';
 export interface TimelineHandle {
   setSaver(saver: SaverPlugin, instance: SaverInstance | null, seed?: number): void;
   loadTrack(track: ControlTrack): void;
+  onTimeChange: ((t: number) => void) | null;
 }
 
 export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
@@ -262,11 +263,14 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     });
   };
 
+  let timeChangeCallback: ((t: number) => void) | null = null;
+
   const scrubTo = (t: number): void => {
     playheadT = t;
     updatePlayhead();
     updateValues();
     syncPreview(t);
+    timeChangeCallback?.(t);
   };
 
   const scrubFromEvent = (e: MouseEvent): void => {
@@ -310,6 +314,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     if (isPreviewDriven(currentInstance) || currentProfile.mode !== 'live') {
       syncPreview(elapsed);
     }
+    timeChangeCallback?.(elapsed);
     if (playing) rafId = requestAnimationFrame(tick);
   };
 
@@ -353,7 +358,10 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
         explicitTrack = null;
       }
       stopPlay();
-      if (!sameSaver) playheadT = 0;
+      if (!sameSaver) {
+        playheadT = 0;
+        timeChangeCallback?.(0);
+      }
       applyProfile();
       if (instance) startPlay();
     },
@@ -361,9 +369,13 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     loadTrack(track) {
       explicitTrack = track;
       playheadT = 0;
+      timeChangeCallback?.(0);
       stopPlay();
       applyProfile();
       if (currentInstance) startPlay();
     },
+
+    get onTimeChange() { return timeChangeCallback; },
+    set onTimeChange(cb: ((t: number) => void) | null) { timeChangeCallback = cb; },
   };
 }

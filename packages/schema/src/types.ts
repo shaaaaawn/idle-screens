@@ -21,6 +21,14 @@ export interface SaverSpec {
   background?: BackgroundSpec;
   layers: LayerSpec[];
   motionIntensity?: 'calm' | 'moderate' | 'energetic';
+  /**
+   * Frame persistence (0..1, capped at LIMITS.maxGhosting). Instead of fully clearing,
+   * each frame the background is painted at reduced alpha so moving entities leave
+   * decaying after-images (Mystify smears, long-exposure light). Inherently
+   * flash-safe: ghosting can only smooth luminance changes, never sharpen them.
+   * `renderFrame(t)` stays deterministic for seeks via a fixed-step warm-up replay.
+   */
+  ghosting?: number;
   /** Dimensional unit system. 'viewport' (default) = all sizes/speeds/distances are fractions of min(w,h). */
   units?: 'viewport' | 'px';
   /**
@@ -68,8 +76,12 @@ export interface LayerSpec {
   flip?: boolean;
   /** Per-entity opacity range, both 0..1. Default [1,1]. */
   alpha?: [number, number];
-  /** Compositing for this layer. 'lighter' = additive (glow stacking). Default source-over. */
-  blend?: 'lighter';
+  /**
+   * Compositing for this layer. 'lighter' = additive (glow stacking); 'screen' =
+   * gentler additive for pale backgrounds; 'multiply' = darkening (shadows,
+   * silhouettes). Default source-over. None of these can strobe.
+   */
+  blend?: 'lighter' | 'screen' | 'multiply';
   /**
    * Fractional spawn window (0 = left/top, 1 = right/bottom). Constrains where
    * entities are PLACED, not where they may travel. Default full viewport.
@@ -80,8 +92,14 @@ export interface LayerSpec {
    * period has a floor (LIMITS.minPulsePeriod — max 2 Hz), and every entity gets
    * its own seeded phase, so a layer can never strobe in unison. Effective alpha
    * is clamped to 0..1.
+   *
+   * `wave` derives each entity's phase from its spawn position instead of a seeded
+   * draw, turning independent breathing into a traveling wave across the field
+   * (ripples, wind through grass). `wavelength` is dimensional (px or viewport
+   * units); `angle` is the propagation direction in degrees (0 = rightward,
+   * default 0). Still flash-safe: neighbors are out of phase by construction.
    */
-  pulse?: { amp: number; period: number };
+  pulse?: { amp: number; period: number; wave?: { wavelength: number; angle?: number } };
   /**
    * Per-entity rotation speed in degrees/sec (positive = clockwise).
    * Each entity gets a seeded starting angle. Composes with any motion type.
@@ -104,7 +122,13 @@ export interface LayerSpec {
    */
   position?: { x: number; y: number };
   /**
-   * Inter-entity links: draw lines to each entity's k nearest neighbors within maxDist.
+   * Inter-entity links. `mode` picks the wiring:
+   * - 'nearest' (default): each entity's k nearest neighbors within maxDist.
+   * - 'chain': entities connected in order (0-1-2-…) — Mystify polygons, string
+   *   art. Ignores k/maxDist; `closed` joins the last entity back to the first.
+   * - 'random': a fixed golden-ratio-stride wiring (k partners per entity,
+   *   deterministic, no RNG draws) — breaks the crystalline k-nearest look.
+   * `falloff` fades link alpha with distance/maxDist, killing pop-in at the cutoff.
    * Capped at LIMITS.maxLinksK. Layer count must be <= LIMITS.maxLinkLayerCount when set.
    */
   links?: {
@@ -113,12 +137,29 @@ export interface LayerSpec {
     color?: string;
     alpha?: number;
     width?: number;
+    mode?: 'nearest' | 'chain' | 'random';
+    falloff?: boolean;
+    closed?: boolean;
   };
   /**
    * Afterglow trail behind moving entities. Samples past positions analytically
    * (no state, fully deterministic). `length` in ms, `fade` 0..1 (default 1 = full fade).
    */
   trail?: { length: number; fade?: number };
+  /**
+   * Grid placement instead of random scatter: entities fill cells row-major within
+   * `region`. `columns` defaults to an aspect-fit square-ish grid; `jitter` (0..1,
+   * scalar or per-axis) offsets each entity within its cell by a seeded fraction of
+   * the cell size — `{ y: 1 }` keeps columns crisp while scattering vertically
+   * (Matrix rain). Unlocks column effects, LED walls, mosaics, uniform dot fields.
+   */
+  layout?: { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } };
+  /**
+   * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
+   * before `enter` (ms), ramps up over `fade` ms (default 1000), holds at 1, then
+   * ramps down starting at `exit`. Entities are skipped entirely while at alpha 0.
+   */
+  life?: { enter?: number; exit?: number; fade?: number };
 }
 
 export type SpriteSpec =
@@ -133,8 +174,25 @@ export type SpriteSpec =
       maxWidth?: number;
       cycle?: CycleSpec;
     }
-  /** `soft` renders a radial falloff (glow orb) instead of a hard disc. */
-  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean; colors?: string[] };
+  /** `soft` renders a radial falloff (glow orb) instead of a hard disc.
+   *  `colorWeights` (same length as `colors`) biases the seeded per-entity pick —
+   *  "mostly cool tones, occasional ember" without duplicating entries. */
+  | { kind: 'circle'; radius: [number, number]; color: string; soft?: boolean; colors?: string[]; colorWeights?: number[] }
+  /** Unfilled circle (bubbles, portals, sonar pings). `width` = stroke width. */
+  | { kind: 'ring'; radius: [number, number]; color: string; width?: number; colors?: string[]; colorWeights?: number[] }
+  /**
+   * A line segment oriented along the entity's instantaneous heading (derived
+   * analytically from its motion) with a faded tail — rain that reads as rain,
+   * shooting stars, warp stars. `length` is the segment length range; `width` the
+   * stroke width.
+   */
+  | { kind: 'streak'; length: [number, number]; color: string; width?: number; colors?: string[]; colorWeights?: number[] }
+  /**
+   * Axis-aligned rectangle (rotates with `spin`). `width` is the horizontal size
+   * range; `aspect` the height/width ratio range (default [1,1] = squares).
+   * Mondrian blocks, confetti, city lights.
+   */
+  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; colors?: string[]; colorWeights?: number[] };
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
 export interface CycleSpec {
@@ -159,9 +217,46 @@ export type MotionSpec =
   /**
    * Orbit around a center point. Each entity gets a seeded radius from `radius`
    * and a seeded phase. `speed` is angular velocity in degrees/sec. `center` is
-   * fractional {x, y} (default {0.5, 0.5} = viewport center).
+   * fractional {x, y} (default {0.5, 0.5} = viewport center) — or
+   * `{ layer: key }` to orbit a single-entity parent layer (moons around a
+   * wandering planet). Strictly one level deep: the parent may not itself
+   * orbit a layer, and must have `count: 1`.
    */
-  | { type: 'orbit'; speed: [number, number]; radius: [number, number]; center?: { x: number; y: number } };
+  | { type: 'orbit'; speed: [number, number]; radius: [number, number]; center?: { x: number; y: number } | { layer: string } }
+  /**
+   * Organic harmonic drift — the analytic flow field. Each entity moves at a base
+   * velocity from `speed` plus 3 seeded sine octaves per axis, producing flowing
+   * curved paths (Flurry streams, aurora, jellyfish) with zero simulation state.
+   * `angle` fixes the base heading in degrees (omit for a seeded heading per
+   * entity); `meander` scales the harmonic amplitude (dimensional, default 0.05
+   * viewport units); `coherence` (0..1) blends every entity's harmonics toward a
+   * shared layer-level set — at 1 the field undulates in unison (fake flocking).
+   */
+  | { type: 'wander'; speed: [number, number]; angle?: number; meander?: number; coherence?: number }
+  /**
+   * Perspective starfield: entities live on a depth axis and stream toward the
+   * viewer, projected as `screen = center + offset / z`. Size and alpha scale
+   * with 1/z (small and faint at the far plane, large and fast up close), and z
+   * wraps — the honest warp tunnel. `speed` is in depth-units/sec
+   * (1 = full near-to-far span per second, capped at LIMITS.maxWarpSpeed).
+   */
+  | { type: 'warp'; speed: [number, number]; center?: { x: number; y: number } }
+  /**
+   * Choreographed spline motion: entities traverse `points` (fractional {x,y})
+   * over `duration` ms. `curve: 'smooth'` (default) uses Catmull-Rom through the
+   * points; 'linear' uses straight segments. `closed` (default true) loops the
+   * path; open paths ping-pong. Each entity gets a seeded phase offset along the
+   * path, and `scatter` (dimensional) adds a seeded per-entity offset so shared
+   * paths don't stack. Figure-eights, sweeping arcs, patrol routes.
+   */
+  | {
+      type: 'path';
+      points: Array<{ x: number; y: number }>;
+      duration: number;
+      curve?: 'linear' | 'smooth';
+      closed?: boolean;
+      scatter?: number;
+    };
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
@@ -202,4 +297,12 @@ export const LIMITS = {
   maxTrailSamples: 24, // dots per trail
   minDriftPeriod: 10000, // ms — background drift floor (10 s)
   maxDriftAmount: 0.3, // fraction of gradient stop shift
+  maxGhosting: 0.95, // frame persistence cap — bounds the seek warm-up replay
+  maxGhostReplayFrames: 120, // fixed-step frames replayed on a non-contiguous seek
+  maxMeander: 500, // px — wander harmonic amplitude cap (viewport cap: /referenceViewport)
+  maxWarpSpeed: 1.5, // depth-units/sec — full near-to-far span in ~0.7 s at max
+  minPathPoints: 2,
+  maxPathPoints: 24,
+  minPathDuration: 2000, // ms — a path lap can't be faster than this
+  maxGridColumns: 100,
 } as const;

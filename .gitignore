@@ -25,10 +25,6 @@ apps/mac/.secrets/
 # Never commit npm auth
 .npmrc
 
-# docs
-docs/specs
-docs/research
-docs/*.md
 
 .mcp.json
 .env

@@ -7,7 +7,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, validateSpec } from './validate';
-import { alphaAt, buildEntities, linkPairs, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -25,6 +25,15 @@ function hexToRgba(hex: string, alpha: number): string {
   const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
   const n = parseInt(h.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})\s+)+)/;
+
+/** Build a valid CSS font shorthand: weight/style tokens must precede the size. */
+function composeFontShorthand(sz: number, font: string): string {
+  const m = FONT_PREFIX_RE.exec(font);
+  if (m) return `${m[1].trim()} ${sz}px ${font.slice(m[0].length)}`;
+  return `${sz}px ${font}`;
 }
 
 /** Derive a manifest so a compiled spec composes with @idle-screens/capabilities. */
@@ -64,6 +73,8 @@ class SpecInstance implements SaverInstance {
   private startT = 0;
   private baseT = 0; // elapsed logical time carried across pause/resume
   private lastT = 0;
+  /** Last time painted — detects non-contiguous seeks for the ghosting warm-up replay. */
+  private lastRenderT = Number.NEGATIVE_INFINITY;
 
   /** The spec currently being rendered (base spec + any applied steering). */
   private effSpec: SaverSpec;
@@ -108,6 +119,8 @@ class SpecInstance implements SaverInstance {
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Resizing clears the canvas — force a ghosting warm-up on the next frame.
+    this.lastRenderT = Number.NEGATIVE_INFINITY;
   }
 
   /** (Re)seed and place all entities — deterministic for the seed + viewport. */
@@ -175,22 +188,43 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  private drawTrail(built: Built, e: Entity, t: number): void {
+  /** Position with parent-orbit resolution: a layer-parented orbit entity's
+   *  positionAt is an offset around (0,0); add the parent's own analytic position. */
+  private entityPos(e: Entity, t: number, parentE: Entity | null): { x: number; y: number; flip: boolean } {
+    const p = positionAt(e, t, this.w, this.h);
+    if (parentE && e.orbitParent) {
+      const pp = positionAt(parentE, t, this.w, this.h);
+      p.x += pp.x;
+      p.y += pp.y;
+    }
+    return p;
+  }
+
+  /** Resolve the single parent entity for a layer-parented orbit layer (or null). */
+  private parentEntityFor(built: Built): Entity | null {
+    const m = built.layer.motion;
+    if (m.type !== 'orbit' || !m.center || !('layer' in m.center)) return null;
+    const key = m.center.layer;
+    const parent = this.layers.find((b) => b.layer.key === key);
+    return parent?.entities[0] ?? null;
+  }
+
+  private drawTrail(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null): void {
     const trail = built.layer.trail;
     if (!trail) return;
     const { ctx, w, h } = this;
     const fade = trail.fade ?? 1;
     const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
-    const headAlpha = alphaAt(e, t);
+    const headAlpha = alphaAt(e, t) * lifeA;
     const headSize = sizeAt(e, t);
     const sprite = built.layer.sprite;
-    const resolvedColor = sprite.kind === 'circle'
+    const resolvedColor = sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect'
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
       : sprite.kind === 'text' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
     const wrap = built.layer.wrap !== false;
 
-    const head = positionAt(e, t, w, h);
+    const head = this.entityPos(e, t, parentE);
     let prevX = head.x;
     let prevY = head.y;
 
@@ -198,7 +232,7 @@ class SpecInstance implements SaverInstance {
       const k = s / n;
       const pastT = t - k * trail.length;
       if (pastT < 0) break;
-      const pos = positionAt(e, pastT, w, h);
+      const pos = this.entityPos(e, pastT, parentE);
 
       if (wrap) {
         const dx = pos.x - prevX;
@@ -229,13 +263,54 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  private drawEntity(built: Built, e: Entity, t: number): void {
+  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null): void {
     const { ctx } = this;
-    const p = positionAt(e, t, this.w, this.h);
+    const p = this.entityPos(e, t, parentE);
     const sprite = built.layer.sprite;
     const sz = sizeAt(e, t);
     const rot = rotationAt(e, t);
-    ctx.globalAlpha = alphaAt(e, t);
+    const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
+    ctx.globalAlpha = alphaAt(e, t) * lifeA;
+    if (sprite.kind === 'ring') {
+      const r = sz / 2;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      ctx.strokeStyle = resolvedColor;
+      ctx.lineWidth = Math.max(0.5, (sprite.width ?? (unitScale === 1 ? 2 : 0.002)) * unitScale);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
+    if (sprite.kind === 'streak') {
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const heading = headingAt(e, t, this.w, this.h) ?? 0;
+      const tailX = p.x - Math.cos(heading) * sz;
+      const tailY = p.y - Math.sin(heading) * sz;
+      const g = ctx.createLinearGradient(tailX, tailY, p.x, p.y);
+      g.addColorStop(0, hexToRgba(resolvedColor, 0));
+      g.addColorStop(1, resolvedColor);
+      ctx.strokeStyle = g;
+      ctx.lineWidth = Math.max(0.5, (sprite.width ?? (unitScale === 1 ? 2 : 0.002)) * unitScale);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      return;
+    }
+    if (sprite.kind === 'rect') {
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const rh = e.size2 !== undefined
+        ? e.size2 * (e.size > 0 ? sz / e.size : 1) // grow/warp scale height with width
+        : sz;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      ctx.fillStyle = resolvedColor;
+      ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
+      ctx.restore();
+      return;
+    }
     if (sprite.kind === 'circle') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
@@ -273,7 +348,13 @@ class SpecInstance implements SaverInstance {
     } else {
       ctx.textAlign = sprite.align ?? 'center';
       ctx.textBaseline = sprite.baseline ?? 'middle';
-      ctx.font = sprite.font ?? `${sz}px system-ui, sans-serif`;
+      // A full CSS shorthand (contains a px size) is used verbatim; a family/weight
+      // only ('bold monospace') composes with the seeded per-entity size.
+      ctx.font = sprite.font
+        ? (/\dpx/.test(sprite.font)
+          ? sprite.font
+          : composeFontShorthand(sz, sprite.font))
+        : `${sz}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       const idx = spriteIndexAt(e, t, sprite.strings.length);
       const text = sprite.strings[idx] ?? sprite.strings[0]!;
@@ -325,27 +406,36 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  private drawLinks(built: Built, t: number): void {
+  private drawLinks(built: Built, t: number, lifeA: number, parentE: Entity | null): void {
     const { links } = built.layer;
     if (!links) return;
     const { ctx } = this;
-    const wrap = built.layer.wrap !== false;
-    const positions = built.entities.map((e) => positionAt(e, t, this.w, this.h));
-    const pairs = linkPairs(positions, links.k, links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h)), wrap, this.w, this.h);
+    // Toroidal link drawing only makes sense for motions that actually wrap —
+    // bounce/orbit/path entities never cross an edge, so a "nearest image" line
+    // would cut across the screen.
+    const motionWraps = ['drift', 'rise', 'wander'].includes(built.layer.motion.type);
+    const wrap = built.layer.wrap !== false && motionWraps;
+    const positions = built.entities.map((e) => this.entityPos(e, t, parentE));
+    const maxDistPx = links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
+    const edges = linkEdges(links, positions, maxDistPx, wrap, this.w, this.h);
     const lw = (links.width ?? 1) * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
     ctx.lineWidth = lw;
+    ctx.lineCap = 'butt'; // streak sprites set 'round'; reset so link ends stay crisp
 
-    for (const [i, j] of pairs) {
+    for (const { i, j, dist } of edges) {
       const pi = positions[i]!;
       const pj = positions[j]!;
       const ei = built.entities[i]!;
       let resolvedColor = links.color;
       if (!resolvedColor) {
         const sprite = built.layer.sprite;
-        if (sprite.kind === 'circle') resolvedColor = sprite.colors?.[ei.colorIndex] ?? sprite.color;
-        else resolvedColor = '#e6e8ef';
+        if (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect') {
+          resolvedColor = sprite.colors?.[ei.colorIndex] ?? sprite.color;
+        } else resolvedColor = '#e6e8ef';
       }
-      ctx.globalAlpha = links.alpha ?? alphaAt(ei, t);
+      let a = links.alpha ?? alphaAt(ei, t);
+      if (links.falloff) a *= Math.max(0, 1 - dist / maxDistPx);
+      ctx.globalAlpha = a * lifeA;
       ctx.strokeStyle = resolvedColor;
       // Draw toward nearest image of pj (avoids full-canvas streaks at wrap seams)
       let dx = pj.x - pi.x;
@@ -361,23 +451,59 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  /** Deterministic, frame-addressable render (shared by the rAF loop). */
-  renderFrame(t: number, _seed: number): void {
-    this.stepTransition(t);
+  /** Paint one composite pass at time t. `bgAlpha` < 1 leaves the previous frame
+   *  showing through — the ghosting smear. */
+  private paintFrame(t: number, bgAlpha: number): void {
     const { ctx } = this;
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = bgAlpha;
     ctx.globalCompositeOperation = 'source-over';
     this.drawBackground(t);
+    ctx.globalAlpha = 1;
     for (const built of this.layers) {
+      const lifeA = lifeAlphaAt(built.layer.life, t);
+      if (lifeA <= 0) continue;
+      const parentE = this.parentEntityFor(built);
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
-      this.drawLinks(built, t);
+      this.drawLinks(built, t, lifeA, parentE);
       for (const e of built.entities) {
-        this.drawTrail(built, e, t);
-        this.drawEntity(built, e, t);
+        this.drawTrail(built, e, t, lifeA, parentE);
+        this.drawEntity(built, e, t, lifeA, parentE);
       }
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * Deterministic, frame-addressable render (shared by the rAF loop).
+   *
+   * With `ghosting` set, contiguous frames composite over the previous frame with a
+   * refresh-rate-normalized fade. A non-contiguous seek (pause render, e2e frame
+   * addressing) replays a bounded fixed-step warm-up from a full clear, so the
+   * accumulated smear at time t is identical on every run — the determinism proof
+   * survives statefulness because the "state" is reconstructed from pure history.
+   */
+  renderFrame(t: number, _seed: number): void {
+    this.stepTransition(t);
+    const g = this.effSpec.ghosting ?? 0;
+    if (g > 0) {
+      const dt = 1000 / 60;
+      const contiguous = this.lastRenderT !== Number.NEGATIVE_INFINITY
+        && t > this.lastRenderT
+        && t - this.lastRenderT <= 250;
+      if (contiguous) {
+        this.paintFrame(t, 1 - Math.pow(g, (t - this.lastRenderT) / dt));
+      } else {
+        const k = Math.min(Math.ceil(Math.log(1 / 255) / Math.log(g)), LIMITS.maxGhostReplayFrames);
+        const t0 = Math.max(0, t - k * dt);
+        this.paintFrame(t0, 1);
+        for (let ft = t0 + dt; ft < t - dt / 2; ft += dt) this.paintFrame(ft, 1 - g);
+        if (t > t0) this.paintFrame(t, 1 - g);
+      }
+    } else {
+      this.paintFrame(t, 1);
+    }
+    this.lastRenderT = t;
   }
 
   setPaused(paused: boolean): void {

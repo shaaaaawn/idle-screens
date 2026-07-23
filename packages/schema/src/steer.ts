@@ -114,7 +114,7 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  */
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
-  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units']);
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'mode', 'curve', 'layer']);
   const INDEXED = new Set(['layers', 'stops']);
   const out: string[] = [];
   const walk = (node: unknown, prefix: string, key: string): void => {
@@ -152,26 +152,35 @@ export function easeSmooth(k: number): number {
 export function structuralSignature(spec: SaverSpec): string {
   return JSON.stringify([
     spec.units,
-    spec.layers.map((l) => [
-      l.count,
-      l.size,
-      l.region,
-      l.position,
-      l.motion,
-      l.wrap,
-      l.flip,
-      l.alpha,
-      l.pulse,
-      l.spin,
-      l.grow,
-      l.sprite.kind,
-      l.sprite.kind === 'circle' ? l.sprite.radius : undefined,
-      l.sprite.kind === 'circle' ? l.sprite.colors?.length : undefined,
-      l.sprite.kind === 'emoji'
-        ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
-        : l.sprite.kind === 'text'
-          ? [l.sprite.strings.length, l.sprite.cycle?.period]
-          : undefined,
-    ]),
+    spec.layers.map((l) => {
+      const s = l.sprite as Record<string, unknown>;
+      return [
+        l.count,
+        l.size,
+        l.region,
+        l.position,
+        l.motion,
+        l.wrap,
+        l.flip,
+        l.alpha,
+        l.pulse,
+        l.spin,
+        l.grow,
+        l.layout,
+        l.sprite.kind,
+        // Dimensional draws baked into entities: radius (circle/ring), length
+        // (streak), width+aspect (rect), palette pick (all shaped sprites).
+        s.radius,
+        s.length,
+        l.sprite.kind === 'rect' ? [s.width, s.aspect] : undefined,
+        Array.isArray(s.colors) ? s.colors.length : undefined,
+        s.colorWeights,
+        l.sprite.kind === 'emoji'
+          ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
+          : l.sprite.kind === 'text'
+            ? [l.sprite.strings.length, l.sprite.cycle?.period]
+            : undefined,
+      ];
+    }),
   ]);
 }

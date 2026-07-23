@@ -223,14 +223,26 @@ seeded, deterministic, and `renderFrame`-addressable. They go in
 `packages/schema/src/examples/` (one file per spec, registered in `index.ts`) and get wired into the playground's schema panel
 (`apps/playground/src/schema-panel.ts`) and `ALL_SAVERS` in `main.ts`.
 
-**Limitations:** no rotation/spin, no custom draw calls, no particle interactions,
-no per-pixel fields. If a saver concept needs these, use the imperative canvas
-pattern instead.
+**Limitations (as of the 2026-07-21 "v1 ceiling"):** the schema now covers spin,
+grow, trails, links (nearest/chain/random), ghosting, wander/warp/path motion,
+grid layout, lifecycle staging, and ring/streak/rect sprites. What it still can't
+do: custom draw calls, particle interactions (real flocking/collision), and
+per-pixel fields (fluid, reaction-diffusion). Those stay imperative — or wait
+for a v2 simulation schema (`docs/v2-simulation-schema-notes.md`).
 
 **Determinism/compat rule for schema features:** optional layer fields must only
 consume EXTRA seeded-rng draws when the field is present in the spec, so specs
-written before a feature existed keep bit-identical entity streams (tested in
-`simulate.test.ts` "stream compat").
+written before a feature existed keep bit-identical entity streams (guarded by
+`determinism-baseline.test.ts` snapshot streams). Two traps proven in practice:
+(1) **Never reorder existing draws.** Draw order in `buildEntities` is part of
+the format contract — computing an existing draw (e.g. `pulsePhase`) earlier in
+the loop shifts the stream for every spec using that field, even though the
+draw count is unchanged. (2) **Derive, don't redraw.** When a new feature
+replaces a seeded value with a computed one (e.g. position-derived wave phase),
+still consume the historical draw in its original position, then PATCH the
+computed value onto the entity after the push — toggling the feature must not
+shift any other draw. New Entity fields must be optional-and-absent for old
+specs or the snapshots churn.
 
 ## Integration checklist (classic savers)
 When adding a saver to `packages/savers-classic/`, update ALL of these files:

@@ -11,7 +11,7 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, ORRERY_SPEC, SAKURA_SPEC, SNOWFALL_SPEC } from '@idle-screens/schema';
+import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
@@ -20,7 +20,7 @@ import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { formatBackendLabel, readPreviewBackend } from './preview-backend';
 
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets']);
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession']);
 
 interface SaverGroup {
   id: string;
@@ -42,6 +42,11 @@ const SAVER_GROUPS: SaverGroup[] = [
       compileSaver(ORRERY_SPEC),
       compileSaver(CONSTELLATION_SPEC),
       compileSaver(COMETS_SPEC),
+      compileSaver(AURORA_SPEC),
+      compileSaver(WARP_TUNNEL_SPEC),
+      compileSaver(POLYGONS_SPEC),
+      compileSaver(MATRIX_RAIN_SPEC),
+      compileSaver(PROCESSION_SPEC),
     ],
   },
 ];
@@ -428,8 +433,16 @@ function liveMode(): void {
     devProps.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
     buildConfigPanel(cfg, rebuild, right.engine);
 
-    const { debug } = right;
+    const { debug, perception, layers } = right;
     const { timeline } = bottom;
+
+    let percThrottleId = 0;
+    let pendingT = 0;
+    timeline.onTimeChange = (t) => {
+      pendingT = t;
+      if (percThrottleId) return;
+      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); }, 250);
+    };
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
@@ -460,6 +473,12 @@ function liveMode(): void {
       };
       timeline.setSaver(saver, null, cfg.seed);
       debug.setContext(previewCtx);
+      perception.setSaver(id, {
+        width: Math.round(rect.width) || 640,
+        height: Math.round(rect.height) || 400,
+        seed: cfg.seed,
+      });
+      layers.setSaver(id);
 
       void Promise.resolve(
         saver.mount({
@@ -480,6 +499,36 @@ function liveMode(): void {
           debug.setContext(previewCtx);
         });
       });
+    };
+
+    layers.onSpecChange = (editedSpec) => {
+      if (!viewportHost) return;
+      try {
+        const newSaver = compileSaver(editedSpec);
+        if (devPreviewInst) devPreviewInst.dispose();
+        devPreviewInst = null;
+        viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
+        const rect = viewportHost.getBoundingClientRect();
+        timeline.setSaver(newSaver, null, cfg.seed);
+        void Promise.resolve(
+          newSaver.mount({
+            host: viewportHost,
+            dpr: devicePixelRatio ?? 1,
+            width: Math.round(rect.width) || 640,
+            height: Math.round(rect.height) || 400,
+            rng: createRng((cfg.seed >>> 0) || 1),
+            seed: cfg.seed,
+            reducedMotion: false,
+          }),
+        ).then((inst) => {
+          devPreviewInst = inst;
+          inst.setPaused(true);
+          timeline.setSaver(newSaver, inst, cfg.seed);
+        });
+        perception.updateSpec(editedSpec);
+      } catch (err) {
+        console.warn('[layers] spec recompile failed:', err);
+      }
     };
 
     buildSaverPalette(left, devSelect, cfg.saver);
