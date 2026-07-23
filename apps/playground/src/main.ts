@@ -437,9 +437,11 @@ function liveMode(): void {
     const { timeline } = bottom;
 
     let percThrottleId = 0;
+    let pendingT = 0;
     timeline.onTimeChange = (t) => {
+      pendingT = t;
       if (percThrottleId) return;
-      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(t); }, 250);
+      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); }, 250);
     };
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;

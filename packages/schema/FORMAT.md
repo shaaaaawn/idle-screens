@@ -42,7 +42,8 @@ These hold **by construction** — no spec can violate them:
 2. **Pulse/grow/cycle are bounded.** Breathing amplitude is capped and periods
    floored at 500 ms (2 Hz — under the WCAG 3 Hz flash threshold). Every entity
    gets its own seeded phase — and with `pulse.wave`, a position-derived phase —
-   so a layer can never pulse in unison. `ghosting` only *smooths* luminance
+   so a layer will generally not pulse in unison (edge case: if spawn positions
+   alias the wavelength, phases may coincide). `ghosting` only *smooths* luminance
    changes (it composites frames over a faded copy of the last), never sharpens
    them.
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
@@ -90,7 +91,9 @@ must exist, have `count: 1`, and not themselves orbit a layer.
 
 With `units: "viewport"` (the default) every dimensional value — sizes, radii,
 speeds, distances, wavelengths, stroke widths — is a fraction of
-`min(width, height)`, so specs scale to any display.
+`min(width, height)`, so specs scale to any display. Exception: text sprites
+with an explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`)
+use that CSS font verbatim and do not scale with the viewport.
 
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
@@ -211,7 +214,11 @@ for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
 
 `src/perceive.ts` translates a spec into modalities a **non-vision agent** can
 reason about, computed analytically from the entity model (no canvas, no
-renderer, deterministic, Node-safe):
+renderer, deterministic, Node-safe). Note: the analytical model approximates
+but does not perfectly match canvas rendering — blend modes are simplified
+(`screen` ≈ `lighter`), wrapped link segments use straight interpolation, and
+background drift is sampled at rest. These are documented trade-offs for a
+zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
