@@ -523,6 +523,7 @@ function liveMode(): void {
           inst.setPaused(true);
           timeline.setSaver(newSaver, inst, cfg.seed);
         });
+        perception.updateSpec(editedSpec);
       } catch (err) {
         console.warn('[layers] spec recompile failed:', err);
       }

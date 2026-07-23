@@ -2,6 +2,7 @@ import { perceiveScene, EXAMPLE_BY_ID, type SaverSpec, type ScenePerception } fr
 
 export interface PerceptionHandle {
   setSaver(id: string, opts?: { width?: number; height?: number; seed?: number }): void;
+  updateSpec(spec: SaverSpec): void;
   setTime(t: number): void;
   dispose(): void;
 }
@@ -42,6 +43,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
   let currentId: string | null = null;
   let currentOpts: { width?: number; height?: number; seed?: number } = {};
   let lastT = 0;
+  let overrideSpec: SaverSpec | null = null;
 
   const show = (p: ScenePerception): void => {
     empty.hidden = true;
@@ -112,7 +114,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
 
   const perceiveAt = (t: number): void => {
     if (!currentId) return;
-    const spec = EXAMPLE_BY_ID[currentId] as SaverSpec | undefined;
+    const spec = overrideSpec ?? EXAMPLE_BY_ID[currentId] as SaverSpec | undefined;
     if (!spec) { hide(); return; }
     try {
       const p = perceiveScene(spec, {
@@ -120,7 +122,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
         viewport: currentOpts.width && currentOpts.height
           ? { width: currentOpts.width, height: currentOpts.height }
           : undefined,
-        seed: currentOpts.seed,
+        seed: spec.seed ?? currentOpts.seed,
       });
       show(p);
     } catch {
@@ -132,12 +134,19 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
     setSaver(id: string, opts: { width?: number; height?: number; seed?: number } = {}) {
       currentId = id;
       currentOpts = opts;
+      overrideSpec = null;
+      lastT = 0;
       const spec = EXAMPLE_BY_ID[id] as SaverSpec | undefined;
       if (!spec) {
         currentId = null;
         hide();
         return;
       }
+      perceiveAt(lastT);
+    },
+
+    updateSpec(spec: SaverSpec) {
+      overrideSpec = spec;
       perceiveAt(lastT);
     },
 

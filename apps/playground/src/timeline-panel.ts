@@ -358,7 +358,10 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
         explicitTrack = null;
       }
       stopPlay();
-      if (!sameSaver) playheadT = 0;
+      if (!sameSaver) {
+        playheadT = 0;
+        timeChangeCallback?.(0);
+      }
       applyProfile();
       if (instance) startPlay();
     },
@@ -366,6 +369,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     loadTrack(track) {
       explicitTrack = track;
       playheadT = 0;
+      timeChangeCallback?.(0);
       stopPlay();
       applyProfile();
       if (currentInstance) startPlay();

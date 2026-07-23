@@ -270,6 +270,9 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
     const spriteFields = document.createElement('div');
     body.append(makeField('Kind', selectField(layer.sprite.kind, SPRITE_KINDS, (v) => {
       layer.sprite = defaultSprite(v);
+      if ((v === 'text' || v === 'emoji') && !layer.size) {
+        layer.size = [0.02, 0.04];
+      }
       kindBadge.textContent = v;
       buildSpriteFields(layer, spriteFields);
     })));
