@@ -30,7 +30,7 @@ pnpm install
 pnpm build                  # tsup build all packages (must run before typecheck on clean checkout)
 pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
-pnpm test                   # vitest run (180 unit tests)
+pnpm test                   # vitest run (455 unit tests)
 pnpm dev                    # Vite playground at localhost:5173
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
 pnpm test:all               # build + typecheck + lint + test + e2e (the full CI gate)
@@ -84,7 +84,7 @@ consumer-facing changes in any publishable package:
 
 One changeset per release batch is fine — summarize the whole npm-facing delta in
 a single file. Run `pnpm changeset` interactively, or author the markdown by
-hand (see `.changeset/worker-savers-steering.md` for the format).
+hand (see any existing `.changeset/*.md` file for the format).
 
 ### When you do **not** need a changeset
 
@@ -132,6 +132,10 @@ for setup-node) in GitHub secrets.
 - Node >= 22 required (see `engines` in root `package.json`).
 - GitHub org is `shaaaaawn` (5 a's). npm scope is `@idle-screens`. npm username is `shawnfx`.
 - Classic savers are ports from Berkeley Systems' After Dark via Bryan Braun's after-dark-css. See `CREDITS.md` for attribution.
+
+## Consumer integration (idle-server)
+
+The Cloudflare Worker at `~/code/idle-server` consumes `@idle-screens/schema` (plus core, savers-classic, saver-black-hole) from npm. Its `src/worker.ts` contains a `SCHEMA_REFERENCE` constant that mirrors `packages/schema/FORMAT.md` — **update the server's reference whenever the schema format changes** (new sprite kinds, motion types, top-level fields, etc.). See `~/code/idle-server/CLAUDE.md` for the update checklist.
 
 ## Consumer integration (shawn-site)
 

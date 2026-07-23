@@ -44,10 +44,18 @@ The following savers are original to this project:
 | Pipes | 3D pipe growth. Original canvas2d implementation. |
 | BSOD | Blue screen of death. Original DOM/CSS implementation. |
 | Flurry | Particle flurry. Original canvas2d implementation. |
-| Snowfall | Snowfall particles. Original canvas2d implementation. |
-| Night Lanterns | Yi Peng festival lantern sky. Original, authored as a declarative `SaverSpec` (pure JSON) and compiled by `@idle-screens/schema`. |
-| Sakura Drift | Cherry blossom petals. Original, authored as a declarative `SaverSpec` (pure JSON) and compiled by `@idle-screens/schema`. |
-| Dev Dashboard | Developer dashboard. Original, authored as a declarative `SaverSpec` (pure JSON) and compiled by `@idle-screens/schema`. |
+| Snowfall | Snowfall particles. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Night Lanterns | Yi Peng festival lantern sky. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Sakura Drift | Cherry blossom petals. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Dev Dashboard | Developer dashboard. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Orrery | Solar system orrery. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Constellation | Star constellation map. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Comet Shower | Comet trails. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Aurora | Aurora borealis curtains. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Warp Tunnel | Hyperspace warp tunnel. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Polygons | Drifting polygon shapes. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Matrix Rain | Matrix-style falling code. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Night Procession | Festival lantern procession. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Fluid | Navier-Stokes fluid simulation. Original canvas2d + WebGPU compute implementation. |
 | Reaction Diffusion | Gray-Scott reaction-diffusion. Original canvas2d + WebGPU compute implementation. Clean-room math — no code from external sources. |
 | Mystify | Bouncing morphing polygon trails. Original canvas2d implementation. Inspired by the Windows XP "Mystify" screensaver concept (clean-room). |
