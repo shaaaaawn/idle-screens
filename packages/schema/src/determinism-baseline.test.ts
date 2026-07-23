@@ -7,9 +7,22 @@ const W = 1920;
 const H = 1080;
 const SEED = 42;
 
+// Round floats to 12 significant digits so cross-platform trig ULP
+// differences don't break snapshots while RNG stream shifts are still caught.
+function stabilize(v: unknown): unknown {
+  if (typeof v === 'number') return +v.toPrecision(12);
+  if (Array.isArray(v)) return v.map(stabilize);
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) out[k] = stabilize(val);
+    return out;
+  }
+  return v;
+}
+
 function snapshotSpec(spec: { layers: Array<Record<string, unknown>> }) {
   const rng = createRng(SEED);
-  return spec.layers.map((layer) => buildEntities(layer as never, rng, W, H));
+  return stabilize(spec.layers.map((layer) => buildEntities(layer as never, rng, W, H)));
 }
 
 describe('determinism baseline — entity streams must not shift', () => {
