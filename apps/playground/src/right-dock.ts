@@ -1,9 +1,13 @@
 import { buildDebugPanel, type DebugHandle } from './debug-panel';
+import { buildLayersPanel, type LayersHandle } from './layers-panel';
+import { buildPerceptionPanel, type PerceptionHandle } from './perception-panel';
 
 export interface RightDockHandle {
   props: HTMLElement;
   engine: HTMLElement;
+  layers: LayersHandle;
   debug: DebugHandle;
+  perception: PerceptionHandle;
 }
 
 function makePanel(label: string, open = true, className?: string): { section: HTMLDetailsElement; body: HTMLElement } {
@@ -26,14 +30,18 @@ export function buildRightDock(mount: HTMLElement): RightDockHandle {
 
   const props = makePanel('Properties', true);
   const engine = makePanel('Engine', true);
+  const layersPanel = makePanel('Layers', false);
+  const percPanel = makePanel('Perception', false);
   const debugPanel = makePanel('Debug', true, 'wb-panel-debug');
 
-  stack.append(props.section, engine.section, debugPanel.section);
+  stack.append(props.section, engine.section, layersPanel.section, percPanel.section, debugPanel.section);
   mount.append(stack);
 
   return {
     props: props.body,
     engine: engine.body,
+    layers: buildLayersPanel(layersPanel.body),
+    perception: buildPerceptionPanel(percPanel.body),
     debug: buildDebugPanel(debugPanel.body),
   };
 }
