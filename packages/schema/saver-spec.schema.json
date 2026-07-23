@@ -13,6 +13,8 @@
     "seed": { "type": "number", "description": "Deterministic RNG seed. Same spec + same seed = identical frames. Falls back to the host's seed." },
     "motionIntensity": { "enum": ["calm", "moderate", "energetic"], "description": "Advisory intensity for capability/reduced-motion gating." },
     "units": { "enum": ["px", "viewport"], "description": "Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h)." },
+    "referenceViewport": { "type": "number", "minimum": 100, "maximum": 8640, "description": "Resolution the spec was designed at (default 1080). Entity counts density-scale above it." },
+    "ghosting": { "type": "number", "minimum": 0, "maximum": 0.95, "description": "Frame persistence 0..0.95: each frame composites over a faded copy of the last, so moving entities smear (Mystify trails, long-exposure light). Flash-safe — only smooths luminance. Seeks stay deterministic via a fixed-step warm-up replay." },
     "background": { "$ref": "#/definitions/background" },
     "layers": {
       "type": "array",
@@ -115,7 +117,7 @@
         "wrap": { "type": "boolean", "description": "Wrap to the opposite edge when leaving the viewport. Default true." },
         "flip": { "type": "boolean", "description": "Flip the sprite horizontally to face its heading. Default false." },
         "alpha": { "$ref": "#/definitions/range01", "description": "Per-entity opacity range. Default [1, 1]." },
-        "blend": { "const": "lighter", "description": "Additive compositing (glow stacking). Omit for normal source-over." },
+        "blend": { "enum": ["lighter", "screen", "multiply"], "description": "Compositing: 'lighter' = additive glow, 'screen' = gentle additive for pale backgrounds, 'multiply' = darkening (shadows). Omit for normal source-over." },
         "region": {
           "type": "object",
           "additionalProperties": false,
@@ -131,7 +133,17 @@
           "additionalProperties": false,
           "properties": {
             "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Opacity breathing amplitude, capped at 0.5." },
-            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; floor of 500 (max 2 Hz — flash-safety)." }
+            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; floor of 500 (max 2 Hz — flash-safety)." },
+            "wave": {
+              "type": "object",
+              "required": ["wavelength"],
+              "additionalProperties": false,
+              "properties": {
+                "wavelength": { "type": "number", "exclusiveMinimum": 0, "description": "Spatial wavelength (px or viewport-units)." },
+                "angle": { "type": "number", "description": "Propagation direction in degrees (0 = rightward). Default 0." }
+              },
+              "description": "Derive each entity's phase from its position: breathing becomes a traveling wave across the field (ripples, wind through grass). Neighbors are out of phase by construction — still flash-safe."
+            }
           },
           "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
         },
@@ -176,9 +188,46 @@
             "maxDist": { "type": "number", "exclusiveMinimum": 0, "description": "Maximum link distance (px or viewport-units)." },
             "color": { "$ref": "#/definitions/hexColor", "description": "Link color. Defaults to per-entity color." },
             "alpha": { "type": "number", "minimum": 0, "maximum": 1, "description": "Link opacity. Defaults to entity alpha." },
-            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 1." }
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 1." },
+            "mode": { "enum": ["nearest", "chain", "random"], "description": "'nearest' (default) k-nearest within maxDist; 'chain' connects entities in order (Mystify polygons — ignores k/maxDist); 'random' a fixed deterministic wiring filtered by maxDist." },
+            "falloff": { "type": "boolean", "description": "Fade link alpha with distance/maxDist — removes pop-in at the cutoff." },
+            "closed": { "type": "boolean", "description": "Chain mode: join the last entity back to the first (closed polygon)." }
           },
-          "description": "Draw lines to each entity's k nearest neighbors within maxDist. The layer's entity count (count field) must be <= 200 for performance."
+          "description": "Draw lines between entities. The layer's entity count (count field) must be <= 200 for performance."
+        },
+        "layout": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "grid" },
+            "columns": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Grid columns. Default: aspect-fit square-ish grid." },
+            "jitter": {
+              "oneOf": [
+                { "type": "number", "minimum": 0, "maximum": 1 },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                }
+              ],
+              "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
+            }
+          },
+          "description": "Place entities on a grid (row-major, within region) instead of random scatter — Matrix columns, LED walls, uniform dot fields."
+        },
+        "life": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enter": { "type": "number", "minimum": 0, "description": "Layer fades in starting at this time (ms)." },
+            "exit": { "type": "number", "minimum": 0, "description": "Layer fades out starting at this time (ms). Must be > enter." },
+            "fade": { "type": "number", "minimum": 0, "description": "Fade ramp duration in ms. Default 1000." }
+          },
+          "description": "Layer lifecycle for act structure (stars first, dancers at t=3000). Pure function of t — deterministic and seekable."
         }
       },
       "if": { "required": ["position"] },
@@ -220,10 +269,59 @@
             "radius": { "$ref": "#/definitions/positiveRange" },
             "color": { "$ref": "#/definitions/hexColor" },
             "soft": { "type": "boolean", "description": "Radial falloff (glow orb) instead of a hard disc." },
-            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick). Falls back to color." }
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick). Falls back to color." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
           }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "radius", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "ring" },
+            "radius": { "$ref": "#/definitions/positiveRange" },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default ~2px." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "Unfilled circle — bubbles, portals, sonar pings."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "length", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "streak" },
+            "length": { "$ref": "#/definitions/positiveRange", "description": "Segment length range (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default ~2px." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "A line oriented along the entity's heading with a faded tail — rain that reads as rain, shooting stars, warp stars."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "width", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "rect" },
+            "width": { "$ref": "#/definitions/positiveRange", "description": "Horizontal size range (px or viewport-units)." },
+            "aspect": { "$ref": "#/definitions/positiveRange", "description": "Height/width ratio range. Default [1,1] = squares." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "Axis-aligned rectangle (rotates with spin) — Mondrian blocks, confetti, city lights."
         }
       ]
+    },
+    "colorWeights": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "number", "minimum": 0 },
+      "description": "Relative weights for the colors[] pick, same length as colors. 'Mostly cool tones, occasional ember' without duplicating entries."
     },
     "cycle": {
       "type": "object",
@@ -290,6 +388,56 @@
             },
             "radius": { "$ref": "#/definitions/positiveRange", "description": "[min, max] orbit radius in px." },
             "center": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["x", "y"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                },
+                {
+                  "type": "object",
+                  "required": ["layer"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "layer": { "type": "string", "minLength": 1, "description": "Key of a count-1 parent layer to orbit (moons around a wandering planet). One level deep only — the parent may not itself orbit a layer." }
+                  }
+                }
+              ],
+              "description": "Orbit center: fractional viewport position (default {0.5, 0.5}) or { layer: key } to orbit a single-entity parent layer."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "wander" },
+            "speed": { "$ref": "#/definitions/speedRange" },
+            "angle": { "type": "number", "description": "Base heading in degrees. Omit for a seeded heading per entity." },
+            "meander": { "type": "number", "exclusiveMinimum": 0, "description": "Harmonic amplitude (px or viewport-units). Default ~0.05 viewport-units. How far paths curve away from the base line." },
+            "coherence": { "type": "number", "minimum": 0, "maximum": 1, "description": "0 = each entity wanders independently; 1 = the whole layer undulates in unison (fake flocking). Default 0." }
+          },
+          "description": "Organic harmonic drift — base velocity plus 3 seeded sine octaves per axis. Flowing curved paths (Flurry streams, aurora, jellyfish) with zero simulation state."
+        },
+        {
+          "type": "object",
+          "required": ["type", "speed"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "warp" },
+            "speed": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 1.5 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[min, max] depth-units/sec (1 = full near-to-far span per second), capped at 1.5."
+            },
+            "center": {
               "type": "object",
               "required": ["x", "y"],
               "additionalProperties": false,
@@ -297,9 +445,38 @@
                 "x": { "type": "number", "minimum": 0, "maximum": 1 },
                 "y": { "type": "number", "minimum": 0, "maximum": 1 }
               },
-              "description": "Orbit center as fractional viewport position. Default {0.5, 0.5}."
+              "description": "Vanishing point as fractional viewport position. Default {0.5, 0.5}."
             }
-          }
+          },
+          "description": "Perspective starfield: entities stream toward the viewer along a depth axis, size and alpha scaling with 1/z. Pair with streak sprites for the classic warp tunnel."
+        },
+        {
+          "type": "object",
+          "required": ["type", "points", "duration"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "path" },
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 24,
+              "items": {
+                "type": "object",
+                "required": ["x", "y"],
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
+              "description": "Waypoints as fractional viewport positions."
+            },
+            "duration": { "type": "number", "minimum": 2000, "description": "Time for one full lap in ms (min 2000)." },
+            "curve": { "enum": ["linear", "smooth"], "description": "'smooth' (default) = Catmull-Rom spline through the points; 'linear' = straight segments." },
+            "closed": { "type": "boolean", "description": "Loop the path (default true). Open paths ping-pong." },
+            "scatter": { "type": "number", "exclusiveMinimum": 0, "description": "Seeded per-entity offset (px or viewport-units) so entities sharing a path don't stack." }
+          },
+          "description": "Choreographed spline motion — figure-eights, sweeping arcs, patrol routes. Each entity gets a seeded phase offset along the path."
         }
       ]
     }

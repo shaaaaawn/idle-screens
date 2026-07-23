@@ -8,12 +8,16 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
+  'layout', 'life',
 ]);
-const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors']);
+const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
+const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
+const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
+const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
@@ -21,6 +25,9 @@ const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
 const KNOWN_STATIC = new Set(['type']);
 const KNOWN_ORBIT = new Set(['type', 'speed', 'radius', 'center']);
+const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence']);
+const KNOWN_WARP = new Set(['type', 'speed', 'center']);
+const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
 
@@ -60,6 +67,9 @@ export function validateSpec(spec: unknown): ValidationResult {
     if (!isNum(spec.referenceViewport) || spec.referenceViewport < 100 || spec.referenceViewport > 8640) {
       err('referenceViewport', 'must be a number between 100 and 8640');
     }
+  }
+  if (spec.ghosting !== undefined && (!isNum(spec.ghosting) || spec.ghosting < 0 || spec.ghosting > LIMITS.maxGhosting)) {
+    err('ghosting', `must be a number 0..${LIMITS.maxGhosting}`);
   }
 
   for (const k of unknownKeys(spec, KNOWN_TOP)) {
@@ -138,7 +148,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     if (k === 'id') {
       warn(`${path}.id`, 'misplaced-property', `'id' is not a layer property — did you mean 'key'? Use 'key' to name a layer`);
     } else if (k === 'depth') {
-      warn(`${path}.depth`, 'unknown-property', `'depth' is not yet supported — fake parallax with size/speed/alpha across layers instead`);
+      warn(`${path}.depth`, 'unknown-property', `'depth' is not a layer property — use motion type 'warp' for true perspective depth, or fake parallax with size/speed/alpha across layers`);
     } else {
       warn(`${path}.${k}`, 'unknown-property', `unknown layer property '${k}' — will be ignored`);
     }
@@ -157,7 +167,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.alpha !== undefined && (!isRange(layer.alpha) || layer.alpha[0] < 0 || layer.alpha[1] > 1)) {
     err(`${path}.alpha`, 'must be a [min,max] range within 0..1');
   }
-  if (layer.blend !== undefined && layer.blend !== 'lighter') err(`${path}.blend`, "must be 'lighter' when set");
+  if (layer.blend !== undefined && !['lighter', 'screen', 'multiply'].includes(layer.blend as string)) {
+    err(`${path}.blend`, "must be 'lighter' | 'screen' | 'multiply' when set");
+  }
   if (layer.key !== undefined && (!isStr(layer.key) || layer.key.trim() === '')) {
     err(`${path}.key`, 'must be a non-empty string');
   }
@@ -189,6 +201,17 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       }
       if (!isNum(layer.pulse.period) || layer.pulse.period < LIMITS.minPulsePeriod) {
         err(`${path}.pulse.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
+      }
+      if (layer.pulse.wave !== undefined) {
+        if (!isObj(layer.pulse.wave)) err(`${path}.pulse.wave`, 'must be an object');
+        else {
+          if (!isNum(layer.pulse.wave.wavelength) || layer.pulse.wave.wavelength <= 0) {
+            err(`${path}.pulse.wave.wavelength`, 'must be > 0 (px or viewport-units)');
+          }
+          if (layer.pulse.wave.angle !== undefined && !isNum(layer.pulse.wave.angle)) {
+            err(`${path}.pulse.wave.angle`, 'must be a number (degrees)');
+          }
+        }
       }
     }
   }
@@ -224,8 +247,60 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (layer.links.width !== undefined && (!isNum(layer.links.width) || layer.links.width <= 0)) {
         err(`${path}.links.width`, 'must be > 0');
       }
+      if (layer.links.mode !== undefined && !['nearest', 'chain', 'random'].includes(layer.links.mode as string)) {
+        err(`${path}.links.mode`, "must be 'nearest' | 'chain' | 'random'");
+      }
+      if (layer.links.falloff !== undefined && typeof layer.links.falloff !== 'boolean') {
+        err(`${path}.links.falloff`, 'must be a boolean');
+      }
+      if (layer.links.closed !== undefined && typeof layer.links.closed !== 'boolean') {
+        err(`${path}.links.closed`, 'must be a boolean');
+      }
       if (isNum(layer.count) && layer.count > LIMITS.maxLinkLayerCount) {
         err(`${path}.links`, `layer count must be <= ${LIMITS.maxLinkLayerCount} when links is set`);
+      }
+    }
+  }
+
+  if (layer.layout !== undefined) {
+    if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
+      err(`${path}.layout`, "must be an object with type: 'grid'");
+    } else {
+      if (layer.layout.columns !== undefined && (!isNum(layer.layout.columns) || !Number.isInteger(layer.layout.columns) || layer.layout.columns < 1 || layer.layout.columns > LIMITS.maxGridColumns)) {
+        err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
+      }
+      const jit = layer.layout.jitter;
+      if (jit !== undefined) {
+        const jitterOk = (v: unknown): boolean => isNum(v) && v >= 0 && v <= 1;
+        if (isNum(jit)) {
+          if (!jitterOk(jit)) err(`${path}.layout.jitter`, 'must be 0..1');
+        } else if (isObj(jit)) {
+          if (jit.x !== undefined && !jitterOk(jit.x)) err(`${path}.layout.jitter.x`, 'must be 0..1');
+          if (jit.y !== undefined && !jitterOk(jit.y)) err(`${path}.layout.jitter.y`, 'must be 0..1');
+        } else {
+          err(`${path}.layout.jitter`, 'must be a number 0..1 or { x?, y? }');
+        }
+      }
+      if (layer.position !== undefined) {
+        warn(`${path}.layout`, 'layout-with-position', 'position overrides layout for the single entity — layout has no effect');
+      }
+    }
+  }
+
+  if (layer.life !== undefined) {
+    if (!isObj(layer.life)) err(`${path}.life`, 'must be an object');
+    else {
+      if (layer.life.enter !== undefined && (!isNum(layer.life.enter) || layer.life.enter < 0)) {
+        err(`${path}.life.enter`, 'must be >= 0 (ms)');
+      }
+      if (layer.life.exit !== undefined && (!isNum(layer.life.exit) || layer.life.exit < 0)) {
+        err(`${path}.life.exit`, 'must be >= 0 (ms)');
+      }
+      if (isNum(layer.life.enter) && isNum(layer.life.exit) && layer.life.exit <= layer.life.enter) {
+        err(`${path}.life.exit`, 'must be greater than life.enter');
+      }
+      if (layer.life.fade !== undefined && (!isNum(layer.life.fade) || layer.life.fade < 0)) {
+        err(`${path}.life.fade`, 'must be >= 0 (ms)');
       }
     }
   }
@@ -277,15 +352,29 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     color(sprite.color, `${path}.color`, err);
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
-    if (sprite.colors !== undefined) {
-      if (!Array.isArray(sprite.colors) || sprite.colors.length === 0) {
-        err(`${path}.colors`, 'must be a non-empty array of hex colours');
-      } else {
-        sprite.colors.forEach((c: unknown, ci: number) => color(c, `${path}.colors[${ci}]`, err));
-      }
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'ring') {
+    knownSet = KNOWN_RING;
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    color(sprite.color, `${path}.color`, err);
+    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'streak') {
+    knownSet = KNOWN_STREAK;
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px');
+    color(sprite.color, `${path}.color`, err);
+    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'rect') {
+    knownSet = KNOWN_RECT;
+    if (!isRange(sprite.width) || sprite.width[0] <= 0) err(`${path}.width`, 'must be a [min,max] range of positive px');
+    if (sprite.aspect !== undefined && (!isRange(sprite.aspect) || sprite.aspect[0] <= 0)) {
+      err(`${path}.aspect`, 'must be a [min,max] range of positive height/width ratios');
     }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect');
     return;
   }
 
@@ -294,6 +383,26 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       warn(`${path}.${k}`, 'misplaced-property', `'${k}' belongs on the layer, not inside sprite — move it up one level`);
     } else {
       warn(`${path}.${k}`, 'unknown-property', `unknown sprite property '${k}' — will be ignored`);
+    }
+  }
+}
+
+/** Shared colors[] + colorWeights[] validation for circle/ring/streak/rect sprites. */
+function validatePalette(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (sprite.colors !== undefined) {
+    if (!Array.isArray(sprite.colors) || sprite.colors.length === 0) {
+      err(`${path}.colors`, 'must be a non-empty array of hex colours');
+    } else {
+      sprite.colors.forEach((c: unknown, ci: number) => color(c, `${path}.colors[${ci}]`, err));
+    }
+  }
+  if (sprite.colorWeights !== undefined) {
+    if (!Array.isArray(sprite.colors)) {
+      err(`${path}.colorWeights`, 'requires colors to be set');
+    } else if (!Array.isArray(sprite.colorWeights) || sprite.colorWeights.length !== sprite.colors.length) {
+      err(`${path}.colorWeights`, 'must be an array the same length as colors');
+    } else if (!sprite.colorWeights.every((v: unknown) => isNum(v) && v >= 0) || !sprite.colorWeights.some((v: unknown) => isNum(v) && v > 0)) {
+      err(`${path}.colorWeights`, 'weights must be >= 0 with at least one > 0');
     }
   }
 }
@@ -352,6 +461,49 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     }
     if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
     if (motion.center !== undefined) {
+      if (!isObj(motion.center)) {
+        err(`${path}.center`, 'must be {x, y} (0..1) or { layer: key }');
+      } else if ('layer' in motion.center) {
+        if (!isStr(motion.center.layer) || motion.center.layer.trim() === '') {
+          err(`${path}.center.layer`, 'must be a non-empty layer key');
+        } else if (isObj(spec) && Array.isArray((spec as Record<string, unknown>).layers)) {
+          // Scene-graph lite: parent must exist, be a single entity, and not itself
+          // orbit a layer (strictly one level deep — keeps positionAt analytic).
+          const layers = (spec as { layers: unknown[] }).layers;
+          const parent = layers.find((l) => isObj(l) && l.key === (motion.center as { layer: string }).layer) as Record<string, unknown> | undefined;
+          if (!parent) {
+            err(`${path}.center.layer`, `no layer with key '${motion.center.layer}'`);
+          } else {
+            if (parent.count !== 1) err(`${path}.center.layer`, 'parent layer must have count: 1');
+            const pm = parent.motion;
+            if (isObj(pm) && pm.type === 'orbit' && isObj(pm.center) && 'layer' in pm.center) {
+              err(`${path}.center.layer`, 'parent may not itself orbit a layer (one level deep only)');
+            }
+          }
+        }
+      } else if (!isNum(motion.center.x) || !isNum(motion.center.y)) {
+        err(`${path}.center`, 'must be {x, y} with numbers 0..1');
+      } else {
+        if (motion.center.x < 0 || motion.center.x > 1) err(`${path}.center.x`, 'must be 0..1');
+        if (motion.center.y < 0 || motion.center.y > 1) err(`${path}.center.y`, 'must be 0..1');
+      }
+    }
+  } else if (motion.type === 'wander') {
+    knownSet = KNOWN_WANDER;
+    speedOk(motion.speed, `${path}.speed`);
+    if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
+    const meanderCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
+    if (motion.meander !== undefined && (!isNum(motion.meander) || motion.meander <= 0 || motion.meander > meanderCap)) {
+      err(`${path}.meander`, `must be > 0 and <= ${isViewport ? meanderCap.toFixed(3) + ' viewport-units' : LIMITS.maxMeander + ' px'}`);
+    }
+    if (motion.coherence !== undefined && (!isNum(motion.coherence) || motion.coherence < 0 || motion.coherence > 1)) {
+      err(`${path}.coherence`, 'must be 0..1');
+    }
+  } else if (motion.type === 'warp') {
+    knownSet = KNOWN_WARP;
+    if (!isRange(motion.speed) || motion.speed[0] < 0) err(`${path}.speed`, 'must be a [min,max] range >= 0 (depth-units/sec)');
+    else if (motion.speed[1] > LIMITS.maxWarpSpeed) err(`${path}.speed`, `warp speed exceeds cap ${LIMITS.maxWarpSpeed} depth-units/sec`);
+    if (motion.center !== undefined) {
       if (!isObj(motion.center) || !isNum(motion.center.x) || !isNum(motion.center.y)) {
         err(`${path}.center`, 'must be {x, y} with numbers 0..1');
       } else {
@@ -359,8 +511,30 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
         if (motion.center.y < 0 || motion.center.y > 1) err(`${path}.center.y`, 'must be 0..1');
       }
     }
+  } else if (motion.type === 'path') {
+    knownSet = KNOWN_PATH;
+    if (!Array.isArray(motion.points) || motion.points.length < LIMITS.minPathPoints || motion.points.length > LIMITS.maxPathPoints) {
+      err(`${path}.points`, `must be an array of ${LIMITS.minPathPoints}..${LIMITS.maxPathPoints} points`);
+    } else {
+      motion.points.forEach((p: unknown, pi: number) => {
+        if (!isObj(p) || !isNum(p.x) || !isNum(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) {
+          err(`${path}.points[${pi}]`, 'must be {x, y} with numbers 0..1');
+        }
+      });
+    }
+    if (!isNum(motion.duration) || motion.duration < LIMITS.minPathDuration) {
+      err(`${path}.duration`, `must be >= ${LIMITS.minPathDuration} ms`);
+    }
+    if (motion.curve !== undefined && motion.curve !== 'linear' && motion.curve !== 'smooth') {
+      err(`${path}.curve`, "must be 'linear' | 'smooth'");
+    }
+    if (motion.closed !== undefined && typeof motion.closed !== 'boolean') err(`${path}.closed`, 'must be a boolean');
+    const scatterCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
+    if (motion.scatter !== undefined && (!isNum(motion.scatter) || motion.scatter <= 0 || motion.scatter > scatterCap)) {
+      err(`${path}.scatter`, `must be > 0 and <= ${isViewport ? scatterCap.toFixed(3) + ' viewport-units' : LIMITS.maxMeander + ' px'}`);
+    }
   } else {
-    err(`${path}.type`, 'must be drift | rise | bounce | static | orbit');
+    err(`${path}.type`, 'must be drift | rise | bounce | static | orbit | wander | warp | path');
     return;
   }
 

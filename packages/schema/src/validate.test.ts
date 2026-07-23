@@ -62,7 +62,9 @@ describe('validateSpec', () => {
   it('validates alpha, blend, region, and soft-circle fields', () => {
     const layer = base().layers[0];
     expect(paths({ ...base(), layers: [{ ...layer, alpha: [0.2, 1.4] }] })).toContain('layers[0].alpha');
-    expect(paths({ ...base(), layers: [{ ...layer, blend: 'multiply' as never }] })).toContain('layers[0].blend');
+    expect(paths({ ...base(), layers: [{ ...layer, blend: 'overlay' as never }] })).toContain('layers[0].blend');
+    expect(paths({ ...base(), layers: [{ ...layer, blend: 'multiply' as const }] })).not.toContain('layers[0].blend');
+    expect(paths({ ...base(), layers: [{ ...layer, blend: 'screen' as const }] })).not.toContain('layers[0].blend');
     expect(paths({ ...base(), layers: [{ ...layer, region: { y: [0.5, 1.2] } }] })).toContain('layers[0].region.y');
     const ok = { ...base(), layers: [{ ...layer, alpha: [0.3, 0.9] as [number, number], blend: 'lighter' as const, region: { x: [0, 0.5] as [number, number] } }] };
     expect(validateSpec(ok)).toEqual({ valid: true, errors: [], warnings: [] });
@@ -184,7 +186,7 @@ describe('validateSpec warnings', () => {
     const warnings = validateSpec(spec).warnings ?? [];
     const depthWarn = warnings.find((w) => w.path === 'layers[0].depth');
     expect(depthWarn).toBeDefined();
-    expect(depthWarn!.message).toContain('not yet supported');
+    expect(depthWarn!.message).toContain("motion type 'warp'");
   });
 
   it('warns on unknown layer properties', () => {

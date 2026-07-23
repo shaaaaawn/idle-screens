@@ -1,5 +1,5 @@
 import { createRng } from '@idle-screens/core';
-import { buildEntities, linkPairs, positionAt } from './simulate';
+import { buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
 import { LIMITS, type SaverSpec, type SpecWarning } from './types';
 
 /**
@@ -41,6 +41,22 @@ export function adviseSpec(
       });
     }
 
+    if (layer.sprite.kind === 'streak' && layer.motion.type === 'static') {
+      warnings.push({
+        path: `layers[${li}].sprite`,
+        code: 'streak-on-static',
+        message: 'streak sprites orient along the motion heading — static entities have none and will render at angle 0',
+      });
+    }
+
+    if (layer.motion.type === 'wander' && layer.motion.coherence === 1 && entities.length >= 20) {
+      warnings.push({
+        path: `layers[${li}].motion.coherence`,
+        code: 'full-coherence',
+        message: 'coherence 1 makes every entity share identical harmonics — the layer moves as a rigid sheet. 0.5–0.8 reads as schooling',
+      });
+    }
+
     if (layer.sprite.kind === 'circle') {
       const maxR = entities.reduce((m, e) => Math.max(m, e.size / 2), 0);
       const maxAlpha = entities.reduce((m, e) => Math.max(m, e.alpha), 0);
@@ -66,6 +82,15 @@ export function adviseSpec(
         ? Math.PI * r * r
         : e.size * e.size; // text/emoji: approximate as square of font size
       totalCoverage += (pixArea * e.alpha) / (w * h);
+    }
+    // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
+    if (layer.links) {
+      const positions = entities.map((e) => positionAt(e, 0, w, h));
+      const maxDistPx = layer.links.maxDist * scale;
+      const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false, w, h);
+      const lwPx = (layer.links.width ?? 1) * scale;
+      const la = layer.links.alpha ?? 1;
+      for (const edge of edges) totalCoverage += (edge.dist * lwPx * la) / (w * h);
     }
   }
 
@@ -96,10 +121,11 @@ export function adviseSpec(
     }
   }
 
-  // Link starvation: links layer where few edges actually form
+  // Link starvation: links layer where few edges actually form.
+  // Chain mode always forms its edges — only distance-gated modes can starve.
   for (let li = 0; li < spec.layers.length; li++) {
     const layer = spec.layers[li]!;
-    if (!layer.links) continue;
+    if (!layer.links || layer.links.mode === 'chain') continue;
     const entities = allEntities[li]!;
     const positions = entities.map((e) => positionAt(e, 0, w, h));
     const maxDist = layer.links.maxDist * scale;
@@ -133,9 +159,18 @@ export function adviseSpec(
     }
   }
 
-  // Composition balance: entities clustered in one region
-  if (totalEntities >= 8) {
-    const positions = allEntities.flatMap((ents) => ents.map((e) => positionAt(e, 0, w, h)));
+  // Composition balance: entities clustered in one region. Motions that sweep the
+  // whole viewport (bounce, warp, path) have transient spawn positions that say
+  // nothing about composition — exclude them from the centroid.
+  const composed = spec.layers
+    .map((l, li) => ({ l, ents: allEntities[li]! }))
+    .filter(({ l }) => !['bounce', 'warp', 'path'].includes(l.motion.type))
+    // Layer-parented orbits position relative to their parent (resolved at render
+    // time) — their raw positionAt is an offset around (0,0), not a screen position.
+    .filter(({ l }) => !(l.motion.type === 'orbit' && l.motion.center && 'layer' in l.motion.center));
+  const composedCount = composed.reduce((s, c) => s + c.ents.length, 0);
+  if (composedCount >= 8) {
+    const positions = composed.flatMap(({ ents }) => ents.map((e) => positionAt(e, 0, w, h)));
     const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
     const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
     const offX = Math.abs(cx / w - 0.5);

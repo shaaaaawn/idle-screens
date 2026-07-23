@@ -5,4 +5,5 @@ export * from './compile';
 export * from './steer';
 export * from './advise';
 export * from './describe';
+export * from './perceive';
 export * from './examples';
