@@ -257,7 +257,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
           if (circular) {
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d > halfX + Math.min(cellW, cellH) / 2) continue;
-            if (s.kind === 'ring' && d < halfX * 0.7) continue; // hollow centre
+            if (s.kind === 'ring') {
+              const strokeW = (s.width ?? (scale === 1 ? 2 : 0.002)) * scale;
+              if (d < halfX - strokeW) continue;
+            }
             const wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             compose(r * cols + c, lum, a * wgt, layer.blend);
           } else {
@@ -423,7 +426,10 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       if (s.kind === 'circle') entArea = Math.PI * (sz / 2) * (sz / 2);
       else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
       else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
-      else if (s.kind === 'rect') entArea = sz * (e.size2 ?? sz);
+      else if (s.kind === 'rect') {
+        const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
+        entArea = sz * h2;
+      }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 });
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55; // sparse glyph ink
