@@ -27,6 +27,15 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
+const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})\s+)+)/;
+
+/** Build a valid CSS font shorthand: weight/style tokens must precede the size. */
+function composeFontShorthand(sz: number, font: string): string {
+  const m = FONT_PREFIX_RE.exec(font);
+  if (m) return `${m[1].trim()} ${sz}px ${font.slice(m[0].length)}`;
+  return `${sz}px ${font}`;
+}
+
 /** Derive a manifest so a compiled spec composes with @idle-screens/capabilities. */
 export function manifestFor(spec: SaverSpec): SaverManifest {
   const total = spec.layers.reduce((n, l) => n + l.count, 0);
@@ -342,7 +351,9 @@ class SpecInstance implements SaverInstance {
       // A full CSS shorthand (contains a px size) is used verbatim; a family/weight
       // only ('bold monospace') composes with the seeded per-entity size.
       ctx.font = sprite.font
-        ? (/\dpx/.test(sprite.font) ? sprite.font : `${sz}px ${sprite.font}`)
+        ? (/\dpx/.test(sprite.font)
+          ? sprite.font
+          : composeFontShorthand(sz, sprite.font))
         : `${sz}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       const idx = spriteIndexAt(e, t, sprite.strings.length);

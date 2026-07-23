@@ -422,6 +422,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   const speedCap = isViewport ? LIMITS.maxSpeed / refVp : LIMITS.maxSpeed;
   const speedOk = (v: unknown, p: string): void => {
     if (!isRange(v)) err(p, 'must be a [min,max] range');
+    else if (v[0] < 0) err(p, 'speed lower bound must be >= 0');
     else if (v[1] > speedCap) err(p, `speed exceeds cap ${isViewport ? speedCap.toFixed(2) + ' viewport-units/sec' : LIMITS.maxSpeed + ' px/sec'}`);
   };
 
