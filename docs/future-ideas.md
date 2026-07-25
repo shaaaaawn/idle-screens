@@ -212,11 +212,13 @@ link-starvation, uniform-motion, off-center, and trail-on-static. **Remaining:**
 
 ## Suggested build order (remaining work)
 
+G1–G4 shipped in schema 2.4.0 and are no longer on this list; what's left:
+
 1. **C2 render-stat confirmation** — viewer reports stats to channel state
    (validated by two independent agent sessions; also unlocks live A/B diff)
-2. **G1 additive-glow calibration** — closes the biggest perception gap
-   (25× coverage under-report) for cheap
-3. **G2 geometry-aware dominance** + **G4 higher-res grid** — perception
-   fidelity for thin/geometric compositions
+2. **G5 spec version stamping** — so a future default change can't silently
+   invalidate stored specs the way 2.3.0's `units` default did
+3. **G1 follow-up: calibrate `GLOW_SPREAD` against the playground** — the halo
+   is modeled, but the constant is still a first-pass guess
 4. **B2 richer links** — falloff + random mode for graph visualizations
-5. **G3 spin range**, B3, F2 — polish
+5. **B3, F2** — polish

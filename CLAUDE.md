@@ -134,9 +134,17 @@ git checkout develop && git fetch origin && git merge --ff-only origin/main
 ```
 
 It should be a clean fast-forward (develop has no commits main lacks). Verify
-with `../scripts/check-drift.sh` — source, npm-latest, and installed should
-line up. If the merge is *not* ff-only, `develop` has diverged and needs a real
-merge; investigate before publishing anything else.
+the sync worked — the consumed changeset is gone and the source version matches
+what npm now serves:
+
+```bash
+ls .changeset/*.md                          # only README.md should remain
+node -p "require('./packages/schema/package.json').version"
+npm view @idle-screens/schema version       # should match the line above
+```
+
+If the merge is *not* ff-only, `develop` has diverged and needs a real merge;
+investigate before publishing anything else.
 
 Config: `.changeset/config.json` — `access: "public"`, `baseBranch: "main"`,
 `updateInternalDependencies: "patch"`. Requires `NPM_TOKEN` (+ `NODE_AUTH_TOKEN`

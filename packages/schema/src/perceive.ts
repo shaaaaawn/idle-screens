@@ -28,6 +28,34 @@ import {
 import { LIMITS, type LayerSpec, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
+// Calibration constants
+//
+// The two knobs that tune how closely this analytical model matches the real
+// canvas. Kept together at module level so a calibration pass has one place to
+// look — neither is a per-entity detail.
+// ---------------------------------------------------------------------------
+
+/**
+ * How far an additive glow blooms past its radius, as a multiple of that radius.
+ * A soft circle drawn with `lighter`/`screen` spreads well beyond its geometric
+ * edge on the real canvas (shadowBlur halos, stacked soft discs), so a
+ * hard-edged analytical disc badly under-reports coverage for glow-heavy scenes.
+ *
+ * First pass, tuned by intuition rather than measurement: it fixes the direction
+ * and rough magnitude, not the exact number. A playground-calibrated value is
+ * future work (docs/future-ideas.md G1).
+ */
+const GLOW_SPREAD = 2.4;
+
+/**
+ * How much more visually prominent line-like ink is than the same area of fill.
+ * Rings, streaks and link lines catch the eye far more than their pixel area
+ * implies, so weighting dominance by raw area alone makes a bright ring lose to
+ * a dim disc. Also a first-pass estimate.
+ */
+const LINE_SALIENCE = 3.5;
+
+// ---------------------------------------------------------------------------
 // Shared scene construction (mirrors describeScene/adviseSpec)
 // ---------------------------------------------------------------------------
 
@@ -245,17 +273,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const circular = s.kind === 'circle' || s.kind === 'ring';
       const soft = s.kind === 'circle' && !!s.soft;
       const additive = layer.blend === 'lighter' || layer.blend === 'screen';
-      // Additive glow calibration: a soft circle drawn with `lighter`/`screen`
-      // blooms far past its radius on the real canvas (shadowBlur halos, stacked
-      // soft discs). A hard-edged analytical disc under-reports the resulting
-      // coverage by up to ~25×. Model the halo: reach ~GLOW_SPREAD× the radius
-      // with a quadratic falloff outside the solid core, so coverage tracks what
-      // the audience actually sees. Non-additive/hard sprites are unchanged.
+      // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
+      // falloff outside the solid core, so coverage tracks what the audience
+      // actually sees. Non-additive / hard-edged sprites are unchanged.
       const glow = soft && additive;
-      // First-pass spread constant (halo ≈ 2.4× radius) — tuned by intuition, not
-      // a live measurement yet. Improves direction/magnitude of glow coverage; a
-      // playground-calibrated value is future work (see docs/future-ideas.md G1).
-      const GLOW_SPREAD = 2.4;
       const reachX = glow ? halfX * GLOW_SPREAD : halfX;
       const reachY = glow ? halfY * GLOW_SPREAD : halfY;
       const c0 = Math.max(0, Math.floor((centerX - reachX) / cellW));
@@ -376,19 +397,30 @@ const DOT_BIT: number[][] = [
 ];
 
 /**
- * Encode a luminance grid as a braille "image": each output character is a 2×4
- * pixel cell, ordered-dithered so mid-tones render as dot density. A grid of
- * 80×48 becomes 12 lines of 40 chars — a picture a text model can read whole.
+ * Auto-exposure curve for a grid: most savers live in the bottom of the
+ * luminance range, so cells are normalized (min → 98th percentile) with a
+ * slight gamma before quantizing — like a camera exposing for the scene. Stats
+ * on the grid itself stay raw.
  *
- * Auto-exposure: most savers live in the bottom of the luminance range, so the
- * cells are normalized (min → 98th percentile) before dithering — like a
- * camera exposing for the scene. Stats on the grid itself stay raw.
+ * Shared by every renderer below, deliberately: if the curve is ever
+ * recalibrated (e.g. once GLOW_SPREAD is tuned and coverage shifts), the braille
+ * and density views must move together or they'd silently disagree about the
+ * same scene.
  */
-export function renderBrailleMap(grid: LuminanceGrid): string {
+function autoExpose(grid: LuminanceGrid): (v: number) => number {
   const sorted = [...grid.cells].sort((a, b) => a - b);
   const lo = sorted[0]!;
   const hi = Math.max(sorted[Math.floor(sorted.length * 0.98)]!, lo + 0.08);
-  const expose = (v: number): number => Math.pow(Math.max(0, Math.min(1, (v - lo) / (hi - lo))), 0.8);
+  return (v: number): number => Math.pow(Math.max(0, Math.min(1, (v - lo) / (hi - lo))), 0.8);
+}
+
+/**
+ * Encode a luminance grid as a braille "image": each output character is a 2×4
+ * pixel cell, ordered-dithered so mid-tones render as dot density. A grid of
+ * 80×48 becomes 12 lines of 40 chars — a picture a text model can read whole.
+ */
+export function renderBrailleMap(grid: LuminanceGrid): string {
+  const expose = autoExpose(grid);
 
   const outRows: string[] = [];
   for (let br = 0; br < Math.floor(grid.rows / 4); br++) {
@@ -418,18 +450,16 @@ const DENSITY_RAMP = ' .:-=+*#%@';
  * braille map (compact, 2×4 dots/char) this is 1:1 with the grid, so pairing it
  * with a larger `cols`/`rows` gives a non-vision agent a genuinely higher-detail
  * read: 120×48 resolves concentric rings and text blocks braille smears into a
- * blob. Same auto-exposure as the braille map (min → 98th percentile).
+ * blob. Shares the braille map's auto-exposure so both views agree.
  */
 export function renderDensityMap(grid: LuminanceGrid): string {
-  const sorted = [...grid.cells].sort((a, b) => a - b);
-  const lo = sorted[0]!;
-  const hi = Math.max(sorted[Math.floor(sorted.length * 0.98)]!, lo + 0.08);
+  const expose = autoExpose(grid);
   const ramp = DENSITY_RAMP;
   const lines: string[] = [];
   for (let r = 0; r < grid.rows; r++) {
     let line = '';
     for (let c = 0; c < grid.cols; c++) {
-      const v = Math.pow(Math.max(0, Math.min(1, (grid.cells[r * grid.cols + c]! - lo) / (hi - lo))), 0.8);
+      const v = expose(grid.cells[r * grid.cols + c]!);
       line += ramp[Math.min(ramp.length - 1, Math.floor(v * ramp.length))]!;
     }
     lines.push(line);
@@ -503,11 +533,6 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
     return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
   })();
 
-  // Geometry-aware dominance: raw pixel-area badly under-weights thin-but-bright
-  // structures — a glowing ring, a comet streak, or a chain of link lines catches
-  // the eye far more than its ink area implies. Boost line-like ink so these
-  // register in the ranking instead of vanishing behind soft filled discs.
-  const LINE_SALIENCE = 3.5;
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
     const lifeA = lifeAlphaAt(layer.life, t);
