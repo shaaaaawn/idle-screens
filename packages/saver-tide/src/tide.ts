@@ -20,8 +20,9 @@ const PARAM_SPACE = {
   waterLevel: { type: 'number', default: 0.55, min: 0, max: 1.2, ease: 'smooth' },
   /** Peak-to-peak sweep of the tide around `waterLevel`. 0 = a still, fixed level. */
   tideSwing: { type: 'number', default: 0.9, min: 0, max: 1.2, ease: 'smooth' },
-  /** Milliseconds for one full ebb -> flood -> ebb. */
-  tideCycleMs: { type: 'number', default: 26000, min: 6000, max: 90000, ease: 'smooth' },
+  /** Milliseconds for one full ebb -> flood -> ebb. Matches `demoTrack.duration`,
+   *  so the workbench timeline covers exactly one cycle. */
+  tideCycleMs: { type: 'number', default: 24000, min: 6000, max: 90000, ease: 'smooth' },
   /** Refraction amplitude in CSS px — how far submerged content is pushed around. */
   waveAmp: { type: 'number', default: 15, min: 0, max: 40, ease: 'smooth' },
   /** Spatial frequency multiplier. Higher = shorter wavelength = more shear per element. */
