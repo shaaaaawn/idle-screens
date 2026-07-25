@@ -28,3 +28,8 @@ apps/mac/.secrets/
 
 .mcp.json
 .env
+
+# Agent worktrees — local scratch, never commit.
+# Scoped to worktrees/ on purpose: .claude/launch.json and .claude/skills/ are
+# tracked intentionally and ship with the repo.
+.claude/worktrees/
