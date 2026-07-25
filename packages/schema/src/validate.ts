@@ -216,8 +216,15 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     }
   }
   if (layer.spin !== undefined) {
-    if (!isNum(layer.spin)) err(`${path}.spin`, 'must be a number (degrees/sec)');
-    else if (Math.abs(layer.spin) > LIMITS.maxSpin) err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+    if (isRange(layer.spin)) {
+      if (Math.abs(layer.spin[0]) > LIMITS.maxSpin || Math.abs(layer.spin[1]) > LIMITS.maxSpin) {
+        err(`${path}.spin`, `each end of the range must be within ±${LIMITS.maxSpin} deg/sec`);
+      }
+    } else if (!isNum(layer.spin)) {
+      err(`${path}.spin`, 'must be a number or a [min,max] range (degrees/sec)');
+    } else if (Math.abs(layer.spin) > LIMITS.maxSpin) {
+      err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+    }
   }
   if (layer.grow !== undefined) {
     if (!isObj(layer.grow)) err(`${path}.grow`, 'must be an object');

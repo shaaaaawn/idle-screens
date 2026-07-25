@@ -122,7 +122,7 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
 | `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing; `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
-| `spin` | number ±360 deg/sec | none | per-entity rotation (seeded start angle) |
+| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris) |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail (ms of history) |
 | `links` | see below | none | inter-entity lines |
@@ -225,23 +225,38 @@ zero-dependency, renderer-free analysis tool.
   (background gradient + entities + link lines, blend-aware), with coverage,
   visual-mass centroid, and **row/column deviation profiles** (1D transects of
   the composition).
-- `renderBrailleMap(grid)` — the picture: 12 lines × 40 braille chars, each
-  char a 2×4 dot cell, ordered-dithered with auto-exposure. An agent reads the
-  whole frame at once instead of reconstructing it entity by entity.
+- `renderBrailleMap(grid)` — the compact picture: 12 lines × 40 braille chars,
+  each char a 2×4 dot cell, ordered-dithered with auto-exposure. An agent reads
+  the whole frame at once instead of reconstructing it entity by entity.
+- `renderDensityMap(grid)` — a **higher-fidelity** picture: one ASCII density
+  char (`  .:-=+*#%@`) per grid cell, so it's 1:1 with the grid. Pair with a
+  larger `cols`/`rows` (e.g. `{cols: 120, rows: 48}`) to resolve structure the
+  braille map smears — concentric rings, grids, text blocks. This is the sharper
+  read when composition detail matters.
 - `dominanceRanking(spec, opts)` — layers ranked by estimated visual weight
   (area × alpha × contrast × glow/motion boosts; links count) — *where the eye
-  goes*, normalized to shares.
+  goes*, normalized to shares. Thin-but-bright structures (rings, streaks, link
+  lines) get a line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
+- `textSprites(spec, opts)` — the literal strings and rendered sizes of every
+  text layer. Glyphs are invisible in the luminance maps, so this is the only
+  way to confirm *what words* are on screen and how big. (Also on
+  `perceiveScene().text`.)
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
   reliably than "is A good"; this is the edit loop's primary instrument.
 
-Known approximations (deliberate): trails and ghosting are not sampled, soft
-circles use a linear falloff, text ink is estimated from font size × string
-length. Good enough to perceive composition, focus, balance, and motion —
-not a substitute for a human (or VLM) judgement of beauty.
+Coverage is **additive-glow-calibrated**: soft circles drawn with
+`blend: lighter`/`screen` bloom past their radius (as they do on the real
+canvas), so `coverage` tracks what the audience sees instead of under-reporting
+glow-heavy scenes by an order of magnitude.
+
+Known approximations (deliberate): trails and ghosting are not sampled, text ink
+is estimated from font size × string length. Good enough to perceive
+composition, focus, balance, and motion — not a substitute for a human (or VLM)
+judgement of beauty.
 
 ## Examples
 

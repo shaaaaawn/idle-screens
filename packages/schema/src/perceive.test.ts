@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, renderBrailleMap } from './perceive';
+import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, renderBrailleMap, renderDensityMap } from './perceive';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
 import type { SaverSpec } from './types';
 
@@ -55,6 +55,64 @@ describe('luminanceGrid', () => {
   it('counts chain link lines as visual mass (Mystify-style scenes)', () => {
     const grid = luminanceGrid(POLYGONS_SPEC);
     expect(grid.coverage).toBeGreaterThan(0.005);
+  });
+});
+
+describe('additive-glow calibration (G1)', () => {
+  it('a soft additive circle covers more than the same hard opaque circle', () => {
+    const hard = luminanceGrid(spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff' }, motion: { type: 'static' } },
+    ]));
+    const glow = luminanceGrid(spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff', soft: true }, blend: 'lighter', motion: { type: 'static' } },
+    ]));
+    expect(glow.coverage).toBeGreaterThan(hard.coverage);
+  });
+
+  it('leaves hard non-additive circles unchanged (no runaway coverage)', () => {
+    // The single-white-circle case the suite already bounds must stay < 0.2.
+    const grid = luminanceGrid(
+      spec([{ count: 1, position: { x: 0.25, y: 0.5 }, sprite: { kind: 'circle', radius: [60, 60], color: '#ffffff' }, motion: { type: 'static' } }]),
+      { viewport: { width: 1600, height: 900 } },
+    );
+    expect(grid.coverage).toBeLessThan(0.2);
+  });
+});
+
+describe('geometry-aware dominance (G2)', () => {
+  it('a thin bright ring registers meaningful weight beside a dim large disc', () => {
+    const s = spec([
+      { key: 'disc', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [120, 120], color: '#222233' }, alpha: [0.3, 0.3], motion: { type: 'static' } },
+      { key: 'ring', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'ring', radius: [100, 100], width: 3, color: '#ffffff' }, motion: { type: 'static' } },
+    ]);
+    const ranks = dominanceRanking(s);
+    const ring = ranks.find((r) => r.key === 'ring')!;
+    expect(ring.share).toBeGreaterThan(0.1);
+  });
+});
+
+describe('renderDensityMap (G4)', () => {
+  it('is grid-sized and pairs with a higher-res grid for a sharper picture', () => {
+    const s = spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [40, 40], color: '#ffffff' }, motion: { type: 'static' } },
+    ]);
+    const grid = luminanceGrid(s, { cols: 120, rows: 48 });
+    const density = renderDensityMap(grid);
+    const lines = density.split('\n');
+    expect(lines).toHaveLength(48);
+    expect(lines[0]!.length).toBe(120);
+    expect([...density].some((ch) => ch !== ' ' && ch !== '\n')).toBe(true);
+  });
+
+  it('perceiveScene lists literal text strings and sizes invisible in the maps', () => {
+    const s = spec([
+      { key: 'label', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'text', strings: ['HELLO', 'WORLD'], color: '#ffffff', font: '48px sans-serif' }, motion: { type: 'static' } },
+    ]);
+    const p = perceiveScene(s);
+    const t = p.text.find((x) => x.key === 'label')!;
+    expect(t.strings).toEqual(['HELLO', 'WORLD']);
+    expect(t.sizePx).toBe(48);
+    expect(typeof p.density).toBe('string');
   });
 });
 

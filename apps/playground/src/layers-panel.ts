@@ -297,7 +297,11 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
       (v) => { layer.blend = (v || undefined) as LayerSpec['blend']; },
     )));
     if (layer.spin !== undefined) {
-      body.append(makeField('Spin', numInput(layer.spin, { step: 1 }, (v) => { layer.spin = v; })));
+      if (Array.isArray(layer.spin)) {
+        body.append(makeField('Spin', rangeInput([...layer.spin], { step: 1, min: -360, max: 360 }, (v) => { layer.spin = v; })));
+      } else {
+        body.append(makeField('Spin', numInput(layer.spin, { step: 1 }, (v) => { layer.spin = v; })));
+      }
     }
 
     card.append(head, body);

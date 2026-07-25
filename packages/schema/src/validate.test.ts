@@ -46,6 +46,16 @@ describe('validateSpec', () => {
     expect(paths({ ...base(), layers: [{ ...base().layers[0], motion: { type: 'spin' } as never }] })).toContain('layers[0].motion.type');
   });
 
+  it('accepts spin as a scalar or a [min,max] range, rejects out-of-range', () => {
+    const withSpin = (spin: unknown): SaverSpec => ({ ...base(), layers: [{ ...base().layers[0]!, spin } as never] });
+    expect(validateSpec(withSpin(8)).valid).toBe(true);
+    expect(validateSpec(withSpin([6, 14])).valid).toBe(true);
+    expect(validateSpec(withSpin([-14, -6])).valid).toBe(true);
+    expect(paths(withSpin([6, 9999]))).toContain('layers[0].spin');
+    expect(paths(withSpin(9999))).toContain('layers[0].spin');
+    expect(paths(withSpin('fast'))).toContain('layers[0].spin');
+  });
+
   it('validates circle + text sprites', () => {
     const circle = { ...base(), layers: [{ count: 5, sprite: { kind: 'circle', radius: [2, 6], color: '#fff' }, motion: { type: 'rise', speed: [10, 20] } }] };
     expect(validateSpec(circle).valid).toBe(true);

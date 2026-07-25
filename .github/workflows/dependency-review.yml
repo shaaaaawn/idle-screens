@@ -1,0 +1,19 @@
+# Dependency review — free on this public repo. Blocks a PR that adds a
+# known-vulnerable dependency (or a disallowed license) before it merges.
+name: Dependency review
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high # block only high/critical; tune as desired

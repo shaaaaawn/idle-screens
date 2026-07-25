@@ -288,7 +288,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       pulsePeriod: layer.pulse?.period ?? 1000,
       pulsePhase: layer.pulse ? rng.range(0, Math.PI * 2) : 0,
       // New draws AFTER pulsePhase — guarded so existing specs keep identical streams.
-      spinSpeed: layer.spin ? (layer.spin * Math.PI) / 180 : 0, // deg/sec → rad/sec
+      // Scalar spin: no draw here, one phase draw below (unchanged). Range spin
+      // (new): one seeded speed draw here, then the phase draw — array form is new
+      // so the extra draw can't perturb any existing spec's entity stream.
+      spinSpeed:
+        typeof layer.spin === 'number'
+          ? (layer.spin * Math.PI) / 180 // deg/sec → rad/sec
+          : Array.isArray(layer.spin)
+            ? (rng.range(layer.spin[0], layer.spin[1]) * Math.PI) / 180
+            : 0,
       spinPhase: layer.spin ? rng.range(0, Math.PI * 2) : 0,
       growAmp: layer.grow?.amp ?? 0,
       growPeriod: layer.grow?.period ?? 1000,
