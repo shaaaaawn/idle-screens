@@ -1,0 +1,158 @@
+import SwiftUI
+
+/// Native Canvas renderer for compiled scenes. Constant-velocity drift with
+/// edge wrapping; pulse opacity breathing; spin; blend honored at t3 only.
+/// Feeds frame durations to the watchdog.
+struct NativeSceneView: View {
+    let layers: [CompiledLayer]
+    let background: SpecSubset.Background?
+    let tier: CapabilityTier
+    let watchdog: FrameWatchdog
+    let onDowngrade: () -> Void
+
+    @State private var start = Date()
+    @State private var lastTick: Date?
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: tier == .t3 ? nil : 1.0 / 30.0)) { context in
+            Canvas { ctx, size in
+                drawBackground(ctx: ctx, size: size)
+                let t = context.date.timeIntervalSince(start)
+                let minDim = min(size.width, size.height)
+                for layer in layers {
+                    applyBlend(ctx: &ctx, blend: layer.blend)
+                    for entity in layer.entities {
+                        let point = position(of: entity, at: t, in: size, minDim: minDim, wrap: layer.wrap)
+                        var alpha = entity.alpha
+                        if let pulse = layer.pulse {
+                            let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
+                            alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
+                        }
+                        draw(entity: entity, sprite: layer.sprite, at: point,
+                             minDim: minDim, alpha: alpha, t: t, ctx: &ctx)
+                    }
+                    ctx.blendMode = .normal
+                }
+            }
+            .onChange(of: context.date) { _, newDate in
+                if let last = lastTick {
+                    let duration = newDate.timeIntervalSince(last)
+                    if duration > 0,
+                       watchdog.record(duration: duration, at: newDate.timeIntervalSinceReferenceDate) {
+                        onDowngrade()
+                    }
+                }
+                lastTick = newDate
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Background
+
+    private func drawBackground(ctx: GraphicsContext, size: CGSize) {
+        let rect = CGRect(origin: .zero, size: size)
+        if let stops = background?.stops, !stops.isEmpty {
+            let gradient = Gradient(stops: stops.map {
+                Gradient.Stop(color: Color(hex: $0.color), location: CGFloat(min(1, max(0, $0.at))))
+            })
+            ctx.fill(rect, with: .linearGradient(
+                gradient,
+                startPoint: CGPoint(x: rect.midX, y: rect.minY),
+                endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+            ))
+        } else if let color = background?.color {
+            ctx.fill(rect, with: .color(Color(hex: color)))
+        } else {
+            ctx.fill(rect, with: .color(.black))
+        }
+    }
+
+    private func applyBlend(ctx: inout GraphicsContext, blend: String?) {
+        guard tier == .t3, let blend else { return }
+        switch blend {
+        case "lighter": ctx.blendMode = .plusLighter
+        case "screen": ctx.blendMode = .screen
+        case "multiply": ctx.blendMode = .multiply
+        default: break
+        }
+    }
+
+    // MARK: - Motion
+
+    private func position(of entity: CompiledEntity, at t: TimeInterval,
+                          in size: CGSize, minDim: CGFloat, wrap: Bool) -> CGPoint {
+        var px = entity.x * size.width + entity.vx * minDim * t
+        var py = entity.y * size.height + entity.vy * minDim * t
+        if wrap {
+            px = px.truncatingRemainder(dividingBy: size.width)
+            if px < 0 { px += size.width }
+            py = py.truncatingRemainder(dividingBy: size.height)
+            if py < 0 { py += size.height }
+        } else {
+            px = min(size.width, max(0, px))
+            py = min(size.height, max(0, py))
+        }
+        return CGPoint(x: px, y: py)
+    }
+
+    // MARK: - Sprites
+
+    private func draw(entity: CompiledEntity, sprite: SpecSubset.Sprite, at point: CGPoint,
+                      minDim: CGFloat, alpha: Double, t: TimeInterval, ctx: inout GraphicsContext) {
+        let color = Color(hex: entity.color).opacity(alpha)
+        let spin = entity.spinAngle + entity.spinSpeed * t
+
+        switch sprite {
+        case .circle(_, _, _, let soft):
+            let r = entity.size * minDim
+            let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
+            if soft {
+                ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
+                    Gradient(colors: [color, color.opacity(0)]),
+                    center: point,
+                    startRadius: 0,
+                    endRadius: r
+                ))
+            } else {
+                ctx.fill(Path(ellipseIn: rect), with: .color(color))
+            }
+
+        case .ring(_, _, _, let width):
+            let r = entity.size * minDim
+            let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
+            ctx.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: width)
+
+        case .rect:
+            let w = entity.size * minDim
+            let h = w * entity.aspect
+            let rect = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            layer.fill(Path(rect), with: .color(color))
+
+        case .streak(_, _, _, let width):
+            let length = entity.size * minDim
+            let speed = hypot(entity.vx, entity.vy)
+            guard speed > 0 else { return }
+            let dx = entity.vx / speed, dy = entity.vy / speed
+            var path = Path()
+            path.move(to: point)
+            path.addLine(to: CGPoint(x: point.x - dx * length, y: point.y - dy * length))
+            ctx.stroke(path, with: .color(color), lineWidth: width)
+
+        case .emoji, .text:
+            let text = Text(entity.glyph ?? "")
+                .font(.system(size: entity.size * minDim))
+                .foregroundStyle(color)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            layer.draw(text, at: .zero, anchor: .center)
+
+        case .unknown:
+            break
+        }
+    }
+}
