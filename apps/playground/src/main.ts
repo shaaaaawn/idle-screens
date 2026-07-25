@@ -11,7 +11,7 @@ import {
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
+import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
@@ -21,7 +21,7 @@ import { buildRightDock } from './right-dock';
 import { formatBackendLabel, readPreviewBackend } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
 
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession']);
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
 
 interface SaverGroup {
   id: string;
@@ -48,6 +48,7 @@ const SAVER_GROUPS: SaverGroup[] = [
       compileSaver(POLYGONS_SPEC),
       compileSaver(MATRIX_RAIN_SPEC),
       compileSaver(PROCESSION_SPEC),
+      compileSaver(NOSTALGHIA_CANDLE_SPEC),
     ],
   },
 ];
