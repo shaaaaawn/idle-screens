@@ -18,6 +18,7 @@ packages/
 apps/
   playground/        Vite dev workbench (imports all 7; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
+  ios/               Native iOS client + VJ remote (Swift, XcodeGen, not published to npm)
   linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
 docs/                Design docs (specs, research)
 ```

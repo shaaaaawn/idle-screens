@@ -1,0 +1,520 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		06584EA3E404F3BEB995E4F0 /* MCPClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C22C1EE5FD739454250DE58 /* MCPClientTests.swift */; };
+		093858569C3985D79F49D0C9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D440AF4157E3C3F831612A2E /* Assets.xcassets */; };
+		0B3FC1932DA73A5BA0973A8D /* GalleryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734C05B9186BD117E244C887 /* GalleryClient.swift */; };
+		16BB0182A7846CEBB7FC0D26 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */; };
+		2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */; };
+		2F38E6E5A65143C6434582CB /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212796CA3B1CF2A7C5513499 /* GalleryView.swift */; };
+		6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5408F494FA3C16573E5AB /* MockTransport.swift */; };
+		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
+		88B2B6D27BAB0AD99141A1FF /* ChannelViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 587CE90600E8DD15D12B773C /* ChannelViewerView.swift */; };
+		89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB1826693F09BA9A26F848A /* AppState+VJ.swift */; };
+		9954580EDE5D79CB12AE1A60 /* AppState+Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */; };
+		99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */; };
+		A35D22B41699F53D6F62A43B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6339510B5B7C996B622F160 /* AppState.swift */; };
+		C70425F1902A2CBDE03D57DE /* MyChannelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C529DD00521F3987A78786C1 /* MyChannelsView.swift */; };
+		CD132EEEAFD591BB0F8B7C0F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D72066AE8508C40E5677F25 /* Models.swift */; };
+		D6191C6E8FB10818A14C2C3B /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
+		E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */; };
+		E6A75BB3ACFAECBAEF42BB4D /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C408BF670E35B5612FAB86D /* AppStateTests.swift */; };
+		E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		7622CE11628125EDC6E540C7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 183B30491F9653C0A32E9E66 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2F26C77C96D2B1C4E9A615B8;
+			remoteInfo = IdleScreens;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0D72066AE8508C40E5677F25 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelCredential.swift; sourceTree = "<group>"; };
+		212796CA3B1CF2A7C5513499 /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
+		21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDeckView.swift; sourceTree = "<group>"; };
+		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
+		587CE90600E8DD15D12B773C /* ChannelViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelViewerView.swift; sourceTree = "<group>"; };
+		5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6A39FC4E62FA08D2DC673189 /* IdleScreens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreens.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		734C05B9186BD117E244C887 /* GalleryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryClient.swift; sourceTree = "<group>"; };
+		75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleScreensApp.swift; sourceTree = "<group>"; };
+		94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
+		9C22C1EE5FD739454250DE58 /* MCPClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientTests.swift; sourceTree = "<group>"; };
+		B7A5408F494FA3C16573E5AB /* MockTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTransport.swift; sourceTree = "<group>"; };
+		BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClient.swift; sourceTree = "<group>"; };
+		C529DD00521F3987A78786C1 /* MyChannelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyChannelsView.swift; sourceTree = "<group>"; };
+		CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Gallery.swift"; sourceTree = "<group>"; };
+		D440AF4157E3C3F831612A2E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EA0BCADF9C61254DBB05CA24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F6339510B5B7C996B622F160 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		FAB1826693F09BA9A26F848A /* AppState+VJ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+VJ.swift"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1196F96E1C69DF0D982E2A5C /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		482908FA32ED7FF85E218080 /* IdleScreensTests */ = {
+			isa = PBXGroup;
+			children = (
+				4C408BF670E35B5612FAB86D /* AppStateTests.swift */,
+				9C22C1EE5FD739454250DE58 /* MCPClientTests.swift */,
+				B7A5408F494FA3C16573E5AB /* MockTransport.swift */,
+			);
+			path = IdleScreensTests;
+			sourceTree = "<group>";
+		};
+		4DB23942094791DC6025F72A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6A39FC4E62FA08D2DC673189 /* IdleScreens.app */,
+				75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		644C00EC9EB5060EC3AD0538 /* API */ = {
+			isa = PBXGroup;
+			children = (
+				1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */,
+				734C05B9186BD117E244C887 /* GalleryClient.swift */,
+				5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */,
+				BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */,
+				0D72066AE8508C40E5677F25 /* Models.swift */,
+			);
+			path = API;
+			sourceTree = "<group>";
+		};
+		78D76AAD1606576168304EB8 /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				587CE90600E8DD15D12B773C /* ChannelViewerView.swift */,
+				212796CA3B1CF2A7C5513499 /* GalleryView.swift */,
+			);
+			path = Watch;
+			sourceTree = "<group>";
+		};
+		8E84A6FC79F1FB475B200AA5 /* IdleScreens */ = {
+			isa = PBXGroup;
+			children = (
+				D440AF4157E3C3F831612A2E /* Assets.xcassets */,
+				7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */,
+				EA0BCADF9C61254DBB05CA24 /* Info.plist */,
+				644C00EC9EB5060EC3AD0538 /* API */,
+				8F551423801DF64294E8872E /* App */,
+				1196F96E1C69DF0D982E2A5C /* Theme */,
+				AEE4203FDBEC1494EC5AEC21 /* VJ */,
+				78D76AAD1606576168304EB8 /* Watch */,
+			);
+			path = IdleScreens;
+			sourceTree = "<group>";
+		};
+		8F551423801DF64294E8872E /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F6339510B5B7C996B622F160 /* AppState.swift */,
+				CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */,
+				FAB1826693F09BA9A26F848A /* AppState+VJ.swift */,
+				68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AEE4203FDBEC1494EC5AEC21 /* VJ */ = {
+			isa = PBXGroup;
+			children = (
+				21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */,
+				C529DD00521F3987A78786C1 /* MyChannelsView.swift */,
+			);
+			path = VJ;
+			sourceTree = "<group>";
+		};
+		B6AE385C67F51955DAC49F6D = {
+			isa = PBXGroup;
+			children = (
+				8E84A6FC79F1FB475B200AA5 /* IdleScreens */,
+				482908FA32ED7FF85E218080 /* IdleScreensTests */,
+				4DB23942094791DC6025F72A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2F26C77C96D2B1C4E9A615B8 /* IdleScreens */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 28019A72259DB60BEF4FE29E /* Build configuration list for PBXNativeTarget "IdleScreens" */;
+			buildPhases = (
+				5338F717E56BF523564BEA88 /* Sources */,
+				618B5227E4623BCF5E6F0EB4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IdleScreens;
+			packageProductDependencies = (
+			);
+			productName = IdleScreens;
+			productReference = 6A39FC4E62FA08D2DC673189 /* IdleScreens.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B6008563C965F427C0CB7F74 /* IdleScreensTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D54A6ADF374AEABADA89F737 /* Build configuration list for PBXNativeTarget "IdleScreensTests" */;
+			buildPhases = (
+				F69B10E32A9E6218C1582E56 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A3AE41287C85916F1DEB2FD9 /* PBXTargetDependency */,
+			);
+			name = IdleScreensTests;
+			packageProductDependencies = (
+			);
+			productName = IdleScreensTests;
+			productReference = 75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		183B30491F9653C0A32E9E66 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					2F26C77C96D2B1C4E9A615B8 = {
+						DevelopmentTeam = Z4P3N45225;
+					};
+				};
+			};
+			buildConfigurationList = 70BF130DB256B7D821A3730C /* Build configuration list for PBXProject "IdleScreens" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B6AE385C67F51955DAC49F6D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4DB23942094791DC6025F72A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2F26C77C96D2B1C4E9A615B8 /* IdleScreens */,
+				B6008563C965F427C0CB7F74 /* IdleScreensTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		618B5227E4623BCF5E6F0EB4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				093858569C3985D79F49D0C9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5338F717E56BF523564BEA88 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9954580EDE5D79CB12AE1A60 /* AppState+Gallery.swift in Sources */,
+				89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */,
+				A35D22B41699F53D6F62A43B /* AppState.swift in Sources */,
+				E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */,
+				99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */,
+				88B2B6D27BAB0AD99141A1FF /* ChannelViewerView.swift in Sources */,
+				E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */,
+				16BB0182A7846CEBB7FC0D26 /* ContentView.swift in Sources */,
+				0B3FC1932DA73A5BA0973A8D /* GalleryClient.swift in Sources */,
+				2F38E6E5A65143C6434582CB /* GalleryView.swift in Sources */,
+				817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */,
+				D6191C6E8FB10818A14C2C3B /* KeychainHelper.swift in Sources */,
+				2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */,
+				CD132EEEAFD591BB0F8B7C0F /* Models.swift in Sources */,
+				C70425F1902A2CBDE03D57DE /* MyChannelsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F69B10E32A9E6218C1582E56 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E6A75BB3ACFAECBAEF42BB4D /* AppStateTests.swift in Sources */,
+				06584EA3E404F3BEB995E4F0 /* MCPClientTests.swift in Sources */,
+				6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A3AE41287C85916F1DEB2FD9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2F26C77C96D2B1C4E9A615B8 /* IdleScreens */;
+			targetProxy = 7622CE11628125EDC6E540C7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		25363EE300DC9D2A71A97513 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.IdleScreensTests;
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IdleScreens.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IdleScreens";
+			};
+			name = Debug;
+		};
+		65E446C1A1E6EC2EA9AC9F01 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		C1EEC3DB88BA5EAACC6580F1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z4P3N45225;
+				INFOPLIST_FILE = IdleScreens/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.idlescreens;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		C3CC276ADEFD89DF300BCD33 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z4P3N45225;
+				INFOPLIST_FILE = IdleScreens/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.idlescreens;
+				PROVISIONING_PROFILE_SPECIFIER = "Idle Screens App Store v2";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		F07B569FB8D782D15A239D14 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		FCF43FCACA2806497C6B2AA3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.IdleScreensTests;
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IdleScreens.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IdleScreens";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		28019A72259DB60BEF4FE29E /* Build configuration list for PBXNativeTarget "IdleScreens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1EEC3DB88BA5EAACC6580F1 /* Debug */,
+				C3CC276ADEFD89DF300BCD33 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		70BF130DB256B7D821A3730C /* Build configuration list for PBXProject "IdleScreens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F07B569FB8D782D15A239D14 /* Debug */,
+				65E446C1A1E6EC2EA9AC9F01 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D54A6ADF374AEABADA89F737 /* Build configuration list for PBXNativeTarget "IdleScreensTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				25363EE300DC9D2A71A97513 /* Debug */,
+				FCF43FCACA2806497C6B2AA3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 183B30491F9653C0A32E9E66 /* Project object */;
+}
