@@ -22,6 +22,21 @@ describe('buildEntities (seeded, deterministic)', () => {
     expect(a).toHaveLength(20);
   });
 
+  it('scalar spin gives every entity one shared speed; range spin gives seeded per-entity speeds', () => {
+    const scalar: LayerSpec = { count: 8, sprite: { kind: 'circle', radius: [10, 10], color: '#ffffff' }, motion: { type: 'static' }, spin: 12 };
+    const scalarEnts = buildEntities(scalar, createRng(3), W, H);
+    expect(new Set(scalarEnts.map((e) => e.spinSpeed)).size).toBe(1);
+    expect(scalarEnts[0]!.spinSpeed).toBeCloseTo((12 * Math.PI) / 180, 6);
+
+    const ranged: LayerSpec = { count: 12, sprite: { kind: 'circle', radius: [10, 10], color: '#ffffff' }, motion: { type: 'static' }, spin: [6, 14] };
+    const degs = buildEntities(ranged, createRng(3), W, H).map((e) => (e.spinSpeed * 180) / Math.PI);
+    expect(new Set(degs).size).toBeGreaterThan(1);
+    for (const d of degs) {
+      expect(d).toBeGreaterThanOrEqual(6 - 1e-6);
+      expect(d).toBeLessThanOrEqual(14 + 1e-6);
+    }
+  });
+
   it('different seed -> different placement', () => {
     const a = buildEntities(driftLayer, createRng(1), W, H);
     const b = buildEntities(driftLayer, createRng(2), W, H);

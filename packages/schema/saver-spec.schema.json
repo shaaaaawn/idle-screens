@@ -147,7 +147,13 @@
           },
           "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
         },
-        "spin": { "type": "number", "minimum": -360, "maximum": 360, "description": "Per-entity rotation speed in degrees/sec (positive = clockwise). Each entity gets a seeded starting angle." },
+        "spin": {
+          "description": "Per-entity rotation speed in degrees/sec (positive = clockwise). A scalar applies one speed to all entities; a [min,max] range gives each entity a seeded speed. Each entity gets a seeded starting angle.",
+          "oneOf": [
+            { "type": "number", "minimum": -360, "maximum": 360 },
+            { "type": "array", "items": { "type": "number", "minimum": -360, "maximum": 360 }, "minItems": 2, "maxItems": 2 }
+          ]
+        },
         "grow": {
           "type": "object",
           "required": ["amp", "period"],

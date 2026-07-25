@@ -242,12 +242,26 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         halfX = box.halfX;
         halfY = box.halfY;
       }
-      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
-      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
-      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
-      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
       const circular = s.kind === 'circle' || s.kind === 'ring';
-      const soft = s.kind === 'circle' && s.soft;
+      const soft = s.kind === 'circle' && !!s.soft;
+      const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+      // Additive glow calibration: a soft circle drawn with `lighter`/`screen`
+      // blooms far past its radius on the real canvas (shadowBlur halos, stacked
+      // soft discs). A hard-edged analytical disc under-reports the resulting
+      // coverage by up to ~25×. Model the halo: reach ~GLOW_SPREAD× the radius
+      // with a quadratic falloff outside the solid core, so coverage tracks what
+      // the audience actually sees. Non-additive/hard sprites are unchanged.
+      const glow = soft && additive;
+      // First-pass spread constant (halo ≈ 2.4× radius) — tuned by intuition, not
+      // a live measurement yet. Improves direction/magnitude of glow coverage; a
+      // playground-calibrated value is future work (see docs/future-ideas.md G1).
+      const GLOW_SPREAD = 2.4;
+      const reachX = glow ? halfX * GLOW_SPREAD : halfX;
+      const reachY = glow ? halfY * GLOW_SPREAD : halfY;
+      const c0 = Math.max(0, Math.floor((centerX - reachX) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((centerX + reachX) / cellW));
+      const r0 = Math.max(0, Math.floor((centerY - reachY) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((centerY + reachY) / cellH));
       // Glyphs don't fill their box — ink is sparse.
       const inkWeight = s.kind === 'text' || s.kind === 'emoji' ? 0.55 : 1;
       for (let r = r0; r <= r1; r++) {
@@ -256,12 +270,23 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
           const dy = (r + 0.5) * cellH - centerY;
           if (circular) {
             const d = Math.sqrt(dx * dx + dy * dy);
-            if (d > halfX + Math.min(cellW, cellH) / 2) continue;
+            const reach = glow ? reachX : halfX;
+            if (d > reach + Math.min(cellW, cellH) / 2) continue;
             if (s.kind === 'ring') {
               const strokeW = (s.width ?? (scale === 1 ? 2 : 0.002)) * scale;
               if (d < halfX - strokeW) continue;
             }
-            const wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
+            let wgt: number;
+            if (glow) {
+              const core = halfX;
+              if (d <= core) wgt = 1;
+              else {
+                const f = Math.max(0, 1 - (d - core) / Math.max(reachX - core, 1e-6));
+                wgt = f * f;
+              }
+            } else {
+              wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
+            }
             compose(r * cols + c, lum, a * wgt, layer.blend);
           } else {
             compose(r * cols + c, lum, a * inkWeight, layer.blend);
@@ -383,6 +408,70 @@ export function renderBrailleMap(grid: LuminanceGrid): string {
   return outRows.join('\n');
 }
 
+// Density ramp, dark → bright. One char per grid cell (vs braille's 2×4), so a
+// higher-resolution grid reads as a sharper picture — the channel agents found
+// most legible for structure (rings, grids, text blocks) that braille blurs.
+const DENSITY_RAMP = ' .:-=+*#%@';
+
+/**
+ * Encode a luminance grid as a one-char-per-cell ASCII density map. Unlike the
+ * braille map (compact, 2×4 dots/char) this is 1:1 with the grid, so pairing it
+ * with a larger `cols`/`rows` gives a non-vision agent a genuinely higher-detail
+ * read: 120×48 resolves concentric rings and text blocks braille smears into a
+ * blob. Same auto-exposure as the braille map (min → 98th percentile).
+ */
+export function renderDensityMap(grid: LuminanceGrid): string {
+  const sorted = [...grid.cells].sort((a, b) => a - b);
+  const lo = sorted[0]!;
+  const hi = Math.max(sorted[Math.floor(sorted.length * 0.98)]!, lo + 0.08);
+  const ramp = DENSITY_RAMP;
+  const lines: string[] = [];
+  for (let r = 0; r < grid.rows; r++) {
+    let line = '';
+    for (let c = 0; c < grid.cols; c++) {
+      const v = Math.pow(Math.max(0, Math.min(1, (grid.cells[r * grid.cols + c]! - lo) / (hi - lo))), 0.8);
+      line += ramp[Math.min(ramp.length - 1, Math.floor(v * ramp.length))]!;
+    }
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Text sprite listing
+// ---------------------------------------------------------------------------
+
+export interface TextSpriteInfo {
+  layerIndex: number;
+  key: string | undefined;
+  /** The literal strings this layer draws (glyphs are invisible in the maps). */
+  strings: string[];
+  /** How many entities carry text. */
+  count: number;
+  /** Representative rendered glyph height in px at the sample viewport. */
+  sizePx: number;
+}
+
+/**
+ * List every text layer's actual strings and rendered size. No grid resolution
+ * renders glyphs legibly, so a non-vision agent otherwise can't tell whether the
+ * words it wrote are on screen, how big, or whether they'll overlap. This closes
+ * that blind spot analytically.
+ */
+export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSpriteInfo[] {
+  const scene = buildScene(spec, opts);
+  const t = opts.t ?? 5000;
+  const out: TextSpriteInfo[] = [];
+  scene.layers.forEach(({ layer, entities }, layerIndex) => {
+    if (layer.sprite.kind !== 'text') return;
+    const s = layer.sprite;
+    const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+    const sizePx = m ? Number(m[1]) : entities[0] ? sizeAt(entities[0], t) : 0;
+    out.push({ layerIndex, key: layer.key, strings: [...s.strings], count: entities.length, sizePx: Math.round(sizePx) });
+  });
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Dominance ranking
 // ---------------------------------------------------------------------------
@@ -414,6 +503,12 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
     return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
   })();
 
+  // Geometry-aware dominance: raw pixel-area badly under-weights thin-but-bright
+  // structures — a glowing ring, a comet streak, or a chain of link lines catches
+  // the eye far more than its ink area implies. Boost line-like ink so these
+  // register in the ranking instead of vanishing behind soft filled discs.
+  const LINE_SALIENCE = 3.5;
+
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
     const lifeA = lifeAlphaAt(layer.life, t);
     let area = 0;
@@ -424,8 +519,8 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       const s = layer.sprite;
       let entArea: number;
       if (s.kind === 'circle') entArea = Math.PI * (sz / 2) * (sz / 2);
-      else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
-      else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
+      else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
+      else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
       else if (s.kind === 'rect') {
         const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
         entArea = sz * h2;
@@ -444,7 +539,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       const edges = linkEdges(layer.links, positions, layer.links.maxDist * scale, layer.wrap !== false && motionWraps, w, h);
       const la = (layer.links.alpha ?? 0.6) * lifeA;
       const lw = (layer.links.width ?? 1) * scale;
-      for (const edge of edges) area += edge.dist * lw * la;
+      for (const edge of edges) area += edge.dist * lw * la * LINE_SALIENCE;
     }
     const meanLuma = entities.length ? lumAcc / entities.length : 0;
     const contrast = Math.abs(meanLuma - bgMean) + 0.1;
@@ -598,8 +693,14 @@ export function diffScenes(a: SaverSpec, b: SaverSpec, opts: LuminanceGridOption
 
 export interface ScenePerception {
   t: number;
-  /** The picture: a braille luminance map (each char = 2×4 pixels). */
+  /** The picture: a braille luminance map (each char = 2×4 pixels), compact. */
   braille: string;
+  /**
+   * A one-char-per-cell ASCII density map at the grid resolution — higher
+   * fidelity than braille for structure (rings, grids, text blocks). Pair with
+   * a larger `cols`/`rows` for a sharper read.
+   */
+  density: string;
   coverage: number;
   meanLuminance: number;
   centroid: { x: number; y: number } | null;
@@ -607,19 +708,23 @@ export interface ScenePerception {
   colProfile: number[];
   dominance: DominanceEntry[];
   motion: LayerMotionStats[];
+  /** Literal strings + sizes of any text layers (glyphs don't show in the maps). */
+  text: TextSpriteInfo[];
   advisories: ReturnType<typeof adviseSpec>;
 }
 
 /**
  * Everything a non-vision agent needs to "see" a spec in one deterministic
- * call: the braille picture, composition transects, dominance ranking, motion
- * stats, and advisories. Intended as the payload behind an MCP previewScene.
+ * call: the braille picture, a higher-res density map, composition transects,
+ * dominance ranking, motion stats, the literal text on screen, and advisories.
+ * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
   const grid = luminanceGrid(spec, opts);
   return {
     t: opts.t ?? 5000,
     braille: renderBrailleMap(grid),
+    density: renderDensityMap(grid),
     coverage: grid.coverage,
     meanLuminance: grid.meanLuminance,
     centroid: grid.centroid,
@@ -627,6 +732,7 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
     motion: motionStats(spec, opts),
+    text: textSprites(spec, opts),
     advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }),
   };
 }

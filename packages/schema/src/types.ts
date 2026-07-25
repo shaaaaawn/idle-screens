@@ -103,8 +103,12 @@ export interface LayerSpec {
   /**
    * Per-entity rotation speed in degrees/sec (positive = clockwise).
    * Each entity gets a seeded starting angle. Composes with any motion type.
+   * A scalar applies one speed to every entity; a `[min, max]` range gives each
+   * entity a seeded speed within the range (like `speed`/`alpha`) — confetti,
+   * tumbling debris, foliage. Existing scalar specs are unaffected (the range
+   * form draws one extra seeded value, only when present).
    */
-  spin?: number;
+  spin?: number | [number, number];
   /**
    * Sinusoidal size breathing, parallel to `pulse` for opacity. `amp` is a
    * fraction of base size (0.3 = ±30 %). `period` in ms with the same
