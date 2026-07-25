@@ -102,6 +102,27 @@ struct SpecSubset: Decodable, Equatable {
         case emoji(glyphs: [String])
         case text(strings: [String], color: String)
         case unknown
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case let (.circle(r1, c1, cs1, s1), .circle(r2, c2, cs2, s2)):
+                return r1 == r2 && c1 == c2 && cs1 == cs2 && s1 == s2
+            case let (.ring(r1, c1, cs1, w1), .ring(r2, c2, cs2, w2)):
+                return r1 == r2 && c1 == c2 && cs1 == cs2 && w1 == w2
+            case let (.rect(w1, a1, c1, cs1), .rect(w2, a2, c2, cs2)):
+                return w1 == w2 && a1 == a2 && c1 == c2 && cs1 == cs2
+            case let (.streak(l1, c1, cs1, w1), .streak(l2, c2, cs2, w2)):
+                return l1 == l2 && c1 == c2 && cs1 == cs2 && w1 == w2
+            case let (.emoji(g1), .emoji(g2)):
+                return g1 == g2
+            case let (.text(s1, c1), .text(s2, c2)):
+                return s1 == s2 && c1 == c2
+            case (.unknown, .unknown):
+                return true
+            default:
+                return false
+            }
+        }
     }
 }
 
@@ -225,7 +246,7 @@ extension SpecSubset.Layer {
             case .streak(let l, _, _, _):
                 size = l.0 + rng.next() * (l.1 - l.0)
             case .emoji, .text:
-                let sr = Self.pair(size, default: (0.02, 0.03))
+                let sr = Self.pair(self.size, default: (0.02, 0.03))
                 size = sr.0 + rng.next() * (sr.1 - sr.0)
             case .unknown:
                 size = 0.01
