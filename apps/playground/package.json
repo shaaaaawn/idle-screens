@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "eval:styles": "WRITE_STYLE_EVAL_BASELINE=1 vitest run src/evals/write-baseline.test.ts"
   },
   "dependencies": {
     "@idle-screens/capabilities": "workspace:*",

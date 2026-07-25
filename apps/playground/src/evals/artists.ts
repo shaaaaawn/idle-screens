@@ -1,0 +1,810 @@
+import type { ArtistStyleProfile } from './types';
+
+/**
+ * Fifteen artists spanning distinct movements. Each StyleDNA is a durable,
+ * steerable object: research thesis + schema translation + signature prompts.
+ * Screens are derived via applyStyle / applySignature — not hand-duplicated.
+ */
+export const ARTISTS: ArtistStyleProfile[] = [
+  {
+    id: 'monet',
+    artist: 'Claude Monet',
+    movement: 'Impressionism',
+    years: '1870s–1920s',
+    research: {
+      thesis:
+        'Light dissolves solid form into vibrating optical mixtures. Horizon and water are stages for color temperature shifts, not line drawings. Atmosphere is the subject.',
+      visualPrinciples: [
+        'Broken color via many soft overlapping marks',
+        'Cool–warm temperature play over hard local color',
+        'Low-contrast horizons, reflective bands',
+        'Calm drift — breeze, not weather drama',
+      ],
+      antiPatterns: ['Hard black outlines', 'Flat poster colors', 'Single-hero figurative emoji'],
+      tempo: 'calm',
+      depth: 'atmospheric',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#a8c4d8' },
+          { at: 0.45, color: '#c9d6c4' },
+          { at: 1, color: '#7a9aaa' },
+        ],
+        band: { color: '#5a7a6a', height: 0.12 },
+        drift: { period: 28000, amount: 0.1 },
+      },
+      accents: ['#f2e6c8', '#d8b48c', '#8eb4c8', '#6a8a78', '#e8dcc0', '#b0c8d8'],
+    },
+    markMaking: {
+      primarySprites: ['circle'],
+      softGlow: true,
+      blend: 'screen',
+      typicalAlpha: [0.25, 0.7],
+      ghosting: 0.88,
+    },
+    motionDialect: {
+      preferred: ['drift', 'wander'],
+      speedScale: 0.7,
+      bobScale: 1.2,
+      pulse: { amp: 0.12, period: 3200 },
+    },
+    composition: { densityScale: 1.1, layerCountHint: 4, regionBias: { y: [0, 0.9] } },
+    schemaGaps: [
+      'No true broken-brush / dab sprite',
+      'No specular water reflection primitive',
+      'Limited atmospheric perspective fog',
+    ],
+    durableKeys: ['palette.warmth', 'atmosphere.haze', 'motion.breeze', 'mark.softness'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Water Lilies Field', intent: 'All-over floating pads of soft color on a reflective pond plane.', recipe: 'field-of-marks' },
+      { id: 'sig-02', title: 'Rouen Light', intent: 'Facade-as-atmosphere: vertical shimmer of warm/cool pulses without architecture detail.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-03', title: 'Haystack Hours', intent: 'Single warm focal mass under a drifting sky temperature shift.', recipe: 'focal-orb' },
+      { id: 'sig-04', title: 'Argenteuil Breeze', intent: 'Layered river depth with slow parallax bands.', recipe: 'rising-forms' },
+      { id: 'sig-05', title: 'Giverny Mist', intent: 'Horizon dissolved into misty linked soft orbs.', recipe: 'linked-web' },
+    ],
+  },
+  {
+    id: 'van-gogh',
+    artist: 'Vincent van Gogh',
+    movement: 'Post-Impressionism',
+    years: '1886–1890',
+    research: {
+      thesis:
+        'Emotion is carried by directional stroke energy and heightened complementary contrast. Night skies coil; cypresses rise like flames; yellow and blue argue.',
+      visualPrinciples: [
+        'Directional streaks as brush energy',
+        'Complementary clash (blue/gold)',
+        'Spiral/coiling motion in skies',
+        'Thick value contrast',
+      ],
+      antiPatterns: ['Pastel wash without gesture', 'Static grids', 'Muted neutrals only'],
+      tempo: 'energetic',
+      depth: 'layered-planes',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#0a1a3a' },
+          { at: 0.55, color: '#1a2a58' },
+          { at: 1, color: '#3a2a18' },
+        ],
+      },
+      accents: ['#f0d050', '#e8a020', '#3a6ab0', '#6a90d0', '#c04030', '#f8e8a0'],
+    },
+    markMaking: {
+      primarySprites: ['streak', 'circle'],
+      softGlow: true,
+      blend: 'lighter',
+      typicalAlpha: [0.55, 1],
+      ghosting: 0.9,
+    },
+    motionDialect: {
+      preferred: ['wander', 'orbit', 'rise'],
+      speedScale: 1.3,
+      bobScale: 1.6,
+      pulse: { amp: 0.2, period: 2200, wave: true },
+    },
+    composition: { densityScale: 1.2, layerCountHint: 4 },
+    schemaGaps: [
+      'No impasto / stroke-width pressure',
+      'No true swirling vector-field brush',
+      'Cypress silhouette as path-of-marks only',
+    ],
+    durableKeys: ['palette.complementTension', 'gesture.energy', 'sky.coil', 'mark.streakBias'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Starry Coil', intent: 'Night sky of orbiting gold streaks over deep blue.', recipe: 'spiral-orbit' },
+      { id: 'sig-02', title: 'Cypress Flame', intent: 'Dark rising forms cutting a turbulent sky.', recipe: 'rising-forms' },
+      { id: 'sig-03', title: 'Wheatfield Wind', intent: 'Directional golden streaks with wave pulse.', recipe: 'gesture-streaks' },
+      { id: 'sig-04', title: 'Cafe Terrace Glow', intent: 'Warm focal bloom against cool street atmosphere.', recipe: 'focal-orb' },
+      { id: 'sig-05', title: 'Olive Grove Pulse', intent: 'Linked silvery greens breathing in wind.', recipe: 'linked-web' },
+    ],
+  },
+  {
+    id: 'seurat',
+    artist: 'Georges Seurat',
+    movement: 'Pointillism / Neo-Impressionism',
+    years: '1880s',
+    research: {
+      thesis:
+        'Color is optical mixture from discrete dots. Contours emerge from density, not lines. Orderly stasis with scientific calm.',
+      visualPrinciples: [
+        'Discrete equal-ish dots',
+        'Optical mixing via adjacency',
+        'Stable, almost ceremonial stillness',
+        'Horizon as density change',
+      ],
+      antiPatterns: ['Long streaks', 'Additive glow chaos', 'Fast warp'],
+      tempo: 'calm',
+      depth: 'layered-planes',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#d8e0e8' },
+          { at: 0.6, color: '#c8d0c0' },
+          { at: 1, color: '#9aa888' },
+        ],
+        band: { color: '#6a7860', height: 0.14 },
+      },
+      accents: ['#e8c060', '#6080b0', '#d06050', '#70a070', '#f0e8d0', '#405878'],
+    },
+    markMaking: {
+      primarySprites: ['circle'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.7, 1],
+    },
+    motionDialect: {
+      preferred: ['drift', 'static'],
+      speedScale: 0.35,
+      bobScale: 0.4,
+      pulse: { amp: 0.08, period: 4000 },
+    },
+    composition: { densityScale: 1.6, layerCountHint: 3, regionBias: { y: [0.05, 0.95] } },
+    schemaGaps: [
+      'No true pointillist size-locked dot grid with hue statistics',
+      'No optical-mix preview metric',
+    ],
+    durableKeys: ['mark.dotSize', 'mark.density', 'palette.divisionism', 'motion.stasis'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Grande Jatte Shore', intent: 'Ordered dotted shore with calm horizon band.', recipe: 'horizon-band' },
+      { id: 'sig-02', title: 'Circus Parade Dots', intent: 'Dense chromatic field of discrete dots.', recipe: 'field-of-marks' },
+      { id: 'sig-03', title: 'Poseuse Stillness', intent: 'Near-static lattice of colored points.', recipe: 'grid-lattice' },
+      { id: 'sig-04', title: 'Port En Bessin', intent: 'Layered coastal planes in dotted densities.', recipe: 'rising-forms' },
+      { id: 'sig-05', title: 'Eiffel Scaffold', intent: 'Geometric lattice dissolving into dots.', recipe: 'linked-web' },
+    ],
+  },
+  {
+    id: 'picasso',
+    artist: 'Pablo Picasso',
+    movement: 'Cubism',
+    years: '1907–1914 (analytic peak)',
+    research: {
+      thesis:
+        'Form is fractured into interlocking planes seen from multiple angles at once. Earth palette, shallow space, edges over atmosphere.',
+      visualPrinciples: [
+        'Faceted planes and shards',
+        'Shallow compressed space',
+        'Ochre / gray / brown analytic palette',
+        'Angular motion, not organic drift',
+      ],
+      antiPatterns: ['Soft romantic glow', 'Deep parallax landscape', 'Pastel impressionist mist'],
+      tempo: 'moderate',
+      depth: 'layered-planes',
+    },
+    palette: {
+      background: { type: 'solid', color: '#2a2824' },
+      accents: ['#c4a574', '#8a7a64', '#d8c8a8', '#5a5048', '#a09078', '#3a3830'],
+    },
+    markMaking: {
+      primarySprites: ['rect', 'streak'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.65, 1],
+      linkMode: 'chain',
+    },
+    motionDialect: {
+      preferred: ['drift', 'bounce', 'static'],
+      speedScale: 0.8,
+      bobScale: 0.3,
+    },
+    composition: { densityScale: 0.85, layerCountHint: 4 },
+    schemaGaps: [
+      'No polygon / arbitrary facet sprite',
+      'No multi-view geometric deformation',
+      'No collage texture layers',
+    ],
+    durableKeys: ['plane.facetCount', 'palette.earthness', 'space.shallowness', 'edge.sharpness'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Analytic Still Life', intent: 'Interlocking ochre planes in shallow space.', recipe: 'geometric-planes' },
+      { id: 'sig-02', title: 'Fragmented Guitar', intent: 'Angular linked shards suggesting an instrument.', recipe: 'linked-web' },
+      { id: 'sig-03', title: 'Demoiselles Facets', intent: 'Hard-edge stacked figure-planes.', recipe: 'hard-edge-blocks' },
+      { id: 'sig-04', title: 'Studio Table', intent: 'Grid of fractured rectangles.', recipe: 'grid-lattice' },
+      { id: 'sig-05', title: 'Angular Parade', intent: 'Bouncing planar marks as marching facets.', recipe: 'gesture-streaks' },
+    ],
+  },
+  {
+    id: 'kandinsky',
+    artist: 'Wassily Kandinsky',
+    movement: 'Abstract / Bauhaus',
+    years: '1910s–1930s',
+    research: {
+      thesis:
+        'Inner necessity expressed as geometric–organic counterpoint: circles, lines, and points in musical tension. Color is chordal.',
+      visualPrinciples: [
+        'Circles as protagonists',
+        'Dynamic diagonal energy',
+        'Primary-ish chords with black accents',
+        'Composition as score',
+      ],
+      antiPatterns: ['Literal landscape horizon', 'Monochrome minimalism', 'Emoji narrative'],
+      tempo: 'energetic',
+      depth: 'flat',
+    },
+    palette: {
+      background: { type: 'solid', color: '#f2efe6' },
+      accents: ['#e23b2e', '#2f5fbf', '#f0c030', '#1a1a1a', '#3aa86a', '#d45520'],
+    },
+    markMaking: {
+      primarySprites: ['circle', 'ring', 'streak'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.75, 1],
+      linkMode: 'random',
+    },
+    motionDialect: {
+      preferred: ['orbit', 'path', 'drift'],
+      speedScale: 1.1,
+      bobScale: 0.8,
+      pulse: { amp: 0.15, period: 1800 },
+    },
+    composition: { densityScale: 0.9, layerCountHint: 5 },
+    schemaGaps: [
+      'No free bezier stroke sprite',
+      'No true triangle / arc primitives',
+      'Limited musical sync between layers',
+    ],
+    durableKeys: ['chord.primaryBias', 'circle.dominance', 'line.tension', 'tempo.allegro'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Several Circles', intent: 'Orbiting translucent circles as cosmic counterpoint.', recipe: 'spiral-orbit' },
+      { id: 'sig-02', title: 'Composition VIII Energy', intent: 'Linked geometric marks in diagonal tension.', recipe: 'linked-web' },
+      { id: 'sig-03', title: 'Point and Line', intent: 'Streaks and dots in path choreography.', recipe: 'gesture-streaks' },
+      { id: 'sig-04', title: 'Bauhaus Grid Song', intent: 'Latticed colored points pulsing.', recipe: 'grid-lattice' },
+      { id: 'sig-05', title: 'Improvisation Bloom', intent: 'Pulsing atmospheric primaries on pale ground.', recipe: 'pulsing-atmosphere' },
+    ],
+  },
+  {
+    id: 'mondrian',
+    artist: 'Piet Mondrian',
+    movement: 'De Stijl',
+    years: '1917–1944',
+    research: {
+      thesis:
+        'Universal harmony through orthogonal black scaffolding and primary color planes. No diagonals, no nature imitation — pure relation.',
+      visualPrinciples: [
+        'Horizontal/vertical only',
+        'Primary red/yellow/blue + black/white',
+        'Asymmetric balance of rectangles',
+        'Stillness with rare micro-drift',
+      ],
+      antiPatterns: ['Diagonals', 'Soft glow impressionism', 'Organic wander fields'],
+      tempo: 'calm',
+      depth: 'flat',
+    },
+    palette: {
+      background: { type: 'solid', color: '#f5f5f0' },
+      accents: ['#e10600', '#0038a8', '#f7d117', '#111111', '#f5f5f0'],
+    },
+    markMaking: {
+      primarySprites: ['rect'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [1, 1],
+      linkMode: 'chain',
+    },
+    motionDialect: {
+      preferred: ['static', 'drift'],
+      speedScale: 0.25,
+      bobScale: 0.1,
+    },
+    composition: { densityScale: 0.55, layerCountHint: 3 },
+    schemaGaps: [
+      'No true black grid-line primitive separate from rects',
+      'No constrained orthogonal layout solver',
+    ],
+    durableKeys: ['grid.orthogonality', 'palette.primaryOnly', 'plane.balance', 'motion.stasis'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Composition with Red', intent: 'Asymmetric primary rectangles on white.', recipe: 'hard-edge-blocks' },
+      { id: 'sig-02', title: 'Broadway Boogie', intent: 'Dense grid lattice of primaries (city pulse).', recipe: 'grid-lattice' },
+      { id: 'sig-03', title: 'Tableau I', intent: 'Sparse large planes, nearly static.', recipe: 'geometric-planes' },
+      { id: 'sig-04', title: 'Pier and Ocean Echo', intent: 'Linked orthogonal marks suggesting rhythm.', recipe: 'linked-web' },
+      { id: 'sig-05', title: 'New York City I', intent: 'Multi-layer grid with tiny drift.', recipe: 'grid-lattice' },
+    ],
+  },
+  {
+    id: 'hokusai',
+    artist: 'Katsushika Hokusai',
+    movement: 'Ukiyo-e',
+    years: '1820s–1830s (Thirty-six Views)',
+    research: {
+      thesis:
+        'Flat color planes, bold contour energy, and dramatic natural motifs (wave, mountain, spray) organized in layered bands of near/far.',
+      visualPrinciples: [
+        'Banded depth (sea / foam / sky / peak)',
+        'Prussian blue dominance',
+        'Foam as discrete spray marks',
+        'Iconic silhouette focal (Fuji)',
+      ],
+      antiPatterns: ['Western aerial perspective fog', 'Soft pastel Monet mist', 'Cubist shards'],
+      tempo: 'moderate',
+      depth: 'layered-planes',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#d8e8f0' },
+          { at: 0.5, color: '#3a6a9a' },
+          { at: 1, color: '#0a2a4a' },
+        ],
+        band: { color: '#1a3a5a', height: 0.18 },
+      },
+      accents: ['#e8f0f8', '#2a5a8a', '#c04030', '#f0e8d0', '#1a1a28', '#5a9aca'],
+    },
+    markMaking: {
+      primarySprites: ['streak', 'circle', 'ring'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.7, 1],
+      emojiGlyphs: ['🌊', '🗻'],
+    },
+    motionDialect: {
+      preferred: ['rise', 'drift', 'path'],
+      speedScale: 1.0,
+      bobScale: 1.4,
+      pulse: { amp: 0.1, period: 2600 },
+    },
+    composition: { densityScale: 1.0, layerCountHint: 4 },
+    schemaGaps: [
+      'No contour-stroke / woodblock line sprite',
+      'No true wave-crest path generator',
+      'Mount Fuji as silhouette mask unsupported',
+    ],
+    durableKeys: ['palette.prussian', 'foam.density', 'band.horizon', 'motif.scale'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Great Wave Crest', intent: 'Rising foam streaks over deep blue bands with a distant focal peak.', recipe: 'rising-forms' },
+      { id: 'sig-02', title: 'Thirty-Six Views Mist', intent: 'Calm horizon with small red accent and spray field.', recipe: 'horizon-band' },
+      { id: 'sig-03', title: 'Fuji Focal', intent: 'Single pale focal mass against layered blue planes.', recipe: 'focal-orb' },
+      { id: 'sig-04', title: 'Kanagawa Spray', intent: 'Dense white spray particles.', recipe: 'field-of-marks' },
+      { id: 'sig-05', title: 'Boat Path', intent: 'Path-following marks under a wave arc.', recipe: 'gesture-streaks' },
+    ],
+  },
+  {
+    id: 'klimt',
+    artist: 'Gustav Klimt',
+    movement: 'Art Nouveau / Vienna Secession',
+    years: '1898–1918',
+    research: {
+      thesis:
+        'Ornament as gold-leaf pattern fields: tesserae, spirals, and erotic stillness. Figures dissolve into decorative mosaic.',
+      visualPrinciples: [
+        'Gold / mosaic tesserae',
+        'Spiral and eye-like ornaments',
+        'Rich pattern density',
+        'Slow ceremonial pulse',
+      ],
+      antiPatterns: ['Stark primaries only', 'Cold minimal grids', 'Harsh cubist facets'],
+      tempo: 'calm',
+      depth: 'flat',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#1a1208' },
+          { at: 1, color: '#3a2810' },
+        ],
+      },
+      accents: ['#d4af37', '#f0d878', '#8a2030', '#c4a060', '#e8c8a0', '#5a1820'],
+    },
+    markMaking: {
+      primarySprites: ['circle', 'ring', 'rect'],
+      softGlow: true,
+      blend: 'lighter',
+      typicalAlpha: [0.5, 0.95],
+      ghosting: 0.86,
+      linkMode: 'nearest',
+    },
+    motionDialect: {
+      preferred: ['orbit', 'drift', 'static'],
+      speedScale: 0.55,
+      bobScale: 0.6,
+      pulse: { amp: 0.18, period: 3500 },
+    },
+    composition: { densityScale: 1.3, layerCountHint: 4 },
+    schemaGaps: [
+      'No gold-leaf metallic material',
+      'No complex ornamental motif stamps',
+      'No figure underpainting layer',
+    ],
+    durableKeys: ['ornament.density', 'palette.gold', 'mosaic.scale', 'pulse.ceremony'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Kiss Mosaic', intent: 'Dense gold tesserae field with crimson accents.', recipe: 'all-over-infinity' },
+      { id: 'sig-02', title: 'Tree of Life Spiral', intent: 'Orbiting ornamental rings and links.', recipe: 'spiral-orbit' },
+      { id: 'sig-03', title: 'Adele Gold', intent: 'Pulsing gold atmosphere with jewel focal.', recipe: 'focal-orb' },
+      { id: 'sig-04', title: 'Secession Frieze', intent: 'Horizontal ornamental band composition.', recipe: 'horizon-band' },
+      { id: 'sig-05', title: 'Pattern Web', intent: 'Nearest-neighbor gold links as filigree.', recipe: 'linked-web' },
+    ],
+  },
+  {
+    id: 'rothko',
+    artist: 'Mark Rothko',
+    movement: 'Color Field / Abstract Expressionism',
+    years: '1949–1970',
+    research: {
+      thesis:
+        'Soft-edged rectangular color masses float in luminous fields. Scale and hush produce emotion; edges breathe; almost nothing moves.',
+      visualPrinciples: [
+        'Large soft color blocks',
+        'Feathered edges via soft glow',
+        'Vertical stacking of fields',
+        'Extremely slow temporal breath',
+      ],
+      antiPatterns: ['Busy particles', 'Hard Mondrian edges', 'Fast orbits'],
+      tempo: 'calm',
+      depth: 'atmospheric',
+    },
+    palette: {
+      background: { type: 'solid', color: '#1c0e0a' },
+      accents: ['#8a2a1a', '#c45a28', '#3a1a28', '#d4a060', '#5a2030'],
+    },
+    markMaking: {
+      primarySprites: ['circle', 'rect'],
+      softGlow: true,
+      blend: 'screen',
+      typicalAlpha: [0.35, 0.75],
+      ghosting: 0.92,
+    },
+    motionDialect: {
+      preferred: ['static', 'drift'],
+      speedScale: 0.15,
+      bobScale: 0.2,
+      pulse: { amp: 0.22, period: 5000 },
+    },
+    composition: { densityScale: 0.25, layerCountHint: 3 },
+    schemaGaps: [
+      'No soft-edged rectangle (rects are hard; circles approximate)',
+      'No monumental scale cue independent of count',
+      'No true color-bleed between stacked fields',
+    ],
+    durableKeys: ['field.warmth', 'edge.softness', 'stack.balance', 'breath.period'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'No. 61 Stack', intent: 'Three soft stacked color masses breathing.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-02', title: 'Chapel Hush', intent: 'Near-black field with deep crimson focal glow.', recipe: 'focal-orb' },
+      { id: 'sig-03', title: 'Ochre Veil', intent: 'Horizontal soft bands almost still.', recipe: 'horizon-band' },
+      { id: 'sig-04', title: 'Magenta Float', intent: 'Sparse large soft planes.', recipe: 'geometric-planes' },
+      { id: 'sig-05', title: 'Seagram Breath', intent: 'Slow pulse atmosphere, minimal marks.', recipe: 'pulsing-atmosphere' },
+    ],
+  },
+  {
+    id: 'kusama',
+    artist: 'Yayoi Kusama',
+    movement: 'Contemporary / Infinity Net',
+    years: '1960s–present',
+    research: {
+      thesis:
+        'Obliteration by dots: infinity rooms, nets, and polka-dot fields that erase the self into repetition. Playful, obsessive, immersive.',
+      visualPrinciples: [
+        'All-over polka dots',
+        'High-key or stark contrast',
+        'Mirrored infinity feeling via repetition',
+        'Playful tempo with pulse',
+      ],
+      antiPatterns: ['Sparse minimalism', 'Painterly broken color without dots', 'Cubist planes'],
+      tempo: 'energetic',
+      depth: 'flat',
+    },
+    palette: {
+      background: { type: 'solid', color: '#120018' },
+      accents: ['#ff2da0', '#ffffff', '#ffd600', '#7a00ff', '#00e5ff'],
+    },
+    markMaking: {
+      primarySprites: ['circle'],
+      softGlow: true,
+      blend: 'lighter',
+      typicalAlpha: [0.7, 1],
+      ghosting: 0.85,
+    },
+    motionDialect: {
+      preferred: ['orbit', 'wander', 'drift'],
+      speedScale: 1.15,
+      bobScale: 1.0,
+      pulse: { amp: 0.25, period: 1600, wave: true },
+    },
+    composition: { densityScale: 1.8, layerCountHint: 3 },
+    schemaGaps: [
+      'No mirrored infinity-room reflection',
+      'No pumpkin / biomorphic mesh primitive',
+      'No true net (woven) topology beyond links',
+    ],
+    durableKeys: ['dot.density', 'palette.neon', 'infinity.depth', 'pulse.obsession'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Infinity Dots', intent: 'All-over obliterating polka-dot cosmos.', recipe: 'all-over-infinity' },
+      { id: 'sig-02', title: 'Obliteration Room', intent: 'Orbiting neon dots around a void core.', recipe: 'spiral-orbit' },
+      { id: 'sig-03', title: 'Net Pulse', intent: 'Linked high-density dots with wave pulse.', recipe: 'linked-web' },
+      { id: 'sig-04', title: 'Pumpkin Field', intent: 'Dense yellow/black dotted field.', recipe: 'field-of-marks' },
+      { id: 'sig-05', title: 'Mirror Ball Atmosphere', intent: 'Pulsing neon atmosphere.', recipe: 'pulsing-atmosphere' },
+    ],
+  },
+  {
+    id: 'magritte',
+    artist: 'René Magritte',
+    movement: 'Surrealism',
+    years: '1926–1967',
+    research: {
+      thesis:
+        'Clarity used against itself: ordinary objects in impossible relations, clean daylight modeling, riddle-space rather than dream-blur.',
+      visualPrinciples: [
+        'Clean hard objects in empty air',
+        'Daylight surreal sky',
+        'Sparse composition, strong focal',
+        'Deadpan stillness with one uncanny motion',
+      ],
+      antiPatterns: ['Busy Dali melt chaos', 'Abstract color fields', 'All-over infinity dots'],
+      tempo: 'calm',
+      depth: 'atmospheric',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#6a9cc8' },
+          { at: 0.55, color: '#b8d0e0' },
+          { at: 1, color: '#d8c8a0' },
+        ],
+        band: { color: '#3a5a38', height: 0.16 },
+      },
+      accents: ['#1a1a1a', '#f0f0f0', '#c04030', '#2a4a6a', '#e8d8a0'],
+    },
+    markMaking: {
+      primarySprites: ['circle', 'rect', 'emoji'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.9, 1],
+      emojiGlyphs: ['🎩', '🍎', '☁️'],
+    },
+    motionDialect: {
+      preferred: ['static', 'drift', 'path'],
+      speedScale: 0.45,
+      bobScale: 0.5,
+      pulse: { amp: 0.08, period: 4500 },
+    },
+    composition: { densityScale: 0.45, layerCountHint: 3 },
+    schemaGaps: [
+      'No object semantic sprites beyond emoji',
+      'No impossible scale juxtaposition helper',
+      'No trompe-l’oeil frame-within-frame',
+    ],
+    durableKeys: ['uncanny.focal', 'sky.daylight', 'object.scale', 'space.emptiness'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Son of Man Sky', intent: 'Clear sky, green band, single floating focal object.', recipe: 'focal-orb' },
+      { id: 'sig-02', title: 'Empire of Light', intent: 'Day/night horizon paradox via band + pulse.', recipe: 'horizon-band' },
+      { id: 'sig-03', title: 'Golconde Drift', intent: 'Sparse repeated falling/drifting figures (emoji).', recipe: 'field-of-marks' },
+      { id: 'sig-04', title: 'Castle in Pyrenees', intent: 'Heavy focal mass floating over calm sea band.', recipe: 'focal-orb' },
+      { id: 'sig-05', title: 'Path of Clouds', intent: 'Path-choreographed soft clouds, deadpan pace.', recipe: 'rising-forms' },
+    ],
+  },
+  {
+    id: 'malevich',
+    artist: 'Kazimir Malevich',
+    movement: 'Suprematism',
+    years: '1915–1920s',
+    research: {
+      thesis:
+        'Non-objective sensation: floating geometric figures on white infinite ground. Cross, square, circle — pure feeling in space.',
+      visualPrinciples: [
+        'White infinite ground',
+        'Floating geometric primaries/black',
+        'Diagonal dynamic of rectangles',
+        'Sparse, cosmic emptiness',
+      ],
+      antiPatterns: ['Busy fields', 'Landscape horizon', 'Ornamental gold'],
+      tempo: 'calm',
+      depth: 'flat',
+    },
+    palette: {
+      background: { type: 'solid', color: '#f4f1ea' },
+      accents: ['#111111', '#d0222a', '#2a5aaa', '#e8c020', '#f4f1ea'],
+    },
+    markMaking: {
+      primarySprites: ['rect', 'circle', 'ring'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [1, 1],
+    },
+    motionDialect: {
+      preferred: ['drift', 'static', 'orbit'],
+      speedScale: 0.4,
+      bobScale: 0.2,
+    },
+    composition: { densityScale: 0.35, layerCountHint: 3 },
+    schemaGaps: [
+      'No rotated plane without spin-as-rotation-speed confusion for static poses',
+      'No true suprematist diagonal layout language',
+    ],
+    durableKeys: ['ground.whiteness', 'figure.sparsity', 'plane.tilt', 'cosmos.emptiness'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Black Square Echo', intent: 'Single dark focal square on white infinity.', recipe: 'focal-orb' },
+      { id: 'sig-02', title: 'Dynamic Suprematism', intent: 'Floating geometric planes in sparse drift.', recipe: 'geometric-planes' },
+      { id: 'sig-03', title: 'Airplane Flying', intent: 'Diagonal streak/rect energy across white.', recipe: 'gesture-streaks' },
+      { id: 'sig-04', title: 'White on White', intent: 'Near-invisible soft planes, extreme sparsity.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-05', title: 'Cross and Circle', intent: 'Orbiting ring and rect relation.', recipe: 'spiral-orbit' },
+    ],
+  },
+  {
+    id: 'okeeffe',
+    artist: 'Georgia O\'Keeffe',
+    movement: 'American Modernism',
+    years: '1920s–1960s',
+    research: {
+      thesis:
+        'Natural forms magnified to abstraction: petals, bones, desert cliffs. Soft gradients, sensual curves, monumental close-up scale.',
+      visualPrinciples: [
+        'Magnified organic focal',
+        'Soft gradient deserts/skies',
+        'Curving rise motions',
+        'Limited refined palette',
+      ],
+      antiPatterns: ['Pixel dots', 'Neon infinity', 'Harsh black scaffolding'],
+      tempo: 'calm',
+      depth: 'atmospheric',
+    },
+    palette: {
+      background: {
+        type: 'gradient',
+        stops: [
+          { at: 0, color: '#f0d8c0' },
+          { at: 0.5, color: '#e8a090' },
+          { at: 1, color: '#c07060' },
+        ],
+      },
+      accents: ['#f8e8e0', '#d04050', '#a06040', '#f0c0a8', '#604030'],
+    },
+    markMaking: {
+      primarySprites: ['circle', 'ring'],
+      softGlow: true,
+      blend: 'screen',
+      typicalAlpha: [0.4, 0.9],
+      ghosting: 0.9,
+    },
+    motionDialect: {
+      preferred: ['rise', 'drift', 'path'],
+      speedScale: 0.6,
+      bobScale: 0.9,
+      pulse: { amp: 0.16, period: 3800 },
+    },
+    composition: { densityScale: 0.7, layerCountHint: 3 },
+    schemaGaps: [
+      'No petal / bezier bloom sprite',
+      'No bone silhouette',
+      'Soft curved bands unsupported (approx with regions)',
+    ],
+    durableKeys: ['form.magnification', 'palette.desert', 'edge.curveSoftness', 'focal.intimacy'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Jimson Bloom', intent: 'Large soft focal bloom with petal-like satellites.', recipe: 'focal-orb' },
+      { id: 'sig-02', title: 'Desert Cliff Bands', intent: 'Horizontal warm bands as landscape abstraction.', recipe: 'horizon-band' },
+      { id: 'sig-03', title: 'Pelvis Sky', intent: 'Ring forms framing atmospheric sky.', recipe: 'spiral-orbit' },
+      { id: 'sig-04', title: 'Red Canna Rise', intent: 'Rising warm forms, magnified.', recipe: 'rising-forms' },
+      { id: 'sig-05', title: 'Cloudscape Soft', intent: 'Pulsing soft atmosphere, sparse.', recipe: 'pulsing-atmosphere' },
+    ],
+  },
+  {
+    id: 'basquiat',
+    artist: 'Jean-Michel Basquiat',
+    movement: 'Neo-Expressionism',
+    years: '1981–1988',
+    research: {
+      thesis:
+        'Raw graffiti energy: crowns, scrawled text, anatomical fragments, frantic layering on restless grounds. Urban tempo, crown as heraldic focal.',
+      visualPrinciples: [
+        'Scrawled text + crown motifs',
+        'High-contrast primaries on dirty grounds',
+        'Layered chaotic density',
+        'Gesture streaks and bounce',
+      ],
+      antiPatterns: ['Polished minimalism', 'Quiet color field', 'Ordered Mondrian grid'],
+      tempo: 'energetic',
+      depth: 'layered-planes',
+    },
+    palette: {
+      background: { type: 'solid', color: '#1a1814' },
+      accents: ['#f5d76e', '#e74c3c', '#3498db', '#ffffff', '#2ecc71', '#e67e22'],
+    },
+    markMaking: {
+      primarySprites: ['text', 'streak', 'circle', 'emoji'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.75, 1],
+      emojiGlyphs: ['👑', '☠', '✦'],
+      linkMode: 'random',
+    },
+    motionDialect: {
+      preferred: ['bounce', 'wander', 'drift'],
+      speedScale: 1.4,
+      bobScale: 1.3,
+      pulse: { amp: 0.14, period: 1400 },
+    },
+    composition: { densityScale: 1.25, layerCountHint: 5 },
+    schemaGaps: [
+      'No freehand graffiti stroke',
+      'Limited typographic scrawl (text sprites are clean)',
+      'No crown vector mark beyond emoji',
+    ],
+    durableKeys: ['graffiti.density', 'text.chaos', 'crown.presence', 'ground.grit'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Crown Herald', intent: 'Crown emoji focal amid chaotic marks.', recipe: 'focal-orb' },
+      { id: 'sig-02', title: 'Untitled Scrawl', intent: 'Text + streak gesture field.', recipe: 'gesture-streaks' },
+      { id: 'sig-03', title: 'Anatomy Layer Cake', intent: 'Dense multi-layer urban energy.', recipe: 'field-of-marks' },
+      { id: 'sig-04', title: 'SAMO Pulse', intent: 'Linked chaotic web of accents.', recipe: 'linked-web' },
+      { id: 'sig-05', title: 'Skull Bounce', intent: 'Bouncing emoji/marks on dark ground.', recipe: 'all-over-infinity' },
+    ],
+  },
+  {
+    id: 'riley',
+    artist: 'Bridget Riley',
+    movement: 'Op Art',
+    years: '1960s–',
+    research: {
+      thesis:
+        'Perception is the medium: periodic structures induce vibration, warp, and afterimage. Precision grids and waves; motion is optical, not narrative.',
+      visualPrinciples: [
+        'High-frequency repetition',
+        'Black/white or tight hue steps',
+        'Wave pulse across field',
+        'Precision over gesture',
+      ],
+      antiPatterns: ['Organic Monet mist', 'Sparse suprematism', 'Narrative emoji'],
+      tempo: 'energetic',
+      depth: 'flat',
+    },
+    palette: {
+      background: { type: 'solid', color: '#f0f0f0' },
+      accents: ['#111111', '#f0f0f0', '#2a6ad0', '#e04060', '#20a090'],
+    },
+    markMaking: {
+      primarySprites: ['streak', 'circle', 'rect'],
+      softGlow: false,
+      blend: 'source-over',
+      typicalAlpha: [0.85, 1],
+      linkMode: 'chain',
+    },
+    motionDialect: {
+      preferred: ['drift', 'wander'],
+      speedScale: 0.7,
+      bobScale: 0.5,
+      pulse: { amp: 0.28, period: 900, wave: true },
+    },
+    composition: { densityScale: 1.5, layerCountHint: 3 },
+    schemaGaps: [
+      'No true sinusoidal stripe displacement mesh',
+      'Flash-safety caps limit authentic Op flicker (correctly)',
+      'No afterimage simulation',
+    ],
+    durableKeys: ['period.frequency', 'contrast.optical', 'wave.angle', 'field.precision'],
+    signaturePrompts: [
+      { id: 'sig-01', title: 'Movement in Squares', intent: 'Precision grid with optical pulse wave.', recipe: 'grid-lattice' },
+      { id: 'sig-02', title: 'Current Wave', intent: 'Streak field with traveling pulse.', recipe: 'gesture-streaks' },
+      { id: 'sig-03', title: 'Cataract Vibration', intent: 'Dense linked chains vibrating.', recipe: 'linked-web' },
+      { id: 'sig-04', title: 'Blaze Study', intent: 'All-over high-contrast dots/lines.', recipe: 'all-over-infinity' },
+      { id: 'sig-05', title: 'Arrest Atmosphere', intent: 'Pulsing optical atmosphere, controlled.', recipe: 'pulsing-atmosphere' },
+    ],
+  },
+];
+
+export function getArtist(id: string): ArtistStyleProfile | undefined {
+  return ARTISTS.find((a) => a.id === id);
+}

@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       'packages/**/src/**/*.test.ts',
       'apps/mac/web/src/**/*.test.ts',
+      'apps/playground/src/evals/**/*.test.ts',
     ],
     environment: 'node',
     coverage: {
