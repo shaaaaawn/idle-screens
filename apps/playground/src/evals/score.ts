@@ -1,7 +1,7 @@
 import { adviseSpec, perceiveScene, validateSpec } from '@idle-screens/schema';
 import type { SaverSpec, ScenePerception } from '@idle-screens/schema';
 import { BENCHMARK_INTENTS } from './benchmarks';
-import { buildProvenance, computeDelta, suggestedActionsFrom } from './provenance';
+import { buildProvenance, computeDelta, fingerprintScreens, suggestedActionsFrom } from './provenance';
 import type {
   ArtistStyleProfile,
   BenchmarkIntent,
@@ -463,10 +463,14 @@ export function scoreSuite(
     .filter((b) => b.variance < 0.002 && b.median > 0)
     .map((b) => b.benchmarkId);
 
-  const provenance = buildProvenance(profiles, {
-    ...opts.request,
-    parentRunId: opts.request.parentRunId ?? opts.parentSummary?.runId,
-  });
+  const provenance = buildProvenance(
+    profiles,
+    {
+      ...opts.request,
+      parentRunId: opts.request.parentRunId ?? opts.parentSummary?.runId,
+    },
+    { saverSpecFormat: screens[0]?.spec.schemaVersion ?? 1 },
+  );
 
   const summary: RunSummary = {
     runId: opts.runId,
@@ -478,6 +482,9 @@ export function scoreSuite(
     perBenchmark,
     gapHistogram,
     failures,
+    // Record what was actually measured so a later session can tell which
+    // screens have since changed underneath the scores.
+    screenFingerprints: fingerprintScreens(screens),
     nextCycle: {
       weakArtists,
       collapsedBenchmarks,

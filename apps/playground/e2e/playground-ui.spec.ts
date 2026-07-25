@@ -359,6 +359,209 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-act="export"]')).toBeEnabled();
   });
 
+  // Mock OpenRouter so CI never depends on the network. A fake, non-secret
+  // placeholder stands in for a key — no real credential is ever used here.
+  const FAKE_KEY = 'sk-or-v1-FAKE000000000000000000000000000000000000000000000000000abcd';
+  const mockOpenRouter = async (page: Page) => {
+    await page.route('https://openrouter.ai/api/v1/models', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: [
+            { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4', context_length: 200000 },
+            { id: 'openai/gpt-5', name: 'GPT-5', context_length: 400000 },
+          ],
+        }),
+      }),
+    );
+    await page.route('https://openrouter.ai/api/v1/key', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { label: 'evals', usage: 1.5, limit: 10 } }),
+      }),
+    );
+  };
+
+  const openRunDialog = async (page: Page) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('[data-act="new-run"]').click();
+    await expect(page.locator('.evals-modal')).toBeVisible();
+  };
+
+  test('the model picker loads OpenRouter models and derives the provider', async ({ page }) => {
+    await mockOpenRouter(page);
+    await openRunDialog(page);
+
+    await expect(page.locator('[data-role="model-hint"]')).toContainText('2 models');
+    await expect(page.locator('#or-model-list option')).toHaveCount(2);
+
+    await page.locator('input[name="model"]').fill('anthropic/claude-opus-4');
+    // Provider is derived from the canonical id, never typed a second time.
+    await expect(page.locator('input[name="provider"]')).toHaveValue('anthropic');
+    await expect(page.locator('input[name="provider"]')).toHaveAttribute('readonly', '');
+  });
+
+  test('the API key is stored client-side and never reaches the run record', async ({ page }) => {
+    await mockOpenRouter(page);
+    await openRunDialog(page);
+
+    const keyField = page.locator('[data-role="or-key"]');
+    await expect(keyField).toHaveAttribute('type', 'password');
+    // No name= means FormData cannot carry it into RunRequest by accident.
+    expect(await keyField.evaluate((el) => el.hasAttribute('name'))).toBe(false);
+    await expect(page.locator('[data-role="conn-state"]')).toHaveText('not set');
+
+    await page.locator('.evals-conn > summary').click();
+    await keyField.fill(FAKE_KEY);
+    await page.locator('[data-act="key-save"]').click();
+
+    // Stored, masked, and the field is cleared so it can't be shoulder-read.
+    await expect(page.locator('[data-role="conn-state"]')).toContainText('stored');
+    await expect(page.locator('[data-role="conn-state"]')).not.toContainText('FAKE000');
+    await expect(keyField).toHaveValue('');
+    expect(
+      await page.evaluate(() => localStorage.getItem('idleScreens.evals.openrouterKey')),
+    ).toBe(FAKE_KEY);
+
+    await page.locator('[data-act="key-verify"]').click();
+    await expect(page.locator('[data-role="conn-msg"]')).toContainText('Key valid');
+
+    // Submit a run, then prove the key is in exactly one place and no run record.
+    await page.locator('.evals-modal [name="label"]').fill('key isolation');
+    await page.locator('input[name="model"]').fill('openai/gpt-5');
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('key isolation');
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('openai/gpt-5');
+
+    const leaks = await page.evaluate((needle) => {
+      const hits: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const k = localStorage.key(i)!;
+        if ((localStorage.getItem(k) ?? '').includes(needle)) hits.push(k);
+      }
+      return hits;
+    }, 'FAKE000');
+    expect(leaks).toEqual(['idleScreens.evals.openrouterKey']);
+
+    // Reopening shows the key as already stored; clearing removes it.
+    await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-conn > summary').click();
+    await expect(page.locator('[data-role="conn-state"]')).toContainText('stored');
+    await page.locator('[data-act="key-clear"]').click();
+    await expect(page.locator('[data-role="conn-state"]')).toHaveText('not set');
+    expect(await page.evaluate(() => localStorage.getItem('idleScreens.evals.openrouterKey'))).toBeNull();
+  });
+
+  test('an unreachable OpenRouter degrades to free text instead of blocking', async ({ page }) => {
+    await page.route('https://openrouter.ai/api/v1/models', (route) => route.abort());
+    await openRunDialog(page);
+    await expect(page.locator('[data-role="model-hint"]')).toContainText('Could not reach OpenRouter');
+    // The run is still submittable with a typed model name.
+    await page.locator('input[name="model"]').fill('local/handwritten');
+    await expect(page.locator('input[name="provider"]')).toHaveValue('local');
+  });
+
+  /** Submit the run dialog and return the id of the run it created. */
+  const submitRun = async (page: Page, label: string, model?: string) => {
+    await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-modal [name="label"]').fill(label);
+    if (model) {
+      await page.locator('input[name="model"]').fill(model);
+      await page.locator('input[name="model"]').dispatchEvent('input');
+    }
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
+    await expect(page.locator('[data-role="subtitle"]')).toContainText(label);
+    return page.evaluate(
+      () => (JSON.parse(localStorage.getItem('idle-screens:style-eval:run-index')!) as Array<{ runId: string }>)[0]!.runId,
+    );
+  };
+
+  test('the version strip records what produced the run', async ({ page }) => {
+    await mockOpenRouter(page);
+    await openRunDialog(page);
+    await page.locator('.evals-modal [data-act="cancel"]').click();
+    await submitRun(page, 'versioned', 'anthropic/claude-opus-4');
+
+    const chips = page.locator('.evals-ver-chip');
+    await expect(chips.filter({ hasText: 'model' })).toContainText('anthropic/claude-opus-4');
+    await expect(chips.filter({ hasText: 'harness' })).toContainText('playground-ui');
+    await expect(chips.filter({ hasText: 'SaverSpec format' })).toContainText('v1');
+    // The package version is a distinct axis from the format number: perceive /
+    // advise semantics can move while schemaVersion stays 1.
+    await expect(chips.filter({ hasText: 'schema pkg' })).toContainText(/\d+\.\d+\.\d+/);
+    await expect(chips.filter({ hasText: 'Scorer' })).toContainText('style-eval-score@');
+
+    // Nothing drifted, so no banner.
+    await expect(page.locator('[data-role="drift"]')).toBeHidden();
+  });
+
+  test('a run fingerprints every screen it scored', async ({ page }) => {
+    await openRunDialog(page);
+    await page.locator('.evals-modal [data-act="cancel"]').click();
+    const runId = await submitRun(page, 'fingerprinted');
+
+    const stored = await page.evaluate(
+      (id) => JSON.parse(localStorage.getItem('idle-screens:style-eval:run:' + id)!),
+      runId,
+    );
+    // The property that matters: every screen on screen has a recorded
+    // fingerprint, so drift can be resolved per tile rather than run-wide.
+    const visibleIds = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.evals-tile')].map((t) => t.dataset.screenId!),
+    );
+    expect(visibleIds.length).toBeGreaterThan(0);
+    for (const id of visibleIds) expect(stored.summary.screenFingerprints[id]).toMatch(/^[0-9a-f]{8}$/);
+    // ...and the whole catalogue is covered, not just the visible benchmark.
+    expect(Object.keys(stored.summary.screenFingerprints).length).toBeGreaterThan(visibleIds.length);
+    expect(stored.summary.provenance.versions.schemaPackage).toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  test('a run scored against older versions is marked, not silently shown as current', async ({ page }) => {
+    await openRunDialog(page);
+    await page.locator('.evals-modal [data-act="cancel"]').click();
+    const runId = await submitRun(page, 'aged run');
+
+    // Simulate the catalogue evolving after the run was taken.
+    await page.evaluate((id) => {
+      const k = 'idle-screens:style-eval:run:' + id;
+      const stored = JSON.parse(localStorage.getItem(k)!);
+      const targets = Object.keys(stored.summary.screenFingerprints)
+        .filter((s: string) => s.includes('calm-horizon'))
+        .slice(0, 3);
+      for (const t of targets) stored.summary.screenFingerprints[t] = 'deadbeef';
+      stored.summary.provenance.versions.styleDnaHash = '00000001';
+      stored.summary.provenance.versions.schemaPackage = '0.0.1';
+      localStorage.setItem(k, JSON.stringify(stored));
+    }, runId);
+
+    await page.reload();
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator(`.evals-tl-node[data-run-id="${runId}"]`).click();
+
+    // Drifted versions are called out on the chips...
+    await expect(page.locator('.evals-ver-chip.is-drift')).toHaveCount(2);
+    // ...the banner says what is actually on screen...
+    await expect(page.locator('.evals-tl-drift-text')).toContainText("Showing today's screens");
+    await expect(page.locator('.evals-tl-drift-text')).toContainText('3 screens changed');
+    await expect(page.locator('[data-act="rescore"]')).toBeVisible();
+    // ...and the affected tiles carry it, because their score badge is stale.
+    await expect(page.locator('.evals-tile[data-drift="changed"]')).toHaveCount(3);
+    await expect(page.locator('.evals-tile-drift').first()).toHaveText('changed since scored');
+  });
+
+  test('runs predating fingerprints report unknown rather than crashing', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    // The disk baseline has no screenFingerprints and no schemaPackage.
+    await page.locator('.evals-tl-node').first().click();
+    await expect(page.locator('.evals-ver-chip').filter({ hasText: 'schema pkg' })).toContainText(
+      'not recorded',
+    );
+    await expect(page.locator('.evals-tl-drift-text')).toContainText('predates per-screen fingerprints');
+    await expect(page.locator('.evals-tile').first()).toBeVisible();
+  });
+
   test('the chamber closes when the route changes', async ({ page }) => {
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));

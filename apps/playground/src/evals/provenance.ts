@@ -1,5 +1,6 @@
 import type {
   ArtistStyleProfile,
+  EvalScreen,
   RunIndexEntry,
   RunProvenance,
   RunRequest,
@@ -50,9 +51,79 @@ export function hashStyleDna(profiles: ArtistStyleProfile[]): string {
   return fnv1a(payload);
 }
 
+/** Injected by vite.config.ts — the @idle-screens/schema version in this build. */
+declare const __SCHEMA_PKG_VERSION__: string;
+
+export const SCHEMA_PKG_VERSION: string =
+  typeof __SCHEMA_PKG_VERSION__ === 'string' ? __SCHEMA_PKG_VERSION__ : 'unknown';
+
+/** Stable fingerprint of one compiled spec — see RunSummary.screenFingerprints. */
+export function hashSpec(spec: unknown): string {
+  return fnv1a(JSON.stringify(spec));
+}
+
+export function fingerprintScreens(screens: EvalScreen[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of screens) out[s.id] = hashSpec(s.spec);
+  return out;
+}
+
+export interface VersionField {
+  key: string;
+  label: string;
+  /** What the run recorded; null when it predates the field. */
+  recorded: string | null;
+  /** What this build would produce today. */
+  current: string | null;
+  /** Recorded and current disagree — the run is not comparable to today. */
+  drifted: boolean;
+}
+
+/**
+ * Compare a run's recorded versions against the live environment. Anything
+ * that drifted means the screens on screen are not the screens that were
+ * scored, so the UI marks it rather than quietly showing both together.
+ */
+export function compareVersions(
+  recorded: RunProvenance['versions'],
+  current: RunProvenance['versions'],
+): VersionField[] {
+  const field = (key: string, label: string, a: unknown, b: unknown): VersionField => {
+    const rec = a == null ? null : String(a);
+    const cur = b == null ? null : String(b);
+    return { key, label, recorded: rec, current: cur, drifted: rec != null && cur != null && rec !== cur };
+  };
+  return [
+    field('styleDna', 'StyleDNA', recorded.styleDnaHash, current.styleDnaHash),
+    field('styleDnaLabel', 'DNA set', recorded.styleDnaLabel, current.styleDnaLabel),
+    field('saverSpecFormat', 'SaverSpec format', `v${recorded.saverSpecFormat}`, `v${current.saverSpecFormat}`),
+    field('schemaPackage', 'schema pkg', recorded.schemaPackage, current.schemaPackage),
+    field('scorer', 'Scorer', recorded.scorer, current.scorer),
+    field('skill', 'Skill', recorded.skill, current.skill),
+  ];
+}
+
+/** Which screens are no longer the ones the run measured. */
+export function driftedScreens(
+  recorded: Record<string, string> | undefined,
+  current: Record<string, string>,
+): { supported: boolean; changed: string[]; added: string[]; removed: string[] } {
+  if (!recorded) return { supported: false, changed: [], added: [], removed: [] };
+  const changed: string[] = [];
+  const added: string[] = [];
+  for (const [id, hash] of Object.entries(current)) {
+    const was = recorded[id];
+    if (was == null) added.push(id);
+    else if (was !== hash) changed.push(id);
+  }
+  const removed = Object.keys(recorded).filter((id) => current[id] == null);
+  return { supported: true, changed, added, removed };
+}
+
 export function buildProvenance(
   profiles: ArtistStyleProfile[],
   req: RunRequest,
+  opts: { saverSpecFormat?: number } = {},
 ): RunProvenance {
   const systemPrompt = req.systemPrompt?.trim() || undefined;
   return {
@@ -67,7 +138,10 @@ export function buildProvenance(
     versions: {
       styleDnaHash: hashStyleDna(profiles),
       styleDnaLabel: STYLE_DNA_LABEL,
-      saverSpecFormat: 1,
+      // Read off the specs rather than hardcoded, so a format bump is recorded
+      // the moment the catalog emits it.
+      saverSpecFormat: opts.saverSpecFormat ?? 1,
+      schemaPackage: SCHEMA_PKG_VERSION,
       scorer: SCORER_ID,
       skill: SKILL_ID,
     },

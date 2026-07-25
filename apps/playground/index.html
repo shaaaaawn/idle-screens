@@ -384,6 +384,7 @@
       body.frame-mode #view-gallery,
       body.frame-mode #view-dev,
       body.frame-mode #view-evals,
+      body.frame-mode #view-settings,
       body.frame-mode #view-docs { display: none; }
 
       /* ================================================================
@@ -725,6 +726,112 @@
         font-size: 11px; color: var(--text-faint); margin-right: 4px;
         white-space: nowrap;
       }
+      /* ---- run version strip: what produced this run, and has it drifted ---- */
+      .evals-tl-versions {
+        display: flex; flex-wrap: wrap; gap: 4px;
+        padding: 8px 0 0;
+      }
+      .evals-ver-chip {
+        display: inline-flex; align-items: baseline; gap: 5px;
+        padding: 3px 7px; border-radius: 3px;
+        border: 1px solid var(--line); background: var(--bg-surface);
+        font: 10px/1.4 var(--mono);
+      }
+      .evals-ver-k { color: var(--text-faint); }
+      .evals-ver-v { color: #c8ced8; }
+      /* Drifted = this run's value no longer matches today's build. */
+      .evals-ver-chip.is-drift {
+        border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.09);
+      }
+      .evals-ver-chip.is-drift .evals-ver-v { color: var(--warn); }
+      .evals-ver-chip.is-drift .evals-ver-k::after { content: ' ⚠'; }
+
+      .evals-tl-drift {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        margin-top: 8px; padding: 8px 10px; border-radius: var(--r-sm);
+        border: 1px solid rgba(251,191,36,.35); background: rgba(251,191,36,.07);
+      }
+      .evals-tl-drift[hidden] { display: none; }
+      .evals-tl-drift-text { flex: 1; min-width: 0; font-size: 11.5px; color: var(--warn); }
+      .evals-tl-drift .evals-btn { flex: 0 0 auto; padding: 4px 10px; font-size: 11px; }
+
+      /* A tile whose spec no longer matches what the selected run scored. */
+      .evals-tile[data-drift='changed'] { border-color: rgba(251,191,36,.4); }
+      .evals-tile-drift {
+        font: 600 8px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em;
+        padding: 3px 5px; border-radius: 3px; align-self: flex-start;
+        color: var(--warn); background: rgba(251,191,36,.12);
+        border: 1px solid rgba(251,191,36,.3);
+      }
+
+      /* ---- run dialog: OpenRouter model picker + key ---- */
+      .evals-field input[readonly] {
+        opacity: .65; cursor: default;
+        background: var(--bg-sunken);
+      }
+      .evals-field-hint {
+        margin: -4px 0 10px; font-size: 11px; color: var(--text-faint);
+      }
+      .evals-conn {
+        margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--r-md);
+        background: var(--bg-sunken);
+      }
+      .evals-conn > summary {
+        list-style: none; cursor: pointer; user-select: none;
+        display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+        font: 500 12px/1 var(--sans); color: var(--text-dim);
+      }
+      .evals-conn > summary::-webkit-details-marker { display: none; }
+      .evals-conn > summary::before {
+        content: '▸'; font-size: 9px; opacity: .55;
+      }
+      .evals-conn[open] > summary::before { content: '▾'; }
+      .evals-conn-state {
+        margin-left: auto; font: 10px var(--mono); color: var(--text-faint);
+        padding: 3px 6px; border-radius: 3px; border: 1px solid var(--line);
+      }
+      .evals-conn-state.is-set { color: var(--ok); border-color: rgba(74,222,128,.35); }
+      .evals-conn-body { padding: 4px 12px 12px; border-top: 1px solid var(--line); }
+      .evals-conn-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+      .evals-conn-actions .evals-btn { padding: 5px 10px; font-size: 11px; }
+      .evals-conn-note {
+        margin: 0; font-size: 10.5px; line-height: 1.55; color: var(--text-faint);
+      }
+      .evals-conn-msg {
+        margin: 8px 0 0; font: 11px var(--mono); color: var(--ok); min-height: 1em;
+      }
+      .evals-conn-msg.is-bad { color: var(--bad); }
+
+      /* ================================================================
+         SETTINGS VIEW — browser-local connection + run defaults
+         ================================================================ */
+      #view-settings {
+        height: calc(100vh - var(--topbar-h));
+        overflow-y: auto;
+        background: #0e0e14;
+        color: #d8dde6;
+      }
+      #view-settings[hidden] { display: none; }
+      .settings-shell { max-width: 720px; margin: 0 auto; padding: 40px 24px 64px; }
+      .settings-head { margin-bottom: 24px; }
+      .settings-title { margin: 0; font: 650 22px/1.2 var(--sans); color: #fff; }
+      .settings-sub {
+        margin: 8px 0 0; font-size: 13px; line-height: 1.55;
+        color: var(--text-dim); max-width: 60ch;
+      }
+      .settings-section {
+        margin-top: 22px; padding: 18px 18px 16px;
+        border: 1px solid var(--line); border-radius: var(--r-md);
+        background: var(--bg-sunken);
+      }
+      .settings-section-title { margin: 0; font: 650 14px/1.2 var(--sans); color: #fff; }
+      .settings-section-sub { margin: 6px 0 14px; font-size: 12px; color: var(--text-dim); }
+      .settings-conn-state { margin: 0 0 10px; font: 11px var(--mono); color: var(--text-faint); }
+      .settings-conn-state.is-set { color: var(--ok); }
+      .settings-defaults { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .settings-saved { margin: 8px 0 0; font: 11px var(--mono); color: var(--ok); min-height: 1em; }
+      @media (max-width: 640px) { .settings-defaults { grid-template-columns: 1fr; } }
+
       .evals-intent-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
       .evals-check-chip {
         font: 10px/1 var(--mono); padding: 4px 7px; border-radius: 3px;
@@ -1227,9 +1334,14 @@
       }
 
       /* timeline */
-      .timeline-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--wb-bg); }
+      .timeline-panel {
+        --tl-label-w: 88px; --tl-value-w: 62px;
+        display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--wb-bg);
+      }
+      .timeline-panel:focus { outline: none; }
+      .timeline-panel:focus-visible { outline: 1px solid var(--wb-accent); outline-offset: -1px; }
       .tl-transport {
-        display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px;
+        display: flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px;
         border-bottom: 1px solid var(--wb-border-subtle); flex: 0 0 auto;
         background: linear-gradient(180deg, #2a2a30 0%, #242428 100%);
       }
@@ -1239,7 +1351,19 @@
         background: var(--wb-bg-deep); border: 1px solid var(--wb-border); color: var(--wb-text);
       }
       .tl-btn:hover { border-color: var(--wb-accent); }
-      .tl-time { font: 10px ui-monospace, monospace; color: var(--wb-text-muted); min-width: 88px; }
+      .tl-btn:disabled { opacity: .35; cursor: not-allowed; border-color: var(--wb-border); }
+      .tl-time-input {
+        width: 56px; height: 22px; padding: 0 5px; text-align: right;
+        font: 10px var(--mono); color: var(--wb-text);
+        background: var(--wb-bg-deep); border: 1px solid var(--wb-border);
+      }
+      .tl-time-input:focus { outline: none; border-color: var(--wb-accent); }
+      .tl-time { font: 10px var(--mono); color: var(--wb-text-muted); }
+      .tl-edited {
+        font: 600 8px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em;
+        padding: 3px 5px; color: var(--warn);
+        background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.3);
+      }
       .tl-loop { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--wb-text-muted); cursor: pointer; }
       .tl-mode {
         font: 600 9px ui-monospace, monospace; text-transform: uppercase; letter-spacing: .05em;
@@ -1251,53 +1375,97 @@
         margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
 
-      .tl-track-area { flex: 1; position: relative; overflow-y: auto; cursor: crosshair; min-height: 0; }
+      .tl-track-area { flex: 1; position: relative; overflow: auto; min-height: 0; }
+      /* Relative wrapper inside the scroller so the playhead overlay and the
+         resize gutter span the full CONTENT height, not just the visible box. */
+      .tl-content { position: relative; min-height: 100%; }
 
       .tl-ruler {
-        display: grid; grid-template-columns: 72px 1fr 52px; height: 18px;
+        display: grid; grid-template-columns: var(--tl-label-w) 1fr var(--tl-value-w); height: 18px;
         border-bottom: 1px solid var(--wb-border-subtle); user-select: none;
         background: var(--wb-bg-deep);
         position: sticky; top: 0; z-index: 3;
       }
-      .tl-ruler-label { padding: 0 8px; font: 9px ui-monospace, monospace; color: var(--wb-text-muted); line-height: 18px; }
+      .tl-ruler-label { padding: 0 8px; font: 9px var(--mono); color: var(--wb-text-muted); line-height: 18px; }
+      .tl-ruler-track { position: relative; cursor: ew-resize; }
+      .tl-ruler-val {
+        padding: 0 6px; font: 9px var(--mono); color: var(--wb-text-muted);
+        line-height: 18px; text-align: right;
+      }
       .tl-mark {
         position: absolute; transform: translateX(-50%);
-        font: 9px ui-monospace, monospace; color: var(--wb-text-muted); top: 4px;
+        font: 9px var(--mono); color: var(--wb-text-muted); top: 4px; pointer-events: none;
       }
       .tl-lane {
-        display: grid; grid-template-columns: 72px 1fr 52px; align-items: center;
+        display: grid; grid-template-columns: var(--tl-label-w) 1fr var(--tl-value-w); align-items: center;
         height: 20px; border-bottom: 1px solid rgba(42,42,50,.4);
       }
       .tl-lane:hover { background: var(--wb-bg-hover); }
+      .tl-lane.is-selected { background: rgba(77,159,255,.08); }
+      .tl-lane.is-selected .tl-lane-label { color: var(--wb-text); }
       .tl-lane-label {
-        padding: 0 8px; font: 10px ui-monospace, monospace; color: var(--wb-text-muted);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        padding: 0 8px; font: 10px var(--mono); color: var(--wb-text-muted);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
       }
-      .tl-lane-track { position: relative; height: 12px; margin: 0 2px; background: var(--wb-bg-deep); border: 1px solid var(--wb-border-subtle); }
+      .tl-lane-track {
+        position: relative; height: 12px; margin: 0 2px;
+        background: var(--wb-bg-deep); border: 1px solid var(--wb-border-subtle);
+        cursor: ew-resize;
+      }
+      /* Ease is legible from the key's shape: step is hard, smooth is round. */
       .tl-keyframe {
-        position: absolute; top: 50%; width: 6px; height: 6px;
-        background: var(--wb-accent); transform: translate(-50%, -50%) rotate(45deg); z-index: 2;
+        position: absolute; top: 50%; width: 7px; height: 7px; padding: 0; border: none;
+        background: var(--wb-accent); transform: translate(-50%, -50%) rotate(45deg);
+        z-index: 2; cursor: ew-resize;
       }
+      .tl-keyframe[hidden] { display: none; }
+      .tl-key-step { border-radius: 0; transform: translate(-50%, -50%); }
+      .tl-key-linear { border-radius: 0; }
+      .tl-key-smooth { border-radius: 50%; transform: translate(-50%, -50%); }
+      .tl-keyframe:hover { background: #fff; }
+      .tl-keyframe.is-selected {
+        background: #ff6b35;
+        box-shadow: 0 0 0 2px rgba(255,107,53,.3);
+      }
+      .tl-keyframe:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
       .tl-segment {
         position: absolute; top: 50%; height: 2px;
         background: rgba(58,134,255,.35); transform: translateY(-50%);
       }
       .tl-segment-flat { background: rgba(58,134,255,.18); }
+      .tl-segment-step { background: rgba(58,134,255,.2); }
+      .tl-segment-linear { background: rgba(58,134,255,.45); }
+      .tl-segment-smooth { background: rgba(120,180,255,.55); height: 3px; }
       .tl-segment-playback { background: rgba(88,166,255,.22); height: 3px; }
       .tl-segment-motion { background: rgba(120,200,120,.22); height: 3px; }
       .tl-lane-value {
-        padding: 0 6px; font: 10px ui-monospace, monospace; opacity: .55;
+        padding: 0 6px; font: 10px var(--mono); opacity: .6;
         text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .tl-editable .tl-lane-value { cursor: text; }
+
+      .tl-overlay {
+        position: absolute; z-index: 4; pointer-events: none;
+        top: 0; bottom: 0;
+        left: calc(var(--tl-label-w) + 3px);
+        right: calc(var(--tl-value-w) + 3px);
       }
       .tl-playhead {
         position: absolute; top: 0; bottom: 0; width: 1px; background: #ff6b35;
-        z-index: 5; pointer-events: none;
+        pointer-events: none;
       }
+      .tl-playhead[hidden] { display: none; }
       .tl-playhead::before {
         content: ''; position: absolute; top: 0; left: -4px;
         border-left: 5px solid transparent; border-right: 5px solid transparent;
         border-top: 6px solid #ff6b35;
       }
+      .tl-gutter {
+        position: absolute; top: 0; bottom: 0; z-index: 6;
+        left: calc(var(--tl-label-w) - 2px); width: 5px;
+        cursor: col-resize; background: transparent;
+      }
+      .tl-gutter:hover { background: rgba(77,159,255,.35); }
 
       /* determinism demo */
       .determinism .lead { opacity: .8; }
@@ -1410,6 +1578,7 @@
         <a href="#dev" data-view="dev" role="tab" aria-selected="false">Dev Tools</a>
         <a href="#evals" data-view="evals" role="tab" aria-selected="false">Evals</a>
         <a href="#docs" data-view="docs" role="tab" aria-selected="false">Docs</a>
+        <a href="#settings" data-view="settings" role="tab" aria-selected="false">Settings</a>
       </nav>
       <span class="tb-spacer"></span>
       <div class="tb-actions">
@@ -1436,6 +1605,13 @@
          ============================================================ -->
     <div id="view-evals" hidden>
       <div id="evals-root"></div>
+    </div>
+
+    <!-- ============================================================
+         SETTINGS VIEW — browser-local OpenRouter key + run defaults
+         ============================================================ -->
+    <div id="view-settings" hidden>
+      <div id="settings-root"></div>
     </div>
 
     <!-- ============================================================

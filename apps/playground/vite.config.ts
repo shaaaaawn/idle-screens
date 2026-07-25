@@ -1,5 +1,16 @@
 import { defineConfig } from 'vite';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+// Eval runs record which @idle-screens/schema published the specs they scored:
+// `perceiveScene` / `adviseSpec` semantics can shift between package versions
+// at the SAME `schemaVersion: 1`, so the format number alone can't tell you
+// whether two runs are comparable. The package's `exports` map has no
+// `./package.json` entry, so read it here and inline it — playground-only, so
+// no new export from packages/schema and therefore no changeset.
+const schemaPkgVersion = (createRequire(import.meta.url)(
+  '../../packages/schema/package.json',
+) as { version: string }).version;
 
 // Resolve the workspace packages to their SOURCE, not their built dist. By default Vite
 // pre-bundles a linked package's `dist/` into its optimize cache and does NOT re-optimize
@@ -12,6 +23,7 @@ const src = (pkg: string): string =>
 
 export default defineConfig({
   base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
+  define: { __SCHEMA_PKG_VERSION__: JSON.stringify(schemaPkgVersion) },
   server: { port: 5177, strictPort: true },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a

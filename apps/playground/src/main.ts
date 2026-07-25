@@ -21,6 +21,7 @@ import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
+import { buildSettingsPanel } from './settings-panel';
 import { buildGallery, type GalleryGroup } from './gallery';
 import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
 
@@ -152,10 +153,18 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
   mount.append(filter, tree);
 }
 
+/** Derived from the group a saver was registered in, so a new package can't
+ *  silently show up attributed to savers-classic. */
+const PACKAGE_BY_ID = new Map<string, string>(
+  SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
+);
+
 function packageFor(saver: SaverPlugin): string {
-  if (saver.manifest.id === 'black-hole') return '@idle-screens/saver-black-hole';
-  if (SCHEMA_IDS.has(saver.manifest.id)) return '@idle-screens/schema';
-  return '@idle-screens/savers-classic';
+  const id = saver.manifest.id;
+  const registered = PACKAGE_BY_ID.get(id);
+  if (registered) return registered;
+  // Compiled specs mounted outside SAVER_GROUPS (aquarium, rain) still resolve.
+  return SCHEMA_IDS.has(id) ? '@idle-screens/schema' : '@idle-screens/savers-classic';
 }
 
 const params = new URLSearchParams(location.search);
@@ -401,7 +410,7 @@ function liveMode(): void {
   void wireCapabilitiesHarness(ALL_SAVERS);
   wireSchemaHarness();
 
-  type View = 'gallery' | 'dev' | 'docs' | 'evals';
+  type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';
   let currentView: View = 'gallery';
 
   // ========== FULLSCREEN PREVIEW (shared by Gallery + Dev Tools) ==========
@@ -450,6 +459,14 @@ function liveMode(): void {
   let devInitialized = false;
   let docsInitialized = false;
   let evalsInitialized = false;
+  let settingsInitialized = false;
+
+  const initSettings = (): void => {
+    if (settingsInitialized) return;
+    settingsInitialized = true;
+    const mount = document.getElementById('settings-root');
+    if (mount) buildSettingsPanel(mount);
+  };
 
   const initDocs = (): void => {
     if (docsInitialized) return;
@@ -587,6 +604,7 @@ function liveMode(): void {
   const devView = document.getElementById('view-dev')!;
   const docsView = document.getElementById('view-docs')!;
   const evalsView = document.getElementById('view-evals')!;
+  const settingsView = document.getElementById('view-settings')!;
 
   const scrollDocsAnchor = (anchor: string | null): void => {
     if (!anchor) return;
@@ -599,6 +617,7 @@ function liveMode(): void {
     const raw = location.hash.replace(/^#/, '');
     if (raw === 'dev') return { view: 'dev', docsAnchor: null };
     if (raw === 'evals') return { view: 'evals', docsAnchor: null };
+    if (raw === 'settings') return { view: 'settings', docsAnchor: null };
     if (raw === 'docs') return { view: 'docs', docsAnchor: null };
     if (raw.startsWith('docs/')) return { view: 'docs', docsAnchor: raw.slice(5) };
     if (raw.startsWith('api-')) return { view: 'docs', docsAnchor: raw };
@@ -614,6 +633,7 @@ function liveMode(): void {
     devView.hidden = view !== 'dev';
     docsView.hidden = view !== 'docs';
     evalsView.hidden = view !== 'evals';
+    settingsView.hidden = view !== 'settings';
     document.querySelectorAll('#topbar nav a').forEach((a) => {
       const on = (a as HTMLElement).dataset.view === view;
       a.classList.toggle('active', on);
@@ -621,6 +641,7 @@ function liveMode(): void {
     });
     if (view === 'dev') initDev();
     if (view === 'evals') initEvals();
+    if (view === 'settings') initSettings();
     if (view === 'docs') {
       initDocs();
       scrollDocsAnchor(docsAnchor);

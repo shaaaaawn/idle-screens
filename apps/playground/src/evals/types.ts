@@ -163,6 +163,14 @@ export interface RunProvenance {
     styleDnaLabel: string;
     /** SaverSpec format version (FORMAT.md schemaVersion). */
     saverSpecFormat: number;
+    /**
+     * npm version of @idle-screens/schema that compiled + perceived these
+     * specs. Distinct axis from the format number: `perceiveScene` and
+     * `adviseSpec` semantics can change between package versions while
+     * `schemaVersion` stays 1, which moves scores without moving the format.
+     * Optional — runs recorded before this was captured simply won't have it.
+     */
+    schemaPackage?: string;
     /** Scorer identity — bump when composite weights/bands change. */
     scorer: string;
     /** Skill / prompt pack identity. */
@@ -226,6 +234,19 @@ export interface RunSummary {
   }>;
   gapHistogram: Array<{ gap: string; count: number }>;
   failures: Array<{ screenId: string; reason: string }>;
+  /**
+   * `screenId → fnv1a(spec)` for every screen this run actually scored.
+   *
+   * The grid always renders TODAY's specs while the scores come from the
+   * selected run, and screen ids (`monet--benchmark--calm-horizon`) survive any
+   * StyleDNA edit — so without this a stale score lands on a visually different
+   * tile with nothing to indicate it. ~150 hashes ≈ 7KB, versus ~300KB to
+   * snapshot the specs themselves. It can't replay the old art, but it can say
+   * exactly which screens are no longer what was measured.
+   *
+   * Optional: runs recorded before this existed report "not recorded".
+   */
+  screenFingerprints?: Record<string, string>;
   /** Diff vs parent when available. */
   delta?: RunDelta;
   /** Pointers for the next cycle — the primary self-improvement input. */

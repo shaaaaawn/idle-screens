@@ -3,8 +3,19 @@ import { compileSaver } from '@idle-screens/schema';
 import { getCatalog } from './catalog';
 import { createChamber, type ChamberEntry } from './chamber';
 import { buildInspector } from './inspector';
+import {
+  buildProvenance,
+  compareVersions,
+  driftedScreens,
+  fingerprintScreens,
+} from './provenance';
 import { listRuns, loadRun, saveBrowserRun } from './run-store';
-import { buildRunTimeline, promptRunRequest, type RunTimelineHandle } from './run-timeline';
+import {
+  buildRunTimeline,
+  promptRunRequest,
+  type RunTimelineHandle,
+  type ScreenDrift,
+} from './run-timeline';
 import { scoreSuite } from './score';
 import type { BenchmarkIntent, EvalScreen, RunSummary, ScreenScore } from './types';
 
@@ -117,6 +128,8 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   let hoveredTile: string | null = null;
   let gridLive = true;
   let tileObserver: IntersectionObserver | null = null;
+  /** Which screens changed since the selected run scored them (null = no run). */
+  let screenDrift: ScreenDrift | null = null;
 
   mount.innerHTML = `
     <div class="evals-shell">
@@ -205,6 +218,16 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     exportBtn.disabled = false;
     timeline.select(summary.runId);
     timeline.setProvenance(summary);
+
+    // Compare what this run recorded against what this build would produce now.
+    // The grid renders today's screens, so any drift has to be stated.
+    const currentVersions = buildProvenance(catalog.artists, {
+      label: '',
+      note: '',
+      harness: 'playground-ui',
+    }, { saverSpecFormat: catalog.screens[0]?.spec.schemaVersion ?? 1 }).versions;
+    screenDrift = driftedScreens(summary.screenFingerprints, fingerprintScreens(catalog.screens));
+    timeline.setVersions(summary, compareVersions(summary.provenance.versions, currentVersions), screenDrift);
     // After refreshView, not before: renderGrid unconditionally rewrites the
     // subtitle, so setting it first meant the provenance line never showed.
     refreshView();
@@ -245,6 +268,11 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   const timeline: RunTimelineHandle = buildRunTimeline(timelineHost, {
     onSelect: selectRun,
     onNewRun: () => {
+      void startNewRun();
+    },
+    // Re-scoring produces a NEW run; the drifted one stays as the record of
+    // what was true when it was taken.
+    onRescore: () => {
       void startNewRun();
     },
   });
@@ -351,6 +379,17 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     metaEl.className = 'evals-tile-meta';
     metaEl.textContent = scored ? `${meta} · ${scored.score.toFixed(2)}` : meta;
     head.append(nameEl, metaEl);
+
+    // This tile is not the one the selected run measured — say so on the tile
+    // itself, because the score badge next to it is from the old screen.
+    if (scored && screenDrift?.changed.includes(s.id)) {
+      tile.dataset.drift = 'changed';
+      const flag = document.createElement('span');
+      flag.className = 'evals-tile-drift';
+      flag.textContent = 'changed since scored';
+      flag.title = 'This spec differs from the one the selected run scored — the number beside it is stale.';
+      head.append(flag);
+    }
 
     const stage = document.createElement('div');
     stage.className = 'evals-tile-stage';
