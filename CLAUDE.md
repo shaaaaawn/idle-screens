@@ -2,25 +2,27 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Six publishable packages + three apps:
+pnpm workspace monorepo. Seven publishable packages + three apps:
 
 ```
 packages/
   core/              @idle-screens/core         -- engine, <idle-screen> element, idle detection,
                                                    plugin registry, seeded RNG, control-track, types
   saver-black-hole/  @idle-screens/saver-black-hole  -- passthrough gravitational-lensing saver
+  saver-tide/        @idle-screens/saver-tide         -- passthrough water saver: Jacobian-driven
+                                                         affine deformation of live page blocks
   savers-classic/    @idle-screens/savers-classic     -- 19 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
 apps/
-  playground/        Vite dev workbench (imports all 6; dev-only, not published)
+  playground/        Vite dev workbench (imports all 7; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
   linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
 docs/                Design docs (specs, research)
 ```
 
-**Dependency graph:** `core` is the foundation. `saver-black-hole`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
+**Dependency graph:** `core` is the foundation. `saver-black-hole`, `saver-tide`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
 
 ## Commands (run from repo root)
 
@@ -48,7 +50,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 **Control track.** Implemented with `step`/`linear`/`smooth` eases and `number`/`color`/`bool`/`enum` param types. `applyTrack(state, track, t)` interpolates params at time `t`. The determinism proof is exercised by Playwright e2e tests on the black hole saver.
 
-**Passthrough savers.** A saver with `manifest.passthrough: true` renders with a transparent canvas (`alpha: true`) and uses `destination-out` compositing to punch a transparent hole through a dark mask, letting the live page show through. The black hole and spotlight are passthrough savers.
+**Passthrough savers.** A saver with `manifest.passthrough: true` renders with a transparent canvas (`alpha: true`) — either compositing `destination-out` to punch a hole through a dark mask, or simply drawing translucently — letting the live page show through, and may transform the page's own blocks via `ctx.page.victims()`. Black hole, tide, and spotlight are the passthrough savers.
 
 **The `<idle-screen>` custom element.** Defined by `core`, it owns the dialog overlay, idle detection, plugin mount/unmount, and fade transitions. Consumers hand it an engine instance imperatively (`el.engine = engine`).
 
@@ -67,7 +69,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 ## Releasing (changesets)
 
-Changesets version and publish **only the six npm packages** in `packages/`. They
+Changesets version and publish **only the seven npm packages** in `packages/`. They
 do not gate CI, the playground, or the Mac app.
 
 ### When to add a changeset
@@ -78,7 +80,7 @@ consumer-facing changes in any publishable package:
 | Change | Typical package(s) | Bump |
 | --- | --- | --- |
 | Engine / element / worker API | `@idle-screens/core` | minor or patch |
-| New or changed saver | `@idle-screens/savers-classic` or `@idle-screens/saver-black-hole` | minor |
+| New or changed saver | `@idle-screens/savers-classic`, `@idle-screens/saver-black-hole` or `@idle-screens/saver-tide` | minor |
 | Schema format or compiler | `@idle-screens/schema` | minor (breaking → major) |
 | Validator or capabilities API | `@idle-screens/validator` or `@idle-screens/capabilities` | minor or patch |
 

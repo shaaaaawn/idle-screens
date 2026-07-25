@@ -77,6 +77,9 @@ importers:
       '@idle-screens/saver-black-hole':
         specifier: workspace:*
         version: link:../../packages/saver-black-hole
+      '@idle-screens/saver-tide':
+        specifier: workspace:*
+        version: link:../../packages/saver-tide
       '@idle-screens/savers-classic':
         specifier: workspace:*
         version: link:../../packages/savers-classic
@@ -99,6 +102,12 @@ importers:
         version: 1.14.3
 
   packages/saver-black-hole:
+    devDependencies:
+      '@idle-screens/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/saver-tide:
     devDependencies:
       '@idle-screens/core':
         specifier: workspace:*

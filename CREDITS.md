@@ -39,6 +39,7 @@ The following savers are original to this project:
 | Saver | Notes |
 | --- | --- |
 | Black Hole | Passthrough gravitational-lensing saver. Original. |
+| Tide | Passthrough water saver: a rising wave field whose analytic Jacobian is handed to each page block as a real affine transform, so live content shears and refracts rather than merely translating. Buoyant blocks raft on the surface; heavy ones sink out of focus. Original. |
 | DVD Bouncing Logo | Inspired by the DVD player idle screen. Original implementation. |
 | Warp | Starfield warp effect. Original canvas2d implementation. |
 | Pipes | 3D pipe growth. Original canvas2d implementation. |
