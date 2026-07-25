@@ -350,25 +350,10 @@ export function promptRunRequest(defaults: {
         <details class="evals-conn">
           <summary>OpenRouter connection <span class="evals-conn-state" data-role="conn-state"></span></summary>
           <div class="evals-conn-body">
-            <label class="evals-field">API key
-              <!-- Deliberately no name= : FormData must never carry the key, so
-                   it cannot reach RunRequest / provenance / exports by accident. -->
-              <input type="password" autocomplete="off" spellcheck="false"
-                     data-role="or-key" placeholder="sk-or-v1-…" />
-            </label>
-            <div class="evals-conn-actions">
-              <button type="button" class="evals-btn secondary" data-act="key-save">Save key</button>
-              <button type="button" class="evals-btn secondary" data-act="key-verify">Verify</button>
-              <button type="button" class="evals-btn secondary" data-act="key-clear">Clear</button>
-              <button type="button" class="evals-btn secondary" data-act="models-refresh">Refresh models</button>
-            </div>
-            <p class="evals-conn-note">
-              Stored in this browser only (localStorage, this origin) — there is no server here.
-              Browsing models sends no credential; the key is transmitted only when you press Verify,
-              and never enters run provenance or an exported example. Any script on this origin can
-              read localStorage, so treat it like any other browser-stored token.
+            <div data-role="connection"></div>
+            <p class="evals-conn-settings">
+              <a href="#settings" data-act="open-settings">Manage in Settings →</a>
             </p>
-            <p class="evals-conn-msg" data-role="conn-msg"></p>
           </div>
         </details>
         <label class="evals-field">Operator
@@ -394,6 +379,22 @@ export function promptRunRequest(defaults: {
       resolve(value);
     };
     wireOpenRouter(backdrop, form);
+
+    // Prefill what the Settings page saved — set once there, not per run.
+    const storedDefaults = getRunDefaults();
+    const operatorInput = form.querySelector<HTMLInputElement>('input[name="operator"]');
+    const modelInput = form.querySelector<HTMLInputElement>('input[name="model"]');
+    if (operatorInput && storedDefaults.operator) operatorInput.value = storedDefaults.operator;
+    if (modelInput && storedDefaults.model) {
+      modelInput.value = storedDefaults.model;
+      modelInput.dispatchEvent(new Event('input')); // derive the provider
+    }
+
+    backdrop.querySelector('[data-act="open-settings"]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      close(null); // leaving the run setup — the form is discarded
+      location.hash = 'settings';
+    });
     backdrop.querySelector('[data-act="cancel"]')?.addEventListener('click', () => close(null));
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) close(null);
