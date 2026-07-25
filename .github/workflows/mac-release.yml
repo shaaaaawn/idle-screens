@@ -64,7 +64,7 @@ jobs:
         run: ./scripts/notarize.sh
 
       - name: Publish DMG to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: apps/mac/dist/IdleScreens.dmg
           fail_on_unmatched_files: true
