@@ -1,11 +1,32 @@
 # Eval cycle — runs, scoring, gaps
 
+## Run timeline (growth substrate)
+
+The playground `#evals` tab has a **Run timeline** at the top. Every suite
+execution is a node with provenance:
+
+| Field | Why it matters |
+| --- | --- |
+| harness | `playground-ui` / `headless-vitest` / `agent-loop` / `mcp` |
+| model + operator | who authored / scored |
+| styleDnaHash | did the artist catalog change? |
+| saverSpecFormat + scorer + skill | version drift detectors |
+| systemPrompt (+ hash) | prompt pack used this cycle |
+| parentRunId + delta | growth / regression vs prior |
+| nextCycle.suggestedActions | concrete inputs for the next tick |
+
+Artifacts live in `apps/playground/src/evals/runs/`:
+- `index.json` — timeline rail (newest first)
+- `<runId>/summary.json` — full provenance + scores
+- `<runId>/results.jsonl` — per-screen scores
+- `<runId>/gaps.md` — human next-cycle brief
+- Playground UI runs also persist in `localStorage` and merge into the rail
+
+Never edit a past summary to make a new run look better — write a new run and diff.
+
 ## Run ID
 
 `run-YYYYMMDD-HHMM-<shortnote>` e.g. `run-20260725-1200-baseline-v0`
-
-Each run is append-only. Never edit a past summary to make a new run look
-better — write a new run and diff.
 
 ## Scoring composite
 

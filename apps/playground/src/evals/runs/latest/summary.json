@@ -315,6 +315,37 @@
       "Cypress silhouette as path-of-marks only",
       "No true pointillist size-locked dot grid with hue statistics",
       "No optical-mix preview metric"
+    ],
+    "suggestedActions": [
+      "Diversify applicator recipes for collapsed benchmarks: dense-field, layered-depth",
+      "Graduate top schema gap → spec-feature-pipeline: No true broken-brush / dab sprite",
+      "Suite healthy on validity — extend contrast via DNA depth-model branching"
     ]
+  },
+  "provenance": {
+    "harness": "headless-vitest",
+    "label": "baseline v0",
+    "note": "Initial StyleDNA catalog — 15 artists × 10 screens. Locked growth origin.",
+    "operator": "scaffold",
+    "versions": {
+      "styleDnaHash": "1d6b1654",
+      "styleDnaLabel": "artists@15",
+      "saverSpecFormat": 1,
+      "scorer": "style-eval-score@1",
+      "skill": "artistic-style-schema-eval@1"
+    },
+    "prompts": {
+      "skillPath": ".claude/skills/artistic-style-schema-eval/SKILL.md",
+      "benchmarkSource": "apps/playground/src/evals/benchmarks.ts@v1"
+    },
+    "scoringBands": {
+      "minCoverage": 0.002,
+      "minLuminanceVar": 0.00005,
+      "weights": {
+        "perception": 0.35,
+        "styleFit": 0.35,
+        "intentFit": 0.3
+      }
+    }
   }
 }

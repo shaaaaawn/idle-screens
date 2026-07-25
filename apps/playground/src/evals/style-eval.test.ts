@@ -25,12 +25,23 @@ describe('artistic style eval catalog', () => {
     }
   });
 
-  it('scoreSuite produces a summary with nextCycle hooks', () => {
-    const { summary, results } = scoreSuite(catalog.screens, catalog.artists, 'test-run');
+  it('scoreSuite produces a summary with provenance and nextCycle hooks', () => {
+    const { summary, results } = scoreSuite(catalog.screens, catalog.artists, {
+      runId: 'test-run',
+      request: {
+        label: 'unit test',
+        note: 'provenance smoke',
+        harness: 'headless-vitest',
+        modelName: 'test-harness',
+      },
+    });
     expect(results).toHaveLength(150);
     expect(summary.perArtist).toHaveLength(15);
     expect(summary.perBenchmark).toHaveLength(5);
-    expect(summary.nextCycle).toBeDefined();
+    expect(summary.provenance.harness).toBe('headless-vitest');
+    expect(summary.provenance.versions.styleDnaHash).toMatch(/^[0-9a-f]{8}$/);
+    expect(summary.provenance.model?.name).toBe('test-harness');
+    expect(summary.nextCycle.suggestedActions.length).toBeGreaterThan(0);
     expect(summary.suiteMedian).toBeGreaterThan(0);
   });
 });

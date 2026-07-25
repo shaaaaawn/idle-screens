@@ -140,10 +140,11 @@ Write under `apps/playground/src/evals/runs/<runId>/`:
 ## Playground
 
 1. `pnpm --filter @idle-screens/playground dev` → open `#evals`
-2. Pick artist → browse bench/signature screens → preview
-3. **Run suite** → download/copy run artifact
-4. Headless: `pnpm --filter @idle-screens/playground eval:styles` → `evals/runs/latest/`
-5. Compare to previous run before changing DNA or schema
+2. **Run timeline** (top) — select a past run for provenance / next-cycle inputs
+3. **New run…** — capture harness, model, system prompt, note, parent; scores append to the timeline
+4. **Compare** — one benchmark × all artists; **By artist** for signatures
+5. Headless: `pnpm --filter @idle-screens/playground eval:styles` → `evals/runs/` + `index.json`
+6. Never start a cycle blank — read the selected run's `nextCycle.suggestedActions`
 
 ## Additional resources
 

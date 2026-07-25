@@ -13,8 +13,11 @@ carry named artistic styles.
 | `style-apply.ts` | DNA × intent → SaverSpec |
 | `score.ts` | validate / perceive / style-fit / intent-fit |
 | `catalog.ts` | memoized 150-screen catalog |
-| `evals-panel.ts` | playground UI |
-| `run-baseline.ts` | headless runner → `runs/<runId>/` |
+| `evals-panel.ts` | playground UI (timeline + Compare + By artist) |
+| `run-timeline.ts` | run timeline rail + new-run provenance modal |
+| `run-store.ts` | disk index + browser localStorage merge |
+| `provenance.ts` | StyleDNA hash, RunProvenance builder, deltas |
+| `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
 | `runs/` | append-only run artifacts for the next cycle |
 
 ## Counts
@@ -27,7 +30,7 @@ carry named artistic styles.
 ## Run
 
 ```bash
-# Playground UI
+# Playground UI — Compare mode is default: one benchmark × all artists
 pnpm --filter @idle-screens/playground dev
 # open http://localhost:5173/#evals
 

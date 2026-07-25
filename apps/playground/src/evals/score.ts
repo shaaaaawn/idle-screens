@@ -1,7 +1,15 @@
 import { adviseSpec, perceiveScene, validateSpec } from '@idle-screens/schema';
-import type { SaverSpec } from '@idle-screens/schema';
+import type { SaverSpec, ScenePerception } from '@idle-screens/schema';
 import { BENCHMARK_INTENTS } from './benchmarks';
-import type { ArtistStyleProfile, BenchmarkIntent, EvalScreen, RunSummary, ScreenScore } from './types';
+import { buildProvenance, computeDelta, suggestedActionsFrom } from './provenance';
+import type {
+  ArtistStyleProfile,
+  BenchmarkIntent,
+  EvalScreen,
+  RunRequest,
+  RunSummary,
+  ScreenScore,
+} from './types';
 
 const DEFAULT_VIEWPORT = { width: 1920, height: 1080 };
 const SAMPLE_T = 5000;
@@ -65,8 +73,56 @@ function densityFit(spec: SaverSpec, profile: ArtistStyleProfile): number {
   return 0.25;
 }
 
+/** One row of a score explanation — the UI renders these verbatim. */
+export interface ScoreTerm {
+  label: string;
+  /** Weight this term carries in its parent score. */
+  weight: number;
+  /** Normalised 0..1 result. */
+  value: number;
+  /** What was actually measured, in the reader's units. */
+  actual: string;
+  /** What the test wanted. */
+  expected: string;
+}
+
+/** Style-fit decomposed. Kept beside `styleFit` so the two cannot drift. */
+export function explainStyleFit(spec: SaverSpec, profile: ArtistStyleProfile): ScoreTerm[] {
+  const palette = paletteOverlap(spec, profile);
+  const motion = motionDialectFit(spec, profile);
+  const density = densityFit(spec, profile);
+  const total = spec.layers.reduce((n, l) => n + l.count, 0);
+  const expected = 40 * profile.composition.densityScale * profile.composition.layerCountHint;
+  const preferred = profile.motionDialect.preferred;
+  const onDialect = spec.layers.filter((l) => preferred.includes(l.motion.type as never)).length;
+  return [
+    {
+      label: 'palette overlap',
+      weight: 0.45,
+      value: palette,
+      actual: `${Math.round(palette * profile.palette.accents.length)}/${profile.palette.accents.length} accents matched`,
+      expected: `spec colours within ΔE 0.22 of the profile's accents`,
+    },
+    {
+      label: 'motion dialect',
+      weight: 0.35,
+      value: motion,
+      actual: `${onDialect}/${spec.layers.length} layers use ${preferred.join('/') || '(any)'}`,
+      expected: 'every layer moves in the artist’s preferred dialect',
+    },
+    {
+      label: 'density',
+      weight: 0.2,
+      value: density,
+      actual: `${total} entities vs ~${Math.round(expected)} expected`,
+      expected: '0.45×–2.2× the profile’s expected entity count',
+    },
+  ];
+}
+
 function styleFit(spec: SaverSpec, profile: ArtistStyleProfile): number {
-  return 0.45 * paletteOverlap(spec, profile) + 0.35 * motionDialectFit(spec, profile) + 0.2 * densityFit(spec, profile);
+  const terms = explainStyleFit(spec, profile);
+  return terms.reduce((acc, t) => acc + t.weight * t.value, 0);
 }
 
 function layerSpeeds(spec: SaverSpec): number[] {
@@ -78,32 +134,100 @@ function layerSpeeds(spec: SaverSpec): number[] {
   });
 }
 
-function intentFit(screen: EvalScreen, spec: SaverSpec, perception: ScreenScore['perception']): number {
-  if (screen.kind === 'signature') return 1;
+/**
+ * The benchmark rubric, check by check — this IS the test the screen is being
+ * put to, so the UI shows it rather than only the number it collapses into.
+ * `intentFit` averages these, so the panel and the score can never disagree.
+ */
+export function explainIntentFit(
+  screen: EvalScreen,
+  spec: SaverSpec,
+  perception: ScreenScore['perception'],
+): ScoreTerm[] {
+  if (screen.kind === 'signature') return [];
   const intent: BenchmarkIntent | undefined = BENCHMARK_INTENTS.find((b) => b.id === screen.screenId);
-  if (!intent) return 0.5;
-  const parts: number[] = [];
+  if (!intent) return [];
+  const terms: ScoreTerm[] = [];
   const c = intent.checks;
-  if (c.minLayers != null) parts.push(spec.layers.length >= c.minLayers ? 1 : 0);
-  if (c.maxLayers != null) parts.push(spec.layers.length <= c.maxLayers ? 1 : 0);
-  if (c.minCoverage != null) parts.push(perception.coverage >= c.minCoverage ? 1 : 0.3);
-  if (c.maxCoverage != null) parts.push(perception.coverage <= c.maxCoverage ? 1 : 0.4);
-  if (c.requirePulse) parts.push(spec.layers.some((l) => l.pulse) ? 1 : 0);
+  const pct1 = (n: number): string => `${(n * 100).toFixed(1)}%`;
+
+  if (c.minLayers != null) {
+    terms.push({
+      label: 'layer count (min)',
+      weight: 1,
+      value: spec.layers.length >= c.minLayers ? 1 : 0,
+      actual: `${spec.layers.length} layers`,
+      expected: `≥ ${c.minLayers}`,
+    });
+  }
+  if (c.maxLayers != null) {
+    terms.push({
+      label: 'layer count (max)',
+      weight: 1,
+      value: spec.layers.length <= c.maxLayers ? 1 : 0,
+      actual: `${spec.layers.length} layers`,
+      expected: `≤ ${c.maxLayers}`,
+    });
+  }
+  if (c.minCoverage != null) {
+    terms.push({
+      label: 'coverage (min)',
+      weight: 1,
+      value: perception.coverage >= c.minCoverage ? 1 : 0.3,
+      actual: pct1(perception.coverage),
+      expected: `≥ ${pct1(c.minCoverage)}`,
+    });
+  }
+  if (c.maxCoverage != null) {
+    terms.push({
+      label: 'coverage (max)',
+      weight: 1,
+      value: perception.coverage <= c.maxCoverage ? 1 : 0.4,
+      actual: pct1(perception.coverage),
+      expected: `≤ ${pct1(c.maxCoverage)}`,
+    });
+  }
+  if (c.requirePulse) {
+    const pulsing = spec.layers.filter((l) => l.pulse).length;
+    terms.push({
+      label: 'pulse present',
+      weight: 1,
+      value: pulsing > 0 ? 1 : 0,
+      actual: `${pulsing} pulsing layer${pulsing === 1 ? '' : 's'}`,
+      expected: '≥ 1 layer with pulse',
+    });
+  }
   if (c.requireSpeedSeparation) {
     const speeds = layerSpeeds(spec).filter((s) => s > 0);
-    if (speeds.length < 2) parts.push(0);
-    else {
-      const min = Math.min(...speeds);
-      const max = Math.max(...speeds);
-      parts.push(max >= min * 1.6 ? 1 : 0.35);
-    }
+    const min = speeds.length ? Math.min(...speeds) : 0;
+    const max = speeds.length ? Math.max(...speeds) : 0;
+    terms.push({
+      label: 'speed separation',
+      weight: 1,
+      value: speeds.length < 2 ? 0 : max >= min * 1.6 ? 1 : 0.35,
+      actual: speeds.length < 2 ? `${speeds.length} moving layer(s)` : `${(max / min).toFixed(2)}× spread`,
+      expected: '≥ 1.6× between slowest and fastest',
+    });
   }
   if (c.requireFocalDominance) {
-    parts.push(
-      perception.topDominanceShare >= 0.28 ? 1 : perception.topDominanceShare >= 0.15 ? 0.55 : 0.2,
-    );
+    const share = perception.topDominanceShare;
+    terms.push({
+      label: 'focal dominance',
+      weight: 1,
+      value: share >= 0.28 ? 1 : share >= 0.15 ? 0.55 : 0.2,
+      actual: `top layer holds ${pct1(share)}`,
+      expected: '≥ 28% of visual mass',
+    });
   }
-  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 1;
+  return terms;
+}
+
+function intentFit(screen: EvalScreen, spec: SaverSpec, perception: ScreenScore['perception']): number {
+  if (screen.kind === 'signature') return 1;
+  const intent = BENCHMARK_INTENTS.find((b) => b.id === screen.screenId);
+  if (!intent) return 0.5;
+  const terms = explainIntentFit(screen, spec, perception);
+  return terms.length ? terms.reduce((a, t) => a + t.value, 0) / terms.length : 1;
 }
 
 export function scoreScreen(
@@ -138,6 +262,8 @@ export function scoreScreen(
       },
       styleFit: 0,
       intentFit: 0,
+      perceptionOk: 0,
+      advisoryPenalty: 0,
       score: 0,
       notes: ['invalid spec', ...validationErrors],
     };
@@ -187,8 +313,71 @@ export function scoreScreen(
     perception: perc,
     styleFit: sf,
     intentFit: iff,
+    perceptionOk,
+    advisoryPenalty: advisoryPen,
     score,
     notes,
+  };
+}
+
+/**
+ * Everything the Evals inspector needs to explain one screen: the score, the
+ * terms it decomposes into, and the full perception bundle (braille picture,
+ * dominance, motion, advisories). Pure and cheap — no rendering — so the panel
+ * can compute it on selection rather than gating it behind "Run suite".
+ */
+export interface ScreenInspection {
+  score: ScreenScore;
+  scene: ScenePerception;
+  /** The three weighted terms of the headline score. */
+  topTerms: ScoreTerm[];
+  styleTerms: ScoreTerm[];
+  /** Empty for signature screens — they answer to the artist, not a shared intent. */
+  intentTerms: ScoreTerm[];
+  intent: BenchmarkIntent | null;
+}
+
+export function inspectScreen(
+  screen: EvalScreen,
+  profile: ArtistStyleProfile,
+  opts?: { viewport?: { width: number; height: number }; t?: number },
+): ScreenInspection {
+  const viewport = opts?.viewport ?? DEFAULT_VIEWPORT;
+  const t = opts?.t ?? SAMPLE_T;
+  const score = scoreScreen(screen, profile, { viewport, t });
+  const scene = perceiveScene(screen.spec, { viewport, t, seed: screen.spec.seed });
+  return {
+    score,
+    scene,
+    topTerms: [
+      {
+        label: 'perception',
+        weight: 0.35,
+        value: score.perceptionOk,
+        actual: `coverage ${(score.perception.coverage * 100).toFixed(1)}%, ${score.perception.entityCount} entities`,
+        expected: 'the scene registers at all (coverage ≥ 0.2%, non-flat luminance)',
+      },
+      {
+        label: 'style fit',
+        weight: 0.35,
+        value: score.styleFit,
+        actual: score.styleFit.toFixed(3),
+        expected: `matches ${profile.artist}’s palette, motion dialect and density`,
+      },
+      {
+        label: 'intent fit',
+        weight: 0.3,
+        value: score.intentFit,
+        actual: score.intentFit.toFixed(3),
+        expected:
+          screen.kind === 'signature'
+            ? 'n/a — signature screens are artist-owned'
+            : 'satisfies the shared benchmark rubric',
+      },
+    ],
+    styleTerms: explainStyleFit(screen.spec, profile),
+    intentTerms: explainIntentFit(screen, screen.spec, score.perception),
+    intent: BENCHMARK_INTENTS.find((b) => b.id === screen.screenId) ?? null,
   };
 }
 
@@ -209,11 +398,30 @@ function variance(xs: number[]): number {
   return xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length;
 }
 
+export interface ScoreSuiteOptions {
+  runId: string;
+  request: RunRequest;
+  /** Prior summary for delta + lineage (usually parent or latest). */
+  parentSummary?: RunSummary | null;
+}
+
 export function scoreSuite(
   screens: EvalScreen[],
   profiles: ArtistStyleProfile[],
-  runId: string,
+  runIdOrOpts: string | ScoreSuiteOptions,
 ): { results: ScreenScore[]; summary: RunSummary } {
+  const opts: ScoreSuiteOptions =
+    typeof runIdOrOpts === 'string'
+      ? {
+          runId: runIdOrOpts,
+          request: {
+            label: runIdOrOpts,
+            note: '',
+            harness: 'headless-vitest',
+          },
+        }
+      : runIdOrOpts;
+
   const byId = new Map(profiles.map((p) => [p.id, p]));
   const results = screens.map((s) => {
     const profile = byId.get(s.artistId) ?? profiles[0]!;
@@ -255,10 +463,16 @@ export function scoreSuite(
     .filter((b) => b.variance < 0.002 && b.median > 0)
     .map((b) => b.benchmarkId);
 
+  const provenance = buildProvenance(profiles, {
+    ...opts.request,
+    parentRunId: opts.request.parentRunId ?? opts.parentSummary?.runId,
+  });
+
   const summary: RunSummary = {
-    runId,
+    runId: opts.runId,
     createdAt: new Date().toISOString(),
     config: { viewport: DEFAULT_VIEWPORT, t: SAMPLE_T, seedFallback: 42 },
+    provenance,
     suiteMedian,
     perArtist,
     perBenchmark,
@@ -268,8 +482,14 @@ export function scoreSuite(
       weakArtists,
       collapsedBenchmarks,
       topGaps: gapHistogram.slice(0, 8).map((g) => g.gap),
+      suggestedActions: [],
     },
   };
+
+  if (opts.parentSummary) {
+    summary.delta = computeDelta(summary, opts.parentSummary);
+  }
+  summary.nextCycle.suggestedActions = suggestedActionsFrom(summary);
 
   return { results, summary };
 }
