@@ -693,11 +693,21 @@ test.describe('timeline panel', () => {
     await expect(page.locator('.tl-lane-label').first()).toHaveText('playback');
   });
 
+  const playBtn = (page: Page) => page.locator('.tl-btn[title^="Play"]');
+  const tlBtn = (page: Page, title: string) => page.locator(`.tl-btn[title^="${title}"]`);
+
+  /** The timeline auto-plays on selection; pause so playhead assertions are stable. */
+  const pauseTimeline = async (page: Page) => {
+    await page.waitForFunction(() => !!document.querySelector('.tl-keyframe'));
+    if ((await playBtn(page).textContent()) === '⏸') await playBtn(page).click();
+    await expect(playBtn(page)).toHaveText('▶');
+  };
+
   test('selecting a saver auto-plays the timeline preview', async ({ page }) => {
     await page.goto('/#dev');
     await page.waitForFunction(() => !!window.__idleScreens);
     await pickSaver(page, 'hard-rain');
-    await expect.poll(() => page.locator('.tl-btn').textContent()).toBe('⏸');
+    await expect.poll(() => playBtn(page).textContent()).toBe('⏸');
   });
 
   test('scrubbing the timeline updates black hole steer values', async ({ page }) => {
@@ -707,15 +717,146 @@ test.describe('timeline panel', () => {
     await expect(lane).toBeVisible();
     const readVal = () => lane.locator('.tl-lane-value').textContent();
 
-    const area = page.locator('.tl-track-area');
-    const box = (await area.boundingBox())!;
-    await page.mouse.click(box.x + 8, box.y + box.height * 0.5);
+    // Scrub from the lane TRACK, not the panel: clicking the channel name used
+    // to yank the playhead, which made selecting a channel impossible.
+    const track = lane.locator('.tl-lane-track');
+    const box = (await track.boundingBox())!;
+    await page.mouse.click(box.x + 4, box.y + box.height / 2);
     const atStart = await readVal();
 
-    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
     const atMid = await readVal();
-
     expect(atStart).not.toBe(atMid);
+  });
+
+  test('clicking a channel name selects it instead of scrubbing', async ({ page }) => {
+    await page.goto('/#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await pauseTimeline(page);
+    const lane = page.locator('.tl-lane').filter({ has: page.locator('.tl-lane-label', { hasText: 'diskBrightness' }) });
+    // Park the playhead somewhere non-zero first.
+    const track = lane.locator('.tl-lane-track');
+    const box = (await track.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
+    const before = await page.locator('.tl-time-input').inputValue();
+
+    await lane.locator('.tl-lane-label').click();
+    await expect(lane).toHaveClass(/is-selected/);
+    expect(await page.locator('.tl-time-input').inputValue()).toBe(before);
+  });
+
+  test('the time axis zooms, and tick density follows the visible span', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await page.waitForFunction(() => !!document.querySelector('.tl-mark'));
+    const span = () => page.locator('.tl-ruler-val').textContent();
+    const marks = () => page.locator('.tl-mark').allTextContents();
+
+    expect(await span()).toBe('24.0s');
+    const wide = await marks();
+
+    await tlBtn(page, 'Zoom in').click();
+    await tlBtn(page, 'Zoom in').click();
+    await tlBtn(page, 'Zoom in').click();
+    const zoomed = await span();
+    expect(parseFloat(zoomed!)).toBeLessThan(24);
+    // Zooming produces finer ticks rather than the same labels stretched apart.
+    expect(await marks()).not.toEqual(wide);
+
+    await tlBtn(page, 'Frame all').click();
+    expect(await span()).toBe('24.0s');
+  });
+
+  test('the playhead survives a panel resize', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await pauseTimeline(page);
+    const track = page.locator('.tl-lane-track').first();
+    const box = (await track.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
+
+    // Percentage positioning inside the track column, so a resize just
+    // repositions — the old pixel math had no resize listener at all.
+    const pctBefore = await page.locator('.tl-playhead').evaluate((el: HTMLElement) => el.style.left);
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await page.waitForTimeout(200);
+    expect(await page.locator('.tl-playhead').evaluate((el: HTMLElement) => el.style.left)).toBe(pctBefore);
+  });
+
+  test('keyframes can be retimed, and the edit survives re-selecting the saver', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await page.waitForFunction(() => !!document.querySelector('.tl-keyframe'));
+    const key = page.locator('.tl-keyframe[data-path="waterLevel"]').first();
+    expect(await key.getAttribute('data-t')).toBe('0');
+
+    const track = page.locator('.tl-lane-track[data-lane="waterLevel"]');
+    const box = (await track.boundingBox())!;
+    await key.hover();
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    const moved = await key.getAttribute('data-t');
+    expect(Number(moved)).toBeGreaterThan(0);
+    await expect(page.locator('.tl-edited')).toBeVisible();
+
+    // buildTimelineProfile re-derives the track on every selection — the owned
+    // copy has to win, or the edit is silently discarded.
+    await pickSaver(page, 'warp');
+    await pickSaver(page, 'tide');
+    await expect(page.locator('.tl-keyframe[data-path="waterLevel"]').first()).toHaveAttribute('data-t', moved!);
+  });
+
+  test('keyframes can be added, re-eased and removed, and reset restores the derived track', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await page.waitForFunction(() => !!document.querySelector('.tl-keyframe'));
+    const keys = page.locator('.tl-keyframe[data-path="tideSwing"]');
+    const before = await keys.count();
+
+    const track = page.locator('.tl-lane-track[data-lane="tideSwing"]');
+    const box = (await track.boundingBox())!;
+    await page.mouse.dblclick(box.x + box.width * 0.6, box.y + box.height / 2);
+    await expect(keys).toHaveCount(before + 1);
+
+    const added = keys.last();
+    await added.click();
+    await expect(added).toHaveClass(/is-selected/);
+    const easeBefore = await added.getAttribute('class');
+    await page.locator('.timeline-panel').press('e');
+    expect(await keys.last().getAttribute('class')).not.toBe(easeBefore);
+
+    await page.locator('.timeline-panel').press('Delete');
+    await expect(keys).toHaveCount(before);
+
+    await tlBtn(page, 'Discard').click();
+    await expect(page.locator('.tl-edited')).toBeHidden();
+    await expect(page.locator('.tl-keyframe[data-path="waterLevel"]').first()).toHaveAttribute('data-t', '0');
+    expect(await page.evaluate(() => localStorage.getItem('idleScreens.timeline.edit:tide'))).toBeNull();
+  });
+
+  test('keyboard drives the transport', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await pauseTimeline(page);
+    const panel = page.locator('.timeline-panel');
+    const time = page.locator('.tl-time-input');
+
+    await panel.press('Home');
+    await expect(time).toHaveValue('0.00');
+    await panel.press('ArrowRight');
+    await expect(time).toHaveValue('0.10');
+    await panel.press('ArrowLeft');
+    await expect(time).toHaveValue('0.00');
+    // ↓ jumps to the next keyframe rather than stepping.
+    await panel.press('ArrowDown');
+    expect(Number(await time.inputValue())).toBeGreaterThan(0.1);
+    await panel.press('End');
+    await expect(time).toHaveValue('24.00');
+  });
+
+  test('typing a time jumps the playhead', async ({ page }) => {
+    await page.goto('/?saver=tide#dev');
+    await pauseTimeline(page);
+    await page.locator('.tl-time-input').fill('7.5');
+    await page.locator('.tl-time-input').press('Enter');
+    await expect(page.locator('.tl-time-input')).toHaveValue('7.50');
   });
 });
 
