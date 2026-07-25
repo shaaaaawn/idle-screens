@@ -19,6 +19,7 @@ import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { formatBackendLabel, readPreviewBackend } from './preview-backend';
+import { buildEvalsPanel } from './evals/evals-panel';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession']);
 
@@ -413,12 +414,20 @@ function liveMode(): void {
   // ========== DEV VIEW (lazy-init on first navigate) ==========
   let devInitialized = false;
   let docsInitialized = false;
+  let evalsInitialized = false;
 
   const initDocs = (): void => {
     if (docsInitialized) return;
     docsInitialized = true;
     const mount = document.getElementById('docs-main');
     if (mount) buildDevDocs(mount);
+  };
+
+  const initEvals = (): void => {
+    if (evalsInitialized) return;
+    evalsInitialized = true;
+    const mount = document.getElementById('evals-root');
+    if (mount) buildEvalsPanel(mount);
   };
 
   const initDev = (): void => {
@@ -536,10 +545,11 @@ function liveMode(): void {
   };
 
   // ========== ROUTER ==========
-  type View = 'gallery' | 'dev' | 'docs';
+  type View = 'gallery' | 'dev' | 'docs' | 'evals';
   const galleryView = document.getElementById('view-gallery')!;
   const devView = document.getElementById('view-dev')!;
   const docsView = document.getElementById('view-docs')!;
+  const evalsView = document.getElementById('view-evals')!;
 
   const scrollDocsAnchor = (anchor: string | null): void => {
     if (!anchor) return;
@@ -551,6 +561,7 @@ function liveMode(): void {
   const parseHash = (): { view: View; docsAnchor: string | null } => {
     const raw = location.hash.replace(/^#/, '');
     if (raw === 'dev') return { view: 'dev', docsAnchor: null };
+    if (raw === 'evals') return { view: 'evals', docsAnchor: null };
     if (raw === 'docs') return { view: 'docs', docsAnchor: null };
     if (raw.startsWith('docs/')) return { view: 'docs', docsAnchor: raw.slice(5) };
     if (raw.startsWith('api-')) return { view: 'docs', docsAnchor: raw };
@@ -561,12 +572,14 @@ function liveMode(): void {
     galleryView.hidden = view !== 'gallery';
     devView.hidden = view !== 'dev';
     docsView.hidden = view !== 'docs';
+    evalsView.hidden = view !== 'evals';
     document.querySelectorAll('#topbar nav a').forEach((a) => {
       const on = (a as HTMLElement).dataset.view === view;
       a.classList.toggle('active', on);
       a.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     if (view === 'dev') initDev();
+    if (view === 'evals') initEvals();
     if (view === 'docs') {
       initDocs();
       scrollDocsAnchor(docsAnchor);
