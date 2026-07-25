@@ -18,6 +18,9 @@ async function pickSaver(page: Page, id: string): Promise<void> {
   }, id);
 }
 
+const previewOpen = (page: Page) =>
+  page.evaluate(() => document.body.classList.contains('pv-open') && !document.getElementById('stage')!.hidden);
+
 test.describe('gallery view', () => {
   test('default view shows a grid of saver thumbnail cards', async ({ page }) => {
     await page.goto('/');
@@ -26,13 +29,152 @@ test.describe('gallery view', () => {
     expect(count).toBeGreaterThanOrEqual(14);
   });
 
-  test('clicking a gallery card selects and sleeps the saver', async ({ page }) => {
+  test('clicking a gallery card selects the saver and opens the fullscreen preview', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => !!window.__idleScreens);
     expect(await active(page)).toBe('black-hole');
     await page.locator('.gallery-card[data-id="dvd"]').click();
     await expect.poll(() => active(page)).toBe('dvd');
     await expect(page.locator('.gallery-card[data-id="dvd"]')).toHaveClass(/active/);
+    await expect.poll(() => previewOpen(page)).toBe(true);
+    await expect(page.locator('.pv-name')).toHaveText('DVD Bouncing Logo');
+    // The preview is a VIEWER, not the screensaver: the engine stays awake.
+    expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
+  });
+
+  test('the preview survives mouse movement and exits on Escape', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('.gallery-card[data-id="dvd"]').click();
+    await expect.poll(() => previewOpen(page)).toBe(true);
+
+    // This is the whole point of the overlay: pointer movement must not dismiss.
+    for (const [x, y] of [[200, 200], [640, 380], [900, 150], [420, 500]] as const) {
+      await page.mouse.move(x, y, { steps: 8 });
+    }
+    await page.waitForTimeout(150);
+    expect(await previewOpen(page)).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect.poll(() => previewOpen(page)).toBe(false);
+  });
+
+  test('the preview exits on a click, but not on the click that opened it', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('.gallery-card[data-id="globe"]').click();
+    await expect.poll(() => previewOpen(page)).toBe(true);
+    await page.waitForTimeout(150); // opening gesture is over; overlay is armed
+    expect(await previewOpen(page)).toBe(true);
+
+    await page.mouse.click(640, 420);
+    await expect.poll(() => previewOpen(page)).toBe(false);
+  });
+
+  test('arrow keys step through savers without leaving the preview', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    // Don't hardcode the catalogue size — it grows every time a saver lands.
+    const total = await page.locator('.gallery-card').count();
+    await page.locator('.gallery-card[data-id="black-hole"]').click();
+    await expect(page.locator('.pv-pos')).toHaveText(`1 / ${total}`);
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('.pv-pos')).toHaveText(`2 / ${total}`);
+    expect(await previewOpen(page)).toBe(true);
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('.pv-pos')).toHaveText(`1 / ${total}`);
+  });
+
+  test('the idle screensaver does not fire on top of an open preview', async ({ page }) => {
+    // 1500ms, not 600: boot + first click has to finish before the timer can
+    // fire, or the engine sleeps before the preview is even open.
+    await page.goto('/?timeout=1500');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('.gallery-card[data-id="dvd"]').click();
+    await expect.poll(() => previewOpen(page)).toBe(true);
+    expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
+
+    await page.waitForTimeout(2600); // well past the idle timeout
+    expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
+    expect(await previewOpen(page)).toBe(true);
+
+    // ...and it resumes sleeping normally once the preview is dismissed.
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.evaluate(() => window.__idleScreens!.state()), { timeout: 5000 }).toBe('sleeping');
+  });
+
+  test('offscreen cards are paused and resume as they scroll into view', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+
+    const top = page.locator('.gallery-card[data-id="black-hole"]');
+    const last = page.locator('.gallery-card').last();
+
+    // On load: the first card runs, the bottom of the list does not.
+    await expect(top).toHaveAttribute('data-playing', 'true');
+    await expect(last).toHaveAttribute('data-playing', 'false');
+
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toHaveAttribute('data-playing', 'true');
+    await expect(top).toHaveAttribute('data-playing', 'false');
+  });
+
+  test('opening the preview pauses the grid behind it, and closing resumes it', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    const top = page.locator('.gallery-card[data-id="black-hole"]');
+    await expect(top).toHaveAttribute('data-playing', 'true');
+
+    await page.locator('.gallery-card[data-id="dvd"]').click();
+    await expect(top).toHaveAttribute('data-playing', 'false');
+
+    await page.keyboard.press('Escape');
+    await expect(top).toHaveAttribute('data-playing', 'true');
+  });
+
+  test('the preview blocks tabbing into the page behind it', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('.gallery-card[data-id="dvd"]').click();
+    await expect.poll(() => previewOpen(page)).toBe(true);
+
+    for (let i = 0; i < 6; i += 1) await page.keyboard.press('Tab');
+    const inOverlay = await page.evaluate(
+      () => !!document.activeElement?.closest('#stage') || document.activeElement === document.body,
+    );
+    expect(inOverlay).toBe(true);
+  });
+
+  test('the filter narrows the grid and hides empty package sections', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('#gallery-search').fill('rain');
+    await expect(page.locator('.gallery-card:not([hidden])')).toHaveCount(3);
+    await expect(page.locator('.gal-section[data-group="saver-black-hole"]')).toBeHidden();
+
+    await page.locator('#gallery-search').fill('');
+    await expect(page.locator('.gal-section[data-group="saver-black-hole"]')).toBeVisible();
+  });
+
+  test('the card shortcut hands the saver off to Dev Tools', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('.gallery-card[data-id="globe"] .gallery-card-dev').click();
+    await expect(page).toHaveURL(/#dev/);
+    await expect(page.locator('#dock-left .palette-item[data-id="globe"]')).toHaveClass(/active/);
+    await expect.poll(() => active(page)).toBe('globe');
+  });
+});
+
+test.describe('saver outliner (dev view)', () => {
+  test('the filter narrows the tree and hides empty groups', async ({ page }) => {
+    await page.goto('/#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await page.locator('#palette-search').fill('rain');
+    await expect(page.locator('#dock-left .palette-item:not([hidden])')).toHaveCount(3);
+    await expect(page.locator('#dock-left .palette-group').first()).toBeHidden();
   });
 });
 
@@ -141,6 +283,181 @@ test.describe('workbench (web components)', () => {
   });
 });
 
+test.describe('evals view', () => {
+  test('only one mode panel lays out at a time', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-shell'));
+    // Both modes used to render stacked because `.evals-body { display: grid }`
+    // outranks [hidden], producing a ~3800px column inside an overflow:hidden box.
+    await expect(page.locator('.evals-body')).toHaveCount(1);
+    const h = await page.evaluate(
+      () => document.querySelector('.evals-shell')!.getBoundingClientRect().height,
+    );
+    expect(h).toBeLessThan(page.viewportSize()!.height + 2);
+  });
+
+  test('the benchmark rubric is stated up front, not hidden behind a run', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await expect(page.locator('.evals-intent-title')).toContainText('shared intent');
+    await expect(page.locator('.evals-check-chip').first()).toBeVisible();
+    // Inspector defaults to Test and is populated without pressing "New run".
+    await expect(page.locator('.insp-tab.active')).toHaveText('Test');
+    await expect(page.locator('.insp-body')).toContainText('Hypothesis');
+  });
+
+  test('score decomposes into weighted terms with measured vs wanted', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('.insp-tab[data-tab="score"]').click();
+    await expect(page.locator('.insp-score')).toHaveText(/^0\.\d{3}$/);
+    await expect(page.locator('.insp-body')).toContainText('perception · ×0.35');
+    await expect(page.locator('.insp-term-detail').first()).toContainText('measured');
+    await expect(page.locator('.insp-term-detail').first()).toContainText('wanted');
+  });
+
+  test('perception shows the braille map the scores are built on', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('.insp-tab[data-tab="perception"]').click();
+    const braille = page.locator('.insp-braille');
+    await expect(braille).toBeVisible();
+    expect((await braille.textContent())!.length).toBeGreaterThan(200);
+    await expect(page.locator('.insp-body')).toContainText('Coverage');
+  });
+
+  test('by-artist is a gallery of that artist’s work, grouped by kind', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('.evals-mode-btn[data-mode="artist"]').click();
+    await expect(page.locator('.evals-grid-label')).toHaveText([
+      'Benchmarks — shared intents',
+      'Signatures — artist-owned',
+    ]);
+    expect(await page.locator('.evals-tile').count()).toBeGreaterThan(5);
+    // Same card component as compare mode — one interaction model everywhere.
+    await expect(page.locator('.evals-tile').first()).toHaveAttribute('data-screen-id', /.+/);
+  });
+
+  test('a new run scores every tile, lands on the timeline, and keeps its provenance line', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    const runNodes = page.locator('.evals-tl-node:not(.evals-tl-slot)');
+    const before = await runNodes.count();
+
+    await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-modal [name="label"]').fill('e2e run');
+    await page.locator('.evals-modal [name="note"]').fill('regression coverage');
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
+
+    await expect(runNodes).toHaveCount(before + 1);
+    // Scores reach the grid: every tile picks up its number.
+    await expect(page.locator('.evals-tile-meta').first()).toContainText(/·\s\d\.\d{2}/);
+    // renderGrid rewrites the subtitle, so applyRun has to set provenance AFTER it.
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('e2e run');
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('median');
+    await expect(page.locator('[data-act="export"]')).toBeEnabled();
+  });
+
+  test('the chamber closes when the route changes', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('[data-act="chamber"]').click();
+    await expect(page.locator('#evals-chamber')).toBeVisible();
+
+    // The host router has no handle on this overlay; a stranded chamber also
+    // leaves #topbar inert and the idle screensaver suppressed.
+    await page.goto('/#dev');
+    await expect(page.locator('#evals-chamber')).toBeHidden();
+    expect(await page.evaluate(() => document.getElementById('topbar')!.inert)).toBe(false);
+  });
+
+  test('a selected tile steps into the chamber, and Escape leaves', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    // The first tile is already selected on load, so use a second one to
+    // exercise both steps: one click selects, the next enters.
+    const tile = page.locator('.evals-tile').nth(1);
+    await tile.click();
+    await expect(tile).toHaveClass(/active/);
+    await expect(page.locator('#evals-chamber')).toBeHidden();
+
+    await tile.click();
+    await expect(page.locator('#evals-chamber')).toBeVisible();
+    await expect(page.locator('.ch-strip-item')).toHaveCount(15);
+    await expect(page.locator('.ch-pos')).toHaveText('2 / 15'); // entered on the 2nd artist
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('.ch-pos')).toHaveText('3 / 15');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#evals-chamber')).toBeHidden();
+  });
+});
+
+test.describe('right dock panels', () => {
+  // <details> wraps its content in an anonymous box, so the old
+  // `flex: 1 1 auto; min-height: 0` never shrank a panel body — it overflowed
+  // its panel and got clipped, hiding whatever sat at the bottom (the Engine
+  // action buttons, the Layers "+ Add Layer" button).
+  const openOnly = async (page: Page, names: string[]) =>
+    page.evaluate((want) => {
+      for (const p of document.querySelectorAll<HTMLDetailsElement>('#dock-right .wb-panel')) {
+        p.open = want.includes(p.querySelector('.wb-panel-head')!.textContent ?? '');
+      }
+    }, names);
+
+  const fits = (page: Page, label: string) =>
+    page.evaluate((name) => {
+      const panel = [...document.querySelectorAll<HTMLDetailsElement>('#dock-right .wb-panel')].find(
+        (p) => p.querySelector('.wb-panel-head')!.textContent === name,
+      )!;
+      const body = panel.querySelector('.wb-panel-body')!;
+      const p = panel.getBoundingClientRect();
+      const b = body.getBoundingClientRect();
+      return { withinPanel: b.bottom <= p.bottom + 1 && b.top >= p.top - 1, bodyH: b.height };
+    }, label);
+
+  const ALL = ['Properties', 'Engine', 'Layers', 'Perception', 'Debug'];
+
+  test('every panel body stays inside its panel instead of overflowing', async ({ page }) => {
+    await page.goto('/?saver=snowfall#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+
+    // Worst case: all five open at once, so each gets a small share of the
+    // column and every body has to actually shrink.
+    await openOnly(page, ALL);
+    for (const name of ALL) {
+      const r = await fits(page, name);
+      expect(r.withinPanel, `${name} body escapes its panel`).toBe(true);
+      expect(r.bodyH, `${name} body collapsed`).toBeGreaterThan(40);
+    }
+
+    // ...and one at a time, where each body gets the full column.
+    for (const name of ALL) {
+      await openOnly(page, [name]);
+      const r = await fits(page, name);
+      expect(r.withinPanel, `${name} body escapes its panel when solo`).toBe(true);
+      expect(r.bodyH, `${name} body collapsed when solo`).toBeGreaterThan(80);
+    }
+  });
+
+  test('the Engine actions and the Layers add button are reachable', async ({ page }) => {
+    await page.goto('/?saver=snowfall#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+
+    await openOnly(page, ['Engine']);
+    // Sticky footer: visible without scrolling.
+    await expect(page.locator('.wb-actions button', { hasText: 'Preview' })).toBeInViewport();
+
+    await openOnly(page, ['Layers']);
+    const add = page.locator('.layers-add');
+    await expect(add).toHaveText(/Add Layer/i);
+    await add.scrollIntoViewIfNeeded();
+    await expect(add).toBeInViewport();
+  });
+});
+
 test.describe('debug panel', () => {
   test('shows capability tier and fps while preview runs', async ({ page }) => {
     await page.goto('/#dev');
@@ -208,6 +525,10 @@ test.describe('dev API docs', () => {
     await expect(page.locator('#docs-main')).toContainText('window.__caps');
     await expect(page.locator('#docs-main')).toContainText('window.__schema');
     await expect(page.locator('#docs-main')).toContainText('dev-api-catalog.ts');
+    // The two fullscreen surfaces must stay documented — they are easy to confuse.
+    await expect(page.locator('#api-surfaces')).toContainText('Preview');
+    await expect(page.locator('#api-surfaces')).toContainText('Idle demo');
+    await expect(page.locator('#api-surfaces')).toContainText('Esc, or click anywhere outside the chrome bar');
     await expect(page.locator('#topbar nav a[data-view="docs"]')).toHaveClass(/active/);
   });
 

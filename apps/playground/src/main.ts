@@ -10,6 +10,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
+import { tide } from '@idle-screens/saver-tide';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -18,8 +19,10 @@ import { buildDevDocs } from './dev-docs';
 import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
-import { formatBackendLabel, readPreviewBackend } from './preview-backend';
+import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
+import { buildGallery, type GalleryGroup } from './gallery';
+import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
 
@@ -31,6 +34,7 @@ interface SaverGroup {
 
 const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-black-hole', label: '@idle-screens/saver-black-hole', savers: [blackHole] },
+  { id: 'saver-tide', label: '@idle-screens/saver-tide', savers: [tide] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -57,11 +61,33 @@ const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
+  'saver-tide': 'tide',
   'savers-classic': 'classic',
   schema: 'schema',
 };
 
+const GALLERY_GROUPS: GalleryGroup[] = SAVER_GROUPS.map((g) => ({
+  id: g.id,
+  label: g.label,
+  short: GROUP_SHORT_LABEL[g.id] ?? g.id,
+  savers: g.savers,
+}));
+
+const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
+  g.savers.map((saver) => ({ saver, pkg: g.label })),
+);
+
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
+  // Same filter affordance as the gallery's — 33 savers is too many to scan.
+  const filter = document.createElement('div');
+  filter.className = 'palette-filter';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.id = 'palette-search';
+  search.placeholder = 'Filter…';
+  search.setAttribute('aria-label', 'Filter savers by name');
+  filter.append(search);
+
   const tree = document.createElement('div');
   tree.className = 'palette-tree';
 
@@ -109,7 +135,21 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     tree.append(details);
   }
 
-  mount.append(tree);
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    for (const details of tree.querySelectorAll<HTMLDetailsElement>('.palette-group')) {
+      let shown = 0;
+      for (const item of details.querySelectorAll<HTMLElement>('.palette-item')) {
+        const hit = q === '' || (item.textContent ?? '').toLowerCase().includes(q) || (item.dataset.id ?? '').includes(q);
+        item.hidden = !hit;
+        if (hit) shown += 1;
+      }
+      details.hidden = shown === 0;
+      if (q !== '') details.open = true;
+    }
+  });
+
+  mount.append(filter, tree);
 }
 
 function packageFor(saver: SaverPlugin): string {
@@ -299,9 +339,15 @@ function liveMode(): void {
     import.meta.url,
   ).href;
 
+  // Watching a fullscreen preview counts as "using the app": without this the
+  // idle timer fires after `timeoutMs` and the real screensaver opens on top
+  // of the thing you were deliberately looking at.
+  let previewIsOpen = false;
+
   const toEngineConfig = (c: LiveConfig): Partial<IdleScreensConfig> => ({
     timeoutMs: c.timeoutMs,
     sleepOnBlur: c.sleepOnBlur,
+    suppress: () => previewIsOpen,
     disableOnLocalhost: false,
     defaultPluginId: c.saver,
     selection: c.selection,
@@ -347,70 +393,58 @@ function liveMode(): void {
   };
   rebuild(cfg);
 
-  document.getElementById('tb-sleep')?.addEventListener('click', () => window.__idleScreens?.sleep());
+  document.getElementById('tb-sleep')?.addEventListener('click', () => {
+    preview.close();
+    window.__idleScreens?.sleep();
+  });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
   wireSchemaHarness();
 
+  type View = 'gallery' | 'dev' | 'docs' | 'evals';
+  let currentView: View = 'gallery';
+
+  // ========== FULLSCREEN PREVIEW (shared by Gallery + Dev Tools) ==========
+  // A viewer, not a screensaver demo: it exits on Escape or a click, never on
+  // a stray mouse move. The top-bar "Idle demo" button is the other half of
+  // that pair — it sleeps the real <idle-screen>, which does wake on any input.
+  let devSelectRef: ((id: string) => void) | null = null;
+
+  const goToDev = (id: string): void => {
+    cfg.saver = id;
+    if (location.hash.replace(/^#/, '') === 'dev') devSelectRef?.(id);
+    else location.hash = 'dev';
+  };
+
   // ========== GALLERY VIEW (grid of thumbnail cards) ==========
-  const galleryGrid = document.getElementById('gallery-grid')!;
-  const galleryInstances: SaverInstance[] = [];
+  const gallery = buildGallery(document.getElementById('gallery-root')!, GALLERY_GROUPS, {
+    activeId: cfg.saver,
+    onOpen: (id) => openPreview(id),
+    onOpenInDev: goToDev,
+  });
 
-  for (const saver of ALL_SAVERS) {
-    const card = document.createElement('div');
-    card.className = 'gallery-card';
-    card.dataset.id = saver.manifest.id;
-    if (saver.manifest.id === cfg.saver) card.classList.add('active');
+  const preview = createPreviewOverlay(PREVIEW_ENTRIES, {
+    seed: () => cfg.seed,
+    onShow: (id) => {
+      cfg.saver = id;
+      gallery.setActive(id);
+      window.__idleScreens?.setPlugin(id);
+    },
+    onExit: () => {
+      previewIsOpen = false;
+      gallery.setPlaying(currentView === 'gallery');
+    },
+    onOpenInDev: goToDev,
+  });
 
-    const preview = document.createElement('div');
-    preview.className = 'gallery-card-preview';
-
-    const info = document.createElement('div');
-    info.className = 'gallery-card-info';
-    const label = document.createElement('span');
-    label.className = 'gallery-card-label';
-    label.textContent = saver.manifest.label;
-    const meta = document.createElement('span');
-    meta.className = 'gallery-card-meta';
-    meta.textContent = saver.manifest.minBackend ?? 'css';
-    info.append(label, meta);
-
-    card.append(preview, info);
-    galleryGrid.append(card);
-
-    card.addEventListener('click', () => {
-      cfg.saver = saver.manifest.id;
-      rebuild(cfg);
-      galleryGrid.querySelectorAll('.gallery-card').forEach((c) =>
-        c.classList.toggle('active', (c as HTMLElement).dataset.id === saver.manifest.id),
-      );
-      window.__idleScreens?.sleep();
-    });
-
-    void Promise.resolve(
-      saver.mount({
-        host: preview,
-        dpr: 1,
-        width: 280,
-        height: 175,
-        rng: createRng(42),
-        seed: 42,
-        reducedMotion: false,
-      }),
-    ).then((inst) => {
-      galleryInstances.push(inst);
-      const min = saver.manifest.minBackend ?? 'css';
-      const syncMeta = (): void => {
-        const active = readPreviewBackend(saver.manifest.id, preview);
-        meta.textContent = active && active !== min ? active : min;
-      };
-      requestAnimationFrame(() => requestAnimationFrame(syncMeta));
-    });
+  function openPreview(id: string): void {
+    cfg.saver = id;
+    rebuild(cfg);
+    previewIsOpen = true;
+    gallery.setActive(id);
+    gallery.setPlaying(false); // don't burn 30 canvases behind a fullscreen preview
+    preview.open(id);
   }
-
-  setTimeout(() => {
-    galleryInstances.forEach((inst) => inst.setPaused(true));
-  }, 2000);
 
   // ========== DEV VIEW (lazy-init on first navigate) ==========
   let devInitialized = false;
@@ -428,7 +462,9 @@ function liveMode(): void {
     if (evalsInitialized) return;
     evalsInitialized = true;
     const mount = document.getElementById('evals-root');
-    if (mount) buildEvalsPanel(mount);
+    // The chamber is fullscreen too, so it needs the same idle suppression as
+    // the gallery preview — otherwise the screensaver drops over the artwork.
+    if (mount) buildEvalsPanel(mount, { onFullscreenChange: (open) => { previewIsOpen = open; } });
   };
 
   const initDev = (): void => {
@@ -441,7 +477,7 @@ function liveMode(): void {
 
     const devProps = buildPropertiesPanel(right.props);
     devProps.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
-    buildConfigPanel(cfg, rebuild, right.engine);
+    buildConfigPanel(cfg, rebuild, right.engine, () => openPreview(cfg.saver));
 
     const { debug, perception, layers } = right;
     const { timeline } = bottom;
@@ -541,12 +577,12 @@ function liveMode(): void {
       }
     };
 
+    devSelectRef = devSelect;
     buildSaverPalette(left, devSelect, cfg.saver);
     devSelect(cfg.saver);
   };
 
   // ========== ROUTER ==========
-  type View = 'gallery' | 'dev' | 'docs' | 'evals';
   const galleryView = document.getElementById('view-gallery')!;
   const devView = document.getElementById('view-dev')!;
   const docsView = document.getElementById('view-docs')!;
@@ -570,6 +606,10 @@ function liveMode(): void {
   };
 
   const showView = (view: View, docsAnchor: string | null = null): void => {
+    currentView = view;
+    preview.close(); // navigating away always leaves the fullscreen viewer
+    // Gallery canvases only run while the gallery is the visible tab.
+    gallery.setPlaying(view === 'gallery');
     galleryView.hidden = view !== 'gallery';
     devView.hidden = view !== 'dev';
     docsView.hidden = view !== 'docs';
@@ -656,7 +696,12 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
   };
 }
 
-function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mount: HTMLElement): void {
+function buildConfigPanel(
+  cfg: LiveConfig,
+  rebuild: (c: LiveConfig) => void,
+  mount: HTMLElement,
+  onPreview: () => void,
+): void {
   const panel = document.createElement('div');
   panel.className = 'wb-panel-content';
 
@@ -750,17 +795,27 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
 
   const actions = document.createElement('div');
   actions.className = 'wb-actions';
+  // Two different fullscreen modes, deliberately labelled apart: "Preview"
+  // is the viewer (Esc/click to exit); "Idle demo" is the real screensaver
+  // (wakes on any input, including mouse movement).
+  const previewBtn = document.createElement('button');
+  previewBtn.type = 'button';
+  previewBtn.className = 'wb-btn wb-btn-primary';
+  previewBtn.textContent = 'Preview';
+  previewBtn.title = 'Fullscreen preview — Esc or click to exit';
+  previewBtn.addEventListener('click', onPreview);
   const sleepBtn = document.createElement('button');
   sleepBtn.type = 'button';
-  sleepBtn.className = 'wb-btn wb-btn-primary';
-  sleepBtn.textContent = 'Sleep';
+  sleepBtn.className = 'wb-btn';
+  sleepBtn.textContent = 'Idle demo';
+  sleepBtn.title = 'Sleep the engine — wakes on any input, like a real screensaver';
   sleepBtn.addEventListener('click', () => window.__idleScreens?.sleep());
   const wakeBtn = document.createElement('button');
   wakeBtn.type = 'button';
   wakeBtn.className = 'wb-btn';
   wakeBtn.textContent = 'Wake';
   wakeBtn.addEventListener('click', () => window.__idleScreens?.wake());
-  actions.append(sleepBtn, wakeBtn);
+  actions.append(previewBtn, sleepBtn, wakeBtn);
 
   panel.append(props, toggles, actions);
   mount.append(panel);

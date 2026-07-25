@@ -2,6 +2,7 @@ import { SCHEMA_EXAMPLES } from '@idle-screens/schema';
 import {
   DEV_API_NAMESPACES,
   DEV_HARNESS_MODES,
+  DEV_SURFACES,
   DEV_URL_PARAMS,
   type ApiNamespace,
 } from './dev-api-catalog';
@@ -62,12 +63,34 @@ export function buildDevDocs(mount: HTMLElement): void {
 
     <nav class="dev-docs-toc" aria-label="API sections">
       ${DEV_API_NAMESPACES.map((ns) => `<a href="#docs/api-${esc(ns.id)}">${esc(ns.global)}</a>`).join('')}
+      <a href="#docs/api-surfaces">Fullscreen surfaces</a>
       <a href="#docs/api-url">URL params</a>
       <a href="#docs/api-modes">Harness modes</a>
     </nav>
 
     <div class="dev-docs-body">
       ${DEV_API_NAMESPACES.map((ns) => renderNamespace(ns, schemaKeys)).join('')}
+
+      <section class="dev-doc-block" id="api-surfaces">
+        <div class="dev-doc-head"><h3>Fullscreen surfaces</h3><span class="dev-doc-avail">Gallery, Dev Tools</span></div>
+        <p class="dev-doc-lead">
+          Two fullscreen modes that look alike and exit differently — on purpose.
+        </p>
+        <table class="dev-api-table">
+          <thead><tr><th>Surface</th><th>Opens from</th><th>Exit</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${DEV_SURFACES.map(
+              (s) => `
+              <tr>
+                <td><code>${esc(s.name)}</code></td>
+                <td>${esc(s.opensFrom)}</td>
+                <td><code class="sig">${esc(s.exit)}</code></td>
+                <td>${esc(s.description)}</td>
+              </tr>`,
+            ).join('')}
+          </tbody>
+        </table>
+      </section>
 
       <section class="dev-doc-block" id="api-url">
         <div class="dev-doc-head"><h3>URL search params</h3><span class="dev-doc-avail">Gallery, Dev Tools, Docs</span></div>
@@ -107,7 +130,12 @@ export function buildDevDocs(mount: HTMLElement): void {
 
       <section class="dev-doc-block dev-doc-try">
         <h3>Quick try</h3>
-        <p>Open <strong>Dev Tools</strong> to pick a saver, tune the inspector, and scrub the timeline. Press <strong>Sleep</strong> or run <code>__idleScreens.sleep()</code> in the console.</p>
+        <p>
+          Click any <strong>Gallery</strong> card for a fullscreen preview (<code>Esc</code> or click to exit,
+          <code>←</code>/<code>→</code> to browse). Open <strong>Dev Tools</strong> to pick a saver, tune the
+          inspector, and scrub the timeline. For the real screensaver, press <strong>Idle demo</strong> or run
+          <code>__idleScreens.sleep()</code> in the console.
+        </p>
       </section>
     </div>`;
 }

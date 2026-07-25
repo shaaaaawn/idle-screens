@@ -33,6 +33,14 @@ export interface HarnessModeDoc {
   globals?: string[];
 }
 
+export interface SurfaceDoc {
+  name: string;
+  opensFrom: string;
+  /** How the user gets back out. */
+  exit: string;
+  description: string;
+}
+
 /** Console / window APIs exposed by the playground. */
 export const DEV_API_NAMESPACES: ApiNamespace[] = [
   {
@@ -53,7 +61,10 @@ export const DEV_API_NAMESPACES: ApiNamespace[] = [
       { name: 'menuOpen()', signature: '() => boolean', description: 'Whether the picker dialog is open.' },
       { name: 'plugins', signature: 'Array<{ id, label }>', description: 'Registered saver list from the engine.' },
     ],
-    notes: ['Top-bar Sleep and Inspector "Sleep now" call sleep(). Escape wakes.'],
+    notes: [
+      'Top-bar "Idle demo" and the Engine panel\'s "Idle demo" call sleep(); any input wakes it.',
+      'This is NOT the gallery preview — see "Fullscreen surfaces" below for the difference.',
+    ],
   },
   {
     id: 'caps',
@@ -125,6 +136,35 @@ export const DEV_URL_PARAMS: UrlParamDoc[] = [
   { name: 'menu', description: 'Disable built-in ⌘K menu (off).', example: '?menu=off' },
   { name: 'engine', description: 'Use external IdleScreensEngine (external).', example: '?engine=external' },
   { name: 'forcePolyfill', description: 'Force rAF polyfill in Workers (1).', example: '?forcePolyfill=1' },
+];
+
+/**
+ * The two fullscreen surfaces. They look similar and behave deliberately
+ * differently — the preview is a viewer you leave on purpose, the idle demo is
+ * the real screensaver, which by definition wakes on any input.
+ */
+export const DEV_SURFACES: SurfaceDoc[] = [
+  {
+    name: 'Preview',
+    opensFrom: 'Gallery card · Engine panel "Preview" button',
+    exit: 'Esc, or click anywhere outside the chrome bar',
+    description:
+      'Playground-owned viewer (src/preview-overlay.ts). Moving the mouse reveals the chrome instead of exiting; ← / → step through savers without leaving. Suppresses the idle timer while open.',
+  },
+  {
+    name: 'Chamber',
+    opensFrom: 'Evals · a second click on a selected tile, or "Enter chamber"',
+    exit: 'Esc or Close — a stage click does NOT exit',
+    description:
+      'Evaluation chamber (src/evals/chamber.ts). One screen at a fixed 16:10 so every artist is judged at identical dimensions, StyleDNA beside it, filmstrip below; ← / → step between screens, D toggles the DNA column. Unlike the preview it keeps chrome you are meant to click, so a stray stage click will not eject you.',
+  },
+  {
+    name: 'Idle demo',
+    opensFrom: 'Top-bar "Idle demo" · Engine panel "Idle demo" · idle timeout',
+    exit: 'Any input — mouse move, key, click, wheel, touch',
+    description:
+      'The real <idle-screen> element from @idle-screens/core, i.e. exactly what a consuming site gets. Wake-on-anything is the correct screensaver behaviour and is not a playground choice.',
+  },
 ];
 
 /** Alternate entry points (no workbench chrome). */
