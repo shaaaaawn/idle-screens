@@ -116,6 +116,28 @@ release.yml runs CI, then changesets/action
 On the same `main` push, GitHub Pages deploys the playground independently.
 The Mac DMG is a separate manual `mac-v*` tag.
 
+### After every release: sync `develop` back from `main` (do not skip)
+
+The `changesets/action` "version packages" PR — the version bumps, CHANGELOG
+entries, and **deletion of the consumed `.changeset/*.md`** — lands on `main`,
+not `develop`. If `develop` isn't fast-forwarded afterward it keeps the stale,
+already-consumed changeset, and the **next** `develop → main` merge re-bumps
+and **re-publishes the same content under a new version**. This bit us once:
+the v1-ceiling batch shipped as `schema@2.3.0` from main while `develop` sat at
+`2.2.0` with the changeset still present, primed to re-ship as `2.4.0`.
+
+So the release flow's real last step is:
+
+```
+# after the version-packages PR merges to main:
+git checkout develop && git fetch origin && git merge --ff-only origin/main
+```
+
+It should be a clean fast-forward (develop has no commits main lacks). Verify
+with `../scripts/check-drift.sh` — source, npm-latest, and installed should
+line up. If the merge is *not* ff-only, `develop` has diverged and needs a real
+merge; investigate before publishing anything else.
+
 Config: `.changeset/config.json` — `access: "public"`, `baseBranch: "main"`,
 `updateInternalDependencies: "patch"`. Requires `NPM_TOKEN` (+ `NODE_AUTH_TOKEN`
 for setup-node) in GitHub secrets.
