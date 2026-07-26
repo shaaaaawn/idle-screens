@@ -86,10 +86,14 @@ final class ChannelWSClientTests: XCTestCase {
         session.send(#"{"type":"wake"}"#)
         session.send(#"{"type":"overlay","text":"hello","ttl":4000}"#)
 
-        XCTAssertEqual(try await iterator.next(), .scene(spec: .object(["id": .string("warp")]), seed: 42))
-        XCTAssertEqual(try await iterator.next(), .sleep)
-        XCTAssertEqual(try await iterator.next(), .wake)
-        XCTAssertEqual(try await iterator.next(), .overlay(text: "hello", ttl: 4000))
+        let sceneEvent = try await iterator.next()
+        let sleepEvent = try await iterator.next()
+        let wakeEvent = try await iterator.next()
+        let overlayEvent = try await iterator.next()
+        XCTAssertEqual(sceneEvent, .scene(spec: .object(["id": .string("warp")]), seed: 42))
+        XCTAssertEqual(sleepEvent, .sleep)
+        XCTAssertEqual(wakeEvent, .wake)
+        XCTAssertEqual(overlayEvent, .overlay(text: "hello", ttl: 4000))
     }
 
     func testGarbageFramesAreSkipped() async throws {
@@ -101,6 +105,7 @@ final class ChannelWSClientTests: XCTestCase {
         session.send(#"{"type":"unknown-future-type","x":1}"#)
         session.send(#"{"type":"wake"}"#)
 
-        XCTAssertEqual(try await iterator.next(), .wake)
+        let event = try await iterator.next()
+        XCTAssertEqual(event, .wake)
     }
 }

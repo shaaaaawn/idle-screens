@@ -14,6 +14,8 @@
 		0B3FC1932DA73A5BA0973A8D /* GalleryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734C05B9186BD117E244C887 /* GalleryClient.swift */; };
 		0DCCB4B6A0098FC9D312E3DE /* SpecSubsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */; };
 		13743AA338CEEE94C89F7238 /* ThumbStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F528250DFE95CB117C8E225 /* ThumbStreamView.swift */; };
+		14B781DF3BD5E3350A3E747F /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B5A0CBD688755360E23C34 /* NativeSceneView.swift */; };
+		14EBCFE042D04972421EAF69 /* CapabilityTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */; };
 		1624F2B9F3A2808C9490251C /* MCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */; };
 		16BB0182A7846CEBB7FC0D26 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */; };
 		187089A01CE17AF038149D95 /* ChannelGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9A29F0D73C5256B5C84FF0C /* ChannelGridView.swift */; };
@@ -21,11 +23,12 @@
 		2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */; };
 		2F38E6E5A65143C6434582CB /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212796CA3B1CF2A7C5513499 /* GalleryView.swift */; };
 		2F88D3F95B2861F5818A3807 /* WatchdogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */; };
-		408E7B66A20C28523C1D7F46 /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C958885895450710D9AC9A /* NativeSceneView.swift */; };
+		34018E505AD097DAD48BB660 /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */; };
 		4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */; };
 		484A4E76F6F49B6E8F58F19E /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
 		4FDE466BCFAEE3788424E6DA /* ChannelWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */; };
 		57953B22A04B7B0D5DB83E8B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BE66C1790A533FA14463C9 /* SettingsView.swift */; };
+		66B4B5A00A0D8BA463F8E912 /* UnitsAndClassicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */; };
 		6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */; };
 		6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5408F494FA3C16573E5AB /* MockTransport.swift */; };
 		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
@@ -35,20 +38,23 @@
 		9080430A42B73C5DCD848D21 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D440AF4157E3C3F831612A2E /* Assets.xcassets */; };
 		9954580EDE5D79CB12AE1A60 /* AppState+Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */; };
 		99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */; };
+		A283256BA27B747A9FCD7508 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
 		A35D22B41699F53D6F62A43B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6339510B5B7C996B622F160 /* AppState.swift */; };
+		AC000386E0E47C842C0FBF9A /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B5A0CBD688755360E23C34 /* NativeSceneView.swift */; };
 		B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */; };
+		BBBD4937EAC130CDC9A4E739 /* CapabilityTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */; };
+		BFE4907F462C3F7B544B2EA6 /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */; };
 		C4184B1F397DC4CD4B42440F /* CapabilityTierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414EED19151EF752ABADB644 /* CapabilityTierTests.swift */; };
 		C70425F1902A2CBDE03D57DE /* MyChannelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C529DD00521F3987A78786C1 /* MyChannelsView.swift */; };
 		C8C63A0EAC1EBD3FA137C55B /* ScreenSaverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B794ADAE2EAD414259F480F9 /* ScreenSaverView.swift */; };
 		CD132EEEAFD591BB0F8B7C0F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D72066AE8508C40E5677F25 /* Models.swift */; };
 		D6191C6E8FB10818A14C2C3B /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
 		D6F231D14703E2A6127A2CD7 /* TVAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C853969A894483598A446E19 /* TVAppState.swift */; };
-		DBA0346D2B0B52677811198F /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765B738846D8B0904B040354 /* SpecSubset.swift */; };
+		E15E2D79437A5F96E7A145B0 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
 		E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */; };
 		E6A75BB3ACFAECBAEF42BB4D /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C408BF670E35B5612FAB86D /* AppStateTests.swift */; };
 		E6C221E7819340F08F51E919 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
 		E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
-		F55D3BDC882ACB97F942F990 /* CapabilityTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B9F8FA10DDAD60E1DE5E547 /* CapabilityTier.swift */; };
 		FAA24B135B3D42596FE624FA /* PerceptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */; };
 /* End PBXBuildFile section */
 
@@ -79,16 +85,15 @@
 		21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDeckView.swift; sourceTree = "<group>"; };
 		3E37A31FE436FF8B8A25DF6F /* IdleScreensTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreensTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		414EED19151EF752ABADB644 /* CapabilityTierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityTierTests.swift; sourceTree = "<group>"; };
-		4B9F8FA10DDAD60E1DE5E547 /* CapabilityTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityTier.swift; sourceTree = "<group>"; };
+		445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePreviewView.swift; sourceTree = "<group>"; };
 		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
-		52C958885895450710D9AC9A /* NativeSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSceneView.swift; sourceTree = "<group>"; };
 		587CE90600E8DD15D12B773C /* ChannelViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelViewerView.swift; sourceTree = "<group>"; };
 		5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		64B5A0CBD688755360E23C34 /* NativeSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSceneView.swift; sourceTree = "<group>"; };
 		68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6A39FC4E62FA08D2DC673189 /* IdleScreens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		734C05B9186BD117E244C887 /* GalleryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryClient.swift; sourceTree = "<group>"; };
 		75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		765B738846D8B0904B040354 /* SpecSubset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpecSubset.swift; sourceTree = "<group>"; };
 		7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleScreensApp.swift; sourceTree = "<group>"; };
 		86B91FEC3CA3ACD9A83E05DA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerceptionView.swift; sourceTree = "<group>"; };
@@ -97,11 +102,14 @@
 		A0BE66C1790A533FA14463C9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelWSClient.swift; sourceTree = "<group>"; };
 		ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleScreensTVApp.swift; sourceTree = "<group>"; };
+		B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityTier.swift; sourceTree = "<group>"; };
 		B794ADAE2EAD414259F480F9 /* ScreenSaverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSaverView.swift; sourceTree = "<group>"; };
 		B7A5408F494FA3C16573E5AB /* MockTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTransport.swift; sourceTree = "<group>"; };
 		BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpecSubsetTests.swift; sourceTree = "<group>"; };
+		BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpecSubset.swift; sourceTree = "<group>"; };
 		BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchdogTests.swift; sourceTree = "<group>"; };
 		BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClient.swift; sourceTree = "<group>"; };
+		BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitsAndClassicTests.swift; sourceTree = "<group>"; };
 		C529DD00521F3987A78786C1 /* MyChannelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyChannelsView.swift; sourceTree = "<group>"; };
 		C853969A894483598A446E19 /* TVAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVAppState.swift; sourceTree = "<group>"; };
 		CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Gallery.swift"; sourceTree = "<group>"; };
@@ -114,6 +122,17 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		0BA9639EEE63D5270E4D5873 /* Render */ = {
+			isa = PBXGroup;
+			children = (
+				B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */,
+				64B5A0CBD688755360E23C34 /* NativeSceneView.swift */,
+				445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */,
+				BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */,
+			);
+			path = Render;
+			sourceTree = "<group>";
+		};
 		1196F96E1C69DF0D982E2A5C /* Theme */ = {
 			isa = PBXGroup;
 			children = (
@@ -163,6 +182,7 @@
 				1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */,
 				F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */,
 				BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */,
+				BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */,
 				BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */,
 			);
 			path = IdleScreensTVTests;
@@ -180,9 +200,7 @@
 		7B8417100F9B49AD2DC0E046 /* Renderers */ = {
 			isa = PBXGroup;
 			children = (
-				52C958885895450710D9AC9A /* NativeSceneView.swift */,
 				8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */,
-				765B738846D8B0904B040354 /* SpecSubset.swift */,
 				0F528250DFE95CB117C8E225 /* ThumbStreamView.swift */,
 			);
 			path = Renderers;
@@ -196,6 +214,7 @@
 				EA0BCADF9C61254DBB05CA24 /* Info.plist */,
 				644C00EC9EB5060EC3AD0538 /* API */,
 				8F551423801DF64294E8872E /* App */,
+				0BA9639EEE63D5270E4D5873 /* Render */,
 				1196F96E1C69DF0D982E2A5C /* Theme */,
 				AEE4203FDBEC1494EC5AEC21 /* VJ */,
 				78D76AAD1606576168304EB8 /* Watch */,
@@ -237,7 +256,6 @@
 		FC6DF4A716B7E7C4A86CC168 /* IdleScreensTV */ = {
 			isa = PBXGroup;
 			children = (
-				4B9F8FA10DDAD60E1DE5E547 /* CapabilityTier.swift */,
 				D9A29F0D73C5256B5C84FF0C /* ChannelGridView.swift */,
 				ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */,
 				86B91FEC3CA3ACD9A83E05DA /* Info.plist */,
@@ -390,6 +408,7 @@
 				9954580EDE5D79CB12AE1A60 /* AppState+Gallery.swift in Sources */,
 				89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */,
 				A35D22B41699F53D6F62A43B /* AppState.swift in Sources */,
+				14EBCFE042D04972421EAF69 /* CapabilityTier.swift in Sources */,
 				E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */,
 				99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */,
 				88B2B6D27BAB0AD99141A1FF /* ChannelViewerView.swift in Sources */,
@@ -403,6 +422,9 @@
 				2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */,
 				CD132EEEAFD591BB0F8B7C0F /* Models.swift in Sources */,
 				C70425F1902A2CBDE03D57DE /* MyChannelsView.swift in Sources */,
+				14B781DF3BD5E3350A3E747F /* NativeSceneView.swift in Sources */,
+				A283256BA27B747A9FCD7508 /* ScenePreviewView.swift in Sources */,
+				34018E505AD097DAD48BB660 /* SpecSubset.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -410,7 +432,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F55D3BDC882ACB97F942F990 /* CapabilityTier.swift in Sources */,
+				BBBD4937EAC130CDC9A4E739 /* CapabilityTier.swift in Sources */,
 				1AC66F3C1B9943FD6A3B0873 /* ChannelCredential.swift in Sources */,
 				187089A01CE17AF038149D95 /* ChannelGridView.swift in Sources */,
 				4FDE466BCFAEE3788424E6DA /* ChannelWSClient.swift in Sources */,
@@ -420,11 +442,12 @@
 				484A4E76F6F49B6E8F58F19E /* KeychainHelper.swift in Sources */,
 				1624F2B9F3A2808C9490251C /* MCPClient.swift in Sources */,
 				00B9B5D0BA5B0D2338B0C462 /* Models.swift in Sources */,
-				408E7B66A20C28523C1D7F46 /* NativeSceneView.swift in Sources */,
+				AC000386E0E47C842C0FBF9A /* NativeSceneView.swift in Sources */,
 				FAA24B135B3D42596FE624FA /* PerceptionView.swift in Sources */,
+				E15E2D79437A5F96E7A145B0 /* ScenePreviewView.swift in Sources */,
 				C8C63A0EAC1EBD3FA137C55B /* ScreenSaverView.swift in Sources */,
 				57953B22A04B7B0D5DB83E8B /* SettingsView.swift in Sources */,
-				DBA0346D2B0B52677811198F /* SpecSubset.swift in Sources */,
+				BFE4907F462C3F7B544B2EA6 /* SpecSubset.swift in Sources */,
 				D6F231D14703E2A6127A2CD7 /* TVAppState.swift in Sources */,
 				13743AA338CEEE94C89F7238 /* ThumbStreamView.swift in Sources */,
 			);
@@ -438,6 +461,7 @@
 				6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */,
 				4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */,
 				0DCCB4B6A0098FC9D312E3DE /* SpecSubsetTests.swift in Sources */,
+				66B4B5A00A0D8BA463F8E912 /* UnitsAndClassicTests.swift in Sources */,
 				2F88D3F95B2861F5818A3807 /* WatchdogTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -547,11 +571,11 @@
 		7D3094BB3B10A106444A4A0B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2026072504;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -569,10 +593,10 @@
 		85B8D82BE308752AF14AA891 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2026072504;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -592,7 +616,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2026072504;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -602,7 +626,7 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.idlescreens;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -631,7 +655,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2026072504;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -642,7 +666,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.hermosalabs.idlescreens;
 				PROVISIONING_PROFILE_SPECIFIER = "Idle Screens App Store v2";
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};

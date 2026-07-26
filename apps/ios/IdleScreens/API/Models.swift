@@ -8,9 +8,39 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     let label: String?
     let tags: [String]?
     let viewers: Int?
+    /// Inline scene spec (`scene.spec`) — powers live native previews.
+    let spec: SpecSubset?
 
     var id: String { channelId ?? label ?? "unknown" }
     var displayLabel: String { label ?? channelId ?? "unknown" }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, channelId, label, tags, viewers, scene
+    }
+
+    private struct SceneWrap: Decodable {
+        let spec: SpecSubset?
+    }
+
+    init(channelId: String?, label: String?, tags: [String]?, viewers: Int?, spec: SpecSubset? = nil) {
+        self.channelId = channelId
+        self.label = label
+        self.tags = tags
+        self.viewers = viewers
+        self.spec = spec
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // The API serves the channel id as `id`; accept legacy `channelId` too.
+        channelId = (try? c.decodeIfPresent(String.self, forKey: .id))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .channelId))
+            ?? nil
+        label = try? c.decodeIfPresent(String.self, forKey: .label)
+        tags = try? c.decodeIfPresent([String].self, forKey: .tags)
+        viewers = try? c.decodeIfPresent(Int.self, forKey: .viewers)
+        spec = (try? c.decodeIfPresent(SceneWrap.self, forKey: .scene))??.spec
+    }
 }
 
 /// Read-only channel state from `GET /c/:channelId/state`.

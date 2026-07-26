@@ -26,8 +26,15 @@ struct SpecSubset: Decodable, Equatable {
     var id: String?
     var label: String?
     var seed: Int?
+    var units: Units?
     var background: Background?
     var layers: [Layer]
+
+    /// Dimensional unit system. 'viewport' (default) = sizes/speeds are fractions
+    /// of min(w,h); 'px' = raw pixels. The server migrates legacy specs to "px".
+    enum Units: String, Decodable, Equatable, Sendable {
+        case viewport, px
+    }
 
     struct Background: Decodable, Equatable {
         /// Solid fill color (background.type == 'solid').
@@ -54,6 +61,14 @@ struct SpecSubset: Decodable, Equatable {
         var pulse: Pulse?
         var spin: Spin?
         var region: Region?
+        /// Exact placement for single-entity layers (HUD text etc.);
+        /// fractions of view width/height, like the web engine.
+        var position: Position?
+    }
+
+    struct Position: Decodable, Equatable {
+        var x: Double
+        var y: Double
     }
 
     struct Region: Decodable, Equatable {
@@ -71,6 +86,11 @@ struct SpecSubset: Decodable, Equatable {
     struct Spin: Decodable, Equatable {
         var min: Double
         var max: Double
+
+        init(min: Double, max: Double) {
+            self.min = min
+            self.max = max
+        }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
@@ -96,9 +116,10 @@ struct SpecSubset: Decodable, Equatable {
 
     enum Sprite: Equatable {
         case circle(radius: (Double, Double), color: String, colors: [String], soft: Bool)
-        case ring(radius: (Double, Double), color: String, colors: [String], width: Double)
+        /// `width` nil = unset; the renderer applies the units-aware default.
+        case ring(radius: (Double, Double), color: String, colors: [String], width: Double?)
         case rect(width: (Double, Double), aspect: (Double, Double), color: String, colors: [String])
-        case streak(length: (Double, Double), color: String, colors: [String], width: Double)
+        case streak(length: (Double, Double), color: String, colors: [String], width: Double?)
         case emoji(glyphs: [String])
         case text(strings: [String], color: String)
         case unknown
@@ -149,7 +170,7 @@ extension SpecSubset.Sprite: Decodable {
                 radius: Self.range(try c.decodeIfPresent([Double].self, forKey: .radius), default: (0.01, 0.02)),
                 color: color,
                 colors: colors,
-                width: try c.decodeIfPresent(Double.self, forKey: .width) ?? 1
+                width: try c.decodeIfPresent(Double.self, forKey: .width)
             )
         case "rect":
             self = .rect(
@@ -163,7 +184,7 @@ extension SpecSubset.Sprite: Decodable {
                 length: Self.range(try c.decodeIfPresent([Double].self, forKey: .length), default: (0.01, 0.03)),
                 color: color,
                 colors: colors,
-                width: try c.decodeIfPresent(Double.self, forKey: .width) ?? 1
+                width: try c.decodeIfPresent(Double.self, forKey: .width)
             )
         case "emoji":
             self = .emoji(glyphs: try c.decodeIfPresent([String].self, forKey: .glyphs) ?? ["✦"])
@@ -201,6 +222,7 @@ struct CompiledEntity: Equatable, Sendable {
 struct CompiledLayer: Equatable, Sendable {
     var entities: [CompiledEntity]
     var sprite: SpecSubset.Sprite
+    var units: SpecSubset.Units
     var blend: String?
     var wrap: Bool
     var pulse: SpecSubset.Pulse?
@@ -208,22 +230,33 @@ struct CompiledLayer: Equatable, Sendable {
 
 extension SpecSubset {
     /// Deterministic entity placement + velocities. Same seed → same scene.
+    /// Sizes/speeds stay in the spec's own units — scaling happens at draw time.
     func compile(seed: Int) -> [CompiledLayer] {
         var rng = Mulberry32(seed: UInt32(truncatingIfNeeded: seed))
-        return layers.map { $0.compile(rng: &rng) }
+        let resolvedUnits = units ?? .viewport
+        return layers.map { $0.compile(rng: &rng, units: resolvedUnits) }
     }
 }
 
 extension SpecSubset.Layer {
-    func compile(rng: inout Mulberry32) -> CompiledLayer {
+    func compile(rng: inout Mulberry32, units: SpecSubset.Units) -> CompiledLayer {
         var entities: [CompiledEntity] = []
         let n = max(0, min(count, 400))
         for _ in 0..<n {
-            // Placement (region-constrained scatter).
-            let xr = Self.pair(region?.x, default: (0, 1))
-            let yr = Self.pair(region?.y, default: (0, 1))
-            let x = xr.0 + rng.next() * (xr.1 - xr.0)
-            let y = yr.0 + rng.next() * (yr.1 - yr.0)
+            // Placement: explicit position wins for single-entity layers
+            // (web parity: `layer.position && layer.count === 1`), otherwise
+            // region-constrained scatter.
+            let x: Double
+            let y: Double
+            if let position, count == 1 {
+                x = position.x
+                y = position.y
+            } else {
+                let xr = Self.pair(region?.x, default: (0, 1))
+                let yr = Self.pair(region?.y, default: (0, 1))
+                x = xr.0 + rng.next() * (xr.1 - xr.0)
+                y = yr.0 + rng.next() * (yr.1 - yr.0)
+            }
 
             // Velocity — drift; every other motion type degrades to drift.
             var vx = 0.0, vy = 0.0
@@ -246,7 +279,12 @@ extension SpecSubset.Layer {
             case .streak(let l, _, _, _):
                 size = l.0 + rng.next() * (l.1 - l.0)
             case .emoji, .text:
-                let sr = Self.pair(self.size, default: (0.02, 0.03))
+                // Web parity: glyph sizes are ALWAYS raw pixels — the engine
+                // draws `${sz}px` with no unit scaling and defaults to [20,40]
+                // (schema simulate.ts `layer.size ?? [20, 40]`), in both unit
+                // modes. The old viewport-fraction default (0.02) rendered
+                // sub-pixel text in px specs.
+                let sr = Self.pair(self.size, default: (20, 40))
                 size = sr.0 + rng.next() * (sr.1 - sr.0)
             case .unknown:
                 size = 0.01
@@ -291,7 +329,11 @@ extension SpecSubset.Layer {
             } else {
                 spinSpeed = 0
             }
-            let spinAngle = rng.next() * 360
+            // Web parity: rotationAt() returns 0 when spinSpeed is 0 — a random
+            // initial angle only applies to entities that actually spin. (The
+            // rng draw stays unconditional to keep the seeded stream stable.)
+            let spinDraw = rng.next() * 360
+            let spinAngle = spinSpeed == 0 ? 0 : spinDraw
 
             entities.append(CompiledEntity(
                 x: x, y: y, vx: vx, vy: vy,
@@ -304,6 +346,7 @@ extension SpecSubset.Layer {
         return CompiledLayer(
             entities: entities,
             sprite: sprite,
+            units: units,
             blend: blend,
             wrap: wrap ?? true,
             pulse: pulse

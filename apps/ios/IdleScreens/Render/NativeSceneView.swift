@@ -7,8 +7,8 @@ struct NativeSceneView: View {
     let layers: [CompiledLayer]
     let background: SpecSubset.Background?
     let tier: CapabilityTier
-    let watchdog: FrameWatchdog
-    let onDowngrade: () -> Void
+    var watchdog: FrameWatchdog?
+    var onDowngrade: () -> Void = {}
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -20,22 +20,26 @@ struct NativeSceneView: View {
                 let t = context.date.timeIntervalSince(start)
                 let minDim = min(size.width, size.height)
                 for layer in layers {
+                    // Dimensional values (sizes, speeds, stroke widths) scale by
+                    // min(w,h) for viewport specs and by 1 for px specs.
+                    // Positions (x/y) are always fractions of w/h — never scaled.
+                    let dim = layer.units == .px ? 1 : minDim
                     applyBlend(ctx: &ctx, blend: layer.blend)
                     for entity in layer.entities {
-                        let point = position(of: entity, at: t, in: size, minDim: minDim, wrap: layer.wrap)
+                        let point = position(of: entity, at: t, in: size, dim: dim, wrap: layer.wrap)
                         var alpha = entity.alpha
                         if let pulse = layer.pulse {
                             let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
                             alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
                         }
-                        draw(entity: entity, sprite: layer.sprite, at: point,
-                             minDim: minDim, alpha: alpha, t: t, ctx: &ctx)
+                        draw(entity: entity, sprite: layer.sprite, units: layer.units, at: point,
+                             dim: dim, alpha: alpha, t: t, ctx: &ctx)
                     }
                     ctx.blendMode = .normal
                 }
             }
             .onChange(of: context.date) { _, newDate in
-                if let last = lastTick {
+                if let watchdog, let last = lastTick {
                     let duration = newDate.timeIntervalSince(last)
                     if duration > 0,
                        watchdog.record(duration: duration, at: newDate.timeIntervalSinceReferenceDate) {
@@ -52,19 +56,20 @@ struct NativeSceneView: View {
 
     private func drawBackground(ctx: GraphicsContext, size: CGSize) {
         let rect = CGRect(origin: .zero, size: size)
+        let path = Path(rect)
         if let stops = background?.stops, !stops.isEmpty {
             let gradient = Gradient(stops: stops.map {
                 Gradient.Stop(color: Color(hex: $0.color), location: CGFloat(min(1, max(0, $0.at))))
             })
-            ctx.fill(rect, with: .linearGradient(
+            ctx.fill(path, with: .linearGradient(
                 gradient,
                 startPoint: CGPoint(x: rect.midX, y: rect.minY),
                 endPoint: CGPoint(x: rect.midX, y: rect.maxY)
             ))
         } else if let color = background?.color {
-            ctx.fill(rect, with: .color(Color(hex: color)))
+            ctx.fill(path, with: .color(Color(hex: color)))
         } else {
-            ctx.fill(rect, with: .color(.black))
+            ctx.fill(path, with: .color(.black))
         }
     }
 
@@ -81,9 +86,9 @@ struct NativeSceneView: View {
     // MARK: - Motion
 
     private func position(of entity: CompiledEntity, at t: TimeInterval,
-                          in size: CGSize, minDim: CGFloat, wrap: Bool) -> CGPoint {
-        var px = entity.x * size.width + entity.vx * minDim * t
-        var py = entity.y * size.height + entity.vy * minDim * t
+                          in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
+        var px = entity.x * size.width + entity.vx * dim * t
+        var py = entity.y * size.height + entity.vy * dim * t
         if wrap {
             px = px.truncatingRemainder(dividingBy: size.width)
             if px < 0 { px += size.width }
@@ -98,14 +103,17 @@ struct NativeSceneView: View {
 
     // MARK: - Sprites
 
-    private func draw(entity: CompiledEntity, sprite: SpecSubset.Sprite, at point: CGPoint,
-                      minDim: CGFloat, alpha: Double, t: TimeInterval, ctx: inout GraphicsContext) {
+    private func draw(entity: CompiledEntity, sprite: SpecSubset.Sprite, units: SpecSubset.Units,
+                      at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
+                      ctx: inout GraphicsContext) {
         let color = Color(hex: entity.color).opacity(alpha)
         let spin = entity.spinAngle + entity.spinSpeed * t
+        /// Web engine default stroke width: 2px for px specs, 0.002 for viewport.
+        let defaultWidth = units == .px ? 2.0 : 0.002
 
         switch sprite {
         case .circle(_, _, _, let soft):
-            let r = entity.size * minDim
+            let r = entity.size * dim
             let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
             if soft {
                 ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
@@ -119,12 +127,13 @@ struct NativeSceneView: View {
             }
 
         case .ring(_, _, _, let width):
-            let r = entity.size * minDim
+            let r = entity.size * dim
             let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
-            ctx.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: width)
+            ctx.stroke(Path(ellipseIn: rect), with: .color(color),
+                       lineWidth: (width ?? defaultWidth) * dim)
 
         case .rect:
-            let w = entity.size * minDim
+            let w = entity.size * dim
             let h = w * entity.aspect
             let rect = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
             var layer = ctx
@@ -133,18 +142,20 @@ struct NativeSceneView: View {
             layer.fill(Path(rect), with: .color(color))
 
         case .streak(_, _, _, let width):
-            let length = entity.size * minDim
+            let length = entity.size * dim
             let speed = hypot(entity.vx, entity.vy)
             guard speed > 0 else { return }
             let dx = entity.vx / speed, dy = entity.vy / speed
             var path = Path()
             path.move(to: point)
             path.addLine(to: CGPoint(x: point.x - dx * length, y: point.y - dy * length))
-            ctx.stroke(path, with: .color(color), lineWidth: width)
+            ctx.stroke(path, with: .color(color), lineWidth: (width ?? defaultWidth) * dim)
 
         case .emoji, .text:
+            // Glyph sizes are raw pixels in the web engine (`${sz}px`, never
+            // unit-scaled) — so no `dim` multiplier here, unlike shaped sprites.
             let text = Text(entity.glyph ?? "")
-                .font(.system(size: entity.size * minDim))
+                .font(.system(size: entity.size))
                 .foregroundStyle(color)
             var layer = ctx
             layer.translateBy(x: point.x, y: point.y)

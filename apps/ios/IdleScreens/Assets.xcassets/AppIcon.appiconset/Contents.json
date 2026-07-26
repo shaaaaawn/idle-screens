@@ -1,38 +1,14 @@
 {
-  "images" : [
+  "images": [
     {
-      "filename" : "icon-1024.png",
-      "idiom" : "universal",
-      "platform" : "ios",
-      "size" : "1024x1024"
-    },
-    {
-      "filename" : "icon-tv-400x240.png",
-      "idiom" : "tv",
-      "scale" : "1x",
-      "size" : "400x240"
-    },
-    {
-      "filename" : "icon-tv-800x480.png",
-      "idiom" : "tv",
-      "scale" : "2x",
-      "size" : "400x240"
-    },
-    {
-      "filename" : "icon-tv-1280x768.png",
-      "idiom" : "tv",
-      "scale" : "1x",
-      "size" : "1280x768"
-    },
-    {
-      "filename" : "icon-tv-2560x1536.png",
-      "idiom" : "tv",
-      "scale" : "2x",
-      "size" : "1280x768"
+      "filename": "icon-1024.png",
+      "idiom": "universal",
+      "platform": "ios",
+      "size": "1024x1024"
     }
   ],
-  "info" : {
-    "author" : "xcode",
-    "version" : 1
+  "info": {
+    "author": "xcode",
+    "version": 1
   }
 }

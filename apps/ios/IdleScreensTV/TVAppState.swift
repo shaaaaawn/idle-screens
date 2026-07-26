@@ -25,6 +25,9 @@ final class TVAppState {
     var currentSpecJSON: JSONValue?
     var compiledScene: [CompiledLayer] = []
     var specBackground: SpecSubset.Background?
+    /// True when the channel runs a non-schema spec (e.g. classic saver
+    /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
+    var isClassicSpec = false
 
     // MARK: Capability tier
 
@@ -99,6 +102,7 @@ final class TVAppState {
         currentSpecJSON = nil
         compiledScene = []
         specBackground = nil
+        isClassicSpec = false
         thumbFailed = false
         watchdogDowngraded = false
 
@@ -157,7 +161,16 @@ final class TVAppState {
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {
         currentSpecJSON = json
         guard let data = try? JSONEncoder().encode(json),
-              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return }
+              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
+            // Not a schema spec (e.g. classic saver {"id":"warp"}) — no native
+            // render. Keep the raw JSON; ScreenSaverView routes to the thumb stream.
+            isClassicSpec = true
+            compiledScene = []
+            specBackground = nil
+            return
+        }
+        // A valid schema spec clears the classic flag (re-publish scenario).
+        isClassicSpec = false
         let seed = spec.seed ?? fallbackSeed ?? 0
         compiledScene = spec.compile(seed: seed)
         specBackground = spec.background

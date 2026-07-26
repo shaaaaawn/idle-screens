@@ -10,51 +10,60 @@ struct ChannelGridView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 40) {
+            VStack(spacing: 0) {
+                // Fixed header — kept out of the ScrollView so focus-driven
+                // scrolling can never push it off screen.
+                HStack {
                     Text("idle screens")
                         .font(.system(size: 56, weight: .bold))
                         .foregroundStyle(Color.textPrimary)
-                        .padding(.horizontal, 80)
+                    Spacer()
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 32))
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 80)
+                .padding(.top, 40)
+                .padding(.bottom, 32)
 
-                    if app.channels.isEmpty, !app.isLoadingGallery {
-                        ContentUnavailableView(
-                            "No channels",
-                            systemImage: "tv",
-                            description: Text(app.galleryError ?? "")
-                        )
-                    } else {
-                        LazyVGrid(columns: columns, spacing: 48) {
-                            ForEach(app.channels) { channel in
-                                Button {
-                                    app.selectChannel(channel.id)
-                                } label: {
-                                    ChannelCard(channel: channel)
+                ScrollView {
+                    VStack(spacing: 48) {
+                        if app.channels.isEmpty, !app.isLoadingGallery {
+                            ContentUnavailableView(
+                                "No channels",
+                                systemImage: "tv",
+                                description: Text(app.galleryError ?? "")
+                            )
+                        } else {
+                            LazyVGrid(columns: columns, spacing: 48) {
+                                ForEach(app.channels) { channel in
+                                    Button {
+                                        app.selectChannel(channel.id)
+                                    } label: {
+                                        ChannelCard(channel: channel)
+                                    }
+                                    .buttonStyle(.card)
                                 }
-                                .buttonStyle(.card)
                             }
                         }
-                        .padding(.horizontal, 80)
-                    }
 
-                    HStack(spacing: 24) {
-                        TextField("Enter channel ID", text: $manualChannelId)
-                            .frame(width: 480)
-                        Button("Watch") {
-                            let id = manualChannelId.trimmingCharacters(in: .whitespaces)
-                            if !id.isEmpty { app.selectChannel(id) }
-                        }
-                        .disabled(manualChannelId.trimmingCharacters(in: .whitespaces).isEmpty)
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
+                        HStack(spacing: 24) {
+                            TextField("Enter channel ID", text: $manualChannelId)
+                                .frame(width: 480)
+                            Button("Watch") {
+                                let id = manualChannelId.trimmingCharacters(in: .whitespaces)
+                                if !id.isEmpty { app.selectChannel(id) }
+                            }
+                            .disabled(manualChannelId.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
                     .padding(.horizontal, 80)
                     .padding(.bottom, 60)
                 }
-                .padding(.top, 60)
             }
             .background(Color.appBackground.ignoresSafeArea())
             .navigationDestination(isPresented: Binding(
@@ -79,16 +88,26 @@ private struct ChannelCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    Color.appSurfaceRaised
+            // Fixed 16:9 poster frame — thumbs arrive in arbitrary aspects
+            // (portrait phone, square, landscape). Color.clear owns the frame
+            // (a scaledToFill image ignores the height proposal and would
+            // inflate the card); the overlaid image overflows and is clipped.
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            ThumbPlaceholder(label: channel.displayLabel)
+                        default:
+                            ThumbPlaceholder(label: channel.displayLabel)
+                                .opacity(0.5)
+                        }
+                    }
                 }
-            }
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(channel.displayLabel)
@@ -105,6 +124,31 @@ private struct ChannelCard: View {
                 }
                 .font(.caption)
                 .foregroundStyle(Color.textSecondary)
+            }
+        }
+    }
+}
+
+/// Shown when a channel has no thumb (404/empty) — reads as intentional,
+/// not broken.
+private struct ThumbPlaceholder: View {
+    let label: String
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.appSurfaceRaised, Color.appBackground],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            VStack(spacing: 16) {
+                Circle()
+                    .fill(Color.appPrimary.opacity(0.7))
+                    .frame(width: 28, height: 28)
+                Text(label)
+                    .font(.headline)
+                    .foregroundStyle(Color.textSecondary)
+                    .lineLimit(1)
             }
         }
     }

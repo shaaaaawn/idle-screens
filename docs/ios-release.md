@@ -64,3 +64,38 @@ xcrun altool --upload-app   -f /tmp/idle-export/IdleScreens.ipa -t ios --apiKey 
 - **1024px marketing icon must be opaque** (no alpha) — `IdleScreens/Assets.xcassets/AppIcon.appiconset/icon-1024.png` is RGB, regenerated via PIL if ever needed.
 - **Duplicate build numbers rejected** → bump `CURRENT_PROJECT_VERSION` every upload.
 - **401 on validate/upload** → wrong Key ID/Issuer for the `.p8`; re-check the key's row in ASC → Users and Access → Integrations.
+
+## tvOS (added 2026-07-25)
+
+Same app record (Apple ID `6794709335`), same bundle id, same dist cert + `idle-build.keychain-db`.
+First tvOS upload: build `2026072501` (1.0.0), Delivery UUID `55935a1f-7325-4dcf-a105-5542320cd0c5`.
+
+| Thing | Value |
+|---|---|
+| Target / scheme | `IdleScreensTV` (tvOS 17.0, device family 3) |
+| Profile | `Idle Screens tvOS App Store` (`TVOS_APP_STORE` — iOS profiles can't sign tvOS) |
+| Icon | `App Icon & Top Shelf Image.brandassets` (layered imagestack — **required** on tvOS) |
+
+Recipe: same as iOS but `-scheme IdleScreensTV -destination 'generic/platform=tvOS'`,
+ExportOptions profile `Idle Screens tvOS App Store`, and `altool -t appletvos`.
+TestFlight on tvOS needs **no device registration**; a direct-from-Xcode debug run would need
+the Apple TV UDID registered (`POST /v1/devices`).
+
+Gotcha hit on first tvOS upload: **90513 `CFBundleIcons.CFBundlePrimaryIcon` missing** —
+adding tv idiom slots to the iOS-style `AppIcon.appiconset` is NOT enough. tvOS requires the
+brand-asset structure (`App Icon & Top Shelf Image.brandassets` with Back/Middle/Front
+imagestack layers at 1280x768 + 400x240, plus 1920x720 / 2320x720 Top Shelf images) and
+`ASSETCATALOG_COMPILER_APPICON_NAME: App Icon & Top Shelf Image` on the tvOS target only.
+Current brand-asset art is flat (same fitted image in all three layers) — placeholder quality,
+revisit with real layered art before any store submission.
+
+Build numbers are date-based (`YYYYMMDDnn`, monotonic by construction) in both targets — no
+manual bumping needed; rebuilds are always accepted.
+
+## Store listing screenshots (added 2026-07-25)
+
+The 1.0 listings (iOS + tvOS, `PREPARE_FOR_SUBMISSION`) have screenshots uploaded via the
+mono-level pipeline: `idle-mono/scripts/store-shots/` captures/composes into
+`idle-mono/store-assets/`, and `asc-upload.mjs` there pushes them to ASC (idempotent).
+Slots filled: iPhone 6.9" + 6.5" (watch grid), Apple TV (4 shots, 4K). TestFlight itself
+never needed these — they're for the eventual App Store submission.
