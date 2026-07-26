@@ -106,6 +106,16 @@ final class TVAppState {
         thumbFailed = false
         watchdogDowngraded = false
 
+        // Instant first frame: the gallery payload carries each channel's
+        // inline spec, so render it immediately instead of holding a spinner
+        // through the WS handshake. The WS snapshot replaces it on arrival
+        // (and classic channels have no decodable inline spec, so they keep
+        // the spinner until the snapshot routes them to the thumb stream).
+        if let cached = channels.first(where: { $0.id == channelId })?.spec {
+            compiledScene = cached.compile(seed: cached.seed ?? 0)
+            specBackground = cached.background
+        }
+
         wsTask = Task { [weak self] in
             guard let self else { return }
             do {

@@ -64,6 +64,7 @@ struct SpecSubset: Decodable, Equatable {
         /// Exact placement for single-entity layers (HUD text etc.);
         /// fractions of view width/height, like the web engine.
         var position: Position?
+        var grow: Grow?
     }
 
     struct Position: Decodable, Equatable {
@@ -105,13 +106,28 @@ struct SpecSubset: Decodable, Equatable {
         }
     }
 
-    /// Only the drift fields are used; every other motion type is treated as drift.
+    /// Motion params. drift/static/rise/bounce/orbit/wander are simulated with
+    /// the web engine's analytic math; unknown types degrade to drift.
     struct Motion: Decodable, Equatable {
         var type: String
         var speed: [Double]?
         var angle: Double?
         var bidirectional: Bool?
         var bob: Double?
+        /// rise: horizontal sway amplitude (spec units).
+        var sway: Double?
+        /// orbit: radius range (spec units) and center (fractions of w/h).
+        var radius: [Double]?
+        var center: Position?
+        /// wander: harmonic drift amplitude (spec units) and 0…1 flock coherence.
+        var meander: Double?
+        var coherence: Double?
+    }
+
+    /// Layer-level size breathing: size *= 1 + amp·sin(2πt/period + phase).
+    struct Grow: Decodable, Equatable {
+        var amp: Double
+        var period: Double?
     }
 
     enum Sprite: Equatable {
@@ -208,8 +224,8 @@ extension SpecSubset.Sprite: Decodable {
 
 struct CompiledEntity: Equatable, Sendable {
     var x, y: Double        // origin, fraction of view width/height
-    var vx, vy: Double      // velocity, fraction of min(view w,h) per second
-    var size: Double        // radius / glyph size, fraction of min(view w,h)
+    var vx, vy: Double      // velocity in spec units/sec (orbit: deg/sec in vx)
+    var size: Double        // radius / glyph size, spec units
     var aspect: Double      // rect height/width
     var color: String
     var glyph: String?
@@ -217,6 +233,26 @@ struct CompiledEntity: Equatable, Sendable {
     var phase: Double       // pulse phase offset, radians
     var spinSpeed: Double   // degrees/sec
     var spinAngle: Double   // initial angle, degrees
+    // Motion (web-engine analytic parity; see packages/schema/src/simulate.ts).
+    var motionType: String = "drift"
+    var bob: Double = 0                 // drift bob / rise sway (spec units)
+    var orbitR: Double = 0              // spec units
+    var orbitCx: Double = 0.5, orbitCy: Double = 0.5  // fractions of w/h
+    var growAmp: Double = 0
+    var growPeriod: Double = 1000       // ms
+    var growPhase: Double = 0
+    var wander: WanderParams?
+}
+
+/// Three harmonic octaves per axis, matching the web engine's drawOsc().
+/// Amplitudes are spec units; freqs are rad/ms.
+struct WanderParams: Equatable, Sendable {
+    var ax: [Double], fx: [Double], phx: [Double]
+    var ay: [Double], fy: [Double], phy: [Double]
+    var sharedAx: [Double], sharedFx: [Double], sharedPhx: [Double]
+    var sharedAy: [Double], sharedFy: [Double], sharedPhy: [Double]
+    var coherence: Double
+    var margin: Double                  // spec units
 }
 
 struct CompiledLayer: Equatable, Sendable {
@@ -239,9 +275,40 @@ extension SpecSubset {
 }
 
 extension SpecSubset.Layer {
+    /// One axis-pair of 3 harmonic octaves (18 draws), matching the web
+    /// engine's drawOsc(). Amplitudes in spec units, freqs rad/ms.
+    struct Osc {
+        var ax: [Double] = [], fx: [Double] = [], phx: [Double] = []
+        var ay: [Double] = [], fy: [Double] = [], phy: [Double] = []
+    }
+
+    static let octAmp = [1.0, 0.5, 0.25]
+    static let octPeriod: [(Double, Double)] = [(6000, 14000), (3000, 7000), (1500, 4000)]
+
+    static func drawOsc(rng: inout Mulberry32, amp: Double) -> Osc {
+        var o = Osc()
+        for i in 0..<3 {
+            o.ax.append(amp * octAmp[i] * (0.6 + rng.next() * 0.8))
+            o.fx.append(2 * .pi / (octPeriod[i].0 + rng.next() * (octPeriod[i].1 - octPeriod[i].0)))
+            o.phx.append(rng.next() * 2 * .pi)
+        }
+        for i in 0..<3 {
+            o.ay.append(amp * octAmp[i] * (0.6 + rng.next() * 0.8))
+            o.fy.append(2 * .pi / (octPeriod[i].0 + rng.next() * (octPeriod[i].1 - octPeriod[i].0)))
+            o.phy.append(rng.next() * 2 * .pi)
+        }
+        return o
+    }
+
     func compile(rng: inout Mulberry32, units: SpecSubset.Units) -> CompiledLayer {
         var entities: [CompiledEntity] = []
         let n = max(0, min(count, 400))
+        // Wander: one shared oscillator set per layer (flock coherence), like
+        // the web engine. Default meander: 60 for px specs, 0.05 viewport.
+        let meander = motion.type == "wander"
+            ? (motion.meander ?? (units == .px ? 60 : 0.05))
+            : 0
+        let sharedOsc = motion.type == "wander" ? Self.drawOsc(rng: &rng, amp: meander) : nil
         for _ in 0..<n {
             // Placement: explicit position wins for single-entity layers
             // (web parity: `layer.position && layer.count === 1`), otherwise
@@ -258,15 +325,49 @@ extension SpecSubset.Layer {
                 y = yr.0 + rng.next() * (yr.1 - yr.0)
             }
 
-            // Velocity — drift; every other motion type degrades to drift.
+            // Velocity, per motion type (web engine parity; unknown → drift).
             var vx = 0.0, vy = 0.0
-            if motion.type != "static" {
+            var bob = 0.0
+            var orbitR = 0.0
+            let motionType: String
+            switch motion.type {
+            case "static":
+                motionType = "static"
+            case "rise":
+                motionType = "rise"
+                let sr = Self.pair(motion.speed, default: (0.02, 0.05))
+                vy = -(sr.0 + rng.next() * (sr.1 - sr.0))  // upward
+                bob = motion.sway ?? 0
+            case "bounce":
+                motionType = "bounce"
+                let sr = Self.pair(motion.speed, default: (0.02, 0.05))
+                let speed = sr.0 + rng.next() * (sr.1 - sr.0)
+                let a = rng.next() * 2 * .pi
+                vx = cos(a) * speed
+                vy = sin(a) * speed
+            case "orbit":
+                motionType = "orbit"
+                // Angular speed in deg/sec rides in vx, like the web engine.
+                let sr = Self.pair(motion.speed, default: (5, 20))
+                vx = sr.0 + rng.next() * (sr.1 - sr.0)
+                let rr = Self.pair(motion.radius, default: (0.1, 0.25))
+                orbitR = rr.0 + rng.next() * (rr.1 - rr.0)
+            case "wander":
+                motionType = "wander"
+                let sr = Self.pair(motion.speed, default: (0.02, 0.05))
+                let speed = sr.0 + rng.next() * (sr.1 - sr.0)
+                let angle = (motion.angle ?? rng.next() * 360) * .pi / 180
+                vx = cos(angle) * speed
+                vy = sin(angle) * speed
+            default:  // drift + unknown types
+                motionType = "drift"
                 let sr = Self.pair(motion.speed, default: (0.02, 0.05))
                 let speed = sr.0 + rng.next() * (sr.1 - sr.0)
                 let angle = (motion.angle ?? rng.next() * 360) * .pi / 180
                 vx = cos(angle) * speed
                 vy = sin(angle) * speed
                 if motion.bidirectional == true, rng.next() < 0.5 { vx = -vx }
+                bob = motion.bob ?? 0
             }
 
             // Size.
@@ -335,12 +436,32 @@ extension SpecSubset.Layer {
             let spinDraw = rng.next() * 360
             let spinAngle = spinSpeed == 0 ? 0 : spinDraw
 
+            var wanderParams: WanderParams?
+            if motionType == "wander", let shared = sharedOsc {
+                let own = Self.drawOsc(rng: &rng, amp: meander)
+                wanderParams = WanderParams(
+                    ax: own.ax, fx: own.fx, phx: own.phx,
+                    ay: own.ay, fy: own.fy, phy: own.phy,
+                    sharedAx: shared.ax, sharedFx: shared.fx, sharedPhx: shared.phx,
+                    sharedAy: shared.ay, sharedFy: shared.fy, sharedPhy: shared.phy,
+                    coherence: min(1, max(0, motion.coherence ?? 0)),
+                    margin: meander * 1.75 * 1.4  // Σ octave amps (1+0.5+0.25) × 1.4
+                )
+            }
+
             entities.append(CompiledEntity(
                 x: x, y: y, vx: vx, vy: vy,
                 size: size, aspect: aspect,
                 color: color, glyph: glyph,
                 alpha: alphaValue, phase: phase,
-                spinSpeed: spinSpeed, spinAngle: spinAngle
+                spinSpeed: spinSpeed, spinAngle: spinAngle,
+                motionType: motionType, bob: bob,
+                orbitR: orbitR,
+                orbitCx: motion.center?.x ?? 0.5, orbitCy: motion.center?.y ?? 0.5,
+                growAmp: grow?.amp ?? 0,
+                growPeriod: grow?.period ?? 1000,
+                growPhase: grow != nil ? rng.next() * 2 * .pi : 0,
+                wander: wanderParams
             ))
         }
         return CompiledLayer(

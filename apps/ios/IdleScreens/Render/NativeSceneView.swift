@@ -19,20 +19,34 @@ struct NativeSceneView: View {
                 drawBackground(ctx: ctx, size: size)
                 let t = context.date.timeIntervalSince(start)
                 let minDim = min(size.width, size.height)
+                // t2 load shedding: thin every layer by the same stride so the
+                // composition survives (dropping whole trailing layers would cut
+                // the foreground accents first).
+                let total = layers.reduce(0) { $0 + $1.entities.count }
+                let stride = tier == .t3 ? 1 : max(1, Int((Double(total) / 150.0).rounded(.up)))
                 for layer in layers {
                     // Dimensional values (sizes, speeds, stroke widths) scale by
                     // min(w,h) for viewport specs and by 1 for px specs.
                     // Positions (x/y) are always fractions of w/h — never scaled.
                     let dim = layer.units == .px ? 1 : minDim
-                    applyBlend(ctx: &ctx, blend: layer.blend)
-                    for entity in layer.entities {
+                    if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
+                    for (i, entity) in layer.entities.enumerated() {
+                        if stride > 1, i % stride != 0 { continue }
                         let point = position(of: entity, at: t, in: size, dim: dim, wrap: layer.wrap)
                         var alpha = entity.alpha
                         if let pulse = layer.pulse {
                             let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
                             alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
                         }
-                        draw(entity: entity, sprite: layer.sprite, units: layer.units, at: point,
+                        var grown = entity
+                        if entity.growAmp != 0 {
+                            // Web engine sizeAt(): size breathing (margins/wrap
+                            // above intentionally use the base size, like web).
+                            let s = entity.size * (1 + entity.growAmp
+                                * sin(t * 1000 * 2 * .pi / entity.growPeriod + entity.growPhase))
+                            grown.size = max(s, entity.size * 0.01)
+                        }
+                        draw(entity: grown, sprite: layer.sprite, units: layer.units, at: point,
                              dim: dim, alpha: alpha, t: t, ctx: &ctx)
                     }
                     ctx.blendMode = .normal
@@ -87,18 +101,85 @@ struct NativeSceneView: View {
 
     private func position(of entity: CompiledEntity, at t: TimeInterval,
                           in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
-        var px = entity.x * size.width + entity.vx * dim * t
-        var py = entity.y * size.height + entity.vy * dim * t
-        if wrap {
-            px = px.truncatingRemainder(dividingBy: size.width)
-            if px < 0 { px += size.width }
-            py = py.truncatingRemainder(dividingBy: size.height)
-            if py < 0 { py += size.height }
-        } else {
-            px = min(size.width, max(0, px))
-            py = min(size.height, max(0, py))
+        let x0 = entity.x * size.width
+        let y0 = entity.y * size.height
+        let m = entity.size * dim
+        let tms = t * 1000
+
+        switch entity.motionType {
+        case "static":
+            return CGPoint(x: x0, y: y0)
+
+        case "orbit":
+            // vx carries angular speed in deg/sec; phase seeds the start angle.
+            let angle = entity.phase + entity.vx * .pi / 180 * t
+            return CGPoint(
+                x: entity.orbitCx * size.width + entity.orbitR * dim * cos(angle),
+                y: entity.orbitCy * size.height + entity.orbitR * dim * sin(angle))
+
+        case "bounce":
+            return CGPoint(
+                x: reflect(x0 + entity.vx * dim * t, m / 2, size.width - m / 2),
+                y: reflect(y0 + entity.vy * dim * t, m / 2, size.height - m / 2))
+
+        case "rise":
+            let sway = entity.bob != 0 ? entity.bob * dim * sin(tms / 700 + entity.phase) : 0
+            return CGPoint(
+                x: x0 + sway,
+                y: wrapValue(y0 + entity.vy * dim * t, -m, size.height + m))
+
+        case "wander" where entity.wander != nil:
+            let w = entity.wander!
+            let c = w.coherence
+            var hx = 0.0, hy = 0.0
+            for i in 0..<3 {
+                if c < 1 {
+                    hx += (1 - c) * w.ax[i] * dim * sin(w.fx[i] * tms + w.phx[i])
+                    hy += (1 - c) * w.ay[i] * dim * sin(w.fy[i] * tms + w.phy[i])
+                }
+                if c > 0 {
+                    hx += c * w.sharedAx[i] * dim * sin(w.sharedFx[i] * tms + w.sharedPhx[i])
+                    hy += c * w.sharedAy[i] * dim * sin(w.sharedFy[i] * tms + w.sharedPhy[i])
+                }
+            }
+            let margin = m + w.margin * dim
+            return CGPoint(
+                x: wrapValue(x0 + entity.vx * dim * t + hx, -margin, size.width + margin),
+                y: wrapValue(y0 + entity.vy * dim * t + hy, -margin, size.height + margin))
+
+        default:  // drift + unknown
+            let bobX = entity.bob != 0 ? entity.bob * dim * sin(tms / 700 + entity.phase) : 0
+            var px = x0 + entity.vx * dim * t + bobX
+            var py = y0 + entity.vy * dim * t
+            if wrap {
+                px = px.truncatingRemainder(dividingBy: size.width)
+                if px < 0 { px += size.width }
+                py = py.truncatingRemainder(dividingBy: size.height)
+                if py < 0 { py += size.height }
+            } else {
+                px = min(size.width, max(0, px))
+                py = min(size.height, max(0, py))
+            }
+            return CGPoint(x: px, y: py)
         }
-        return CGPoint(x: px, y: py)
+    }
+
+    /// Web engine's wrap(): cyclic wrap of v into [lo, hi).
+    private func wrapValue(_ v: Double, _ lo: Double, _ hi: Double) -> Double {
+        let range = hi - lo
+        guard range > 0 else { return lo }
+        return (((v - lo).truncatingRemainder(dividingBy: range)) + range)
+            .truncatingRemainder(dividingBy: range) + lo
+    }
+
+    /// Web engine's reflect(): ping-pong of v between lo and hi.
+    private func reflect(_ v: Double, _ lo: Double, _ hi: Double) -> Double {
+        let range = hi - lo
+        guard range > 0 else { return lo }
+        let period = range * 2
+        var p = (v - lo).truncatingRemainder(dividingBy: period)
+        if p < 0 { p += period }
+        return p < range ? lo + p : hi - (p - range)
     }
 
     // MARK: - Sprites
@@ -115,7 +196,9 @@ struct NativeSceneView: View {
         case .circle(_, _, _, let soft):
             let r = entity.size * dim
             let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
-            if soft {
+            // Per-entity per-frame radial gradients are the renderer's most
+            // expensive path — below t3, soft circles degrade to plain fills.
+            if soft, tier == .t3 {
                 ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
                     Gradient(colors: [color, color.opacity(0)]),
                     center: point,

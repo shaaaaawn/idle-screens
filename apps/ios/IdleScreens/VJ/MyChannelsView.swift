@@ -12,14 +12,24 @@ struct MyChannelsView: View {
             List {
                 ForEach(app.credentials) { credential in
                     NavigationLink(destination: ChannelDeckView(credential: credential)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(credential.label)
-                                .foregroundStyle(Color.textPrimary)
-                            Text(credential.channelId)
-                                .font(.caption)
-                                .foregroundStyle(Color.textSecondary)
+                        HStack(spacing: 12) {
+                            // Live preview when the channel is in the public
+                            // gallery (specs come along for free with it).
+                            if let spec = app.channels.first(where: { $0.id == credential.channelId })?.spec {
+                                ScenePreviewView(spec: spec, fallbackSeed: credential.channelId)
+                                    .frame(width: 84, height: 47)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(credential.label)
+                                    .foregroundStyle(Color.textPrimary)
+                                Text(credential.channelId)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
                         }
                     }
+                    .listRowBackground(Color.appBackground)
                 }
                 .onDelete { indexSet in
                     indexSet.forEach { app.removeChannel(app.credentials[$0]) }
