@@ -1,5 +1,6 @@
 import { createRng, type SaverInstance } from '@idle-screens/core';
 import { compileSaver } from '@idle-screens/schema';
+import { openAgentPanel } from './agent-panel';
 import { getCatalog } from './catalog';
 import { createChamber, type ChamberEntry } from './chamber';
 import { buildInspector } from './inspector';
@@ -32,7 +33,7 @@ export interface EvalsPanelOptions {
   onFullscreenChange?: (open: boolean) => void;
 }
 
-type ViewMode = 'compare' | 'artist';
+type ViewMode = 'compare' | 'artist' | 'gallery';
 
 function downloadJson(filename: string, data: unknown): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -119,6 +120,8 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   let mode: ViewMode = 'compare';
   let artistId = catalog.artists[0]?.id ?? 'monet';
   let benchmarkId = catalog.benchmarks[0]?.id ?? 'calm-horizon';
+  /** Gallery mode: true = the index wall of all artists, false = one artist's wall. */
+  let galleryIndex = true;
   let screen: EvalScreen | null = null;
   const compareByScreen = new Map<string, SaverInstance>();
   let lastResults: ScreenScore[] | null = null;
@@ -137,6 +140,7 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         <div class="evals-mode">
           <button type="button" class="evals-mode-btn active" data-mode="compare">Compare</button>
           <button type="button" class="evals-mode-btn" data-mode="artist">By artist</button>
+          <button type="button" class="evals-mode-btn" data-mode="gallery">Gallery</button>
         </div>
         <div class="evals-nav-list" data-nav="compare"></div>
         <div class="evals-nav-list" data-nav="artist" hidden></div>
@@ -151,6 +155,7 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
           <div class="evals-toolbar-actions">
             <span class="evals-toolbar-hint">Click to select · click again to enter the chamber</span>
             <button type="button" class="evals-btn" data-act="chamber">Enter chamber</button>
+            <button type="button" class="evals-btn secondary" data-act="agent">Agent run…</button>
             <button type="button" class="evals-btn secondary" data-act="export" disabled>Export run</button>
           </div>
         </header>
@@ -361,6 +366,29 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       scoreLine: scoreLineFor(s),
     }));
 
+  /** Mount a live saver into a tile stage; the instance joins playback sync. */
+  const mountStage = (stage: HTMLElement, s: EvalScreen): void => {
+    try {
+      const plugin = compileSaver(s.spec);
+      void Promise.resolve(
+        plugin.mount({
+          host: stage,
+          dpr: Math.min(devicePixelRatio || 1, 1.25),
+          width: 320,
+          height: 200,
+          rng: createRng((s.spec.seed ?? 42) >>> 0 || 1),
+          seed: s.spec.seed ?? 42,
+          reducedMotion: false,
+        }),
+      ).then((inst) => {
+        compareByScreen.set(s.id, inst);
+        syncTiles();
+      });
+    } catch (err) {
+      stage.textContent = err instanceof Error ? err.message : String(err);
+    }
+  };
+
   /** Build one live tile. Both modes use the same card — only the labels differ. */
   const buildTile = (s: EvalScreen, name: string, meta: string): HTMLElement => {
     const tile = document.createElement('button');
@@ -415,26 +443,57 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       syncTiles();
     });
 
-    try {
-      const plugin = compileSaver(s.spec);
-      void Promise.resolve(
-        plugin.mount({
-          host: stage,
-          dpr: Math.min(devicePixelRatio || 1, 1.25),
-          width: 320,
-          height: 200,
-          rng: createRng((s.spec.seed ?? 42) >>> 0 || 1),
-          seed: s.spec.seed ?? 42,
-          reducedMotion: false,
-        }),
-      ).then((inst) => {
-        compareByScreen.set(s.id, inst);
-        syncTiles();
-      });
-    } catch (err) {
-      stage.textContent = err instanceof Error ? err.message : String(err);
-    }
+    mountStage(stage, s);
     return tile;
+  };
+
+  /**
+   * Artist index card (Gallery mode): one live signature work standing in for
+   * the artist's whole wall. Click steps into the wall, not the inspector.
+   */
+  const buildArtistCard = (a: (typeof catalog.artists)[number]): HTMLElement => {
+    const works = catalog.screensByArtist.get(a.id) ?? [];
+    const showcase = works.find((s) => s.kind === 'signature') ?? works[0];
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'evals-tile evals-artist-card';
+    if (showcase) card.dataset.screenId = showcase.id;
+
+    const head = document.createElement('div');
+    head.className = 'evals-tile-head';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'evals-tile-name';
+    nameEl.textContent = a.artist;
+    const metaEl = document.createElement('span');
+    metaEl.className = 'evals-tile-meta';
+    metaEl.textContent = `${a.movement} · ${a.years}`;
+    head.append(nameEl, metaEl);
+
+    const stage = document.createElement('div');
+    stage.className = 'evals-tile-stage';
+    card.append(head, stage);
+
+    card.addEventListener('click', () => {
+      artistId = a.id;
+      galleryIndex = false;
+      artistNav.querySelectorAll('.evals-nav-item').forEach((el) => {
+        el.classList.toggle('active', (el as HTMLElement).dataset.id === artistId);
+      });
+      renderGrid();
+    });
+    card.addEventListener('pointerenter', () => {
+      if (showcase) {
+        hoveredTile = showcase.id;
+        syncTiles();
+      }
+    });
+    card.addEventListener('pointerleave', () => {
+      if (showcase && hoveredTile === showcase.id) hoveredTile = null;
+      syncTiles();
+    });
+
+    if (showcase) mountStage(stage, showcase);
+    return card;
   };
 
   /**
@@ -444,13 +503,88 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
    */
   const renderGrid = (): void => {
     disposeCompare();
+    compareGrid.classList.remove('evals-compare-grid--wall');
 
     const screens =
       mode === 'compare'
         ? catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId)
-        : (catalog.screensByArtist.get(artistId) ?? []);
+        : mode === 'gallery' && galleryIndex
+          ? []
+          : (catalog.screensByArtist.get(artistId) ?? []);
 
-    if (mode === 'compare') {
+    if (mode === 'gallery') {
+      compareGrid.classList.add('evals-compare-grid--wall');
+      if (galleryIndex) {
+        intentEl.innerHTML = '';
+        const title = document.createElement('div');
+        title.className = 'evals-intent-title';
+        title.textContent = 'The gallery — 15 artists, one wall each';
+        const body = document.createElement('div');
+        body.className = 'evals-intent-body';
+        body.textContent =
+          'Every StyleDNA profile is a hypothesis about how an artist compiles into SaverSpec. ' +
+          'Step into a wall to see the whole body of work — shared benchmarks and signature pieces.';
+        intentEl.append(title, body);
+        subtitleEl.textContent = `Gallery — ${catalog.artists.length} artists`;
+        const showcaseScreens = catalog.artists
+          .map((a) => {
+            const works = catalog.screensByArtist.get(a.id) ?? [];
+            return works.find((s) => s.kind === 'signature') ?? works[0];
+          })
+          .filter((s): s is EvalScreen => !!s);
+        chamber.setEntries(
+          chamberEntriesForArtist(showcaseScreens),
+          `The gallery — ${catalog.artists.length} artists`,
+        );
+        for (const a of catalog.artists) compareGrid.append(buildArtistCard(a));
+      } else {
+        const a = catalog.artists.find((x) => x.id === artistId);
+        intentEl.innerHTML = '';
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'evals-gallery-back';
+        back.textContent = '← All artists';
+        back.addEventListener('click', () => {
+          galleryIndex = true;
+          renderGrid();
+        });
+        const title = document.createElement('div');
+        title.className = 'evals-intent-title';
+        title.textContent = `${a?.artist ?? artistId} — ${a?.movement ?? ''} (${a?.years ?? ''})`;
+        const body = document.createElement('div');
+        body.className = 'evals-intent-body';
+        body.textContent = a?.research.thesis ?? '';
+        const chips = document.createElement('div');
+        chips.className = 'evals-intent-chips';
+        for (const c of [
+          `tempo ${a?.research.tempo ?? '—'}`,
+          `depth ${a?.research.depth ?? '—'}`,
+          `sprites ${a?.markMaking.primarySprites.join(', ') || '—'}`,
+          `motions ${a?.motionDialect.preferred.join(', ') || '—'}`,
+          `blend ${a?.markMaking.blend ?? '—'}`,
+        ]) {
+          const chip = document.createElement('span');
+          chip.className = 'evals-check-chip';
+          chip.textContent = c;
+          chips.append(chip);
+        }
+        intentEl.append(back, title, body, chips);
+        subtitleEl.textContent = `${a?.artist ?? artistId} — gallery wall, ${screens.length} works`;
+        chamber.setEntries(
+          chamberEntriesForArtist(screens),
+          `${a?.artist ?? artistId} — ${screens.length} works`,
+        );
+        for (const kind of ['benchmark', 'signature'] as const) {
+          const group = screens.filter((s) => s.kind === kind);
+          if (!group.length) continue;
+          const label = document.createElement('div');
+          label.className = 'evals-grid-label';
+          label.textContent = kind === 'benchmark' ? 'Benchmarks — shared intents' : 'Signatures — artist-owned';
+          compareGrid.append(label);
+          for (const s of group) compareGrid.append(buildTile(s, s.title, s.recipe));
+        }
+      }
+    } else if (mode === 'compare') {
       const bench = catalog.benchmarks.find((b) => b.id === benchmarkId);
       intentEl.innerHTML = '';
       if (bench) {
@@ -549,7 +683,9 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       b.classList.toggle('active', (b as HTMLElement).dataset.mode === mode);
     });
     compareNav.hidden = mode !== 'compare';
-    artistNav.hidden = mode !== 'artist';
+    artistNav.hidden = mode === 'compare';
+    // The Gallery tab always lands on the index; walls are entered from there.
+    if (mode === 'gallery') galleryIndex = true;
     renderGrid();
   };
 
@@ -580,6 +716,7 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     btn.innerHTML = `<span class="evals-nav-name">${a.artist}</span><span class="evals-nav-meta">${a.movement}</span>`;
     btn.addEventListener('click', () => {
       artistId = a.id;
+      if (mode === 'gallery') galleryIndex = false;
       artistNav.querySelectorAll('.evals-nav-item').forEach((el) => {
         el.classList.toggle('active', (el as HTMLElement).dataset.id === artistId);
       });
@@ -597,6 +734,15 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
 
   mount.querySelector('[data-act="chamber"]')?.addEventListener('click', () => {
     if (screen) chamber.open(screen.id);
+  });
+
+  mount.querySelector('[data-act="agent"]')?.addEventListener('click', () => {
+    openAgentPanel({
+      catalog,
+      screenId: screen?.id ?? null,
+      benchmarkId,
+      artistId,
+    });
   });
 
   exportBtn.addEventListener('click', () => {

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -21,9 +21,21 @@ const schemaPkgVersion = (createRequire(import.meta.url)(
 const src = (pkg: string): string =>
   fileURLToPath(new URL(`../../packages/${pkg}/src/index.ts`, import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Seed the Evals OpenRouter connection from the environment (process env or
+  // a local .env). A key the user saves in Settings always wins over this;
+  // the env value is only the fallback. It is inlined into the client bundle —
+  // same trust model as localStorage, so this stays a local-dev convenience.
+  const envOpenRouterKey =
+    process.env.OPENROUTER_API_KEY ??
+    loadEnv(mode, process.cwd(), 'OPENROUTER_').OPENROUTER_API_KEY ??
+    '';
+  return {
   base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
-  define: { __SCHEMA_PKG_VERSION__: JSON.stringify(schemaPkgVersion) },
+  define: {
+    __SCHEMA_PKG_VERSION__: JSON.stringify(schemaPkgVersion),
+    __OPENROUTER_API_KEY__: JSON.stringify(envOpenRouterKey),
+  },
   server: { port: 5177, strictPort: true },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a
@@ -43,4 +55,5 @@ export default defineConfig({
       '@idle-screens/capabilities': src('capabilities'),
     },
   },
+  };
 });

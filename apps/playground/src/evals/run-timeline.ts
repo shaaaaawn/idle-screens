@@ -307,9 +307,14 @@ function wireOpenRouter(root: HTMLElement, form: HTMLFormElement): void {
 
   buildConnectionEditor(q<HTMLElement>('[data-role="connection"]')!, {
     onModels: paint,
-    onKeyChange: (stored) => {
-      state.textContent = stored ? `stored · ${maskKey()}` : 'not set';
-      state.classList.toggle('is-set', stored);
+    onKeyChange: (source) => {
+      state.textContent =
+        source === 'stored'
+          ? `stored · ${maskKey()}`
+          : source === 'env'
+            ? `env · ${maskKey()}`
+            : 'not set';
+      state.classList.toggle('is-set', source !== null);
     },
   });
 }

@@ -72,9 +72,14 @@ export function buildSettingsPanel(mount: HTMLElement): SettingsPanelHandle {
     mount.querySelector<HTMLElement>('[data-role="connection"]')!,
     {
       onModels: paintModels,
-      onKeyChange: (stored) => {
-        connState.textContent = stored ? 'A key is stored in this browser.' : 'No key stored yet.';
-        connState.classList.toggle('is-set', stored);
+      onKeyChange: (source) => {
+        connState.textContent =
+          source === 'stored'
+            ? 'A key is stored in this browser.'
+            : source === 'env'
+              ? 'Using OPENROUTER_API_KEY from the environment.'
+              : 'No key stored yet.';
+        connState.classList.toggle('is-set', source !== null);
       },
     },
   );

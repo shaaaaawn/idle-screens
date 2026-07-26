@@ -13,10 +13,16 @@ carry named artistic styles.
 | `style-apply.ts` | DNA × intent → SaverSpec |
 | `score.ts` | validate / perceive / style-fit / intent-fit |
 | `catalog.ts` | memoized 150-screen catalog |
-| `evals-panel.ts` | playground UI (timeline + Compare + By artist) |
+| `evals-panel.ts` | playground UI (timeline + Compare + By artist + Gallery) |
 | `run-timeline.ts` | run timeline rail + new-run provenance modal |
 | `run-store.ts` | disk index + browser localStorage merge |
 | `provenance.ts` | StyleDNA hash, RunProvenance builder, deltas |
+| `connection-editor.ts` | shared OpenRouter key editor (run modal + `#settings`) |
+| `run-defaults.ts` | operator/model defaults, prefilled into the run modal |
+| `agent-loop.ts` | agent-loop engine: model authors a spec via tools (submit/perceive/score/finish) |
+| `agent-artifact.ts` | training-set record shape (prompt, trajectory, initial/final) |
+| `agent-run.ts` | serial batch runner, browser store, training/SFT JSONL export |
+| `agent-panel.ts` | Agent run modal (config → progress → results) |
 | `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
 | `runs/` | append-only run artifacts for the next cycle |
 

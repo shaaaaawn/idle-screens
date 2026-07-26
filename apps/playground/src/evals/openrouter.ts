@@ -10,15 +10,30 @@
  * Key handling — the constraints this file is built around:
  *  - The key lives in localStorage on this origin and nowhere else. There is no
  *    server in the playground; nothing is ever POSTed anywhere but openrouter.ai.
- *  - It is only transmitted when the user explicitly verifies it. The model
- *    catalogue endpoint is public, so browsing models sends no credential.
+ *  - It is only transmitted in two user-initiated cases: when the user presses
+ *    Verify, and when the user starts an agent-loop eval run (chat
+ *    completions). The model catalogue endpoint is public, so browsing models
+ *    sends no credential.
  *  - It is never logged, never written into a run summary, and never included
  *    in an exported training example. `RunProvenance` carries the model *name*,
  *    not the key.
  *  - localStorage is not secure storage. It is readable by any script on this
  *    origin. That is an acceptable trade for a local dev workbench; it is
  *    stated in the UI rather than hidden.
+ *  - If OPENROUTER_API_KEY is set in the dev server's environment (process env
+ *    or a local .env), vite inlines it as the FALLBACK key — used only when
+ *    nothing is stored in localStorage. A saved key always wins; Clear returns
+ *    to the env key rather than to nothing.
  */
+
+declare const __OPENROUTER_API_KEY__: string;
+
+/** Env-seeded key (vite define), empty string when the dev server had none. */
+const ENV_KEY: string =
+  typeof __OPENROUTER_API_KEY__ === 'string' ? __OPENROUTER_API_KEY__ : '';
+
+/** Where the active key came from — the UI states this rather than implying it. */
+export type KeySource = 'stored' | 'env' | null;
 
 const KEY_STORAGE = 'idleScreens.evals.openrouterKey';
 const MODELS_STORAGE = 'idleScreens.evals.openrouterModels';
@@ -55,7 +70,12 @@ function safeLocal(): Storage | null {
 }
 
 export function getKey(): string {
-  return safeLocal()?.getItem(KEY_STORAGE) ?? '';
+  return safeLocal()?.getItem(KEY_STORAGE) || ENV_KEY;
+}
+
+export function keySource(): KeySource {
+  if (safeLocal()?.getItem(KEY_STORAGE)) return 'stored';
+  return ENV_KEY ? 'env' : null;
 }
 
 export function setKey(key: string): void {
@@ -158,4 +178,89 @@ export async function verifyKey(key = getKey()): Promise<KeyStatus> {
     // Network/CORS failures must not be reported as an invalid key.
     return { ok: false, message: 'Could not reach OpenRouter (offline or blocked).' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// chat completions (agent-loop eval runs)
+
+const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+export interface ChatToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_calls?: ChatToolCall[];
+  tool_call_id?: string;
+}
+
+export interface ChatToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ChatRequest {
+  model: string;
+  messages: ChatMessage[];
+  tools?: ChatToolDef[];
+  signal?: AbortSignal;
+}
+
+export interface ChatResponse {
+  content: string | null;
+  toolCalls: ChatToolCall[];
+}
+
+/** OpenRouter failure with a machine-readable kind for the UI to branch on. */
+export class ChatError extends Error {
+  constructor(
+    readonly kind: 'auth' | 'rate' | 'http' | 'network',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ChatError';
+  }
+}
+
+/**
+ * One chat completion round-trip. This is the ONLY other call that transmits
+ * the key, and it only happens when the user explicitly starts an agent run.
+ * The key never enters messages, artifacts, trajectories, or exports — those
+ * record the model's name, never the credential.
+ */
+export async function chatCompletion(req: ChatRequest): Promise<ChatResponse> {
+  const key = getKey();
+  if (!key) throw new ChatError('auth', 'No OpenRouter key — add one in Settings.');
+  let res: Response;
+  try {
+    res = await fetch(CHAT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: req.model,
+        messages: req.messages,
+        ...(req.tools?.length ? { tools: req.tools } : {}),
+      }),
+      signal: req.signal ?? null,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new ChatError('network', 'Could not reach OpenRouter (offline or blocked).');
+  }
+  if (res.status === 401) throw new ChatError('auth', 'OpenRouter rejected the key — check Settings.');
+  if (res.status === 429) throw new ChatError('rate', 'Rate limited by OpenRouter — wait and retry.');
+  if (!res.ok) throw new ChatError('http', `OpenRouter chat: HTTP ${res.status}`);
+  const body = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string | null; tool_calls?: ChatToolCall[] } }>;
+  };
+  const msg = body.choices?.[0]?.message;
+  return { content: msg?.content ?? null, toolCalls: msg?.tool_calls ?? [] };
 }

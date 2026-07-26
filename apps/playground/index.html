@@ -805,6 +805,71 @@
       .evals-conn-settings a { color: #9cc6ff; text-decoration: none; }
       .evals-conn-settings a:hover { text-decoration: underline; }
 
+      /* ---- agent-run modal ---- */
+      .evals-agent-modal { max-height: 86vh; overflow-y: auto; }
+      .evals-agent-wide { width: min(880px, 92vw); }
+      .evals-agent-scope-label {
+        display: block; font: 600 10px/1 var(--mono); text-transform: uppercase;
+        letter-spacing: .06em; color: var(--text-faint); margin-bottom: 6px;
+      }
+      .evals-agent-scope {
+        display: flex; align-items: center; gap: 8px; padding: 4px 0;
+        font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+      }
+      .evals-agent-estimate {
+        margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-faint);
+      }
+      .evals-agent-nokey {
+        margin: 10px 0 0; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+        color: var(--warn); background: rgba(251,191,36,.08);
+        border: 1px solid rgba(251,191,36,.25); border-radius: var(--r-sm);
+      }
+      .evals-agent-nokey a { color: #9cc6ff; }
+      .evals-agent-rows {
+        display: flex; flex-direction: column; gap: 2px; margin: 10px 0;
+        max-height: 180px; overflow-y: auto;
+      }
+      .evals-agent-row {
+        display: flex; justify-content: space-between; gap: 10px;
+        padding: 4px 8px; border-radius: var(--r-sm);
+        font: 11.5px var(--mono); color: var(--text-dim);
+      }
+      .evals-agent-row[data-state='running'] { background: var(--accent-wash); color: #cfe2ff; }
+      .evals-agent-row[data-state='done'] { color: var(--ok); }
+      .evals-agent-row[data-state='warn'] { color: var(--warn); }
+      .evals-agent-log {
+        height: 160px; overflow-y: auto; margin: 6px 0 10px; padding: 10px 12px;
+        background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--r-sm);
+        font: 10.5px/1.65 var(--mono); color: var(--text-dim); white-space: pre-wrap;
+      }
+      .evals-agent-results {
+        display: flex; flex-direction: column; gap: 14px; margin: 12px 0;
+        max-height: 56vh; overflow-y: auto;
+      }
+      .evals-agent-result-head {
+        display: flex; align-items: baseline; gap: 12px; padding: 4px 0;
+        font: 11.5px var(--mono); color: var(--text-dim);
+      }
+      .evals-agent-row-name { color: var(--text); font-weight: 600; }
+      .evals-agent-outcome { padding: 2px 6px; border-radius: 3px; border: 1px solid var(--line); }
+      .evals-agent-outcome[data-outcome='finished'] { color: var(--ok); border-color: rgba(74,222,128,.35); }
+      .evals-agent-outcome[data-outcome='error'],
+      .evals-agent-outcome[data-outcome='aborted'] { color: var(--bad); border-color: rgba(248,113,113,.35); }
+      .evals-agent-outcome[data-outcome='max-calls'] { color: var(--warn); border-color: rgba(251,191,36,.3); }
+      .evals-agent-delta { color: #cfe2ff; }
+      .evals-agent-calls { margin-left: auto; color: var(--text-faint); }
+      .evals-agent-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .evals-agent-cell-cap {
+        font: 10px var(--mono); color: var(--text-faint); margin-bottom: 4px;
+      }
+      .evals-agent-cell-stage {
+        position: relative; width: 100%; aspect-ratio: 16 / 10;
+        background: #000; border: 1px solid var(--line); border-radius: var(--r-sm);
+        overflow: hidden;
+      }
+      .evals-agent-cell-stage canvas { display: block; width: 100%; height: 100%; }
+
+
       /* ================================================================
          SETTINGS VIEW — browser-local connection + run defaults
          ================================================================ */
@@ -849,6 +914,20 @@
         color: var(--text-faint); border-bottom: 1px solid var(--line-soft);
       }
       .evals-grid-label:first-child { margin-top: 0; }
+
+      /* Gallery mode — a wall of works, not an eval grid: larger frames. */
+      .evals-compare-grid--wall {
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 16px;
+      }
+      .evals-compare-grid--wall .evals-tile-stage { aspect-ratio: 4 / 3; }
+      .evals-artist-card .evals-tile-head { padding: 10px 12px; }
+      .evals-gallery-back {
+        display: inline-flex; align-items: center; gap: 6px;
+        margin: 0 0 8px; padding: 0; border: none; background: none;
+        color: #9cc6ff; font: 500 12px/1 var(--sans); cursor: pointer;
+      }
+      .evals-gallery-back:hover { text-decoration: underline; }
 
       /* ================================================================
          EVALS INSPECTOR — test / score / perception / DNA

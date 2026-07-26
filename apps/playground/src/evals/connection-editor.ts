@@ -2,10 +2,11 @@ import {
   cachedModels,
   clearKey,
   fetchModels,
-  hasKey,
+  keySource,
   maskKey,
   setKey,
   verifyKey,
+  type KeySource,
   type OpenRouterModel,
 } from './openrouter';
 
@@ -22,8 +23,8 @@ export interface ConnectionEditorOptions {
    * model datalist; the settings page uses it for its defaults datalist.
    */
   onModels?: (models: OpenRouterModel[]) => void;
-  /** Fired whenever the stored key changes (save/clear). */
-  onKeyChange?: (stored: boolean) => void;
+  /** Fired whenever the active key changes (save/clear/env fallback). */
+  onKeyChange?: (source: KeySource) => void;
 }
 
 /**
@@ -70,12 +71,15 @@ export function buildConnectionEditor(
   const msg = mount.querySelector<HTMLElement>('[data-role="conn-msg"]')!;
 
   const sync = (): void => {
-    const stored = hasKey();
+    const source = keySource();
     keyInput.value = '';
-    keyInput.placeholder = stored
-      ? `stored · ${maskKey()} — type a new key to replace`
-      : 'sk-or-v1-…';
-    opts.onKeyChange?.(stored);
+    keyInput.placeholder =
+      source === 'stored'
+        ? `stored · ${maskKey()} — type a new key to replace`
+        : source === 'env'
+          ? `env · ${maskKey()} — type a key to override`
+          : 'sk-or-v1-…';
+    opts.onKeyChange?.(source);
   };
 
   const reportModels = (models: OpenRouterModel[]): void => {

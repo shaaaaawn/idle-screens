@@ -130,7 +130,13 @@ test.describe('gallery view', () => {
     await page.locator('.gallery-card[data-id="dvd"]').click();
     await expect(top).toHaveAttribute('data-playing', 'false');
 
+    // Clicking a card far down the grid auto-scrolls, which parks `top` outside
+    // the viewport — and an offscreen card stays paused by design. Scroll it
+    // back before asserting it resumed, or this tests scroll position rather
+    // than the preview. (Every saver package added above `classic` pushes `dvd`
+    // further down; it is already ~1300px in.)
     await page.keyboard.press('Escape');
+    await top.scrollIntoViewIfNeeded();
     await expect(top).toHaveAttribute('data-playing', 'true');
   });
 
@@ -456,10 +462,16 @@ test.describe('evals view', () => {
   test('an unreachable OpenRouter degrades to free text instead of blocking', async ({ page }) => {
     await page.route('https://openrouter.ai/api/v1/models', (route) => route.abort());
     await openRunDialog(page);
-    await expect(page.locator('[data-role="model-hint"]')).toContainText('Could not reach OpenRouter');
-    // The run is still submittable with a typed model name.
+    // Assert the PROPERTY, not the wording: with no catalogue the field is
+    // still usable and the run still submittable. (The exact empty-state copy
+    // lives in the connection editor and is free to change.)
+    await expect(page.locator('#or-model-list option')).toHaveCount(0);
+    await expect(page.locator('[data-role="model-hint"]')).not.toBeEmpty();
     await page.locator('input[name="model"]').fill('local/handwritten');
     await expect(page.locator('input[name="provider"]')).toHaveValue('local');
+    await page.locator('.evals-modal [name="label"]').fill('offline run');
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('offline run');
   });
 
   /** Submit the run dialog and return the id of the run it created. */
@@ -713,18 +725,22 @@ test.describe('timeline panel', () => {
   test('scrubbing the timeline updates black hole steer values', async ({ page }) => {
     await page.goto('/#dev');
     await page.waitForFunction(() => !!window.__idleScreens);
+    await pauseTimeline(page);
     const lane = page.locator('.tl-lane').filter({ has: page.locator('.tl-lane-label', { hasText: 'diskBrightness' }) });
     await expect(lane).toBeVisible();
     const readVal = () => lane.locator('.tl-lane-value').textContent();
 
     // Scrub from the lane TRACK, not the panel: clicking the channel name used
     // to yank the playhead, which made selecting a channel impossible.
+    // The dock is short, so the lane must be scrolled in before its box is
+    // usable — mouse.click takes raw coordinates and will silently miss.
     const track = lane.locator('.tl-lane-track');
+    await track.scrollIntoViewIfNeeded();
     const box = (await track.boundingBox())!;
-    await page.mouse.click(box.x + 4, box.y + box.height / 2);
+    await page.mouse.click(box.x + box.width * 0.05, box.y + box.height / 2);
     const atStart = await readVal();
 
-    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
+    await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2);
     const atMid = await readVal();
     expect(atStart).not.toBe(atMid);
   });
@@ -736,6 +752,7 @@ test.describe('timeline panel', () => {
     const lane = page.locator('.tl-lane').filter({ has: page.locator('.tl-lane-label', { hasText: 'diskBrightness' }) });
     // Park the playhead somewhere non-zero first.
     const track = lane.locator('.tl-lane-track');
+    await track.scrollIntoViewIfNeeded();
     const box = (await track.boundingBox())!;
     await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
     const before = await page.locator('.tl-time-input').inputValue();
