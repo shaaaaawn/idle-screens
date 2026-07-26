@@ -54,12 +54,12 @@ control signals do.
 
    +-------------------------------------------------------+
    |                    playground                          |
-   |  Vite workbench (imports all 9, dev only)              |
+   |  Vite workbench (imports all 10, dev only)              |
    +-------------------------------------------------------+
 ```
 
 **core** is the foundation. The plugin packages (`saver-black-hole`, `saver-tide`,
-`saver-limelight`, `saver-slipstream`, `savers-classic`, `schema`) depend on it
+`saver-limelight`, `saver-slipstream`, `saver-catwalk`, `savers-classic`, `schema`) depend on it
 for types and the `SaverPlugin` contract. **validator** and **capabilities** are
 standalone with zero dependencies, so they can be used independently. The
 **playground** app imports everything for development and testing.
@@ -73,6 +73,7 @@ standalone with zero dependencies, so they can be used independently. The
 | [`@idle-screens/saver-tide`](packages/saver-tide) | Passthrough water saver: Jacobian-driven affine deformation of live page blocks — buoyant chips raft, heavy ones sink. |
 | [`@idle-screens/saver-limelight`](packages/saver-limelight) | Passthrough stage-light saver: page blocks gain height, cast silhouettes, and occlude each other under a roaming key light. |
 | [`@idle-screens/saver-slipstream`](packages/saver-slipstream) | Passthrough wind saver: page blocks are obstacles in an analytic potential-flow field; streamlines part around content and blocks lean with local wind. |
+| [`@idle-screens/saver-catwalk`](packages/saver-catwalk) | Passthrough cat screensaver: a silhouette cat parkours across the live page's own blocks — perches dip and spring under its weight, it naps on the warm ones. |
 | [`@idle-screens/savers-classic`](packages/savers-classic) | 19 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
 | [`@idle-screens/validator`](packages/validator) | Photosensitivity (WCAG 2.3.1 flash) + performance validation. Feed it luminance samples and frame times, get a pass/fail safety verdict. |
 | [`@idle-screens/capabilities`](packages/capabilities) | Device and capability detection + saver eligibility tiering. Pure decide (Node-testable) + a thin browser detector. |
