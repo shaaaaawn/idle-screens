@@ -80,6 +80,9 @@ importers:
       '@idle-screens/saver-limelight':
         specifier: workspace:*
         version: link:../../packages/saver-limelight
+      '@idle-screens/saver-slipstream':
+        specifier: workspace:*
+        version: link:../../packages/saver-slipstream
       '@idle-screens/saver-tide':
         specifier: workspace:*
         version: link:../../packages/saver-tide
