@@ -288,6 +288,13 @@ export interface PerceiveFrameOptions {
   seed?: number;
   /** Sample time in ms — honoured exactly when the saver is frame-addressable. */
   t?: number;
+  /**
+   * Backing-store multiplier. Savers size their canvas `w * dpr` and then
+   * `setTransform(dpr, …)`, so a dpr BELOW 1 hands the saver a large logical
+   * viewport while allocating a small buffer — the lever that makes a
+   * proportionally-correct thumbnail cost no extra memory.
+   */
+  dpr?: number;
 }
 
 /**
@@ -332,7 +339,7 @@ export async function perceiveSaverFrame(
     inst = await Promise.resolve(
       saver.mount({
         host,
-        dpr: 1, // read back at CSS size; no need to pay for retina here
+        dpr: opts.dpr ?? 1,
         width,
         height,
         rng: createRng((seed >>> 0) || 1),

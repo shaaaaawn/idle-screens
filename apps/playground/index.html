@@ -241,6 +241,19 @@
       }
       .gallery-card-preview canvas { display: block; width: 100%; height: 100%; }
       .gallery-card-preview > div { position: absolute; inset: 0; }
+      /* A real reference-sized box, shrunk by a compositor transform. CSS
+         savers style elements in absolute px (`.fish { width: 145px }`), so
+         they need the stage itself scaled — there is no backing store to
+         shrink the way `dpr` does for a canvas. */
+      .gallery-card-preview > .gallery-card-stage {
+        position: absolute; top: 0; left: 0; right: auto; bottom: auto;
+        width: var(--thumb-ref-w, 1280px);
+        height: var(--thumb-ref-h, 800px);
+        transform: scale(var(--thumb-scale, 0.225));
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+      .gallery-card-stage > div { position: absolute; inset: 0; }
 
       /* Full-bleed primary action: keyboard-reachable, invisible until focused. */
       .gallery-card-hit {

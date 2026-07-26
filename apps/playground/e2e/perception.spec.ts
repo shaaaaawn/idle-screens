@@ -28,7 +28,7 @@ interface Row {
 
 interface PerceiveHook {
   all(o: unknown): Promise<Row[]>;
-  saver(id: string, o: unknown): Promise<Row>;
+  saver(id: string, o: { width?: number; height?: number; seed?: number; t?: number; dpr?: number }): Promise<Row>;
 }
 
 /** Frame-addressable imperative savers — reproducible pixel readings. */
@@ -115,6 +115,45 @@ test('pixels report colour and whole-frame motion — signal the spec path lacks
   expect(rows.tide.motion!.rate).toBeGreaterThan(0);
   expect(rows.blackHole.motion).not.toBeNull();
   expect(rows.globe.motion, 'globe is only sampled — motion would be meaningless').toBeNull();
+});
+
+/**
+ * Thumbnail proportionality.
+ *
+ * A gallery card renders a saver far smaller than it was authored for, and that
+ * broke in BOTH directions at once: classic savers use absolute pixel constants
+ * so they read far too dense (warp was 20× fullsize ink), while schema savers
+ * scale entity count by `min(w,h)/referenceViewport` so they read far too sparse
+ * (polygons was 0.01×). The gallery now hands each saver a REF-sized logical
+ * viewport with a card-sized backing store (dpr below 1), which costs nothing.
+ */
+test('savers keep their proportions when rendered at thumbnail scale', async ({ page }) => {
+  test.setTimeout(120_000);
+  await ready(page);
+  const rows = await page.evaluate(async () => {
+    const p = (window as unknown as { __perceive: PerceiveHook }).__perceive;
+    const ids = ['warp', 'globe', 'pipes', 'flurry', 'spotlight', 'dev-dashboard', 'matrix-rain', 'sakura'];
+    const out: Array<{ id: string; ratio: number }> = [];
+    for (const id of ids) {
+      const full = await p.saver(id, { width: 1280, height: 800, seed: 42, t: 5000 });
+      // Same geometry the gallery uses: REF viewport, card-sized buffer.
+      const thumb = await p.saver(id, { width: 960, height: 600, seed: 42, t: 5000, dpr: 1 / 3 });
+      out.push({ id, ratio: full.coverage > 0.0001 ? thumb.coverage / full.coverage : 1 });
+    }
+    return out;
+  });
+
+  for (const { id, ratio } of rows) {
+    // Was 0.01×–20× before; anything inside this band reads as the same scene.
+    expect(ratio, `${id} is out of proportion at thumbnail scale (${ratio.toFixed(2)}×)`).toBeGreaterThan(0.35);
+    expect(ratio, `${id} is out of proportion at thumbnail scale (${ratio.toFixed(2)}×)`).toBeLessThan(2.6);
+  }
+
+  // The dashboard is the tightest case: its px fonts used to ignore the
+  // viewport entirely, so its text overlapped itself in a card.
+  const dash = rows.find((r) => r.id === 'dev-dashboard')!;
+  expect(dash.ratio).toBeGreaterThan(0.7);
+  expect(dash.ratio).toBeLessThan(1.4);
 });
 
 test('a frame-addressable saver reads identically for the same (t, seed)', async ({ page }) => {
