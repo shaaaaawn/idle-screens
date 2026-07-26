@@ -58,6 +58,28 @@ export interface KeyStatus {
   label?: string;
 }
 
+/**
+ * Applied to every OpenRouter request.
+ *
+ * `credentials: 'omit'` stops any ambient cookie for the origin riding along;
+ * `referrerPolicy: 'no-referrer'` stops the page URL (which can carry saver ids
+ * and run labels) being disclosed to a third party. Neither is needed for the
+ * API to work, so there is no reason to send them.
+ */
+const SAFE_FETCH = { credentials: 'omit', referrerPolicy: 'no-referrer' } as const satisfies RequestInit;
+
+/**
+ * OpenRouter keys are `sk-or-v1-<hex>`. Checking the shape before storing turns
+ * the commonest mistakes — pasting a different provider's key, a whole curl
+ * command, or a stray newline — into an immediate, explicit error instead of an
+ * opaque 401 later. It is a usability guard, not a security boundary.
+ */
+const KEY_SHAPE = /^sk-or-v1-[A-Za-z0-9]{16,}$/;
+
+export function looksLikeKey(key: string): boolean {
+  return KEY_SHAPE.test(key.trim());
+}
+
 // ---------------------------------------------------------------------------
 // key storage
 
@@ -138,7 +160,10 @@ export async function fetchModels(opts: { force?: boolean } = {}): Promise<OpenR
   if (!opts.force && cache && Date.now() - cache.fetchedAt < MODELS_TTL_MS && cache.models.length) {
     return cache.models;
   }
-  const res = await fetch(MODELS_URL, { headers: { accept: 'application/json' } });
+  const res = await fetch(MODELS_URL, {
+    headers: { accept: 'application/json' },
+    ...SAFE_FETCH,
+  });
   if (!res.ok) throw new Error(`OpenRouter models: HTTP ${res.status}`);
   const body = (await res.json()) as { data?: Array<{ id?: string; name?: string; context_length?: number }> };
   const models: OpenRouterModel[] = (body.data ?? [])
@@ -162,7 +187,10 @@ export async function fetchModels(opts: { force?: boolean } = {}): Promise<OpenR
 export async function verifyKey(key = getKey()): Promise<KeyStatus> {
   if (!key) return { ok: false, message: 'No key stored.' };
   try {
-    const res = await fetch(KEY_URL, { headers: { Authorization: `Bearer ${key}` } });
+    const res = await fetch(KEY_URL, {
+      headers: { Authorization: `Bearer ${key}` },
+      ...SAFE_FETCH,
+    });
     if (res.status === 401) return { ok: false, message: 'Rejected — OpenRouter says this key is invalid.' };
     if (!res.ok) return { ok: false, message: `Could not verify (HTTP ${res.status}).` };
     const body = (await res.json()) as { data?: { label?: string; usage?: number; limit?: number | null } };
@@ -243,6 +271,7 @@ export async function chatCompletion(req: ChatRequest): Promise<ChatResponse> {
   try {
     res = await fetch(CHAT_URL, {
       method: 'POST',
+      ...SAFE_FETCH,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: req.model,

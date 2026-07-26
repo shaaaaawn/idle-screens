@@ -33,7 +33,6 @@ import { readPreviewBackend } from './preview-backend';
 const REF_W = 1280;
 const REF_H = 800;
 const CARD_W = 320;
-const CARD_H = 200;
 /** Cards this far outside the viewport are warmed up before you reach them. */
 const PREROLL = '240px';
 

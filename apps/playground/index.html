@@ -140,6 +140,19 @@
       #topbar .tb-actions button:active {
         transform: scale(.98); background: #0e0e14;
       }
+      .tb-saver {
+        display: inline-flex; align-items: baseline; gap: 6px;
+        max-width: 280px;
+        font: 500 11px/1 var(--sans); color: var(--text-dim);
+        overflow: hidden; white-space: nowrap;
+      }
+      .tb-saver[hidden] { display: none; }
+      .tb-saver b { color: var(--text); font-weight: 600; }
+      .tb-saver-pkg { font: 10px var(--mono); color: var(--text-faint); }
+      /* Running state reads at a glance, without depending on the label. */
+      #tb-sleep.is-transport[data-playing='true'] {
+        border-color: rgba(74,222,128,.45); color: var(--ok);
+      }
 
       /* ================================================================
          GALLERY VIEW — browse surface: filter bar + per-package sections
@@ -1723,6 +1736,9 @@
       </nav>
       <span class="tb-spacer"></span>
       <div class="tb-actions">
+        <!-- Dev Tools only: which saver the workbench is on, and a transport for
+             its inline preview. Elsewhere the button is the idle-demo trigger. -->
+        <span id="tb-saver" class="tb-saver" hidden></span>
         <button id="tb-sleep" type="button" title="Sleep the engine — the real screensaver, wakes on any input">Idle demo</button>
       </div>
     </header>

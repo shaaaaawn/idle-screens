@@ -412,7 +412,66 @@ function liveMode(): void {
   };
   rebuild(cfg);
 
-  document.getElementById('tb-sleep')?.addEventListener('click', () => {
+  /*
+   * The top-right control does two different jobs, so it says which one it is
+   * doing. In Dev Tools it is a transport for the SELECTED saver's inline
+   * preview (paired with the saver's name); everywhere else it triggers the
+   * real idle screensaver. Labelling one button "Idle demo" while it played a
+   * preview would be the same ambiguity the Gallery preview / Idle demo split
+   * was introduced to remove.
+   */
+  const tbSaver = document.getElementById('tb-saver') as HTMLElement | null;
+  const tbBtn = document.getElementById('tb-sleep') as HTMLButtonElement | null;
+  /** Set by initDev once the timeline exists; null until then. */
+  let devTransport: (() => void) | null = null;
+
+  const setTopbarSaver = (saver: SaverPlugin | null): void => {
+    if (!tbSaver) return;
+    if (!saver) {
+      tbSaver.hidden = true;
+      return;
+    }
+    tbSaver.hidden = false;
+    tbSaver.replaceChildren();
+    const name = document.createElement('b');
+    name.textContent = saver.manifest.label;
+    const pkg = document.createElement('span');
+    pkg.className = 'tb-saver-pkg';
+    pkg.textContent = (packageFor(saver).split('/')[1] ?? '').replace(/^savers?-/, '');
+    tbSaver.append(name, pkg);
+    tbSaver.title = `${saver.manifest.label} — ${packageFor(saver)}`;
+  };
+
+  const setTopbarPlaying = (playing: boolean): void => {
+    if (!tbBtn) return;
+    tbBtn.dataset.playing = String(playing);
+    tbBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    tbBtn.title = playing
+      ? 'Pause the selected saver’s inline preview'
+      : 'Play the selected saver’s inline preview';
+  };
+
+  const syncTopbarMode = (view: View): void => {
+    if (!tbBtn) return;
+    const dev = view === 'dev';
+    tbBtn.classList.toggle('is-transport', dev);
+    setTopbarSaver(dev ? (ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null) : null);
+    if (dev) {
+      setTopbarPlaying(devPlaying);
+    } else {
+      delete tbBtn.dataset.playing;
+      tbBtn.textContent = 'Idle demo';
+      tbBtn.title = 'Sleep the engine — the real screensaver, wakes on any input';
+    }
+  };
+
+  let devPlaying = false;
+
+  tbBtn?.addEventListener('click', () => {
+    if (tbBtn.classList.contains('is-transport') && devTransport) {
+      devTransport();
+      return;
+    }
     preview.close();
     window.__idleScreens?.sleep();
   });
@@ -557,6 +616,7 @@ function liveMode(): void {
       cfg.saver = id;
       rebuild(cfg);
       devProps.select(saver);
+      if (currentView === 'dev') setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
         .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
@@ -679,6 +739,11 @@ function liveMode(): void {
     };
 
     devSelectRef = devSelect;
+    devTransport = () => timeline.togglePlay();
+    timeline.onPlayingChange = (p) => {
+      devPlaying = p;
+      if (currentView === 'dev') setTopbarPlaying(p);
+    };
     buildSaverPalette(left, devSelect, cfg.saver);
     devSelect(cfg.saver);
   };
@@ -710,6 +775,7 @@ function liveMode(): void {
 
   const showView = (view: View, docsAnchor: string | null = null): void => {
     currentView = view;
+    syncTopbarMode(view);
     preview.close(); // navigating away always leaves the fullscreen viewer
     // Gallery canvases only run while the gallery is the visible tab.
     gallery.setPlaying(view === 'gallery');

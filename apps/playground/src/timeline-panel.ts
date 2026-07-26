@@ -12,6 +12,15 @@ export interface TimelineHandle {
   setSaver(saver: SaverPlugin, instance: SaverInstance | null, seed?: number): void;
   loadTrack(track: ControlTrack): void;
   onTimeChange: ((t: number) => void) | null;
+  /** Play/pause the inline preview — the same action as the transport button. */
+  togglePlay(): void;
+  isPlaying(): boolean;
+  /**
+   * Fires whenever playback starts or stops, from any source. The top bar's
+   * control mirrors this rather than tracking its own flag, so the two can
+   * never disagree about whether the preview is running.
+   */
+  onPlayingChange: ((playing: boolean) => void) | null;
 }
 
 /** Smallest window the time axis may zoom to — below this, keys overlap anyway. */
@@ -499,6 +508,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
 
   // ---- scrubbing ---------------------------------------------------------
   let timeChangeCallback: ((t: number) => void) | null = null;
+  let playingChangeCallback: ((p: boolean) => void) | null = null;
 
   const scrubTo = (t: number): void => {
     const dur = currentProfile?.duration ?? 0;
@@ -735,9 +745,11 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
   };
 
   const stopPlay = (): void => {
+    const was = playing;
     playing = false;
     cancelAnimationFrame(rafId);
     playBtn.textContent = '▶';
+    if (was) playingChangeCallback?.(false);
     startT = playheadT;
     if (!isPreviewDriven(currentInstance)) currentInstance?.setPaused(true);
   };
@@ -746,6 +758,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     if (!currentProfile?.duration || !currentInstance) return;
     playing = true;
     playBtn.textContent = '⏸';
+    playingChangeCallback?.(true);
     startT = playheadT;
     startWall = performance.now();
     if (isPreviewDriven(currentInstance) || currentProfile.mode !== 'live') {
@@ -853,7 +866,12 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
       if (currentInstance) startPlay();
     },
 
+    togglePlay,
+    isPlaying: () => playing,
+
     get onTimeChange() { return timeChangeCallback; },
     set onTimeChange(cb: ((t: number) => void) | null) { timeChangeCallback = cb; },
+    get onPlayingChange() { return playingChangeCallback; },
+    set onPlayingChange(cb: ((p: boolean) => void) | null) { playingChangeCallback = cb; },
   };
 }

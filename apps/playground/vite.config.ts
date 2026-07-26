@@ -21,16 +21,51 @@ const schemaPkgVersion = (createRequire(import.meta.url)(
 const src = (pkg: string): string =>
   fileURLToPath(new URL(`../../packages/${pkg}/src/index.ts`, import.meta.url));
 
-export default defineConfig(({ mode }) => {
-  // Seed the Evals OpenRouter connection from the environment (process env or
-  // a local .env). A key the user saves in Settings always wins over this;
-  // the env value is only the fallback. It is inlined into the client bundle —
-  // same trust model as localStorage, so this stays a local-dev convenience.
+/**
+ * Fail the build if a secret ever reaches the output.
+ *
+ * `define` performs literal text substitution, so anything inlined lands in the
+ * emitted JS verbatim — and this app auto-deploys to GitHub Pages on push to
+ * main. A developer with OPENROUTER_API_KEY exported in their shell running
+ * `pnpm build` would publish their key to a public URL. The dev-only gate below
+ * is the fix; this plugin is the seatbelt, because a future `define` could
+ * reintroduce the same leak silently.
+ */
+const forbidSecretsInBundle = (): import('vite').Plugin => ({
+  name: 'forbid-secrets-in-bundle',
+  apply: 'build',
+  generateBundle(_opts, bundle) {
+    const SECRET = /\bsk-(?:or-v1|ant|proj|live)-[A-Za-z0-9_-]{8,}/;
+    for (const [file, chunk] of Object.entries(bundle)) {
+      const text = chunk.type === 'chunk' ? chunk.code : String(chunk.source ?? '');
+      const hit = SECRET.exec(text);
+      if (hit) {
+        throw new Error(
+          `Refusing to emit ${file}: it contains what looks like an API key ` +
+            `(${hit[0].slice(0, 12)}…). Secrets must never be inlined into a ` +
+            `client bundle — this app deploys publicly.`,
+        );
+      }
+    }
+  },
+});
+
+export default defineConfig(({ mode, command }) => {
+  // Seed the Evals OpenRouter connection from the environment, for local dev
+  // convenience only. A key saved in Settings always wins over it.
+  //
+  // DEV SERVER ONLY. `define` inlines the value verbatim into the emitted JS,
+  // and `pnpm build` output is published to GitHub Pages — so inlining it at
+  // build time would put the key on a public URL. Reading it during `serve`
+  // keeps it on localhost, which is the same trust boundary as localStorage.
   const envOpenRouterKey =
-    process.env.OPENROUTER_API_KEY ??
-    loadEnv(mode, process.cwd(), 'OPENROUTER_').OPENROUTER_API_KEY ??
-    '';
+    command === 'serve'
+      ? (process.env.OPENROUTER_API_KEY ??
+         loadEnv(mode, process.cwd(), 'OPENROUTER_').OPENROUTER_API_KEY ??
+         '')
+      : '';
   return {
+  plugins: [forbidSecretsInBundle()],
   base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
   define: {
     __SCHEMA_PKG_VERSION__: JSON.stringify(schemaPkgVersion),

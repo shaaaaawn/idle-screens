@@ -73,7 +73,7 @@ struct PairedTVView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "tv.badge.wifi")
                         .font(.system(size: 46, weight: .light))
-                        .foregroundStyle(Color.appPrimary)
+                        .foregroundStyle(Color.textPrimary)
                     Text("Pair a screen")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(Color.textPrimary)
@@ -90,7 +90,8 @@ struct PairedTVView: View {
                             .frame(maxWidth: .infinity, minHeight: 30)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.appPrimary)
+                    .tint(Color.textPrimary)
+                    .foregroundStyle(Color.appBackground)
                     .controlSize(.large)
                     .padding(.top, 4)
                 }
@@ -140,7 +141,7 @@ struct PairedTVView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.appAccent)
+                        .tint(Color.textPrimary)
                         .foregroundStyle(Color.appBackground)
                         .disabled(manualCode.trimmingCharacters(in: .whitespaces).isEmpty || app.isPairing)
                     }
@@ -168,7 +169,7 @@ struct PairedTVView: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Color.appBackground)
                 .frame(width: 22, height: 22)
-                .background(Color.appPrimary, in: Circle())
+                .background(Color.textPrimary, in: Circle())
             Text(title)
                 .font(.headline)
                 .foregroundStyle(Color.textPrimary)
@@ -183,7 +184,7 @@ struct PairedTVView: View {
                 HStack(spacing: 16) {
                     Image(systemName: "tv.badge.wifi")
                         .font(.largeTitle)
-                        .foregroundStyle(Color.appPrimary)
+                        .foregroundStyle(Color.textPrimary)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Screen paired")
                             .font(.headline)
@@ -257,7 +258,7 @@ struct PairedTVView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     Image(systemName: "play.tv")
-                        .foregroundStyle(Color.appPrimary)
+                        .foregroundStyle(Color.textPrimary)
                 }
             }
         }

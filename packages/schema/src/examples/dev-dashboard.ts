@@ -103,14 +103,6 @@ export const DASHBOARD_SPEC: SaverSpec = {
     },
     // ---- left column: arrays (boots second) ----
     {
-      key: 'arrays-label', count: 1,
-      position: { x: 0.035, y: 0.115 },
-      sprite: { kind: 'text', strings: ['ARRAY STATUS'], color: '#41536b',
-        font: "9px 'SF Mono', monospace", align: 'left', baseline: 'top' },
-      motion: { type: 'static' },
-      life: { enter: 700, fade: 600 },
-    },
-    {
       key: 'dish1', count: 1,
       position: { x: 0.035, y: 0.148 },
       sprite: { kind: 'text', strings: ['DSA-1 EAST    AZ 214.6°  EL 38.2°'], color: '#9fb2c8',
@@ -212,7 +204,9 @@ export const DASHBOARD_SPEC: SaverSpec = {
     },
     {
       key: 'orbit-guides', count: 3,
-      position: { x: 0.455, y: 0.4 },
+      // All three guides pin to the plot centre; the seeded radius range
+      // spreads them into concentric orbits (`position` is count:1-only).
+      region: { x: [0.455, 0.455], y: [0.4, 0.4] },
       sprite: { kind: 'ring', radius: [0.075, 0.185], color: '#1e3a52', width: 0.0011 },
       alpha: [0.55, 0.55],
       motion: { type: 'static' },
@@ -228,7 +222,7 @@ export const DASHBOARD_SPEC: SaverSpec = {
       motion: { type: 'orbit', speed: [4, 11], radius: [0.075, 0.185], center: { x: 0.455, y: 0.4 } },
       trail: { length: 9, fade: 0.75 },
       // The relay web: each craft holds a comm chain to its neighbours.
-      links: { k: 2, maxDist: 0.5, color: '#2ee6c8', alpha: 0.14, width: 1, mode: 'chain' },
+      links: { k: 2, maxDist: 0.5, color: '#2ee6c8', alpha: 0.2, width: 0.0012, mode: 'chain' },
       life: { enter: 1350, fade: 700 },
     },
     {
@@ -321,15 +315,6 @@ export const DASHBOARD_SPEC: SaverSpec = {
         font: "10px 'SF Mono', monospace", align: 'left', baseline: 'top' },
       motion: { type: 'static' },
       life: { enter: 2150, fade: 600 },
-    },
-    {
-      key: 'feed-cursor', count: 1,
-      position: { x: 0.665, y: 0.402 },
-      sprite: { kind: 'text', strings: ['▊'], color: '#2ee6c8',
-        font: "10px 'SF Mono', monospace", align: 'left', baseline: 'top' },
-      pulse: { amp: 0.5, period: 1100 },
-      motion: { type: 'static' },
-      life: { enter: 2250, fade: 600 },
     },
     // alert + relay load
     {

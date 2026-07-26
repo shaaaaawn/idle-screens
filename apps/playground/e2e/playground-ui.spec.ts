@@ -174,6 +174,40 @@ test.describe('gallery view', () => {
   });
 });
 
+test.describe('top bar', () => {
+  test('is a preview transport in Dev Tools and the idle demo elsewhere', async ({ page }) => {
+    const btn = page.locator('#tb-sleep');
+    const name = page.locator('#tb-saver');
+
+    await page.goto('/?saver=tide#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await expect(name).toContainText('Tide');
+    await expect(btn).toHaveText(/Pause|Play/);
+
+    // One playback state, two controls: toggling either must move both, or the
+    // top bar and the timeline transport can disagree about what is running.
+    const tl = page.locator('.tl-btn[title^="Play"]');
+    await expect(tl).toHaveText('⏸');
+    await btn.click();
+    await expect(tl).toHaveText('▶');
+    await expect(btn).toHaveText('▶ Play');
+    await tl.click();
+    await expect(btn).toHaveText('⏸ Pause');
+
+    // Selecting another saver renames the label.
+    await page.evaluate(() => {
+      (document.querySelector('#dock-left .palette-item[data-id="warp"]') as HTMLButtonElement)?.click();
+    });
+    await expect(name).toContainText('Warp');
+
+    // Outside Dev Tools the same button means the real screensaver again.
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await expect(btn).toHaveText('Idle demo');
+    await expect(name).toBeHidden();
+  });
+});
+
 test.describe('saver outliner (dev view)', () => {
   test('the filter narrows the tree and hides empty groups', async ({ page }) => {
     await page.goto('/#dev');

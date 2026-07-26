@@ -34,7 +34,7 @@ interface PerceiveHook {
 /** Frame-addressable imperative savers — reproducible pixel readings. */
 const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide'];
 /** No canvas to read: these draw with elements + CSS transforms. */
-const CSS_SAVERS = ['toasters', 'dvd', 'fish', 'fade-out', 'bouncing-ball', 'logo', 'messages', 'messages2', 'bsod'];
+const CSS_SAVERS = ['toasters', 'dvd', 'fish', 'fade-out', 'bouncing-ball', 'logo', 'bsod'];
 /** Worker-ready savers must NOT be excluded — see the assertion below. */
 const WORKER_READY = ['warp', 'rainstorm', 'globe', 'mystify', 'pipes', 'flurry'];
 
