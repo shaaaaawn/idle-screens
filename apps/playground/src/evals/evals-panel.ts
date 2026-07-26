@@ -23,6 +23,12 @@ import {
 import { scoreSuite } from './score';
 import type { BenchmarkIntent, EvalScreen, RunSummary, ScreenScore } from './types';
 
+declare global {
+  interface Window {
+    __evalsCatalog?: ReturnType<typeof getCatalog>;
+  }
+}
+
 export interface EvalsPanelHandle {
   dispose(): void;
 }
@@ -120,6 +126,12 @@ function dnaText(artistId: string, catalog: ReturnType<typeof getCatalog>): stri
 /** Mount the Evals workbench into #view-evals. */
 export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}): EvalsPanelHandle {
   const catalog = getCatalog();
+  // Debug hook, in the same spirit as core's `window.__idleScreens`. e2e needs
+  // the catalog to synthesize a run, and reaching it via `import('/src/…')`
+  // means a live Vite transform mid-test — which fails under CI dep
+  // re-optimization ("Failed to fetch dynamically imported module") in a way
+  // retries don't absorb. The panel already holds the catalog; hand it over.
+  window.__evalsCatalog = catalog;
   let mode: ViewMode = 'compare';
   let artistId = catalog.artists[0]?.id ?? 'monet';
   let benchmarkId = catalog.benchmarks[0]?.id ?? 'calm-horizon';

@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 declare global {
   interface Window {
     __idleScreens?: { active(): string | null; menuOpen(): boolean; state(): string };
+    __evalsCatalog?: { screens: Array<{ id: string; kind: string; screenId: string }> };
   }
 }
 
@@ -429,9 +430,12 @@ test.describe('evals view', () => {
 
     // Inject a run that authored calm-horizon for every artist — By artist
     // must show that one tile per artist, not the other 9 catalog fillers.
-    const runId = await page.evaluate(async () => {
-      const { getCatalog } = await import('/src/evals/catalog.ts');
-      const catalog = getCatalog();
+    const runId = await page.evaluate(() => {
+      // The panel publishes the catalog on mount, so the tile we just waited
+      // for is proof it's here. Importing '/src/evals/catalog.ts' instead
+      // would ask Vite to transform a module mid-test, which loses races
+      // against dep re-optimization on CI.
+      const catalog = window.__evalsCatalog!;
       const authored = catalog.screens.filter(
         (s) => s.kind === 'benchmark' && s.screenId === 'calm-horizon',
       );
