@@ -394,9 +394,13 @@ class TideInstance implements SaverInstance {
       if (r.right < 0 || r.left > this.w) continue;
 
       // Buoyancy from footprint: a nav link bobs up, a hero image sinks.
+      // Per-block jitter comes from a FORKED stream keyed on the block's index,
+      // not the shared cursor: `resize()` re-collects, and a stateful draw would
+      // silently re-roll every block's buoyancy on every viewport change.
+      const r2 = rng.fork(this.victims.length);
       const area = r.width * r.height;
       const heavy = clamp((area - 6_000) / 90_000, 0, 1);
-      const buoy = clamp((1 - smooth01(heavy)) * (0.55 + rng.next() * 0.45), 0, 1);
+      const buoy = clamp((1 - smooth01(heavy)) * (0.55 + r2.next() * 0.45), 0, 1);
 
       this.victims.push({
         el,
@@ -405,10 +409,10 @@ class TideInstance implements SaverInstance {
         hw: r.width / 2,
         hh: r.height / 2,
         buoy,
-        draft: 3 + rng.next() * 22,
-        bobAmp: 2 + rng.next() * 7,
-        bobPh: rng.next() * TAU,
-        rockPh: rng.next() * TAU,
+        draft: 3 + r2.next() * 22,
+        bobAmp: 2 + r2.next() * 7,
+        bobPh: r2.next() * TAU,
+        rockPh: r2.next() * TAU,
         prevTransform: el.style.transform,
         prevOrigin: el.style.transformOrigin,
         prevFilter: el.style.filter,
