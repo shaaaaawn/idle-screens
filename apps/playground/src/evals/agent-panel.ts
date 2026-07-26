@@ -20,57 +20,16 @@ import {
   type AgentRunTarget,
 } from './agent-run';
 import type { AgentScreenArtifact } from './agent-artifact';
-import type { getCatalog } from './catalog';
+import {
+  mountAgentScopeControls,
+  resolveAgentTargets,
+  type AgentTargetContext,
+} from './agent-targets';
+import type { AgentScope } from './types';
 
-export interface AgentPanelContext {
-  catalog: ReturnType<typeof getCatalog>;
-  /** Currently selected screen in the workbench (any mode). */
-  screenId: string | null;
-  benchmarkId: string;
-  artistId: string;
-}
-
-type Scope = 'screen' | 'benchmark' | 'artist' | 'suite';
-
-const SCOPES: Array<{ id: Scope; label: (n: number) => string }> = [
-  { id: 'screen', label: () => 'Selected screen' },
-  { id: 'benchmark', label: (n) => `Current benchmark × all artists (${n} screens)` },
-  { id: 'artist', label: (n) => `Selected artist's benchmarks (${n} screens)` },
-  { id: 'suite', label: (n) => `Full suite (${n} screens)` },
-];
-
-export type AgentScope = Scope;
-
-export function resolveAgentTargets(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
-  const { catalog } = ctx;
-  const profileOf = (artistId: string) => catalog.artists.find((a) => a.id === artistId)!;
-  const benchOf = (screenId: string) =>
-    catalog.benchmarks.find((b) => b.id === screenId) ?? null;
-  const toTarget = (s: (typeof catalog.screens)[number]): AgentRunTarget => ({
-    screen: s,
-    profile: profileOf(s.artistId),
-    benchmark: s.kind === 'benchmark' ? benchOf(s.screenId) : null,
-  });
-  if (scope === 'screen') {
-    const s = catalog.screens.find((x) => x.id === ctx.screenId) ?? catalog.screens[0]!;
-    return [toTarget(s)];
-  }
-  if (scope === 'benchmark') {
-    return catalog.screens
-      .filter((s) => s.kind === 'benchmark' && s.screenId === ctx.benchmarkId)
-      .map(toTarget);
-  }
-  if (scope === 'artist') {
-    return (catalog.screensByArtist.get(ctx.artistId) ?? [])
-      .filter((s) => s.kind === 'benchmark')
-      .map(toTarget);
-  }
-  return catalog.screens.map(toTarget);
-}
-
-function targetsFor(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
-  return resolveAgentTargets(ctx, scope);
-}
+export type AgentPanelContext = AgentTargetContext;
+export type { AgentScope };
+export { resolveAgentTargets };
 
 function shortId(screenId: string): string {
   // monet--benchmark--calm-horizon → monet / calm-horizon
@@ -87,7 +46,7 @@ export async function runAgentEvalInteractive(opts: {
   ctx: AgentPanelContext;
   model: string;
   maxToolCalls: number;
-  scope: Scope;
+  scope: AgentScope;
   operator?: string;
   runId?: string;
 }): Promise<AgentRun | null> {

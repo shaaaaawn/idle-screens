@@ -272,6 +272,10 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     const req = await promptRunRequest({
       parentRunId: parent?.runId,
       parentLabel: parent?.provenance.label,
+      catalog,
+      artistId,
+      benchmarkId,
+      screenId: screen?.id ?? null,
     });
     if (!req) return;
 
@@ -288,12 +292,13 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         return;
       }
       const runId = `run-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}-agent`;
+      // Targets come from the dialog pickers — not whatever tile happens to be active.
       const agent = await runAgentEvalInteractive({
         ctx: {
           catalog,
-          screenId: screen?.id ?? null,
-          benchmarkId,
-          artistId,
+          screenId: req.targetScreenId ?? screen?.id ?? null,
+          benchmarkId: req.targetBenchmarkId ?? benchmarkId,
+          artistId: req.targetArtistId ?? artistId,
         },
         model: req.modelName,
         maxToolCalls: req.maxToolCalls ?? 20,
