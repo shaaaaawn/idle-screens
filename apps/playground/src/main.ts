@@ -27,6 +27,7 @@ import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
 import { buildGallery, type GalleryGroup } from './gallery';
 import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
+import { wirePerceptionHarness } from './frame-perception';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
 
@@ -417,6 +418,7 @@ function liveMode(): void {
   });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
+  wirePerceptionHarness(ALL_SAVERS);
   wireSchemaHarness();
 
   type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';
@@ -549,6 +551,9 @@ function liveMode(): void {
         width: Math.round(rect.width) || 640,
         height: Math.round(rect.height) || 400,
         seed: cfg.seed,
+        // Imperative savers have no spec to analyse; the panel reads their
+        // pixels instead, which needs the plugin itself.
+        saver,
       });
       layers.setSaver(id);
 
