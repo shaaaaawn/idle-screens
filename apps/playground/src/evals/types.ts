@@ -259,11 +259,25 @@ export interface RunSummary {
   };
 }
 
+/** What a New run actually does. */
+export type RunMode =
+  /** Call OpenRouter; model authors SaverSpecs via tools — the real eval. */
+  | 'agent'
+  /** Locally re-score today's catalog (no network). */
+  | 'rescore';
+
+export type AgentScope = 'screen' | 'benchmark' | 'artist' | 'suite';
+
 /** Dialog / CLI inputs when starting a new run. */
 export interface RunRequest {
   label: string;
   note: string;
   harness: EvalHarness;
+  /** Default `rescore` (local). Set `agent` to call OpenRouter and author specs. */
+  mode?: RunMode;
+  /** Scope of screens for agent mode. Ignored for rescore (always full suite). */
+  agentScope?: AgentScope;
+  maxToolCalls?: number;
   modelName?: string;
   modelProvider?: string;
   operator?: string;

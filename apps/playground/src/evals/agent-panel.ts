@@ -39,7 +39,9 @@ const SCOPES: Array<{ id: Scope; label: (n: number) => string }> = [
   { id: 'suite', label: (n) => `Full suite (${n} screens)` },
 ];
 
-function targetsFor(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
+export type AgentScope = Scope;
+
+export function resolveAgentTargets(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
   const { catalog } = ctx;
   const profileOf = (artistId: string) => catalog.artists.find((a) => a.id === artistId)!;
   const benchOf = (screenId: string) =>
@@ -66,10 +68,130 @@ function targetsFor(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
   return catalog.screens.map(toTarget);
 }
 
+function targetsFor(ctx: AgentPanelContext, scope: Scope): AgentRunTarget[] {
+  return resolveAgentTargets(ctx, scope);
+}
+
 function shortId(screenId: string): string {
   // monet--benchmark--calm-horizon → monet / calm-horizon
   const [artist, , id] = screenId.split('--');
   return id ? `${artist} / ${id}` : screenId;
+}
+
+/**
+ * Run the OpenRouter agent loop with a progress UI. Resolves with the AgentRun
+ * (partial if aborted) or null if the user cancelled before any screen finished.
+ * Used by both the Agent run… button and New run (agent mode).
+ */
+export async function runAgentEvalInteractive(opts: {
+  ctx: AgentPanelContext;
+  model: string;
+  maxToolCalls: number;
+  scope: Scope;
+  operator?: string;
+  runId?: string;
+}): Promise<AgentRun | null> {
+  if (!hasKey()) {
+    window.alert(
+      'OpenRouter API key required. Add one in Settings (or set OPENROUTER_API_KEY for the Vite env fallback).',
+    );
+    return null;
+  }
+  const targets = resolveAgentTargets(opts.ctx, opts.scope);
+  if (targets.length === 0) return null;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'evals-modal-backdrop';
+  const abort = new AbortController();
+  let disposed = false;
+  document.body.append(backdrop);
+
+  const modal = document.createElement('div');
+  modal.className = 'evals-modal evals-agent-modal evals-agent-wide';
+  modal.innerHTML = `
+    <h2 class="evals-modal-title">Authoring via OpenRouter — ${opts.model}</h2>
+    <p class="evals-modal-sub">
+      ${targets.length} screen${targets.length === 1 ? '' : 's'}, serial tool loop.
+      Specs from the model become this run’s evidence; scores are computed locally.
+    </p>
+    <div class="evals-agent-rows" data-role="rows"></div>
+    <div class="evals-agent-log" data-role="log" aria-live="polite"></div>
+    <div class="evals-modal-actions">
+      <button type="button" class="evals-btn secondary" data-act="abort">Abort</button>
+    </div>
+  `;
+  backdrop.append(modal);
+  modal.querySelector('[data-act="abort"]')?.addEventListener('click', () => abort.abort());
+
+  const rowsHost = modal.querySelector<HTMLElement>('[data-role="rows"]')!;
+  const log = modal.querySelector<HTMLElement>('[data-role="log"]')!;
+  const rowEls = new Map<string, HTMLElement>();
+  const logLines: string[] = [];
+  for (const t of targets) {
+    const row = document.createElement('div');
+    row.className = 'evals-agent-row';
+    row.dataset.state = 'queued';
+    row.innerHTML = `<span class="evals-agent-row-name">${shortId(t.screen.id)}</span><span class="evals-agent-row-state">queued</span>`;
+    rowsHost.append(row);
+    rowEls.set(t.screen.id, row);
+  }
+  const setRow = (screenId: string, state: string, text: string): void => {
+    const row = rowEls.get(screenId);
+    if (!row) return;
+    row.dataset.state = state;
+    row.querySelector('.evals-agent-row-state')!.textContent = text;
+  };
+  const addLog = (line: string): void => {
+    logLines.push(line);
+    log.textContent = logLines.slice(-50).join('\n');
+    log.scrollTop = log.scrollHeight;
+  };
+
+  try {
+    const run = await runAgentBatch({
+      runId: opts.runId ?? `agent-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`,
+      model: opts.model,
+      maxToolCalls: opts.maxToolCalls,
+      operator: opts.operator,
+      targets,
+      profiles: opts.ctx.catalog.artists,
+      chat: chatCompletion,
+      signal: abort.signal,
+      onProgress: (p) => {
+        if (disposed) return;
+        if (p.type === 'screen-start') {
+          setRow(p.screenId, 'running', `running · 0/${opts.maxToolCalls} calls`);
+          addLog(`\n▶ ${shortId(p.screenId)} (${p.index + 1}/${p.total})`);
+        } else if (p.type === 'screen-event') {
+          const e = p.event;
+          if (e.type === 'tool') {
+            const row = rowEls.get(p.screenId);
+            if (row) {
+              const m = /· (\d+)\//.exec(row.querySelector('.evals-agent-row-state')!.textContent ?? '');
+              const n = (m ? Number(m[1]) : 0) + (e.name === 'finish' ? 0 : 1);
+              setRow(p.screenId, 'running', `running · ${n}/${opts.maxToolCalls} calls`);
+            }
+            addLog(`  ${e.ok ? '✓' : '✕'} ${e.name} — ${e.summary}`);
+          } else if (e.type === 'assistant') {
+            addLog(`  “${e.text.slice(0, 120)}${e.text.length > 120 ? '…' : ''}”`);
+          }
+        } else if (p.type === 'screen-done') {
+          const a = p.artifact;
+          const delta =
+            a.initial && a.final
+              ? `${a.initial.score.score.toFixed(2)} → ${a.final.score.score.toFixed(2)}`
+              : 'no spec';
+          setRow(a.screenId, a.outcome === 'finished' ? 'done' : 'warn', `${a.outcome} · ${delta}`);
+          addLog(`  ■ ${a.outcome} · ${delta} (${a.toolCallsUsed} calls)`);
+        }
+      },
+    });
+    saveAgentRun(run);
+    return run.artifacts.length ? run : null;
+  } finally {
+    disposed = true;
+    backdrop.remove();
+  }
 }
 
 export function openAgentPanel(ctx: AgentPanelContext): void {

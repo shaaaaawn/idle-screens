@@ -824,11 +824,14 @@ test.describe('timeline panel', () => {
 
   test('keyframes can be added, re-eased and removed, and reset restores the derived track', async ({ page }) => {
     await page.goto('/?saver=tide#dev');
-    await page.waitForFunction(() => !!document.querySelector('.tl-keyframe'));
+    await pauseTimeline(page);
     const keys = page.locator('.tl-keyframe[data-path="tideSwing"]');
     const before = await keys.count();
 
+    // Scroll the lane in before using raw coordinates, and keep it in view for
+    // the subsequent keyframe clicks — the dock is short enough to clip lanes.
     const track = page.locator('.tl-lane-track[data-lane="tideSwing"]');
+    await track.scrollIntoViewIfNeeded();
     const box = (await track.boundingBox())!;
     await page.mouse.dblclick(box.x + box.width * 0.6, box.y + box.height / 2);
     await expect(keys).toHaveCount(before + 1);

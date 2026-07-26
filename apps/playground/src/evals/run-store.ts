@@ -1,7 +1,7 @@
 import diskIndex from './runs/index.json' with { type: 'json' };
 import baselineSummary from './runs/run-2026-07-25T1908-baseline-v0/summary.json' with { type: 'json' };
 import { toIndexEntry } from './provenance';
-import type { RunIndexEntry, RunSummary, ScreenScore } from './types';
+import type { EvalScreen, RunIndexEntry, RunSummary, ScreenScore } from './types';
 
 export { toIndexEntry };
 
@@ -11,6 +11,14 @@ const LS_RUN_PREFIX = 'idle-screens:style-eval:run:';
 export interface StoredRun {
   summary: RunSummary;
   results: ScreenScore[];
+  /**
+   * Model-authored screens from an OpenRouter agent-loop run. When present,
+   * the compare grid renders THESE specs (the run's evidence), not today's
+   * catalog applicator output.
+   */
+  authoredScreens?: EvalScreen[];
+  /** Cross-link to the full trajectory store (`agent-run.ts`). */
+  agentRunId?: string;
 }
 
 type DiskIndexFile = { runs: RunIndexEntry[] };
@@ -60,9 +68,19 @@ export function loadRun(runId: string): StoredRun | null {
   }
 }
 
-export function saveBrowserRun(summary: RunSummary, results: ScreenScore[]): RunIndexEntry {
+export function saveBrowserRun(
+  summary: RunSummary,
+  results: ScreenScore[],
+  extras?: Pick<StoredRun, 'authoredScreens' | 'agentRunId'>,
+): RunIndexEntry {
   const entry = toIndexEntry(summary, 'browser');
-  localStorage.setItem(LS_RUN_PREFIX + summary.runId, JSON.stringify({ summary, results }));
+  const payload: StoredRun = {
+    summary,
+    results,
+    ...(extras?.authoredScreens ? { authoredScreens: extras.authoredScreens } : {}),
+    ...(extras?.agentRunId ? { agentRunId: extras.agentRunId } : {}),
+  };
+  localStorage.setItem(LS_RUN_PREFIX + summary.runId, JSON.stringify(payload));
   const idx = readBrowserIndex().filter((r) => r.runId !== summary.runId);
   idx.unshift(entry);
   writeBrowserIndex(idx.slice(0, 40)); // keep last 40 browser runs

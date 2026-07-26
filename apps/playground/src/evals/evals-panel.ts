@@ -1,9 +1,11 @@
 import { createRng, type SaverInstance } from '@idle-screens/core';
 import { compileSaver } from '@idle-screens/schema';
-import { openAgentPanel } from './agent-panel';
+import { bridgeAgentRunToTimeline } from './agent-bridge';
+import { openAgentPanel, runAgentEvalInteractive } from './agent-panel';
 import { getCatalog } from './catalog';
 import { createChamber, type ChamberEntry } from './chamber';
 import { buildInspector } from './inspector';
+import { hasKey } from './openrouter';
 import {
   buildProvenance,
   compareVersions,
@@ -217,37 +219,51 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     timeline.setRuns(listRuns());
   };
 
-  const applyRun = (summary: RunSummary, results: ScreenScore[]): void => {
+  /** When a selected run carries model-authored specs, the grid shows those. */
+  let activeScreens: EvalScreen[] | null = null;
+
+  const applyRun = (
+    summary: RunSummary,
+    results: ScreenScore[],
+    authored?: EvalScreen[] | null,
+  ): void => {
     lastSummary = summary;
     lastResults = results;
+    activeScreens = authored?.length ? authored : null;
     exportBtn.disabled = false;
     timeline.select(summary.runId);
     timeline.setProvenance(summary);
 
     // Compare what this run recorded against what this build would produce now.
-    // The grid renders today's screens, so any drift has to be stated.
+    // Agent runs render their own authoredScreens — fingerprint those instead.
+    const fingerprintSource = activeScreens ?? catalog.screens;
     const currentVersions = buildProvenance(catalog.artists, {
       label: '',
       note: '',
       harness: 'playground-ui',
     }, { saverSpecFormat: catalog.screens[0]?.spec.schemaVersion ?? 1 }).versions;
-    screenDrift = driftedScreens(summary.screenFingerprints, fingerprintScreens(catalog.screens));
+    screenDrift = driftedScreens(summary.screenFingerprints, fingerprintScreens(fingerprintSource));
     timeline.setVersions(summary, compareVersions(summary.provenance.versions, currentVersions), screenDrift);
     // After refreshView, not before: renderGrid unconditionally rewrites the
     // subtitle, so setting it first meant the provenance line never showed.
     refreshView();
     const p = summary.provenance;
+    const evidence =
+      p.harness === 'agent-loop'
+        ? ` · ${results.filter((r) => r.valid).length}/${results.length} authored`
+        : '';
     subtitleEl.textContent =
       `${p.label} · median ${summary.suiteMedian.toFixed(3)}` +
       (p.model ? ` · ${p.model.name}` : '') +
-      ` · dna:${p.versions.styleDnaHash.slice(0, 6)}`;
+      ` · dna:${p.versions.styleDnaHash.slice(0, 6)}` +
+      evidence;
   };
 
   const selectRun = (runId: string): void => {
     const stored = loadRun(runId);
     if (!stored) return;
     // Disk baselines may ship summary without results — still show provenance.
-    applyRun(stored.summary, stored.results);
+    applyRun(stored.summary, stored.results, stored.authoredScreens);
   };
 
   const startNewRun = async (): Promise<void> => {
@@ -259,15 +275,60 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       parentLabel: parent?.provenance.label,
     });
     if (!req) return;
+
+    // ---- Agent mode: hit OpenRouter, author SaverSpecs, land on timeline ----
+    if (req.mode === 'agent') {
+      if (!hasKey()) {
+        window.alert(
+          'OpenRouter API key required for agent runs. Open Settings and add a key (or set OPENROUTER_API_KEY for the Vite env fallback).',
+        );
+        return;
+      }
+      if (!req.modelName) {
+        window.alert('Pick an OpenRouter model for agent mode.');
+        return;
+      }
+      const runId = `run-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}-agent`;
+      const agent = await runAgentEvalInteractive({
+        ctx: {
+          catalog,
+          screenId: screen?.id ?? null,
+          benchmarkId,
+          artistId,
+        },
+        model: req.modelName,
+        maxToolCalls: req.maxToolCalls ?? 20,
+        scope: req.agentScope ?? 'benchmark',
+        operator: req.operator,
+        runId,
+      });
+      if (!agent) return;
+      const bridged = bridgeAgentRunToTimeline(
+        agent,
+        catalog.screens,
+        catalog.artists,
+        req,
+        parent,
+      );
+      saveBrowserRun(bridged.stored.summary, bridged.stored.results, {
+        authoredScreens: bridged.screens,
+        agentRunId: agent.runId,
+      });
+      refreshTimeline();
+      applyRun(bridged.stored.summary, bridged.stored.results, bridged.screens);
+      return;
+    }
+
+    // ---- Re-score mode: local only, no network ----
     const runId = `run-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}-ui`;
     const { results, summary } = scoreSuite(catalog.screens, catalog.artists, {
       runId,
-      request: req,
+      request: { ...req, harness: 'playground-ui', mode: 'rescore' },
       parentSummary: parent,
     });
     saveBrowserRun(summary, results);
     refreshTimeline();
-    applyRun(summary, results);
+    applyRun(summary, results, null);
   };
 
   const timeline: RunTimelineHandle = buildRunTimeline(timelineHost, {
@@ -501,16 +562,20 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
    * inspector. Compare holds the intent constant and varies the artist;
    * By artist holds the artist constant and shows their whole body of work.
    */
+  const screensForView = (): EvalScreen[] => {
+    const pool = activeScreens ?? catalog.screens;
+    if (mode === 'compare') {
+      return pool.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId);
+    }
+    if (mode === 'gallery') return [];
+    return pool.filter((s) => s.artistId === artistId);
+  };
+
   const renderGrid = (): void => {
     disposeCompare();
     compareGrid.classList.remove('evals-compare-grid--wall');
 
-    const screens =
-      mode === 'compare'
-        ? catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId)
-        : mode === 'gallery' && galleryIndex
-          ? []
-          : (catalog.screensByArtist.get(artistId) ?? []);
+    const screens = screensForView();
 
     if (mode === 'gallery') {
       compareGrid.classList.add('evals-compare-grid--wall');

@@ -22,7 +22,15 @@ carry named artistic styles.
 | `agent-loop.ts` | agent-loop engine: model authors a spec via tools (submit/perceive/score/finish) |
 | `agent-artifact.ts` | training-set record shape (prompt, trajectory, initial/final) |
 | `agent-run.ts` | serial batch runner, browser store, training/SFT JSONL export |
-| `agent-panel.ts` | Agent run modal (config → progress → results) |
+| `agent-panel.ts` | Agent run modal + `runAgentEvalInteractive` (OpenRouter progress UI) |
+| `agent-bridge.ts` | folds agent artifacts into timeline runs (authored specs as evidence) |
+
+### New run modes
+
+| Mode | Network | Evidence on timeline |
+| --- | --- | --- |
+| **Agent** (default) | OpenRouter chat completions | Model-authored SaverSpecs + local scores |
+| **Re-score** | none | Scores against today's static catalog only |
 | `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
 | `runs/` | append-only run artifacts for the next cycle |
 
