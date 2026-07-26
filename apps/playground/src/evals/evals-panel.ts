@@ -558,17 +558,31 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   };
 
   /**
+   * Overlay model-authored evidence onto the full catalog so nav never
+   * collapses. An agent run often covers only one benchmark × N artists —
+   * By artist must still show that artist's full 5+5 body of work, with
+   * authored specs swapped in where they exist.
+   */
+  const withAuthored = (base: EvalScreen[]): EvalScreen[] => {
+    if (!activeScreens?.length) return base;
+    const byId = new Map(activeScreens.map((s) => [s.id, s]));
+    return base.map((s) => byId.get(s.id) ?? s);
+  };
+
+  /**
    * Both modes render the same thing — a gallery of live screens plus the
    * inspector. Compare holds the intent constant and varies the artist;
    * By artist holds the artist constant and shows their whole body of work.
    */
   const screensForView = (): EvalScreen[] => {
-    const pool = activeScreens ?? catalog.screens;
-    if (mode === 'compare') {
-      return pool.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId);
-    }
     if (mode === 'gallery') return [];
-    return pool.filter((s) => s.artistId === artistId);
+    if (mode === 'compare') {
+      return withAuthored(
+        catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId),
+      );
+    }
+    // By artist — always the full catalog body of work for that artist.
+    return withAuthored(catalog.screensByArtist.get(artistId) ?? []);
   };
 
   const renderGrid = (): void => {
