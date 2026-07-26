@@ -20,6 +20,7 @@ export default defineConfig({
         'packages/validator/src/**/*.ts',
         'packages/capabilities/src/**/*.ts',
         'packages/saver-tide/src/**/*.ts',
+        'packages/saver-limelight/src/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -34,6 +35,7 @@ export default defineConfig({
         // WebGPU backends — unit-hostile; covered by e2e / device-tier paths.
         'packages/savers-classic/src/*-gpu.ts',
         'packages/saver-tide/src/index.ts',
+        'packages/saver-limelight/src/index.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
@@ -77,6 +79,13 @@ export default defineConfig({
           branches: 79,
           functions: 86,
           lines: 93,
+        },
+        // saver-limelight: measured 2026-07-25 → 96.36 / 72.51 / 92.68 / 96.36; gate at −2.
+        'packages/saver-limelight/src/**': {
+          statements: 94,
+          branches: 70,
+          functions: 90,
+          lines: 94,
         },
       },
     },
