@@ -2,7 +2,7 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Nine publishable packages + three apps:
+pnpm workspace monorepo. Nine publishable packages + four apps:
 
 ```
 packages/
@@ -97,6 +97,7 @@ hand (see any existing `.changeset/*.md` file for the format).
 
 - Playground / workbench UI (`apps/playground` — explicitly ignored in config)
 - Mac app (`apps/mac` — ships via `mac-v*` tag, not npm)
+- iOS / tvOS app (`apps/ios` — ships via TestFlight / App Store, not npm)
 - Linux app (`apps/linux` — ships via PKGBUILD / manual install, not npm)
 - Docs, tests, CI, refactors with no published API change
 - Work that stays on `develop` and is not ready to publish
