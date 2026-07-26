@@ -65,7 +65,13 @@ extension AppState {
             pairPushError = nil
             return true
         } catch {
-            pairPushError = error.localizedDescription
+            // Claim failures are almost always a wrong/expired code (or the
+            // service being unreachable) — say that, not "HTTP 404".
+            if let pairError = error as? PairError, case .httpError = pairError {
+                pairPushError = "Couldn't pair — check the code on your TV and try again."
+            } else {
+                pairPushError = error.localizedDescription
+            }
             return false
         }
     }

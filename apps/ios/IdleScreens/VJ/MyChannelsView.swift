@@ -6,12 +6,13 @@ struct MyChannelsView: View {
     @State private var showingNew = false
     @State private var showingAdd = false
     @State private var createdToken: String?
+    @State private var path: [ChannelCredential] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 ForEach(app.credentials) { credential in
-                    NavigationLink(destination: ChannelDeckView(credential: credential)) {
+                    NavigationLink(value: credential) {
                         HStack(spacing: 12) {
                             // Live preview when the channel is in the public
                             // gallery (specs come along for free with it).
@@ -47,6 +48,9 @@ struct MyChannelsView: View {
                     }
                 }
             }
+            .navigationDestination(for: ChannelCredential.self) { credential in
+                ChannelDeckView(credential: credential)
+            }
             .navigationTitle("vj")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -59,7 +63,14 @@ struct MyChannelsView: View {
                 }
             }
             .sheet(isPresented: $showingNew) {
-                NewChannelSheet { token in createdToken = token }
+                NewChannelSheet { token in
+                    createdToken = token
+                    // Land the user in their new channel's deck, not back on
+                    // the list — creation should end somewhere steerable.
+                    if let credential = app.credentials.last {
+                        path = [credential]
+                    }
+                }
             }
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
@@ -69,7 +80,7 @@ struct MyChannelsView: View {
                 set: { if !$0 { createdToken = nil } }
             )) {
                 if let token = createdToken {
-                    TokenRevealSheet(token: token)
+                    TokenRevealSheet(token: token, channelId: app.credentials.last?.channelId)
                 }
             }
         }
@@ -152,6 +163,9 @@ private struct AddExistingChannelSheet: View {
                     SecureField("Token (isk_…)", text: $token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        // Capability tokens aren't passwords — suppress the
+                        // "Save Password?" prompt autofill would offer.
+                        .textContentType(.oneTimeCode)
                 } footer: {
                     Text("The token is verified with the channel before it is saved.")
                 }
@@ -192,25 +206,45 @@ private struct AddExistingChannelSheet: View {
 
 private struct TokenRevealSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var app
     let token: String
+    var channelId: String?
+    @State private var sentToTV = false
 
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
 
-            Image(systemName: "key.fill")
+            Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 40))
                 .foregroundStyle(Color.appAccent)
 
-            Text("Channel created")
+            Text("Your channel is live")
                 .font(.title2)
                 .foregroundStyle(Color.textPrimary)
 
-            Text("This capability token is shown once. It is stored in the Keychain — keep a copy somewhere safe if you want to VJ from another device.")
+            Text("A starter scene is already on air — steer it from the deck behind this sheet. This capability token is shown once; it's saved to your Keychain, so copy it only if you'll VJ from another device.")
                 .font(.subheadline)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
+
+            if let channelId, app.pairedTV != nil {
+                Button {
+                    Task {
+                        sentToTV = await app.pushToTV(channelId: channelId)
+                    }
+                } label: {
+                    Label(sentToTV ? "Playing on Apple TV" : "Play on Apple TV",
+                          systemImage: sentToTV ? "checkmark.circle.fill" : "play.tv")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(sentToTV ? .appSuccess : .appAccent)
+                .disabled(sentToTV)
+                .padding(.horizontal, 40)
+            }
 
             Text(token)
                 .font(.system(.footnote, design: .monospaced))

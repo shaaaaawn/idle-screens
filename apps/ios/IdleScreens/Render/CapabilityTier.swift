@@ -1,7 +1,7 @@
 import Foundation
 
 /// Rendering capability tier for the tvOS viewer.
-/// t3 = full native Canvas renderer, t2 = native at 30fps,
+/// t3 = full native Canvas renderer, t2 = GPU SpriteKit renderer at 30fps,
 /// t1 = thumbnail stream, t0 = braille perception floor.
 enum CapabilityTier: String, CaseIterable, Sendable {
     case t3, t2, t1, t0
@@ -37,14 +37,13 @@ enum CapabilityDetector {
             .split(separator: ",")
             .compactMap { Int($0) }
         guard let major = parts.first else { return .t2 }
-        // Lowest-common-denominator floors: the native Canvas renderer is only
-        // uncapped on A12+; A10X runs it load-shed at 30fps; the 2015 A8 box
-        // never gets the canvas at all (thumb stream). New hardware defaults
-        // to t3 by falling through.
+        // The CPU Canvas renderer (t3) is only for A12+; everything older
+        // gets the GPU SpriteKit tier (t2), which even the 2015 A8 box can
+        // drive — textured quads, not per-frame rasterization. New hardware
+        // defaults to t3 by falling through.
         switch major {
-        case 5: return .t1   // AppleTV5,3 (A8, Apple TV HD 2015)
-        case 6: return .t2   // AppleTV6,2 (A10X, 4K gen 1)
-        default: return .t3  // AppleTV11,1 (A12), 14,1+ (A15/A17…)
+        case 5, 6: return .t2  // AppleTV5,3 (A8), AppleTV6,x (A10X)
+        default: return .t3    // AppleTV11,1 (A12), 14,1+ (A15/A17…)
         }
     }
 }

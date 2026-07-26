@@ -8,6 +8,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     let label: String?
     let tags: [String]?
     let viewers: Int?
+    let sleeping: Bool?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
 
@@ -15,18 +16,20 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     var displayLabel: String { label ?? channelId ?? "unknown" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, channelId, label, tags, viewers, scene
+        case id, channelId, label, tags, viewers, sleeping, scene
     }
 
     private struct SceneWrap: Decodable {
         let spec: SpecSubset?
     }
 
-    init(channelId: String?, label: String?, tags: [String]?, viewers: Int?, spec: SpecSubset? = nil) {
+    init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
+         sleeping: Bool? = nil, spec: SpecSubset? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
         self.viewers = viewers
+        self.sleeping = sleeping
         self.spec = spec
     }
 
@@ -39,6 +42,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         label = try? c.decodeIfPresent(String.self, forKey: .label)
         tags = try? c.decodeIfPresent([String].self, forKey: .tags)
         viewers = try? c.decodeIfPresent(Int.self, forKey: .viewers)
+        sleeping = try? c.decodeIfPresent(Bool.self, forKey: .sleeping)
         spec = (try? c.decodeIfPresent(SceneWrap.self, forKey: .scene))??.spec
     }
 }
@@ -76,16 +80,23 @@ extension ChannelState: Decodable {
 }
 
 extension ChannelState.SceneSummary: Decodable {
-    private enum CodingKeys: String, CodingKey { case id, label }
+    private enum CodingKeys: String, CodingKey { case id, label, spec }
 
     init(from decoder: Decoder) throws {
-        // Tolerate `"scene": "warp"` as well as `"scene": {"id": ..., "label": ...}`.
+        // Tolerate `"scene": "warp"`, `"scene": {"id": ...}` AND the live
+        // shape `"scene": {"spec": {"id": ..., "label": ...}}` — the deck
+        // showed "—" for every playing channel until the nested form parsed.
         if let single = try? decoder.singleValueContainer(),
            let s = try? single.decode(String.self) {
             self.init(id: s, label: s)
             return
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let nested = try? c.decodeIfPresent(ChannelState.SceneSummary.self, forKey: .spec),
+           nested.id != nil || nested.label != nil {
+            self = nested
+            return
+        }
         self.init(
             id: try c.decodeIfPresent(String.self, forKey: .id),
             label: try c.decodeIfPresent(String.self, forKey: .label)

@@ -37,13 +37,20 @@ struct ScreenSaverView: View {
                     .scaleEffect(2)
             } else {
                 switch app.effectiveTier {
-                case .t3, .t2:
+                case .t3:
                     NativeSceneView(
                         layers: app.compiledScene,
                         background: app.specBackground,
-                        tier: app.effectiveTier,
+                        tier: .t3,
                         watchdog: app.watchdog,
                         onDowngrade: { app.watchdogDidTrigger() }
+                    )
+                case .t2:
+                    // GPU sprite renderer — no watchdog; SpriteKit maintains
+                    // its own frame pacing and this tier IS the fallback.
+                    SpriteSceneView(
+                        layers: app.compiledScene,
+                        background: app.specBackground
                     )
                 case .t1:
                     ThumbStreamView(channelId: app.selectedChannelId ?? "")

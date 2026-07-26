@@ -11,7 +11,7 @@ Generic root-cause reference: user skill `testflight-cli-upload-fresh-org`; sibl
 |---|---|
 | Org / Team ID | `Z4P3N45225` (Hermosa Labs, LLC) |
 | App bundle ID | `com.hermosalabs.idlescreens` (ASC bundleId resource `9B2CMN8834`) |
-| App Store profile | `Idle Screens App Store v2` (v1 references the marco cert — unused) |
+| App Store profile | `Idle Screens App Store v3` (adds Associated Domains for `/pair/` universal links; v1 references the marco cert, v2 predates the entitlement — both unused) |
 | Distribution identity | `Apple Distribution: Hermosa Labs, LLC (Z4P3N45225)` cert `HT5T6FN8ZK`, private key lives ONLY in `~/Library/Keychains/idle-build.keychain-db` |
 | Keychain password | `IDLE_BUILD_KEYCHAIN_PASSWORD` in the **farco-bolo repo-root `.env`** (gitignored; never commit the value) |
 | App Store Connect app ID | `6794709335` (Idle Screens) |

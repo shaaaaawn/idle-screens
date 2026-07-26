@@ -2,12 +2,9 @@ import XCTest
 @testable import IdleScreensTV
 
 final class CapabilityTierTests: XCTestCase {
-    func testAppleTV53IsT1() {
-        // A8 never gets the native canvas — thumb stream floor.
-        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV5,3"), .t1)
-    }
-
-    func testA10XIsT2() {
+    func testA8AndA10XAreT2() {
+        // Pre-A12 boxes get the GPU sprite renderer, never the CPU canvas.
+        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV5,3"), .t2)
         XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV6,2"), .t2)
     }
 

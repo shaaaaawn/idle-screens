@@ -23,7 +23,11 @@ struct ChannelDeckView: View {
             }
 
             Section("savers") {
-                if app.savers.isEmpty {
+                if app.savers.isEmpty, let error = app.vjError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondary)
+                } else if app.savers.isEmpty {
                     ProgressView()
                 } else {
                     ForEach(app.savers) { saver in
@@ -47,6 +51,20 @@ struct ChannelDeckView: View {
             }
 
             Section("controls") {
+                if app.pairedTV != nil {
+                    Button {
+                        run {
+                            let delivered = await app.pushToTV(channelId: credential.channelId)
+                            if !delivered {
+                                actionError = await app.pairPushError ?? "Couldn't reach the TV."
+                            }
+                        }
+                    } label: {
+                        Label("Play on Apple TV", systemImage: "play.tv")
+                    }
+                    .disabled(isSending)
+                }
+
                 Button {
                     run { _ = try await app.shuffleSeed(for: credential.channelId) }
                 } label: {

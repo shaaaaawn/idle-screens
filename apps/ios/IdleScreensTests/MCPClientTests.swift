@@ -69,4 +69,17 @@ final class MCPClientTests: XCTestCase {
         let savers = try await client.listSavers()
         XCTAssertEqual(savers, [SaverInfo(id: "warp", label: "Warp", description: "starfield")])
     }
+
+    /// The live server returns grouped savers, not a bare array — this shape
+    /// regressed silently once (savers list empty forever against prod).
+    func testListSaversParsesGroupedResultJSON() async throws {
+        let (client, _) = makeClient { _ in
+            (MockTransport.mcpEnvelope(resultText:
+                #"{"classicSavers":[{"id":"warp","label":"Warp","description":"starfield"}],"note":"ignored"}"#
+            ), 200)
+        }
+
+        let savers = try await client.listSavers()
+        XCTAssertEqual(savers, [SaverInfo(id: "warp", label: "Warp", description: "starfield")])
+    }
 }

@@ -28,11 +28,18 @@ struct GalleryView: View {
             }
             .background(Color.appBackground)
             .overlay {
-                if app.channels.isEmpty, !app.isLoadingGallery {
-                    ContentUnavailableView {
-                        Label("No channels", systemImage: "tv")
-                    } description: {
-                        Text(app.galleryError ?? "Pull to refresh.")
+                // First run has no cache: never show a bare black screen.
+                if app.channels.isEmpty {
+                    if app.isLoadingGallery {
+                        ProgressView()
+                            .tint(.appPrimary)
+                            .controlSize(.large)
+                    } else {
+                        ContentUnavailableView {
+                            Label("No channels", systemImage: "tv")
+                        } description: {
+                            Text(app.galleryError ?? "Pull to refresh.")
+                        }
                     }
                 }
             }

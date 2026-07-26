@@ -19,6 +19,8 @@ extension AppState {
 
     /// Create (claim) a new channel. Returns the capability token so the UI can
     /// show it exactly once — it is also stored in the Keychain immediately.
+    /// A starter saver goes on air right away: a freshly created channel must
+    /// never be dead air the user is left to figure out.
     @discardableResult
     func createChannel(label: String, tags: [String]) async throws -> String {
         isWorking = true
@@ -32,7 +34,19 @@ extension AppState {
         credentials.append(credential)
         store.save(credentials)
         store.setToken(created.token, for: created.channelId)
+        await publishStarter(to: created.channelId)
         return created.token
+    }
+
+    /// Best-effort: put something beautiful on air immediately after creation.
+    /// Failure is silent — the channel still exists and the deck still works.
+    private func publishStarter(to channelId: String) async {
+        await loadSavers()
+        let preferred = ["warp", "starfield", "aquarium", "toasters"]
+        let starter = preferred.compactMap { id in savers.first { $0.id == id } }.first
+            ?? savers.randomElement()
+        guard let starter else { return }
+        try? await publish(saver: starter, to: channelId)
     }
 
     /// Add a channel created elsewhere. The token is verified against
@@ -43,7 +57,10 @@ extension AppState {
         let approved = try await gallery.verify(channelId: channelId, token: token)
         guard approved else { throw VJError.tokenDeclined(channelId: channelId) }
         if !credentials.contains(where: { $0.channelId == channelId }) {
-            credentials.append(ChannelCredential(channelId: channelId, label: channelId, createdAt: Date()))
+            // Use the channel's public label when the gallery knows it —
+            // "velvet-meadow-fc / velvet-meadow-fc" rows read as broken.
+            let label = channels.first { $0.id == channelId }?.displayLabel ?? channelId
+            credentials.append(ChannelCredential(channelId: channelId, label: label, createdAt: Date()))
             store.save(credentials)
         }
         store.setToken(token, for: channelId)

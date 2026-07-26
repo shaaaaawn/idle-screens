@@ -106,11 +106,41 @@ final class TVAppState {
     func loadGallery() async {
         isLoadingGallery = true
         defer { isLoadingGallery = false }
+        // Cache-first: paint the last known channel list instantly (inline
+        // specs make it fully renderable), then let the network refresh
+        // replace it. A cold boot shows real content in one frame.
+        if channels.isEmpty, let cached = await gallery.cachedChannels() {
+            channels = cached
+        }
         do {
             channels = try await gallery.fetchChannels()
             galleryError = nil
         } catch {
-            galleryError = error.localizedDescription
+            // Keep showing cached content on refresh failure; only surface
+            // the error when there is nothing to show at all.
+            if channels.isEmpty { galleryError = error.localizedDescription }
+        }
+    }
+
+    // MARK: Scene lifecycle
+
+    /// Foreground/background edges from the app. Background: drop the socket
+    /// cleanly (suspended apps shouldn't hold one). Foreground: refresh the
+    /// gallery (viewer counts go stale) and re-open the right socket.
+    func scenePhaseChanged(active: Bool) {
+        if active {
+            // Cold boot is handled by the launch .task paths; only act when
+            // resuming from a real background (socket was torn down below).
+            guard wsTask == nil else { return }
+            if let current = selectedChannelId {
+                openSocket(channelId: current, watching: true)
+            } else {
+                openSocket(channelId: lastChannelId, watching: false)
+                Task { await self.loadGallery() }
+            }
+        } else {
+            wsTask?.cancel()
+            wsTask = nil
         }
     }
 
@@ -152,6 +182,9 @@ final class TVAppState {
     var lastChannelId: String {
         UserDefaults.standard.string(forKey: Self.lastChannelKey) ?? "default"
     }
+
+    /// For the Settings connection panel — where this TV is pointed.
+    var serverHost: String { baseURL.host ?? baseURL.absoluteString }
 
     /// Open (or replace) the single channel socket. `watching: false` is
     /// control-only — scene traffic is ignored, but "switch" pushes still land.

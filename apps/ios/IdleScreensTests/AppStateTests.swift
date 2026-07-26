@@ -83,4 +83,13 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(app.credentials.map(\.channelId), ["shared-chan"])
         XCTAssertEqual(app.token(for: "shared-chan"), "isk_good")
     }
+
+    /// The live `/c/:id/state` nests the scene under `scene.spec` — the deck
+    /// showed "—" for every playing channel until this shape decoded.
+    func testChannelStateDecodesNestedSceneSpec() throws {
+        let json = #"{"sleeping":false,"scene":{"spec":{"id":"warp","label":"Warp"}}}"#
+        let state = try JSONDecoder().decode(ChannelState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.scene?.id, "warp")
+        XCTAssertEqual(state.scene?.label, "Warp")
+    }
 }

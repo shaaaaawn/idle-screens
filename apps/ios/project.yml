@@ -27,7 +27,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026072509"
+        CURRENT_PROJECT_VERSION: "2026072511"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -37,7 +37,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution"
-          PROVISIONING_PROFILE_SPECIFIER: "Idle Screens App Store v2"
+          PROVISIONING_PROFILE_SPECIFIER: "Idle Screens App Store v3"
     info:
       path: IdleScreens/Info.plist
       properties:
@@ -45,7 +45,8 @@ targets:
         CFBundleName: IdleScreens
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -96,7 +97,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026072509"
+        CURRENT_PROJECT_VERSION: "2026072511"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "3"
@@ -113,7 +114,8 @@ targets:
         CFBundleName: IdleScreensTV
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// A channel the user controls. Metadata lives in UserDefaults;
 /// the capability token lives in the Keychain, keyed by channelId.
-struct ChannelCredential: Codable, Equatable, Identifiable, Sendable {
+struct ChannelCredential: Codable, Equatable, Hashable, Identifiable, Sendable {
     let channelId: String
     var label: String
     let createdAt: Date

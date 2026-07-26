@@ -13,7 +13,7 @@
   <key>provisioningProfiles</key>
   <dict>
     <key>com.hermosalabs.idlescreens</key>
-    <string>Idle Screens App Store v2</string>
+    <string>Idle Screens App Store v3</string>
   </dict>
   <key>destination</key>
   <string>export</string>

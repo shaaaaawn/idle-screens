@@ -104,8 +104,30 @@ actor MCPClient {
         return try await callTool("createChannel", arguments: args, as: CreatedChannel.self)
     }
 
+    /// The live server groups savers (`{"classicSavers": [...], ...}`);
+    /// older shapes returned a bare array. Accept both — decoding only the
+    /// flat shape left the saver list permanently empty against production.
     func listSavers() async throws -> [SaverInfo] {
-        try await callTool("listSavers", as: [SaverInfo].self)
+        let text = try await callTool("listSavers")
+        guard let data = text.data(using: .utf8) else {
+            throw MCPError.unparsableResult(tool: "listSavers", text: text)
+        }
+        if let flat = try? JSONDecoder().decode([SaverInfo].self, from: data) {
+            return flat
+        }
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var all: [SaverInfo] = []
+            for key in object.keys.sorted() {
+                guard let group = object[key] as? [[String: Any]],
+                      let groupData = try? JSONSerialization.data(withJSONObject: group),
+                      let infos = try? JSONDecoder().decode([SaverInfo].self, from: groupData) else {
+                    continue
+                }
+                all.append(contentsOf: infos)
+            }
+            if !all.isEmpty { return all }
+        }
+        throw MCPError.unparsableResult(tool: "listSavers", text: text)
     }
 
     func publishScene(channelId: String, token: String, saverId: String, seed: Int,
