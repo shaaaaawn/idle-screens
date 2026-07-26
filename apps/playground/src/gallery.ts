@@ -11,6 +11,27 @@
 import { createRng, type SaverInstance, type SaverPlugin } from '@idle-screens/core';
 import { readPreviewBackend } from './preview-backend';
 
+/**
+ * Logical viewport handed to each saver, and the backing-store size.
+ *
+ * Savers are authored against a full screen: classic ones use absolute pixel
+ * constants (`STAR_COUNT = 520` 1px stars, `RADIUS = 120`), and schema ones
+ * scale their entity COUNT by `min(w,h) / referenceViewport`. Mounting at
+ * 320×200 therefore broke proportion in both directions at once — warp read
+ * 20× too dense, polygons 100× too sparse.
+ *
+ * The fix costs nothing, because `dpr` is a backing-store multiplier, not a
+ * device fact: every saver does `canvas.width = w * dpr; setTransform(dpr,…)`.
+ * A dpr BELOW 1 hands the saver the viewport it expects while allocating a
+ * card-sized buffer. `min(dpr, 2)` caps the top and never floors it, so this
+ * is within the existing contract.
+ *
+ * Raising CARD_* toward `cssWidth * devicePixelRatio` would sharpen thumbnails
+ * on retina at a proportional memory cost; it is deliberately left at the
+ * card's CSS size so this change is memory-neutral.
+ */
+const REF_W = 1280;
+const REF_H = 800;
 const CARD_W = 320;
 const CARD_H = 200;
 /** Cards this far outside the viewport are warmed up before you reach them. */
@@ -182,16 +203,34 @@ export function buildGallery(mount: HTMLElement, groups: GalleryGroup[], opts: G
 
   document.addEventListener('visibilitychange', syncAll);
 
+  /*
+   * Cards are uniform width, so one measurement drives every stage's scale.
+   * Without this the transform would be a guess that breaks whenever the grid
+   * reflows (window resize, filter change, a new saver package landing).
+   */
+  const syncStageScale = (): void => {
+    const first = cards[0]?.el.querySelector('.gallery-card-preview');
+    const w = first?.getBoundingClientRect().width ?? 0;
+    if (w > 0) mount.style.setProperty('--thumb-scale', String(w / REF_W));
+  };
+  mount.style.setProperty('--thumb-ref-w', `${REF_W}px`);
+  mount.style.setProperty('--thumb-ref-h', `${REF_H}px`);
+  syncStageScale();
+  if (cards[0]) new ResizeObserver(syncStageScale).observe(cards[0].el);
+
   // ---- mount every saver -------------------------------------------------
   for (const rec of cards) {
-    const preview = rec.el.querySelector('.gallery-card-preview') as HTMLElement;
+    const preview = rec.el.querySelector('.gallery-card-stage') as HTMLElement;
     const meta = rec.el.querySelector('.gallery-card-backend') as HTMLElement;
     void Promise.resolve(
       rec.saver.mount({
         host: preview,
-        dpr: 1,
-        width: CARD_W,
-        height: CARD_H,
+        // Backing store stays card-sized; the saver still thinks it has a
+        // REF_W×REF_H stage, so its absolute sizes and entity counts land in
+        // the same proportion they would on a real screen.
+        dpr: CARD_W / REF_W,
+        width: REF_W,
+        height: REF_H,
         rng: createRng(42),
         seed: 42,
         reducedMotion,
@@ -277,6 +316,21 @@ function buildCard(
 
   const preview = document.createElement('div');
   preview.className = 'gallery-card-preview';
+
+  /*
+   * The stage is a real REF_W×REF_H box, visually shrunk with a CSS transform.
+   *
+   * `dpr` fixes proportion for canvas savers, but CSS/DOM savers have no
+   * backing store — they position elements with absolute pixel styles
+   * (`.fish { width: 145px }`), so a 145px fish filled half a 289px card no
+   * matter what viewport we claimed. Scaling the whole stage is the DOM
+   * equivalent of the dpr trick: elements lay out against the viewport they
+   * were authored for, then the transform renders them card-sized. Costs
+   * nothing — a transform is compositor work, not extra pixels.
+   */
+  const stage = document.createElement('div');
+  stage.className = 'gallery-card-stage';
+  preview.append(stage);
 
   // Full-bleed hit target over the canvas = the primary action, and it is a
   // real <button>, so it is tabbable and fires on Enter/Space for free.
