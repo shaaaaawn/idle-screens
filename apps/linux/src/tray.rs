@@ -123,25 +123,23 @@ impl Tray for IdleScreensTray {
                 icon_name: "phone".into(),
                 activate: Box::new(|_this: &mut Self| {
                     // Blocking HTTP — keep it off the tray's reactor thread.
-                    std::thread::spawn(|| {
-                        match crate::pair::mint_code(None) {
-                            Ok(code) => {
-                                log::info!("pairing code: {code}");
-                                let _ = std::process::Command::new("notify-send")
-                                    .arg("idle screens — pair phone")
-                                    .arg(format!(
-                                        "Enter {code} in the idle screens iPhone app \
+                    std::thread::spawn(|| match crate::pair::mint_code(None) {
+                        Ok(code) => {
+                            log::info!("pairing code: {code}");
+                            let _ = std::process::Command::new("notify-send")
+                                .arg("idle screens — pair phone")
+                                .arg(format!(
+                                    "Enter {code} in the idle screens iPhone app \
                                          (TV tab). Expires in 5 minutes."
-                                    ))
-                                    .spawn();
-                            }
-                            Err(e) => {
-                                log::warn!("pairing failed: {e:#}");
-                                let _ = std::process::Command::new("notify-send")
-                                    .arg("idle screens — pairing failed")
-                                    .arg(e.to_string())
-                                    .spawn();
-                            }
+                                ))
+                                .spawn();
+                        }
+                        Err(e) => {
+                            log::warn!("pairing failed: {e:#}");
+                            let _ = std::process::Command::new("notify-send")
+                                .arg("idle screens — pairing failed")
+                                .arg(e.to_string())
+                                .spawn();
                         }
                     });
                 }),

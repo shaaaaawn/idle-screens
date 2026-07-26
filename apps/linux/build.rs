@@ -15,7 +15,10 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     let mut commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    if git(&["status", "--porcelain"]).map(|s| !s.is_empty()).unwrap_or(false) {
+    if git(&["status", "--porcelain"])
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
         commit.push_str("-dirty");
     }
     let date = Command::new("date")

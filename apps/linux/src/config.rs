@@ -181,7 +181,10 @@ pub fn resolve_channel_url(channel: &str) -> String {
     if channel.contains("://") {
         channel.to_string()
     } else {
-        format!("{CHANNEL_BASE}{channel}?device={}", crate::pair::device_id())
+        format!(
+            "{CHANNEL_BASE}{channel}?device={}",
+            crate::pair::device_id()
+        )
     }
 }
 
