@@ -184,4 +184,47 @@ describe('slipstream: the page is the boundary condition', () => {
     expect(read()).toEqual(before);
     host.remove();
   });
+
+  // `composition()` and `applyTrack()` came in with the core composition-stack
+  // change this release and were untested here — which is exactly what the
+  // ratcheted coverage gate flagged. The playground's inspector renders this
+  // stack, so a missing layer or an unbound `el` is a real defect.
+  it('describes its composition stack, binding the surface layer to the live canvas', () => {
+    const { host, page } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+
+    const stack = inst.composition?.() ?? [];
+    expect(stack.length).toBeGreaterThan(0);
+
+    // Bottom-up: the borrowed page, then the wind canvas, then draw passes.
+    expect(stack[0]?.kind).toBe('page');
+    const surface = stack.find((l) => l.kind === 'surface');
+    expect(surface?.el, 'the surface layer must point at a real canvas to be toggleable').toBeInstanceOf(
+      HTMLCanvasElement,
+    );
+    expect(host.contains(surface!.el as HTMLElement)).toBe(true);
+
+    const ids = stack.map((l) => l.id);
+    expect(new Set(ids).size, `duplicate layer ids: ${ids.join(', ')}`).toBe(ids.length);
+    for (const layer of stack) expect(layer.label).toMatch(/\S/);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  it('applyTrack while paused repaints instead of waiting for a frame', () => {
+    const { host, page, victims } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+
+    inst.renderFrame(9000, 11);
+    inst.setPaused(true);
+    const before = snapshot(victims);
+
+    // Paused means no frames run, so steering must repaint or be invisible.
+    inst.applyTrack?.({ program: 'slipstream', seed: 11, deltas: [] });
+    expect(snapshot(victims)).toEqual(before);
+
+    inst.dispose();
+    host.remove();
+  });
 });

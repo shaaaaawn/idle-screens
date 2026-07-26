@@ -173,4 +173,49 @@ describe('tide is frame-addressable through to the live page', () => {
     expect(after).toEqual(before);
     host.remove();
   });
+
+  // `composition()` and `applyTrack()` arrived with the core composition-stack
+  // change in this release and had no test in this package, which is what the
+  // ratcheted coverage gate caught. The stack is what the playground's inspector
+  // renders, so a wrong `el` or a missing layer is a real defect.
+  it('describes its composition stack, binding the surface layer to the live canvas', () => {
+    const { host, page } = makePage();
+    const inst = mount(ctx(host, page));
+
+    const stack = inst.composition?.() ?? [];
+    expect(stack.length).toBeGreaterThan(0);
+
+    // Bottom-up: the borrowed page sits under the water canvas, then passes.
+    expect(stack[0]?.kind).toBe('page');
+    const surface = stack.find((l) => l.kind === 'surface');
+    expect(surface?.el, 'the surface layer must point at a real canvas to be toggleable').toBeInstanceOf(
+      HTMLCanvasElement,
+    );
+    expect(host.contains(surface!.el as HTMLElement)).toBe(true);
+
+    // Ids are what the inspector keys rows on, so they have to be unique.
+    const ids = stack.map((l) => l.id);
+    expect(new Set(ids).size, `duplicate layer ids: ${ids.join(', ')}`).toBe(ids.length);
+    for (const layer of stack) expect(layer.label).toMatch(/\S/);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  it('applyTrack while paused re-renders the still rather than waiting for a frame', () => {
+    const { host, page, victims } = makePage();
+    const inst = mount(ctx(host, page));
+
+    inst.renderFrame(9000, 11);
+    inst.setPaused(true);
+    const before = snapshot(victims);
+
+    // A paused saver runs no frames, so steering has to repaint immediately or
+    // the change is invisible until something resumes it.
+    inst.applyTrack?.({ program: 'tide', seed: 11, deltas: [] });
+    expect(snapshot(victims)).toEqual(before);
+
+    inst.dispose();
+    host.remove();
+  });
 });
