@@ -140,6 +140,40 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     host.remove();
   });
 
+  it('a playful cat swats a small neighbour block sideways (translateX, not a perch spring)', () => {
+    // A perch grid plus one swattable chip parked in paw's reach of a perch.
+    // Whether a given seed's itinerary includes a 'bat' stop is personality,
+    // so probe a fixed seed list — at least one of these cats must be playful.
+    const seeds = [7, 11, 23, 42, 5];
+    let swatted = false;
+    for (const seed of seeds) {
+      const { host, page, victims } = makePage();
+      const chip = document.createElement('a');
+      chip.dataset.idleVictim = '';
+      // 110px right of the perch at (100,120,w260): anchor x=230 → chip cx=340.
+      chip.getBoundingClientRect = () =>
+        ({ left: 310, top: 150, right: 370, bottom: 170, width: 60, height: 20, x: 310, y: 150 }) as DOMRect;
+      document.body.append(chip);
+      const allEls = [...victims, chip];
+      const pageWithChip: PageContext = { palette: () => [], victims: () => allEls };
+
+      const c = { ...ctx(host, pageWithChip), rng: createRng(seed), seed };
+      const inst = mount(c);
+      // The bat works both ways: the chip may swat a perch or a perch may swat
+      // the chip — either produces a sideways (translateX) shove somewhere.
+      for (let t = 0; t < 90_000 && !swatted; t += 120) {
+        inst.renderFrame(t, seed);
+        if (allEls.some((el) => el.style.transform.startsWith('translateX'))) swatted = true;
+      }
+      inst.dispose();
+      expect(chip.style.transform, 'swat restored on dispose').toBe('');
+      chip.remove();
+      host.remove();
+      if (swatted) break;
+    }
+    expect(swatted, 'some seed bats the chip').toBe(true);
+  });
+
   it('falls back to structural perches when the semantic selector finds nothing', () => {
     // A page of plain perch-sized <div>s — the gallery/app-shell case that
     // shipped as a blank dark veil. The structural second pass must find them.
