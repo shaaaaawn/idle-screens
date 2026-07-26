@@ -345,6 +345,28 @@ test.describe('evals view', () => {
     await expect(page.locator('.evals-tile').first()).toHaveAttribute('data-screen-id', /.+/);
   });
 
+  test('only the selected (or hovered) tile animates; the rest stay stills', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile.active[data-playing="true"]'));
+
+    // Default: one live rAF loop (the selection); the wall is stills.
+    await expect(page.locator('.evals-tile[data-playing="true"]')).toHaveCount(1);
+
+    const idleId = await page.locator('.evals-tile[data-screen-id]:not(.active)').first().getAttribute('data-screen-id');
+    expect(idleId).toBeTruthy();
+    const idle = page.locator(`.evals-tile[data-screen-id="${idleId}"]`);
+    await expect(idle).toHaveAttribute('data-playing', 'false');
+    await idle.hover();
+    await expect(idle).toHaveAttribute('data-playing', 'true');
+    // Selection + hover can both run — still a tiny budget, not the whole wall.
+    expect(await page.locator('.evals-tile[data-playing="true"]').count()).toBeLessThanOrEqual(2);
+
+    await idle.click();
+    await expect(idle).toHaveClass(/active/);
+    await expect(idle).toHaveAttribute('data-playing', 'true');
+    await expect(page.locator('.evals-tile[data-playing="true"]')).toHaveCount(1);
+  });
+
   test('a new run scores every tile, lands on the timeline, and keeps its provenance line', async ({ page }) => {
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
@@ -371,38 +393,84 @@ test.describe('evals view', () => {
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
 
-    // Simulate a selected run that only authored one benchmark across artists
-    // (the common agent-scope case) — By artist must not collapse to that slice.
-    await page.evaluate(() => {
-      const catalogScreens = (window as unknown as { __evalsTest?: { injectPartialAuthoredRun: () => void } }).__evalsTest;
-      catalogScreens?.injectPartialAuthoredRun();
+    // Inject a browser run whose authoredScreens cover only one benchmark
+    // (typical agent scope) — selecting it must not collapse By artist.
+    const runId = await page.evaluate(async () => {
+      const { getCatalog } = await import('/src/evals/catalog.ts');
+      const catalog = getCatalog();
+      const authored = catalog.screens.filter(
+        (s) => s.kind === 'benchmark' && s.screenId === 'calm-horizon',
+      );
+      const runId = 'run-e2e-partial-authored';
+      const createdAt = new Date().toISOString();
+      const summary = {
+        runId,
+        createdAt,
+        config: { viewport: { width: 1920, height: 1080 }, t: 5000, seedFallback: 42 },
+        suiteMedian: 0.5,
+        perArtist: [],
+        perBenchmark: [],
+        gapHistogram: [],
+        failures: [],
+        provenance: {
+          harness: 'agent-loop',
+          label: 'e2e partial authored',
+          note: 'one benchmark only',
+          versions: {
+            styleDnaHash: 'deadbeef',
+            styleDnaLabel: 'artists@15',
+            saverSpecFormat: 1,
+            scorer: 'style-eval-score@test',
+            skill: 'artistic-style-schema-eval@test',
+          },
+          prompts: { benchmarkSource: 'benchmarks.ts' },
+          scoringBands: {
+            minCoverage: 0.05,
+            minLuminanceVar: 0.01,
+            weights: { perception: 0.25, styleFit: 0.4, intentFit: 0.35 },
+          },
+        },
+        nextCycle: {
+          weakArtists: [],
+          collapsedBenchmarks: [],
+          topGaps: [],
+          suggestedActions: [],
+        },
+        screenFingerprints: Object.fromEntries(authored.map((s) => [s.id, 'abcd1234'])),
+      };
+      localStorage.setItem(
+        'idle-screens:style-eval:run:' + runId,
+        JSON.stringify({ summary, results: [], authoredScreens: authored }),
+      );
+      const idx = JSON.parse(localStorage.getItem('idle-screens:style-eval:run-index') ?? '[]') as unknown[];
+      idx.unshift({
+        runId,
+        createdAt,
+        label: summary.provenance.label,
+        harness: 'agent-loop',
+        suiteMedian: 0.5,
+        styleDnaHash: 'deadbeef',
+        storage: 'browser',
+      });
+      localStorage.setItem('idle-screens:style-eval:run-index', JSON.stringify(idx));
+      return runId;
     });
-    // If the test hook isn't wired, fall back to a direct localStorage inject
-    // that matches StoredRun shape and reload the selected run via UI.
-    const injected = await page.evaluate(() => {
-      const key = 'idle-screens:style-eval:run:run-e2e-partial-authored';
-      const existing = localStorage.getItem(key);
-      if (existing) return true;
-      // Minimal payload: one authored screen id per the first artist; summary
-      // is enough for loadRun + activeScreens overlay logic via a synthetic path.
-      return false;
-    });
-    void injected;
+
+    await page.reload();
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator(`.evals-tl-node[data-run-id="${runId}"]`).click();
+    await expect(page.locator('[data-role="subtitle"]')).toContainText('e2e partial authored');
 
     await page.locator('.evals-mode-btn[data-mode="artist"]').click();
     await expect(page.locator('[data-nav="artist"]')).toBeVisible();
-    await expect(page.locator('[data-nav="artist"] .evals-nav-item').first()).toBeVisible();
-
-    // Switch artists — nav must keep working and each wall must stay complete.
     const artistButtons = page.locator('[data-nav="artist"] .evals-nav-item');
-    const artistCount = await artistButtons.count();
-    expect(artistCount).toBeGreaterThanOrEqual(15);
+    expect(await artistButtons.count()).toBeGreaterThanOrEqual(15);
     await artistButtons.nth(1).click();
     await expect(page.locator('.evals-grid-label')).toHaveText([
       'Benchmarks — shared intents',
       'Signatures — artist-owned',
     ]);
-    // Full body of work: 5 benchmarks + 5 signatures.
+    // Full body of work: 5 benchmarks + 5 signatures — not just the authored slice.
     expect(await page.locator('.evals-tile').count()).toBe(10);
     await artistButtons.nth(2).click();
     expect(await page.locator('.evals-tile').count()).toBe(10);
@@ -476,7 +544,8 @@ test.describe('evals view', () => {
     await page.locator('[data-act="key-verify"]').click();
     await expect(page.locator('[data-role="conn-msg"]')).toContainText('Key valid');
 
-    // Submit a run, then prove the key is in exactly one place and no run record.
+    // Re-score with a model name recorded in provenance — never call OpenRouter.
+    await page.locator('.evals-modal input[name="mode"][value="rescore"]').check();
     await page.locator('.evals-modal [name="label"]').fill('key isolation');
     await page.locator('input[name="model"]').fill('openai/gpt-5');
     await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
@@ -512,14 +581,16 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-role="model-hint"]')).not.toBeEmpty();
     await page.locator('input[name="model"]').fill('local/handwritten');
     await expect(page.locator('input[name="provider"]')).toHaveValue('local');
+    await page.locator('.evals-modal input[name="mode"][value="rescore"]').check();
     await page.locator('.evals-modal [name="label"]').fill('offline run');
     await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
     await expect(page.locator('[data-role="subtitle"]')).toContainText('offline run');
   });
 
-  /** Submit the run dialog and return the id of the run it created. */
+  /** Submit a local re-score run and return the id of the run it created. */
   const submitRun = async (page: Page, label: string, model?: string) => {
     await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-modal input[name="mode"][value="rescore"]').check();
     await page.locator('.evals-modal [name="label"]').fill(label);
     if (model) {
       await page.locator('input[name="model"]').fill(model);

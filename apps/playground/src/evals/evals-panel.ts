@@ -13,6 +13,7 @@ import {
   fingerprintScreens,
 } from './provenance';
 import { listRuns, loadRun, saveBrowserRun } from './run-store';
+import { overlayAuthoredScreens } from './screens-view';
 import {
   buildRunTimeline,
   promptRunRequest,
@@ -128,11 +129,9 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   const compareByScreen = new Map<string, SaverInstance>();
   let lastResults: ScreenScore[] | null = null;
   let lastSummary: RunSummary | null = null;
-  /** Tiles the observer says are on screen; playback is the intersection of this and `gridLive`. */
-  const visibleTiles = new Set<string>();
+  /** Only this tile + the selection keep a live rAF loop; everything else is a still. */
   let hoveredTile: string | null = null;
   let gridLive = true;
-  let tileObserver: IntersectionObserver | null = null;
   /** Which screens changed since the selected run scored them (null = no run). */
   let screenDrift: ScreenDrift | null = null;
 
@@ -345,9 +344,6 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   refreshTimeline();
 
   const disposeCompare = (): void => {
-    tileObserver?.disconnect();
-    tileObserver = null;
-    visibleTiles.clear();
     hoveredTile = null;
     for (const inst of compareByScreen.values()) inst.dispose();
     compareByScreen.clear();
@@ -355,15 +351,14 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   };
 
   /**
-   * Tile playback. The old rule ran all 15 for 4.5s then froze everything but
-   * the selection, which left a wall of dead stills — and any saver that paints
-   * only inside rAF froze black before its first frame. Now: on-screen tiles
-   * run, the selected and hovered tiles always run, and the whole grid stops
-   * while the chamber is up.
+   * Tile playback. 10–15 Canvas2D savers all looping is what makes Compare /
+   * By artist feel janky. Mount paints a still (`reducedMotion`), then only the
+   * selected tile and the hovered tile run — everything else stays on its last
+   * frame. The whole grid freezes while the chamber is up.
    */
   const syncTiles = (): void => {
     for (const [id, inst] of compareByScreen) {
-      const on = gridLive && (visibleTiles.has(id) || id === screen?.id || id === hoveredTile);
+      const on = gridLive && (id === screen?.id || id === hoveredTile);
       inst.setPaused(!on);
       const tile = compareGrid.querySelector<HTMLElement>(
         `.evals-tile[data-screen-id="${CSS.escape(id)}"]`,
@@ -427,7 +422,11 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       scoreLine: scoreLineFor(s),
     }));
 
-  /** Mount a live saver into a tile stage; the instance joins playback sync. */
+  /**
+   * Mount a saver into a tile stage as a still frame, then let syncTiles unpause
+   * only the hot tile. `reducedMotion` paints t=0 immediately so paused tiles
+   * never sit black waiting for a rAF they will not get.
+   */
   const mountStage = (stage: HTMLElement, s: EvalScreen): void => {
     try {
       const plugin = compileSaver(s.spec);
@@ -439,7 +438,7 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
           height: 200,
           rng: createRng((s.spec.seed ?? 42) >>> 0 || 1),
           seed: s.spec.seed ?? 42,
-          reducedMotion: false,
+          reducedMotion: true,
         }),
       ).then((inst) => {
         compareByScreen.set(s.id, inst);
@@ -558,31 +557,21 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   };
 
   /**
-   * Overlay model-authored evidence onto the full catalog so nav never
-   * collapses. An agent run often covers only one benchmark × N artists —
-   * By artist must still show that artist's full 5+5 body of work, with
-   * authored specs swapped in where they exist.
-   */
-  const withAuthored = (base: EvalScreen[]): EvalScreen[] => {
-    if (!activeScreens?.length) return base;
-    const byId = new Map(activeScreens.map((s) => [s.id, s]));
-    return base.map((s) => byId.get(s.id) ?? s);
-  };
-
-  /**
    * Both modes render the same thing — a gallery of live screens plus the
    * inspector. Compare holds the intent constant and varies the artist;
    * By artist holds the artist constant and shows their whole body of work.
+   * Authored evidence from a selected agent run overlays the catalog — it
+   * never replaces the catalog slice (so By artist stays a full 5+5 wall).
    */
   const screensForView = (): EvalScreen[] => {
     if (mode === 'gallery') return [];
     if (mode === 'compare') {
-      return withAuthored(
+      return overlayAuthoredScreens(
         catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId),
+        activeScreens,
       );
     }
-    // By artist — always the full catalog body of work for that artist.
-    return withAuthored(catalog.screensByArtist.get(artistId) ?? []);
+    return overlayAuthoredScreens(catalog.screensByArtist.get(artistId) ?? [], activeScreens);
   };
 
   const renderGrid = (): void => {
@@ -728,23 +717,6 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         for (const s of group) compareGrid.append(buildTile(s, s.title, s.recipe));
       }
     }
-
-    // The scroller is .evals-compare-wrap, not the document — rootMargin is
-    // only applied to the root's own rect, so leaving this null would make the
-    // preroll a no-op against the real clipping ancestor.
-    tileObserver = new IntersectionObserver(
-      (records) => {
-        for (const r of records) {
-          const id = (r.target as HTMLElement).dataset.screenId;
-          if (!id) continue;
-          if (r.isIntersecting) visibleTiles.add(id);
-          else visibleTiles.delete(id);
-        }
-        syncTiles();
-      },
-      { root: compareGrid.closest('.evals-compare-wrap'), rootMargin: '160px', threshold: 0 },
-    );
-    for (const tile of compareGrid.querySelectorAll('.evals-tile')) tileObserver.observe(tile);
 
     const focus =
       screens.find((s) => s.id === screen?.id) ??

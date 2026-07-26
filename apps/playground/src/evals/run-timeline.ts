@@ -5,10 +5,11 @@ import {
   providerOf,
   type OpenRouterModel,
 } from './openrouter';
+import { mountAgentScopeControls, type EvalCatalog } from './agent-targets';
 import { getRunDefaults } from './run-defaults';
 import type { VersionField } from './provenance';
 import { nextCycleBrief } from './run-store';
-import type { RunIndexEntry, RunSummary } from './types';
+import type { AgentScope, RunIndexEntry, RunSummary } from './types';
 
 export interface ScreenDrift {
   /** False for runs recorded before per-screen fingerprints existed. */

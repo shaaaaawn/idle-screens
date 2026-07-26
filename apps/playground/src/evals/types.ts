@@ -277,6 +277,10 @@ export interface RunRequest {
   mode?: RunMode;
   /** Scope of screens for agent mode. Ignored for rescore (always full suite). */
   agentScope?: AgentScope;
+  /** Explicit targets chosen in the New run dialog (not implied by grid selection). */
+  targetArtistId?: string;
+  targetBenchmarkId?: string;
+  targetScreenId?: string;
   maxToolCalls?: number;
   modelName?: string;
   modelProvider?: string;
