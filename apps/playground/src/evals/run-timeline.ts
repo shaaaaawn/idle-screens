@@ -9,7 +9,7 @@ import { mountAgentScopeControls, type EvalCatalog } from './agent-targets';
 import { getRunDefaults } from './run-defaults';
 import type { VersionField } from './provenance';
 import { nextCycleBrief } from './run-store';
-import type { AgentScope, RunIndexEntry, RunSummary } from './types';
+import type { RunIndexEntry, RunSummary } from './types';
 
 export interface ScreenDrift {
   /** False for runs recorded before per-screen fingerprints existed. */
@@ -324,6 +324,12 @@ function wireOpenRouter(root: HTMLElement, form: HTMLFormElement): void {
 export function promptRunRequest(defaults: {
   parentRunId?: string;
   parentLabel?: string;
+  /** Required for agent target pickers (artist / benchmark / screen). */
+  catalog: EvalCatalog;
+  /** Prefill pickers from the workbench — user can change them in the dialog. */
+  artistId?: string;
+  benchmarkId?: string;
+  screenId?: string | null;
 }): Promise<import('./types').RunRequest | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
@@ -367,19 +373,10 @@ export function promptRunRequest(defaults: {
         <p class="evals-field-hint" data-role="model-hint"></p>
 
         <div data-role="agent-opts">
-          <div class="evals-field-row">
-            <label class="evals-field">Scope
-              <select name="agentScope">
-                <option value="benchmark" selected>Current benchmark × all artists</option>
-                <option value="screen">Selected screen only</option>
-                <option value="artist">Selected artist’s benchmarks</option>
-                <option value="suite">Full suite (150 — expensive)</option>
-              </select>
-            </label>
-            <label class="evals-field">Max tool calls / screen
-              <input name="maxToolCalls" type="number" min="1" max="100" value="20" />
-            </label>
-          </div>
+          <div data-role="scope-controls"></div>
+          <label class="evals-field">Max tool calls / screen
+            <input name="maxToolCalls" type="number" min="1" max="100" value="20" />
+          </label>
         </div>
 
         <details class="evals-conn">
@@ -411,6 +408,19 @@ export function promptRunRequest(defaults: {
     const form = backdrop.querySelector('form') as HTMLFormElement;
     const submitBtn = form.querySelector<HTMLButtonElement>('[data-role="submit"]')!;
     const agentOpts = form.querySelector<HTMLElement>('[data-role="agent-opts"]')!;
+    const scopeHost = form.querySelector<HTMLElement>('[data-role="scope-controls"]')!;
+    const maxCallsInput = form.querySelector<HTMLInputElement>('input[name="maxToolCalls"]')!;
+    const scopeControls = mountAgentScopeControls(
+      scopeHost,
+      defaults.catalog,
+      {
+        scope: 'benchmark',
+        artistId: defaults.artistId ?? defaults.catalog.artists[0]!.id,
+        benchmarkId: defaults.benchmarkId ?? defaults.catalog.benchmarks[0]!.id,
+        screenId: defaults.screenId ?? null,
+      },
+      { maxCallsInput },
+    );
     const close = (value: import('./types').RunRequest | null): void => {
       backdrop.remove();
       resolve(value);
@@ -457,12 +467,16 @@ export function promptRunRequest(defaults: {
         if (hint) hint.textContent = 'Pick an OpenRouter model — agent mode needs one.';
         return;
       }
+      const targets = scopeControls.read();
       close({
         label: String(fd.get('label') ?? '').trim() || 'playground run',
         note: String(fd.get('note') ?? '').trim(),
         harness: mode === 'agent' ? 'agent-loop' : 'playground-ui',
         mode,
-        agentScope: (String(fd.get('agentScope') ?? 'benchmark') as import('./types').AgentScope),
+        agentScope: targets.scope,
+        targetArtistId: targets.artistId,
+        targetBenchmarkId: targets.benchmarkId,
+        targetScreenId: targets.screenId ?? undefined,
         maxToolCalls: Math.min(100, Math.max(1, Number(fd.get('maxToolCalls')) || 20)),
         modelName,
         modelProvider: String(fd.get('provider') ?? '').trim() || undefined,
