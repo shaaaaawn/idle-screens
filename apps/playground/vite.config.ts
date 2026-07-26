@@ -34,6 +34,8 @@ export default defineConfig({
     alias: {
       '@idle-screens/core': src('core'),
       '@idle-screens/saver-black-hole': src('saver-black-hole'),
+      '@idle-screens/saver-limelight': src('saver-limelight'),
+      '@idle-screens/saver-slipstream': src('saver-slipstream'),
       '@idle-screens/saver-tide': src('saver-tide'),
       '@idle-screens/savers-classic': src('savers-classic'),
       '@idle-screens/schema': src('schema'),
