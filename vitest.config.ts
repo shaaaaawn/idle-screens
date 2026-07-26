@@ -22,6 +22,7 @@ export default defineConfig({
         'packages/saver-tide/src/**/*.ts',
         'packages/saver-limelight/src/**/*.ts',
         'packages/saver-slipstream/src/**/*.ts',
+        'packages/saver-catwalk/src/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -38,6 +39,7 @@ export default defineConfig({
         'packages/saver-tide/src/index.ts',
         'packages/saver-limelight/src/index.ts',
         'packages/saver-slipstream/src/index.ts',
+        'packages/saver-catwalk/src/index.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
@@ -95,6 +97,13 @@ export default defineConfig({
           branches: 78,
           functions: 86,
           lines: 93,
+        },
+        // saver-catwalk: measured 2026-07-26 → 91.3 / 87.87 / 88.57 / 91.3; gate at −2.
+        'packages/saver-catwalk/src/**': {
+          statements: 89,
+          branches: 85,
+          functions: 86,
+          lines: 89,
         },
       },
     },
