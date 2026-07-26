@@ -178,6 +178,17 @@ class LimelightInstance implements SaverInstance {
   private victims: Victim[] = [];
   private occBucket = -1;
 
+  /**
+   * The bounding box of the collected set. The light aims in THIS space, not
+   * viewport space: on a page with a centered column, a viewport-space roam
+   * spends half its time lighting empty margin. `lightX: 0.5` means "middle of
+   * the content" — which is also the more useful contract for an agent.
+   */
+  private stageX = 0;
+  private stageY = 0;
+  private stageW = 0;
+  private stageH = 0;
+
   private frameId: number | null = null;
   private paused = false;
   private startT = 0;
@@ -264,10 +275,9 @@ class LimelightInstance implements SaverInstance {
   /** Where the key light is aimed — the centre of the pool on the stage floor. */
   private aimFrom(p: Params, t: number): [number, number] {
     const wt = BASE_W * p.roamSpeed * t;
-    return [
-      (p.lightX + p.roamX * Math.sin(wt)) * this.w,
-      (p.lightY + p.roamY * Math.sin(wt * 1.37 + 1.1)) * this.h,
-    ];
+    const fx = p.lightX + p.roamX * Math.sin(wt);
+    const fy = p.lightY + p.roamY * Math.sin(wt * 1.37 + 1.1);
+    return [this.stageX + fx * this.stageW, this.stageY + fy * this.stageH];
   }
 
   /**
@@ -358,6 +368,29 @@ class LimelightInstance implements SaverInstance {
       el.style.transition = 'none';
       el.style.transformOrigin = '50% 50%';
     }
+    this.computeStage();
+  }
+
+  /** The stage is where the set actually stands; empty pages get the viewport. */
+  private computeStage(): void {
+    if (!this.victims.length) {
+      this.stageX = 0;
+      this.stageY = 0;
+      this.stageW = this.w;
+      this.stageH = this.h;
+      return;
+    }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const v of this.victims) {
+      if (v.x0 < x0) x0 = v.x0;
+      if (v.y0 < y0) y0 = v.y0;
+      if (v.x1 > x1) x1 = v.x1;
+      if (v.y1 > y1) y1 = v.y1;
+    }
+    this.stageX = clamp(x0, 0, this.w);
+    this.stageY = clamp(y0, 0, this.h);
+    this.stageW = Math.max(1, clamp(x1, 0, this.w) - this.stageX);
+    this.stageH = Math.max(1, clamp(y1, 0, this.h) - this.stageY);
   }
 
   private restoreVictims(): void {
@@ -499,8 +532,8 @@ class LimelightInstance implements SaverInstance {
         : `translate(${ox.toFixed(1)}px, ${oy.toFixed(1)}px) scale(${sc.toFixed(4)})`;
 
     const lit = this.litness(v, aimX, aimY);
-    const bri = Math.round((0.66 + lit * 0.74) * 20) / 20;
-    const sat = Math.round((0.68 + lit * 0.46) * 20) / 20;
+    const bri = Math.round((0.62 + lit * 0.88) * 20) / 20;
+    const sat = Math.round((0.66 + lit * 0.52) * 20) / 20;
     const filter = bri === 1 && sat === 1 ? v.prevFilter : `brightness(${bri}) saturate(${sat})`;
 
     this.write(v, transform, filter);
@@ -605,6 +638,27 @@ class LimelightInstance implements SaverInstance {
     ctx.arc(aimX, aimY, beam, 0, TAU);
     ctx.fill();
 
+    // 2.5. The pool glows. On a dark page, punching a hole in the wash shows
+    // more dark — this additive floor is what the shadows then visibly carve,
+    // so the shadow story reads on any page. Drawn BEFORE the shadows on
+    // purpose: light first, then the set eats it.
+    ctx.globalCompositeOperation = 'lighter';
+    const pool = ctx.createRadialGradient(aimX, aimY, 0, aimX, aimY, beam * 1.05);
+    pool.addColorStop(0, `rgba(${gel[0]},${gel[1]},${gel[2]},0.3)`);
+    pool.addColorStop(0.5, `rgba(${gel[0]},${gel[1]},${gel[2]},0.14)`);
+    pool.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = pool;
+    ctx.beginPath();
+    ctx.arc(aimX, aimY, beam * 1.05, 0, TAU);
+    ctx.fill();
+    const hot = ctx.createRadialGradient(aimX, aimY, 0, aimX, aimY, beam * 0.42);
+    hot.addColorStop(0, `rgba(${gel[0]},${gel[1]},${gel[2]},0.24)`);
+    hot.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hot;
+    ctx.beginPath();
+    ctx.arc(aimX, aimY, beam * 0.42, 0, TAU);
+    ctx.fill();
+
     // 3. The set casts back into its own light — key, then the cold counter.
     ctx.globalCompositeOperation = 'source-over';
     if (this.params.shadowLength > 0 && this.params.shadowOpacity > 0) {
@@ -684,12 +738,13 @@ class LimelightInstance implements SaverInstance {
   private drawRims(lamp: [number, number], gel: RGB, gain: number, aimX: number, aimY: number): void {
     if (gain <= 0.02) return;
     const ctx = this.ctx;
-    ctx.lineWidth = 1.4;
     ctx.lineJoin = 'round';
     for (const v of this.victims) {
       const lit = this.litness(v, aimX, aimY);
-      const a = 0.5 * gain * (0.25 + lit * 0.75);
+      const a = 0.55 * gain * (0.22 + lit * 0.78);
       if (a < 0.02) continue;
+      // Blocks in the pool get a fat hot edge; the rest a hairline.
+      ctx.lineWidth = 1 + lit * 1.9;
       this.buildBoxes(v);
       const l = this.lifted;
       const sil = silhouetteFor(lamp[0], lamp[1], l[0]!, l[1]!, l[4]!, l[5]!);
@@ -732,7 +787,9 @@ class LimelightInstance implements SaverInstance {
     const uy = dy / len;
     const px = -uy;
     const py = ux;
-    const far = len * 2.1;
+    // The shaft terminates AT the pool — a beam that runs off the bottom of
+    // the frame reads as a glitch, not a light.
+    const far = len * 1.12;
     const spread = beam / len;
 
     // Two nested wedges: the wider one at low alpha softens the beam's edge.
@@ -741,7 +798,8 @@ class LimelightInstance implements SaverInstance {
       const g = bc.createLinearGradient(apex[0], apex[1], apex[0] + ux * far, apex[1] + uy * far);
       const a = 0.2 * strength * mul;
       g.addColorStop(0, `rgba(${gel[0]},${gel[1]},${gel[2]},${(a * 1.1).toFixed(4)})`);
-      g.addColorStop(0.55, `rgba(${gel[0]},${gel[1]},${gel[2]},${(a * 0.7).toFixed(4)})`);
+      g.addColorStop(0.62, `rgba(${gel[0]},${gel[1]},${gel[2]},${(a * 0.75).toFixed(4)})`);
+      g.addColorStop(0.88, `rgba(${gel[0]},${gel[1]},${gel[2]},${(a * 0.3).toFixed(4)})`);
       g.addColorStop(1, 'rgba(0,0,0,0)');
       bc.fillStyle = g;
       bc.beginPath();
@@ -751,6 +809,16 @@ class LimelightInstance implements SaverInstance {
       bc.closePath();
       bc.fill();
     }
+
+    // Terminal splash where the shaft lands — drawn on the beam layer so the
+    // set's shadows carve it along with the shaft itself.
+    const splash = bc.createRadialGradient(aimX, aimY, 0, aimX, aimY, beam * 0.8);
+    splash.addColorStop(0, `rgba(${gel[0]},${gel[1]},${gel[2]},${(0.28 * strength).toFixed(4)})`);
+    splash.addColorStop(1, 'rgba(0,0,0,0)');
+    bc.fillStyle = splash;
+    bc.beginPath();
+    bc.ellipse(aimX, aimY, beam * 0.8, beam * 0.52, 0, 0, TAU);
+    bc.fill();
 
     // The set eats the light it stands in.
     bc.globalCompositeOperation = 'destination-out';
