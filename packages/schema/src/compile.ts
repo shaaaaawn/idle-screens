@@ -29,6 +29,25 @@ function hexToRgba(hex: string, alpha: number): string {
 
 const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})\s+)+)/;
 
+/** Matches the size token in a CSS font shorthand ("bold 26px monospace"). */
+const FONT_PX_RE = /(\d*\.?\d+)px/;
+
+/**
+ * Rescale an explicit px size inside a font shorthand.
+ *
+ * A spec in the default `viewport` units expresses every other dimension as a
+ * fraction of `min(w, h)`, so a font pinned to absolute pixels is the one thing
+ * that does NOT adapt: `bold 26px monospace` renders 26px whether the canvas is
+ * 1920 or 320 wide, which is how the dashboard's text came to overlap itself at
+ * thumbnail size. Scaling it by `min(w, h) / referenceViewport` makes it behave
+ * like the rest of the spec. Specs that opt into `units: 'px'` are asking for
+ * absolute sizes and are left alone.
+ */
+function scaleFontPx(font: string, factor: number): string {
+  if (factor === 1) return font;
+  return font.replace(FONT_PX_RE, (_m, n: string) => `${(Number(n) * factor).toFixed(2)}px`);
+}
+
 /** Build a valid CSS font shorthand: weight/style tokens must precede the size. */
 function composeFontShorthand(sz: number, font: string): string {
   const m = FONT_PREFIX_RE.exec(font);
@@ -112,6 +131,12 @@ class SpecInstance implements SaverInstance {
     this.paused = ctx.reducedMotion;
     if (this.paused) this.renderFrame(0, this.seed);
     else this.start();
+  }
+
+  /** Viewport factor for absolute px sizes — 1 for `units: 'px'` specs. */
+  private fontScale(): number {
+    if (this.effSpec.units === 'px') return 1;
+    return Math.min(this.w, this.h) / (this.effSpec.referenceViewport ?? LIMITS.referenceViewport);
   }
 
   private sizeCanvas(): void {
@@ -351,8 +376,8 @@ class SpecInstance implements SaverInstance {
       // A full CSS shorthand (contains a px size) is used verbatim; a family/weight
       // only ('bold monospace') composes with the seeded per-entity size.
       ctx.font = sprite.font
-        ? (/\dpx/.test(sprite.font)
-          ? sprite.font
+        ? (FONT_PX_RE.test(sprite.font)
+          ? scaleFontPx(sprite.font, this.fontScale())
           : composeFontShorthand(sz, sprite.font))
         : `${sz}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
