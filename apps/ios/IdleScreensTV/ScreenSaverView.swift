@@ -10,7 +10,19 @@ struct ScreenSaverView: View {
             Color.black.ignoresSafeArea()
 
             if app.sleeping {
-                Color.black.ignoresSafeArea()
+                // Sleeping is intentional darkness — but say so quietly, or a
+                // sleeping channel is indistinguishable from a broken one.
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        Image(systemName: "moon.zzz")
+                            .font(.system(size: 40))
+                            .foregroundStyle(Color.textSecondary.opacity(0.5))
+                        Text("channel is sleeping")
+                            .font(.system(size: 26))
+                            .foregroundStyle(Color.textSecondary.opacity(0.4))
+                    }
+                }
             } else if app.isClassicSpec {
                 // Classic savers (e.g. {"id":"warp"}) can't render natively and
                 // previewScene doesn't support them — the thumb stream is the

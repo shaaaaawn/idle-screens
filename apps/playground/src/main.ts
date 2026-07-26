@@ -13,6 +13,7 @@ import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
+import { catwalk } from '@idle-screens/saver-catwalk';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -26,6 +27,7 @@ import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
 import { buildGallery, type GalleryGroup } from './gallery';
 import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
+import { wirePerceptionHarness } from './frame-perception';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
 
@@ -40,6 +42,7 @@ const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-tide', label: '@idle-screens/saver-tide', savers: [tide] },
   { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
   { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
+  { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -69,6 +72,7 @@ const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-tide': 'tide',
   'saver-limelight': 'limelight',
   'saver-slipstream': 'slipstream',
+  'saver-catwalk': 'catwalk',
   'savers-classic': 'classic',
   schema: 'schema',
 };
@@ -414,6 +418,7 @@ function liveMode(): void {
   });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
+  wirePerceptionHarness(ALL_SAVERS);
   wireSchemaHarness();
 
   type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';
@@ -546,6 +551,9 @@ function liveMode(): void {
         width: Math.round(rect.width) || 640,
         height: Math.round(rect.height) || 400,
         seed: cfg.seed,
+        // Imperative savers have no spec to analyse; the panel reads their
+        // pixels instead, which needs the plugin itself.
+        saver,
       });
       layers.setSaver(id);
 

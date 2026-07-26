@@ -319,7 +319,7 @@ function wireOpenRouter(root: HTMLElement, form: HTMLFormElement): void {
   });
 }
 
-/** Modal form to capture provenance before scoring. */
+/** Modal form to capture provenance before scoring / agent-authoring. */
 export function promptRunRequest(defaults: {
   parentRunId?: string;
   parentLabel?: string;
@@ -330,17 +330,33 @@ export function promptRunRequest(defaults: {
     backdrop.innerHTML = `
       <form class="evals-modal" data-role="form">
         <h2 class="evals-modal-title">New eval run</h2>
-        <p class="evals-modal-sub">Capture harness / model / prompt so this run can feed the next cycle.</p>
+        <p class="evals-modal-sub">
+          <strong>Agent</strong> calls OpenRouter — the model authors SaverSpecs (the run’s evidence).
+          <strong>Re-score</strong> only grades today’s local catalog (no network).
+        </p>
+
+        <fieldset class="evals-field evals-mode-fieldset">
+          <legend>Mode</legend>
+          <label class="evals-agent-scope">
+            <input type="radio" name="mode" value="agent" checked />
+            Agent — OpenRouter authors new SaverSpecs
+          </label>
+          <label class="evals-agent-scope">
+            <input type="radio" name="mode" value="rescore" />
+            Re-score — local catalog only (no API calls)
+          </label>
+        </fieldset>
+
         <label class="evals-field">Label
-          <input name="label" required placeholder="e.g. after pulse.wave" value="" />
+          <input name="label" required placeholder="e.g. openrouter deepseek on calm-horizon" value="" />
         </label>
         <label class="evals-field">Note (why this run)
-          <textarea name="note" rows="2" placeholder="What changed since the parent run?"></textarea>
+          <textarea name="note" rows="2" placeholder="What should the next cycle learn from this?"></textarea>
         </label>
         <div class="evals-field-row">
           <label class="evals-field">Model
             <input name="model" list="or-model-list" autocomplete="off" spellcheck="false"
-                   placeholder="type to search OpenRouter models, or 'none'" />
+                   placeholder="provider/model from OpenRouter" />
             <datalist id="or-model-list"></datalist>
           </label>
           <label class="evals-field">Provider
@@ -348,6 +364,22 @@ export function promptRunRequest(defaults: {
           </label>
         </div>
         <p class="evals-field-hint" data-role="model-hint"></p>
+
+        <div data-role="agent-opts">
+          <div class="evals-field-row">
+            <label class="evals-field">Scope
+              <select name="agentScope">
+                <option value="benchmark" selected>Current benchmark × all artists</option>
+                <option value="screen">Selected screen only</option>
+                <option value="artist">Selected artist’s benchmarks</option>
+                <option value="suite">Full suite (150 — expensive)</option>
+              </select>
+            </label>
+            <label class="evals-field">Max tool calls / screen
+              <input name="maxToolCalls" type="number" min="1" max="100" value="20" />
+            </label>
+          </div>
+        </div>
 
         <details class="evals-conn">
           <summary>OpenRouter connection <span class="evals-conn-state" data-role="conn-state"></span></summary>
@@ -361,8 +393,8 @@ export function promptRunRequest(defaults: {
         <label class="evals-field">Operator
           <input name="operator" placeholder="your name or agent id" />
         </label>
-        <label class="evals-field">System / authoring prompt
-          <textarea name="systemPrompt" rows="4" placeholder="Paste the system prompt or authoring brief used for DNA/screens this cycle…"></textarea>
+        <label class="evals-field">Extra system / authoring notes
+          <textarea name="systemPrompt" rows="3" placeholder="Optional notes appended into provenance (the agent loop already ships FORMAT.md + StyleDNA)."></textarea>
         </label>
         <p class="evals-modal-parent">${
           defaults.parentRunId
@@ -371,16 +403,29 @@ export function promptRunRequest(defaults: {
         }</p>
         <div class="evals-modal-actions">
           <button type="button" class="evals-btn secondary" data-act="cancel">Cancel</button>
-          <button type="submit" class="evals-btn">Run suite</button>
+          <button type="submit" class="evals-btn" data-role="submit">Author via OpenRouter</button>
         </div>
       </form>
     `;
     const form = backdrop.querySelector('form') as HTMLFormElement;
+    const submitBtn = form.querySelector<HTMLButtonElement>('[data-role="submit"]')!;
+    const agentOpts = form.querySelector<HTMLElement>('[data-role="agent-opts"]')!;
     const close = (value: import('./types').RunRequest | null): void => {
       backdrop.remove();
       resolve(value);
     };
     wireOpenRouter(backdrop, form);
+
+    const syncMode = (): void => {
+      const mode = (form.querySelector('input[name="mode"]:checked') as HTMLInputElement | null)?.value;
+      const agent = mode !== 'rescore';
+      agentOpts.hidden = !agent;
+      submitBtn.textContent = agent ? 'Author via OpenRouter' : 'Re-score catalog locally';
+    };
+    form.querySelectorAll('input[name="mode"]').forEach((el) =>
+      el.addEventListener('change', syncMode),
+    );
+    syncMode();
 
     // Prefill what the Settings page saved — set once there, not per run.
     const storedDefaults = getRunDefaults();
@@ -404,11 +449,21 @@ export function promptRunRequest(defaults: {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(form);
+      const mode = String(fd.get('mode') ?? 'agent') === 'rescore' ? 'rescore' : 'agent';
+      const modelName = String(fd.get('model') ?? '').trim() || undefined;
+      if (mode === 'agent' && !modelName) {
+        const hint = form.querySelector<HTMLElement>('[data-role="model-hint"]');
+        if (hint) hint.textContent = 'Pick an OpenRouter model — agent mode needs one.';
+        return;
+      }
       close({
         label: String(fd.get('label') ?? '').trim() || 'playground run',
         note: String(fd.get('note') ?? '').trim(),
-        harness: 'playground-ui',
-        modelName: String(fd.get('model') ?? '').trim() || undefined,
+        harness: mode === 'agent' ? 'agent-loop' : 'playground-ui',
+        mode,
+        agentScope: (String(fd.get('agentScope') ?? 'benchmark') as import('./types').AgentScope),
+        maxToolCalls: Math.min(100, Math.max(1, Number(fd.get('maxToolCalls')) || 20)),
+        modelName,
         modelProvider: String(fd.get('provider') ?? '').trim() || undefined,
         operator: String(fd.get('operator') ?? '').trim() || undefined,
         systemPrompt: String(fd.get('systemPrompt') ?? '').trim() || undefined,

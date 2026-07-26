@@ -15,6 +15,7 @@ function stubContext2D(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     moveTo: () => {},
     lineTo: () => {},
     arc: () => {},
+    ellipse: () => {},
     fill: () => {},
     stroke: () => {},
     drawImage: () => {},

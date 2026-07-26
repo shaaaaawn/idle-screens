@@ -37,9 +37,14 @@ enum CapabilityDetector {
             .split(separator: ",")
             .compactMap { Int($0) }
         guard let major = parts.first else { return .t2 }
+        // Lowest-common-denominator floors: the native Canvas renderer is only
+        // uncapped on A12+; A10X runs it load-shed at 30fps; the 2015 A8 box
+        // never gets the canvas at all (thumb stream). New hardware defaults
+        // to t3 by falling through.
         switch major {
-        case 5: return .t2   // AppleTV5,3 (A8)
-        default: return .t3  // AppleTV6,2 (A10X), 11,1 (A12), 14,1+ (A15/A17…)
+        case 5: return .t1   // AppleTV5,3 (A8, Apple TV HD 2015)
+        case 6: return .t2   // AppleTV6,2 (A10X, 4K gen 1)
+        default: return .t3  // AppleTV11,1 (A12), 14,1+ (A15/A17…)
         }
     }
 }

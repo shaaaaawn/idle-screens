@@ -242,14 +242,24 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     return owned;
   };
 
+  /** Badge + export/reset enablement. Owned in one place so an edit made in
+   *  this session enables Discard immediately, not only after a reload. */
+  const syncEditControls = (): void => {
+    const editable = currentProfile?.mode === 'track';
+    const dirty = edits.has(saverId());
+    editedBadge.hidden = !dirty;
+    exportBtn.disabled = !editable;
+    resetBtn.disabled = !editable || !dirty;
+  };
+
   /** Apply an edit: push to the instance, re-render, persist, mark dirty. */
   const commitEdit = (track: ControlTrack): void => {
     persistEdit(saverId(), track);
-    editedBadge.hidden = false;
     currentInstance?.applyTrack?.(track);
     updateChannels();
     updateValues();
     syncPreview(playheadT);
+    syncEditControls();
   };
 
   // ---- rendering ---------------------------------------------------------
@@ -270,7 +280,6 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     if (owned && currentProfile.mode === 'track') {
       currentProfile.track = owned;
     }
-    editedBadge.hidden = !owned;
     if (currentInstance?.applyTrack && currentProfile.mode === 'track') {
       currentInstance.applyTrack(currentProfile.track);
     }
@@ -295,10 +304,8 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
             : 'Runtime animation — preview free-runs (timeline is indicative)';
     const dur = (currentProfile.duration / 1000).toFixed(1);
     trackInfo.textContent = `${currentSaver.manifest.label} · ${dur}s${currentProfile.loop ? ' · loop' : ''}`;
-    const editable = currentProfile.mode === 'track';
-    exportBtn.disabled = !editable;
-    resetBtn.disabled = !editable || !edits.has(saverId());
-    section.classList.toggle('tl-editable', editable);
+    syncEditControls();
+    section.classList.toggle('tl-editable', currentProfile.mode === 'track');
   };
 
   /** Ruler + playhead — everything whose x depends on the view window. */

@@ -86,8 +86,13 @@ adding tv idiom slots to the iOS-style `AppIcon.appiconset` is NOT enough. tvOS 
 brand-asset structure (`App Icon & Top Shelf Image.brandassets` with Back/Middle/Front
 imagestack layers at 1280x768 + 400x240, plus 1920x720 / 2320x720 Top Shelf images) and
 `ASSETCATALOG_COMPILER_APPICON_NAME: App Icon & Top Shelf Image` on the tvOS target only.
-Current brand-asset art is flat (same fitted image in all three layers) — placeholder quality,
-revisit with real layered art before any store submission.
+Brand-asset art is generated (build 2026072508+) by `idle-mono/scripts/make-app-icon.py` —
+seeded, reproducible; renders the iOS 1024 icon, true parallax layers (Back opaque field,
+Middle halo, Front ring, both with alpha), and all four Top Shelf sizes.
+**Imagestack gotcha:** in an imagestack's `Contents.json`, the FIRST layer listed is the
+front-most and the LAST must be fully opaque. The scaffolded stacks listed
+`[Back, Middle, Front]` — inverted — which flat opaque placeholders masked; transparent
+layers surface it as actool error "last image stack layer … must be a fully opaque bitmap".
 
 Build numbers are date-based (`YYYYMMDDnn`, monotonic by construction) in both targets — no
 manual bumping needed; rebuilds are always accepted.

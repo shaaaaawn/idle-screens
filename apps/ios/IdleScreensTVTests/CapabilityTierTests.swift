@@ -2,12 +2,16 @@ import XCTest
 @testable import IdleScreensTV
 
 final class CapabilityTierTests: XCTestCase {
-    func testAppleTV53IsT2() {
-        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV5,3"), .t2)
+    func testAppleTV53IsT1() {
+        // A8 never gets the native canvas — thumb stream floor.
+        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV5,3"), .t1)
     }
 
-    func testA10XAndLaterAreT3() {
-        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV6,2"), .t3)
+    func testA10XIsT2() {
+        XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV6,2"), .t2)
+    }
+
+    func testA12AndLaterAreT3() {
         XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV11,1"), .t3)
         XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV14,1"), .t3)
         XCTAssertEqual(CapabilityDetector.tier(forMachine: "AppleTV15,1"), .t3)

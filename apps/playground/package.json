@@ -17,6 +17,7 @@
     "@idle-screens/capabilities": "workspace:*",
     "@idle-screens/core": "workspace:*",
     "@idle-screens/saver-black-hole": "workspace:*",
+    "@idle-screens/saver-catwalk": "workspace:*",
     "@idle-screens/saver-limelight": "workspace:*",
     "@idle-screens/saver-slipstream": "workspace:*",
     "@idle-screens/saver-tide": "workspace:*",

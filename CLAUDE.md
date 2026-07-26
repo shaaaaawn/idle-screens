@@ -2,7 +2,7 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Nine publishable packages + three apps:
+pnpm workspace monorepo. Ten publishable packages + four apps:
 
 ```
 packages/
@@ -15,19 +15,21 @@ packages/
                                                          gain height and occlude each other
   saver-slipstream/  @idle-screens/saver-slipstream   -- passthrough wind saver: page blocks are
                                                          obstacles in an analytic flow field
+  saver-catwalk/    @idle-screens/saver-catwalk      -- passthrough cat saver: a seeded-itinerary
+                                                         cat parkours across the page's blocks
   savers-classic/    @idle-screens/savers-classic     -- 19 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
 apps/
-  playground/        Vite dev workbench (imports all 9; dev-only, not published)
+  playground/        Vite dev workbench (imports all 10; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
   ios/               Native iOS client + VJ remote (Swift, XcodeGen, not published to npm)
   linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
 docs/                Design docs (specs, research)
 ```
 
-**Dependency graph:** `core` is the foundation. `saver-black-hole`, `saver-tide`, `saver-limelight`, `saver-slipstream`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
+**Dependency graph:** `core` is the foundation. `saver-black-hole`, `saver-tide`, `saver-limelight`, `saver-slipstream`, `saver-catwalk`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
 
 ## Commands (run from repo root)
 
@@ -74,7 +76,7 @@ pnpm test:all               # build + typecheck + lint + test + e2e (the full CI
 
 ## Releasing (changesets)
 
-Changesets version and publish **only the nine npm packages** in `packages/`. They
+Changesets version and publish **only the ten npm packages** in `packages/`. They
 do not gate CI, the playground, or the Mac app.
 
 ### When to add a changeset
@@ -97,6 +99,7 @@ hand (see any existing `.changeset/*.md` file for the format).
 
 - Playground / workbench UI (`apps/playground` — explicitly ignored in config)
 - Mac app (`apps/mac` — ships via `mac-v*` tag, not npm)
+- iOS / tvOS app (`apps/ios` — ships via TestFlight / App Store, not npm)
 - Linux app (`apps/linux` — ships via PKGBUILD / manual install, not npm)
 - Docs, tests, CI, refactors with no published API change
 - Work that stays on `develop` and is not ready to publish

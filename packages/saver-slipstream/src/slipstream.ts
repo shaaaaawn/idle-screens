@@ -407,6 +407,20 @@ class SlipstreamInstance implements SaverInstance {
         if (m < 1e-4) break;
         x += (v[0] / m) * STEP_PX;
         y += (v[1] / m) * STEP_PX;
+        // Stall guard: at a stagnation point between two obstacles the
+        // integrator can oscillate in place, drawing a dense scribble knot.
+        // A real streamline covers ground; one that hasn't net-moved ~3 steps'
+        // worth over the last 8 is trapped — cut it.
+        if (n >= 8) {
+          const bx = pts[(n - 8) * 2]!;
+          const by = pts[(n - 8) * 2 + 1]!;
+          if (Math.hypot(x - bx, y - by) < STEP_PX * 2.5) {
+            // Drop the oscillating tail too, or every trapped line leaves a
+            // bright little scribble stub at the stagnation point.
+            n = Math.max(0, n - 7);
+            break;
+          }
+        }
         const margin = diag * 0.25;
         if (x < -margin || x > this.w + margin || y < -margin || y > this.h + margin) {
           // One more point so the line exits the frame cleanly.
@@ -520,25 +534,30 @@ class SlipstreamInstance implements SaverInstance {
     const lop = this.params.lineOpacity;
     if (lop > 0.01 && this.lines.length) {
       ctx.globalCompositeOperation = 'lighter';
-      ctx.lineWidth = 1;
       ctx.lineJoin = 'round';
       const dashLen = 34;
       const gapLen = 26;
       const cycle = dashLen + gapLen;
       const flow = t * 0.11 * this.bSpeed;
       ctx.setLineDash([dashLen, gapLen]);
-      for (let i = 0; i < this.lines.length; i++) {
-        const ln = this.lines[i]!;
-        if (ln.n < 2) continue;
-        // Neighbouring lines breathe out of phase so the field shimmers.
-        const a = lop * (0.16 + 0.1 * Math.sin(t * 0.0006 + i * 1.7));
-        if (a <= 0.008) continue;
-        ctx.strokeStyle = this.lineColor(a);
-        ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
-        ctx.beginPath();
-        ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
-        for (let k = 1; k < ln.n; k++) ctx.lineTo(ln.pts[k * 2]!, ln.pts[k * 2 + 1]!);
-        ctx.stroke();
+      // Two passes per line: a wide soft underglow, then a bright core — the
+      // dashes read as travelling light, not hairline scratches. A single 1px
+      // pass at low alpha was invisible over any real content.
+      for (const [width, gain] of [[3.2, 0.4], [1.3, 1]] as const) {
+        ctx.lineWidth = width;
+        for (let i = 0; i < this.lines.length; i++) {
+          const ln = this.lines[i]!;
+          if (ln.n < 2) continue;
+          // Neighbouring lines breathe out of phase so the field shimmers.
+          const a = lop * gain * (0.34 + 0.16 * Math.sin(t * 0.0006 + i * 1.7));
+          if (a <= 0.008) continue;
+          ctx.strokeStyle = this.lineColor(a);
+          ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
+          ctx.beginPath();
+          ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
+          for (let k = 1; k < ln.n; k++) ctx.lineTo(ln.pts[k * 2]!, ln.pts[k * 2 + 1]!);
+          ctx.stroke();
+        }
       }
       ctx.setLineDash([]);
 

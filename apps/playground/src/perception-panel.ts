@@ -1,7 +1,21 @@
+import type { SaverPlugin } from '@idle-screens/core';
 import { perceiveScene, EXAMPLE_BY_ID, type SaverSpec, type ScenePerception } from '@idle-screens/schema';
+import { perceiveSaverFrame, type FramePerception } from './frame-perception';
+
+export interface PerceptionSaverOptions {
+  width?: number;
+  height?: number;
+  seed?: number;
+  /**
+   * The plugin itself. Schema savers are perceived analytically from their
+   * spec; anything else falls back to reading pixels off a mounted frame,
+   * which needs the plugin rather than just its id.
+   */
+  saver?: SaverPlugin;
+}
 
 export interface PerceptionHandle {
-  setSaver(id: string, opts?: { width?: number; height?: number; seed?: number }): void;
+  setSaver(id: string, opts?: PerceptionSaverOptions): void;
   updateSpec(spec: SaverSpec): void;
   setTime(t: number): void;
   dispose(): void;
@@ -24,7 +38,8 @@ function fmtMs(ms: number): string {
 export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
   mount.innerHTML = `
     <div class="perc-wrap">
-      <div class="perc-empty">Select a schema saver to see perception data</div>
+      <div class="perc-mode" hidden></div>
+      <div class="perc-empty">Select a saver to see perception data</div>
       <pre class="perc-braille" hidden></pre>
       <div class="perc-stats" hidden></div>
       <div class="perc-dominance" hidden></div>
@@ -33,6 +48,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
     </div>
   `;
 
+  const modeEl = mount.querySelector('.perc-mode') as HTMLElement;
   const empty = mount.querySelector('.perc-empty') as HTMLElement;
   const braillePre = mount.querySelector('.perc-braille') as HTMLPreElement;
   const statsDiv = mount.querySelector('.perc-stats') as HTMLElement;
@@ -41,12 +57,16 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
   const advDiv = mount.querySelector('.perc-advisories') as HTMLElement;
 
   let currentId: string | null = null;
-  let currentOpts: { width?: number; height?: number; seed?: number } = {};
+  let currentOpts: PerceptionSaverOptions = {};
   let lastT = 0;
   let overrideSpec: SaverSpec | null = null;
 
   const show = (p: ScenePerception): void => {
     empty.hidden = true;
+    modeEl.hidden = false;
+    modeEl.className = 'perc-mode is-spec';
+    modeEl.innerHTML =
+      '<b>spec perception</b> — analytic, from the SaverSpec. Deterministic; layer-attributed.';
     braillePre.hidden = false;
     statsDiv.hidden = false;
     domDiv.hidden = false;
@@ -105,6 +125,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
 
   const hide = (): void => {
     empty.hidden = false;
+    modeEl.hidden = true;
     braillePre.hidden = true;
     statsDiv.hidden = true;
     domDiv.hidden = true;
@@ -112,32 +133,137 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
     advDiv.hidden = true;
   };
 
+  /**
+   * Imperative savers: a real picture and real whole-frame stats, but the
+   * layer-attributed sections stay EMPTY rather than approximated — dominance
+   * and motion are spec concepts and cannot be recovered from pixels.
+   */
+  const showFrame = (p: FramePerception, label: string): void => {
+    empty.hidden = true;
+    modeEl.hidden = false;
+
+    if (p.support === 'unsupported') {
+      modeEl.className = 'perc-mode is-unsupported';
+      modeEl.innerHTML = `<b>no perception</b> — ${esc(p.reason ?? 'unsupported saver')}`;
+      braillePre.hidden = true;
+      statsDiv.hidden = true;
+      domDiv.hidden = true;
+      motionDiv.hidden = true;
+      advDiv.hidden = true;
+      return;
+    }
+
+    const deterministic = p.support === 'deterministic';
+    modeEl.className = `perc-mode ${deterministic ? 'is-frame' : 'is-sampled'}`;
+    modeEl.innerHTML =
+      `<b>frame perception</b> — pixels read back from ${esc(label)}. ` +
+      (deterministic
+        ? 'Deterministic: this saver is frame-addressable, so the same (t, seed) always reads the same.'
+        : '<i>Sampled from a live frame — this saver is not frame-addressable, so the numbers move run to run.</i>');
+
+    braillePre.hidden = false;
+    braillePre.textContent = p.braille;
+
+    statsDiv.hidden = false;
+    statsDiv.innerHTML = [
+      `<span class="perc-kv"><b>coverage</b> ${pct(p.coverage)}</span>`,
+      `<span class="perc-kv"><b>luminance</b> ${p.meanLuminance.toFixed(3)}</span>`,
+      p.centroid
+        ? `<span class="perc-kv"><b>centroid</b> (${p.centroid.x.toFixed(2)}, ${p.centroid.y.toFixed(2)})</span>`
+        : `<span class="perc-kv"><b>centroid</b> none</span>`,
+      `<span class="perc-kv"><b>t</b> ${fmtMs(p.t)}</span>`,
+    ].join('');
+
+    // Colour is the one channel pixels carry and the spec path only approximates.
+    domDiv.hidden = false;
+    domDiv.innerHTML =
+      '<div class="perc-section-label">palette (on screen)</div>' +
+      (p.colors.length
+        ? p.colors
+            .map(
+              (c) =>
+                `<div class="perc-bar-row">` +
+                `<span class="perc-swatch" style="background:${esc(c.hex)}"></span>` +
+                `<span class="perc-bar-label">${esc(c.hex)}</span>` +
+                `<div class="perc-bar-track"><div class="perc-bar-fill" style="width:${(c.share * 100).toFixed(1)}%"></div></div>` +
+                `<span class="perc-bar-val">${pct(c.share)}</span>` +
+                `</div>`,
+            )
+            .join('')
+        : '<span class="perc-na">no ink above the background</span>') +
+      '<div class="perc-section-label">dominance</div>' +
+      '<span class="perc-na">n/a — which layer owns the frame is a spec concept; pixels only carry the composite.</span>';
+
+    motionDiv.hidden = false;
+    motionDiv.innerHTML =
+      '<div class="perc-section-label">motion (whole frame)</div>' +
+      (p.motion
+        ? [
+            `<span class="perc-kv"><b>rate</b> ${p.motion.rate.toFixed(3)}/s</span>`,
+            `<span class="perc-kv"><b>changed</b> ${pct(p.motion.changedFraction)}</span>`,
+            p.motion.centroid
+              ? `<span class="perc-kv"><b>at</b> (${p.motion.centroid.x.toFixed(2)}, ${p.motion.centroid.y.toFixed(2)})</span>`
+              : `<span class="perc-kv"><b>at</b> still</span>`,
+            `<span class="perc-na">Δ between t and t+${p.motion.dtMs}ms. Per-layer speeds still need the spec.</span>`,
+          ].join('')
+        : '<span class="perc-na">n/a — needs a frame-addressable saver; two wall-clock grabs are not a measurement.</span>');
+    advDiv.hidden = false;
+    advDiv.innerHTML =
+      '<div class="perc-section-label">advisories</div>' +
+      '<span class="perc-na">n/a — advisories lint the spec, not the output.</span>';
+  };
+
+  /** Guards against a slow frame read landing after the user moved on. */
+  let frameToken = 0;
+
   const perceiveAt = (t: number): void => {
     if (!currentId) return;
     const spec = overrideSpec ?? EXAMPLE_BY_ID[currentId] as SaverSpec | undefined;
-    if (!spec) { hide(); return; }
-    try {
-      const p = perceiveScene(spec, {
-        t,
-        viewport: currentOpts.width && currentOpts.height
-          ? { width: currentOpts.width, height: currentOpts.height }
-          : undefined,
-        seed: spec.seed ?? currentOpts.seed,
-      });
-      show(p);
-    } catch {
-      hide();
+
+    if (spec) {
+      try {
+        show(
+          perceiveScene(spec, {
+            t,
+            viewport: currentOpts.width && currentOpts.height
+              ? { width: currentOpts.width, height: currentOpts.height }
+              : undefined,
+            seed: spec.seed ?? currentOpts.seed,
+          }),
+        );
+      } catch {
+        hide();
+      }
+      return;
     }
+
+    // No spec — fall back to reading the saver's own pixels.
+    const saver = currentOpts.saver;
+    if (!saver) {
+      hide();
+      return;
+    }
+    const token = ++frameToken;
+    void perceiveSaverFrame(saver, {
+      width: currentOpts.width,
+      height: currentOpts.height,
+      seed: currentOpts.seed,
+      t,
+    }).then((p) => {
+      if (token !== frameToken) return; // superseded
+      showFrame(p, saver.manifest.label);
+    });
   };
 
   return {
-    setSaver(id: string, opts: { width?: number; height?: number; seed?: number } = {}) {
+    setSaver(id: string, opts: PerceptionSaverOptions = {}) {
       currentId = id;
       currentOpts = opts;
       overrideSpec = null;
       lastT = 0;
-      const spec = EXAMPLE_BY_ID[id] as SaverSpec | undefined;
-      if (!spec) {
+      // No longer bails when there is no spec — imperative savers get the
+      // pixel path instead of a dead panel.
+      if (!EXAMPLE_BY_ID[id] && !opts.saver) {
         currentId = null;
         hide();
         return;

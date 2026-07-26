@@ -22,7 +22,9 @@ actor GalleryClient {
         self.transport = transport
     }
 
-    /// `GET /api/channels` — public channel list.
+    /// `GET /api/channels` — public channel list. Successful responses are
+    /// cached to disk so a cold launch can render instantly from
+    /// `cachedChannels()` while the refresh is in flight.
     func fetchChannels() async throws -> [PublicChannel] {
         let url = baseURL.appendingPathComponent("api/channels")
         let (data, http) = try await transport.data(for: URLRequest(url: url))
@@ -32,7 +34,22 @@ actor GalleryClient {
         guard let channels = try? JSONDecoder().decode([PublicChannel].self, from: data) else {
             throw GalleryError.invalidResponse
         }
+        try? data.write(to: cacheFileURL(), options: .atomic)
         return channels
+    }
+
+    /// Last successfully fetched channel list, or nil if never fetched.
+    /// The inline scene specs make cached content fully renderable offline.
+    func cachedChannels() -> [PublicChannel]? {
+        guard let data = try? Data(contentsOf: cacheFileURL()) else { return nil }
+        return try? JSONDecoder().decode([PublicChannel].self, from: data)
+    }
+
+    /// Cache file is keyed by host so localhost dev and prod don't mix.
+    private func cacheFileURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("channels-\(host).json")
     }
 
     /// `GET /c/:channelId/state` — public read-only state.
