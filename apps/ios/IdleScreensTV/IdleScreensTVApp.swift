@@ -6,7 +6,15 @@ struct IdleScreensTVApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ChannelGridView()
+            Group {
+                // Debug affordance: `-pair` renders the pairing QR screen
+                // directly (CLI screenshots — tvOS has no UI scripting).
+                if ProcessInfo.processInfo.arguments.contains("-pair") {
+                    PairView()
+                } else {
+                    ChannelGridView()
+                }
+            }
                 .environment(appState)
                 .preferredColorScheme(.dark)
                 .task {
@@ -15,6 +23,10 @@ struct IdleScreensTVApp: App {
                     let args = ProcessInfo.processInfo.arguments
                     if let i = args.firstIndex(of: "-channel"), args.indices.contains(i + 1) {
                         appState.selectChannel(args[i + 1])
+                    } else {
+                        // Idle on the grid, but reachable: a paired phone can
+                        // push a switch through this control socket.
+                        appState.startControlSocket()
                     }
                 }
         }

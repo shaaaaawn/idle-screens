@@ -22,6 +22,12 @@ struct SettingsView: View {
                     LabeledContent("Effective tier", value: app.effectiveTier.rawValue)
                 }
 
+                Section("iPhone") {
+                    NavigationLink("Pair iPhone") {
+                        PairView()
+                    }
+                }
+
                 Section("Channel") {
                     TextField("Channel ID", text: $channelId)
                     Button("Watch") {

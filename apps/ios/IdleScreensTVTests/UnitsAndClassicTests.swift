@@ -115,6 +115,7 @@ final class ClassicSpecTests: XCTestCase {
             gallery: GalleryClient(baseURL: baseURL),
             mcp: MCPClient(baseURL: baseURL),
             ws: ChannelWSClient(),
+            pair: PairClient(baseURL: baseURL),
             baseURL: baseURL
         )
     }

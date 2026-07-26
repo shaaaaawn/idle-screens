@@ -32,6 +32,7 @@ targets:
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: IdleScreens/IdleScreens.entitlements
       configs:
         Release:
           CODE_SIGN_STYLE: Manual
@@ -55,6 +56,13 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        # TV pairing: camera for the QR scanner, plus a custom scheme fallback
+        # for the https://idlescreens.com/pair/<code> universal link.
+        NSCameraUsageDescription: Scan the pairing code shown on your Apple TV.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.hermosalabs.idlescreens.pair
+            CFBundleURLSchemes:
+              - idlescreens
 
   IdleScreensTests:
     type: bundle.unit-test

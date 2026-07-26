@@ -44,6 +44,24 @@ final class ChannelWSClientTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "wss://example.com/c/abc/ws")
     }
 
+    func testWebSocketURLWithDeviceId() async {
+        let url = await ChannelWSClient.webSocketURL(
+            baseURL: baseURL, channelId: "abc", deviceId: "tv-device-1"
+        )
+        XCTAssertEqual(url.absoluteString, "wss://example.com/c/abc/ws?device=tv-device-1")
+    }
+
+    func testSwitchDecode() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector)
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"switch","channelId":"lobby"}"#)
+
+        let event = try await iterator.next()
+        XCTAssertEqual(event, .switchChannel(channelId: "lobby"))
+    }
+
     func testSnapshotWithResolvedSpecAsObject() async throws {
         let connector = MockWSConnector()
         let (stream, session) = await makeStream(connector: connector)

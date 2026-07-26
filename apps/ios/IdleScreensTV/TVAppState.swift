@@ -8,7 +8,21 @@ final class TVAppState {
     let gallery: GalleryClient
     let mcp: MCPClient
     let ws: ChannelWSClient
+    let pair: PairClient
     let watchdog = FrameWatchdog()
+
+    // MARK: Device identity / pairing
+
+    static let deviceIdKey = "tv.device_id"
+    static let lastChannelKey = "tv.last_channel"
+
+    /// Stable identity for this TV, minted once and persisted. A paired
+    /// phone addresses switch pushes to this id.
+    let deviceId: String
+
+    var pairCode: PairCode?
+    var isRequestingPairCode = false
+    var pairError: String?
 
     // MARK: Gallery
 
@@ -57,16 +71,24 @@ final class TVAppState {
     private var baseURL: URL
     private var wsTask: Task<Void, Never>?
 
-    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, baseURL: URL) {
+    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL) {
         self.gallery = gallery
         self.mcp = mcp
         self.ws = ws
+        self.pair = pair
         self.baseURL = baseURL
         self.machine = CapabilityDetector.machine
         self.detectedTier = CapabilityDetector.tier(forMachine: machine)
         self.tierOverride = UserDefaults.standard
             .string(forKey: Self.tierOverrideKey)
             .flatMap(CapabilityTier.init(rawValue:))
+        if let existing = UserDefaults.standard.string(forKey: Self.deviceIdKey) {
+            self.deviceId = existing
+        } else {
+            let minted = UUID().uuidString
+            UserDefaults.standard.set(minted, forKey: Self.deviceIdKey)
+            self.deviceId = minted
+        }
     }
 
     convenience init() {
@@ -76,6 +98,7 @@ final class TVAppState {
             gallery: GalleryClient(baseURL: baseURL, transport: transport),
             mcp: MCPClient(baseURL: baseURL, transport: transport),
             ws: ChannelWSClient(),
+            pair: PairClient(baseURL: baseURL, transport: transport),
             baseURL: baseURL
         )
     }
@@ -94,7 +117,6 @@ final class TVAppState {
     // MARK: WS lifecycle
 
     func selectChannel(_ channelId: String) {
-        wsTask?.cancel()
         selectedChannelId = channelId
         sleeping = false
         viewers = nil
@@ -105,26 +127,52 @@ final class TVAppState {
         isClassicSpec = false
         thumbFailed = false
         watchdogDowngraded = false
+        UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
+        openSocket(channelId: channelId, watching: true)
+    }
 
+    func exitChannel() {
+        selectedChannelId = nil
+        overlayText = nil
+        // Stay reachable: keep a socket on the last channel so a paired phone
+        // can still push a switch while this TV sits on the grid.
+        openSocket(channelId: lastChannelId, watching: false)
+    }
+
+    /// The channel whose socket carries pushes while nothing is fullscreen.
+    var lastChannelId: String {
+        UserDefaults.standard.string(forKey: Self.lastChannelKey) ?? "default"
+    }
+
+    /// Open (or replace) the single channel socket. `watching: false` is
+    /// control-only — scene traffic is ignored, but "switch" pushes still land.
+    private func openSocket(channelId: String, watching: Bool) {
+        wsTask?.cancel()
         wsTask = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await event in await ws.events(baseURL: baseURL, channelId: channelId) {
+                for try await event in await ws.events(
+                    baseURL: baseURL,
+                    channelId: channelId,
+                    deviceId: deviceId
+                ) {
                     guard !Task.isCancelled else { break }
-                    self.handle(event)
+                    if watching {
+                        self.handle(event)
+                    } else if case .switchChannel(let target) = event {
+                        self.handle(.switchChannel(channelId: target))
+                    }
                 }
             } catch {
-                // Stream ended with an error — the next selectChannel reconnects.
+                // Stream ended with an error — the next openSocket reconnects.
             }
         }
     }
 
-    func exitChannel() {
-        wsTask?.cancel()
-        wsTask = nil
-        Task { await ws.disconnect() }
-        selectedChannelId = nil
-        overlayText = nil
+    /// Call once at launch: makes an idle TV reachable for pushes.
+    func startControlSocket() {
+        guard wsTask == nil else { return }
+        openSocket(channelId: lastChannelId, watching: false)
     }
 
     // MARK: Events
@@ -155,6 +203,24 @@ final class TVAppState {
             }
         case .delta:
             break
+        case .switchChannel(let channelId):
+            if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
+                selectChannel(channelId)
+            }
+        }
+    }
+
+    // MARK: Pairing
+
+    /// Mint (or re-mint) a pair code for the QR screen.
+    func requestPairCode() async {
+        isRequestingPairCode = true
+        defer { isRequestingPairCode = false }
+        do {
+            pairCode = try await pair.createCode(deviceId: deviceId, channelId: selectedChannelId ?? lastChannelId)
+            pairError = nil
+        } catch {
+            pairError = error.localizedDescription
         }
     }
 

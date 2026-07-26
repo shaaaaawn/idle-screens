@@ -75,6 +75,11 @@ struct ChannelGridView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+            // A paired phone can push a channel while Settings (the pairing
+            // QR) is up — drop the sheet so the saver is actually visible.
+            .onChange(of: app.selectedChannelId) {
+                if app.selectedChannelId != nil { showingSettings = false }
+            }
         }
         .task {
             if app.channels.isEmpty { await app.loadGallery() }

@@ -77,6 +77,8 @@ enum ChannelWSEvent: Equatable, Sendable {
     case sleep
     case wake
     case overlay(text: String?, ttl: Int?)
+    /// A paired phone pushed a channel change to this device.
+    case switchChannel(channelId: String?)
 }
 
 // MARK: - JSONValue lenient accessors
@@ -132,20 +134,25 @@ actor ChannelWSClient {
         self.connector = connector
     }
 
-    static func webSocketURL(baseURL: URL, channelId: String) -> URL {
+    static func webSocketURL(baseURL: URL, channelId: String, deviceId: String? = nil) -> URL {
         let httpURL = baseURL
             .appendingPathComponent("c")
             .appendingPathComponent(channelId)
             .appendingPathComponent("ws")
         var components = URLComponents(url: httpURL, resolvingAgainstBaseURL: false)!
         components.scheme = baseURL.scheme == "http" ? "ws" : "wss"
+        if let deviceId {
+            // Identifies this device to the server so a paired phone can
+            // address its socket with a "switch" push.
+            components.queryItems = [URLQueryItem(name: "device", value: deviceId)]
+        }
         return components.url!
     }
 
     /// Stream of events for a channel. Reconnects automatically until the
     /// consuming task is cancelled or `disconnect()` is called.
-    func events(baseURL: URL, channelId: String) -> AsyncThrowingStream<ChannelWSEvent, Error> {
-        let url = Self.webSocketURL(baseURL: baseURL, channelId: channelId)
+    func events(baseURL: URL, channelId: String, deviceId: String? = nil) -> AsyncThrowingStream<ChannelWSEvent, Error> {
+        let url = Self.webSocketURL(baseURL: baseURL, channelId: channelId, deviceId: deviceId)
         // The element type is pinned explicitly. Left to inference, the compiler
         // resolves to AsyncThrowingStream(unfolding:) — whose closure takes no
         // arguments — and reports the misleading "expects 0 arguments, but 1 was
@@ -244,6 +251,8 @@ actor ChannelWSClient {
                 text: message["text"]?.stringValue,
                 ttl: message["ttl"]?.intValue
             )
+        case "switch":
+            return .switchChannel(channelId: message["channelId"]?.stringValue)
         default:
             return nil
         }
