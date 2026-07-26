@@ -77,9 +77,15 @@ importers:
       '@idle-screens/saver-black-hole':
         specifier: workspace:*
         version: link:../../packages/saver-black-hole
+      '@idle-screens/saver-catwalk':
+        specifier: workspace:*
+        version: link:../../packages/saver-catwalk
       '@idle-screens/saver-limelight':
         specifier: workspace:*
         version: link:../../packages/saver-limelight
+      '@idle-screens/saver-slipstream':
+        specifier: workspace:*
+        version: link:../../packages/saver-slipstream
       '@idle-screens/saver-tide':
         specifier: workspace:*
         version: link:../../packages/saver-tide
@@ -105,6 +111,12 @@ importers:
         version: 1.14.3
 
   packages/saver-black-hole:
+    devDependencies:
+      '@idle-screens/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/saver-catwalk:
     devDependencies:
       '@idle-screens/core':
         specifier: workspace:*

@@ -3,6 +3,7 @@ import { demoTrack as blackHoleDemo } from '@idle-screens/saver-black-hole';
 import { demoTrack as tideDemo } from '@idle-screens/saver-tide';
 import { demoTrack as limelightDemo } from '@idle-screens/saver-limelight';
 import { demoTrack as slipstreamDemo } from '@idle-screens/saver-slipstream';
+import { demoTrack as catwalkDemo } from '@idle-screens/saver-catwalk';
 
 export const PREVIEW_DURATION_MS = 6000;
 
@@ -17,6 +18,7 @@ const DEMO_TRACKS: Record<string, ControlTrack> = {
   tide: tideDemo,
   limelight: limelightDemo,
   slipstream: slipstreamDemo,
+  catwalk: catwalkDemo,
 };
 
 export type TimelineMode = 'track' | 'addressable' | 'live';

@@ -13,6 +13,7 @@ import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
 import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
+import { catwalk } from '@idle-screens/saver-catwalk';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -40,6 +41,7 @@ const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-tide', label: '@idle-screens/saver-tide', savers: [tide] },
   { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
   { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
+  { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -69,6 +71,7 @@ const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-tide': 'tide',
   'saver-limelight': 'limelight',
   'saver-slipstream': 'slipstream',
+  'saver-catwalk': 'catwalk',
   'savers-classic': 'classic',
   schema: 'schema',
 };
