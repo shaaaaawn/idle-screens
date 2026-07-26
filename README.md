@@ -28,14 +28,21 @@ control signals do.
                          |  track, types          |
                          +----------+------------+
                                     |
-              +---------------------+---------------------+
-              |                     |                     |
-   +----------v-----------+  +-----v-----------+  +------v----------+
-   | @idle-screens/       |  | @idle-screens/  |  | @idle-screens/  |
-   | saver-black-hole     |  | savers-classic  |  | schema          |
-   | passthrough lensing  |  | 19 classic      |  | declarative     |
-   | saver                |  | savers          |  | saver format    |
-   +----------------------+  +-----------------+  +-----------------+
+        +------------+--------------+--------------+------------+
+        |            |              |              |            |
+   +----v-----+ +----v-----+ +------v------+ +-----v-----+ +----v-----+
+   | black-   | | tide     | | limelight   | | slipstream| | savers-  |
+   | hole     | | water    | | stage light | | wind flow | | classic  |
+   | lensing  | | Jacobian | | occlusion   | | field     | | 19       |
+   +----------+ +----------+ +-------------+ +-----------+ +----+-----+
+        |            |              |              |             |
+        +------------+------+-------+--------------+             |
+                            |                                    |
+                     +------v------+                      +------v------+
+                     | schema      |                      | (plugins)   |
+                     | declarative |                      +-------------+
+                     | saver format|
+                     +-------------+
 
    +----------------------+  +-----------------+
    | @idle-screens/       |  | @idle-screens/  |
@@ -47,22 +54,26 @@ control signals do.
 
    +-------------------------------------------------------+
    |                    playground                          |
-   |  Vite workbench (imports all 6, dev only)              |
+   |  Vite workbench (imports all 10, dev only)              |
    +-------------------------------------------------------+
 ```
 
-**core** is the foundation. The three plugin/tooling packages (`saver-black-hole`,
-`savers-classic`, `schema`) depend on it for types and the `SaverPlugin` contract.
-**validator** and **capabilities** are standalone with zero dependencies, so they
-can be used independently. The **playground** app imports everything for
-development and testing.
+**core** is the foundation. The plugin packages (`saver-black-hole`, `saver-tide`,
+`saver-limelight`, `saver-slipstream`, `saver-catwalk`, `savers-classic`, `schema`) depend on it
+for types and the `SaverPlugin` contract. **validator** and **capabilities** are
+standalone with zero dependencies, so they can be used independently. The
+**playground** app imports everything for development and testing.
 
 ## Packages
 
 | Package | What |
 | --- | --- |
 | [`@idle-screens/core`](packages/core) | Engine + `<idle-screen>` custom element, idle detection, plugin registry, seeded RNG, control-track, types. |
-| [`@idle-screens/saver-black-hole`](packages/saver-black-hole) | The signature passthrough saver: a gravitational-lensing black hole that roams and eats the live page. Seeded + paramSpace + control-track. |
+| [`@idle-screens/saver-black-hole`](packages/saver-black-hole) | Passthrough gravitational-lensing saver: a black hole that roams and eats the live page. Seeded + paramSpace + control-track. |
+| [`@idle-screens/saver-tide`](packages/saver-tide) | Passthrough water saver: Jacobian-driven affine deformation of live page blocks — buoyant chips raft, heavy ones sink. |
+| [`@idle-screens/saver-limelight`](packages/saver-limelight) | Passthrough stage-light saver: page blocks gain height, cast silhouettes, and occlude each other under a roaming key light. |
+| [`@idle-screens/saver-slipstream`](packages/saver-slipstream) | Passthrough wind saver: page blocks are obstacles in an analytic potential-flow field; streamlines part around content and blocks lean with local wind. |
+| [`@idle-screens/saver-catwalk`](packages/saver-catwalk) | Passthrough cat screensaver: a silhouette cat parkours across the live page's own blocks — perches dip and spring under its weight, it naps on the warm ones. |
 | [`@idle-screens/savers-classic`](packages/savers-classic) | 19 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
 | [`@idle-screens/validator`](packages/validator) | Photosensitivity (WCAG 2.3.1 flash) + performance validation. Feed it luminance samples and frame times, get a pass/fail safety verdict. |
 | [`@idle-screens/capabilities`](packages/capabilities) | Device and capability detection + saver eligibility tiering. Pure decide (Node-testable) + a thin browser detector. |
@@ -74,6 +85,7 @@ development and testing.
 | --- | --- |
 | [`playground`](apps/playground) | Vite dev workbench: saver palette, inline preview, determinism proof, safety/perf analysis, device capabilities, declarative schema editor. |
 | [`mac`](apps/mac) | Native macOS menu-bar app (Swift). One borderless overlay per display, idle detection, channel mode, saver cycling, auto-updates from idlescreens.com. See [apps/mac/README.md](apps/mac/README.md). |
+| [`ios`](apps/ios) | Native iOS Watch + VJ client and tvOS host (Swift, XcodeGen). Gallery, channel deck, shared SpecSubset render path. See [apps/ios/README.md](apps/ios/README.md) and [docs/ios-release.md](docs/ios-release.md). |
 | [`linux`](apps/linux) | Native Wayland/Hyprland overlay (Rust + WebKitGTK 6). Layer-shell fullscreen saver, channel or bundled engine, hypridle integration. On the `develop` branch — see [apps/linux/README.md](apps/linux/README.md). |
 
 ## Docs

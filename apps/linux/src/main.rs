@@ -1,7 +1,9 @@
+mod about;
 mod bundle;
 mod cli;
 mod config;
 mod idle;
+mod pair;
 mod platform;
 mod state;
 mod tray;
@@ -19,6 +21,7 @@ use crate::config::{Mode, Settings};
 fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
     platform::init_logging(cli.verbose);
+    log::info!("{}", about::summary());
 
     if let Some(cli::Command::Tray) = cli.command {
         return tray::run(cli.kiosk, cli.forwardable_args());

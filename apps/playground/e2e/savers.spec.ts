@@ -16,20 +16,20 @@ declare global {
 }
 
 const ALL_IDS = [
-  'black-hole', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
-  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages', 'messages2',
+  'black-hole', 'tide', 'limelight', 'catwalk', 'slipstream', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
+  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages',
   'pipes', 'bsod', 'flurry', 'fluid', 'reaction-diffusion', 'mystify', 'snowfall', 'lanterns',
   'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets',
 ];
 
 /**
  * Every saver must honor the SaverInstance interface (S1-S5): mount into the
- * host, survive resize + setPaused, dispose without errors, and — for the one
- * passthrough saver (black-hole) — mutate the live page's victims while running
- * and restore them on dispose, while the 13 non-passthrough savers touch nothing
- * outside their host.
+ * host, survive resize + setPaused, and dispose without errors. The passthrough
+ * savers (black-hole, tide, limelight, catwalk, slipstream, spotlight) may mutate the live page's victims while
+ * running, and must restore them on dispose; every non-passthrough saver must
+ * touch nothing outside its host.
  */
-test('all 27 savers honor the full SaverInstance lifecycle', async ({ page }) => {
+test('all 30 savers honor the full SaverInstance lifecycle', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await page.goto('/?harness=1');

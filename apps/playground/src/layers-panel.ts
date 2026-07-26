@@ -1,7 +1,15 @@
 import { EXAMPLE_BY_ID, type SaverSpec, type LayerSpec, type SpriteSpec, type MotionSpec } from '@idle-screens/schema';
+import type { SaverInstance, SaverLayer } from '@idle-screens/core';
 
 export interface LayersHandle {
   setSaver(id: string): void;
+  /**
+   * Show the mounted instance's practical composition stack (page / surface /
+   * passes). `pageEl` is the host-owned element that IS the page deck (the
+   * stage document's body) — the saver only borrows the page, so the saver
+   * describes the deck and the host binds it.
+   */
+  setRuntime(instance: SaverInstance | null, pageEl: HTMLElement | null): void;
   onSpecChange: ((spec: SaverSpec) => void) | null;
   dispose(): void;
 }
@@ -39,14 +47,76 @@ function defaultMotion(type: MotionSpec['type']): MotionSpec {
 
 export function buildLayersPanel(mount: HTMLElement): LayersHandle {
   mount.innerHTML = `<div class="layers-wrap">
+    <div class="layers-runtime" hidden></div>
     <div class="layers-empty">Select a schema saver to edit layers</div>
     <div class="layers-list" hidden></div>
     <button class="layers-add wb-btn wb-btn-primary" hidden type="button">+ Add Layer</button>
   </div>`;
 
+  const runtimeEl = mount.querySelector('.layers-runtime') as HTMLElement;
   const emptyEl = mount.querySelector('.layers-empty') as HTMLElement;
   const listEl = mount.querySelector('.layers-list') as HTMLElement;
   const addBtn = mount.querySelector('.layers-add') as HTMLButtonElement;
+
+  // ---- runtime composition stack (any saver; schema editing stays below) ----
+  const KIND_COLOR: Record<SaverLayer['kind'], string> = {
+    page: '#79c0ff',
+    surface: '#d2a8ff',
+    pass: '#8b949e',
+  };
+  const renderRuntime = (instance: SaverInstance | null, pageEl: HTMLElement | null): void => {
+    runtimeEl.replaceChildren();
+    const stack = instance?.composition?.();
+    if (!stack || stack.length === 0) {
+      runtimeEl.hidden = true;
+      return;
+    }
+    runtimeEl.hidden = false;
+    const title = document.createElement('div');
+    title.textContent = 'COMPOSITION';
+    title.style.cssText = 'font:600 9px ui-monospace,monospace;letter-spacing:.08em;color:#8b949e;margin:2px 0 6px';
+    runtimeEl.append(title);
+    // Top of the stack first, like a compositor.
+    for (const layer of [...stack].reverse()) {
+      const row = document.createElement('div');
+      row.style.cssText =
+        'display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;' +
+        (layer.kind === 'pass' ? 'margin-left:14px;' : '');
+      const toggleTarget = layer.el ?? (layer.kind === 'page' ? pageEl : null);
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'comp-eye';
+      eye.dataset.layer = layer.id;
+      eye.style.cssText =
+        'width:18px;height:16px;padding:0;font-size:10px;line-height:1;border:0;border-radius:3px;' +
+        'background:transparent;color:#c6cbd4;cursor:pointer';
+      if (toggleTarget) {
+        const paint = (): void => { eye.textContent = toggleTarget.style.visibility === 'hidden' ? '○' : '●'; };
+        paint();
+        eye.title = 'Toggle this deck (inspection only — does not affect the saver)';
+        eye.addEventListener('click', () => {
+          toggleTarget.style.visibility = toggleTarget.style.visibility === 'hidden' ? '' : 'hidden';
+          paint();
+        });
+      } else {
+        eye.textContent = '·';
+        eye.disabled = true;
+        eye.style.cursor = 'default';
+        eye.title = 'Draw pass — not independently toggleable (yet)';
+      }
+      const badge = document.createElement('span');
+      badge.textContent = layer.kind.toUpperCase();
+      badge.style.cssText =
+        `font:600 8px ui-monospace,monospace;letter-spacing:.05em;color:${KIND_COLOR[layer.kind]};` +
+        'border:1px solid currentColor;border-radius:3px;padding:1px 4px;opacity:.85';
+      const label = document.createElement('span');
+      label.textContent = layer.label;
+      label.style.cssText = 'font-size:11px;color:#e6e9ee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      if (layer.description) row.title = layer.description;
+      row.append(eye, badge, label);
+      runtimeEl.append(row);
+    }
+  };
 
   let spec: SaverSpec | null = null;
   let specChangeCallback: ((spec: SaverSpec) => void) | null = null;
@@ -329,6 +399,7 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
   });
 
   return {
+    setRuntime: renderRuntime,
     setSaver(id: string) {
       clearTimeout(debounceId);
       const orig = EXAMPLE_BY_ID[id] as SaverSpec | undefined;

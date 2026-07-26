@@ -10,17 +10,27 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { blackHole, demoTrack } from '@idle-screens/saver-black-hole';
+import { tide } from '@idle-screens/saver-tide';
+import { limelight } from '@idle-screens/saver-limelight';
+import { slipstream } from '@idle-screens/saver-slipstream';
+import { catwalk } from '@idle-screens/saver-catwalk';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
+import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
 import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
-import { formatBackendLabel, readPreviewBackend } from './preview-backend';
+import { formatBackendLabel } from './preview-backend';
+import { buildEvalsPanel } from './evals/evals-panel';
+import { buildSettingsPanel } from './settings-panel';
+import { buildGallery, type GalleryGroup } from './gallery';
+import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
+import { STAGES, mountStage, mirrorPage, type MountedStage } from './stages';
+import { wirePerceptionHarness } from './frame-perception';
 
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession']);
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
 
 interface SaverGroup {
   id: string;
@@ -30,6 +40,10 @@ interface SaverGroup {
 
 const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-black-hole', label: '@idle-screens/saver-black-hole', savers: [blackHole] },
+  { id: 'saver-tide', label: '@idle-screens/saver-tide', savers: [tide] },
+  { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
+  { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
+  { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -47,6 +61,7 @@ const SAVER_GROUPS: SaverGroup[] = [
       compileSaver(POLYGONS_SPEC),
       compileSaver(MATRIX_RAIN_SPEC),
       compileSaver(PROCESSION_SPEC),
+      compileSaver(NOSTALGHIA_CANDLE_SPEC),
     ],
   },
 ];
@@ -55,11 +70,36 @@ const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
+  'saver-tide': 'tide',
+  'saver-limelight': 'limelight',
+  'saver-slipstream': 'slipstream',
+  'saver-catwalk': 'catwalk',
   'savers-classic': 'classic',
   schema: 'schema',
 };
 
+const GALLERY_GROUPS: GalleryGroup[] = SAVER_GROUPS.map((g) => ({
+  id: g.id,
+  label: g.label,
+  short: GROUP_SHORT_LABEL[g.id] ?? g.id,
+  savers: g.savers,
+}));
+
+const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
+  g.savers.map((saver) => ({ saver, pkg: g.label })),
+);
+
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
+  // Same filter affordance as the gallery's — 33 savers is too many to scan.
+  const filter = document.createElement('div');
+  filter.className = 'palette-filter';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.id = 'palette-search';
+  search.placeholder = 'Filter…';
+  search.setAttribute('aria-label', 'Filter savers by name');
+  filter.append(search);
+
   const tree = document.createElement('div');
   tree.className = 'palette-tree';
 
@@ -107,13 +147,35 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     tree.append(details);
   }
 
-  mount.append(tree);
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    for (const details of tree.querySelectorAll<HTMLDetailsElement>('.palette-group')) {
+      let shown = 0;
+      for (const item of details.querySelectorAll<HTMLElement>('.palette-item')) {
+        const hit = q === '' || (item.textContent ?? '').toLowerCase().includes(q) || (item.dataset.id ?? '').includes(q);
+        item.hidden = !hit;
+        if (hit) shown += 1;
+      }
+      details.hidden = shown === 0;
+      if (q !== '') details.open = true;
+    }
+  });
+
+  mount.append(filter, tree);
 }
 
+/** Derived from the group a saver was registered in, so a new package can't
+ *  silently show up attributed to savers-classic. */
+const PACKAGE_BY_ID = new Map<string, string>(
+  SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
+);
+
 function packageFor(saver: SaverPlugin): string {
-  if (saver.manifest.id === 'black-hole') return '@idle-screens/saver-black-hole';
-  if (SCHEMA_IDS.has(saver.manifest.id)) return '@idle-screens/schema';
-  return '@idle-screens/savers-classic';
+  const id = saver.manifest.id;
+  const registered = PACKAGE_BY_ID.get(id);
+  if (registered) return registered;
+  // Compiled specs mounted outside SAVER_GROUPS (aquarium, rain) still resolve.
+  return SCHEMA_IDS.has(id) ? '@idle-screens/schema' : '@idle-screens/savers-classic';
 }
 
 const params = new URLSearchParams(location.search);
@@ -156,8 +218,7 @@ const twoFrames = (): Promise<void> =>
   new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 const SAVER_VARIANTS: Record<string, string> = {
-  messages: 'Out to Lunch',
-  messages2: 'Macintosh',
+  messages: 'Out to Lunch / Macintosh',
 };
 
 if (params.has('frame')) {
@@ -297,9 +358,15 @@ function liveMode(): void {
     import.meta.url,
   ).href;
 
+  // Watching a fullscreen preview counts as "using the app": without this the
+  // idle timer fires after `timeoutMs` and the real screensaver opens on top
+  // of the thing you were deliberately looking at.
+  let previewIsOpen = false;
+
   const toEngineConfig = (c: LiveConfig): Partial<IdleScreensConfig> => ({
     timeoutMs: c.timeoutMs,
     sleepOnBlur: c.sleepOnBlur,
+    suppress: () => previewIsOpen,
     disableOnLocalhost: false,
     defaultPluginId: c.saver,
     selection: c.selection,
@@ -345,80 +412,146 @@ function liveMode(): void {
   };
   rebuild(cfg);
 
-  document.getElementById('tb-sleep')?.addEventListener('click', () => window.__idleScreens?.sleep());
+  /*
+   * The top-right control does two different jobs, so it says which one it is
+   * doing. In Dev Tools it is a transport for the SELECTED saver's inline
+   * preview (paired with the saver's name); everywhere else it triggers the
+   * real idle screensaver. Labelling one button "Idle demo" while it played a
+   * preview would be the same ambiguity the Gallery preview / Idle demo split
+   * was introduced to remove.
+   */
+  const tbSaver = document.getElementById('tb-saver') as HTMLElement | null;
+  const tbBtn = document.getElementById('tb-sleep') as HTMLButtonElement | null;
+  /** Set by initDev once the timeline exists; null until then. */
+  let devTransport: (() => void) | null = null;
+
+  const setTopbarSaver = (saver: SaverPlugin | null): void => {
+    if (!tbSaver) return;
+    if (!saver) {
+      tbSaver.hidden = true;
+      return;
+    }
+    tbSaver.hidden = false;
+    tbSaver.replaceChildren();
+    const name = document.createElement('b');
+    name.textContent = saver.manifest.label;
+    const pkg = document.createElement('span');
+    pkg.className = 'tb-saver-pkg';
+    pkg.textContent = (packageFor(saver).split('/')[1] ?? '').replace(/^savers?-/, '');
+    tbSaver.append(name, pkg);
+    tbSaver.title = `${saver.manifest.label} — ${packageFor(saver)}`;
+  };
+
+  const setTopbarPlaying = (playing: boolean): void => {
+    if (!tbBtn) return;
+    tbBtn.dataset.playing = String(playing);
+    tbBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    tbBtn.title = playing
+      ? 'Pause the selected saver’s inline preview'
+      : 'Play the selected saver’s inline preview';
+  };
+
+  const syncTopbarMode = (view: View): void => {
+    if (!tbBtn) return;
+    const dev = view === 'dev';
+    tbBtn.classList.toggle('is-transport', dev);
+    setTopbarSaver(dev ? (ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null) : null);
+    if (dev) {
+      setTopbarPlaying(devPlaying);
+    } else {
+      delete tbBtn.dataset.playing;
+      tbBtn.textContent = 'Idle demo';
+      tbBtn.title = 'Sleep the engine — the real screensaver, wakes on any input';
+    }
+  };
+
+  let devPlaying = false;
+
+  tbBtn?.addEventListener('click', () => {
+    if (tbBtn.classList.contains('is-transport') && devTransport) {
+      devTransport();
+      return;
+    }
+    preview.close();
+    window.__idleScreens?.sleep();
+  });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
+  wirePerceptionHarness(ALL_SAVERS);
   wireSchemaHarness();
 
+  type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';
+  let currentView: View = 'gallery';
+
+  // ========== FULLSCREEN PREVIEW (shared by Gallery + Dev Tools) ==========
+  // A viewer, not a screensaver demo: it exits on Escape or a click, never on
+  // a stray mouse move. The top-bar "Idle demo" button is the other half of
+  // that pair — it sleeps the real <idle-screen>, which does wake on any input.
+  let devSelectRef: ((id: string) => void) | null = null;
+
+  const goToDev = (id: string): void => {
+    cfg.saver = id;
+    if (location.hash.replace(/^#/, '') === 'dev') devSelectRef?.(id);
+    else location.hash = 'dev';
+  };
+
   // ========== GALLERY VIEW (grid of thumbnail cards) ==========
-  const galleryGrid = document.getElementById('gallery-grid')!;
-  const galleryInstances: SaverInstance[] = [];
+  const gallery = buildGallery(document.getElementById('gallery-root')!, GALLERY_GROUPS, {
+    activeId: cfg.saver,
+    onOpen: (id) => openPreview(id),
+    onOpenInDev: goToDev,
+  });
 
-  for (const saver of ALL_SAVERS) {
-    const card = document.createElement('div');
-    card.className = 'gallery-card';
-    card.dataset.id = saver.manifest.id;
-    if (saver.manifest.id === cfg.saver) card.classList.add('active');
+  const preview = createPreviewOverlay(PREVIEW_ENTRIES, {
+    seed: () => cfg.seed,
+    onShow: (id) => {
+      cfg.saver = id;
+      gallery.setActive(id);
+      window.__idleScreens?.setPlugin(id);
+    },
+    onExit: () => {
+      previewIsOpen = false;
+      gallery.setPlaying(currentView === 'gallery');
+    },
+    onOpenInDev: goToDev,
+  });
 
-    const preview = document.createElement('div');
-    preview.className = 'gallery-card-preview';
-
-    const info = document.createElement('div');
-    info.className = 'gallery-card-info';
-    const label = document.createElement('span');
-    label.className = 'gallery-card-label';
-    label.textContent = saver.manifest.label;
-    const meta = document.createElement('span');
-    meta.className = 'gallery-card-meta';
-    meta.textContent = saver.manifest.minBackend ?? 'css';
-    info.append(label, meta);
-
-    card.append(preview, info);
-    galleryGrid.append(card);
-
-    card.addEventListener('click', () => {
-      cfg.saver = saver.manifest.id;
-      rebuild(cfg);
-      galleryGrid.querySelectorAll('.gallery-card').forEach((c) =>
-        c.classList.toggle('active', (c as HTMLElement).dataset.id === saver.manifest.id),
-      );
-      window.__idleScreens?.sleep();
-    });
-
-    void Promise.resolve(
-      saver.mount({
-        host: preview,
-        dpr: 1,
-        width: 280,
-        height: 175,
-        rng: createRng(42),
-        seed: 42,
-        reducedMotion: false,
-      }),
-    ).then((inst) => {
-      galleryInstances.push(inst);
-      const min = saver.manifest.minBackend ?? 'css';
-      const syncMeta = (): void => {
-        const active = readPreviewBackend(saver.manifest.id, preview);
-        meta.textContent = active && active !== min ? active : min;
-      };
-      requestAnimationFrame(() => requestAnimationFrame(syncMeta));
-    });
+  function openPreview(id: string): void {
+    cfg.saver = id;
+    rebuild(cfg);
+    previewIsOpen = true;
+    gallery.setActive(id);
+    gallery.setPlaying(false); // don't burn 30 canvases behind a fullscreen preview
+    preview.open(id);
   }
-
-  setTimeout(() => {
-    galleryInstances.forEach((inst) => inst.setPaused(true));
-  }, 2000);
 
   // ========== DEV VIEW (lazy-init on first navigate) ==========
   let devInitialized = false;
   let docsInitialized = false;
+  let evalsInitialized = false;
+  let settingsInitialized = false;
+
+  const initSettings = (): void => {
+    if (settingsInitialized) return;
+    settingsInitialized = true;
+    const mount = document.getElementById('settings-root');
+    if (mount) buildSettingsPanel(mount);
+  };
 
   const initDocs = (): void => {
     if (docsInitialized) return;
     docsInitialized = true;
     const mount = document.getElementById('docs-main');
     if (mount) buildDevDocs(mount);
+  };
+
+  const initEvals = (): void => {
+    if (evalsInitialized) return;
+    evalsInitialized = true;
+    const mount = document.getElementById('evals-root');
+    // The chamber is fullscreen too, so it needs the same idle suppression as
+    // the gallery preview — otherwise the screensaver drops over the artwork.
+    if (mount) buildEvalsPanel(mount, { onFullscreenChange: (open) => { previewIsOpen = open; } });
   };
 
   const initDev = (): void => {
@@ -431,7 +564,7 @@ function liveMode(): void {
 
     const devProps = buildPropertiesPanel(right.props);
     devProps.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
-    buildConfigPanel(cfg, rebuild, right.engine);
+    buildConfigPanel(cfg, rebuild, right.engine, () => openPreview(cfg.saver));
 
     const { debug, perception, layers } = right;
     const { timeline } = bottom;
@@ -447,6 +580,35 @@ function liveMode(): void {
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
     let devPreviewInst: SaverInstance | null = null;
+    let devStage: MountedStage | null = null;
+    let devMountToken = 0;
+
+    // Stage picker: passthrough savers perform ON a page, so the workbench
+    // offers swappable mock documents. (stage, seed) => identical performance.
+    const stageSaved = localStorage.getItem('idleScreens.dev.stage');
+    let stageId = STAGES.some((s) => s.id === stageSaved) ? stageSaved! : 'article';
+    const stagePick = document.createElement('select');
+    stagePick.id = 'stage-pick';
+    stagePick.title = 'Mock page the passthrough saver performs on';
+    stagePick.setAttribute('aria-label', 'Stage document');
+    stagePick.style.cssText =
+      'position:absolute;right:10px;top:10px;z-index:3;font:10px ui-monospace,monospace;' +
+      'background:#14161c;color:#c6cbd4;border:1px solid #2a2e38;border-radius:4px;padding:3px 6px;display:none';
+    for (const st of STAGES) {
+      const o = document.createElement('option');
+      o.value = st.id;
+      o.textContent = st.label;
+      stagePick.append(o);
+    }
+    stagePick.value = stageId;
+    // Lives NEXT TO the viewport, not inside it — devSelect clears the
+    // viewport's children on every mount.
+    viewportHost?.parentElement?.appendChild(stagePick);
+    stagePick.addEventListener('change', () => {
+      stageId = stagePick.value;
+      localStorage.setItem('idleScreens.dev.stage', stageId);
+      devSelect(cfg.saver);
+    });
 
     const devSelect = (id: string): void => {
       const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
@@ -454,6 +616,7 @@ function liveMode(): void {
       cfg.saver = id;
       rebuild(cfg);
       devProps.select(saver);
+      if (currentView === 'dev') setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
         .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
@@ -464,6 +627,8 @@ function liveMode(): void {
 
       if (devPreviewInst) devPreviewInst.dispose();
       devPreviewInst = null;
+      devStage?.destroy();
+      devStage = null;
       viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
       const rect = viewportHost.getBoundingClientRect();
       const previewCtx = {
@@ -477,28 +642,69 @@ function liveMode(): void {
         width: Math.round(rect.width) || 640,
         height: Math.round(rect.height) || 400,
         seed: cfg.seed,
+        // Imperative savers have no spec to analyse; the panel reads their
+        // pixels instead, which needs the plugin itself.
+        saver,
       });
       layers.setSaver(id);
 
-      void Promise.resolve(
-        saver.mount({
-          host: viewportHost,
-          dpr: devicePixelRatio ?? 1,
-          width: Math.round(rect.width) || 640,
-          height: Math.round(rect.height) || 400,
-          rng: createRng((cfg.seed >>> 0) || 1),
-          seed: cfg.seed,
-          reducedMotion: false,
-        }),
-      ).then((inst) => {
+      // Passthrough savers perform ON a page: mount a stage document in an
+      // iframe and let the saver play inside it, victims scoped to the stage.
+      // (stage, seed) is the whole recipe — the performance is repeatable.
+      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
+      stagePick.style.display = saver.manifest.passthrough ? 'block' : 'none';
+      const token = ++devMountToken;
+      const mounted: Promise<SaverInstance> = useStage
+        ? mountStage(viewportHost, STAGES.find((st) => st.id === stageId)!).then((st) => {
+            if (token !== devMountToken) { st.destroy(); throw new Error('stale stage mount'); }
+            devStage = st;
+            return Promise.resolve(
+              saver.mount({
+                host: st.overlay,
+                dpr: devicePixelRatio ?? 1,
+                width: st.width || Math.round(rect.width) || 640,
+                height: st.height || Math.round(rect.height) || 400,
+                rng: createRng((cfg.seed >>> 0) || 1),
+                seed: cfg.seed,
+                reducedMotion: false,
+                page: st.page,
+              }),
+            );
+          })
+        : Promise.resolve(
+            saver.mount({
+              host: viewportHost,
+              dpr: devicePixelRatio ?? 1,
+              width: Math.round(rect.width) || 640,
+              height: Math.round(rect.height) || 400,
+              rng: createRng((cfg.seed >>> 0) || 1),
+              seed: cfg.seed,
+              reducedMotion: false,
+            }),
+          );
+      mounted.then((inst) => {
+        if (token !== devMountToken) { inst.dispose(); return; }
         devPreviewInst = inst;
         inst.setPaused(true);
         timeline.setSaver(saver, inst, cfg.seed);
+        layers.setRuntime(inst, devStage?.doc.body ?? null);
+        if (devStage) {
+          // Re-aim perception at the STAGE performance: same victim geometry
+          // (mirrored, so the sampler never fights the live instance), same
+          // dimensions — the map now portrays what the viewport shows.
+          perception.setSaver(id, {
+            width: devStage.width || Math.round(rect.width) || 640,
+            height: devStage.height || Math.round(rect.height) || 400,
+            seed: cfg.seed,
+            saver,
+            page: mirrorPage(devStage),
+          });
+        }
         requestAnimationFrame(() => {
           devProps.refresh();
           debug.setContext(previewCtx);
         });
-      });
+      }).catch(() => { /* superseded by a newer selection */ });
     };
 
     layers.onSpecChange = (editedSpec) => {
@@ -524,6 +730,7 @@ function liveMode(): void {
           devPreviewInst = inst;
           inst.setPaused(true);
           timeline.setSaver(newSaver, inst, cfg.seed);
+          layers.setRuntime(inst, null);
         });
         perception.updateSpec(editedSpec);
       } catch (err) {
@@ -531,15 +738,22 @@ function liveMode(): void {
       }
     };
 
+    devSelectRef = devSelect;
+    devTransport = () => timeline.togglePlay();
+    timeline.onPlayingChange = (p) => {
+      devPlaying = p;
+      if (currentView === 'dev') setTopbarPlaying(p);
+    };
     buildSaverPalette(left, devSelect, cfg.saver);
     devSelect(cfg.saver);
   };
 
   // ========== ROUTER ==========
-  type View = 'gallery' | 'dev' | 'docs';
   const galleryView = document.getElementById('view-gallery')!;
   const devView = document.getElementById('view-dev')!;
   const docsView = document.getElementById('view-docs')!;
+  const evalsView = document.getElementById('view-evals')!;
+  const settingsView = document.getElementById('view-settings')!;
 
   const scrollDocsAnchor = (anchor: string | null): void => {
     if (!anchor) return;
@@ -551,6 +765,8 @@ function liveMode(): void {
   const parseHash = (): { view: View; docsAnchor: string | null } => {
     const raw = location.hash.replace(/^#/, '');
     if (raw === 'dev') return { view: 'dev', docsAnchor: null };
+    if (raw === 'evals') return { view: 'evals', docsAnchor: null };
+    if (raw === 'settings') return { view: 'settings', docsAnchor: null };
     if (raw === 'docs') return { view: 'docs', docsAnchor: null };
     if (raw.startsWith('docs/')) return { view: 'docs', docsAnchor: raw.slice(5) };
     if (raw.startsWith('api-')) return { view: 'docs', docsAnchor: raw };
@@ -558,15 +774,24 @@ function liveMode(): void {
   };
 
   const showView = (view: View, docsAnchor: string | null = null): void => {
+    currentView = view;
+    syncTopbarMode(view);
+    preview.close(); // navigating away always leaves the fullscreen viewer
+    // Gallery canvases only run while the gallery is the visible tab.
+    gallery.setPlaying(view === 'gallery');
     galleryView.hidden = view !== 'gallery';
     devView.hidden = view !== 'dev';
     docsView.hidden = view !== 'docs';
+    evalsView.hidden = view !== 'evals';
+    settingsView.hidden = view !== 'settings';
     document.querySelectorAll('#topbar nav a').forEach((a) => {
       const on = (a as HTMLElement).dataset.view === view;
       a.classList.toggle('active', on);
       a.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     if (view === 'dev') initDev();
+    if (view === 'evals') initEvals();
+    if (view === 'settings') initSettings();
     if (view === 'docs') {
       initDocs();
       scrollDocsAnchor(docsAnchor);
@@ -630,6 +855,8 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
         ${row('Flash safe', flashSafe === undefined ? '—' : flashSafe ? 'yes' : 'no')}
         ${row('Worker ready', m.workerReady ? 'yes' : 'no')}
         ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
+        ${m.attribution ? row('Source', `<span title="${m.attribution.source}">${m.attribution.source}</span>`) : ''}
+        ${m.attribution ? row('License', m.attribution.url ? `<a href="${m.attribution.url}" target="_blank" rel="noreferrer">${m.attribution.license}</a>` : m.attribution.license) : ''}
       </dl>
       ${m.a11y?.notes ? `<p class="wb-note">${m.a11y.notes}</p>` : ''}`;
   };
@@ -642,7 +869,12 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
   };
 }
 
-function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mount: HTMLElement): void {
+function buildConfigPanel(
+  cfg: LiveConfig,
+  rebuild: (c: LiveConfig) => void,
+  mount: HTMLElement,
+  onPreview: () => void,
+): void {
   const panel = document.createElement('div');
   panel.className = 'wb-panel-content';
 
@@ -736,17 +968,27 @@ function buildConfigPanel(cfg: LiveConfig, rebuild: (c: LiveConfig) => void, mou
 
   const actions = document.createElement('div');
   actions.className = 'wb-actions';
+  // Two different fullscreen modes, deliberately labelled apart: "Preview"
+  // is the viewer (Esc/click to exit); "Idle demo" is the real screensaver
+  // (wakes on any input, including mouse movement).
+  const previewBtn = document.createElement('button');
+  previewBtn.type = 'button';
+  previewBtn.className = 'wb-btn wb-btn-primary';
+  previewBtn.textContent = 'Preview';
+  previewBtn.title = 'Fullscreen preview — Esc or click to exit';
+  previewBtn.addEventListener('click', onPreview);
   const sleepBtn = document.createElement('button');
   sleepBtn.type = 'button';
-  sleepBtn.className = 'wb-btn wb-btn-primary';
-  sleepBtn.textContent = 'Sleep';
+  sleepBtn.className = 'wb-btn';
+  sleepBtn.textContent = 'Idle demo';
+  sleepBtn.title = 'Sleep the engine — wakes on any input, like a real screensaver';
   sleepBtn.addEventListener('click', () => window.__idleScreens?.sleep());
   const wakeBtn = document.createElement('button');
   wakeBtn.type = 'button';
   wakeBtn.className = 'wb-btn';
   wakeBtn.textContent = 'Wake';
   wakeBtn.addEventListener('click', () => window.__idleScreens?.wake());
-  actions.append(sleepBtn, wakeBtn);
+  actions.append(previewBtn, sleepBtn, wakeBtn);
 
   panel.append(props, toggles, actions);
   mount.append(panel);

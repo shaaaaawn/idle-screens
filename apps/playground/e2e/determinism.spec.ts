@@ -44,9 +44,13 @@ test('the live overlay mounts the black hole on sleep', async ({ page }) => {
   expect(await page.evaluate(() => window.__idleScreens?.state())).toBe('sleeping');
 });
 
+// Keep in step with CLASSIC_SAVERS — an id that no longer exists silently falls
+// back to the default saver, so the assertion below fails with a confusing
+// "expected messages2, received black-hole" rather than "no such saver".
+// `messages2` was folded into `messages` in a7139c3.
 const SAVER_IDS = [
   'black-hole', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
-  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages', 'messages2',
+  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages',
 ];
 
 test('every saver mounts on sleep without errors', async ({ page }) => {

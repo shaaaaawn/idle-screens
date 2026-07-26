@@ -6,6 +6,7 @@
  */
 import { SAVERS as ALL_SAVERS } from './savers';
 import { createMacHostController, saverIndex } from './host-controller';
+import { renderActivity } from './activity';
 
 const params = new URLSearchParams(location.search);
 const pinned = params.get('saver');
@@ -82,10 +83,20 @@ declare global {
       setPaused(paused: boolean): void;
       toast(text: string): void;
       currentId(): string;
+      setActivity(sections: unknown): void;
     };
   }
 }
-window.__idleScreensMac = controller.createBridge(showToast);
+// System-activity HUD: the Swift shell pushes sections (docker / apple
+// containers / MCP processes / dev servers) while the saver is showing.
+const activityEl = document.getElementById('activity');
+const showActivity = params.get('activity') !== '0';
+window.__idleScreensMac = {
+  ...controller.createBridge(showToast),
+  setActivity(sections: unknown) {
+    if (activityEl && showActivity) renderActivity(activityEl, sections);
+  },
+};
 
 // Hosts without native key routing (Linux windowed dev) handle browse + quit here.
 // Mac handles ←/→ in Swift; duplicate calls are harmless (same saver index).

@@ -63,7 +63,16 @@ open dist/IdleScreens.app           # menu-bar icon appears
 Debug flags on the binary: `--show` (start the saver immediately), `--hold`
 (don't dismiss on input, for inspection), `--diagnostics` (print the diagnostics
 report and exit), `--check-updates` (run a bundle refresh and exit), `--probe`
-(show the saver, then print the webview's rendered state).
+(show the saver, then print the webview's rendered state), `--activity` (print
+the system-activity snapshot and exit).
+
+**System Activity.** The menu's **System Activity…** shows what's running in
+the background: Docker containers, Apple `container` containers, MCP server
+processes (grouped, since agent sessions spawn duplicates), and listening dev
+servers. Toggle **Show System Activity** to also render it as a quiet HUD in
+the corner of the saver, refreshed every 30s. Off by default — the saver shows
+while the machine is unattended, so surfacing process names is opt-in. Every
+detector degrades to empty when its CLI is missing or its daemon is down.
 
 **Overlay keys** while the saver is showing: **← / →** browse savers, **F**
 favorite, **⌫** hide from cycle, **Return** pin the one you're viewing. Keys and

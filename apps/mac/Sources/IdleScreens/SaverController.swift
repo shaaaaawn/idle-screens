@@ -21,6 +21,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private var eventMonitor: Any?
   private var fastPollTimer: Timer?
   private var cycleTimer: Timer?
+  private var activityTimer: Timer?
   private var assertionID: IOPMAssertionID = 0
   private var hasAssertion = false
   private(set) var isShowing = false
@@ -41,6 +42,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
   var favorites: Set<String> = []
   /// Hidden saver ids — never shown in cycle/browse.
   var hidden: Set<String> = []
+  /// Show the system-activity HUD (docker / containers / MCP / dev servers)
+  /// on the overlay. Off by default — the saver shows while the machine is
+  /// unattended, so surfacing process names is opt-in.
+  var showActivity = false
 
   var onShow: (() -> Void)?
   var onDismiss: (() -> Void)?
@@ -117,6 +122,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
     beginDisplaySleepAssertion()
     startCycle()
+    startActivityUpdates()
     // Debug: --hold keeps the saver up despite input (screenshot/inspection).
     if !CommandLine.arguments.contains("--hold") {
       installWakeMonitors()
@@ -130,6 +136,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
     removeWakeMonitors()
     stopCycle()
+    stopActivityUpdates()
     endDisplaySleepAssertion()
     NSApp.presentationOptions = []
 
@@ -225,6 +232,43 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private func stopCycle() {
     cycleTimer?.invalidate()
     cycleTimer = nil
+  }
+
+  // MARK: - System-activity HUD
+
+  /// Push docker/container/MCP/dev-server activity into every overlay while
+  /// showing. First push waits for the page to load; then refresh periodically.
+  private func startActivityUpdates() {
+    guard showActivity, channelURL == nil else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+      self?.pushActivity()
+    }
+    let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+      self?.pushActivity()
+    }
+    RunLoop.main.add(t, forMode: .common)
+    activityTimer = t
+  }
+
+  private func stopActivityUpdates() {
+    activityTimer?.invalidate()
+    activityTimer = nil
+  }
+
+  private func pushActivity() {
+    guard isShowing else { return }
+    SystemActivity.snapshot { [weak self] snap in
+      guard let self, self.isShowing else { return }
+      guard
+        let data = try? JSONSerialization.data(withJSONObject: SystemActivity.hudSections(snap)),
+        let json = String(data: data, encoding: .utf8)
+      else { return }
+      let js =
+        "window.__idleScreensMac && window.__idleScreensMac.setActivity && window.__idleScreensMac.setActivity(\(json))"
+      for overlay in self.overlays {
+        overlay.webView.evaluateJavaScript(js, completionHandler: nil)
+      }
+    }
   }
 
   // MARK: - Window construction
@@ -335,6 +379,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
         savers: (window.__idleScreensMac && window.__idleScreensMac.savers || []).length,
         canvas: !!document.querySelector('#host canvas'),
         hostChildren: document.getElementById('host') ? document.getElementById('host').childElementCount : -1,
+        activityLines: document.getElementById('activity') ? document.getElementById('activity').childElementCount : -1,
         url: location.href
       })
       """

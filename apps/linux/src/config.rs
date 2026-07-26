@@ -175,11 +175,16 @@ fn with_trailing_slash(mut url: String) -> String {
 }
 
 /// A channel value is either a bare id ("ballet") or a full URL passed through.
+/// Bare ids get this screen's `device` id so a paired phone can retarget the
+/// display; explicit URLs are the user's business and pass through untouched.
 pub fn resolve_channel_url(channel: &str) -> String {
     if channel.contains("://") {
         channel.to_string()
     } else {
-        format!("{CHANNEL_BASE}{channel}")
+        format!(
+            "{CHANNEL_BASE}{channel}?device={}",
+            crate::pair::device_id()
+        )
     }
 }
 
@@ -214,14 +219,29 @@ mod tests {
         assert_eq!(s.fade_ms, 900);
     }
 
+    /// A resolved bare-id channel URL: the canonical channel path plus this
+    /// screen's `device` id. The id is generated per machine, so tests assert
+    /// its presence, not its value.
+    fn is_channel_url(url: &str, channel: &str) -> bool {
+        url.starts_with(&format!(
+            "https://idlescreens.com/channel/{channel}?device="
+        )) && url.len() > format!("https://idlescreens.com/channel/{channel}?device=").len()
+    }
+
     #[test]
     fn cli_channel_overrides_config_mode() {
         let file: FileConfig = toml::from_str("mode = \"savers\"").unwrap();
         let s = Settings::merge(&cli(&["--channel", "ballet"]), file);
-        assert_eq!(
-            s.mode,
-            Mode::Channel("https://idlescreens.com/channel/ballet".into())
-        );
+        // A bare id now carries this screen's device id so a paired phone can
+        // retarget it, and that id is random per machine — assert the stable
+        // parts rather than a literal URL.
+        match s.mode {
+            Mode::Channel(url) => assert!(
+                is_channel_url(&url, "ballet"),
+                "unexpected channel url: {url}"
+            ),
+            other => panic!("expected Mode::Channel, got {other:?}"),
+        }
     }
 
     #[test]
@@ -229,10 +249,13 @@ mod tests {
         let file: FileConfig = toml::from_str("mode = \"channel\"").unwrap();
         assert_eq!(Settings::merge(&cli(&[]), file).mode, Mode::Savers);
         let file: FileConfig = toml::from_str("mode = \"channel\"\nchannel = \"lobby\"").unwrap();
-        assert_eq!(
-            Settings::merge(&cli(&[]), file).mode,
-            Mode::Channel("https://idlescreens.com/channel/lobby".into())
-        );
+        match Settings::merge(&cli(&[]), file).mode {
+            Mode::Channel(url) => assert!(
+                is_channel_url(&url, "lobby"),
+                "unexpected channel url: {url}"
+            ),
+            other => panic!("expected Mode::Channel, got {other:?}"),
+        }
     }
 
     #[test]
@@ -241,9 +264,10 @@ mod tests {
             resolve_channel_url("https://example.com/x"),
             "https://example.com/x"
         );
-        assert_eq!(
-            resolve_channel_url("ballet"),
-            "https://idlescreens.com/channel/ballet"
+        let url = resolve_channel_url("ballet");
+        assert!(
+            is_channel_url(&url, "ballet"),
+            "unexpected channel url: {url}"
         );
     }
 

@@ -11,8 +11,7 @@ import { spotlight } from './spotlight';
 import { fadeOut } from './fade-out';
 import { bouncingBall } from './bouncing-ball';
 import { logo } from './logo';
-import { messages } from './messages';
-import { messages2 } from './messages2';
+import { messages, messagesDemoTrack } from './messages';
 import { pipes } from './pipes';
 import { bsod } from './bsod';
 import { flurry } from './flurry';
@@ -33,7 +32,6 @@ export {
   bouncingBall,
   logo,
   messages,
-  messages2,
   pipes,
   bsod,
   flurry,
@@ -43,6 +41,8 @@ export {
 };
 
 /** All classic savers, for bulk registration. */
+export { messagesDemoTrack };
+
 export const CLASSIC_SAVERS: SaverPlugin[] = [
   toasters,
   dvd,
@@ -56,7 +56,6 @@ export const CLASSIC_SAVERS: SaverPlugin[] = [
   bouncingBall,
   logo,
   messages,
-  messages2,
   pipes,
   bsod,
   flurry,

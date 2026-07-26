@@ -24,6 +24,11 @@ export const rainstormManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Rainstorm" — concept by Berkeley Systems',
+    license: 'MIT port; reference CSS MIT (Bryan Braun)',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true, notes: 'Rain streaks over a dark sky; the lightning is a brief, gentle brightening (no rapid strobe).' },
   workerReady: true,
 };

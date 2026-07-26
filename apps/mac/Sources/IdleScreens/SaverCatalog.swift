@@ -29,7 +29,18 @@ enum SaverCatalog {
     SaverEntry(id: "snowfall", label: "Snowfall"),
     SaverEntry(id: "lanterns", label: "Night Lanterns"),
     SaverEntry(id: "sakura", label: "Sakura Drift"),
-    SaverEntry(id: "dev-dashboard", label: "Dev Dashboard"),
+    SaverEntry(id: "dev-dashboard", label: "Control Center"),
+    SaverEntry(id: "aquarium", label: "Aquarium"),
+    SaverEntry(id: "aurora", label: "Aurora"),
+    SaverEntry(id: "comets", label: "Comet Shower"),
+    SaverEntry(id: "constellation", label: "Constellation"),
+    SaverEntry(id: "matrix-rain", label: "Matrix Rain"),
+    SaverEntry(id: "nostalghia-candle", label: "Nostalghia's Candle"),
+    SaverEntry(id: "orrery", label: "Orrery"),
+    SaverEntry(id: "polygons", label: "Polygons"),
+    SaverEntry(id: "procession", label: "Night Procession"),
+    SaverEntry(id: "rain", label: "Rain"),
+    SaverEntry(id: "warp-tunnel", label: "Warp Tunnel"),
   ]
   static var ids: [String] { all.map(\.id) }
 }

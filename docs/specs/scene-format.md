@@ -2,6 +2,20 @@
 
 ## Status: Thought experiment
 
+> **2026-07-26 — this spec now has a candidate use case.** Presentations want
+> almost exactly what's designed below: a sequence of scenes, each with a
+> timeline, advanced by input, composed from reusable symbols. That's this
+> document's stated feature set with a different name on it.
+>
+> The reason this stayed a thought experiment is that nothing forced a decision
+> about scope — an open-ended "Flash, but safe" runtime has no natural edge.
+> A use case supplies one. See
+> [`idle-mono/docs/timeline-and-presentations.md`](../../../docs/timeline-and-presentations.md)
+> for the argument and the cheap experiment that would test it.
+>
+> Related: mosaic/GRID composition wants the same machinery in space rather than
+> time — [`idle-mono/docs/grid-mosaic-channels.md`](../../../docs/grid-mosaic-channels.md).
+
 ## Overview
 
 A declarative scene format that extends `SaverSpec` into a general-purpose

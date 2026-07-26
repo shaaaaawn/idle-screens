@@ -10,12 +10,17 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "eval:styles": "WRITE_STYLE_EVAL_BASELINE=1 vitest run src/evals/write-baseline.test.ts"
   },
   "dependencies": {
     "@idle-screens/capabilities": "workspace:*",
     "@idle-screens/core": "workspace:*",
     "@idle-screens/saver-black-hole": "workspace:*",
+    "@idle-screens/saver-catwalk": "workspace:*",
+    "@idle-screens/saver-limelight": "workspace:*",
+    "@idle-screens/saver-slipstream": "workspace:*",
+    "@idle-screens/saver-tide": "workspace:*",
     "@idle-screens/savers-classic": "workspace:*",
     "@idle-screens/schema": "workspace:*",
     "@idle-screens/validator": "workspace:*",

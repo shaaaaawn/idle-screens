@@ -10,10 +10,21 @@ import type { SaverPlugin } from '@idle-screens/core';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import {
   compileSaver,
+  AQUARIUM_SPEC,
+  AURORA_SPEC,
+  COMETS_SPEC,
+  CONSTELLATION_SPEC,
   DASHBOARD_SPEC,
   LANTERNS_SPEC,
+  MATRIX_RAIN_SPEC,
+  NOSTALGHIA_CANDLE_SPEC,
+  ORRERY_SPEC,
+  POLYGONS_SPEC,
+  PROCESSION_SPEC,
+  RAIN_SPEC,
   SAKURA_SPEC,
   SNOWFALL_SPEC,
+  WARP_TUNNEL_SPEC,
 } from '@idle-screens/schema';
 
 export const SAVERS: SaverPlugin[] = [
@@ -22,6 +33,17 @@ export const SAVERS: SaverPlugin[] = [
   compileSaver(LANTERNS_SPEC),
   compileSaver(SAKURA_SPEC),
   compileSaver(DASHBOARD_SPEC),
+  compileSaver(AQUARIUM_SPEC),
+  compileSaver(AURORA_SPEC),
+  compileSaver(COMETS_SPEC),
+  compileSaver(CONSTELLATION_SPEC),
+  compileSaver(MATRIX_RAIN_SPEC),
+  compileSaver(NOSTALGHIA_CANDLE_SPEC),
+  compileSaver(ORRERY_SPEC),
+  compileSaver(POLYGONS_SPEC),
+  compileSaver(PROCESSION_SPEC),
+  compileSaver(RAIN_SPEC),
+  compileSaver(WARP_TUNNEL_SPEC),
 ];
 
 export interface SaverEntry {

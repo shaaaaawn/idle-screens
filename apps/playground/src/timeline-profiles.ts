@@ -1,7 +1,27 @@
 import type { ControlTrack, ParamSpace, SaverPlugin } from '@idle-screens/core';
-import { demoTrack } from '@idle-screens/saver-black-hole';
+import { demoTrack as blackHoleDemo } from '@idle-screens/saver-black-hole';
+import { demoTrack as tideDemo } from '@idle-screens/saver-tide';
+import { demoTrack as limelightDemo } from '@idle-screens/saver-limelight';
+import { demoTrack as slipstreamDemo } from '@idle-screens/saver-slipstream';
+import { demoTrack as catwalkDemo } from '@idle-screens/saver-catwalk';
+import { messagesDemoTrack } from '@idle-screens/savers-classic';
 
 export const PREVIEW_DURATION_MS = 6000;
+
+/**
+ * Savers that ship a canonical demo track. The timeline runs at the track's own
+ * duration, so the scrubber covers one full cycle of the visual instead of the
+ * generic 6s hold — a saver whose program is longer than that (tide floods over
+ * 24s) otherwise resets a fraction of the way in and reads as broken.
+ */
+const DEMO_TRACKS: Record<string, ControlTrack> = {
+  'black-hole': blackHoleDemo,
+  tide: tideDemo,
+  limelight: limelightDemo,
+  slipstream: slipstreamDemo,
+  catwalk: catwalkDemo,
+  messages: messagesDemoTrack,
+};
 
 export type TimelineMode = 'track' | 'addressable' | 'live';
 
@@ -94,8 +114,9 @@ export function buildTimelineProfile(
     };
   }
 
-  if (id === 'black-hole' && saver.manifest.paramSpace) {
-    return profileFromTrack(saver, demoTrack, seed, 'track');
+  const demo = DEMO_TRACKS[id];
+  if (demo && saver.manifest.paramSpace) {
+    return profileFromTrack(saver, demo, seed, 'track');
   }
 
   if (saver.manifest.paramSpace) {

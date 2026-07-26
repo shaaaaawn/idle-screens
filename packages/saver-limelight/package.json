@@ -1,0 +1,54 @@
+{
+  "name": "@idle-screens/saver-limelight",
+  "version": "0.0.0",
+  "description": "Passthrough theatre-light screensaver for idle-screens: a roaming key light that lifts the live page's blocks into set pieces and makes them cast shadows on each other. Seeded, paramSpace, control-track, frame-addressable.",
+  "license": "MIT",
+  "author": "Shawn Partridge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaaaaawn/idle-screens",
+    "directory": "packages/saver-limelight"
+  },
+  "homepage": "https://github.com/shaaaaawn/idle-screens#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "screensaver",
+    "idle",
+    "ambient",
+    "light",
+    "shadow",
+    "canvas",
+    "passthrough"
+  ],
+  "bugs": {
+    "url": "https://github.com/shaaaaawn/idle-screens/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "peerDependencies": {
+    "@idle-screens/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@idle-screens/core": "workspace:*"
+  }
+}

@@ -19,6 +19,11 @@ export const bouncingBallManifest: SaverManifest = {
   costTier: 'idle',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Bouncing Ball" — concept by Berkeley Systems',
+    license: 'MIT port; reference CSS MIT (Bryan Braun)',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true, notes: 'A single ball gliding smoothly; no flashing.' },
 };
 

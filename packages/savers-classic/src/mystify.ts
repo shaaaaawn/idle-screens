@@ -15,6 +15,10 @@ export const mystifyManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'Windows "Mystify" — concept only; clean-room reimplementation',
+    license: 'MIT (original code)',
+  },
   a11y: { flashSafe: true, notes: 'Slow-fade polygon trails on black; no strobing.' },
   workerReady: true,
 };

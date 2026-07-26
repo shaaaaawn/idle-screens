@@ -1,0 +1,351 @@
+{
+  "runId": "run-2026-07-25T1908-baseline-v0",
+  "createdAt": "2026-07-25T19:08:43.280Z",
+  "config": {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "t": 5000,
+    "seedFallback": 42
+  },
+  "suiteMedian": 0.9288333333333333,
+  "perArtist": [
+    {
+      "artistId": "monet",
+      "median": 0.972,
+      "mean": 0.9586999999999998,
+      "n": 10
+    },
+    {
+      "artistId": "van-gogh",
+      "median": 0.9049166666666666,
+      "mean": 0.9127333333333334,
+      "n": 10
+    },
+    {
+      "artistId": "seurat",
+      "median": 0.9737499999999999,
+      "mean": 0.9649416666666666,
+      "n": 10
+    },
+    {
+      "artistId": "picasso",
+      "median": 0.972,
+      "mean": 0.9545333333333332,
+      "n": 10
+    },
+    {
+      "artistId": "kandinsky",
+      "median": 0.8932499999999999,
+      "mean": 0.8826916666666668,
+      "n": 10
+    },
+    {
+      "artistId": "mondrian",
+      "median": 0.9125,
+      "mean": 0.9093833333333332,
+      "n": 10
+    },
+    {
+      "artistId": "hokusai",
+      "median": 0.92475,
+      "mean": 0.9015333333333333,
+      "n": 10
+    },
+    {
+      "artistId": "klimt",
+      "median": 0.972,
+      "mean": 0.9750333333333332,
+      "n": 10
+    },
+    {
+      "artistId": "rothko",
+      "median": 0.9299999999999999,
+      "mean": 0.9285833333333333,
+      "n": 10
+    },
+    {
+      "artistId": "kusama",
+      "median": 0.9055,
+      "mean": 0.8961666666666666,
+      "n": 10
+    },
+    {
+      "artistId": "magritte",
+      "median": 0.98425,
+      "mean": 0.9742166666666666,
+      "n": 10
+    },
+    {
+      "artistId": "malevich",
+      "median": 0.937,
+      "mean": 0.9296833333333334,
+      "n": 10
+    },
+    {
+      "artistId": "okeeffe",
+      "median": 0.9684999999999999,
+      "mean": 0.9533333333333334,
+      "n": 10
+    },
+    {
+      "artistId": "basquiat",
+      "median": 0.8932499999999999,
+      "mean": 0.8958166666666667,
+      "n": 10
+    },
+    {
+      "artistId": "riley",
+      "median": 0.9055,
+      "mean": 0.90655,
+      "n": 10
+    }
+  ],
+  "perBenchmark": [
+    {
+      "benchmarkId": "calm-horizon",
+      "median": 0.9684999999999999,
+      "variance": 0.004132687222222223
+    },
+    {
+      "benchmarkId": "dense-field",
+      "median": 0.9299999999999999,
+      "variance": 0.0012869850000000016
+    },
+    {
+      "benchmarkId": "single-focal",
+      "median": 0.9591666666666667,
+      "variance": 0.002285598950617284
+    },
+    {
+      "benchmarkId": "layered-depth",
+      "median": 0.8903333333333332,
+      "variance": 0.001498785987654322
+    },
+    {
+      "benchmarkId": "pulse-atmosphere",
+      "median": 0.9055,
+      "variance": 0.0021561538888888888
+    }
+  ],
+  "gapHistogram": [
+    {
+      "gap": "No true broken-brush / dab sprite",
+      "count": 1
+    },
+    {
+      "gap": "No specular water reflection primitive",
+      "count": 1
+    },
+    {
+      "gap": "Limited atmospheric perspective fog",
+      "count": 1
+    },
+    {
+      "gap": "No impasto / stroke-width pressure",
+      "count": 1
+    },
+    {
+      "gap": "No true swirling vector-field brush",
+      "count": 1
+    },
+    {
+      "gap": "Cypress silhouette as path-of-marks only",
+      "count": 1
+    },
+    {
+      "gap": "No true pointillist size-locked dot grid with hue statistics",
+      "count": 1
+    },
+    {
+      "gap": "No optical-mix preview metric",
+      "count": 1
+    },
+    {
+      "gap": "No polygon / arbitrary facet sprite",
+      "count": 1
+    },
+    {
+      "gap": "No multi-view geometric deformation",
+      "count": 1
+    },
+    {
+      "gap": "No collage texture layers",
+      "count": 1
+    },
+    {
+      "gap": "No free bezier stroke sprite",
+      "count": 1
+    },
+    {
+      "gap": "No true triangle / arc primitives",
+      "count": 1
+    },
+    {
+      "gap": "Limited musical sync between layers",
+      "count": 1
+    },
+    {
+      "gap": "No true black grid-line primitive separate from rects",
+      "count": 1
+    },
+    {
+      "gap": "No constrained orthogonal layout solver",
+      "count": 1
+    },
+    {
+      "gap": "No contour-stroke / woodblock line sprite",
+      "count": 1
+    },
+    {
+      "gap": "No true wave-crest path generator",
+      "count": 1
+    },
+    {
+      "gap": "Mount Fuji as silhouette mask unsupported",
+      "count": 1
+    },
+    {
+      "gap": "No gold-leaf metallic material",
+      "count": 1
+    },
+    {
+      "gap": "No complex ornamental motif stamps",
+      "count": 1
+    },
+    {
+      "gap": "No figure underpainting layer",
+      "count": 1
+    },
+    {
+      "gap": "No soft-edged rectangle (rects are hard; circles approximate)",
+      "count": 1
+    },
+    {
+      "gap": "No monumental scale cue independent of count",
+      "count": 1
+    },
+    {
+      "gap": "No true color-bleed between stacked fields",
+      "count": 1
+    },
+    {
+      "gap": "No mirrored infinity-room reflection",
+      "count": 1
+    },
+    {
+      "gap": "No pumpkin / biomorphic mesh primitive",
+      "count": 1
+    },
+    {
+      "gap": "No true net (woven) topology beyond links",
+      "count": 1
+    },
+    {
+      "gap": "No object semantic sprites beyond emoji",
+      "count": 1
+    },
+    {
+      "gap": "No impossible scale juxtaposition helper",
+      "count": 1
+    },
+    {
+      "gap": "No trompe-l’oeil frame-within-frame",
+      "count": 1
+    },
+    {
+      "gap": "No rotated plane without spin-as-rotation-speed confusion for static poses",
+      "count": 1
+    },
+    {
+      "gap": "No true suprematist diagonal layout language",
+      "count": 1
+    },
+    {
+      "gap": "No petal / bezier bloom sprite",
+      "count": 1
+    },
+    {
+      "gap": "No bone silhouette",
+      "count": 1
+    },
+    {
+      "gap": "Soft curved bands unsupported (approx with regions)",
+      "count": 1
+    },
+    {
+      "gap": "No freehand graffiti stroke",
+      "count": 1
+    },
+    {
+      "gap": "Limited typographic scrawl (text sprites are clean)",
+      "count": 1
+    },
+    {
+      "gap": "No crown vector mark beyond emoji",
+      "count": 1
+    },
+    {
+      "gap": "No true sinusoidal stripe displacement mesh",
+      "count": 1
+    },
+    {
+      "gap": "Flash-safety caps limit authentic Op flicker (correctly)",
+      "count": 1
+    },
+    {
+      "gap": "No afterimage simulation",
+      "count": 1
+    }
+  ],
+  "failures": [],
+  "nextCycle": {
+    "weakArtists": [],
+    "collapsedBenchmarks": [
+      "dense-field",
+      "layered-depth"
+    ],
+    "topGaps": [
+      "No true broken-brush / dab sprite",
+      "No specular water reflection primitive",
+      "Limited atmospheric perspective fog",
+      "No impasto / stroke-width pressure",
+      "No true swirling vector-field brush",
+      "Cypress silhouette as path-of-marks only",
+      "No true pointillist size-locked dot grid with hue statistics",
+      "No optical-mix preview metric"
+    ],
+    "suggestedActions": [
+      "Diversify applicator recipes for collapsed benchmarks: dense-field, layered-depth",
+      "Graduate top schema gap → spec-feature-pipeline: No true broken-brush / dab sprite",
+      "Suite healthy on validity — extend contrast via DNA depth-model branching"
+    ]
+  },
+  "provenance": {
+    "harness": "headless-vitest",
+    "label": "baseline v0",
+    "note": "Initial StyleDNA catalog — 15 artists × 10 screens. Locked growth origin.",
+    "operator": "scaffold",
+    "versions": {
+      "styleDnaHash": "1d6b1654",
+      "styleDnaLabel": "artists@15",
+      "saverSpecFormat": 1,
+      "scorer": "style-eval-score@1",
+      "skill": "artistic-style-schema-eval@1"
+    },
+    "prompts": {
+      "skillPath": ".claude/skills/artistic-style-schema-eval/SKILL.md",
+      "benchmarkSource": "apps/playground/src/evals/benchmarks.ts@v1"
+    },
+    "scoringBands": {
+      "minCoverage": 0.002,
+      "minLuminanceVar": 0.00005,
+      "weights": {
+        "perception": 0.35,
+        "styleFit": 0.35,
+        "intentFit": 0.3
+      }
+    }
+  }
+}

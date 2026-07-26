@@ -181,6 +181,14 @@ export const fluid: SaverPlugin = {
    since OffscreenCanvas has no `.remove()`. See `warp.ts` for the reference pattern.
 2. **Seeded, not random.** Replace every `Math.random()` with `ctx.rng.next()` /
    `.range(a,b)` / `.int(a,b)` / `.pick(arr)` / `.fork(salt)`.
+   **Anything rebuilt after mount must draw from a `fork(salt)`, not `ctx.rng`.**
+   `ctx.rng` is a running stream: build-time draws consume it, so a `resize()`
+   that rebuilds particles or re-collects passthrough victims gets *different*
+   values the second time and the same `(seed, t)` silently stops reproducing
+   the frame. `fork(salt)` derives from the original seed, so every rebuild
+   gets the identical stream. Assert it: render at `t`, `resize()` to the same
+   dimensions, render at `t` again, expect an identical snapshot
+   (`packages/saver-tide/src/tide.frames.test.ts`).
 3. **`resize(w, h, dpr?)` not a listener.** The `<idle-screen>` element calls
    `resize()` on viewport changes (debounced, including DPR changes from zoom or
    browser zoom); never add your own `window.addEventListener('resize')`.
@@ -284,6 +292,11 @@ the canvas you create; `DestroyRef.onDestroy` -> `dispose()`; `NgZone.*` -> dele
 
 ## Reference files
 - **Deep/steerable:** `packages/saver-black-hole/src/black-hole.ts` (paramSpace, control-track, passthrough)
+- **Deep/steerable, fully frame-addressable:** `packages/saver-tide/src/tide.ts` — every
+  quantity is closed-form in `t` (no `p += ...` accumulators), so `renderFrame` reproduces
+  the *page's* transforms too, not just the canvas. Victims get the analytic Jacobian of the
+  field as a real `matrix()` (shear/stretch), depth-graded `filter`, and style writes are
+  diffed against the last written string.
 - **Repaint canvas:** `packages/savers-classic/src/warp.ts` (worker-ready, rAF loop)
 - **Accumulative canvas:** `packages/savers-classic/src/pipes.ts` (grid growth, resize rebuild)
 - **DOM/CSS:** `packages/savers-classic/src/messages.ts` (CSS animations, style injection)
