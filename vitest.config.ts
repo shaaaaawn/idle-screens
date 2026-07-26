@@ -21,6 +21,7 @@ export default defineConfig({
         'packages/capabilities/src/**/*.ts',
         'packages/saver-tide/src/**/*.ts',
         'packages/saver-limelight/src/**/*.ts',
+        'packages/saver-slipstream/src/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -36,6 +37,7 @@ export default defineConfig({
         'packages/savers-classic/src/*-gpu.ts',
         'packages/saver-tide/src/index.ts',
         'packages/saver-limelight/src/index.ts',
+        'packages/saver-slipstream/src/index.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
@@ -86,6 +88,13 @@ export default defineConfig({
           branches: 70,
           functions: 90,
           lines: 94,
+        },
+        // saver-slipstream: measured 2026-07-25 → 95.13 / 80.45 / 88.88 / 95.13; gate at −2.
+        'packages/saver-slipstream/src/**': {
+          statements: 93,
+          branches: 78,
+          functions: 86,
+          lines: 93,
         },
       },
     },
