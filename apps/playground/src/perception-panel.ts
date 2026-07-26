@@ -174,16 +174,39 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
       `<span class="perc-kv"><b>t</b> ${fmtMs(p.t)}</span>`,
     ].join('');
 
-    // Say what is missing and why, so a frame reading is never mistaken for a
-    // spec reading that happens to have empty sections.
+    // Colour is the one channel pixels carry and the spec path only approximates.
     domDiv.hidden = false;
     domDiv.innerHTML =
+      '<div class="perc-section-label">palette (on screen)</div>' +
+      (p.colors.length
+        ? p.colors
+            .map(
+              (c) =>
+                `<div class="perc-bar-row">` +
+                `<span class="perc-swatch" style="background:${esc(c.hex)}"></span>` +
+                `<span class="perc-bar-label">${esc(c.hex)}</span>` +
+                `<div class="perc-bar-track"><div class="perc-bar-fill" style="width:${(c.share * 100).toFixed(1)}%"></div></div>` +
+                `<span class="perc-bar-val">${pct(c.share)}</span>` +
+                `</div>`,
+            )
+            .join('')
+        : '<span class="perc-na">no ink above the background</span>') +
       '<div class="perc-section-label">dominance</div>' +
       '<span class="perc-na">n/a — which layer owns the frame is a spec concept; pixels only carry the composite.</span>';
+
     motionDiv.hidden = false;
     motionDiv.innerHTML =
-      '<div class="perc-section-label">motion</div>' +
-      '<span class="perc-na">n/a — per-layer speeds need the spec; a single frame carries no velocity.</span>';
+      '<div class="perc-section-label">motion (whole frame)</div>' +
+      (p.motion
+        ? [
+            `<span class="perc-kv"><b>rate</b> ${p.motion.rate.toFixed(3)}/s</span>`,
+            `<span class="perc-kv"><b>changed</b> ${pct(p.motion.changedFraction)}</span>`,
+            p.motion.centroid
+              ? `<span class="perc-kv"><b>at</b> (${p.motion.centroid.x.toFixed(2)}, ${p.motion.centroid.y.toFixed(2)})</span>`
+              : `<span class="perc-kv"><b>at</b> still</span>`,
+            `<span class="perc-na">Δ between t and t+${p.motion.dtMs}ms. Per-layer speeds still need the spec.</span>`,
+          ].join('')
+        : '<span class="perc-na">n/a — needs a frame-addressable saver; two wall-clock grabs are not a measurement.</span>');
     advDiv.hidden = false;
     advDiv.innerHTML =
       '<div class="perc-section-label">advisories</div>' +

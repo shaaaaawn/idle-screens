@@ -21,6 +21,8 @@ interface Row {
   support: 'deterministic' | 'sampled' | 'unsupported';
   coverage: number;
   braille: string;
+  colors: Array<{ hex: string; share: number }>;
+  motion: { rate: number; changedFraction: number; dtMs: number } | null;
   reason?: string;
 }
 
@@ -83,6 +85,38 @@ test('every canvas saver yields a picture; CSS savers say why they cannot', asyn
   }
 });
 
+test('pixels report colour and whole-frame motion — signal the spec path lacks', async ({ page }) => {
+  await ready(page);
+  const rows = await page.evaluate(async () => {
+    const p = (window as unknown as { __perceive: PerceiveHook }).__perceive;
+    const o = { width: 320, height: 200, seed: 42, t: 5000 };
+    return {
+      tide: await p.saver('tide', o),
+      blackHole: await p.saver('black-hole', o),
+      globe: await p.saver('globe', o),
+    };
+  });
+
+  for (const [name, r] of Object.entries(rows)) {
+    // A dominant colour must actually dominate. 5-bit buckets splintered
+    // gradients so the top entry sat near 6% and said nothing.
+    expect(r.colors.length, `${name} produced no palette`).toBeGreaterThan(0);
+    expect(r.colors[0]!.share, `${name} has no dominant colour`).toBeGreaterThan(0.08);
+    expect(r.colors[0]!.hex).toMatch(/^#[0-9a-f]{6}$/);
+    // Shares are fractions of ink and must be ordered.
+    for (let i = 1; i < r.colors.length; i++) {
+      expect(r.colors[i]!.share).toBeLessThanOrEqual(r.colors[i - 1]!.share);
+    }
+  }
+
+  // Motion needs a frame-addressable saver; globe is sampled, so it gets none
+  // rather than a number derived from two arbitrary wall-clock grabs.
+  expect(rows.tide.motion, 'tide is frame-addressable').not.toBeNull();
+  expect(rows.tide.motion!.rate).toBeGreaterThan(0);
+  expect(rows.blackHole.motion).not.toBeNull();
+  expect(rows.globe.motion, 'globe is only sampled — motion would be meaningless').toBeNull();
+});
+
 test('a frame-addressable saver reads identically for the same (t, seed)', async ({ page }) => {
   await ready(page);
   const [a, b] = await page.evaluate(async () => {
@@ -102,7 +136,10 @@ test('the Dev Tools panel labels which perception it is showing', async ({ page 
   const perc = page
     .locator('#dock-right .wb-panel')
     .filter({ has: page.locator('.wb-panel-head', { hasText: 'Perception' }) });
-  await perc.locator('.wb-panel-head').click();
+  // Open by default — it used to be collapsed, which hid the readout behind a
+  // click most people never made.
+  await expect(perc).toHaveAttribute('open', '');
+  await expect(page.locator('.perc-braille')).toBeVisible();
   await expect(page.locator('.perc-mode')).toContainText('spec perception');
 
   // An imperative saver switches the panel to the pixel path rather than the

@@ -14,9 +14,13 @@
  *
  * What it deliberately does NOT provide, because pixels cannot carry it:
  *   - dominance   (which LAYER owns the frame — a spec-level concept)
- *   - motion      (per-layer speeds — likewise)
+ *   - motion      (per-LAYER speeds; whole-frame motion IS measured, by
+ *                  diffing two rendered frames when the saver allows it)
  *   - text        (glyph strings)
  *   - advisories  (spec lints)
+ *
+ * It does provide one thing the analytic path cannot: the dominant colours
+ * actually on screen after blending, alpha and overdraw.
  * Those stay absent rather than being approximated, so a frame reading is never
  * mistaken for a spec reading.
  *
@@ -41,6 +45,10 @@ export interface FramePerception {
   colProfile: number[];
   /** ms the frame was sampled at (exact when deterministic). */
   t: number;
+  /** Dominant on-screen colours — signal the analytic path cannot produce. */
+  colors: ColorShare[];
+  /** Whole-frame motion, only when the saver is frame-addressable. */
+  motion: FrameMotion | null;
   support: FrameSupport;
   /** Why this saver is unsupported, when it is. */
   reason?: string;
@@ -51,6 +59,10 @@ const ROWS = 48;
 /** Cells deviating more than this from the row background count as covered —
  *  matches the analytic grid's threshold so the two are comparable. */
 const COVERAGE_EPS = 0.03;
+/** Row quantile taken as "background". See the note in `gridFromImageData`. */
+const BG_QUANTILE = 0.2;
+/** Second sample offset for the motion estimate, in ms. */
+const MOTION_DT = 120;
 
 const twoFrames = (): Promise<void> =>
   new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
@@ -64,9 +76,8 @@ function luma(r: number, g: number, b: number): number {
  * Downsample an ImageData into the same LuminanceGrid the analytic path emits,
  * so `renderBrailleMap` / `renderDensityMap` can be reused verbatim.
  *
- * Background is estimated PER ROW as that row's median luminance. The analytic
- * path knows the declared background; here it has to be inferred, and a median
- * is robust to sprites covering part of the row in a way a mean is not.
+ * Background is inferred per row (see BG_QUANTILE) because, unlike the analytic
+ * path, there is no declared background to read.
  */
 export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): LuminanceGrid {
   const cells = new Array<number>(cols * rows).fill(0);
@@ -98,10 +109,18 @@ export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): Lum
     }
   }
 
+  // Background per row, estimated as a LOW quantile rather than the median.
+  //
+  // The analytic path knows the declared background; here it has to be
+  // inferred. The median only works while marks cover under half a row — for a
+  // dense scene (tide's water fills the bottom half of the frame) the median IS
+  // the content, deviation collapses toward zero, and both the coverage number
+  // and the braille map degrade into a flat wall. A low quantile stays anchored
+  // to the actual backdrop up to ~75% coverage.
   const background = new Array<number>(rows).fill(0);
   for (let ry = 0; ry < rows; ry++) {
     const row = cells.slice(ry * cols, ry * cols + cols).sort((a, b) => a - b);
-    background[ry] = row[Math.floor(row.length / 2)] ?? 0;
+    background[ry] = row[Math.floor(row.length * BG_QUANTILE)] ?? 0;
   }
 
   let covered = 0;
@@ -138,6 +157,102 @@ export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): Lum
     centroid: wSum > 1e-6 ? { x: cxSum / wSum, y: cySum / wSum } : null,
     rowProfile,
     colProfile,
+  };
+}
+
+/**
+ * Dominant palette, quantized into a coarse RGB cube.
+ *
+ * Luminance discards colour entirely, yet colour is exactly what a style
+ * judgement turns on ("does this read as Monet?"). The analytic path can only
+ * report the palette a spec *declares*; pixels report what actually landed on
+ * screen after blending, alpha and overdraw — so this is signal the spec path
+ * cannot produce.
+ */
+export interface ColorShare {
+  hex: string;
+  /** Fraction of non-background ink carrying this colour, 0..1. */
+  share: number;
+}
+
+function dominantColors(img: ImageData, max = 5): ColorShare[] {
+  const buckets = new Map<number, { n: number; r: number; g: number; b: number }>();
+  const step = Math.max(1, Math.floor((img.width * img.height) / 20000)) * 4;
+  for (let i = 0; i < img.data.length; i += step) {
+    const a = img.data[i + 3]!;
+    if (a < 24) continue; // transparent — not ink
+    const r = img.data[i]!;
+    const g = img.data[i + 1]!;
+    const b = img.data[i + 2]!;
+    // Skip near-black: it is the backdrop of almost every saver and would win
+    // every ranking without saying anything.
+    if (luma(r, g, b) < 0.06) continue;
+    // 4 bits/channel. 5 bits splinters a gradient across dozens of buckets, so
+    // the top entry lands at ~6% and reads as "no dominant colour" for a scene
+    // that plainly has one. Coarser buckets merge shades of the same hue.
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n++;
+    e.r += r;
+    e.g += g;
+    e.b += b;
+    buckets.set(key, e);
+  }
+  const total = [...buckets.values()].reduce((s, e) => s + e.n, 0);
+  if (!total) return [];
+  return [...buckets.values()]
+    .sort((a, b) => b.n - a.n)
+    .slice(0, max)
+    .map((e) => ({
+      hex:
+        '#' +
+        [e.r / e.n, e.g / e.n, e.b / e.n]
+          .map((c) => Math.round(c).toString(16).padStart(2, '0'))
+          .join(''),
+      share: e.n / total,
+    }));
+}
+
+/**
+ * Whole-frame motion from two samples.
+ *
+ * A single frame carries no velocity, which is why the panel reports motion as
+ * n/a. For a frame-addressable saver we can render (t) and (t+dt) and diff the
+ * grids: not per-layer speeds — pixels cannot attribute those — but a real,
+ * reproducible answer to "is this moving, and where".
+ */
+export interface FrameMotion {
+  /** Mean absolute cell change per second, 0..1. */
+  rate: number;
+  /** Fraction of cells that changed perceptibly. */
+  changedFraction: number;
+  /** Where the change concentrated, as viewport fractions. */
+  centroid: { x: number; y: number } | null;
+  dtMs: number;
+}
+
+function motionBetween(a: LuminanceGrid, b: LuminanceGrid, dtMs: number): FrameMotion {
+  let sum = 0;
+  let changed = 0;
+  let wSum = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < a.cells.length; i++) {
+    const d = Math.abs((b.cells[i] ?? 0) - (a.cells[i] ?? 0));
+    sum += d;
+    if (d > COVERAGE_EPS) changed++;
+    const col = i % a.cols;
+    const row = Math.floor(i / a.cols);
+    wSum += d;
+    cx += d * ((col + 0.5) / a.cols);
+    cy += d * ((row + 0.5) / a.rows);
+  }
+  const n = a.cells.length || 1;
+  return {
+    rate: (sum / n) * (1000 / dtMs),
+    changedFraction: changed / n,
+    centroid: wSum > 1e-6 ? { x: cx / wSum, y: cy / wSum } : null,
+    dtMs,
   };
 }
 
@@ -197,6 +312,8 @@ export async function perceiveSaverFrame(
     rowProfile: [],
     colProfile: [],
     t,
+    colors: [],
+    motion: null,
     support,
     reason,
   });
@@ -262,6 +379,17 @@ export async function perceiveSaverFrame(
     }
 
     const grid = gridFromImageData(img);
+
+    // Second sample for motion. Only meaningful when the saver is
+    // frame-addressable — otherwise the two grabs are separated by whatever
+    // wall-clock happened to elapse, which is not a measurement.
+    let motion: FrameMotion | null = null;
+    if (addressable) {
+      inst.renderFrame!(t + MOTION_DT, seed);
+      motion = motionBetween(grid, gridFromImageData(ctx.getImageData(0, 0, canvas.width, canvas.height)), MOTION_DT);
+      inst.renderFrame!(t, seed); // leave the surface on the requested frame
+    }
+
     return {
       braille: renderBrailleMap(grid),
       density: renderDensityMap(grid),
@@ -271,6 +399,8 @@ export async function perceiveSaverFrame(
       rowProfile: grid.rowProfile,
       colProfile: grid.colProfile,
       t,
+      colors: dominantColors(img),
+      motion,
       support: addressable ? 'deterministic' : 'sampled',
     };
   } catch (err) {

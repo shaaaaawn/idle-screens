@@ -1226,6 +1226,9 @@
         overflow: auto;
       }
       .wb-stack-right > .wb-panel:last-child { border-bottom: none; }
+      /* Perception carries a 12-line braille map; an even quarter-share of the
+         column clips it to a couple of rows. Give it double weight. */
+      .wb-stack-right > .wb-panel-perception[open] { flex: 2.2 1 0; }
       .wb-panel:not([open]) .wb-panel-head { border-bottom: none; }
       .wb-panel-head {
         list-style: none; flex: 0 0 auto; height: 24px;
@@ -1572,6 +1575,10 @@
       .perc-mode.is-sampled i { color: var(--warn); font-style: normal; }
       .perc-mode.is-unsupported { border-left-color: var(--bad); }
       .perc-na { display: block; opacity: .45; font-size: 10px; line-height: 1.5; }
+      .perc-swatch {
+        flex: 0 0 auto; width: 10px; height: 10px; border-radius: 2px;
+        border: 1px solid rgba(255,255,255,.2);
+      }
       .perc-braille {
         font-family: 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
         font-size: 10px; line-height: 1.1; letter-spacing: 0;
