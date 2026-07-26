@@ -71,7 +71,32 @@ export interface SaverContext {
   page?: PageContext;
 }
 
-/** A mounted, running saver visual. */
+/**
+ * One deck of a mounted saver's practical composition stack, bottom-up.
+ *
+ * This is deliberately NOT the schema's layer concept (declared sprite
+ * layers): it describes what a running instance is actually composed of, so
+ * hosts and tooling can present and inspect the stack uniformly. A
+ * passthrough saver is at minimum `page` + `surface`; a classic canvas saver
+ * is just its `surface`; savers may further describe the logical draw passes
+ * inside a surface. The model is intentionally small and open — future work
+ * (multi-surface savers, per-pass toggles, cross-saver scenes) extends it
+ * rather than replacing it.
+ */
+export interface SaverLayer {
+  id: string;
+  label: string;
+  /** 'page' = the live document a passthrough saver performs on;
+   *  'surface' = a rendering surface the instance owns (usually a canvas);
+   *  'pass' = a logical draw pass inside the surface above it. */
+  kind: 'page' | 'surface' | 'pass';
+  /** The element that IS this layer, when one exists. Hosts may toggle its
+   *  visibility for inspection. A `page` layer has no element — the HOST
+   *  owns the document and binds it (the saver only borrows it). */
+  el?: HTMLElement;
+  description?: string;
+}
+
 export interface SaverInstance {
   /** Freeze/unfreeze the render loop (paused, reduced-motion, or screensaver end). */
   setPaused(paused: boolean): void;
@@ -83,6 +108,10 @@ export interface SaverInstance {
   applyTrack?(track: ControlTrack): void;
   /** Seek logical animation time (ms) for workbench preview. Optional. */
   previewAt?(t: number): void;
+  /** Describe the practical composition stack, bottom-up. Optional.
+   *  (Named `composition`, not `layers`: schema-compiled instances already
+   *  carry their declared sprite `layers` as data.) */
+  composition?(): SaverLayer[];
   /** Tear down; MUST restore any live-page mutations. */
   dispose(): void;
 }
@@ -100,6 +129,17 @@ export interface SaverManifest {
   paramSpace?: ParamSpace;
   a11y?: { flashSafe?: boolean; notes?: string };
   provenance?: { prompt?: string; seed?: number; model?: string };
+  /** Attribution for savers derived from licensed or third-party work — the
+   *  concept, reference implementation, or embedded assets. Hosts SHOULD show
+   *  this wherever the saver is showcased; the full ledger is CREDITS.md. */
+  attribution?: {
+    /** What this saver descends from, e.g. 'After Dark "Messages" — concept by Berkeley Systems'. */
+    source: string;
+    /** The licensing situation, ours and upstream, e.g. 'MIT port; reference CSS MIT (Bryan Braun)'. */
+    license: string;
+    /** Reference implementation or rights context. */
+    url?: string;
+  };
   thumbnail?: string;
   /** Saver renders on a provided surface (canvas/OffscreenCanvas) and avoids DOM
    *  APIs, enabling Worker execution when the browser supports OffscreenCanvas. */

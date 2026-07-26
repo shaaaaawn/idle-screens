@@ -18,6 +18,11 @@ export const toastersManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Flying Toasters" — Berkeley Systems (1989)',
+    license: 'MIT port; reference CSS MIT (Bryan Braun); embedded sprites (c) Berkeley Systems, included under fair use — see CREDITS.md',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true },
 };
 

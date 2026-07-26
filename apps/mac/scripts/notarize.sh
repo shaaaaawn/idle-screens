@@ -34,7 +34,8 @@ APP="dist/IdleScreens.app"
 DMG="dist/IdleScreens.dmg"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  ./scripts/build-app.sh --release
+  # Notarized builds are the deployed artifact — stamp them as such.
+  IDLE_BUILD_KIND=release ./scripts/build-app.sh --release
 fi
 
 if [[ ! -d "$APP" ]]; then

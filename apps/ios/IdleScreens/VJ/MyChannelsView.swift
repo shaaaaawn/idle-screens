@@ -235,7 +235,7 @@ private struct TokenRevealSheet: View {
                         sentToTV = await app.pushToTV(channelId: channelId)
                     }
                 } label: {
-                    Label(sentToTV ? "Playing on Apple TV" : "Play on Apple TV",
+                    Label(sentToTV ? "Playing on your screen" : "Play on your screen",
                           systemImage: sentToTV ? "checkmark.circle.fill" : "play.tv")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)

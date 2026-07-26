@@ -8,7 +8,7 @@ struct ContentView: View {
             MyChannelsView()
                 .tabItem { Label("VJ", systemImage: "slider.horizontal.3") }
             PairedTVView()
-                .tabItem { Label("TV", systemImage: "appletv") }
+                .tabItem { Label("Screens", systemImage: "tv.badge.wifi") }
         }
         .preferredColorScheme(.dark)
         .tint(.appPrimary)

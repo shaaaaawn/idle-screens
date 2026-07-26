@@ -175,11 +175,13 @@ fn with_trailing_slash(mut url: String) -> String {
 }
 
 /// A channel value is either a bare id ("ballet") or a full URL passed through.
+/// Bare ids get this screen's `device` id so a paired phone can retarget the
+/// display; explicit URLs are the user's business and pass through untouched.
 pub fn resolve_channel_url(channel: &str) -> String {
     if channel.contains("://") {
         channel.to_string()
     } else {
-        format!("{CHANNEL_BASE}{channel}")
+        format!("{CHANNEL_BASE}{channel}?device={}", crate::pair::device_id())
     }
 }
 

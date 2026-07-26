@@ -265,6 +265,9 @@ export function buildGallery(mount: HTMLElement, groups: GalleryGroup[], opts: G
   function applyFilter(): void {
     const q = query.trim().toLowerCase();
     let shown = 0;
+    // The All view is one dense wall (see CSS): section headers only earn
+    // their row breaks once a package chip narrows the field.
+    body.dataset.filter = groupFilter;
     for (const rec of cards) {
       const m = rec.saver.manifest;
       const hit =

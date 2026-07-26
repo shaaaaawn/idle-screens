@@ -27,6 +27,7 @@ import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
 import { buildGallery, type GalleryGroup } from './gallery';
 import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
+import { STAGES, mountStage, mirrorPage, type MountedStage } from './stages';
 import { wirePerceptionHarness } from './frame-perception';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle']);
@@ -217,8 +218,7 @@ const twoFrames = (): Promise<void> =>
   new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 const SAVER_VARIANTS: Record<string, string> = {
-  messages: 'Out to Lunch',
-  messages2: 'Macintosh',
+  messages: 'Out to Lunch / Macintosh',
 };
 
 if (params.has('frame')) {
@@ -521,6 +521,35 @@ function liveMode(): void {
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
     let devPreviewInst: SaverInstance | null = null;
+    let devStage: MountedStage | null = null;
+    let devMountToken = 0;
+
+    // Stage picker: passthrough savers perform ON a page, so the workbench
+    // offers swappable mock documents. (stage, seed) => identical performance.
+    const stageSaved = localStorage.getItem('idleScreens.dev.stage');
+    let stageId = STAGES.some((s) => s.id === stageSaved) ? stageSaved! : 'article';
+    const stagePick = document.createElement('select');
+    stagePick.id = 'stage-pick';
+    stagePick.title = 'Mock page the passthrough saver performs on';
+    stagePick.setAttribute('aria-label', 'Stage document');
+    stagePick.style.cssText =
+      'position:absolute;right:10px;top:10px;z-index:3;font:10px ui-monospace,monospace;' +
+      'background:#14161c;color:#c6cbd4;border:1px solid #2a2e38;border-radius:4px;padding:3px 6px;display:none';
+    for (const st of STAGES) {
+      const o = document.createElement('option');
+      o.value = st.id;
+      o.textContent = st.label;
+      stagePick.append(o);
+    }
+    stagePick.value = stageId;
+    // Lives NEXT TO the viewport, not inside it — devSelect clears the
+    // viewport's children on every mount.
+    viewportHost?.parentElement?.appendChild(stagePick);
+    stagePick.addEventListener('change', () => {
+      stageId = stagePick.value;
+      localStorage.setItem('idleScreens.dev.stage', stageId);
+      devSelect(cfg.saver);
+    });
 
     const devSelect = (id: string): void => {
       const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
@@ -538,6 +567,8 @@ function liveMode(): void {
 
       if (devPreviewInst) devPreviewInst.dispose();
       devPreviewInst = null;
+      devStage?.destroy();
+      devStage = null;
       viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
       const rect = viewportHost.getBoundingClientRect();
       const previewCtx = {
@@ -557,25 +588,63 @@ function liveMode(): void {
       });
       layers.setSaver(id);
 
-      void Promise.resolve(
-        saver.mount({
-          host: viewportHost,
-          dpr: devicePixelRatio ?? 1,
-          width: Math.round(rect.width) || 640,
-          height: Math.round(rect.height) || 400,
-          rng: createRng((cfg.seed >>> 0) || 1),
-          seed: cfg.seed,
-          reducedMotion: false,
-        }),
-      ).then((inst) => {
+      // Passthrough savers perform ON a page: mount a stage document in an
+      // iframe and let the saver play inside it, victims scoped to the stage.
+      // (stage, seed) is the whole recipe — the performance is repeatable.
+      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
+      stagePick.style.display = saver.manifest.passthrough ? 'block' : 'none';
+      const token = ++devMountToken;
+      const mounted: Promise<SaverInstance> = useStage
+        ? mountStage(viewportHost, STAGES.find((st) => st.id === stageId)!).then((st) => {
+            if (token !== devMountToken) { st.destroy(); throw new Error('stale stage mount'); }
+            devStage = st;
+            return Promise.resolve(
+              saver.mount({
+                host: st.overlay,
+                dpr: devicePixelRatio ?? 1,
+                width: st.width || Math.round(rect.width) || 640,
+                height: st.height || Math.round(rect.height) || 400,
+                rng: createRng((cfg.seed >>> 0) || 1),
+                seed: cfg.seed,
+                reducedMotion: false,
+                page: st.page,
+              }),
+            );
+          })
+        : Promise.resolve(
+            saver.mount({
+              host: viewportHost,
+              dpr: devicePixelRatio ?? 1,
+              width: Math.round(rect.width) || 640,
+              height: Math.round(rect.height) || 400,
+              rng: createRng((cfg.seed >>> 0) || 1),
+              seed: cfg.seed,
+              reducedMotion: false,
+            }),
+          );
+      mounted.then((inst) => {
+        if (token !== devMountToken) { inst.dispose(); return; }
         devPreviewInst = inst;
         inst.setPaused(true);
         timeline.setSaver(saver, inst, cfg.seed);
+        layers.setRuntime(inst, devStage?.doc.body ?? null);
+        if (devStage) {
+          // Re-aim perception at the STAGE performance: same victim geometry
+          // (mirrored, so the sampler never fights the live instance), same
+          // dimensions — the map now portrays what the viewport shows.
+          perception.setSaver(id, {
+            width: devStage.width || Math.round(rect.width) || 640,
+            height: devStage.height || Math.round(rect.height) || 400,
+            seed: cfg.seed,
+            saver,
+            page: mirrorPage(devStage),
+          });
+        }
         requestAnimationFrame(() => {
           devProps.refresh();
           debug.setContext(previewCtx);
         });
-      });
+      }).catch(() => { /* superseded by a newer selection */ });
     };
 
     layers.onSpecChange = (editedSpec) => {
@@ -601,6 +670,7 @@ function liveMode(): void {
           devPreviewInst = inst;
           inst.setPaused(true);
           timeline.setSaver(newSaver, inst, cfg.seed);
+          layers.setRuntime(inst, null);
         });
         perception.updateSpec(editedSpec);
       } catch (err) {
@@ -719,6 +789,8 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
         ${row('Flash safe', flashSafe === undefined ? '—' : flashSafe ? 'yes' : 'no')}
         ${row('Worker ready', m.workerReady ? 'yes' : 'no')}
         ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
+        ${m.attribution ? row('Source', `<span title="${m.attribution.source}">${m.attribution.source}</span>`) : ''}
+        ${m.attribution ? row('License', m.attribution.url ? `<a href="${m.attribution.url}" target="_blank" rel="noreferrer">${m.attribution.license}</a>` : m.attribution.license) : ''}
       </dl>
       ${m.a11y?.notes ? `<p class="wb-note">${m.a11y.notes}</p>` : ''}`;
   };

@@ -10,6 +10,7 @@ import { pipes } from './pipes';
 import { flurry } from './flurry';
 import { fluid } from './fluid';
 import { reactionDiffusion } from './reaction-diffusion';
+import { messages } from './messages';
 
 runIdleWorker(
   {
@@ -23,6 +24,7 @@ runIdleWorker(
     [flurry.manifest.id]: flurry,
     [fluid.manifest.id]: fluid,
     [reactionDiffusion.manifest.id]: reactionDiffusion,
+    [messages.manifest.id]: messages,
   },
   { compiler: compileSaver },
 );

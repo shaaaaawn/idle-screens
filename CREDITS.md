@@ -18,8 +18,7 @@ The following savers carry this lineage:
 | Rainstorm | After Dark "Rainstorm" | Canvas2d raindrop/splash animation; concept from Berkeley Systems. |
 | Hard Rain | After Dark "Hard Rain" | Dense rain variant; concept from Berkeley Systems. |
 | Globe | After Dark "Globe" | Wireframe globe bounce; concept from Berkeley Systems. |
-| Messages (Out to Lunch) | After Dark "Messages" | Scrolling text; concept from Berkeley Systems. |
-| Messages (Macintosh) | After Dark "Messages" | Corner-to-corner text variant; concept from Berkeley Systems. |
+| Messages | After Dark "Messages" | Both classic behaviours ("Out to Lunch" marquee and the "Macintosh" corner-to-corner drift) consolidated into one modern canvas saver with typed params (`mode`, `phrase`, `speed`, `ink`, `glow`, `trail`); concepts from Berkeley Systems. |
 | Bouncing Ball | After Dark "Bouncing Ball" | CSS-animated ball; concept from Berkeley Systems. |
 | Logo | After Dark | Bouncing logo mark; concept from Berkeley Systems. |
 | Fade Out | After Dark "Fade Away" | Progressive pixel fade; concept from Berkeley Systems. |

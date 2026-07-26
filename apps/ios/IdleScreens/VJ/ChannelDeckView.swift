@@ -60,7 +60,7 @@ struct ChannelDeckView: View {
                             }
                         }
                     } label: {
-                        Label("Play on Apple TV", systemImage: "play.tv")
+                        Label("Play on your screen", systemImage: "play.tv")
                     }
                     .disabled(isSending)
                 }

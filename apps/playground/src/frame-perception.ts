@@ -29,7 +29,7 @@
  * is labelled as such, because an eval number that silently wobbles run to run
  * is worse than no number.
  */
-import { createRng, type SaverInstance, type SaverPlugin } from '@idle-screens/core';
+import { createRng, type PageContext, type SaverInstance, type SaverPlugin } from '@idle-screens/core';
 import { renderBrailleMap, renderDensityMap, type LuminanceGrid } from '@idle-screens/schema';
 
 export type FrameSupport = 'deterministic' | 'sampled' | 'unsupported';
@@ -289,6 +289,12 @@ export interface PerceiveFrameOptions {
   /** Sample time in ms — honoured exactly when the saver is frame-addressable. */
   t?: number;
   /**
+   * Page the passthrough saver performs on. Without it the sample mounts on
+   * an EMPTY page — which is a DIFFERENT performance (fallback modes) from
+   * the one in the viewport. Hosts with a stage should pass a mirror of it.
+   */
+  page?: PageContext;
+  /**
    * Backing-store multiplier. Savers size their canvas `w * dpr` and then
    * `setTransform(dpr, …)`, so a dpr BELOW 1 hands the saver a large logical
    * viewport while allocating a small buffer — the lever that makes a
@@ -346,7 +352,7 @@ export async function perceiveSaverFrame(
         seed,
         reducedMotion: false,
         page: saver.manifest.passthrough
-          ? { palette: () => [], victims: () => [] }
+          ? (opts.page ?? { palette: () => [], victims: () => [] })
           : undefined,
       }),
     );

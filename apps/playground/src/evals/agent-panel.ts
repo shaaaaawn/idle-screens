@@ -193,8 +193,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         </label>
       </div>
       <p class="evals-field-hint" data-role="model-hint"></p>
-      <div class="evals-field" data-role="scopes"><span class="evals-agent-scope-label">Scope</span></div>
-      <p class="evals-agent-estimate" data-role="estimate"></p>
+      <div data-role="scope-controls"></div>
       ${
         keyed
           ? ''
@@ -214,8 +213,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
     const maxCallsInput = modal.querySelector<HTMLInputElement>('input[name="maxCalls"]')!;
     const datalist = modal.querySelector<HTMLDataListElement>('#agent-model-list')!;
     const hint = modal.querySelector<HTMLElement>('[data-role="model-hint"]')!;
-    const scopesHost = modal.querySelector<HTMLElement>('[data-role="scopes"]')!;
-    const estimate = modal.querySelector<HTMLElement>('[data-role="estimate"]')!;
+    const scopeHost = modal.querySelector<HTMLElement>('[data-role="scope-controls"]')!;
 
     modelInput.value = defaults.model ?? '';
 
@@ -235,34 +233,17 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
     paintModels(cachedModels());
     void fetchModels().then(paintModels).catch(() => { /* cached stands */ });
 
-    let scope: Scope = 'screen';
-    const radios: HTMLInputElement[] = [];
-    for (const s of SCOPES) {
-      const targets = targetsFor(ctx, s.id);
-      const label = document.createElement('label');
-      label.className = 'evals-agent-scope';
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'agent-scope';
-      radio.checked = s.id === scope;
-      radio.addEventListener('change', () => {
-        scope = s.id;
-        syncEstimate();
-      });
-      radios.push(radio);
-      label.append(radio, document.createTextNode(s.label(targets.length)));
-      scopesHost.append(label);
-    }
-
-    const syncEstimate = (): void => {
-      const n = targetsFor(ctx, scope).length;
-      const calls = Math.max(1, Number(maxCallsInput.value) || 20);
-      estimate.textContent =
-        `Worst case: ${n} screen${n === 1 ? '' : 's'} × ${calls} tool calls each — ` +
-        `serial, abortable anytime. Scores are always computed locally.`;
-    };
-    maxCallsInput.addEventListener('input', syncEstimate);
-    syncEstimate();
+    const scopeControls = mountAgentScopeControls(
+      scopeHost,
+      ctx.catalog,
+      {
+        scope: 'benchmark',
+        artistId: ctx.artistId,
+        benchmarkId: ctx.benchmarkId,
+        screenId: ctx.screenId,
+      },
+      { maxCallsInput },
+    );
 
     modal.querySelector('[data-act="cancel"]')?.addEventListener('click', close);
     modal.querySelector('[data-act="open-settings"]')?.addEventListener('click', (e) => {
@@ -277,7 +258,17 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         return;
       }
       const maxToolCalls = Math.min(100, Math.max(1, Number(maxCallsInput.value) || 20));
-      void runBatch(model, maxToolCalls, targetsFor(ctx, scope));
+      const sel = scopeControls.read();
+      const targets = resolveAgentTargets(
+        {
+          catalog: ctx.catalog,
+          artistId: sel.artistId,
+          benchmarkId: sel.benchmarkId,
+          screenId: sel.screenId,
+        },
+        sel.scope,
+      );
+      void runBatch(model, maxToolCalls, targets);
     });
   };
 

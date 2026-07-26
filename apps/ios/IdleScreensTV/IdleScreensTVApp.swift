@@ -17,7 +17,7 @@ struct IdleScreensTVApp: App {
                     } else if ProcessInfo.processInfo.arguments.contains("-settings") {
                         SettingsView()
                     } else {
-                        ChannelGridView()
+                        MainTabView()
                     }
                 }
 
@@ -47,6 +47,32 @@ struct IdleScreensTVApp: App {
             .onChange(of: scenePhase) {
                 appState.scenePhaseChanged(active: scenePhase == .active)
             }
+        }
+    }
+}
+
+/// Top tab bar — the tvOS-native way to reach secondary surfaces: swipe up
+/// from anywhere, no walking focus to a corner button. Content pushes
+/// (fullscreen channels) hide the bar automatically.
+private struct MainTabView: View {
+    @Environment(TVAppState.self) private var app
+    @State private var selection: Tab = .channels
+
+    enum Tab: Hashable { case channels, settings }
+
+    var body: some View {
+        TabView(selection: $selection) {
+            ChannelGridView()
+                .tabItem { Label("Channels", systemImage: "tv") }
+                .tag(Tab.channels)
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(Tab.settings)
+        }
+        // A paired phone can push a channel while Settings is up — jump to
+        // the Channels tab so the saver is actually visible.
+        .onChange(of: app.selectedChannelId) {
+            if app.selectedChannelId != nil { selection = .channels }
         }
     }
 }

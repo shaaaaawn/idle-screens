@@ -17,6 +17,11 @@ export const fishManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Fish!" — Berkeley Systems (1990)',
+    license: 'MIT port; reference CSS MIT (Bryan Braun); embedded sprites (c) Berkeley Systems, included under fair use — see CREDITS.md',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true },
 };
 

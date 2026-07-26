@@ -35,7 +35,13 @@ heart while grooming, and blinks. It rolls belly-up on wide perches (paws
 wiggling in the air, the perch swaying slowly under it), chatters its jaw at
 the moth mid-stalk, pops a startled "!" when it spots it and a curious "?"
 during the look-around, twitches its tail in its sleep while dreaming, and
-always does the big wake-up stretch before leaving a nap.
+always does the big wake-up stretch before leaving a nap. It keeps a
+FAVOURITE perch: the loop returns it home near the end — greeted with a
+heart — for the longest nap of the day. The genuinely playful ones get THE
+ZOOMIES: three flat-out jumps chained with barely a landing between them,
+recovered from with an embarrassed groom. It sometimes lands right on the end
+of a block and sits there with its tail hanging off the ledge, swinging slow;
+and mid-sit it will give you the slow-blink.
 
 11 typed params (`pace`, `jumpArc`, `bounce`, `veil`, `lightRadius`, `eyeGlow`,
 `tint`, …) plus a dusk-falls `demoTrack`.

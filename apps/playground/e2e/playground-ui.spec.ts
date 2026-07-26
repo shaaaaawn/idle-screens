@@ -389,12 +389,12 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-act="export"]')).toBeEnabled();
   });
 
-  test('by-artist nav still shows full body of work after a partial agent-evidence run', async ({ page }) => {
+  test('by-artist shows only authored screens from a partial agent run — no catalog blanks', async ({ page }) => {
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
 
-    // Inject a browser run whose authoredScreens cover only one benchmark
-    // (typical agent scope) — selecting it must not collapse By artist.
+    // Inject a run that authored calm-horizon for every artist — By artist
+    // must show that one tile per artist, not the other 9 catalog fillers.
     const runId = await page.evaluate(async () => {
       const { getCatalog } = await import('/src/evals/catalog.ts');
       const catalog = getCatalog();
@@ -462,18 +462,13 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-role="subtitle"]')).toContainText('e2e partial authored');
 
     await page.locator('.evals-mode-btn[data-mode="artist"]').click();
-    await expect(page.locator('[data-nav="artist"]')).toBeVisible();
     const artistButtons = page.locator('[data-nav="artist"] .evals-nav-item');
-    expect(await artistButtons.count()).toBeGreaterThanOrEqual(15);
     await artistButtons.nth(1).click();
-    await expect(page.locator('.evals-grid-label')).toHaveText([
-      'Benchmarks — shared intents',
-      'Signatures — artist-owned',
-    ]);
-    // Full body of work: 5 benchmarks + 5 signatures — not just the authored slice.
-    expect(await page.locator('.evals-tile').count()).toBe(10);
+    await expect(page.locator('.evals-grid-label')).toHaveText(['Benchmarks — shared intents']);
+    // One authored benchmark — not the full 5+5 catalog wall.
+    expect(await page.locator('.evals-tile').count()).toBe(1);
     await artistButtons.nth(2).click();
-    expect(await page.locator('.evals-tile').count()).toBe(10);
+    expect(await page.locator('.evals-tile').count()).toBe(1);
   });
 
   // Mock OpenRouter so CI never depends on the network. A fake, non-secret
@@ -517,6 +512,29 @@ test.describe('evals view', () => {
     // Provider is derived from the canonical id, never typed a second time.
     await expect(page.locator('input[name="provider"]')).toHaveValue('anthropic');
     await expect(page.locator('input[name="provider"]')).toHaveAttribute('readonly', '');
+  });
+
+  test('agent scope pickers name the artist and benchmark explicitly', async ({ page }) => {
+    await mockOpenRouter(page);
+    await openRunDialog(page);
+
+    // Default: one benchmark × every artist — benchmark picker visible, artist hidden.
+    await expect(page.locator('select[name="agentScope"]')).toHaveValue('benchmark');
+    await expect(page.locator('[data-role="target-benchmark"]')).toBeVisible();
+    await expect(page.locator('[data-role="target-artist"]')).toBeHidden();
+    await expect(page.locator('[data-role="scope-estimate"]')).toContainText(/\d+ screens/);
+
+    await page.locator('select[name="agentScope"]').selectOption('artist');
+    await expect(page.locator('[data-role="target-artist"]')).toBeVisible();
+    await expect(page.locator('[data-role="target-benchmark"]')).toBeHidden();
+    await page.locator('select[name="targetArtist"]').selectOption('kusama');
+    // One artist's shared benchmarks — 5 screens, not "whatever was selected".
+    await expect(page.locator('[data-role="scope-estimate"]')).toContainText('5 screens');
+
+    await page.locator('select[name="agentScope"]').selectOption('screen');
+    await expect(page.locator('[data-role="target-artist"]')).toBeVisible();
+    await expect(page.locator('[data-role="target-screen"]')).toBeVisible();
+    await expect(page.locator('[data-role="scope-estimate"]')).toContainText('1 screen');
   });
 
   test('the API key is stored client-side and never reaches the run record', async ({ page }) => {

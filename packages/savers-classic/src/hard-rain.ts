@@ -23,6 +23,11 @@ export const hardRainManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Hard Rain" — concept by Berkeley Systems',
+    license: 'MIT port; reference CSS MIT (Bryan Braun)',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true, notes: 'Slow-expanding coloured rings on black; no flashing.' },
   workerReady: true,
 };

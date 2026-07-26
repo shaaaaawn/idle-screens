@@ -17,7 +17,7 @@ declare global {
 
 const ALL_IDS = [
   'black-hole', 'tide', 'limelight', 'catwalk', 'slipstream', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
-  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages', 'messages2',
+  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages',
   'pipes', 'bsod', 'flurry', 'fluid', 'reaction-diffusion', 'mystify', 'snowfall', 'lanterns',
   'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets',
 ];
@@ -29,7 +29,7 @@ const ALL_IDS = [
  * running, and must restore them on dispose; every non-passthrough saver must
  * touch nothing outside its host.
  */
-test('all 31 savers honor the full SaverInstance lifecycle', async ({ page }) => {
+test('all 30 savers honor the full SaverInstance lifecycle', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await page.goto('/?harness=1');

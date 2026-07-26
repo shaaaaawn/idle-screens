@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let lastUpdateCheckKey = "lastUpdateCheck"  // epoch seconds
   private static let castChannelKey = "activeCastChannel"
   private static let pendingUpdateToastKey = "pendingUpdateToast"
+  private static let activityHUDKey = "showActivityHUD"
 
   /// pauseInFullscreen defaults ON (don't cover presentations/video calls).
   private var pauseInFullscreen: Bool {
@@ -118,10 +119,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     maybeAutoCheckForUpdates()
 
+    // Debug: --about prints version + build provenance and exits.
+    if CommandLine.arguments.contains("--about") {
+      print(BuildInfo.summary)
+      exit(0)
+    }
+
     // Debug: --diagnostics prints the report to stdout and exits.
     if CommandLine.arguments.contains("--diagnostics") {
       print(Diagnostics.report(thumbnails: thumbnails))
       exit(0)
+    }
+
+    // Debug: --activity prints the system-activity snapshot and exits.
+    if CommandLine.arguments.contains("--activity") {
+      SystemActivity.snapshot { snap in
+        print(SystemActivity.textReport(snap))
+        exit(0)
+      }
+      return
     }
 
     // Debug: --check-updates runs a bundle refresh against the live server.
@@ -171,9 +187,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.perDisplaySaver = perDisplaySaver
     saver.favorites = Set(defaults.stringArray(forKey: Self.favoritesKey) ?? [])
     saver.hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
+    saver.showActivity = defaults.bool(forKey: Self.activityHUDKey)
     let channelId = defaults.string(forKey: Self.channelKey)
     saver.channelURL = channelId.flatMap { id in
-      id.isEmpty ? nil : URL(string: "https://idlescreens.com/channel/\(id)")
+      // `device` registers this Mac's viewer socket so a paired iPhone can
+      // retarget the display with a "switch" push.
+      id.isEmpty
+        ? nil
+        : URL(string: "https://idlescreens.com/channel/\(id)?device=\(PairDevice.deviceId)")
     }
   }
 
@@ -224,6 +245,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func buildMenu() -> NSMenu {
     let menu = NSMenu()
 
+    // Version + build provenance up top — dev builds and releases look
+    // identical in the menu bar otherwise.
+    let about = NSMenuItem(
+      title: "About idle screens (\(BuildInfo.appVersion) · \(BuildInfo.current.kind))",
+      action: #selector(showAbout(_:)), keyEquivalent: "")
+    about.target = self
+    menu.addItem(about)
+    menu.addItem(.separator())
+
     let startNow = NSMenuItem(
       title: "Start Screen Saver", action: #selector(startNow(_:)), keyEquivalent: "s")
     startNow.target = self
@@ -260,6 +290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       toggleItem("Pause During Fullscreen", Self.pauseFullscreenKey, #selector(toggleDefault(_:)),
         defaultOn: true))
     menu.addItem(toggleItem("Dim at Night", Self.dimAtNightKey, #selector(toggleDefault(_:))))
+    menu.addItem(
+      toggleItem("Show System Activity", Self.activityHUDKey, #selector(toggleActivityHUD(_:))))
     menu.addItem(launchAtLoginItem())
 
     menu.addItem(.separator())
@@ -277,6 +309,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       title: "Diagnostics…", action: #selector(showDiagnostics(_:)), keyEquivalent: "")
     diag.target = self
     menu.addItem(diag)
+    let activity = NSMenuItem(
+      title: "System Activity…", action: #selector(showSystemActivity(_:)), keyEquivalent: "")
+    activity.target = self
+    menu.addItem(activity)
 
     menu.addItem(.separator())
     let quit = NSMenuItem(
@@ -358,6 +394,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     channel.target = self
     channel.state = channelId.isEmpty ? .off : .on
     submenu.addItem(channel)
+
+    let pair = NSMenuItem(
+      title: "Pair iPhone…", action: #selector(pairPhone(_:)), keyEquivalent: "")
+    pair.target = self
+    submenu.addItem(pair)
 
     let item = NSMenuItem(title: "Content", action: nil, keyEquivalent: "")
     item.submenu = submenu
@@ -523,6 +564,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusItem.menu = buildMenu()
   }
 
+  @objc private func showAbout(_ sender: NSMenuItem) {
+    let alert = NSAlert()
+    alert.messageText = "idle screens"
+    alert.informativeText = BuildInfo.summary
+    NSApp.activate(ignoringOtherApps: true)
+    alert.runModal()
+  }
+
+  @objc private func pairPhone(_ sender: NSMenuItem) {
+    let channelId = defaults.string(forKey: Self.channelKey)
+    PairDevice.mintCode(channelId: channelId) { result in
+      let alert = NSAlert()
+      switch result {
+      case .success(let code):
+        alert.messageText = "Pair your iPhone"
+        alert.informativeText = """
+          In idle screens on your iPhone, open the TV tab and enter:
+
+          \(code)
+
+          The code expires in 5 minutes. Set a channel on this Mac \
+          (Content → Channel…) so pushes have a socket to reach.
+          """
+      case .failure(let error):
+        alert.messageText = "Pairing unavailable"
+        alert.informativeText = error.localizedDescription
+      }
+      NSApp.activate(ignoringOtherApps: true)
+      alert.runModal()
+    }
+  }
+
   @objc private func toggleDefault(_ sender: NSMenuItem) {
     guard let key = sender.representedObject as? String else { return }
     let current = sender.state == .on  // reflects the value shown
@@ -655,6 +728,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func showDiagnostics(_ sender: NSMenuItem) {
     alert("idle-screens Diagnostics", Diagnostics.report(thumbnails: thumbnails))
+  }
+
+  @objc private func toggleActivityHUD(_ sender: NSMenuItem) {
+    defaults.set(sender.state != .on, forKey: Self.activityHUDKey)
+    applyConfigToSaver()
+    statusItem.menu = buildMenu()
+  }
+
+  @objc private func showSystemActivity(_ sender: NSMenuItem) {
+    SystemActivity.snapshot { [weak self] snap in
+      self?.alert("System Activity", SystemActivity.textReport(snap))
+    }
   }
 
   private func setStatusIcon(_ symbol: String) {

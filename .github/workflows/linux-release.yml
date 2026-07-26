@@ -49,6 +49,9 @@ jobs:
 
       - name: Build release tarball
         working-directory: apps/linux
+        env:
+          # Stamps the About panel: distinguishes this artifact from local dev builds.
+          IDLE_BUILD_KIND: release
         run: ./scripts/make-release.sh
 
       - name: Publish to GitHub Release

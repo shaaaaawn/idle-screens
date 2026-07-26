@@ -13,7 +13,7 @@ import {
   fingerprintScreens,
 } from './provenance';
 import { listRuns, loadRun, saveBrowserRun } from './run-store';
-import { overlayAuthoredScreens } from './screens-view';
+import { screensForArtistRun, screensForCompareRun } from './screens-view';
 import {
   buildRunTimeline,
   promptRunRequest,
@@ -562,21 +562,25 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   };
 
   /**
-   * Both modes render the same thing — a gallery of live screens plus the
-   * inspector. Compare holds the intent constant and varies the artist;
-   * By artist holds the artist constant and shows their whole body of work.
-   * Authored evidence from a selected agent run overlays the catalog — it
-   * never replaces the catalog slice (so By artist stays a full 5+5 wall).
+   * Both modes render a gallery of live screens plus the inspector.
+   * With agent-run evidence (`activeScreens`), only show what that run
+   * actually authored — no catalog blanks for screens the model never wrote.
+   * Without evidence (rescore / browsing), fall back to the full catalog slice.
    */
   const screensForView = (): EvalScreen[] => {
     if (mode === 'gallery') return [];
     if (mode === 'compare') {
-      return overlayAuthoredScreens(
+      return screensForCompareRun(
         catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId),
         activeScreens,
+        benchmarkId,
       );
     }
-    return overlayAuthoredScreens(catalog.screensByArtist.get(artistId) ?? [], activeScreens);
+    return screensForArtistRun(
+      catalog.screensByArtist.get(artistId) ?? [],
+      activeScreens,
+      artistId,
+    );
   };
 
   const renderGrid = (): void => {
@@ -677,7 +681,10 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         }
         intentEl.append(title, body, chips);
       }
-      subtitleEl.textContent = `${catalog.benchmarks.find((b) => b.id === benchmarkId)?.title ?? benchmarkId} × ${catalog.artists.length} artists — same intent, different StyleDNA`;
+      subtitleEl.textContent =
+        `${catalog.benchmarks.find((b) => b.id === benchmarkId)?.title ?? benchmarkId} × ${screens.length}` +
+        (activeScreens?.length ? ' authored' : ` / ${catalog.artists.length} artists`) +
+        ' — same intent, different StyleDNA';
       chamber.setEntries(
         chamberEntriesForCompare(screens),
         `${catalog.benchmarks.find((b) => b.id === benchmarkId)?.title ?? benchmarkId} — ${screens.length} artists, one intent`,
@@ -712,6 +719,12 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         `${a?.artist ?? artistId} — ${screens.length} screens`,
       );
       // Group the artist's gallery so shared intents read apart from their own work.
+      if (!screens.length && activeScreens?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'evals-grid-empty';
+        empty.textContent = 'This run didn’t author any screens for this artist.';
+        compareGrid.append(empty);
+      }
       for (const kind of ['benchmark', 'signature'] as const) {
         const group = screens.filter((s) => s.kind === kind);
         if (!group.length) continue;

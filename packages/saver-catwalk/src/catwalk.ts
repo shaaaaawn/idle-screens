@@ -5,6 +5,7 @@ import {
   type ParamSpace,
   type SaverContext,
   type SaverInstance,
+  type SaverLayer,
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
@@ -101,6 +102,10 @@ interface Visit {
   quirk: number;
   /** Victim index of the neighbouring block a 'bat' visit swats, or -1. */
   batTarget: number;
+  /** Part of a zoomies chain: barely lands before launching again. */
+  zoom: boolean;
+  /** The return to the favourite perch — greeted with a heart, ends in the long nap. */
+  favorite: boolean;
 }
 
 /** In-place pounce hop: starts this long before the visit's departure. */
@@ -131,12 +136,15 @@ interface CatFrame {
   state: Action | 'jump' | 'crouch' | 'land' | 'walk' | 'stalk';
   /** 0..1 progress through the state, for pose blending. */
   k: number;
+  /** 0..1 — how close to the end of its perch it is sitting. Near 1, the
+   *  tail hangs off the ledge instead of curling behind. */
+  edge: number;
   visit: Visit;
 }
 
 /** Stand-in visit for the floor patrol (no perches to tour). The impossible
  *  times keep every itinerary-relative effect (dust, Zzz) inert. */
-const GROUND_VISIT: Visit = { perch: 0, tA: -1e9, tD: -1e9, action: 'sit', face: 1, dx: 0, quirk: 0, batTarget: -1 };
+const GROUND_VISIT: Visit = { perch: 0, tA: -1e9, tD: -1e9, action: 'sit', face: 1, dx: 0, quirk: 0, batTarget: -1, zoom: false, favorite: false };
 
 type Params = Record<keyof typeof PARAM_SPACE, number>;
 
@@ -415,6 +423,27 @@ class CatwalkInstance implements SaverInstance {
     // cat. A playful one bats and pounces; a placid one mostly sits and naps.
     const playful = 0.35 + rng.next() * 0.55;
 
+    // Perch memory: pick a favourite from the first stops and return to it
+    // near the end of the loop. The second visit is greeted with a heart and
+    // becomes the long nap — viewers notice "it likes that one".
+    let favoriteIdx = -1;
+    if (order.length >= 6) {
+      const fav = order[Math.floor(rng.next() * 3)]!;
+      const at = order.length - 2;
+      if (order[at - 1] !== fav && order[at + 1] !== fav && order[at] !== fav) {
+        order[at] = fav;
+        favoriteIdx = at;
+      }
+    }
+
+    // The zoomies: a burst of three barely-there landings chained at speed,
+    // followed by an embarrassed groom. Only the genuinely playful cats.
+    let zoomStart = -1;
+    if (playful > 0.78 && order.length >= 7) {
+      zoomStart = 2 + Math.floor(rng.next() * (order.length - 6));
+      if (favoriteIdx >= 0 && zoomStart + 3 >= favoriteIdx) zoomStart = -1; // never trample the homecoming
+    }
+
     let t = 0;
     for (let i = 0; i < order.length; i++) {
       const perch = order[i]!;
@@ -422,9 +451,17 @@ class CatwalkInstance implements SaverInstance {
       const here = P[perch]!;
 
       const batTarget = this.batTargetFor(perch);
+      const zoom = zoomStart >= 0 && i >= zoomStart && i < zoomStart + 3;
+      const favorite = i === favoriteIdx;
       let action: Action;
       const roll = rng.next();
-      if (roll < sleepy) {
+      if (zoom) {
+        action = 'sit'; // never reached — a zoomies dwell is all land-and-launch
+      } else if (zoomStart >= 0 && i === zoomStart + 3) {
+        action = 'groom'; // the post-zoomies composure recovery
+      } else if (favorite) {
+        action = 'sleep'; // home again — the long nap
+      } else if (roll < sleepy) {
         action = 'sleep';
       } else {
         // Weighted pool; 'bat' only when something is in paw's reach.
@@ -434,7 +471,9 @@ class CatwalkInstance implements SaverInstance {
           ['stretch', 0.12],
           ['knead', 0.14],
           ['pounce', 0.2 * playful],
-          ['bat', batTarget >= 0 ? 0.3 * playful : 0],
+          // Weighted up: zoomies and the homecoming already claim several
+          // of a playful cat's stops, and batting is the crown jewel.
+          ['bat', batTarget >= 0 ? 0.42 * playful : 0],
           // Belly-up roll needs room — only on genuinely wide perches.
           ['roll', here.halfW >= 90 ? 0.14 * playful : 0],
         ];
@@ -447,7 +486,9 @@ class CatwalkInstance implements SaverInstance {
         }
       }
       const dwell =
-        action === 'sleep' ? 6_000 + rng.next() * 4_500
+        zoom ? 380 + rng.next() * 140
+        : favorite ? 8_000 + rng.next() * 3_500
+        : action === 'sleep' ? 6_000 + rng.next() * 4_500
         : action === 'groom' ? 3_200 + rng.next() * 1_800
         : action === 'knead' ? 4_000 + rng.next() * 2_000
         : action === 'bat' ? 3_800 + rng.next() * 1_400
@@ -464,12 +505,17 @@ class CatwalkInstance implements SaverInstance {
         tD,
         action,
         face: next.x >= here.x ? 1 : -1,
-        dx: (rng.next() - 0.5) * Math.max(0, here.halfW - 26),
+        // Spread reaches ~85% of the way to the perch ends, so the outer
+        // landings actually read as edge-sits (tail off the ledge).
+        dx: (rng.next() - 0.5) * 1.7 * Math.max(0, here.halfW - 26),
         quirk: rng.next(),
         batTarget: action === 'bat' ? batTarget : -1,
+        zoom,
+        favorite,
       });
       const dist = Math.hypot(next.x - here.x, next.y - here.y);
-      t = tD + 420 + dist * 0.55; // jump duration scales with distance
+      // Zoomies jumps are flat-out; normal jumps scale with distance.
+      t = tD + (zoom ? 240 + dist * 0.3 : 420 + dist * 0.55);
     }
     this.loopD = t; // the final jump lands at t == 0 of the next loop
   }
@@ -538,27 +584,28 @@ class CatwalkInstance implements SaverInstance {
       if (vis.action === 'bat' && vis.batTarget >= 0) {
         face = this.victims[vis.batTarget]!.cx >= x0 ? 1 : -1;
       }
-      if (sinceA < 260) return { x: x0, y: y0, face, angle: 0, state: 'land', k: sinceA / 260, visit: vis };
-      if (untilD < 320) return { x: x0, y: y0, face: vis.face, angle: 0, state: 'crouch', k: 1 - untilD / 320, visit: vis };
+      const edge = clamp(Math.abs(vis.dx) / Math.max(1, here.halfW - 26), 0, 1);
+      if (sinceA < 260) return { x: x0, y: y0, face, angle: 0, state: 'land', k: sinceA / 260, edge, visit: vis };
+      if (untilD < 320) return { x: x0, y: y0, face: vis.face, angle: 0, state: 'crouch', k: 1 - untilD / 320, edge, visit: vis };
 
       // Pounce: stalk the moth, then a little out-and-back lunge at it.
       if (vis.action === 'pounce') {
         const tP0 = vis.tD - POUNCE_LEAD;
-        if (tt < tP0) return { x: x0, y: y0, face, angle: 0, state: 'stalk', k: clamp(sinceA / Math.max(1, tP0 - vis.tA), 0, 1), visit: vis };
+        if (tt < tP0) return { x: x0, y: y0, face, angle: 0, state: 'stalk', k: clamp(sinceA / Math.max(1, tP0 - vis.tA), 0, 1), edge, visit: vis };
         if (tt < tP0 + 420) {
           const u = (tt - tP0) / 420;
           return {
             x: x0 + face * 38 * Math.sin(Math.PI * u),
             y: y0 - 30 * Math.sin(Math.PI * u),
-            face, angle: -0.25 * Math.sin(Math.PI * u) , state: 'jump', k: u, visit: vis,
+            face, angle: -0.25 * Math.sin(Math.PI * u), state: 'jump', k: u, edge, visit: vis,
           };
         }
-        return { x: x0, y: y0, face, angle: 0, state: 'sit', k: 0.5, visit: vis };
+        return { x: x0, y: y0, face, angle: 0, state: 'sit', k: 0.5, edge, visit: vis };
       }
 
       // Waking from a nap always earns the big stretch before moving on.
       if (vis.action === 'sleep' && untilD < 1240) {
-        return { x: x0, y: y0, face: vis.face, angle: 0, state: 'stretch', k: (1240 - untilD) / 920, visit: vis };
+        return { x: x0, y: y0, face: vis.face, angle: 0, state: 'stretch', k: (1240 - untilD) / 920, edge, visit: vis };
       }
 
       // The idle look-around: mid-sit, the cat turns to check the other way.
@@ -567,7 +614,7 @@ class CatwalkInstance implements SaverInstance {
         const w0 = 0.4 + vis.quirk * 0.25;
         if (fr > w0 && fr < w0 + 0.13) face = -face;
       }
-      return { x: x0, y: y0, face, angle: 0, state: vis.action, k: clamp((sinceA - 260) / Math.max(1, vis.tD - vis.tA - 580), 0, 1), visit: vis };
+      return { x: x0, y: y0, face, angle: 0, state: vis.action, k: clamp((sinceA - 260) / Math.max(1, vis.tD - vis.tA - 580), 0, 1), edge, visit: vis };
     }
 
     // Airborne toward the next perch (which may be in the next loop).
@@ -585,7 +632,7 @@ class CatwalkInstance implements SaverInstance {
     return {
       x: ux, y: uy, face: dxd >= 0 ? 1 : -1,
       angle: clamp(Math.atan2(dyd, Math.abs(dxd)) * 0.5, -0.6, 0.6),
-      state: 'jump', k: u, visit: vis,
+      state: 'jump', k: u, edge: 0, visit: vis,
     };
   }
 
@@ -609,6 +656,7 @@ class CatwalkInstance implements SaverInstance {
       angle: 0,
       state: atEdge ? 'sit' : 'walk',
       k: 1,
+      edge: 0,
       visit: GROUND_VISIT,
     };
   }
@@ -1013,16 +1061,36 @@ class CatwalkInstance implements SaverInstance {
     ctx.lineCap = 'round';
     const tl = this.look.tail;
     ctx.beginPath();
-    ctx.moveTo(-bl * 0.5, -bh * 0.5);
-    ctx.quadraticCurveTo(
-      -bl * 0.78 * tl, -bh * (0.55 + 0.4 * tailLift) - sway * s * 0.2,
-      -bl * (0.86 + 0.08 * sway) * tl, -bh * (0.2 + (0.75 * tailLift + 0.3 * sway) * tl),
-    );
+    if (cat.state === 'sit' && cat.edge > 0.72) {
+      // Sitting on the very end of its perch: the tail hangs off the ledge,
+      // swinging slow below the block. Sells the furniture harder than the
+      // landing spring does.
+      const hang = Math.sin(tt * 0.0016 + cat.visit.quirk * 5) * s * 0.14;
+      ctx.moveTo(-bl * 0.5, -bh * 0.5);
+      ctx.quadraticCurveTo(
+        -bl * 0.72 * tl, -bh * 0.05,
+        -bl * 0.66 * tl + hang, s * (0.55 * tl),
+      );
+    } else {
+      ctx.moveTo(-bl * 0.5, -bh * 0.5);
+      ctx.quadraticCurveTo(
+        -bl * 0.78 * tl, -bh * (0.55 + 0.4 * tailLift) - sway * s * 0.2,
+        -bl * (0.86 + 0.08 * sway) * tl, -bh * (0.2 + (0.75 * tailLift + 0.3 * sway) * tl),
+      );
+    }
     ctx.stroke();
 
     // Eyes: two lamps in the dark. Blink is a pure function of tt.
     const glow = this.params.eyeGlow;
     const blink = ((tt * 0.00021 + cat.visit.perch * 0.37) % 1) < 0.035;
+    // The slow-blink: mid-sit, both eyes narrow to slits for half a second.
+    // Cat people know exactly what this means.
+    let slitK = 1;
+    if (cat.state === 'sit' && cat.visit.tD > cat.visit.tA) {
+      const fr = (tt - cat.visit.tA) / (cat.visit.tD - cat.visit.tA);
+      const w0 = 0.16 + cat.visit.quirk * 0.18;
+      if (fr > w0 && fr < w0 + 0.09) slitK = 0.2 + 0.1 * Math.abs(Math.sin(((fr - w0) / 0.09) * Math.PI));
+    }
     if (glow > 0.02 && !blink && cat.state !== 'jump') {
       ctx.globalCompositeOperation = 'lighter';
       const ea = (0.85 * Math.min(1, glow)).toFixed(3);
@@ -1032,7 +1100,7 @@ class CatwalkInstance implements SaverInstance {
       ] as const) {
         ctx.fillStyle = col.replace('$A', ea);
         ctx.beginPath();
-        ctx.ellipse(ex, hy - hr * 0.08, hr * 0.1, hr * 0.16, 0, 0, TAU);
+        ctx.ellipse(ex, hy - hr * 0.08, hr * 0.1, hr * 0.16 * slitK, 0, 0, TAU);
         ctx.fill();
       }
       if (glow > 1) {
@@ -1119,6 +1187,10 @@ class CatwalkInstance implements SaverInstance {
       const k = (tt - vis.tA - 320) / 900;
       if (k >= 0 && k <= 1) emote('!', k, 'rgba(255,214,140,$A)');
     }
+    if (vis.favorite) {
+      const k = (tt - vis.tA - 300) / 1200;
+      if (k >= 0 && k <= 1) emote('\u2665', k, 'rgba(255,158,186,$A)');
+    }
     if (vis.action === 'sit' || vis.action === 'groom') {
       const fr = (tt - vis.tA) / Math.max(1, vis.tD - vis.tA);
       const w0 = 0.4 + vis.quirk * 0.25;
@@ -1200,6 +1272,17 @@ class CatwalkInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     if (this.paused) this.renderStill();
+  }
+
+  /** The practical composition stack, bottom-up. */
+  composition(): SaverLayer[] {
+    return [
+      { id: 'page', label: 'Stage page', kind: 'page', description: 'Perches spring, sag and rock under the cat; batted neighbours ring back. Fully restored on dispose.' },
+      { id: 'surface', label: 'Night canvas', kind: 'surface', el: this.canvas, description: 'Everything the cat adds over the page.' },
+      { id: 'veil', label: 'Veil & lamplight pool', kind: 'pass' },
+      { id: 'cat', label: 'The cat', kind: 'pass' },
+      { id: 'effects', label: 'Dust, Zzz, moth & emotes', kind: 'pass' },
+    ];
   }
 
   /**

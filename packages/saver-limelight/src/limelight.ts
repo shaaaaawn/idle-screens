@@ -5,6 +5,7 @@ import {
   type ParamSpace,
   type SaverContext,
   type SaverInstance,
+  type SaverLayer,
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
@@ -893,6 +894,19 @@ class LimelightInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     if (this.paused) this.renderStill();
+  }
+
+  /** The practical composition stack, bottom-up. */
+  composition(): SaverLayer[] {
+    return [
+      { id: 'page', label: 'Stage page', kind: 'page', description: 'Blocks stand up with parallax, brighten in the pool, dim in each other\'s shadow. Restored on dispose.' },
+      { id: 'surface', label: 'Light canvas', kind: 'surface', el: this.canvas, description: 'The rig\'s light drawn over the page.' },
+      { id: 'wash', label: 'House wash & pool', kind: 'pass' },
+      { id: 'shadows', label: 'Cast shadows (key + counter)', kind: 'pass' },
+      { id: 'walls', label: 'Side walls & rims', kind: 'pass' },
+      { id: 'beam', label: 'Volumetric beam (own buffer, slots carved)', kind: 'pass' },
+      { id: 'motes', label: 'Haze & dust', kind: 'pass' },
+    ];
   }
 
   /**

@@ -21,6 +21,11 @@ export const fadeOutManifest: SaverManifest = {
   costTier: 'idle',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Fade Away" — concept by Berkeley Systems',
+    license: 'MIT port; reference CSS MIT (Bryan Braun)',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true, notes: 'A slow, smooth 40s dim to black; no flashing.' },
 };
 

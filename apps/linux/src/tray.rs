@@ -105,6 +105,48 @@ impl Tray for IdleScreensTray {
                 activate: Box::new(|this: &mut Self| this.open_config()),
                 ..Default::default()
             }),
+            MenuItem::Standard(StandardItem {
+                label: "About".into(),
+                icon_name: "help-about".into(),
+                activate: Box::new(|_this: &mut Self| {
+                    let summary = crate::about::summary();
+                    log::info!("{summary}");
+                    let _ = std::process::Command::new("notify-send")
+                        .arg("idle screens")
+                        .arg(&summary)
+                        .spawn();
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Standard(StandardItem {
+                label: "Pair phone".into(),
+                icon_name: "phone".into(),
+                activate: Box::new(|_this: &mut Self| {
+                    // Blocking HTTP — keep it off the tray's reactor thread.
+                    std::thread::spawn(|| {
+                        match crate::pair::mint_code(None) {
+                            Ok(code) => {
+                                log::info!("pairing code: {code}");
+                                let _ = std::process::Command::new("notify-send")
+                                    .arg("idle screens — pair phone")
+                                    .arg(format!(
+                                        "Enter {code} in the idle screens iPhone app \
+                                         (TV tab). Expires in 5 minutes."
+                                    ))
+                                    .spawn();
+                            }
+                            Err(e) => {
+                                log::warn!("pairing failed: {e:#}");
+                                let _ = std::process::Command::new("notify-send")
+                                    .arg("idle screens — pairing failed")
+                                    .arg(e.to_string())
+                                    .spawn();
+                            }
+                        }
+                    });
+                }),
+                ..Default::default()
+            }),
             MenuItem::Separator,
             MenuItem::Standard(StandardItem {
                 label: "Quit tray".into(),

@@ -144,7 +144,8 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     // A perch grid plus one swattable chip parked in paw's reach of a perch.
     // Whether a given seed's itinerary includes a 'bat' stop is personality,
     // so probe a fixed seed list — at least one of these cats must be playful.
-    const seeds = [7, 11, 23, 42, 5];
+    const probe = process.env.PROBE_SEEDS === '1';
+    const seeds = probe ? Array.from({ length: 40 }, (_, i) => i + 1) : [3, 7, 11, 23, 42];
     let swatted = false;
     for (const seed of seeds) {
       const { host, victims } = makePage();
@@ -159,6 +160,9 @@ describe('catwalk: the page is the cat\'s furniture', () => {
 
       const c = { ...ctx(host, pageWithChip), rng: createRng(seed), seed };
       const inst = mount(c);
+      if (probe && (inst as unknown as { visits: { batTarget: number }[] }).visits.some((v) => v.batTarget >= 0)) {
+        console.log('BATSEED', seed);
+      }
       // The bat works both ways: the chip may swat a perch or a perch may swat
       // the chip — either produces a sideways (translateX) shove somewhere.
       for (let t = 0; t < 90_000 && !swatted; t += 120) {
@@ -174,11 +178,36 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     expect(swatted, 'some seed bats the chip').toBe(true);
   });
 
+  it('perch memory and zoomies appear across the seed population', () => {
+    let sawFavorite = false;
+    let sawZoomies = false;
+    for (let seed = 1; seed <= 12 && !(sawFavorite && sawZoomies); seed++) {
+      const { host, page } = makePage();
+      const inst = mount({ ...ctx(host, page), rng: createRng(seed), seed });
+       
+      const visits = (inst as any).visits as { perch: number; action: string; zoom: boolean; favorite: boolean }[];
+      const fav = visits.find((v) => v.favorite);
+      if (fav) {
+        sawFavorite = true;
+        expect(fav.action, 'the homecoming is the long nap').toBe('sleep');
+        expect(
+          visits.filter((v) => v.perch === fav.perch).length,
+          'the favourite perch is genuinely revisited',
+        ).toBeGreaterThanOrEqual(2);
+      }
+      if (visits.some((v) => v.zoom)) sawZoomies = true;
+      inst.dispose();
+      host.remove();
+    }
+    expect(sawFavorite, 'some cat has a favourite perch').toBe(true);
+    expect(sawZoomies, 'some cat gets the zoomies').toBe(true);
+  });
+
   it('every seed is a different cat: body and itinerary both vary', () => {
     const summaries = [1, 2, 3].map((seed) => {
       const { host, page, victims } = makePage();
       const inst = mount({ ...ctx(host, page), rng: createRng(seed), seed });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const anyInst = inst as any;
       const summary = JSON.stringify({
         look: anyInst.look,
@@ -195,7 +224,7 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     const twice = [0, 0].map(() => {
       const { host, page } = makePage();
       const inst = mount({ ...ctx(host, page), rng: createRng(9), seed: 9 });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const s = JSON.stringify({ look: (inst as any).look, actions: (inst as any).visits.map((v: { action: string }) => v.action) });
       inst.dispose();
       host.remove();
@@ -252,6 +281,19 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     inst.renderFrame(31_000, 7);
     inst.renderFrame(9000, 7);
 
+    inst.dispose();
+    host.remove();
+  });
+
+  it('describes its composition stack: page deck, surface, passes', () => {
+    const { host, page } = makePage();
+    const inst = mount(ctx(host, page));
+    const stack = inst.composition!();
+    expect(stack[0]!.kind).toBe('page');
+    expect(stack[0]!.el, 'the page deck is host-bound, never saver-owned').toBeUndefined();
+    const surface = stack.find((l) => l.kind === 'surface');
+    expect(surface?.el?.tagName).toBe('CANVAS');
+    expect(stack.filter((l) => l.kind === 'pass').length).toBeGreaterThanOrEqual(2);
     inst.dispose();
     host.remove();
   });

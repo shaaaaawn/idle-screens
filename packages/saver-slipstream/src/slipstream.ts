@@ -5,6 +5,7 @@ import {
   type ParamSpace,
   type SaverContext,
   type SaverInstance,
+  type SaverLayer,
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
@@ -609,6 +610,17 @@ class SlipstreamInstance implements SaverInstance {
     this.track = track;
     this.flowBucket = -1; // the cache is param-dependent; force a rebuild
     if (this.paused) this.renderStill();
+  }
+
+  /** The practical composition stack, bottom-up. */
+  composition(): SaverLayer[] {
+    return [
+      { id: 'page', label: 'Stage page', kind: 'page', description: 'Blocks lean with the local deflected wind, hinged at their base. Restored on dispose.' },
+      { id: 'surface', label: 'Wind canvas', kind: 'surface', el: this.canvas, description: 'The night wind drawn over the page.' },
+      { id: 'veil', label: 'Night veil & vignette', kind: 'pass' },
+      { id: 'lines', label: 'Streamlines', kind: 'pass' },
+      { id: 'dust', label: 'Advected dust', kind: 'pass' },
+    ];
   }
 
   /**

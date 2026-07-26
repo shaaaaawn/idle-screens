@@ -206,6 +206,20 @@
         gap: 18px;
       }
 
+      /* All view: one continuous wall. Sections and their grids dissolve into
+         a shared grid so single-saver packages (black-hole, tide, …) don't
+         each burn a row of empty auto-fill tracks; headers come back when a
+         package chip narrows the field. */
+      .gal-body[data-filter='all'] {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 18px;
+      }
+      .gal-body[data-filter='all'] > .gal-section,
+      .gal-body[data-filter='all'] .gallery-grid { display: contents; }
+      .gal-body[data-filter='all'] .gal-section-head { display: none; }
+      .gal-body[data-filter='all'] > .gal-section[hidden] { display: none; }
+
       .gallery-card {
         display: flex; flex-direction: column;
         border-radius: var(--r-lg);
@@ -592,6 +606,10 @@
         display: flex; flex-direction: column; gap: 4px;
         font-size: 11px; opacity: 0.9;
       }
+      /* Author `display:flex` otherwise beats the UA [hidden] rule. */
+      .evals-field[hidden] { display: none !important; }
+      .evals-agent-targets { display: flex; flex-direction: column; gap: 10px; }
+      .evals-agent-estimate { margin: 0; font-size: 11px; opacity: 0.55; }
       .evals-field input, .evals-field textarea {
         border: 1px solid #2a2a38; background: #0e0e14; color: #e8eef8;
         border-radius: 6px; padding: 7px 9px; font: 12px/1.35 inherit;
@@ -927,6 +945,13 @@
         color: var(--text-faint); border-bottom: 1px solid var(--line-soft);
       }
       .evals-grid-label:first-child { margin-top: 0; }
+      .evals-grid-empty {
+        grid-column: 1 / -1;
+        padding: 28px 12px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-faint, #6a7384);
+      }
 
       /* Gallery mode — a wall of works, not an eval grid: larger frames. */
       .evals-compare-grid--wall {

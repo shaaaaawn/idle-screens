@@ -5,6 +5,7 @@ import {
   type ParamSpace,
   type SaverContext,
   type SaverInstance,
+  type SaverLayer,
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
@@ -742,6 +743,18 @@ class TideInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     if (this.paused) this.renderStill();
+  }
+
+  /** The practical composition stack, bottom-up. */
+  composition(): SaverLayer[] {
+    return [
+      { id: 'page', label: 'Stage page', kind: 'page', description: 'Submerged blocks shear with the wave (Jacobian affine); light ones raft, heavy ones sink and blur. Restored on dispose.' },
+      { id: 'surface', label: 'Water canvas', kind: 'surface', el: this.canvas, description: 'The water drawn over the page.' },
+      { id: 'body', label: 'Water body & light shafts', kind: 'pass' },
+      { id: 'bubbles', label: 'Bubbles', kind: 'pass' },
+      { id: 'surface-line', label: 'Surface line & foam', kind: 'pass' },
+      { id: 'wakes', label: 'Raft wakes', kind: 'pass' },
+    ];
   }
 
   /**

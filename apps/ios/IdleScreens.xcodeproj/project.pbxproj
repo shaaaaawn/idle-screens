@@ -24,6 +24,7 @@
 		1AC66F3C1B9943FD6A3B0873 /* ChannelCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */; };
 		2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */; };
 		2A0AF3B6BDB8D8803FD347B7 /* SceneMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702C370C1F397FD4B6E902CB /* SceneMotion.swift */; };
+		2DB645ED6B99FFEDB9FD9D13 /* ProceduralArtTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72D357847ECE6961DDCD4E7D /* ProceduralArtTests.swift */; };
 		2F38E6E5A65143C6434582CB /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212796CA3B1CF2A7C5513499 /* GalleryView.swift */; };
 		2F88D3F95B2861F5818A3807 /* WatchdogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */; };
 		34018E505AD097DAD48BB660 /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */; };
@@ -36,6 +37,7 @@
 		66B4B5A00A0D8BA463F8E912 /* UnitsAndClassicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */; };
 		6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */; };
 		6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5408F494FA3C16573E5AB /* MockTransport.swift */; };
+		791C3C15DA09CFF41821BA91 /* HeroChannelCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */; };
 		7A47F321D6901C9BC1260706 /* AppState+Pair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 193F27EA5CA4F1DF5743170E /* AppState+Pair.swift */; };
 		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
 		824BB1E0792FC2EF21044663 /* IdleScreensTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */; };
@@ -64,6 +66,7 @@
 		E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
 		E8E8841AC339243ACEE363A7 /* SpriteSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E14B7DC8B4215FD925DF86 /* SpriteSceneView.swift */; };
 		EB42D92297C875AE1D90D6FE /* PairScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7F4750FA16A1F3B0A2CC2 /* PairScannerSheet.swift */; };
+		EC3651B8B6E98C649073E48E /* ProceduralChannelArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB38A59EE972FD543C240FD1 /* ProceduralChannelArt.swift */; };
 		FAA24B135B3D42596FE624FA /* PerceptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */; };
 		FF676042D59DF5624EC8C552 /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B72E150FD50FD2B4798EF0 /* PairView.swift */; };
 /* End PBXBuildFile section */
@@ -107,6 +110,7 @@
 		68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6A39FC4E62FA08D2DC673189 /* IdleScreens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		702C370C1F397FD4B6E902CB /* SceneMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneMotion.swift; sourceTree = "<group>"; };
+		72D357847ECE6961DDCD4E7D /* ProceduralArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProceduralArtTests.swift; sourceTree = "<group>"; };
 		734C05B9186BD117E244C887 /* GalleryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryClient.swift; sourceTree = "<group>"; };
 		75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		773AA4A5F9D47466B26A7AA9 /* PairedTVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedTVView.swift; sourceTree = "<group>"; };
@@ -130,10 +134,12 @@
 		BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitsAndClassicTests.swift; sourceTree = "<group>"; };
 		C529DD00521F3987A78786C1 /* MyChannelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyChannelsView.swift; sourceTree = "<group>"; };
 		C853969A894483598A446E19 /* TVAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVAppState.swift; sourceTree = "<group>"; };
+		CB38A59EE972FD543C240FD1 /* ProceduralChannelArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProceduralChannelArt.swift; sourceTree = "<group>"; };
 		CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Gallery.swift"; sourceTree = "<group>"; };
 		D440AF4157E3C3F831612A2E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D9A29F0D73C5256B5C84FF0C /* ChannelGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelGridView.swift; sourceTree = "<group>"; };
 		EA0BCADF9C61254DBB05CA24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroChannelCard.swift; sourceTree = "<group>"; };
 		F6339510B5B7C996B622F160 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mulberry32Tests.swift; sourceTree = "<group>"; };
 		FAB1826693F09BA9A26F848A /* AppState+VJ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+VJ.swift"; sourceTree = "<group>"; };
@@ -211,6 +217,7 @@
 				414EED19151EF752ABADB644 /* CapabilityTierTests.swift */,
 				1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */,
 				F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */,
+				72D357847ECE6961DDCD4E7D /* ProceduralArtTests.swift */,
 				BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */,
 				BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */,
 				BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */,
@@ -290,9 +297,11 @@
 			isa = PBXGroup;
 			children = (
 				D9A29F0D73C5256B5C84FF0C /* ChannelGridView.swift */,
+				EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */,
 				ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */,
 				86B91FEC3CA3ACD9A83E05DA /* Info.plist */,
 				28B72E150FD50FD2B4798EF0 /* PairView.swift */,
+				CB38A59EE972FD543C240FD1 /* ProceduralChannelArt.swift */,
 				B794ADAE2EAD414259F480F9 /* ScreenSaverView.swift */,
 				A0BE66C1790A533FA14463C9 /* SettingsView.swift */,
 				C853969A894483598A446E19 /* TVAppState.swift */,
@@ -478,6 +487,7 @@
 				4FDE466BCFAEE3788424E6DA /* ChannelWSClient.swift in Sources */,
 				E6C221E7819340F08F51E919 /* Colors.swift in Sources */,
 				08541755AD614AEBC9684487 /* GalleryClient.swift in Sources */,
+				791C3C15DA09CFF41821BA91 /* HeroChannelCard.swift in Sources */,
 				824BB1E0792FC2EF21044663 /* IdleScreensTVApp.swift in Sources */,
 				484A4E76F6F49B6E8F58F19E /* KeychainHelper.swift in Sources */,
 				1624F2B9F3A2808C9490251C /* MCPClient.swift in Sources */,
@@ -486,6 +496,7 @@
 				603A182B7D3F5EBB3FDEDC0D /* PairClient.swift in Sources */,
 				FF676042D59DF5624EC8C552 /* PairView.swift in Sources */,
 				FAA24B135B3D42596FE624FA /* PerceptionView.swift in Sources */,
+				EC3651B8B6E98C649073E48E /* ProceduralChannelArt.swift in Sources */,
 				028D93E25E830D3E45D32353 /* SceneMotion.swift in Sources */,
 				E15E2D79437A5F96E7A145B0 /* ScenePreviewView.swift in Sources */,
 				C8C63A0EAC1EBD3FA137C55B /* ScreenSaverView.swift in Sources */,
@@ -504,6 +515,7 @@
 				C4184B1F397DC4CD4B42440F /* CapabilityTierTests.swift in Sources */,
 				6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */,
 				4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */,
+				2DB645ED6B99FFEDB9FD9D13 /* ProceduralArtTests.swift in Sources */,
 				0DCCB4B6A0098FC9D312E3DE /* SpecSubsetTests.swift in Sources */,
 				66B4B5A00A0D8BA463F8E912 /* UnitsAndClassicTests.swift in Sources */,
 				2F88D3F95B2861F5818A3807 /* WatchdogTests.swift in Sources */,
@@ -619,7 +631,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026072511;
+				CURRENT_PROJECT_VERSION = 2026072602;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -640,7 +652,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026072511;
+				CURRENT_PROJECT_VERSION = 2026072602;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -661,7 +673,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026072511;
+				CURRENT_PROJECT_VERSION = 2026072602;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -701,7 +713,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026072511;
+				CURRENT_PROJECT_VERSION = 2026072602;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

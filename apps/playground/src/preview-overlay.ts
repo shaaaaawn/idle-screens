@@ -66,7 +66,10 @@ export function createPreviewOverlay(
   nameEl.className = 'pv-name';
   const pkgEl = document.createElement('span');
   pkgEl.className = 'pv-pkg';
-  idEl.append(nameEl, pkgEl);
+  const attrEl = document.createElement('span');
+  attrEl.className = 'pv-attr';
+  attrEl.style.cssText = 'display:block;font:10px ui-monospace,monospace;color:#6f7684;margin-top:2px';
+  idEl.append(nameEl, pkgEl, attrEl);
 
   const badges = document.createElement('div');
   badges.className = 'pv-badges';
@@ -147,6 +150,7 @@ export function createPreviewOverlay(
 
     nameEl.textContent = m.label;
     pkgEl.textContent = pkg;
+    attrEl.textContent = m.attribution ? `${m.attribution.source} · ${m.attribution.license}` : '';
     posEl.textContent = `${i + 1} / ${entries.length}`;
     renderBadges(badges, saver);
     showChrome();

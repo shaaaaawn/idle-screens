@@ -1,6 +1,7 @@
 import type { SaverPlugin } from '@idle-screens/core';
 import { perceiveScene, EXAMPLE_BY_ID, type SaverSpec, type ScenePerception } from '@idle-screens/schema';
 import { perceiveSaverFrame, type FramePerception } from './frame-perception';
+import type { PageContext } from '@idle-screens/core';
 
 export interface PerceptionSaverOptions {
   width?: number;
@@ -12,6 +13,8 @@ export interface PerceptionSaverOptions {
    * which needs the plugin rather than just its id.
    */
   saver?: SaverPlugin;
+  /** Mirror of the stage page, so passthrough samples match the viewport. */
+  page?: PageContext;
 }
 
 export interface PerceptionHandle {
@@ -248,6 +251,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
       width: currentOpts.width,
       height: currentOpts.height,
       seed: currentOpts.seed,
+      page: currentOpts.page,
       t,
     }).then((p) => {
       if (token !== frameToken) return; // superseded

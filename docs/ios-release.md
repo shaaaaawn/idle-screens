@@ -63,6 +63,12 @@ xcrun altool --upload-app   -f /tmp/idle-export/IdleScreens.ipa -t ios --apiKey 
   was created by hand in the ASC web UI (one-time).
 - **1024px marketing icon must be opaque** (no alpha) — `IdleScreens/Assets.xcassets/AppIcon.appiconset/icon-1024.png` is RGB, regenerated via PIL if ever needed.
 - **Duplicate build numbers rejected** → bump `CURRENT_PROJECT_VERSION` every upload.
+- **Lower-than-existing build numbers can be dropped SILENTLY** (2026-07-26): if a higher
+  build already exists for the platform (e.g. a parallel session moved to the next day's
+  `YYYYMMDDnn` series), altool may still report "No errors uploading" — the build then
+  never appears in ASC (rejection email only). Before uploading, check the CURRENT max
+  build via `GET /v1/builds?filter[app]=…&sort=-uploadedDate` and number above it.
+  With multiple sessions shipping in parallel, always re-check right before upload.
 - **401 on validate/upload** → wrong Key ID/Issuer for the `.p8`; re-check the key's row in ASC → Users and Access → Integrations.
 
 ## tvOS (added 2026-07-25)

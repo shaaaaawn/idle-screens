@@ -15,6 +15,11 @@ export const spotlightManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'After Dark "Spotlight" — concept by Berkeley Systems',
+    license: 'MIT port; reference CSS MIT (Bryan Braun)',
+    url: 'https://github.com/bryanbraun/after-dark-css',
+  },
   a11y: { flashSafe: true, notes: 'A soft light circle drifting over the live page; no flashing.' },
   workerReady: true,
 };

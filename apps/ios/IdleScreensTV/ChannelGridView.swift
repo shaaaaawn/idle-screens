@@ -1,26 +1,21 @@
 import SwiftUI
 
-/// Focus-driven gallery of channel poster cards.
+/// 10-foot gallery: cinematic hero for the first featured channel,
+/// "featured" and "channels" sections of 16:9 cards below the fold.
 struct ChannelGridView: View {
     @Environment(TVAppState.self) private var app
+    @State private var manualChannelId = ""
     @State private var showingSettings = false
 
-    // Fixed 3-up: cinematic posters (~554pt) over many small tiles.
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 56), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
-    /// Presentation order: featured first, then most-watched, then awake
-    /// channels, then alphabetical. Broken-looking channels sink naturally.
-    private var sortedChannels: [PublicChannel] {
-        app.channels.sorted { a, b in
-            let af = a.tags?.contains("featured") ?? false
-            let bf = b.tags?.contains("featured") ?? false
-            if af != bf { return af }
-            let av = a.viewers ?? 0, bv = b.viewers ?? 0
-            if av != bv { return av > bv }
-            let asleep = a.sleeping ?? false, bsleep = b.sleeping ?? false
-            if asleep != bsleep { return bsleep }
-            return a.displayLabel.localizedCaseInsensitiveCompare(b.displayLabel) == .orderedAscending
-        }
+    private var featured: [PublicChannel] {
+        app.channels.filter { $0.tags?.contains("featured") == true }
+    }
+    private var hero: PublicChannel? { featured.first }
+    private var featuredRail: [PublicChannel] { Array(featured.dropFirst()) }
+    private var rest: [PublicChannel] {
+        app.channels.filter { $0.tags?.contains("featured") != true }
     }
 
     var body: some View {
@@ -28,57 +23,76 @@ struct ChannelGridView: View {
             VStack(spacing: 0) {
                 // Fixed header — kept out of the ScrollView so focus-driven
                 // scrolling can never push it off screen.
-                HStack(alignment: .firstTextBaseline, spacing: 20) {
-                    Text("idle screens")
-                        .font(.system(size: 50, weight: .bold))
-                        .foregroundStyle(Color.textPrimary)
-                    if !app.channels.isEmpty {
-                        Text("\(app.channels.count) channels")
-                            .font(.system(size: 24))
-                            .foregroundStyle(Color.textTertiary)
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("idle screens")
+                            .font(.system(size: 56, weight: .bold))
+                            .foregroundStyle(Color.textPrimary)
+                        Text("ambient channels · \(app.channels.count) live")
+                            .font(.callout)
+                            .foregroundStyle(Color.textSecondary)
                     }
                     Spacer()
                     Button {
                         showingSettings = true
                     } label: {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 30))
+                            .font(.system(size: 32))
                     }
                     .buttonStyle(.borderless)
                 }
-                .padding(.horizontal, 90)
+                .padding(.horizontal, 80)
                 .padding(.top, 40)
-                .padding(.bottom, 28)
+                .padding(.bottom, 40)
 
-                ScrollView {
-                    VStack(spacing: 48) {
-                        if app.channels.isEmpty, !app.isLoadingGallery {
-                            ContentUnavailableView(
-                                "No channels",
-                                systemImage: "tv",
-                                description: Text(app.galleryError ?? "")
-                            )
-                        } else {
-                            LazyVGrid(columns: columns, spacing: 56) {
-                                ForEach(sortedChannels) { channel in
-                                    // Poster-only card button; the text lockup
-                                    // sits outside so the focus platter and
-                                    // lift apply to the artwork alone.
-                                    VStack(alignment: .leading, spacing: 14) {
-                                        Button {
-                                            app.selectChannel(channel.id)
-                                        } label: {
-                                            ChannelPoster(channel: channel)
-                                        }
-                                        .buttonStyle(.card)
-                                        ChannelLockup(channel: channel)
+                GeometryReader { geo in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 64) {
+                            if app.channels.isEmpty, !app.isLoadingGallery {
+                                ContentUnavailableView(
+                                    "No channels",
+                                    systemImage: "tv",
+                                    description: Text(app.galleryError ?? "")
+                                )
+                            } else {
+                                if let hero {
+                                    Button {
+                                        app.selectChannel(hero.id)
+                                    } label: {
+                                        // Cap at ~58% of the space left after the
+                                        // tab bar + header so the whole hero —
+                                        // scrim, label, pills — stays above the fold.
+                                        HeroChannelCard(channel: hero, height: geo.size.height * 0.58)
+                                    }
+                                    .buttonStyle(.card)
+                                }
+
+                                if !featuredRail.isEmpty {
+                                    ChannelSection(title: "featured") {
+                                        CardGrid(channels: featuredRail, columns: columns)
+                                    }
+                                }
+
+                                if !rest.isEmpty {
+                                    ChannelSection(title: "channels") {
+                                        CardGrid(channels: rest, columns: columns)
                                     }
                                 }
                             }
+
+                            HStack(spacing: 24) {
+                                TextField("Enter channel ID", text: $manualChannelId)
+                                    .frame(width: 480)
+                                Button("Watch") {
+                                    let id = manualChannelId.trimmingCharacters(in: .whitespaces)
+                                    if !id.isEmpty { app.selectChannel(id) }
+                                }
+                                .disabled(manualChannelId.trimmingCharacters(in: .whitespaces).isEmpty)
+                            }
                         }
+                        .padding(.horizontal, 80)
+                        .padding(.bottom, 80)
                     }
-                    .padding(.horizontal, 90)
-                    .padding(.bottom, 70)
                 }
             }
             .background(Color.appBackground.ignoresSafeArea())
@@ -91,11 +105,6 @@ struct ChannelGridView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
-            // A paired phone can push a channel while Settings (the pairing
-            // QR) is up — drop the sheet so the saver is actually visible.
-            .onChange(of: app.selectedChannelId) {
-                if app.selectedChannelId != nil { showingSettings = false }
-            }
         }
         .task {
             if app.channels.isEmpty { await app.loadGallery() }
@@ -103,104 +112,81 @@ struct ChannelGridView: View {
     }
 }
 
-/// The focusable 16:9 artwork. Poster priority: live native scene (the
-/// product promise) → web thumb (classic channels) → deterministic gradient.
-/// Live previews only on canvas-capable tiers; sleeping scenes render dimmed.
-private struct ChannelPoster: View {
+// MARK: - Sections
+
+private struct ChannelSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text(title)
+                .font(.title3)
+                .foregroundStyle(Color.textSecondary)
+            content
+        }
+    }
+}
+
+private struct CardGrid: View {
+    @Environment(TVAppState.self) private var app
+    let channels: [PublicChannel]
+    let columns: [GridItem]
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 48) {
+            ForEach(channels) { channel in
+                Button {
+                    app.selectChannel(channel.id)
+                } label: {
+                    ChannelCard(channel: channel)
+                }
+                .buttonStyle(.card)
+            }
+        }
+    }
+}
+
+// MARK: - Card
+
+private struct ChannelCard: View {
     @Environment(TVAppState.self) private var app
     let channel: PublicChannel
 
-    private var isSleeping: Bool { channel.sleeping ?? false }
-
     var body: some View {
-        // Color.clear owns the frame (a scaledToFill image ignores the height
-        // proposal and would inflate the card); overlays overflow and clip.
-        Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .overlay { poster }
-            .overlay {
-                // Hairline keeps near-black posters from melting into
-                // the page background.
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    @ViewBuilder private var poster: some View {
-        // Live previews are Canvas-rendered — t3 hardware only. t2 devices
-        // (A8/A10X) get static art; nine live scenes would swamp them.
-        if let spec = channel.spec, app.effectiveTier == .t3 {
-            ScenePreviewView(spec: spec, fallbackSeed: channel.id)
-                .opacity(isSleeping ? 0.35 : 1)
-        } else {
+        VStack(alignment: .leading, spacing: 12) {
+            // Fixed 16:9 poster frame — thumbs arrive in arbitrary aspects;
+            // channels without one get deterministic generative art.
             AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 default:
-                    GradientPlaceholder(seedText: channel.id)
+                    ProceduralChannelArt(channelId: channel.id)
                 }
             }
-            .opacity(isSleeping ? 0.35 : 1)
-        }
-    }
-}
+            .frame(maxWidth: .infinity)
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
 
-/// Title + meta row, outside the focus platter.
-private struct ChannelLockup: View {
-    let channel: PublicChannel
-
-    private var isSleeping: Bool { channel.sleeping ?? false }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(channel.displayLabel)
-                .font(.system(size: 31, weight: .medium))
-                .foregroundStyle(Color.textPrimary)
-                .lineLimit(1)
-            HStack(spacing: 10) {
-                if isSleeping {
-                    Label("sleeping", systemImage: "moon.zzz.fill")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(Color.textTertiary)
-                } else if let viewers = channel.viewers, viewers > 0 {
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.appAccent).frame(width: 10, height: 10)
-                        Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(channel.displayLabel)
+                    .font(.headline)
+                    .foregroundStyle(Color.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 12) {
+                    if let viewers = channel.viewers {
+                        Label("\(viewers)", systemImage: "eye")
                     }
-                    .foregroundStyle(Color.textSecondary)
+                    if let tags = channel.tags, !tags.isEmpty {
+                        Text(tags.prefix(3).joined(separator: " · "))
+                            .lineLimit(1)
+                    }
                 }
-                if let tags = channel.tags, !tags.isEmpty {
-                    Text(tags.prefix(3).joined(separator: " · "))
-                        .foregroundStyle(Color.textTertiary)
-                        .lineLimit(1)
-                }
+                .font(.caption)
+                .foregroundStyle(Color.textSecondary)
             }
-            // tvOS HIG: secondary labels ≥25pt at 10-foot distance.
-            .font(.system(size: 25))
         }
-        .padding(.horizontal, 6)
-    }
-}
-
-/// Last-resort poster: a per-channel deterministic dark duotone, so even a
-/// channel with no spec and no thumb reads as designed, not broken.
-private struct GradientPlaceholder: View {
-    let seedText: String
-
-    var body: some View {
-        let hue = Double(seedText.utf8.reduce(UInt32(2_166_136_261)) {
-            ($0 ^ UInt32($1)) &* 16_777_619
-        } % 360) / 360
-        LinearGradient(
-            colors: [
-                Color(hue: hue, saturation: 0.45, brightness: 0.16),
-                Color(hue: (hue + 0.09).truncatingRemainder(dividingBy: 1),
-                      saturation: 0.55, brightness: 0.05),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
     }
 }
