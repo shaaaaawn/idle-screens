@@ -71,7 +71,7 @@ const MAX_VICTIMS = 200;
 const MIN_PERCH_W = 56;
 const MIN_PERCH_H = 12;
 
-type Action = 'sit' | 'groom' | 'stretch' | 'sleep' | 'knead' | 'bat' | 'pounce';
+type Action = 'sit' | 'groom' | 'stretch' | 'sleep' | 'knead' | 'bat' | 'pounce' | 'roll';
 
 interface Perch {
   /** Index into `victims`. */
@@ -174,7 +174,38 @@ class CatwalkInstance implements SaverInstance {
   private params: Params = defaultParams(PARAM_SPACE) as Params;
   private track: ControlTrack | null = null;
 
+  /**
+   * This cat's body, rolled once from a forked stream — every seed is a
+   * visibly different animal, not just a different temperament. `tint` (the
+   * steerable param) still shifts the fur; these modulate around it.
+   */
+  private readonly look: {
+    /** Left/right eye colours — usually matching, occasionally odd-eyed. */
+    eyeL: string;
+    eyeR: string;
+    /** 0.9..1.15 body scale. Some cats are simply more cat. */
+    plump: number;
+    /** 0.85..1.2 tail length multiplier. */
+    tail: number;
+    /** Fur brightness multiplier around the tint param. */
+    shade: number;
+    /** White chest patch + sock paws, or a solid coat. */
+    socks: boolean;
+  };
+
   constructor(ctx: SaverContext) {
+    const lookRng = ctx.rng.fork(0xface);
+    const EYES = ['rgba(255,214,120,$A)', 'rgba(168,232,150,$A)', 'rgba(255,168,96,$A)', 'rgba(150,214,255,$A)'];
+    const eyeL = EYES[Math.floor(lookRng.next() * EYES.length)]!;
+    this.look = {
+      eyeL,
+      // ~6% of cats are odd-eyed. They know they're special.
+      eyeR: lookRng.next() < 0.06 ? EYES[Math.floor(lookRng.next() * EYES.length)]! : eyeL,
+      plump: 0.9 + lookRng.next() * 0.25,
+      tail: 0.85 + lookRng.next() * 0.35,
+      shade: 0.75 + lookRng.next() * 0.6,
+      socks: lookRng.next() < 0.45,
+    };
     this.ctxSaver = ctx;
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'display:block;width:100%;height:100%';
@@ -404,6 +435,8 @@ class CatwalkInstance implements SaverInstance {
           ['knead', 0.14],
           ['pounce', 0.2 * playful],
           ['bat', batTarget >= 0 ? 0.3 * playful : 0],
+          // Belly-up roll needs room — only on genuinely wide perches.
+          ['roll', here.halfW >= 90 ? 0.14 * playful : 0],
         ];
         const total = pool.reduce((s, [, w]) => s + w, 0);
         let pick = rng.next() * total;
@@ -419,6 +452,7 @@ class CatwalkInstance implements SaverInstance {
         : action === 'knead' ? 4_000 + rng.next() * 2_000
         : action === 'bat' ? 3_800 + rng.next() * 1_400
         : action === 'pounce' ? 3_400 + rng.next() * 1_000
+        : action === 'roll' ? 3_600 + rng.next() * 1_200
         : action === 'stretch' ? 2_600 + rng.next() * 1_000
         : 2_200 + rng.next() * 1_600;
 
@@ -522,6 +556,11 @@ class CatwalkInstance implements SaverInstance {
         return { x: x0, y: y0, face, angle: 0, state: 'sit', k: 0.5, visit: vis };
       }
 
+      // Waking from a nap always earns the big stretch before moving on.
+      if (vis.action === 'sleep' && untilD < 1240) {
+        return { x: x0, y: y0, face: vis.face, angle: 0, state: 'stretch', k: (1240 - untilD) / 920, visit: vis };
+      }
+
       // The idle look-around: mid-sit, the cat turns to check the other way.
       if (vis.action === 'sit' || vis.action === 'groom') {
         const fr = sinceA / Math.max(1, vis.tD - vis.tA);
@@ -583,10 +622,13 @@ class CatwalkInstance implements SaverInstance {
       // Kneading rocks the perch side to side under the alternating paws.
       let rock = 0;
       for (const vis of this.visits) {
-        if (vis.action !== 'knead' || vis.perch !== i) continue;
+        if ((vis.action !== 'knead' && vis.action !== 'roll') || vis.perch !== i) continue;
         if (tt < vis.tA + 400 || tt > vis.tD - 300) continue;
         const env = smooth01(clamp((tt - vis.tA - 400) / 500, 0, 1)) * smooth01(clamp((vis.tD - 300 - tt) / 500, 0, 1));
-        rock += Math.sin((tt - vis.tA) * (TAU / 700)) * 0.4 * p.give * env;
+        // Kneading is a quick paw-rhythm rock; rolling is a slow, deeper sway.
+        rock += vis.action === 'knead'
+          ? Math.sin((tt - vis.tA) * (TAU / 700)) * 0.4 * p.give * env
+          : Math.sin((tt - vis.tA) * (TAU / 1400)) * 0.7 * p.give * env;
       }
       let transform: string;
       if (Math.abs(off) < 0.05 && Math.abs(rock) < 0.02) {
@@ -652,7 +694,12 @@ class CatwalkInstance implements SaverInstance {
   // ---- draw ----
   private fur(): [number, number, number] {
     const k = this.params.tint;
-    return [Math.round(16 + k * 189), Math.round(16 + k * 104), Math.round(20 + k * 25)];
+    const sh = this.look.shade;
+    return [
+      Math.min(255, Math.round((16 + k * 189) * sh)),
+      Math.min(255, Math.round((16 + k * 104) * sh)),
+      Math.min(255, Math.round((20 + k * 25) * sh)),
+    ];
   }
 
   private render(tt: number, cat: ReturnType<CatwalkInstance['catAt']> | null): void {
@@ -698,7 +745,7 @@ class CatwalkInstance implements SaverInstance {
     if (cat.state !== 'jump') {
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.beginPath();
-      ctx.ellipse(cat.x, cat.y + 2, this.params.catSize * 0.72, 3.4, 0, 0, TAU);
+      ctx.ellipse(cat.x, cat.y + 2, this.params.catSize * this.look.plump * 0.72, 3.4, 0, 0, TAU);
       ctx.fill();
     }
 
@@ -726,7 +773,7 @@ class CatwalkInstance implements SaverInstance {
   /** The cat itself: a silhouette built from ellipses and a live tail. */
   private drawCat(tt: number, cat: ReturnType<CatwalkInstance['catAt']>): void {
     const ctx = this.ctx;
-    const s = this.params.catSize;
+    const s = this.params.catSize * this.look.plump;
     const [fr, fg, fb] = this.fur();
     const fur = `rgb(${fr},${fg},${fb})`;
     // A black cat on a dark page is invisible without this: a faint cool
@@ -736,12 +783,16 @@ class CatwalkInstance implements SaverInstance {
     // Pose: body length/height multipliers + head placement per state.
     let len = 1.15, ht = 1, headDrop = 0, tailLift = 1;
     if (cat.state === 'crouch') { const k = smooth01(cat.k); len = 1.15 + 0.1 * k; ht = 1 - 0.38 * k; tailLift = 1 + k; }
-    else if (cat.state === 'land') { const k = 1 - smooth01(cat.k); len = 1.15 + 0.12 * k; ht = 1 - 0.3 * k; }
+    else if (cat.state === 'land') { const k = 1 - smooth01(cat.k); len = 1.15 + 0.12 * k; ht = 1 - 0.3 * k; tailLift = 1.6; }
     else if (cat.state === 'jump') { const str = Math.sin(Math.PI * cat.k); len = 1.15 + 0.55 * str; ht = 1 - 0.28 * str; }
     else if (cat.state === 'stretch') { const k = Math.sin(Math.PI * clamp(cat.k, 0, 1)); len = 1.15 + 0.5 * k; ht = 1 - 0.22 * k; headDrop = 6 * k; }
     else if (cat.state === 'groom') { headDrop = 4 + 2.5 * Math.sin(tt * 0.012); }
     else if (cat.state === 'walk') { tailLift = 1.5; }
-    else if (cat.state === 'stalk') { len = 1.28; ht = 0.8; headDrop = 6; tailLift = 0.5; }
+    else if (cat.state === 'stalk') {
+      // Low and locked on, jaw chattering at the moth.
+      len = 1.28; ht = 0.8; tailLift = 0.5;
+      headDrop = 6 + Math.sin(tt * 0.045) * 1.2;
+    }
     else if (cat.state === 'knead') { ht = 0.94 - 0.02 * Math.abs(Math.sin(tt * 0.009)); }
     else if (cat.state === 'bat') { headDrop = 3; }
 
@@ -776,8 +827,53 @@ class CatwalkInstance implements SaverInstance {
       ctx.strokeStyle = fur;
       ctx.lineWidth = s * 0.14;
       ctx.lineCap = 'round';
-      ctx.beginPath(); // tail wrap
-      ctx.arc(0, -s * 0.22, s * 0.58, 0.35, Math.PI * 0.92);
+      // Tail wrap — with a dream twitch every few seconds.
+      const dph = (tt % 4200) / 4200;
+      const twitch = dph < 0.07 ? Math.sin((dph / 0.07) * Math.PI) * 0.16 : 0;
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.22, s * 0.58, 0.35, Math.PI * (0.92 + twitch));
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    if (cat.state === 'roll') {
+      // Belly-up on a wide perch, paws in the air. Entry/exit fold the legs.
+      const env = smooth01(clamp(Math.min(cat.k / 0.16, (1 - cat.k) / 0.16), 0, 1));
+      ctx.fillStyle = fur;
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.ellipse(0, -s * 0.32, s * 0.6, s * 0.34, 0, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath(); // head lolling to the side
+      ctx.arc(-s * 0.52, -s * 0.34 + (1 - env) * s * 0.1, s * 0.24, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      this.ear(-s * 0.62, -s * 0.54, s * 0.12, fur, 0.1);
+      if (this.look.socks) {
+        ctx.fillStyle = 'rgba(224,220,212,0.55)';
+        ctx.beginPath();
+        ctx.ellipse(0, -s * 0.3, s * 0.34, s * 0.19, 0, 0, TAU);
+        ctx.fill();
+      }
+      // Four paws up, wiggling — the whole point of the manoeuvre.
+      ctx.strokeStyle = fur;
+      ctx.lineWidth = s * 0.12;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const px = -s * 0.28 + i * s * 0.19;
+        const wig = Math.sin(tt * 0.008 + i * 1.9) * s * 0.06 * env;
+        ctx.moveTo(px, -s * 0.55);
+        ctx.lineTo(px + wig, -s * 0.55 - s * 0.26 * env);
+      }
+      ctx.stroke();
+      // Tail flopped out along the perch.
+      ctx.beginPath();
+      ctx.moveTo(s * 0.55, -s * 0.24);
+      ctx.quadraticCurveTo(s * 0.85, -s * 0.3 - Math.sin(tt * 0.003) * s * 0.08, s * 1.02, -s * 0.12);
       ctx.stroke();
       ctx.restore();
       return;
@@ -885,6 +981,21 @@ class CatwalkInstance implements SaverInstance {
       ctx.lineTo(bl * 0.46, 0);
       ctx.stroke();
     }
+    // Markings: a white chest patch and sock paws, for the cats that have them.
+    if (this.look.socks) {
+      ctx.fillStyle = 'rgba(224,220,212,0.8)';
+      ctx.beginPath();
+      ctx.ellipse(bl * 0.36, -bh * 0.55, s * 0.1, s * 0.15, -0.3, 0, TAU);
+      ctx.fill();
+      if (cat.state !== 'jump') {
+        for (const px of [bl * 0.32, bl * 0.46]) {
+          ctx.beginPath();
+          ctx.ellipse(px, -s * 0.03, s * 0.065, s * 0.045, 0, 0, TAU);
+          ctx.fill();
+        }
+      }
+    }
+
     // Whiskers — three hairlines catching the moonlight.
     ctx.strokeStyle = 'rgba(200,218,248,0.4)';
     ctx.lineWidth = 0.8;
@@ -900,11 +1011,12 @@ class CatwalkInstance implements SaverInstance {
     ctx.strokeStyle = fur;
     ctx.lineWidth = s * 0.12;
     ctx.lineCap = 'round';
+    const tl = this.look.tail;
     ctx.beginPath();
     ctx.moveTo(-bl * 0.5, -bh * 0.5);
     ctx.quadraticCurveTo(
-      -bl * 0.78, -bh * (0.55 + 0.4 * tailLift) - sway * s * 0.2,
-      -bl * (0.86 + 0.08 * sway), -bh * (0.2 + 0.75 * tailLift + 0.3 * sway),
+      -bl * 0.78 * tl, -bh * (0.55 + 0.4 * tailLift) - sway * s * 0.2,
+      -bl * (0.86 + 0.08 * sway) * tl, -bh * (0.2 + (0.75 * tailLift + 0.3 * sway) * tl),
     );
     ctx.stroke();
 
@@ -913,14 +1025,18 @@ class CatwalkInstance implements SaverInstance {
     const blink = ((tt * 0.00021 + cat.visit.perch * 0.37) % 1) < 0.035;
     if (glow > 0.02 && !blink && cat.state !== 'jump') {
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(255,232,140,${(0.85 * Math.min(1, glow)).toFixed(3)})`;
-      for (const ex of [hx + hr * 0.28, hx + hr * 0.72]) {
+      const ea = (0.85 * Math.min(1, glow)).toFixed(3);
+      for (const [ex, col] of [
+        [hx + hr * 0.28, this.look.eyeL],
+        [hx + hr * 0.72, this.look.eyeR],
+      ] as const) {
+        ctx.fillStyle = col.replace('$A', ea);
         ctx.beginPath();
         ctx.ellipse(ex, hy - hr * 0.08, hr * 0.1, hr * 0.16, 0, 0, TAU);
         ctx.fill();
       }
       if (glow > 1) {
-        ctx.fillStyle = `rgba(255,240,170,${((glow - 1) * 0.25).toFixed(3)})`;
+        ctx.fillStyle = this.look.eyeL.replace('$A', ((glow - 1) * 0.25).toFixed(3));
         ctx.beginPath();
         ctx.arc(hx + hr * 0.5, hy, hr * 0.9, 0, TAU);
         ctx.fill();
@@ -986,6 +1102,27 @@ class CatwalkInstance implements SaverInstance {
         ctx.fillStyle = `rgba(200,222,255,${a.toFixed(3)})`;
         ctx.fillText('z', cat.x + 16 + k * 7 + age * 10, cat.y - this.params.catSize - 8 - age * 34 - k * 8);
       }
+    }
+
+    // Emotes: a startled "!" when the moth is spotted; a curious "?" during
+    // the mid-sit look-around. Both pop, hold, and fade — pure in tt.
+    const emote = (ch: string, k: number, color: string): void => {
+      const pop = k < 0.25 ? smooth01(k / 0.25) : 1;
+      const fade = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
+      const a = 0.85 * pop * fade;
+      if (a < 0.03) return;
+      ctx.font = `bold ${Math.round(11 + pop * 4)}px ui-monospace, monospace`;
+      ctx.fillStyle = color.replace('$A', a.toFixed(3));
+      ctx.fillText(ch, cat.x + cat.face * 14, cat.y - this.params.catSize - 14 - k * 6);
+    };
+    if (vis.action === 'pounce') {
+      const k = (tt - vis.tA - 320) / 900;
+      if (k >= 0 && k <= 1) emote('!', k, 'rgba(255,214,140,$A)');
+    }
+    if (vis.action === 'sit' || vis.action === 'groom') {
+      const fr = (tt - vis.tA) / Math.max(1, vis.tD - vis.tA);
+      const w0 = 0.4 + vis.quirk * 0.25;
+      if (fr > w0 && fr < w0 + 0.13) emote('?', (fr - w0) / 0.13, 'rgba(190,214,255,$A)');
     }
 
     // The moth: circles just out of reach while the cat stalks, escapes the

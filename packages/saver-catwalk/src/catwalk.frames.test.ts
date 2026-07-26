@@ -147,7 +147,7 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     const seeds = [7, 11, 23, 42, 5];
     let swatted = false;
     for (const seed of seeds) {
-      const { host, page, victims } = makePage();
+      const { host, victims } = makePage();
       const chip = document.createElement('a');
       chip.dataset.idleVictim = '';
       // 110px right of the perch at (100,120,w260): anchor x=230 → chip cx=340.
@@ -172,6 +172,36 @@ describe('catwalk: the page is the cat\'s furniture', () => {
       if (swatted) break;
     }
     expect(swatted, 'some seed bats the chip').toBe(true);
+  });
+
+  it('every seed is a different cat: body and itinerary both vary', () => {
+    const summaries = [1, 2, 3].map((seed) => {
+      const { host, page, victims } = makePage();
+      const inst = mount({ ...ctx(host, page), rng: createRng(seed), seed });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const anyInst = inst as any;
+      const summary = JSON.stringify({
+        look: anyInst.look,
+        actions: anyInst.visits.map((v: { action: string }) => v.action),
+      });
+      inst.dispose();
+      void victims;
+      host.remove();
+      return summary;
+    });
+    expect(new Set(summaries).size, 'three seeds, three distinct cats').toBe(3);
+
+    // And the same seed twice is the same cat exactly.
+    const twice = [0, 0].map(() => {
+      const { host, page } = makePage();
+      const inst = mount({ ...ctx(host, page), rng: createRng(9), seed: 9 });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = JSON.stringify({ look: (inst as any).look, actions: (inst as any).visits.map((v: { action: string }) => v.action) });
+      inst.dispose();
+      host.remove();
+      return s;
+    });
+    expect(twice[0]).toBe(twice[1]);
   });
 
   it('falls back to structural perches when the semantic selector finds nothing', () => {

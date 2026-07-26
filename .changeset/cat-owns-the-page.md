@@ -20,5 +20,22 @@ spring response are closed-form in `t`; `renderFrame(t, seed)` reproduces any
 frame, page transforms included, and a same-size `resize()` re-derives the
 identical itinerary from forked RNG streams.
 
+And every seed is a DIFFERENT CAT — in body and in temperament. A seeded
+look rolls the coat shade, plumpness, tail length, eye colour (gold, green,
+copper, or ice-blue — ~6% are odd-eyed), and whether it wears a white chest
+patch and sock paws. A seeded playfulness trait weights what it does at each
+stop. A playful
+cat **stalks and pounces on a moth** (which escapes, every time) and **bats a
+neighbouring block** — the swatted chip is shoved sideways and rings back, the
+one place the cat touches something that isn't its own perch. It also **kneads
+biscuits** (the perch rocks under the alternating paws), looks back over its
+shoulder mid-sit, does a butt-wiggle before every pounce and jump, walks with
+a real gait and paw prints when a page offers nothing to perch on, floats a
+heart while grooming, and blinks. It rolls belly-up on wide perches (paws
+wiggling in the air, the perch swaying slowly under it), chatters its jaw at
+the moth mid-stalk, pops a startled "!" when it spots it and a curious "?"
+during the look-around, twitches its tail in its sleep while dreaming, and
+always does the big wake-up stretch before leaving a nap.
+
 11 typed params (`pace`, `jumpArc`, `bounce`, `veil`, `lightRadius`, `eyeGlow`,
 `tint`, …) plus a dusk-falls `demoTrack`.
