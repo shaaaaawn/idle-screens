@@ -627,6 +627,51 @@ test.describe('evals view', () => {
     expect(await page.evaluate(() => localStorage.getItem('idleScreens.evals.openrouterKey'))).toBeNull();
   });
 
+  test('a hostile model id renders as text, not markup', async ({ page }) => {
+    // Model ids come off the OpenRouter catalogue and a free-text box, and the
+    // agent modals put them in their titles. They used to be interpolated into
+    // innerHTML. CodeQL caught two of the three sites; this covers the shape so
+    // the third can't come back either.
+    const hostile = '<img src=x onerror="window.__pwned=1">evil/model';
+    await page.route('https://openrouter.ai/api/v1/models', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [{ id: hostile, name: 'Evil', context_length: 1000 }] }),
+      }),
+    );
+    await page.route('https://openrouter.ai/api/v1/key', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { label: 'evals', usage: 0, limit: 10 } }),
+      }),
+    );
+    // No tool call in the reply, so every screen finishes in a single turn.
+    await page.route('https://openrouter.ai/api/v1/chat/completions', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ choices: [{ message: { content: 'done', role: 'assistant' } }] }),
+      }),
+    );
+    await page.addInitScript((key) => {
+      localStorage.setItem('idleScreens.evals.openrouterKey', key);
+    }, FAKE_KEY);
+
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator('[data-act="agent"]').click();
+    await page.locator('.evals-agent-modal input[name="model"]').fill(hostile);
+    await page.locator('.evals-agent-modal [data-act="start"]').click();
+
+    const title = page.locator('.evals-modal-title');
+    // The id still reaches the operator as text...
+    await expect(title).toContainText('evil/model');
+    // ...as text only: no element built, no handler run.
+    expect(await title.locator('img').count()).toBe(0);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+      undefined,
+    );
+  });
+
   test('an unreachable OpenRouter degrades to free text instead of blocking', async ({ page }) => {
     await page.route('https://openrouter.ai/api/v1/models', (route) => route.abort());
     await openRunDialog(page);

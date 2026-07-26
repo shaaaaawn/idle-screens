@@ -68,7 +68,7 @@ export async function runAgentEvalInteractive(opts: {
   const modal = document.createElement('div');
   modal.className = 'evals-modal evals-agent-modal evals-agent-wide';
   modal.innerHTML = `
-    <h2 class="evals-modal-title">Authoring via OpenRouter — ${opts.model}</h2>
+    <h2 class="evals-modal-title">Authoring via OpenRouter — <span data-role="model"></span></h2>
     <p class="evals-modal-sub">
       ${targets.length} screen${targets.length === 1 ? '' : 's'}, serial tool loop.
       Specs from the model become this run’s evidence; scores are computed locally.
@@ -79,6 +79,7 @@ export async function runAgentEvalInteractive(opts: {
       <button type="button" class="evals-btn secondary" data-act="abort">Abort</button>
     </div>
   `;
+  modal.querySelector('[data-role="model"]')!.textContent = opts.model;
   backdrop.append(modal);
   modal.querySelector('[data-act="abort"]')?.addEventListener('click', () => abort.abort());
 
@@ -278,7 +279,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
     const modal = document.createElement('div');
     modal.className = 'evals-modal evals-agent-modal evals-agent-wide';
     modal.innerHTML = `
-      <h2 class="evals-modal-title">Agent run — ${model}</h2>
+      <h2 class="evals-modal-title">Agent run — <span data-role="model"></span></h2>
       <p class="evals-modal-sub">${targets.length} screen${targets.length === 1 ? '' : 's'}, serial. Scores are computed locally, never self-reported.</p>
       <div class="evals-agent-rows" data-role="rows"></div>
       <div class="evals-agent-log" data-role="log" aria-live="polite"></div>
@@ -286,6 +287,9 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         <button type="button" class="evals-btn secondary" data-act="abort">Abort</button>
       </div>
     `;
+    // Model ids arrive from the OpenRouter catalogue and the search box, so
+    // they're untrusted strings — set them as text, never as markup.
+    modal.querySelector('[data-role="model"]')!.textContent = model;
     backdrop.append(modal);
     modal.querySelector('[data-act="abort"]')?.addEventListener('click', () => abort.abort());
     return modal;
@@ -431,7 +435,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
     modal.className = 'evals-modal evals-agent-modal evals-agent-wide';
     const finished = run.artifacts.filter((a) => a.final).length;
     modal.innerHTML = `
-      <h2 class="evals-modal-title">Run complete — ${run.model}</h2>
+      <h2 class="evals-modal-title">Run complete — <span data-role="model"></span></h2>
       <p class="evals-modal-sub">
         ${finished}/${run.artifacts.length} screens produced a final spec · saved to this browser
         (last 5 agent runs are kept).
@@ -444,6 +448,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         <button type="button" class="evals-btn" data-act="close">Close</button>
       </div>
     `;
+    modal.querySelector('[data-role="model"]')!.textContent = run.model;
     backdrop.append(modal);
     const results = modal.querySelector<HTMLElement>('[data-role="results"]')!;
     for (const a of run.artifacts) results.append(artifactRow(a));
