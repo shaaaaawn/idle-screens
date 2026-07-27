@@ -51,16 +51,17 @@ struct ChannelDeckView: View {
             }
 
             Section("controls") {
-                if app.pairedTV != nil {
+                if !app.pairedScreens.isEmpty {
                     Button {
                         run {
-                            let delivered = await app.pushToTV(channelId: credential.channelId)
-                            if !delivered {
-                                actionError = await app.pairPushError ?? "Couldn't reach the TV."
+                            let delivered = await app.pushToAllScreens(channelId: credential.channelId)
+                            if delivered == 0 {
+                                actionError = await app.pairPushError ?? "Couldn't reach your screens."
                             }
                         }
                     } label: {
-                        Label("Play on your screen", systemImage: "play.tv")
+                        Label(app.pairedScreens.count > 1 ? "Play on all screens" : "Play on your screen",
+                              systemImage: "play.tv")
                     }
                     .disabled(isSending)
                 }

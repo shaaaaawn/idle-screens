@@ -9,6 +9,7 @@ struct PairedTVView: View {
     @State private var manualCode = ""
     @State private var justPushed: String?
     @State private var screenKind: ScreenKind = .appleTV
+    @State private var selectedScreen: String?
 
     /// The three screen hosts, each with the one step that puts it into
     /// pairing mode — shown one at a time instead of as a run-on sentence.
@@ -44,7 +45,7 @@ struct PairedTVView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if app.pairedTV != nil {
+                if !app.pairedScreens.isEmpty {
                     pairedContent
                 } else {
                     unpairedContent
@@ -60,7 +61,7 @@ struct PairedTVView: View {
             }
         }
         .task {
-            await app.refreshTVStatus()
+            await app.refreshScreenStatuses()
         }
     }
 
@@ -178,90 +179,228 @@ struct PairedTVView: View {
 
     // MARK: Paired
 
-    private var pairedContent: some View {
-        List {
-            Section {
-                HStack(spacing: 16) {
-                    Image(systemName: "tv.badge.wifi")
-                        .font(.largeTitle)
-                        .foregroundStyle(Color.textPrimary)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Screen paired")
-                            .font(.headline)
-                        Text(app.pairedTV?.channelId.map { "Watching \($0)" } ?? "Not watching yet")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
+    /// Push target: one screen, or everything at once.
+    private var targetLabel: String {
+        guard let selectedScreen,
+              let screen = app.pairedScreens.first(where: { $0.deviceId == selectedScreen })
+        else { return app.pairedScreens.count > 1 ? "All screens" : "your screen" }
+        return screen.kind.label
+    }
 
-            if let error = app.pairPushError {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                }
+    private func send(_ channelId: String) {
+        Task {
+            let ok: Bool
+            if let selectedScreen,
+               let screen = app.pairedScreens.first(where: { $0.deviceId == selectedScreen }) {
+                ok = await app.push(channelId: channelId, to: screen)
+            } else {
+                ok = await app.pushToAllScreens(channelId: channelId) > 0
             }
-
-            if !app.credentials.isEmpty {
-                Section("Your channels") {
-                    ForEach(app.credentials) { credential in
-                        pushRow(id: credential.channelId, label: credential.label)
-                    }
-                }
-            }
-
-            Section("Gallery") {
-                if app.channels.isEmpty {
-                    Text("No channels loaded yet.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(app.channels) { channel in
-                    pushRow(id: channel.id, label: channel.displayLabel)
-                }
-            }
-
-            Section {
-                Button("Unpair TV", role: .destructive) {
-                    app.unpairTV()
-                }
+            if ok {
+                justPushed = channelId
+                try? await Task.sleep(for: .seconds(2))
+                if justPushed == channelId { justPushed = nil }
             }
         }
+    }
+
+    private var pairedContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                // Screens — one card each, live status while the app is open.
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("your screens")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.textPrimary)
+                        Spacer()
+                        Button {
+                            showingScanner = true
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.textPrimary)
+                        }
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            if app.pairedScreens.count > 1 {
+                                allScreensCard
+                            }
+                            ForEach(app.pairedScreens) { screen in
+                                screenCard(screen)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                if let error = app.pairPushError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+
+                // Channels as poster cards — same language as the Watch tab.
+                if !app.credentials.isEmpty {
+                    channelSection(
+                        "your channels",
+                        items: app.credentials.map { ($0.channelId, $0.label) })
+                }
+                channelSection(
+                    "gallery",
+                    items: app.channels.map { ($0.id, $0.displayLabel) })
+            }
+            .padding(20)
+        }
         .refreshable {
-            await app.refreshTVStatus()
+            await app.refreshScreenStatuses()
             await app.loadGallery()
         }
         .task {
             if app.channels.isEmpty { await app.loadGallery() }
+            // Poll while this tab is on screen so the dots stay honest.
+            while !Task.isCancelled {
+                await app.refreshScreenStatuses()
+                try? await Task.sleep(for: .seconds(10))
+            }
         }
     }
 
-    private func pushRow(id: String, label: String) -> some View {
-        Button {
-            Task {
-                if await app.pushToTV(channelId: id) {
-                    justPushed = id
-                    try? await Task.sleep(for: .seconds(2))
-                    if justPushed == id { justPushed = nil }
-                }
-            }
+    private var allScreensCard: some View {
+        let selected = selectedScreen == nil
+        return Button {
+            selectedScreen = nil
         } label: {
-            HStack {
-                Text(label)
-                Spacer()
-                if justPushed == id {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else if app.pairedTV?.channelId == id {
-                    Text("On TV")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: "play.tv")
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.title3)
+                    .foregroundStyle(Color.textPrimary)
+                Spacer(minLength: 0)
+                Text("All screens")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                Text("\(app.pairedScreens.count) paired")
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .padding(14)
+            .frame(width: 148, height: 118, alignment: .leading)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.6),
+                                  lineWidth: selected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func screenCard(_ screen: PairedScreen) -> some View {
+        let selected = selectedScreen == screen.deviceId
+        return Button {
+            selectedScreen = selected ? nil : screen.deviceId
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: screen.kind.icon)
+                        .font(.title3)
                         .foregroundStyle(Color.textPrimary)
+                    Spacer()
+                    Circle()
+                        .fill(screen.hasRegistered ? Color.appSuccess : Color.textTertiary)
+                        .frame(width: 8, height: 8)
+                }
+                Spacer(minLength: 0)
+                Text(screen.kind.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                Text(screen.statusText)
+                    .font(.caption)
+                    .foregroundStyle(screen.hasRegistered ? Color.textSecondary : Color.textTertiary)
+                    .lineLimit(1)
+            }
+            .padding(14)
+            .frame(width: 148, height: 118, alignment: .leading)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.6),
+                                  lineWidth: selected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Unpair \(screen.kind.label)", role: .destructive) { app.unpair(screen) }
+        }
+    }
+
+    /// A shelf of channel poster cards that push on tap.
+    private func channelSection(_ title: String, items: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                Text("→ \(targetLabel)")
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 16) {
+                ForEach(items, id: \.0) { id, label in
+                    channelCard(id: id, label: label)
                 }
             }
         }
+    }
+
+    private func channelCard(id: String, label: String) -> some View {
+        let onTarget = app.pairedScreens.contains { $0.channelId == id }
+        return Button {
+            send(id)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    if let spec = app.channels.first(where: { $0.id == id })?.spec {
+                        ScenePreviewView(spec: spec, fallbackSeed: id)
+                    } else {
+                        LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+                    if justPushed == id {
+                        Color.black.opacity(0.45)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.white)
+                    }
+                }
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(alignment: .topTrailing) {
+                    if onTarget {
+                        Text("ON AIR")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.appBackground)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.textPrimary, in: Capsule())
+                            .padding(6)
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
+                }
+
+                Text(label)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
         .disabled(app.isPairing)
     }
 }

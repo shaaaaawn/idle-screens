@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// Full-screen, chrome-free host for the active channel. Picks the renderer
-/// from the effective capability tier; dims to black while the channel sleeps.
+/// Full-screen host for the active channel. Picks the renderer from the
+/// effective capability tier; dims to black while the channel sleeps.
+/// Chrome-free while watching, but self-explaining: an overlay with the
+/// channel name and the way out shows on entry and on any click, then fades.
 struct ScreenSaverView: View {
     @Environment(TVAppState.self) private var app
+    @State private var showChrome = false
+    @State private var chromeTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -70,10 +74,75 @@ struct ScreenSaverView: View {
                     .padding(48)
                     .transition(.opacity)
             }
+
+            if showChrome {
+                channelChrome
+                    .transition(.opacity)
+            }
         }
         .animation(.easeInOut(duration: 0.4), value: app.overlayText)
         .animation(.easeInOut(duration: 0.8), value: app.sleeping)
+        .animation(.easeInOut(duration: 0.4), value: showChrome)
         .ignoresSafeArea()
+        // The saver has no buttons, so give the remote somewhere to land and
+        // handle the exits explicitly — Menu/Back must never feel dead.
+        .focusable()
+        .onExitCommand { app.exitChannel() }
+        .onPlayPauseCommand { revealChrome() }
+        .onTapGesture { revealChrome() }
+        .onAppear { revealChrome() }
+        .onDisappear { chromeTask?.cancel() }
+    }
+
+    /// Bottom scrim with the channel name and the way back — visible for a
+    /// few seconds on entry and on any click, then gone.
+    private var channelChrome: some View {
+        VStack {
+            Spacer()
+            HStack(alignment: .lastTextBaseline) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(channelLabel)
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(.white)
+                    if let viewers = app.viewers, viewers > 0 {
+                        HStack(spacing: 8) {
+                            Circle().fill(Color.appAccent).frame(width: 10, height: 10)
+                            Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
+                        }
+                        .font(.system(size: 25))
+                        .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                Spacer()
+                Label("Press Back to browse", systemImage: "chevron.backward")
+                    .font(.system(size: 25))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .padding(.horizontal, 90)
+            .padding(.bottom, 60)
+            .background(
+                LinearGradient(colors: [.clear, .black.opacity(0.7)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 280),
+                alignment: .bottom
+            )
+        }
+        .ignoresSafeArea()
+    }
+
+    private var channelLabel: String {
+        let id = app.selectedChannelId ?? ""
+        return app.channels.first(where: { $0.id == id })?.displayLabel ?? id
+    }
+
+    private func revealChrome() {
+        showChrome = true
+        chromeTask?.cancel()
+        chromeTask = Task {
+            try? await Task.sleep(for: .seconds(3.5))
+            guard !Task.isCancelled else { return }
+            showChrome = false
+        }
     }
 }
 

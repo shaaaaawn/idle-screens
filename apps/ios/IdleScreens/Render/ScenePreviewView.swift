@@ -13,18 +13,29 @@ struct ScenePreviewView: View {
     @State private var layers: [CompiledLayer]?
 
     var body: some View {
-        ZStack {
-            if let layers {
-                NativeSceneView(
-                    layers: layers,
-                    background: spec.background,
-                    tier: .t2
-                )
-            } else {
-                // One frame of background color while the compile task runs.
-                Color(hex: spec.background?.primaryColor ?? "0A0A0F")
+        // Render on a virtual 1080p canvas and scale down, so the preview is
+        // an exact miniature of the fullscreen render. Rendering at tile size
+        // distorts px-unit specs badly: positions compress into the tile
+        // while pixel-sized sprites stay full size — cramped and "stretched".
+        GeometryReader { geo in
+            ZStack {
+                if let layers {
+                    NativeSceneView(
+                        layers: layers,
+                        background: spec.background,
+                        tier: .t2
+                    )
+                } else {
+                    // One frame of background color while the compile task runs.
+                    Color(hex: spec.background?.primaryColor ?? "0A0A0F")
+                }
             }
+            .frame(width: 1920, height: 1080)
+            .scaleEffect(x: geo.size.width / 1920,
+                         y: geo.size.height / 1080,
+                         anchor: .topLeading)
         }
+        .clipped()
         .task(id: spec) {
             layers = spec.compile(seed: spec.seed ?? Self.stableSeed(fallbackSeed))
         }

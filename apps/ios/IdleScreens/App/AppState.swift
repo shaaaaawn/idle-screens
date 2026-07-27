@@ -25,7 +25,7 @@ final class AppState {
 
     // MARK: TV pairing
 
-    var pairedTV: PairedTV?
+    var pairedScreens: [PairedScreen] = []
     var isPairing = false
     var pairPushError: String?
 
@@ -37,7 +37,7 @@ final class AppState {
         self.pairClient = PairClient(baseURL: baseURL, transport: transport)
         self.store = CredentialStore()
         self.credentials = store.load()
-        self.pairedTV = Self.loadPairedTV()
+        self.pairedScreens = Self.loadPairedScreens()
     }
 
     /// Test-friendly initializer — inject clients backed by a mock transport.
@@ -48,7 +48,7 @@ final class AppState {
             ?? PairClient(baseURL: URL(string: Config.baseURL)!)
         self.store = store
         self.credentials = store.load()
-        self.pairedTV = Self.loadPairedTV()
+        self.pairedScreens = Self.loadPairedScreens()
     }
 }
 

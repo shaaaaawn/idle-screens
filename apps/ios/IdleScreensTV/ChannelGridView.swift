@@ -4,8 +4,6 @@ import SwiftUI
 /// "featured" and "channels" sections of 16:9 cards below the fold.
 struct ChannelGridView: View {
     @Environment(TVAppState.self) private var app
-    @State private var manualChannelId = ""
-    @State private var showingSettings = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
@@ -33,13 +31,8 @@ struct ChannelGridView: View {
                             .foregroundStyle(Color.textSecondary)
                     }
                     Spacer()
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 32))
-                    }
-                    .buttonStyle(.borderless)
+                    // Settings lives in the top tab bar — no header chrome,
+                    // so the grid is the only focus surface on this screen.
                 }
                 .padding(.horizontal, 80)
                 .padding(.top, 40)
@@ -80,15 +73,6 @@ struct ChannelGridView: View {
                                 }
                             }
 
-                            HStack(spacing: 24) {
-                                TextField("Enter channel ID", text: $manualChannelId)
-                                    .frame(width: 480)
-                                Button("Watch") {
-                                    let id = manualChannelId.trimmingCharacters(in: .whitespaces)
-                                    if !id.isEmpty { app.selectChannel(id) }
-                                }
-                                .disabled(manualChannelId.trimmingCharacters(in: .whitespaces).isEmpty)
-                            }
                         }
                         .padding(.horizontal, 80)
                         .padding(.bottom, 80)
@@ -101,9 +85,10 @@ struct ChannelGridView: View {
                 set: { if !$0 { app.exitChannel() } }
             )) {
                 ScreenSaverView()
-            }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView()
+                    // Fullscreen means fullscreen: no floating tab bar over
+                    // the scene while watching.
+                    .toolbar(.hidden, for: .tabBar)
+                    .toolbar(.hidden, for: .navigationBar)
             }
         }
         .task {
@@ -155,14 +140,23 @@ private struct ChannelCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Fixed 16:9 poster frame — thumbs arrive in arbitrary aspects;
-            // channels without one get deterministic generative art.
-            AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    ProceduralChannelArt(channelId: channel.id)
+            // Fixed 16:9 poster. Priority: live native scene (the product
+            // promise; canvas-capable t3 hardware only, rendered on a virtual
+            // 1080p canvas so it's an exact miniature of fullscreen) → web
+            // thumb → deterministic generative art.
+            Group {
+                if let spec = channel.spec, app.effectiveTier == .t3 {
+                    ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+                        .opacity((channel.sleeping ?? false) ? 0.35 : 1)
+                } else {
+                    AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            ProceduralChannelArt(channelId: channel.id)
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -176,8 +170,11 @@ private struct ChannelCard: View {
                     .foregroundStyle(Color.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 12) {
-                    if let viewers = channel.viewers {
-                        Label("\(viewers)", systemImage: "eye")
+                    if channel.sleeping ?? false {
+                        Label("sleeping", systemImage: "moon.zzz.fill")
+                    } else if let viewers = channel.viewers, viewers > 0 {
+                        Label(viewers == 1 ? "1 watching" : "\(viewers) watching",
+                              systemImage: "eye")
                     }
                     if let tags = channel.tags, !tags.isEmpty {
                         Text(tags.prefix(3).joined(separator: " · "))
