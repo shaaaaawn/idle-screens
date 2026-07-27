@@ -3,13 +3,23 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRng, type PageContext, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { catwalk } from './index';
 
+/**
+ * Counts canvas clears. Every full repaint starts by clearing, so this is how a
+ * test can tell "it actually redrew" apart from "nothing happened" — the page
+ * transforms alone can't show it, since the steerable params (lightRadius,
+ * eyeGlow, tint, dust) only reach the canvas.
+ */
+let clears = 0;
+
 /* happy-dom has no Canvas2D — stub just enough for the cat to draw into. */
 function stubContext2D(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const gradient = { addColorStop: () => {} } as unknown as CanvasGradient;
   return {
     canvas,
     fillRect: () => {},
-    clearRect: () => {},
+    clearRect: () => {
+      clears += 1;
+    },
     beginPath: () => {},
     closePath: () => {},
     moveTo: () => {},
@@ -280,6 +290,48 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     inst.renderFrame(9000, 7);
     inst.renderFrame(31_000, 7);
     inst.renderFrame(9000, 7);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  // A paused saver runs no frames, so a steer has to repaint on the spot or the
+  // change stays invisible until something resumes it. tide and limelight both
+  // ratchet this; catwalk did not, and an untested applyTrack() is exactly what
+  // tripped the coverage gate on this branch.
+  it('applyTrack while paused repaints immediately, and sleepiness waits for a recompile', () => {
+    const { host, page, victims } = makePage();
+    const inst = mount(ctx(host, page));
+
+    inst.renderFrame(9000, 7);
+    inst.setPaused(true);
+    const paused = snapshot(victims);
+
+    // The actual invariant: steering a paused saver has to redraw on the spot.
+    // Count clears, because lightRadius only reaches the canvas — the page
+    // transforms this suite usually snapshots cannot show a canvas repaint.
+    clears = 0;
+    inst.applyTrack?.({
+      program: 'catwalk',
+      seed: 7,
+      deltas: [{ t: 0, path: 'lightRadius', value: 0.9 }],
+    });
+    expect(clears, 'a paused saver must repaint on steer, not wait for a frame').toBeGreaterThan(0);
+
+    // ...and the repaint must not re-seed: the cat holds its pose rather than
+    // teleporting every time a slider moves.
+    expect(snapshot(victims), 'steering must not disturb the cat’s pose').toEqual(paused);
+
+    // `sleepiness` is read once while compiling the itinerary, so a delta on it
+    // deliberately does NOT take hold until the next resize() recompiles. This
+    // asserts the documented behaviour rather than wishing it away: if someone
+    // later makes it live, this test should be updated, not silently pass.
+    inst.applyTrack?.({
+      program: 'catwalk',
+      seed: 7,
+      deltas: [{ t: 0, path: 'sleepiness', value: 1 }],
+    });
+    expect(snapshot(victims), 'sleepiness is itinerary-time, not frame-time').toEqual(paused);
 
     inst.dispose();
     host.remove();
