@@ -1,114 +1,207 @@
-import type { SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
+import {
+  sampleTrack,
+  defaultParams,
+  type ControlTrack,
+  type ParamSpace,
+  type SaverContext,
+  type SaverInstance,
+  type SaverManifest,
+  type SaverPlugin,
+} from '@idle-screens/core';
 
 /**
- * The DVD bouncing logo. A small JS physics loop (the colour must change ON each wall
- * hit — CSS can't detect the bounce) that writes only `transform` each frame. Honours
- * pause (freeze) + reducedMotion (sit still). Bounds are cached and re-read on resize.
+ * DVD / Bouncing Logo — the consolidated, modernized descendant of the two
+ * "mark bounces around a black screen" savers that used to ship separately:
+ *   - `dvd.ts`: a raw rAF physics loop, `vx = 2.4px/frame`, `vy = 2px/frame`
+ *     (i.e. 144px/s / 120px/s at an implicit 60fps), colour re-rolled on
+ *     every wall hit, DOM/CSS rendering.
+ *   - `logo.ts` (retired): a CSS `alternate` keyframe pair, one-way periods
+ *     5000ms (x) / 6300ms (y), After Dark "logo" concept, no hit reaction.
+ * They were the same saver wearing two sprites. This canvas version keeps the
+ * `dvd` id (referenced by e2e) and the CLASSIC bounce-and-flash behaviour as
+ * the default, and lets the mark itself — plus three more geometric marks —
+ * be a typed, steerable parameter instead of a second saver.
  *
- * Asset substitution: no logo image — the classic "DVD" wordmark is drawn as bouncing
- * coloured DOM text, fully self-contained.
+ * Motion is closed-form in `t`: position is a triangle wave per axis (the
+ * canvas equivalent of `animation: alternate`), so the wall-hit COUNT at any
+ * `t` is `floor(t / onewayPeriod)` — no accumulated velocity/position state,
+ * ever. Hue is derived purely from those hit counts (a fixed step per hit,
+ * not a re-roll), and "corner party" intensity is the analytic product of
+ * both axes' proximity to a simultaneous hit. `BASE_SPEED_X`/`BASE_SPEED_Y`
+ * carry dvd.ts's numeric velocity forward (144px/s : 120px/s, ratio 1.2 —
+ * close to logo.ts's 6300:5000 = 1.26 period ratio, the same asymmetric
+ * diagonal feel both originals had).
  */
+
+const MARKS = ['dvd', 'idle-screens', 'diamond', 'ring'] as const;
+type Mark = (typeof MARKS)[number];
+
+const PARAM_SPACE = {
+  /** Which shape bounces. 'dvd' = the classic wordmark-in-a-pill. */
+  mark: { type: 'enum', default: 'dvd', options: [...MARKS] },
+  /** Multiplies both axis speeds (and therefore the wall-hit rate). */
+  speed: { type: 'number', default: 1, min: 0.25, max: 3, ease: 'smooth' },
+  /** Multiplies the mark's box size. */
+  scale: { type: 'number', default: 1, min: 0.5, max: 2, ease: 'smooth' },
+  /** Base hue (0-360); each wall hit steps it deterministically from here. */
+  hue: { type: 'number', default: 110, min: 0, max: 360, ease: 'smooth' },
+  /** Phosphor glow around the mark. */
+  glow: { type: 'number', default: 0.25, min: 0, max: 1, ease: 'smooth' },
+  /** Burst intensity when both axes hit a wall at once (a corner hit). */
+  cornerParty: { type: 'number', default: 0.6, min: 0, max: 1, ease: 'smooth' },
+} satisfies ParamSpace;
+
 export const dvdManifest: SaverManifest = {
   id: 'dvd',
-  label: 'DVD Bouncing Logo',
+  label: 'Bouncing Logo',
   passthrough: false,
-  minBackend: 'css',
+  minBackend: 'canvas2d',
   costTier: 'low',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
-  a11y: { flashSafe: true },
+  paramSpace: PARAM_SPACE,
+  a11y: {
+    flashSafe: true,
+    notes: 'Hue steps once per wall hit and a brief corner burst on exact corner hits; no strobing.',
+  },
+  attribution: {
+    source: 'DVD player idle screen + After Dark logo bounce — concepts',
+    license: 'MIT, original implementation; no third-party assets',
+  },
+  workerReady: true,
 };
 
-const STYLE = `
-.dvd-root { position:absolute; inset:0; display:block; overflow:hidden; background:#000; }
-.dvd-logo {
-  position:absolute; top:0; left:0; width:200px; will-change:transform;
-  color:#39ff14; text-align:center; user-select:none;
+interface Params {
+  mark: Mark;
+  speed: number;
+  scale: number;
+  hue: number;
+  glow: number;
+  cornerParty: number;
 }
-.dvd-word {
-  font-family:'Arial Black', Arial, sans-serif; font-size:58px; font-weight:900;
-  font-style:italic; letter-spacing:-3px; line-height:1; transform:skewX(-10deg);
-}
-.dvd-disc {
-  margin:2px auto 0; width:156px; height:20px; border-radius:50%;
-  background:currentColor; position:relative;
-}
-.dvd-video {
-  position:absolute; inset:0; color:#000; font-family:Arial, sans-serif;
-  font-size:13px; font-weight:700; letter-spacing:5px; line-height:20px;
-  text-indent:5px; text-align:center;
-}
-`;
 
-const COLORS = [
-  '#39ff14', '#ff2079', '#00e5ff', '#ffe600',
-  '#ff6a00', '#b967ff', '#ff3b3b', '#f5f5f5',
-];
+type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+// dvd.ts's original per-frame velocity (2.4px/frame, 2px/frame) at the
+// implicit ~60fps rAF cadence it ran at, converted to px/s.
+const BASE_SPEED_X = 144;
+const BASE_SPEED_Y = 120;
+
+// dvd.ts's `.dvd-logo` box (200px wide; 58px word + 20px disc + ~6px gap).
+const BASE_MARK_W = 200;
+const BASE_MARK_H = 84;
+
+// Deterministic hue step per wall hit. Not a multiple of small divisors of
+// 360 (so it doesn't cycle through the same handful of hues), but plain
+// arithmetic — never `ctx.rng` — so it's reproducible from (t, params) alone.
+const HUE_STEP_DEG = 47;
+
+// How close (ms) to an axis's wall-bounce instant counts as "hitting now",
+// for both the hue step's edge and the corner-burst falloff window.
+const CORNER_BURST_MS = 220;
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+/** Triangle wave in [0,1] with one-way period `p` (ms) — the canvas
+ *  equivalent of `animation: alternate`. Pure function of `t`. */
+function tri(t: number, p: number): number {
+  const cycle = p * 2;
+  const k = ((t % cycle) + cycle) % cycle;
+  return k < p ? k / p : 2 - k / p;
+}
+
+/** Wall-bounce count on one axis by time `t`, for a one-way period `p`.
+ *  Bounces land on every multiple of `p`. Never accumulated — recomputed
+ *  fresh from `t` every call. */
+function hitCount(t: number, p: number): number {
+  return Math.floor(Math.max(0, t) / p);
+}
+
+/** Time-distance (ms) from `t` to the nearest wall-bounce instant on an axis
+ *  with one-way period `p`. */
+function distToNearestHit(t: number, p: number): number {
+  const r = ((t % p) + p) % p;
+  return Math.min(r, p - r);
+}
 
 class DvdInstance implements SaverInstance {
   private readonly ctxSaver: SaverContext;
-  private readonly root: HTMLDivElement;
-  private readonly logo: HTMLDivElement;
-  private readonly styleEl: HTMLStyleElement;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly c2d: Ctx2D;
 
-  private x = 40;
-  private y = 40;
-  private vx = 2.4;
-  private vy = 2;
   private w = 0;
   private h = 0;
-  private W = 0;
-  private H = 0;
-  private ci = 0;
   private frameId: number | null = null;
   private paused = false;
+  private startT = 0;
+  private t = 0;
+
+  private params: Params = defaultParams(PARAM_SPACE) as unknown as Params;
+  private track: ControlTrack | null = null;
 
   constructor(ctx: SaverContext) {
     this.ctxSaver = ctx;
-
-    const style = document.createElement('style');
-    style.textContent = STYLE;
-    ctx.host.appendChild(style);
-    this.styleEl = style;
-
-    const root = document.createElement('div');
-    root.className = 'dvd-root';
-    const logo = document.createElement('div');
-    logo.className = 'dvd-logo';
-    logo.setAttribute('aria-hidden', 'true');
-    logo.innerHTML =
-      '<div class="dvd-word">DVD</div>' +
-      '<div class="dvd-disc"><span class="dvd-video">VIDEO</span></div>';
-    root.appendChild(logo);
-    ctx.host.appendChild(root);
-    this.root = root;
-    this.logo = logo;
-
-    this.W = ctx.width;
-    this.H = ctx.height;
-    this.measure();
-    this.x = ctx.rng.next() * Math.max(1, this.W - this.w);
-    this.y = ctx.rng.next() * Math.max(1, this.H - this.h);
-    this.vx = 2.4 * (ctx.rng.next() < 0.5 ? -1 : 1);
-    this.vy = 2 * (ctx.rng.next() < 0.5 ? -1 : 1);
-    this.setColor(0);
-    this.apply();
+    if (ctx.surface) {
+      this.canvas = ctx.surface;
+    } else {
+      const el = document.createElement('canvas');
+      el.style.cssText = 'display:block;width:100%;height:100%;background:#04050a';
+      ctx.host.appendChild(el);
+      this.canvas = el;
+    }
+    const c2d = this.canvas.getContext('2d', { alpha: false }) as Ctx2D | null;
+    if (!c2d) throw new Error('dvd: no 2d context');
+    this.c2d = c2d;
+    this.w = ctx.width;
+    this.h = ctx.height;
+    this.sizeCanvas();
 
     this.paused = ctx.reducedMotion;
-    if (!this.paused) this.start();
+    if (this.paused) this.renderStill();
+    else this.start();
   }
 
-  private measure(): void {
-    this.w = this.logo.offsetWidth;
-    this.h = this.logo.offsetHeight;
-    this.W = this.root.clientWidth || this.ctxSaver.width;
-    this.H = this.root.clientHeight || this.ctxSaver.height;
+  // ---- params ----
+  private applyParams(t: number): void {
+    const p = this.track ? sampleTrack(PARAM_SPACE, this.track, t) : this.params;
+    for (const k of Object.keys(PARAM_SPACE) as Array<keyof typeof PARAM_SPACE>) {
+      const v = (p as Record<string, unknown>)[k];
+      if (v !== undefined) (this.params as unknown as Record<string, unknown>)[k] = v;
+    }
   }
 
+  private sizeCanvas(): void {
+    const dpr = Math.min(this.ctxSaver.dpr, 2);
+    this.canvas.width = Math.max(1, Math.round(this.w * dpr));
+    this.canvas.height = Math.max(1, Math.round(this.h * dpr));
+    this.c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // ---- closed-form geometry ----
+
+  private markSize(): { markW: number; markH: number } {
+    const s = this.params.scale;
+    return {
+      markW: clamp(BASE_MARK_W * s, 60, this.w * 0.7),
+      markH: clamp(BASE_MARK_H * s, 26, this.h * 0.7),
+    };
+  }
+
+  /** One-way traversal periods (ms) for each axis at the current box size
+   *  and speed. Pure function of (w, h, markW, markH, speed). */
+  private periods(markW: number, markH: number): { px: number; py: number } {
+    const distX = Math.max(1, this.w - markW);
+    const distY = Math.max(1, this.h - markH);
+    const speedX = BASE_SPEED_X * Math.max(0.05, this.params.speed);
+    const speedY = BASE_SPEED_Y * Math.max(0.05, this.params.speed);
+    return { px: (distX / speedX) * 1000, py: (distY / speedY) * 1000 };
+  }
+
+  // ---- loop ----
   private start(): void {
     if (this.frameId !== null || typeof requestAnimationFrame === 'undefined') return;
-    this.measure();
-    this.loop();
+    this.startT = 0;
+    this.frameId = requestAnimationFrame((now) => this.loop(now));
   }
 
   private stop(): void {
@@ -118,69 +211,226 @@ class DvdInstance implements SaverInstance {
     }
   }
 
-  private loop(): void {
-    this.frameId = requestAnimationFrame(() => this.loop());
-    this.x += this.vx;
-    this.y += this.vy;
-    let hit = false;
-    if (this.x <= 0) {
-      this.x = 0;
-      this.vx = Math.abs(this.vx);
-      hit = true;
-    } else if (this.x + this.w >= this.W) {
-      this.x = this.W - this.w;
-      this.vx = -Math.abs(this.vx);
-      hit = true;
+  private loop(now: number): void {
+    this.frameId = requestAnimationFrame((n) => this.loop(n));
+    if (this.startT === 0) this.startT = now;
+    this.renderFrame(now - this.startT, this.ctxSaver.seed);
+  }
+
+  private renderStill(): void {
+    this.renderFrame(this.t, this.ctxSaver.seed);
+  }
+
+  // ---- draw ----
+
+  /** Rounded-rect path built from `arc` + `lineTo` only (no `quadraticCurveTo`/
+   *  `roundRect`, to stay inside the minimal Canvas2D surface classic savers
+   *  rely on). */
+  private roundRectPath(c: Ctx2D, x: number, y: number, w: number, h: number, r: number): void {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+    c.beginPath();
+    c.moveTo(x + rr, y);
+    c.lineTo(x + w - rr, y);
+    c.arc(x + w - rr, y + rr, rr, -Math.PI / 2, 0);
+    c.lineTo(x + w, y + h - rr);
+    c.arc(x + w - rr, y + h - rr, rr, 0, Math.PI / 2);
+    c.lineTo(x + rr, y + h);
+    c.arc(x + rr, y + h - rr, rr, Math.PI / 2, Math.PI);
+    c.lineTo(x, y + rr);
+    c.arc(x + rr, y + rr, rr, Math.PI, Math.PI * 1.5);
+    c.closePath();
+  }
+
+  /** The classic mark: a rounded pill with a bold italic "DVD" wordmark drawn
+   *  from paths/text — no trademarked disc/video-strip asset, just the shape
+   *  language the original evoked. */
+  private drawDvd(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
+    this.roundRectPath(c, x, y, w, h, h * 0.24);
+    c.fillStyle = color;
+    c.fill();
+    c.save();
+    c.translate(x + w / 2, y + h / 2);
+    c.rotate(-0.06); // a slight lean stands in for italic, without a matrix transform
+    c.fillStyle = '#04050a';
+    c.font = `900 ${Math.round(h * 0.6)}px "Arial Black", Arial, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('DVD', 0, 0);
+    c.restore();
+  }
+
+  private drawWordmark(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
+    c.fillStyle = color;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `700 ${Math.round(h * 0.32)}px ui-rounded, "Avenir Next", system-ui, sans-serif`;
+    c.fillText('idle-screens', x + w / 2, y + h / 2);
+  }
+
+  private drawDiamond(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const s = Math.min(w, h) * 0.62;
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(Math.PI / 4);
+    c.fillStyle = color;
+    c.fillRect(-s / 2, -s / 2, s, s);
+    c.restore();
+  }
+
+  private drawRing(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const r = Math.min(w, h) * 0.4;
+    c.beginPath();
+    c.arc(cx, cy, r, 0, Math.PI * 2);
+    c.strokeStyle = color;
+    c.lineWidth = Math.max(4, r * 0.34);
+    c.stroke();
+  }
+
+  private drawMark(mark: Mark, c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
+    switch (mark) {
+      case 'idle-screens':
+        this.drawWordmark(c, x, y, w, h, color);
+        break;
+      case 'diamond':
+        this.drawDiamond(c, x, y, w, h, color);
+        break;
+      case 'ring':
+        this.drawRing(c, x, y, w, h, color);
+        break;
+      case 'dvd':
+      default:
+        this.drawDvd(c, x, y, w, h, color);
+        break;
     }
-    if (this.y <= 0) {
-      this.y = 0;
-      this.vy = Math.abs(this.vy);
-      hit = true;
-    } else if (this.y + this.h >= this.H) {
-      this.y = this.H - this.h;
-      this.vy = -Math.abs(this.vy);
-      hit = true;
+  }
+
+  /** A tiny sparkle burst — the "corner party" — purely a function of how
+   *  close both axes are to hitting simultaneously right now. */
+  private drawBurst(c: Ctx2D, cx: number, cy: number, intensity: number, hue: number): void {
+    const rays = 8;
+    const radius = 10 + 46 * intensity;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * Math.PI * 2;
+      c.strokeStyle = `hsla(${hue.toFixed(1)}, 92%, 72%, ${(0.85 * intensity).toFixed(3)})`;
+      c.lineWidth = 1.5 + 3 * intensity;
+      c.beginPath();
+      c.moveTo(cx, cy);
+      c.lineTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+      c.stroke();
     }
-    if (hit) this.setColor();
-    this.apply();
+    c.restore();
   }
 
-  private apply(): void {
-    this.logo.style.transform = `translate(${this.x.toFixed(1)}px, ${this.y.toFixed(1)}px)`;
+  /** Pure render at logical time `t` for `seed`: everything below is a closed
+   *  -form function of (t, seed, this.w, this.h, this.params) — nothing is
+   *  read from or written to accumulated instance state. */
+  private render(t: number, seed: number): void {
+    const c = this.c2d;
+    c.fillStyle = '#04050a';
+    c.fillRect(0, 0, this.w, this.h);
+
+    const { markW, markH } = this.markSize();
+    const { px, py } = this.periods(markW, markH);
+    // A deterministic per-seed time offset (plain arithmetic on the seed
+    // argument, never ctx.rng) so different seeds land on different bounce
+    // phases without breaking (seed, t) purity.
+    const shifted = t + (Math.abs(seed) * 233) % 5000;
+
+    const x = tri(shifted, px) * Math.max(0, this.w - markW);
+    const y = tri(shifted, py) * Math.max(0, this.h - markH);
+
+    const hits = hitCount(shifted, px) + hitCount(shifted, py);
+    const hue = ((this.params.hue + hits * HUE_STEP_DEG) % 360 + 360) % 360;
+    const color = `hsl(${hue.toFixed(1)}, 78%, 56%)`;
+
+    if (this.params.glow > 0.02) {
+      c.shadowColor = color;
+      c.shadowBlur = 26 * this.params.glow;
+    } else {
+      c.shadowBlur = 0;
+    }
+    this.drawMark(this.params.mark, c, x, y, markW, markH, color);
+    c.shadowBlur = 0;
+
+    // Corner hit = both axes hitting a wall at (nearly) the same instant —
+    // detected analytically from each axis's distance to its own next/last
+    // bounce, with no memory of past hits required.
+    const ax = Math.max(0, 1 - distToNearestHit(shifted, px) / CORNER_BURST_MS);
+    const ay = Math.max(0, 1 - distToNearestHit(shifted, py) / CORNER_BURST_MS);
+    const cornerIntensity = this.params.cornerParty * ax * ax * ay * ay;
+    if (cornerIntensity > 0.002) {
+      this.drawBurst(c, x + markW / 2, y + markH / 2, cornerIntensity, hue);
+    }
   }
 
-  private setColor(next?: number): void {
-    this.ci =
-      next ??
-      (this.ci + 1 + Math.floor(this.ctxSaver.rng.next() * (COLORS.length - 1))) % COLORS.length;
-    this.logo.style.color = COLORS[this.ci];
-  }
-
+  // ---- SaverInstance ----
   setPaused(paused: boolean): void {
     this.paused = paused;
-    if (paused) this.stop();
-    else this.start();
+    if (paused) {
+      this.stop();
+      this.renderStill();
+    } else {
+      this.start();
+    }
   }
 
-  resize(width: number, height: number): void {
-    this.W = width;
-    this.H = height;
-    this.measure();
-    // Keep the logo inside the new bounds.
-    this.x = Math.min(this.x, Math.max(0, this.W - this.w));
-    this.y = Math.min(this.y, Math.max(0, this.H - this.h));
-    this.apply();
+  resize(width: number, height: number, dpr?: number): void {
+    this.w = width;
+    this.h = height;
+    if (dpr !== undefined) this.ctxSaver.dpr = dpr;
+    this.sizeCanvas();
+    if (this.paused) this.renderStill();
+  }
+
+  applyTrack(track: ControlTrack): void {
+    this.track = track;
+    if (this.paused) this.renderStill();
+  }
+
+  /** Pure, frame-addressable render: draw the state at logical time `t` for `seed`. */
+  renderFrame(t: number, seed: number): void {
+    this.t = t;
+    this.applyParams(t);
+    this.render(t, seed);
   }
 
   dispose(): void {
     this.stop();
-    this.root.remove();
-    this.styleEl.remove();
+    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) {
+      this.canvas.remove();
+    }
   }
 }
 
-/** The DVD bouncing-logo saver plugin. */
+/** The DVD / Bouncing Logo saver plugin. */
 export const dvd: SaverPlugin = {
   manifest: dvdManifest,
   mount: (ctx: SaverContext) => new DvdInstance(ctx),
+};
+
+/** A demo control-track: cycles through all four marks, sweeps the base hue,
+ *  and pumps the speed up and down. ~16s, loops. Deterministic. */
+export const dvdDemoTrack: ControlTrack = {
+  program: 'dvd',
+  seed: 7,
+  duration: 16_000,
+  loop: true,
+  deltas: [
+    { t: 0, path: 'mark', value: 'dvd' },
+    { t: 4000, path: 'mark', value: 'diamond' },
+    { t: 8000, path: 'mark', value: 'ring' },
+    { t: 12_000, path: 'mark', value: 'idle-screens' },
+    { t: 0, path: 'hue', value: 110 },
+    { t: 8000, path: 'hue', value: 280, ease: 'smooth' },
+    { t: 16_000, path: 'hue', value: 110, ease: 'smooth' },
+    { t: 0, path: 'speed', value: 0.8 },
+    { t: 8000, path: 'speed', value: 1.7, ease: 'smooth' },
+    { t: 16_000, path: 'speed', value: 0.8, ease: 'smooth' },
+  ],
 };

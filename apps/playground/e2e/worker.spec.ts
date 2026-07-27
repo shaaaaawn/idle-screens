@@ -13,7 +13,7 @@ declare global {
 }
 
 const WORKER_SAVERS = [
-  'warp', 'hard-rain', 'rainstorm', 'globe', 'spotlight', 'mystify', 'pipes', 'flurry',
+  'dvd', 'warp', 'hard-rain', 'rainstorm', 'globe', 'spotlight', 'mystify', 'pipes', 'flurry',
   'fluid', 'reaction-diffusion', 'messages', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard',
 ] as const;
 const MAIN_THREAD_SAVERS = ['black-hole', 'toasters'] as const;

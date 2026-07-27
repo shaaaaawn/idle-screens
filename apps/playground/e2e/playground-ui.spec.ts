@@ -38,7 +38,7 @@ test.describe('gallery view', () => {
     await expect.poll(() => active(page)).toBe('dvd');
     await expect(page.locator('.gallery-card[data-id="dvd"]')).toHaveClass(/active/);
     await expect.poll(() => previewOpen(page)).toBe(true);
-    await expect(page.locator('.pv-name')).toHaveText('DVD Bouncing Logo');
+    await expect(page.locator('.pv-name')).toHaveText('Bouncing Logo');
     // The preview is a VIEWER, not the screensaver: the engine stays awake.
     expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
   });
@@ -201,11 +201,28 @@ test.describe('top bar', () => {
     });
     await expect(name).toContainText('Warp');
 
-    // Outside Dev Tools the same button means the real screensaver again.
+    // The selected saver follows you out of Dev Tools...
     await page.goto('/');
     await page.waitForFunction(() => !!window.__idleScreens);
+    await expect(name).toBeVisible();
+    await expect(name).toContainText(/\w/);
+
+    // ...and in the gallery the transport pauses the wall of cards.
+    const card = page.locator('.gallery-card[data-id="black-hole"]');
+    await expect(card).toHaveAttribute('data-playing', 'true');
+    await expect(btn).toHaveText('⏸ Pause');
+    await btn.click();
+    await expect(btn).toHaveText('▶ Play');
+    await expect(card).toHaveAttribute('data-playing', 'false');
+    await btn.click();
+    await expect(card).toHaveAttribute('data-playing', 'true');
+
+    // Docs has no preview of the selected saver, so the button keeps its
+    // original meaning rather than pretending to drive something.
+    await page.goto('/#docs');
+    await page.waitForFunction(() => !!window.__idleScreens);
     await expect(btn).toHaveText('Idle demo');
-    await expect(name).toBeHidden();
+    await expect(name).toBeVisible();
   });
 });
 

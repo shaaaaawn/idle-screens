@@ -451,13 +451,29 @@ function liveMode(): void {
       : 'Play the selected saver’s inline preview';
   };
 
+  /**
+   * Which view can actually play the selected saver.
+   *
+   * The saver's NAME is meaningful everywhere — it is what the engine would
+   * show and what "Idle demo" would run. A transport only means something
+   * where that saver is on screen: the workbench viewport, or its gallery
+   * card. Docs and Settings have no such preview, and the Evals grid shows
+   * eval screens rather than catalogue savers, so there the button keeps its
+   * original job rather than pretending to drive something.
+   */
+  const hasTransport = (view: View): boolean => view === 'dev' || view === 'gallery';
+
+  const currentPlaying = (view: View): boolean =>
+    view === 'dev' ? devPlaying : view === 'gallery' ? gallery.isPlaying() : false;
+
   const syncTopbarMode = (view: View): void => {
     if (!tbBtn) return;
-    const dev = view === 'dev';
-    tbBtn.classList.toggle('is-transport', dev);
-    setTopbarSaver(dev ? (ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null) : null);
-    if (dev) {
-      setTopbarPlaying(devPlaying);
+    // The selected saver is shown on every view, not just the workbench.
+    setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null);
+    const transport = hasTransport(view);
+    tbBtn.classList.toggle('is-transport', transport);
+    if (transport) {
+      setTopbarPlaying(currentPlaying(view));
     } else {
       delete tbBtn.dataset.playing;
       tbBtn.textContent = 'Idle demo';
@@ -468,8 +484,12 @@ function liveMode(): void {
   let devPlaying = false;
 
   tbBtn?.addEventListener('click', () => {
-    if (tbBtn.classList.contains('is-transport') && devTransport) {
+    if (currentView === 'dev' && devTransport) {
       devTransport();
+      return;
+    }
+    if (currentView === 'gallery') {
+      setTopbarPlaying(gallery.toggleUserPaused());
       return;
     }
     preview.close();
@@ -518,6 +538,7 @@ function liveMode(): void {
 
   function openPreview(id: string): void {
     cfg.saver = id;
+    setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === id) ?? null);
     rebuild(cfg);
     previewIsOpen = true;
     gallery.setActive(id);
@@ -616,7 +637,7 @@ function liveMode(): void {
       cfg.saver = id;
       rebuild(cfg);
       devProps.select(saver);
-      if (currentView === 'dev') setTopbarSaver(saver);
+      setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
         .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));

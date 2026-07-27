@@ -1,5 +1,6 @@
 import { runIdleWorker } from '@idle-screens/core';
 import { compileSaver } from '@idle-screens/schema';
+import { dvd } from './dvd';
 import { warp } from './warp';
 import { hardRain } from './hard-rain';
 import { rainstorm } from './rainstorm';
@@ -14,6 +15,7 @@ import { messages } from './messages';
 
 runIdleWorker(
   {
+    [dvd.manifest.id]: dvd,
     [warp.manifest.id]: warp,
     [hardRain.manifest.id]: hardRain,
     [rainstorm.manifest.id]: rainstorm,

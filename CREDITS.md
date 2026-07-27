@@ -20,8 +20,8 @@ The following savers carry this lineage:
 | Globe | After Dark "Globe" | Wireframe globe bounce; concept from Berkeley Systems. |
 | Messages | After Dark "Messages" | Both classic behaviours ("Out to Lunch" marquee and the "Macintosh" corner-to-corner drift) consolidated into one modern canvas saver with typed params (`mode`, `phrase`, `speed`, `ink`, `glow`, `trail`); concepts from Berkeley Systems. |
 | Bouncing Ball | After Dark "Bouncing Ball" | CSS-animated ball; concept from Berkeley Systems. |
-| Logo | After Dark | Bouncing logo mark; concept from Berkeley Systems. |
-| Fade Out | After Dark "Fade Away" | Progressive pixel fade; concept from Berkeley Systems. |
+| Bouncing Logo (`dvd`) | After Dark logo bounce + DVD player idle screen | Both bouncing-mark savers consolidated into one modern canvas saver (`mark` enum, analytic wall-hit hue steps, corner celebration). Generic marks only — no trademarked DVD logo. |
+| Fade Out | After Dark "Fade Away" | Rebuilt as a deterministic canvas dissolve (seeded per-cell thresholds; dissolve/scan/blinds patterns); concept from Berkeley Systems. |
 
 **Artwork copyright**: the embedded GIF/PNG sprite assets (toasters, fish) are
 copyrighted by Berkeley Systems. They are included here under fair use for
@@ -42,7 +42,6 @@ The following savers are original to this project:
 | Limelight | Passthrough theatre-light saver. A roaming key light gives each page block a height, stands it off the page with parallax, and casts its silhouette across the stage — and blocks dim each other by standing in the way, so the content occludes itself. Original. |
 | Catwalk | Passthrough cat saver. A silhouette cat parkours across the page's blocks on a seeded itinerary — perches dip and ring under its landings, sag while it sits, and it naps on the ones it likes. Original. |
 | Slipstream | Passthrough wind saver: the page's blocks are obstacles in an analytic potential-flow field — streamlines thread between the content and part around it, and blocks lean with the local deflected wind, hinged at their base like grass. The page is the boundary condition. Original. |
-| DVD Bouncing Logo | Inspired by the DVD player idle screen. Original implementation. |
 | Warp | Starfield warp effect. Original canvas2d implementation. |
 | Pipes | 3D pipe growth. Original canvas2d implementation. |
 | BSOD | Blue screen of death. Original DOM/CSS implementation. |
