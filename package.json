@@ -29,7 +29,6 @@
   "pnpm": {
     "overrides": {
       "tsup>esbuild": ">=0.28.1",
-      "brace-expansion@^1": "1.1.16",
       "brace-expansion@^2": "^2.1.2",
       "brace-expansion@^5": "^5.0.8",
       "fast-uri@<3.1.4": "^3.1.4",
@@ -42,7 +41,7 @@
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^3.2.6",
     "@webgpu/types": "^0.1.71",
-    "eslint": "^9.17.0",
+    "eslint": "^10.8.0",
     "happy-dom": "^20.10.6",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
