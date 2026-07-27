@@ -39,7 +39,7 @@
     "@changesets/cli": "^2.27.11",
     "@playwright/test": "^1.49.1",
     "@types/node": "^22.10.2",
-    "@vitest/coverage-v8": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.10",
     "@webgpu/types": "^0.1.71",
     "eslint": "^10.8.0",
     "happy-dom": "^20.10.6",
@@ -47,6 +47,6 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vite": "^6.0.5",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.10"
   }
 }
