@@ -274,7 +274,7 @@ class CatwalkInstance implements SaverInstance {
         prevOrigin: el.style.transformOrigin,
         prevWillChange: el.style.willChange,
         prevTransition: el.style.transition,
-        lastTransform: ' ', // sentinel ≠ any real value, forces first write
+        lastTransform: '\u0000', // sentinel ≠ any real value, forces first write
       });
     }
 
