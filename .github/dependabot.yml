@@ -16,13 +16,16 @@ updates:
         update-types: [minor, patch]
     # Majors that are blocked by a peer range, not by preference. Each was
     # attempted, found impossible, and closed with evidence — without these
-    # rules Dependabot reopens all three every week. Drop the matching entry
+    # rules Dependabot reopens both every week. Drop the matching entry
     # (don't just merge past it) once the blocker below clears.
     ignore:
       # vitest@3 depends on vite "^5 || ^6 || ^7.0.0-0". Taking vite 8 either
       # fails to resolve or strands vitest on a second copy — and the whole unit
       # suite plus the Playwright e2e run ride on that peer.
-      # Unblocks when: vitest 4 lands. vite and vitest must move together.
+      # Unblocks when: vitest 4 reaches this branch. It has already landed on
+      # develop, and vitest@4 peers vite "^6 || ^7 || ^8" — so this entry is
+      # due to be dropped in the release that brings vitest 4 to main, not
+      # carried forward by habit. vite and vitest must still move together.
       - dependency-name: vite
         update-types: [version-update:semver-major]
       # @types/node describes the Node API surface; this repo pins Node 22
