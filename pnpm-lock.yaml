@@ -43,7 +43,7 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
       typescript-eslint:
-        specifier: ^8.18.1
+        specifier: ^8.57.0
         version: 8.62.1(eslint@10.8.0)(typescript@5.9.3)
       vite:
         specifier: ^6.0.5
