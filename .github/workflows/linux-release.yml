@@ -17,7 +17,7 @@ jobs:
     container: archlinux:latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain + deps
         run: |
@@ -26,7 +26,7 @@ jobs:
             gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita
           rustup default stable
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,7 +55,7 @@ jobs:
         run: ./scripts/make-release.sh
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('linux-v{0}', steps.ver.outputs.version) }}
           name: idle-screens-wayland ${{ steps.ver.outputs.version }} (Linux)
