@@ -94,19 +94,21 @@ export default defineConfig({
           functions: 88,
           lines: 83,
         },
-        // validator: measured 2026-07-26 → 98.25 / 85.71 / 100 / 100; gate at −2.
+        // validator: measured 2026-07-26 → 99.1 / 86.76 / 100 / 100; gate at −2.
+        // Statements is not 100: flash.ts's `if (e < s)` window guard is unreachable
+        // for contract-conforming input and is deliberately left uncovered.
         'packages/validator/src/**': {
-          statements: 96,
-          branches: 83,
+          statements: 97,
+          branches: 84,
           functions: 98,
           lines: 98,
         },
-        // capabilities: measured 2026-07-26 → 95.18 / 89.61 / 89.47 / 98.61; gate at −2.
+        // capabilities: measured 2026-07-26 → 97.59 / 89.61 / 100 / 100; gate at −2.
         'packages/capabilities/src/**': {
-          statements: 93,
+          statements: 95,
           branches: 87,
-          functions: 87,
-          lines: 96,
+          functions: 98,
+          lines: 98,
         },
         // savers-classic (non-GPU): re-measured after workshop batch 1 (2e0b591)
         // → 86.27 / 64.65 / 82.59 / 90.23; gate at −2. Functions stays at 81

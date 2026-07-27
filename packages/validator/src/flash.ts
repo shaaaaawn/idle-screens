@@ -96,6 +96,10 @@ function maxFlashesPerSecond(transitions: number[]): number {
   let best = 0;
   let e = 0;
   for (let s = 0; s < transitions.length; s++) {
+    // Unreachable for contract-conforming input: `t` is non-decreasing and finite, so the
+    // while below always advances e past s and the e >= s invariant holds. It exists to keep
+    // the window from walking backward if a caller violates that (non-finite t), and is
+    // deliberately left uncovered — a test for it would pin down arbitrary garbage-in behavior.
     if (e < s) e = s;
     while (e < transitions.length && transitions[e] < transitions[s] + 1000) e++;
     const count = e - s;
