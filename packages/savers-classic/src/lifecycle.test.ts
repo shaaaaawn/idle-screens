@@ -82,7 +82,6 @@ let originalOffscreenGetContext: typeof OffscreenCanvas.prototype.getContext | u
 
 beforeAll(() => {
   originalGetContext = HTMLCanvasElement.prototype.getContext;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, _opts?: any) {
     if (id === '2d') return stubContext2D(this);
     // WebGPU / WebGL — return null so GPU savers fall through to their CPU path
@@ -93,7 +92,6 @@ beforeAll(() => {
   // create off-screen buffer canvases via `new OffscreenCanvas(w, h)`.
   if (typeof OffscreenCanvas !== 'undefined') {
     originalOffscreenGetContext = OffscreenCanvas.prototype.getContext;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     OffscreenCanvas.prototype.getContext = function (this: OffscreenCanvas, id: string, _opts?: any) {
       if (id === '2d') return stubContext2D(this as unknown as HTMLCanvasElement);
       return null;
