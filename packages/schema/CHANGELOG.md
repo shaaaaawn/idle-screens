@@ -1,5 +1,56 @@
 # @idle-screens/schema
 
+## 3.0.0
+
+### Minor Changes
+
+- 072780b: Add Nostalghia's Candle schema example — Tarkovsky-inspired single-flame devotion scene.
+- 072780b: **savers-classic — Messages consolidated and modernized.** The two hard-coded
+  CSS keyframe ports ("Out to Lunch" and "Macintosh") are now two `mode`s of ONE
+  canvas saver. `messages2` is removed (its behaviour lives on as
+  `mode: 'drift'`). The new saver is closed-form in `t` (the timeline scrubs
+  it), worker-ready, typeset on a modern system stack instead of 1992 Times New
+  Roman, and carries 7 typed params (`phrase`, `mode`, `speed`, `textScale`,
+  `ink`, `glow`, `trail`) plus a demo track. Classic 19 → 18 savers.
+
+  **core — `SaverManifest.attribution`.** Savers derived from licensed or
+  third-party work now declare their lineage in the manifest itself
+  (`source`, `license`, `url`), so every surface that showcases a saver can
+  show its license. All ten After Dark-descended savers and Mystify carry it;
+  the playground shows Source/License rows in Properties and a line in the
+  fullscreen preview. CREDITS.md remains the full ledger.
+
+  **schema — Control Center rebuilt as a real ops wall.** The example is now
+  VIREO-9, Trans-Lunar Relay Operations: framed zones, three dish arrays with
+  live signal bars, a cislunar orbital plot with a five-craft fleet on orbit
+  motion (trails + hairline chain links as the relay web), telemetry with a
+  hero signal readout, an event log, an alert chip, a relay-load meter and a
+  pass schedule — booted in stages, composed deliberately against the 36-layer
+  ceiling. (Entity-stream snapshot regenerated: the spec change is the point.)
+
+- 072780b: Scale absolute `px` font sizes with the viewport in normalized specs.
+
+  A spec using the default `units: 'viewport'` expresses every dimension as a
+  fraction of `min(w, h)`, but a `sprite.font` carrying an explicit px size was
+  used verbatim — so `bold 26px monospace` rendered at 26px whether the canvas was
+  1920 or 320 wide. In a small viewport the text stayed full size and overlapped
+  itself, which is what made `DASHBOARD_SPEC` unreadable as a thumbnail.
+
+  Explicit px sizes in such specs are now scaled by
+  `min(w, h) / referenceViewport`, matching how the rest of the spec adapts.
+  Measured on `DASHBOARD_SPEC`, thumbnail-vs-fullsize ink coverage moved from
+  6.5× to 0.93× (1.0 = proportional).
+
+  Specs that opt into `units: 'px'` are asking for absolute sizes and are
+  unaffected. No bundled example uses `units: 'px'`, so nothing in the shipped
+  catalogue changes except the dashboard rendering correctly at small sizes.
+
+### Patch Changes
+
+- Updated dependencies [072780b]
+- Updated dependencies [072780b]
+  - @idle-screens/core@0.4.0
+
 ## 2.4.0
 
 ### Minor Changes
