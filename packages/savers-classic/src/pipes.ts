@@ -1,4 +1,14 @@
-import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@idle-screens/core';
+import {
+  sampleTrack,
+  defaultParams,
+  type ControlTrack,
+  type ParamSpace,
+  type Rng,
+  type SaverContext,
+  type SaverInstance,
+  type SaverManifest,
+  type SaverPlugin,
+} from '@idle-screens/core';
 
 /**
  * Pipes — the classic grid pipe-growth, restructured from "mutate a little
@@ -25,6 +35,17 @@ import type { Rng, SaverContext, SaverInstance, SaverManifest, SaverPlugin } fro
  * plans only for the recent few (an old epoch recompiles bit-identically on
  * demand from its fork).
  */
+const PARAM_SPACE = {
+  /** Growth speed multiplier. Sampled at each epoch's start — a run keeps its
+   *  pace for its whole life, so the step clock stays a pure function of t. */
+  tempo: { type: 'number', default: 1, min: 0.3, max: 3, ease: 'smooth' },
+  /** Fraction of the grid a run fills before the screen clears. Sampled per
+   *  epoch, like tempo. */
+  density: { type: 'number', default: 0.65, min: 0.3, max: 0.9, ease: 'smooth' },
+} satisfies ParamSpace;
+
+type Params = Record<keyof typeof PARAM_SPACE, number>;
+
 export const pipesManifest: SaverManifest = {
   id: 'pipes',
   label: 'Pipes',
@@ -33,13 +54,13 @@ export const pipesManifest: SaverManifest = {
   costTier: 'low',
   motionIntensity: 'moderate',
   reducedMotionFallback: 'static',
+  paramSpace: PARAM_SPACE,
   a11y: { flashSafe: true },
   workerReady: true,
 };
 
 const CELL = 20;
 const PIPE_WIDTH = 8;
-const FILL_THRESHOLD = 0.65;
 /** The accumulative version stepped 3x per rAF frame — ~180/s at 60Hz. */
 const STEP_MS = 1000 / 180;
 /** Compiled plans kept in memory; older epochs recompile on demand. */
@@ -67,6 +88,8 @@ interface Step {
 
 interface EpochPlan {
   steps: Step[];
+  /** ms per step for this epoch — STEP_MS over the epoch's sampled tempo. */
+  stepMs: number;
 }
 
 class PipesInstance implements SaverInstance {
@@ -84,6 +107,9 @@ class PipesInstance implements SaverInstance {
   /** Step counts per compiled-at-least-once epoch (start + count = summary). */
   private epochSteps: number[] = [];
   private plans = new Map<number, EpochPlan>();
+
+  private track: ControlTrack | null = null;
+  private readonly baseParams: Params = defaultParams(PARAM_SPACE) as Params;
 
   /** What the canvas currently shows: epoch index + steps drawn. -1 = dirty. */
   private paintedEpoch = -1;
@@ -150,13 +176,28 @@ class PipesInstance implements SaverInstance {
 
   // ---- the compiled plan ----
 
+  /** Params at `t` — track-driven when a track is applied, defaults otherwise. */
+  private paramsAt(t: number): Params {
+    if (!this.track) return this.baseParams;
+    const p = sampleTrack(PARAM_SPACE, this.track, t);
+    const out = { ...this.baseParams };
+    for (const k of Object.keys(PARAM_SPACE) as Array<keyof typeof PARAM_SPACE>) {
+      const v = p[k];
+      if (typeof v === 'number') out[k] = v;
+    }
+    return out;
+  }
+
   /**
    * Compile one epoch's full growth history. Pure in (seed, epoch, cols,
-   * rows): the rng is an epoch-keyed fork, and the walk is exactly the old
-   * per-frame algorithm — spawn on an empty cell, grow with a 0.65 bias to
-   * continue straight, die when boxed in, stop at the fill threshold.
+   * rows, params-at-epoch-start): the rng is an epoch-keyed fork, and the
+   * walk is exactly the old per-frame algorithm — spawn on an empty cell,
+   * grow with a 0.65 bias to continue straight, die when boxed in, stop at
+   * the fill threshold. tempo/density are sampled once at the epoch's start,
+   * so a run keeps its pace and appetite for its whole life.
    */
-  private compileEpoch(epoch: number): EpochPlan {
+  private compileEpoch(epoch: number, start: number): EpochPlan {
+    const p = this.paramsAt(start);
     const rng: Rng = this.ctxSaver.rng.fork(0x919e5 + epoch * 7919);
     const size = this.cols * this.rows;
     const grid = new Uint8Array(size);
@@ -165,7 +206,7 @@ class PipesInstance implements SaverInstance {
     const steps: Step[] = [];
 
     // Each iteration is one clock step, exactly like one growStep() call.
-    while (filled / size <= FILL_THRESHOLD) {
+    while (filled / size <= p.density) {
       if (!pipe) {
         const empty: number[] = [];
         for (let i = 0; i < size; i++) if (!grid[i]) empty.push(i);
@@ -207,14 +248,14 @@ class PipesInstance implements SaverInstance {
       grid[nr * this.cols + nc] = 1;
       filled++;
     }
-    return { steps };
+    return { steps, stepMs: STEP_MS / Math.max(0.05, p.tempo) };
   }
 
   /** The plan for an epoch, via the small cache. Recompiles are bit-identical. */
-  private planFor(epoch: number): EpochPlan {
+  private planFor(epoch: number, start: number): EpochPlan {
     let plan = this.plans.get(epoch);
     if (!plan) {
-      plan = this.compileEpoch(epoch);
+      plan = this.compileEpoch(epoch, start);
       this.plans.set(epoch, plan);
       if (this.plans.size > PLAN_CACHE) {
         // Drop the entry farthest from the one just requested.
@@ -244,9 +285,9 @@ class PipesInstance implements SaverInstance {
       if (t >= this.epochStarts[e]!) break;
     }
     for (;;) {
-      const plan = this.planFor(e);
-      const dur = Math.max(1, plan.steps.length) * STEP_MS;
       const start = this.epochStarts[e]!;
+      const plan = this.planFor(e, start);
+      const dur = Math.max(1, plan.steps.length) * plan.stepMs;
       if (t < start + dur) return { epoch: e, start, plan };
       if (this.epochStarts.length === e + 1) this.epochStarts.push(start + dur);
       e++;
@@ -329,7 +370,7 @@ class PipesInstance implements SaverInstance {
   renderFrame(t: number, _seed: number): void {
     this.t = t;
     const { epoch, start, plan } = this.epochAt(Math.max(0, t));
-    const stepsDone = Math.min(plan.steps.length, Math.floor((t - start) / STEP_MS));
+    const stepsDone = Math.min(plan.steps.length, Math.floor((t - start) / plan.stepMs));
     if (epoch === this.paintedEpoch && stepsDone >= this.paintedSteps) {
       this.drawSteps(plan, this.paintedSteps, stepsDone);
     } else {
@@ -350,6 +391,18 @@ class PipesInstance implements SaverInstance {
     }
   }
 
+  applyTrack(track: ControlTrack): void {
+    this.track = track;
+    // Plans depend on the sampled params; everything derived must recompute.
+    this.epochStarts = [];
+    this.epochSteps = [];
+    this.plans.clear();
+    this.paintedEpoch = -1;
+    this.paintedSteps = 0;
+    this.paintBackground();
+    if (this.paused) this.renderStill();
+  }
+
   resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
@@ -368,4 +421,22 @@ class PipesInstance implements SaverInstance {
 export const pipes: SaverPlugin = {
   manifest: pipesManifest,
   mount: (ctx: SaverContext) => new PipesInstance(ctx),
+};
+
+/** A demo control-track: a leisurely build accelerates into a frantic dense
+ *  fill and settles back — several epochs' worth, so the scrubber shows the
+ *  clear-and-regrow rhythm. tempo/density land at epoch boundaries. */
+export const pipesDemoTrack: ControlTrack = {
+  program: 'pipes',
+  seed: 7,
+  duration: 30_000,
+  loop: true,
+  deltas: [
+    { t: 0, path: 'tempo', value: 0.8 },
+    { t: 15_000, path: 'tempo', value: 2.4, ease: 'smooth' },
+    { t: 30_000, path: 'tempo', value: 0.8, ease: 'smooth' },
+    { t: 0, path: 'density', value: 0.55 },
+    { t: 15_000, path: 'density', value: 0.8, ease: 'smooth' },
+    { t: 30_000, path: 'density', value: 0.55, ease: 'smooth' },
+  ],
 };

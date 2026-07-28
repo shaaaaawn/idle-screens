@@ -155,11 +155,11 @@ describe('pipes: a compiled plan evaluated at t', () => {
   it('the compiled plan honours the fill threshold and the grid bounds', () => {
     const { inst, host } = mountWithLog(7);
     const anyInst = inst as unknown as {
-      compileEpoch(e: number): { steps: { kind: string; col: number; row: number; c2: number; r2: number }[] };
+      compileEpoch(e: number, start: number): { steps: { kind: string; col: number; row: number; c2: number; r2: number }[] };
       cols: number;
       rows: number;
     };
-    const plan = anyInst.compileEpoch(0);
+    const plan = anyInst.compileEpoch(0, 0);
     const size = anyInst.cols * anyInst.rows;
     const cells = plan.steps.filter((s) => s.kind !== 'end').length;
     expect(cells / size).toBeGreaterThan(0.6); // it genuinely fills the screen
@@ -175,6 +175,42 @@ describe('pipes: a compiled plan evaluated at t', () => {
     }
     inst.dispose();
     host.remove();
+  });
+
+  it('a steering track re-plans deterministically: tempo/density land at epoch boundaries', () => {
+    const track = {
+      program: 'pipes',
+      seed: 7,
+      duration: 10_000,
+      loop: true,
+      deltas: [
+        { t: 0, path: 'tempo', value: 2 },
+        { t: 0, path: 'density', value: 0.4 },
+      ],
+    };
+    const a = mountWithLog(7);
+    const b = mountWithLog(7);
+    (a.inst as SaverInstance).applyTrack?.(track);
+    (b.inst as SaverInstance).applyTrack?.(track);
+    a.inst.renderFrame(2500, 7);
+    b.inst.renderFrame(2500, 7);
+    expect(sinceLastBg(a.log), 'two tracked instances agree frame-for-frame').toBe(sinceLastBg(b.log));
+
+    // tempo 2 halves the per-step ms; density 0.4 shortens the run. The
+    // tracked epoch 0 must be genuinely different from the default one.
+    const plain = mountWithLog(7);
+    plain.inst.renderFrame(100, 7);
+    const tracked = (a.inst as unknown as { plans: Map<number, { steps: unknown[]; stepMs: number }> }).plans.get(0)!;
+    const untracked = (plain.inst as unknown as { plans: Map<number, { steps: unknown[]; stepMs: number }> }).plans.get(0)!;
+    expect(tracked.stepMs).toBeLessThan(untracked.stepMs);
+    expect(tracked.steps.length).toBeLessThan(untracked.steps.length);
+
+    a.inst.dispose();
+    b.inst.dispose();
+    plain.inst.dispose();
+    a.host.remove();
+    b.host.remove();
+    plain.host.remove();
   });
 
   it('a reduced-motion still is never a bare background', () => {
