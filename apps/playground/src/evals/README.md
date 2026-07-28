@@ -20,8 +20,11 @@ carry named artistic styles.
 | `connection-editor.ts` | shared OpenRouter key editor (run modal + `#settings`) |
 | `run-defaults.ts` | operator/model defaults, prefilled into the run modal |
 | `agent-loop.ts` | agent-loop engine: model authors a spec via tools (submit/perceive/score/finish) |
-| `agent-artifact.ts` | training-set record shape (prompt, trajectory, initial/final) |
-| `agent-run.ts` | serial batch runner, browser store, training/SFT JSONL export |
+| `agent-artifact.ts` | training-set record shape (prompt, trajectory, versions, rejections, initial/final/best) |
+| `agent-run.ts` | batch runner (targets x trials), browser store, training/SFT/repair JSONL export |
+| `artifact-sink.ts` | POSTs a finished run to the dev-server disk sink (see below) |
+| `eval-registry.ts` | the canonical eval list — ids, visibility, channel eligibility |
+| `public-identity.ts` | research identity vs public identity; owns every spec `label` |
 | `agent-panel.ts` | Agent run modal + `runAgentEvalInteractive` (OpenRouter progress UI) |
 | `agent-bridge.ts` | folds agent artifacts into timeline runs (authored specs as evidence) |
 
@@ -52,6 +55,34 @@ pnpm --filter @idle-screens/playground dev
 pnpm --filter @idle-screens/playground eval:styles
 ```
 
+
+## Persisting agent runs
+
+Agent runs cost real API calls and can't be reproduced — the model behind an id
+drifts. `saveAgentRun` keeps only the last 5 in localStorage and evicts silently
+on quota, so runs you care about need somewhere durable:
+
+```bash
+make dev-evals              # from the mono root
+# or: IDLE_EVAL_SINK_DIR=/abs/path pnpm --filter @idle-screens/playground dev
+```
+
+With `IDLE_EVAL_SINK_DIR` set, each finished run writes `run.json`,
+`training.jsonl`, `sft.jsonl` and `repair.jsonl` to
+`<dir>/<evalId>/<runId>/`. Unset (the default, and always in a build) the sink
+is off and nothing is written. `operator` is stripped before writing.
+
+`training.jsonl` is the lossless one: every version with its full `ScreenScore`,
+every rejected submission with the validator's errors, and a provenance envelope
+so a single line is readable on its own. `sft.jsonl` completes from **best**,
+not last — a model can refine into a worse final and stop there.
+
+## Naming
+
+`profile.artist` is a research label and stays exact. Everything a viewer sees —
+spec labels, channel ids, captions — goes through `public-identity.ts` and uses
+`publicName` / `channelId`. See [ACCREDITATION.md](./ACCREDITATION.md) and
+`idle-mono/docs/eval-publishing-spec.md` §5.
 
 ## Skill + loop
 

@@ -84,7 +84,7 @@ export function buildRunTimeline(mount: HTMLElement, opts: RunTimelineOptions): 
     <div class="evals-tl">
       <div class="evals-tl-head">
         <span class="evals-tl-title">Run timeline</span>
-        <span class="evals-tl-hint">Growth over time — select a run to load scores &amp; next-cycle inputs</span>
+        <span class="evals-tl-hint">Select a run to load evidence · New run authors or re-scores</span>
         <button type="button" class="evals-btn" data-act="new-run">New run…</button>
       </div>
       <div class="evals-tl-rail" data-role="rail" role="list"></div>

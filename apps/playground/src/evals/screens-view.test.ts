@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  authoredCountByArtist,
   overlayAuthoredScreens,
   screensForArtistRun,
   screensForCompareRun,
@@ -25,17 +26,6 @@ const screen = (id: string, title = id): EvalScreen =>
     },
   }) as EvalScreen;
 
-describe('overlayAuthoredScreens', () => {
-  const body = [
-    screen('monet--benchmark--calm-horizon', 'catalog calm'),
-    screen('monet--benchmark--pulse-field', 'catalog pulse'),
-  ];
-
-  it('returns the catalog slice when there is no authored evidence', () => {
-    expect(overlayAuthoredScreens(body, null)).toEqual(body);
-  });
-});
-
 describe('screensForArtistRun', () => {
   const catalog = [
     screen('monet--benchmark--calm-horizon', 'catalog calm'),
@@ -43,23 +33,21 @@ describe('screensForArtistRun', () => {
     screen('monet--signature--water-lilies', 'catalog sig'),
   ];
 
-  it('shows the full catalog body when no run evidence is loaded', () => {
-    expect(screensForArtistRun(catalog, null, 'monet')).toEqual(catalog);
+  it('catalog evidence shows the full body (authored overlaid)', () => {
+    const authored = [screen('monet--benchmark--calm-horizon', 'authored calm')];
+    const out = screensForArtistRun(catalog, authored, 'monet', 'catalog');
+    expect(out).toHaveLength(3);
+    expect(out[0]!.title).toBe('authored calm');
   });
 
-  it('shows only what the run authored for that artist — no blank benchmarks', () => {
+  it('run evidence shows only authored screens for that artist', () => {
     const authored = [
       screen('monet--benchmark--calm-horizon', 'authored calm'),
       screen('kusama--benchmark--calm-horizon', 'kusama'),
     ];
-    const out = screensForArtistRun(catalog, authored, 'monet');
+    const out = screensForArtistRun(catalog, authored, 'monet', 'run');
     expect(out).toHaveLength(1);
     expect(out[0]!.title).toBe('authored calm');
-  });
-
-  it('returns an empty wall when the run never touched that artist', () => {
-    const authored = [screen('kusama--benchmark--calm-horizon', 'kusama')];
-    expect(screensForArtistRun(catalog, authored, 'monet')).toEqual([]);
   });
 });
 
@@ -67,20 +55,35 @@ describe('screensForCompareRun', () => {
   const catalog = [
     screen('monet--benchmark--calm-horizon'),
     screen('kusama--benchmark--calm-horizon'),
-    screen('rothko--benchmark--calm-horizon'),
   ];
 
-  it('falls back to the catalog when there is no authored set', () => {
-    expect(screensForCompareRun(catalog, null, 'calm-horizon')).toEqual(catalog);
+  it('run evidence keeps only authored tiles for the benchmark', () => {
+    const authored = [screen('monet--benchmark--calm-horizon', 'authored')];
+    expect(screensForCompareRun(catalog, authored, 'calm-horizon', 'run')).toHaveLength(1);
   });
 
-  it('keeps only authored tiles for the benchmark', () => {
+  it('catalog evidence keeps every artist', () => {
+    const authored = [screen('monet--benchmark--calm-horizon', 'authored')];
+    expect(screensForCompareRun(catalog, authored, 'calm-horizon', 'catalog')).toHaveLength(2);
+  });
+});
+
+describe('authoredCountByArtist', () => {
+  it('counts per artist', () => {
     const authored = [
-      screen('monet--benchmark--calm-horizon', 'authored'),
-      screen('monet--benchmark--pulse-field', 'other bench'),
+      screen('monet--benchmark--calm-horizon'),
+      screen('monet--benchmark--pulse-field'),
+      screen('kusama--benchmark--calm-horizon'),
     ];
-    const out = screensForCompareRun(catalog, authored, 'calm-horizon');
-    expect(out).toHaveLength(1);
-    expect(out[0]!.title).toBe('authored');
+    const map = authoredCountByArtist(authored);
+    expect(map.get('monet')).toBe(2);
+    expect(map.get('kusama')).toBe(1);
+  });
+});
+
+describe('overlayAuthoredScreens', () => {
+  it('returns the catalog slice when there is no authored evidence', () => {
+    const body = [screen('monet--benchmark--calm-horizon')];
+    expect(overlayAuthoredScreens(body, null)).toEqual(body);
   });
 });

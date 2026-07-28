@@ -441,6 +441,79 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-act="export"]')).toBeEnabled();
   });
 
+  test('evidence toggle switches Catalog wall vs This run authored set', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+
+    const runId = await page.evaluate(() => {
+      const catalog = window.__evalsCatalog!;
+      const authored = catalog.screens.filter(
+        (s) => s.kind === 'benchmark' && s.screenId === 'calm-horizon',
+      );
+      const runId = 'run-e2e-evidence-toggle';
+      const createdAt = new Date().toISOString();
+      const summary = {
+        runId,
+        createdAt,
+        config: { viewport: { width: 1920, height: 1080 }, t: 5000, seedFallback: 42 },
+        suiteMedian: 0.5,
+        perArtist: [],
+        perBenchmark: [],
+        gapHistogram: [],
+        failures: [],
+        provenance: {
+          harness: 'agent-loop',
+          label: 'e2e evidence',
+          note: 'toggle',
+          versions: {
+            styleDnaHash: 'deadbeef',
+            styleDnaLabel: 'artists@15',
+            saverSpecFormat: 1,
+            scorer: 'style-eval-score@test',
+            skill: 'artistic-style-schema-eval@test',
+          },
+          prompts: { benchmarkSource: 'benchmarks.ts' },
+          scoringBands: {
+            minCoverage: 0.05,
+            minLuminanceVar: 0.01,
+            weights: { perception: 0.25, styleFit: 0.4, intentFit: 0.35 },
+          },
+        },
+        nextCycle: { weakArtists: [], collapsedBenchmarks: [], topGaps: [], suggestedActions: [] },
+        screenFingerprints: Object.fromEntries(authored.map((s) => [s.id, 'abcd1234'])),
+      };
+      localStorage.setItem(
+        'idle-screens:style-eval:run:' + runId,
+        JSON.stringify({ summary, results: [], authoredScreens: authored }),
+      );
+      const idx = JSON.parse(localStorage.getItem('idle-screens:style-eval:run-index') ?? '[]') as unknown[];
+      idx.unshift({
+        runId,
+        createdAt,
+        label: summary.provenance.label,
+        harness: 'agent-loop',
+        suiteMedian: 0.5,
+        styleDnaHash: 'deadbeef',
+        storage: 'browser',
+      });
+      localStorage.setItem('idle-screens:style-eval:run-index', JSON.stringify(idx));
+      return runId;
+    });
+
+    await page.reload();
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator(`.evals-tl-node[data-run-id="${runId}"]`).click();
+    await expect(page.locator('[data-role="hero"]')).toBeVisible();
+    await expect(page.locator('.evals-evidence-btn[data-evidence="run"]')).toHaveClass(/active/);
+
+    await page.locator('.evals-mode-btn[data-mode="artist"]').click();
+    expect(await page.locator('.evals-tile').count()).toBe(1);
+
+    await page.locator('.evals-evidence-btn[data-evidence="catalog"]').click();
+    await expect(page.locator('.evals-evidence-btn[data-evidence="catalog"]')).toHaveClass(/active/);
+    expect(await page.locator('.evals-tile').count()).toBe(10);
+  });
+
   test('by-artist shows only authored screens from a partial agent run — no catalog blanks', async ({ page }) => {
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
@@ -675,9 +748,13 @@ test.describe('evals view', () => {
 
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
-    await page.locator('[data-act="agent"]').click();
-    await page.locator('.evals-agent-modal input[name="model"]').fill(hostile);
-    await page.locator('.evals-agent-modal [data-act="start"]').click();
+    // Single New run path (agent mode) — model id must never become HTML.
+    await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-modal input[name="mode"][value="agent"]').check();
+    await page.locator('select[name="agentScope"]').selectOption('screen');
+    await page.locator('.evals-modal input[name="model"]').fill(hostile);
+    await page.locator('.evals-modal [name="label"]').fill('xss probe');
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
 
     const title = page.locator('.evals-modal-title');
     // The id still reaches the operator as text...

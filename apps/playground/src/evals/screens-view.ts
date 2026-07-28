@@ -1,10 +1,11 @@
 import type { EvalScreen } from './types';
 
+/** What the stage is showing — catalog DNA, or only this run’s authored evidence. */
+export type EvidenceMode = 'catalog' | 'run';
+
 /**
  * Overlay model-authored evidence onto a catalog slice, keeping the catalog
- * shape. Used when there is no authored set (rescore / browsing the local
- * catalog) — callers that have agent evidence should prefer the filter helpers
- * below so blank catalog fillers never appear.
+ * shape. Used in Catalog evidence mode so agent specs land in-place.
  */
 export function overlayAuthoredScreens(
   base: EvalScreen[],
@@ -16,28 +17,47 @@ export function overlayAuthoredScreens(
 }
 
 /**
- * By artist: when a run carries authored evidence, show ONLY what that run
- * generated for this artist — never catalog blanks for screens the agent
- * never touched.
+ * By artist stage contents.
+ * - Catalog: full body of work (authored specs overlaid when present).
+ * - This run: only screens the run authored for this artist — no blanks.
  */
 export function screensForArtistRun(
   catalogWorks: EvalScreen[],
   authored: EvalScreen[] | null | undefined,
   artistId: string,
+  evidence: EvidenceMode = 'run',
 ): EvalScreen[] {
-  if (!authored?.length) return catalogWorks;
+  if (evidence === 'catalog' || !authored?.length) {
+    return overlayAuthoredScreens(catalogWorks, authored);
+  }
   return authored.filter((s) => s.artistId === artistId);
 }
 
 /**
- * Compare: when a run carries authored evidence, show ONLY authored tiles for
- * this benchmark. Artists the run skipped stay off the wall.
+ * Cross-artist (compare) stage contents.
+ * - Catalog: every artist for the benchmark.
+ * - This run: only authored tiles for that benchmark.
  */
 export function screensForCompareRun(
   catalogSlice: EvalScreen[],
   authored: EvalScreen[] | null | undefined,
   benchmarkId: string,
+  evidence: EvidenceMode = 'run',
 ): EvalScreen[] {
-  if (!authored?.length) return catalogSlice;
+  if (evidence === 'catalog' || !authored?.length) {
+    return overlayAuthoredScreens(catalogSlice, authored);
+  }
   return authored.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId);
+}
+
+/** How many authored screens a run produced for each artist (nav badges). */
+export function authoredCountByArtist(
+  authored: EvalScreen[] | null | undefined,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!authored?.length) return map;
+  for (const s of authored) {
+    map.set(s.artistId, (map.get(s.artistId) ?? 0) + 1);
+  }
+  return map;
 }
