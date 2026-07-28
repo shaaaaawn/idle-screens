@@ -1,5 +1,14 @@
 # @idle-screens/core
 
+## 0.4.2
+
+### Patch Changes
+
+- bae7b6b: `SaverManifest.timeModel` (`'closed-form' | 'simulated'`) — a semantic claim
+  about how the saver relates to time, so tooling can prefer it over hardcoded
+  per-saver capability lists. Catalog savers declare theirs; the playground
+  properties panel surfaces the claim.
+
 ## 0.4.1
 
 ### Patch Changes

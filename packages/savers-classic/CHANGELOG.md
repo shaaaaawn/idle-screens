@@ -1,5 +1,23 @@
 # @idle-screens/savers-classic
 
+## 3.2.0
+
+### Minor Changes
+
+- bae7b6b: Mystify and pipes join the closed-form classics: both compile a per-run plan
+  and evaluate it at `t` (fold vertices + ghost trails for mystify; epoch pipe
+  network for pipes). Typed params, demo tracks, and deterministic
+  `renderFrame(t, seed)` coverage land with them.
+
+### Patch Changes
+
+- bae7b6b: `SaverManifest.timeModel` (`'closed-form' | 'simulated'`) — a semantic claim
+  about how the saver relates to time, so tooling can prefer it over hardcoded
+  per-saver capability lists. Catalog savers declare theirs; the playground
+  properties panel surfaces the claim.
+- Updated dependencies [bae7b6b]
+  - @idle-screens/core@0.4.2
+
 ## 3.1.0
 
 ### Minor Changes
