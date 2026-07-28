@@ -155,12 +155,13 @@ describe('pipes: a compiled plan evaluated at t', () => {
   it('the compiled plan honours the fill threshold and the grid bounds', () => {
     const { inst, host } = mountWithLog(7);
     const anyInst = inst as unknown as {
-      compileEpoch(e: number, start: number): { steps: { kind: string; col: number; row: number; c2: number; r2: number }[] };
-      cols: number;
-      rows: number;
+      compileEpoch(
+        e: number,
+        start: number,
+      ): { steps: { kind: string; col: number; row: number; c2: number; r2: number }[]; cols: number; rows: number };
     };
     const plan = anyInst.compileEpoch(0, 0);
-    const size = anyInst.cols * anyInst.rows;
+    const size = plan.cols * plan.rows;
     const cells = plan.steps.filter((s) => s.kind !== 'end').length;
     expect(cells / size).toBeGreaterThan(0.6); // it genuinely fills the screen
     expect(cells / size).toBeLessThan(0.7); // ...and stops at the threshold
@@ -168,9 +169,9 @@ describe('pipes: a compiled plan evaluated at t', () => {
       if (s.kind === 'seg') {
         expect(Math.abs(s.c2 - s.col) + Math.abs(s.r2 - s.row), 'segments are one cell long').toBe(1);
         expect(s.c2).toBeGreaterThanOrEqual(0);
-        expect(s.c2).toBeLessThan(anyInst.cols);
+        expect(s.c2).toBeLessThan(plan.cols);
         expect(s.r2).toBeGreaterThanOrEqual(0);
-        expect(s.r2).toBeLessThan(anyInst.rows);
+        expect(s.r2).toBeLessThan(plan.rows);
       }
     }
     inst.dispose();
@@ -211,6 +212,51 @@ describe('pipes: a compiled plan evaluated at t', () => {
     a.host.remove();
     b.host.remove();
     plain.host.remove();
+  });
+
+  it('cell and straightness genuinely change the walk character', () => {
+    const { inst, host } = mountWithLog(7);
+    interface Compiled {
+      steps: { kind: string; turn: boolean }[];
+      cols: number;
+      rows: number;
+    }
+    const anyInst = inst as unknown as {
+      compileEpoch(e: number, start: number): Compiled;
+      track: unknown;
+    };
+    const pin = (tempo: number, density: number, cellPx: number, straightness: number, thickness: number) => {
+      anyInst.track = {
+        program: 'pipes',
+        seed: 7,
+        duration: 1000,
+        loop: true,
+        deltas: [
+          { t: 0, path: 'tempo', value: tempo },
+          { t: 0, path: 'density', value: density },
+          { t: 0, path: 'cell', value: cellPx },
+          { t: 0, path: 'straightness', value: straightness },
+          { t: 0, path: 'thickness', value: thickness },
+        ],
+      };
+    };
+    const turnRate = (c: Compiled): number => {
+      const segs = c.steps.filter((s) => s.kind === 'seg');
+      return segs.filter((s) => s.turn).length / Math.max(1, segs.length);
+    };
+
+    pin(1, 0.65, 40, 0.05, 8);
+    const twisty = anyInst.compileEpoch(0, 0);
+    pin(1, 0.65, 40, 0.95, 8);
+    const straight = anyInst.compileEpoch(0, 0);
+    expect(turnRate(twisty), 'low straightness turns far more often').toBeGreaterThan(turnRate(straight) + 0.2);
+
+    pin(1, 0.65, 10, 0.65, 8);
+    const fine = anyInst.compileEpoch(0, 0);
+    expect(fine.cols, 'small cells mean a denser grid').toBeGreaterThan(twisty.cols * 2);
+
+    inst.dispose();
+    host.remove();
   });
 
   it('a reduced-motion still is never a bare background', () => {

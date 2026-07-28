@@ -40,8 +40,15 @@ const PARAM_SPACE = {
    *  pace for its whole life, so the step clock stays a pure function of t. */
   tempo: { type: 'number', default: 1, min: 0.3, max: 3, ease: 'smooth' },
   /** Fraction of the grid a run fills before the screen clears. Sampled per
-   *  epoch, like tempo. */
+   *  epoch, like every param here. */
   density: { type: 'number', default: 0.65, min: 0.3, max: 0.9, ease: 'smooth' },
+  /** Grid pitch, px. Small cells read as circuitry; large ones as plumbing. */
+  cell: { type: 'number', default: 20, min: 10, max: 40, ease: 'smooth' },
+  /** Chance a pipe keeps its heading when it can — the classic bias is 0.65.
+   *  Low values grow twisty mazes; high values long straight runs. */
+  straightness: { type: 'number', default: 0.65, min: 0, max: 0.95, ease: 'smooth' },
+  /** Pipe stroke width, px. */
+  thickness: { type: 'number', default: 8, min: 3, max: 14, ease: 'smooth' },
 } satisfies ParamSpace;
 
 type Params = Record<keyof typeof PARAM_SPACE, number>;
@@ -59,8 +66,6 @@ export const pipesManifest: SaverManifest = {
   workerReady: true,
 };
 
-const CELL = 20;
-const PIPE_WIDTH = 8;
 /** The accumulative version stepped 3x per rAF frame — ~180/s at 60Hz. */
 const STEP_MS = 1000 / 180;
 /** Compiled plans kept in memory; older epochs recompile on demand. */
@@ -90,6 +95,11 @@ interface EpochPlan {
   steps: Step[];
   /** ms per step for this epoch — STEP_MS over the epoch's sampled tempo. */
   stepMs: number;
+  /** Geometry this epoch was compiled against (params sampled at its start). */
+  cell: number;
+  thickness: number;
+  cols: number;
+  rows: number;
 }
 
 class PipesInstance implements SaverInstance {
@@ -99,8 +109,6 @@ class PipesInstance implements SaverInstance {
 
   private w = 0;
   private h = 0;
-  private cols = 0;
-  private rows = 0;
 
   /** Prefix-sum of epoch start times (ms); index i = epoch i's start. */
   private epochStarts: number[] = [];
@@ -159,8 +167,6 @@ class PipesInstance implements SaverInstance {
   }
 
   private rebuild(): void {
-    this.cols = Math.max(2, Math.floor(this.w / CELL));
-    this.rows = Math.max(2, Math.floor(this.h / CELL));
     this.epochStarts = [];
     this.epochSteps = [];
     this.plans.clear();
@@ -199,7 +205,10 @@ class PipesInstance implements SaverInstance {
   private compileEpoch(epoch: number, start: number): EpochPlan {
     const p = this.paramsAt(start);
     const rng: Rng = this.ctxSaver.rng.fork(0x919e5 + epoch * 7919);
-    const size = this.cols * this.rows;
+    const cell = Math.max(6, p.cell);
+    const cols = Math.max(2, Math.floor(this.w / cell));
+    const rows = Math.max(2, Math.floor(this.h / cell));
+    const size = cols * rows;
     const grid = new Uint8Array(size);
     let filled = 0;
     let pipe: { col: number; row: number; dir: Dir; color: number } | null = null;
@@ -211,11 +220,11 @@ class PipesInstance implements SaverInstance {
         const empty: number[] = [];
         for (let i = 0; i < size; i++) if (!grid[i]) empty.push(i);
         if (empty.length === 0) break;
-        const cell = rng.pick(empty);
-        const col = cell % this.cols;
-        const row = Math.floor(cell / this.cols);
+        const at = rng.pick(empty);
+        const col = at % cols;
+        const row = Math.floor(at / cols);
         pipe = { col, row, dir: rng.int(0, 3) as Dir, color: PALETTE.indexOf(rng.pick(PALETTE)) };
-        grid[cell] = 1;
+        grid[at] = 1;
         filled++;
         steps.push({ kind: 'spawn', col, row, c2: -1, r2: -1, turn: false, color: pipe.color });
         continue;
@@ -225,13 +234,14 @@ class PipesInstance implements SaverInstance {
       for (let d = 0; d < 4; d++) {
         const nc = pipe.col + DX[d as Dir];
         const nr = pipe.row + DY[d as Dir];
-        if (nc >= 0 && nc < this.cols && nr >= 0 && nr < this.rows && !grid[nr * this.cols + nc]) {
+        if (nc >= 0 && nc < cols && nr >= 0 && nr < rows && !grid[nr * cols + nc]) {
           candidates.push(d as Dir);
         }
       }
-      // Bias toward continuing straight — same draw order as the original.
+      // Bias toward continuing straight — the classic draw order, with the
+      // classic 0.65 as `straightness`'s default.
       const pool =
-        candidates.includes(pipe.dir) && rng.next() < 0.65 ? [pipe.dir] : candidates;
+        candidates.includes(pipe.dir) && rng.next() < p.straightness ? [pipe.dir] : candidates;
       if (pool.length === 0) {
         pipe = null;
         steps.push({ kind: 'end', col: -1, row: -1, c2: -1, r2: -1, turn: false, color: -1 });
@@ -245,10 +255,17 @@ class PipesInstance implements SaverInstance {
       pipe.col = nc;
       pipe.row = nr;
       pipe.dir = newDir;
-      grid[nr * this.cols + nc] = 1;
+      grid[nr * cols + nc] = 1;
       filled++;
     }
-    return { steps, stepMs: STEP_MS / Math.max(0.05, p.tempo) };
+    return {
+      steps,
+      stepMs: STEP_MS / Math.max(0.05, p.tempo),
+      cell,
+      thickness: Math.min(p.thickness, cell * 0.7),
+      cols,
+      rows,
+    };
   }
 
   /** The plan for an epoch, via the small cache. Recompiles are bit-identical. */
@@ -294,31 +311,27 @@ class PipesInstance implements SaverInstance {
     }
   }
 
-  // ---- drawing (identical marks to the accumulative version) ----
+  // ---- drawing (identical marks to the accumulative version; geometry from
+  // the epoch's own plan, since cell/thickness are epoch-sampled params) ----
 
-  private cellCenter(col: number, row: number): [number, number] {
-    return [col * CELL + CELL / 2, row * CELL + CELL / 2];
-  }
-
-  private drawSegment(c1: number, r1: number, c2: number, r2: number, color: string): void {
-    const [x1, y1] = this.cellCenter(c1, r1);
-    const [x2, y2] = this.cellCenter(c2, r2);
+  private drawSegment(plan: EpochPlan, c1: number, r1: number, c2: number, r2: number, color: string): void {
+    const half = plan.cell / 2;
     const ctx = this.ctx;
     ctx.strokeStyle = color;
-    ctx.lineWidth = PIPE_WIDTH;
+    ctx.lineWidth = plan.thickness;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
+    ctx.moveTo(c1 * plan.cell + half, r1 * plan.cell + half);
+    ctx.lineTo(c2 * plan.cell + half, r2 * plan.cell + half);
     ctx.stroke();
   }
 
-  private drawJoint(col: number, row: number, color: string): void {
-    const [x, y] = this.cellCenter(col, row);
+  private drawJoint(plan: EpochPlan, col: number, row: number, color: string): void {
+    const half = plan.cell / 2;
     const ctx = this.ctx;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(x, y, PIPE_WIDTH * 0.65, 0, Math.PI * 2);
+    ctx.arc(col * plan.cell + half, row * plan.cell + half, plan.thickness * 0.65, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -326,10 +339,10 @@ class PipesInstance implements SaverInstance {
     for (let i = from; i < to; i++) {
       const s = plan.steps[i]!;
       if (s.kind === 'spawn') {
-        this.drawJoint(s.col, s.row, PALETTE[s.color]!);
+        this.drawJoint(plan, s.col, s.row, PALETTE[s.color]!);
       } else if (s.kind === 'seg') {
-        this.drawSegment(s.col, s.row, s.c2, s.r2, PALETTE[s.color]!);
-        if (s.turn) this.drawJoint(s.col, s.row, PALETTE[s.color]!);
+        this.drawSegment(plan, s.col, s.row, s.c2, s.r2, PALETTE[s.color]!);
+        if (s.turn) this.drawJoint(plan, s.col, s.row, PALETTE[s.color]!);
       }
     }
   }
