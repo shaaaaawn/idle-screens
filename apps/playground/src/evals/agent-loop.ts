@@ -13,8 +13,18 @@ import FORMAT_MD from '../../../../packages/schema/FORMAT.md?raw';
 import specSchemaJson from '../../../../packages/schema/saver-spec.schema.json';
 import { adviseSpec, perceiveScene, validateSpec, type SaverSpec } from '@idle-screens/schema';
 import { explainIntentFit, scoreScreen } from './score';
-import type { ChatMessage, ChatRequest, ChatResponse, ChatToolDef } from './openrouter';
-import type { AgentScreenArtifact, AgentSpecVersion } from './agent-artifact';
+import type {
+  ChatMessage,
+  ChatRequest,
+  ChatResponse,
+  ChatServed,
+  ChatToolDef,
+} from './openrouter';
+import type {
+  AgentRejection,
+  AgentScreenArtifact,
+  AgentSpecVersion,
+} from './agent-artifact';
 import type { ArtistStyleProfile, BenchmarkIntent, EvalScreen } from './types';
 
 export type ChatTransport = (req: ChatRequest) => Promise<ChatResponse>;
@@ -34,6 +44,8 @@ export interface RunAgentScreenOptions {
   chat: ChatTransport;
   onEvent?: (e: AgentEvent) => void;
   signal?: AbortSignal;
+  /** 0-based repeat index, recorded on the artifact. Defaults to 0. */
+  trial?: number;
 }
 
 const DEFAULT_VIEWPORT = { width: 1920, height: 1080 };
@@ -164,6 +176,39 @@ function isAbort(err: unknown, signal?: AbortSignal): boolean {
   );
 }
 
+/**
+ * Fold each round's served-model report into one. Token counts sum; identity
+ * fields take the first non-empty value and then stay put — a mid-run change
+ * would mean OpenRouter re-routed, and the first model to answer is the one
+ * that set the trajectory's direction.
+ */
+function mergeServed(acc: ChatServed | undefined, next: ChatServed | undefined): ChatServed | undefined {
+  if (!next) return acc;
+  if (!acc) return { ...next, ...(next.usage ? { usage: { ...next.usage } } : {}) };
+  const usage =
+    acc.usage || next.usage
+      ? {
+          promptTokens: (acc.usage?.promptTokens ?? 0) + (next.usage?.promptTokens ?? 0),
+          completionTokens: (acc.usage?.completionTokens ?? 0) + (next.usage?.completionTokens ?? 0),
+          totalTokens: (acc.usage?.totalTokens ?? 0) + (next.usage?.totalTokens ?? 0),
+        }
+      : undefined;
+  return {
+    ...acc,
+    ...(acc.model ? {} : next.model ? { model: next.model } : {}),
+    ...(acc.provider ? {} : next.provider ? { provider: next.provider } : {}),
+    ...(acc.generationId ? {} : next.generationId ? { generationId: next.generationId } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+/** Highest score wins; ties keep the earlier version (fewer calls to get there). */
+function bestOf(versions: AgentSpecVersion[]): AgentSpecVersion | null {
+  let best: AgentSpecVersion | null = null;
+  for (const v of versions) if (!best || v.score.score > best.score.score) best = v;
+  return best;
+}
+
 export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<AgentScreenArtifact> {
   const { screen, profile, benchmark, model, maxToolCalls, chat, onEvent, signal } = opts;
   const startedAt = new Date().toISOString();
@@ -177,10 +222,12 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
   ];
   const trajectory: ChatMessage[] = [...messages];
   const versions: AgentSpecVersion[] = [];
+  const rejections: AgentRejection[] = [];
   let candidate: SaverSpec | null = null;
   let outcome: AgentScreenArtifact['outcome'] | null = null;
   let error: string | undefined;
   let callsUsed = 0;
+  let served: ChatServed | undefined;
 
   const execTool = (name: string, argsJson: string): { result: string; ok: boolean; summary: string } => {
     if (name === 'finish') return { result: '{"ok":true}', ok: true, summary: 'finish' };
@@ -189,11 +236,23 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
       try {
         spec = (JSON.parse(argsJson) as { spec?: unknown }).spec;
       } catch {
+        rejections.push({
+          afterVersion: versions.length,
+          spec: argsJson,
+          reason: 'invalid-json',
+          validationErrors: ['arguments were not valid JSON'],
+        });
         return { result: '{"ok":false,"error":"arguments were not valid JSON"}', ok: false, summary: 'bad JSON' };
       }
       const validation = validateSpec(spec);
       if (!validation.valid) {
         const errors = validation.errors.map((e) => `${e.path}: ${e.message}`);
+        rejections.push({
+          afterVersion: versions.length,
+          spec,
+          reason: 'schema',
+          validationErrors: errors,
+        });
         return {
           result: JSON.stringify({ ok: false, errors }),
           ok: false,
@@ -288,6 +347,7 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
       }
       break;
     }
+    served = mergeServed(served, res.served);
     const assistantMsg: ChatMessage = {
       role: 'assistant',
       content: res.content,
@@ -332,6 +392,8 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
     artistId: screen.artistId,
     benchmarkId: benchmark?.id ?? screen.screenId,
     model,
+    ...(served ? { served } : {}),
+    trial: opts.trial ?? 0,
     maxToolCalls,
     toolCallsUsed: callsUsed,
     startedAt,
@@ -339,8 +401,10 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
     prompt,
     trajectory,
     versions,
+    rejections,
     initial: versions[0] ?? null,
     final: versions[versions.length - 1] ?? null,
+    best: bestOf(versions),
     outcome,
     ...(error ? { error } : {}),
   };
