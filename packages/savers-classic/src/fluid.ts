@@ -16,6 +16,7 @@ import {
 export const fluidManifest: SaverManifest = {
   id: 'fluid',
   label: 'Fluid',
+  description: 'Fluid dynamics simulation with emitters. WebGPU-accelerated with canvas2d fallback.',
   timeModel: 'simulated',
   passthrough: false,
   minBackend: 'canvas2d',

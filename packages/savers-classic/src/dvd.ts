@@ -54,6 +54,7 @@ const PARAM_SPACE = {
 export const dvdManifest: SaverManifest = {
   id: 'dvd',
   label: 'Bouncing Logo',
+  description: 'A logo bounces off viewport edges, changing color at each bounce.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

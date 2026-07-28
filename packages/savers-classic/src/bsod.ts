@@ -8,6 +8,7 @@ import type {
 export const bsodManifest: SaverManifest = {
   id: 'bsod',
   label: 'BSOD',
+  description: 'Blue Screen of Death — cycles through classic OS crash screens.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',

@@ -11,6 +11,7 @@ import {
 export const reactionDiffusionManifest: SaverManifest = {
   id: 'reaction-diffusion',
   label: 'Reaction Diffusion',
+  description: 'Gray-Scott reaction-diffusion patterns. WebGPU-accelerated with canvas2d fallback.',
   timeModel: 'simulated',
   passthrough: false,
   minBackend: 'canvas2d',
