@@ -20,7 +20,7 @@ The following savers carry this lineage:
 | Globe | After Dark "Globe" | Wireframe globe bounce; concept from Berkeley Systems. |
 | Messages | After Dark "Messages" | Both classic behaviours ("Out to Lunch" marquee and the "Macintosh" corner-to-corner drift) consolidated into one modern canvas saver with typed params (`mode`, `phrase`, `speed`, `ink`, `glow`, `trail`); concepts from Berkeley Systems. |
 | Bouncing Ball | After Dark "Bouncing Ball" | CSS-animated ball; concept from Berkeley Systems. |
-| Bouncing Logo (`dvd`) | After Dark logo bounce + DVD player idle screen | Both bouncing-mark savers consolidated into one modern canvas saver (`mark` enum, analytic wall-hit hue steps, corner celebration). Generic marks only — no trademarked DVD logo. |
+| Bouncing Logo (`dvd`) | After Dark logo bounce + DVD player idle screen | Both bouncing-mark savers consolidated into one modern canvas saver (`mark` enum, analytic wall-hit hue steps, corner celebration). The default mark renders the classic DVD-Video logo shape (letters + disc) from scratch as nostalgic homage — the "bouncing DVD logo" meme. The DVD-Video logo is a trademark of DVD Format/Logo Licensing Corporation; no licensed assets are embedded, and no affiliation is implied. |
 | Fade Out | After Dark "Fade Away" | Rebuilt as a deterministic canvas dissolve (seeded per-cell thresholds; dissolve/scan/blinds patterns); concept from Berkeley Systems. |
 
 **Artwork copyright**: the embedded GIF/PNG sprite assets (toasters, fish) are
@@ -44,7 +44,7 @@ The following savers are original to this project:
 | Slipstream | Passthrough wind saver: the page's blocks are obstacles in an analytic potential-flow field — streamlines thread between the content and part around it, and blocks lean with the local deflected wind, hinged at their base like grass. The page is the boundary condition. Original. |
 | Warp | Starfield warp effect. Original canvas2d implementation. |
 | Pipes | 3D pipe growth. Original canvas2d implementation. |
-| BSOD | Blue screen of death. Original DOM/CSS implementation. |
+| BSOD | Blue screen of death. Original DOM/CSS implementation. Parody/homage of historical OS crash screens — text recreated from memory, no third-party code or assets; trademarks belong to their owners. |
 | Flurry | Particle flurry. Original canvas2d implementation. |
 | Snowfall | Snowfall particles. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Night Lanterns | Yi Peng festival lantern sky. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
