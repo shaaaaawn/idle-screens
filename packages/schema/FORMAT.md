@@ -214,11 +214,15 @@ for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
 
 `src/perceive.ts` translates a spec into modalities a **non-vision agent** can
 reason about, computed analytically from the entity model (no canvas, no
-renderer, deterministic, Node-safe). Note: the analytical model approximates
-but does not perfectly match canvas rendering — blend modes are simplified
-(`screen` ≈ `lighter`), wrapped link segments use straight interpolation, and
-background drift is sampled at rest. These are documented trade-offs for a
-zero-dependency, renderer-free analysis tool.
+renderer, deterministic, Node-safe). Persistence is part of the picture:
+`ghosting` is modeled as a decayed sum of past-frame splats (ink from m frames
+ago survives at weight gᵐ, mirroring the renderer's warm-up replay) and `trail`
+mirrors the renderer's past-position sampling — so the smear an audience sees
+is measurable, not invisible, in every output below. Note: the analytical model
+approximates but does not perfectly match canvas rendering — blend modes are
+simplified (`screen` ≈ `lighter`), wrapped link segments use straight
+interpolation, and background drift is sampled at rest. These are documented
+trade-offs for a zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
