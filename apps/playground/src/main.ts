@@ -636,6 +636,13 @@ function liveMode(): void {
       const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
       if (!saver) return;
       cfg.saver = id;
+      // Deep link: the address bar always names the selected saver, so the
+      // state you are looking at is shareable as-is. replaceState (not push)
+      // — browsing the palette is one workbench state, not a history trail.
+      const url = new URL(location.href);
+      url.searchParams.set('saver', id);
+      url.hash = 'dev';
+      history.replaceState(null, '', url);
       rebuild(cfg);
       devProps.select(saver);
       setTopbarSaver(saver);

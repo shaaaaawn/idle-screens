@@ -234,6 +234,26 @@ test.describe('saver outliner (dev view)', () => {
     await expect(page.locator('#dock-left .palette-item:not([hidden])')).toHaveCount(3);
     await expect(page.locator('#dock-left .palette-group').first()).toBeHidden();
   });
+
+  test('selecting a saver deep-links it: the URL is shareable and survives reload', async ({ page }) => {
+    await page.goto('/#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await pickSaver(page, 'pipes');
+    // The address bar always names the selection (replaceState, no history spam).
+    await expect.poll(() => page.url()).toContain('saver=pipes');
+    expect(page.url()).toContain('#dev');
+
+    // The link round-trips: a fresh load of that URL restores the selection.
+    await page.reload();
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await expect(page.locator('#dock-left .palette-item.active')).toHaveAttribute('data-id', 'pipes');
+
+    // ...and picking another saver rewrites, not appends, browser history.
+    const before = await page.evaluate(() => history.length);
+    await pickSaver(page, 'warp');
+    await expect.poll(() => page.url()).toContain('saver=warp');
+    expect(await page.evaluate(() => history.length)).toBe(before);
+  });
 });
 
 test.describe('config panel (dev view)', () => {
