@@ -136,15 +136,21 @@ include a changeset in that PR.
 
 ### Release flow
 
-```
-# BEFORE opening the PR — mandatory local gate (matches CI):
-make preflight X=screens ARGS=--e2e   # from idle-mono/
+**Process playbook (inner→outer→develop):** `idle-mono/scripts/RELEASE.md`
+Helpers: `scripts/release.sh cut|dual-land|guide`.
 
-develop / release/* PR (includes .changeset/*.md when npm packages changed)
-    → merge to main
-release.yml runs CI, then changesets/action
-    → if pending changesets: opens "chore: version packages" PR
-    → merge that PR → pnpm changeset publish → npm
+```
+# INNER — green develop tip first (discover failures here, not on GitHub):
+make preflight X=screens ARGS=--e2e
+scripts/release.sh cut <slug>          # if squash-diverged; else PR develop→main
+
+# OUTER — push only after local green; dual-land any CI fix onto develop:
+#   scripts/release.sh dual-land <sha>
+develop / release/* PR (changesets when npm packages changed)
+    → merge-commit to main (prefer not squash)
+release.yml → "version packages" PR → npm
+
+# BACK — sync develop ← main (ff or metadata-only); never leave release-only fixes
 ```
 
 On the same `main` push, GitHub Pages deploys the playground independently.
