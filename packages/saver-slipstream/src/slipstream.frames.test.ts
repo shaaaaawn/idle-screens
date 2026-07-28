@@ -227,6 +227,36 @@ describe('slipstream: the page is the boundary condition', () => {
     host.remove();
   });
 
+  it('the crossfade pair (current + previous bucket lines) is reproducible from a cold seek', () => {
+    interface LineInternals {
+      lines: { pts: Float32Array; n: number }[];
+      prevLines: { pts: Float32Array; n: number }[];
+    }
+    const fingerprint = (i: Frameable): string => {
+      const { lines, prevLines } = i as unknown as LineInternals;
+      const sig = (set: LineInternals['lines']): number[] =>
+        set.slice(0, 5).flatMap((l) => [l.n, l.pts[0]!, l.pts[1]!, l.pts[(l.n - 1) * 2]!]);
+      return JSON.stringify({ n: lines.length, p: prevLines.length, a: sig(lines), b: sig(prevLines) });
+    };
+
+    const { host, page } = makePage(GRID);
+    const played = mount(ctx(host, page));
+    played.applyTrack?.(demoTrack);
+    for (let t = 0; t <= 1000; t += 16) played.renderFrame(t, 23);
+    const warm = fingerprint(played);
+
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    cold.renderFrame(1000, 23);
+    expect(fingerprint(cold), 'seek lands on the same current AND previous line sets').toBe(warm);
+
+    played.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.transform = 'translateY(2px)';

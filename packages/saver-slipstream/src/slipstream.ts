@@ -152,6 +152,7 @@ class SlipstreamInstance implements SaverInstance {
   private dust: Dust[] = [];
 
   private lines: Streamline[] = [];
+  private prevLines: Streamline[] = [];
   private flowBucket = -1;
   /** Wind snapshot the cached lines were built with — reused per frame so the
    *  page's lean matches the lines exactly. */
@@ -386,21 +387,36 @@ class SlipstreamInstance implements SaverInstance {
   // ---- streamlines (cached per flow bucket) ----
 
   /**
-   * Rebuild the streamline cache for a bucket. Pure in the bucket index: wind
-   * angle/speed are sampled at the bucket's centre time, seeds come from a
-   * bucket-independent fork, and the integrator is fixed-step.
+   * Keep the line cache pointed at `t`'s bucket, and the PREVIOUS bucket's
+   * lines alongside it so the draw can crossfade — the geometry used to snap
+   * to its new shape every FLOW_BUCKET_MS, a 4Hz pop across the whole field.
+   * Both sets are pure in their bucket index, so seeking rebuilds the pair.
    */
   private ensureFlow(t: number): void {
     const bucket = Math.floor(t / FLOW_BUCKET_MS);
     if (bucket === this.flowBucket) return;
+    if (this.flowBucket >= 0 && bucket === this.flowBucket + 1) {
+      this.prevLines = this.lines;
+    } else {
+      this.prevLines = bucket > 0 ? this.buildFlow(bucket - 1).lines : [];
+    }
+    const cur = this.buildFlow(bucket);
+    this.lines = cur.lines;
+    this.bAngle = cur.angle;
+    this.bSpeed = cur.speed;
     this.flowBucket = bucket;
+  }
 
+  /**
+   * Build one bucket's streamlines. Pure in the bucket index: wind
+   * angle/speed are sampled at the bucket's centre time, seeds come from a
+   * bucket-independent fork, and the integrator is fixed-step.
+   */
+  private buildFlow(bucket: number): { lines: Streamline[]; angle: number; speed: number } {
     const tc = bucket * FLOW_BUCKET_MS + FLOW_BUCKET_MS / 2;
     const p = this.paramsAt(tc);
     const angle = this.windAngleAt(p, tc);
     const speed = p.windSpeed * this.gustAt(p, tc);
-    this.bAngle = angle;
-    this.bSpeed = speed;
 
     // Apply clearance by scaling obstacle radii for this bucket's integration.
     const scaled = this.obstacles.map((o) => ({ cx: o.cx, cy: o.cy, r: o.r * p.clearance }));
@@ -474,7 +490,7 @@ class SlipstreamInstance implements SaverInstance {
     }
 
     this.obstacles = saved;
-    this.lines = lines;
+    return { lines, angle, speed };
   }
 
   // ---- the wind acts on the page ----
@@ -576,49 +592,74 @@ class SlipstreamInstance implements SaverInstance {
       const dashLen = 34;
       const gapLen = 26;
       const cycle = dashLen + gapLen;
-      const flow = this.phaseAt(t) * 0.11;
+      const phi = this.phaseAt(t);
+      const flow = phi * 0.11;
+
+      // Crossfade weight into the current bucket's geometry: the outgoing
+      // set fades as the incoming one rises, so the field REFORMS instead of
+      // snapping 4x a second. Pure in t (flowBucket is derived from t).
+      const FADE_MS = 120;
+      const k = this.prevLines.length
+        ? smooth01(clamp((t - this.flowBucket * FLOW_BUCKET_MS) / FADE_MS, 0, 1))
+        : 1;
+
       ctx.setLineDash([dashLen, gapLen]);
       // Two passes per line: a wide soft underglow, then a bright core — the
       // dashes read as travelling light, not hairline scratches. A single 1px
-      // pass at low alpha was invisible over any real content.
-      for (const [width, gain] of [[3.2, 0.4], [1.3, 1]] as const) {
-        ctx.lineWidth = width;
-        for (let i = 0; i < this.lines.length; i++) {
-          const ln = this.lines[i]!;
-          if (ln.n < 2) continue;
-          // Neighbouring lines breathe out of phase so the field shimmers.
-          const a = lop * gain * (0.34 + 0.16 * Math.sin(t * 0.0006 + i * 1.7));
-          if (a <= 0.008) continue;
-          ctx.strokeStyle = this.lineColor(a);
-          ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
-          ctx.beginPath();
-          ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
-          for (let k = 1; k < ln.n; k++) ctx.lineTo(ln.pts[k * 2]!, ln.pts[k * 2 + 1]!);
-          ctx.stroke();
+      // pass at low alpha was invisible over any real content. The OUTGOING
+      // set gets the core pass only; at its fading alpha the underglow is
+      // invisible and the strokes are the expensive part of this saver.
+      const strokeSet = (lines: Streamline[], scale: number, wide: boolean): void => {
+        if (scale <= 0.02 || !lines.length) return;
+        const passes: ReadonlyArray<readonly [number, number]> = wide
+          ? [[3.2, 0.4], [1.3, 1]]
+          : [[1.3, 1]];
+        for (const [width, gain] of passes) {
+          ctx.lineWidth = width;
+          for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i]!;
+            if (ln.n < 2) continue;
+            // Neighbouring lines breathe out of phase so the field shimmers.
+            const a = scale * lop * gain * (0.34 + 0.16 * Math.sin(t * 0.0006 + i * 1.7));
+            if (a <= 0.008) continue;
+            ctx.strokeStyle = this.lineColor(a);
+            ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
+            ctx.beginPath();
+            ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
+            for (let m = 1; m < ln.n; m++) ctx.lineTo(ln.pts[m * 2]!, ln.pts[m * 2 + 1]!);
+            ctx.stroke();
+          }
         }
-      }
+      };
+      strokeSet(this.prevLines, 1 - k, false);
+      strokeSet(this.lines, k, true);
       ctx.setLineDash([]);
 
       // Dust: motes advected along the cached polylines by arc-length offset —
-      // real particle advection with zero per-frame integration.
-      const phi = this.phaseAt(t);
-      for (const d of this.dust) {
-        const ln = this.lines[Math.min(this.lines.length - 1, Math.floor(d.lane * this.lines.length))]!;
-        if (ln.n < 2 || ln.len <= 0) continue;
-        const s = ((d.s0 + (phi * 0.00006 * d.speed)) % 1 + 1) % 1;
-        const f = s * (ln.n - 1);
-        const k = Math.floor(f);
-        const frac = f - k;
-        const x = ln.pts[k * 2]! + (ln.pts[Math.min(k + 1, ln.n - 1) * 2]! - ln.pts[k * 2]!) * frac;
-        const y = ln.pts[k * 2 + 1]! + (ln.pts[Math.min(k + 1, ln.n - 1) * 2 + 1]! - ln.pts[k * 2 + 1]!) * frac;
-        if (x < -10 || x > this.w + 10 || y < -10 || y > this.h + 10) continue;
-        const fade = Math.sin(s * Math.PI) * (0.5 + 0.5 * Math.sin(t * 0.0011 + d.ph));
-        if (fade <= 0.03) continue;
-        ctx.fillStyle = this.lineColor(0.5 * fade * lop * 1.6);
-        ctx.beginPath();
-        ctx.arc(x, y, d.size, 0, TAU);
-        ctx.fill();
-      }
+      // real particle advection with zero per-frame integration. Motes ride
+      // both sets during the fade so they migrate with the geometry.
+      const drawDust = (lines: Streamline[], scale: number): void => {
+        if (scale <= 0.03 || !lines.length) return;
+        for (const d of this.dust) {
+          const ln = lines[Math.min(lines.length - 1, Math.floor(d.lane * lines.length))]!;
+          if (ln.n < 2 || ln.len <= 0) continue;
+          const s = ((d.s0 + (phi * 0.00006 * d.speed)) % 1 + 1) % 1;
+          const f = s * (ln.n - 1);
+          const ki = Math.floor(f);
+          const frac = f - ki;
+          const x = ln.pts[ki * 2]! + (ln.pts[Math.min(ki + 1, ln.n - 1) * 2]! - ln.pts[ki * 2]!) * frac;
+          const y = ln.pts[ki * 2 + 1]! + (ln.pts[Math.min(ki + 1, ln.n - 1) * 2 + 1]! - ln.pts[ki * 2 + 1]!) * frac;
+          if (x < -10 || x > this.w + 10 || y < -10 || y > this.h + 10) continue;
+          const fade = Math.sin(s * Math.PI) * (0.5 + 0.5 * Math.sin(t * 0.0011 + d.ph));
+          if (fade <= 0.03) continue;
+          ctx.fillStyle = this.lineColor(0.5 * fade * lop * 1.6 * scale);
+          ctx.beginPath();
+          ctx.arc(x, y, d.size, 0, TAU);
+          ctx.fill();
+        }
+      };
+      drawDust(this.prevLines, 1 - k);
+      drawDust(this.lines, k);
       ctx.globalCompositeOperation = 'source-over';
     }
   }
