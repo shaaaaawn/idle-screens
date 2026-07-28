@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/saver-slipstream",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Passthrough wind screensaver for idle-screens: the live page's blocks become obstacles in an analytic potential-flow field — streamlines thread between the content, part around it, and push it as they pass. Seeded, paramSpace, control-track, frame-addressable.",
   "license": "MIT",
   "author": "Shawn Partridge",
