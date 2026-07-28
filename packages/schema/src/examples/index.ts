@@ -4,6 +4,7 @@ import { AURORA_SPEC } from './aurora';
 import { COMETS_SPEC } from './comets';
 import { CONSTELLATION_SPEC } from './constellation';
 import { DASHBOARD_SPEC } from './dev-dashboard';
+import { HAIKU_SPEC } from './haiku';
 import { LANTERNS_SPEC } from './lanterns';
 import { MATRIX_RAIN_SPEC } from './matrix-rain';
 import { NOSTALGHIA_CANDLE_SPEC } from './nostalghia-candle';
@@ -23,6 +24,7 @@ export { SNOWFALL_SPEC } from './snowfall';
 export { LANTERNS_SPEC } from './lanterns';
 export { SAKURA_SPEC } from './sakura';
 export { DASHBOARD_SPEC } from './dev-dashboard';
+export { HAIKU_SPEC } from './haiku';
 export { ORRERY_SPEC } from './orrery';
 export { AURORA_SPEC } from './aurora';
 export { MATRIX_RAIN_SPEC } from './matrix-rain';
@@ -55,6 +57,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'matrix-rain', label: 'Matrix Rain', spec: MATRIX_RAIN_SPEC },
   { id: 'procession', label: 'Night Procession', spec: PROCESSION_SPEC },
   { id: 'nostalghia-candle', label: "Nostalghia's Candle", spec: NOSTALGHIA_CANDLE_SPEC },
+  { id: 'haiku', label: 'Haiku', spec: HAIKU_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */

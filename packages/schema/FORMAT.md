@@ -29,7 +29,8 @@ Additions to version 1 so far, all optional and backward compatible:
 `ghosting`, `wander` / `warp` / `path` motions, `ring` / `streak` / `rect`
 sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
-(2026-07-21 — "the v1 ceiling").
+(2026-07-21 — "the v1 ceiling");
+`textBlock` sprite — deterministic multi-line text with viewport-unit sizing.
 
 ## Safety invariants
 
@@ -154,6 +155,18 @@ with distance, removing pop-in at the cutoff.
   (rain that reads as rain, shooting stars, warp stars)
 - `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
   rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
+- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
+  multi-line text block with deterministic line-breaking. All dimensions are
+  viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
+  textBlock sprites at validation time. `position` is always the block's
+  **top-left corner** regardless of `align` (align moves text within the box,
+  not the box itself — different from the `text` sprite where `align`/`baseline`
+  shift the meaning of `position`). Line breaks are computed from a fixed
+  character-class metrics table so wrapping is identical across platforms; note
+  that the table is approximate — a painted line may slightly exceed `maxWidth`
+  when the real font is wider than the table estimates, so `maxWidth` is a
+  layout target, not a hard clip.
+  Use with `count: 1`, `motion: { type: "static" }`, and `position`.
 
 `circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
 per-entity palette pick) and `colorWeights: [...]` (relative weights, same
