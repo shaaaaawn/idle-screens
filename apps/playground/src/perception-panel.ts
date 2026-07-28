@@ -291,6 +291,25 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
   };
 }
 
+/**
+ * Escape for HTML, including quotes.
+ *
+ * Quotes matter because one call site interpolates into an ATTRIBUTE —
+ * `style="background:${esc(c.hex)}"`. Escaping only `& < >` leaves a value
+ * containing `"` free to close the attribute and open another, so
+ * `#000" onmouseover="…` becomes a handler rather than a colour. The colours
+ * come from `sprite.color` / `sprite.colors[]` on the authored spec, so that
+ * is reachable input, not a theoretical one.
+ *
+ * Escaping quotes here rather than at the one call site keeps the helper
+ * correct in both contexts — the next attribute interpolation shouldn't have
+ * to rediscover this.
+ */
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

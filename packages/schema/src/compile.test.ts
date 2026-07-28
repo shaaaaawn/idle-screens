@@ -362,3 +362,70 @@ describe('all example specs compile', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('font size parsing is not a denial of service', () => {
+  // `sprite.font` is authored input — on idlescreens.com any agent that can
+  // publish a scene controls it. The size regex used to be `(\d*\.?\d+)px`,
+  // where two quantifiers can split one digit run many ways, so a long run
+  // that never reaches "px" made the engine retry every split at every start
+  // position: 1 000 digits took 600ms, 5 000 took 62 seconds. Bounding the
+  // runs makes the work per position constant.
+  it('a long hostile digit run compiles in linear time', () => {
+    // 2 000, not 50 000, on purpose. Measured against the old regex: 1 000
+    // digits = 600ms, 2 000 ≈ 5s, 5 000 = 62s, 50 000 did not finish in ten
+    // minutes. A test that HANGS when the bug returns is worse than one that
+    // fails — this size is decisively over budget while still terminating.
+    const hostile = '9'.repeat(2_000); // no "px" — the worst case for backtracking
+    const spec = {
+      schemaVersion: 1 as const,
+      id: 'redos-probe',
+      label: 'ReDoS probe',
+      units: 'px' as const,
+      layers: [
+        {
+          key: 'text',
+          count: 1,
+          sprite: { kind: 'text' as const, strings: ['x'], font: hostile },
+          motion: { type: 'static' as const },
+        },
+      ],
+    };
+
+    const started = performance.now();
+    const inst = mountSync(compileSaver(spec));
+    inst.renderFrame?.(0, 1);
+    inst.dispose();
+    const elapsed = performance.now() - started;
+
+    // Generous: the old regex needed minutes for this input, the new one is
+    // single-digit milliseconds. Anything under a second proves it is not
+    // backtracking, without making the test flaky on a loaded CI box.
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('still reads every CSS size shape it used to', () => {
+    // Guards the bounded quantifiers against over-tightening: each of these
+    // must still be recognised as carrying an explicit px size.
+    for (const font of ['16px', '16.5px', '.5px', '0.5px', 'bold 26px monospace', '12px/1.4 system-ui']) {
+      const spec = {
+        schemaVersion: 1 as const,
+        id: 'font-shape',
+        label: 'Font shape',
+        units: 'viewport' as const,
+        layers: [
+          {
+            key: 'text',
+            count: 1,
+            sprite: { kind: 'text' as const, strings: ['x'], font },
+            motion: { type: 'static' as const },
+          },
+        ],
+      };
+      const inst = mountSync(compileSaver(spec));
+      expect(() => inst.renderFrame?.(0, 1), `font "${font}" should compile`).not.toThrow();
+      inst.dispose();
+    }
+  });
+});
