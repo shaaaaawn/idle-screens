@@ -58,7 +58,10 @@ pub fn mint_code(channel: Option<&str>) -> anyhow::Result<String> {
 /// fine on the phone but every push came back "has not connected yet" (the
 /// exact bug the macOS app hit). This runs for the life of the process,
 /// re-registering the device id and surfacing `{"type":"switch"}` pushes.
-pub fn spawn_control_socket(initial_channel: Option<String>, on_switch: impl Fn(String) + Send + 'static) {
+pub fn spawn_control_socket(
+    initial_channel: Option<String>,
+    on_switch: impl Fn(String) + Send + 'static,
+) {
     let mut channel = initial_channel.unwrap_or_else(|| "default".to_string());
     std::thread::spawn(move || {
         let mut backoff = std::time::Duration::from_secs(1);
