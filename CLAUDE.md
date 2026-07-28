@@ -17,7 +17,7 @@ packages/
                                                          obstacles in an analytic flow field
   saver-catwalk/    @idle-screens/saver-catwalk      -- passthrough cat saver: a seeded-itinerary
                                                          cat parkours across the page's blocks
-  savers-classic/    @idle-screens/savers-classic     -- 19 classic savers (toasters, DVD, warp, etc.)
+  savers-classic/    @idle-screens/savers-classic     -- 17 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
@@ -39,7 +39,7 @@ pnpm install
 pnpm build                  # tsup build all packages (must run before typecheck on clean checkout)
 pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
-pnpm test                   # vitest run (455 unit tests)
+pnpm test                   # vitest run
 pnpm dev                    # Vite playground at localhost:5173
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
 pnpm test:all               # build + typecheck + lint + test + e2e (the full CI gate)
@@ -143,9 +143,37 @@ So the release flow's real last step is:
 git checkout develop && git fetch origin && git merge --ff-only origin/main
 ```
 
-It should be a clean fast-forward (develop has no commits main lacks). Verify
-the sync worked — the consumed changeset is gone and the source version matches
-what npm now serves:
+**This only works if the `develop → main` PR was a true merge.** If it was
+**squash**-merged, develop is not a descendant of main and there is nothing to
+fast-forward — `--ff-only` fails and it is tempting to skip the step. Check
+first:
+
+```bash
+git rev-list --parents -n 1 <the-release-merge-sha> | wc -w   # 2 = squash, 3 = merge
+git merge-base --is-ancestor origin/main origin/develop && echo "already synced"
+```
+
+Squash also *inverts* the danger. With a true merge, develop's stale versions
+would conflict on the next merge; with squash they are carried wholesale
+**onto main**, silently regressing published version numbers.
+
+After a squash, a plain `git merge origin/main` conflicts across everything
+both sides touched since the old base. Do a metadata-only sync instead — same
+end state, no conflicts:
+
+1. copy `packages/*/package.json` and `packages/*/CHANGELOG.md` from `main`
+2. delete only the changesets `main` actually consumed — `git cat-file -e
+   <release-sha>:.changeset/<file>` tells you whether a file predates the
+   release (consumed, delete it) or was added after (keep it)
+3. leave root `package.json` alone; it carries develop-only overrides
+
+**The same applies to anything merged directly to `main`** — Dependabot bumps,
+CI workflow changes. A later squash from `develop` reverts them. Mirror them
+back to `develop` or they are temporary. (Seen 2026-07-27: PRs #28/#30/#32 had
+to be carried back by hand.)
+
+Verify the sync worked — the consumed changesets are gone and the source
+version matches what npm now serves:
 
 ```bash
 ls .changeset/*.md                          # only README.md should remain

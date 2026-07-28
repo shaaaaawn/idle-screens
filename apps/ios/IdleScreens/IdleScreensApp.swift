@@ -17,6 +17,13 @@ struct IdleScreensApp: App {
                     }
                 }
                 .task {
+                    // Crash/hang capture: MetricKit delivers the previous
+                    // run's diagnostics shortly after launch.
+                    CrashReporter.shared.start()
+                    if ProcessInfo.processInfo.arguments.contains("-print-diagnostics") {
+                        CrashReporter.shared.printReports()
+                    }
+
                     // Debug affordance (CLI testing, mirrors the TV's -channel):
                     // `simctl launch booted <id> -pair <code>` claims a pair
                     // code headlessly; `-push <channel>` pushes to the TV.
@@ -25,8 +32,17 @@ struct IdleScreensApp: App {
                         await appState.claimPairCode(args[i + 1])
                     }
                     if let i = args.firstIndex(of: "-push"), args.indices.contains(i + 1) {
-                        await appState.pushToTV(channelId: args[i + 1])
+                        await appState.pushToAllScreens(channelId: args[i + 1])
                     }
+                    // `-seed-screens` fakes one paired screen per platform so
+                    // the Screens tab can be reviewed before the pairing
+                    // service is reachable. Debug/QA only — no tokens, so
+                    // pushes from these will fail loudly rather than silently.
+                    #if DEBUG
+                    if args.contains("-seed-screens") {
+                        appState.seedDemoScreens()
+                    }
+                    #endif
                 }
         }
         .onChange(of: scenePhase) {

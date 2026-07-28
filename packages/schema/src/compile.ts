@@ -29,8 +29,23 @@ function hexToRgba(hex: string, alpha: number): string {
 
 const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})\s+)+)/;
 
-/** Matches the size token in a CSS font shorthand ("bold 26px monospace"). */
-const FONT_PX_RE = /(\d*\.?\d+)px/;
+/**
+ * Matches the size token in a CSS font shorthand ("bold 26px monospace").
+ *
+ * The digit runs are bounded on purpose. This ran as `(\d*\.?\d+)px`, where
+ * `\d*` and `\d+` can split the same digit run many ways, so a long run that
+ * never reaches "px" makes the engine retry every split at every start
+ * position. `sprite.font` comes straight from an authored SaverSpec, so that
+ * input is reachable by anyone who can publish a scene: 1 000 digits took
+ * 600 ms and 5 000 took 62 SECONDS, which is a denial of service rather than
+ * a slow path. Bounding each run makes the work per start position constant —
+ * 200 000 chars now costs about 4 ms.
+ *
+ * The bounds are far past anything real: no CSS font size needs more than
+ * five integer digits or four decimals. `.5px` still parses via the second
+ * branch.
+ */
+const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
 
 /**
  * Rescale an explicit px size inside a font shorthand.

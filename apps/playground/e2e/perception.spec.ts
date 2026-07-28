@@ -32,9 +32,9 @@ interface PerceiveHook {
 }
 
 /** Frame-addressable imperative savers — reproducible pixel readings. */
-const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide'];
+const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide', 'dvd', 'fade-out'];
 /** No canvas to read: these draw with elements + CSS transforms. */
-const CSS_SAVERS = ['toasters', 'dvd', 'fish', 'fade-out', 'bouncing-ball', 'logo', 'bsod'];
+const CSS_SAVERS = ['toasters', 'fish', 'bouncing-ball', 'bsod'];
 /** Worker-ready savers must NOT be excluded — see the assertion below. */
 const WORKER_READY = ['warp', 'rainstorm', 'globe', 'mystify', 'pipes', 'flurry'];
 
@@ -94,6 +94,7 @@ test('pixels report colour and whole-frame motion — signal the spec path lacks
       tide: await p.saver('tide', o),
       blackHole: await p.saver('black-hole', o),
       globe: await p.saver('globe', o),
+      pipes: await p.saver('pipes', o),
     };
   });
 
@@ -109,12 +110,14 @@ test('pixels report colour and whole-frame motion — signal the spec path lacks
     }
   }
 
-  // Motion needs a frame-addressable saver; globe is sampled, so it gets none
-  // rather than a number derived from two arbitrary wall-clock grabs.
+  // Motion needs a frame-addressable saver. Globe joined that club in the
+  // July 2026 modernization batch; pipes (accumulative) is the saver that
+  // legitimately stays sampled, so it carries the null-motion assertion.
   expect(rows.tide.motion, 'tide is frame-addressable').not.toBeNull();
   expect(rows.tide.motion!.rate).toBeGreaterThan(0);
   expect(rows.blackHole.motion).not.toBeNull();
-  expect(rows.globe.motion, 'globe is only sampled — motion would be meaningless').toBeNull();
+  expect(rows.globe.motion, 'globe is frame-addressable since the P3 modernization').not.toBeNull();
+  expect(rows.pipes.motion, 'pipes is accumulative — only sampled, so motion would be meaningless').toBeNull();
 });
 
 /**

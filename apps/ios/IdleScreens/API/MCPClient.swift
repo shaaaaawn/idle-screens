@@ -130,6 +130,28 @@ actor MCPClient {
         throw MCPError.unparsableResult(tool: "listSavers", text: text)
     }
 
+    /// Fork another channel's *current* scene into a brand-new channel you
+    /// own — one atomic call that returns the new id and its token.
+    func remixChannel(sourceChannelId: String, label: String? = nil) async throws -> CreatedChannel {
+        var args: [String: JSONValue] = ["channelId": .string(sourceChannelId)]
+        if let label, !label.isEmpty { args["label"] = .string(label) }
+        return try await callTool("remixChannel", arguments: args, as: CreatedChannel.self)
+    }
+
+    /// Publish a full SaverSpec (as opposed to a classic saver id) — the path
+    /// used when adopting another channel's scene onto one you own.
+    func publishSpec(channelId: String, token: String, spec: JSONValue, seed: Int,
+                     intent: String? = nil) async throws {
+        var args: [String: JSONValue] = [
+            "channelId": .string(channelId),
+            "token": .string(token),
+            "spec": spec,
+            "seed": .int(seed),
+        ]
+        if let intent { args["intent"] = .string(intent) }
+        try await callTool("publishScene", arguments: args)
+    }
+
     func publishScene(channelId: String, token: String, saverId: String, seed: Int,
                       model: String? = nil, intent: String? = nil) async throws {
         var args: [String: JSONValue] = [

@@ -16,6 +16,11 @@ struct IdleScreensTVApp: App {
                         PairView()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings") {
                         SettingsView()
+                    } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
+                              ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
+                        // Debug: render one channel's poster tile in isolation
+                        // (bisects card-composition bugs from preview bugs).
+                        PosterDebugView(channelId: ProcessInfo.processInfo.arguments[i + 1])
                     } else {
                         MainTabView()
                     }
@@ -33,6 +38,10 @@ struct IdleScreensTVApp: App {
                 // jumps straight into a channel, bypassing the grid (CLI testing).
                 let args = ProcessInfo.processInfo.arguments
                 if let i = args.firstIndex(of: "-channel"), args.indices.contains(i + 1) {
+                    // Let the tab/navigation hierarchy install its
+                    // navigationDestination first — a binding that is already
+                    // true at install time never pushes (cold-start quirk).
+                    try? await Task.sleep(for: .milliseconds(300))
                     appState.selectChannel(args[i + 1])
                 } else {
                     // Idle on the grid, but reachable: a paired phone can
@@ -41,13 +50,34 @@ struct IdleScreensTVApp: App {
                 }
                 // Hold the splash just long enough to cover the first grid
                 // paint (cache-first, so content is ready almost immediately).
-                try? await Task.sleep(for: .milliseconds(900))
+                try? await Task.sleep(for: .milliseconds(600))
                 withAnimation(.easeOut(duration: 0.5)) { showingSplash = false }
             }
             .onChange(of: scenePhase) {
                 appState.scenePhaseChanged(active: scenePhase == .active)
             }
         }
+    }
+}
+
+/// Debug-only isolated poster tile (`-poster <channelId>`).
+private struct PosterDebugView: View {
+    let channelId: String
+    @Environment(TVAppState.self) private var app
+
+    var body: some View {
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            if let channel = app.channels.first(where: { $0.id == channelId }),
+               let spec = channel.spec {
+                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+                    .frame(width: 960, height: 540)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            } else {
+                ProgressView()
+            }
+        }
+        .task { if app.channels.isEmpty { await app.loadGallery() } }
     }
 }
 

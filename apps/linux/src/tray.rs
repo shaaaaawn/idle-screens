@@ -91,33 +91,8 @@ impl Tray for IdleScreensTray {
                 activate: Box::new(|this: &mut Self| this.spawn_saver(&["--kiosk"])),
                 ..Default::default()
             }),
-            MenuItem::Standard(StandardItem {
-                label: "Check for saver updates".into(),
-                icon_name: "system-software-update".into(),
-                activate: Box::new(|this: &mut Self| {
-                    this.spawn_background(&["check-updates"]);
-                }),
-                ..Default::default()
-            }),
-            MenuItem::Standard(StandardItem {
-                label: "Open config folder".into(),
-                icon_name: "folder-open".into(),
-                activate: Box::new(|this: &mut Self| this.open_config()),
-                ..Default::default()
-            }),
-            MenuItem::Standard(StandardItem {
-                label: "About".into(),
-                icon_name: "help-about".into(),
-                activate: Box::new(|_this: &mut Self| {
-                    let summary = crate::about::summary();
-                    log::info!("{summary}");
-                    let _ = std::process::Command::new("notify-send")
-                        .arg("idle screens")
-                        .arg(&summary)
-                        .spawn();
-                }),
-                ..Default::default()
-            }),
+            // Pairing belongs with the primary actions, not below the
+            // maintenance items — it's something you reach for, not upkeep.
             MenuItem::Standard(StandardItem {
                 label: "Pair phone".into(),
                 icon_name: "phone".into(),
@@ -147,6 +122,34 @@ impl Tray for IdleScreensTray {
             }),
             MenuItem::Separator,
             MenuItem::Standard(StandardItem {
+                label: "Check for saver updates".into(),
+                icon_name: "system-software-update".into(),
+                activate: Box::new(|this: &mut Self| {
+                    this.spawn_background(&["check-updates"]);
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Standard(StandardItem {
+                label: "Open config folder".into(),
+                icon_name: "folder-open".into(),
+                activate: Box::new(|this: &mut Self| this.open_config()),
+                ..Default::default()
+            }),
+            MenuItem::Standard(StandardItem {
+                label: "About".into(),
+                icon_name: "help-about".into(),
+                activate: Box::new(|_this: &mut Self| {
+                    let summary = crate::about::summary();
+                    log::info!("{summary}");
+                    let _ = std::process::Command::new("notify-send")
+                        .arg("idle screens")
+                        .arg(&summary)
+                        .spawn();
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Separator,
+            MenuItem::Standard(StandardItem {
                 label: "Quit tray".into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|_| std::process::exit(0)),
@@ -162,6 +165,20 @@ pub fn run(kiosk_default: bool, forwarded_args: Vec<OsString>) -> anyhow::Result
         forwarded_args,
     };
     log::info!("starting status notifier tray");
+
+    // Keep this screen reachable for phone pushes for as long as the tray
+    // runs — without it a paired phone's pushes 409 ("not connected yet").
+    crate::pair::spawn_control_socket(None, |channel| {
+        log::info!("pushed to channel {channel}; launching saver");
+        let exe = std::env::current_exe()
+            .unwrap_or_else(|_| std::path::PathBuf::from("idle-screens-wayland"));
+        let _ = Command::new(exe)
+            .args(["--channel", &channel])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    });
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

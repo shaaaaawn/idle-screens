@@ -173,6 +173,13 @@ class CatwalkInstance implements SaverInstance {
   private visits: Visit[] = [];
   /** Total loop duration, ms. 0 = no itinerary (not enough perches). */
   private loopD = 0;
+  /**
+   * The entrance: a one-time prologue before the loop clock starts. At t=0
+   * there is no cat — it walks in from the nearest screen edge, gathers with
+   * a crouch, and its first leap lands exactly at loop-time 0, so the perch's
+   * ordinary landing spring rings on arrival. Null until an itinerary exists.
+   */
+  private entrance: { xStart: number; xTakeoff: number; walkD: number; crouchD: number; jumpD: number; dur: number } | null = null;
 
   private frameId: number | null = null;
   private paused = false;
@@ -254,6 +261,7 @@ class CatwalkInstance implements SaverInstance {
     this.perches = [];
     this.visits = [];
     this.loopD = 0;
+    this.entrance = null;
     const page = this.ctxSaver.page;
     if (!page) return;
     let els = page.victims(VICTIM_SELECTOR);
@@ -274,7 +282,7 @@ class CatwalkInstance implements SaverInstance {
         prevOrigin: el.style.transformOrigin,
         prevWillChange: el.style.willChange,
         prevTransition: el.style.transition,
-        lastTransform: ' ', // sentinel ≠ any real value, forces first write
+        lastTransform: '\u0000', // sentinel ≠ any real value, forces first write
       });
     }
 
@@ -518,6 +526,20 @@ class CatwalkInstance implements SaverInstance {
       t = tD + (zoom ? 240 + dist * 0.3 : 420 + dist * 0.55);
     }
     this.loopD = t; // the final jump lands at t == 0 of the next loop
+
+    // The entrance. Geometry only — all evaluation lives in entranceAt().
+    const first = P[this.visits[0]!.perch]!;
+    const xLand = first.x + this.visits[0]!.dx;
+    const groundY = this.h - 8;
+    const xStart = xLand < this.w / 2 ? -34 : this.w + 34;
+    // Take off short of the landing spot so the first leap has a readable arc;
+    // clamp on-screen for perches parked near the entry edge.
+    const back = clamp((groundY - first.y) * 0.4, 70, 230);
+    const xTakeoff = clamp(xLand - Math.sign(xLand - xStart) * back, 24, this.w - 24);
+    const walkD = Math.abs(xTakeoff - xStart) / 0.2; // a brisk ~200 px/s arrival
+    const crouchD = 620; // gather + butt-wiggle before the first leap
+    const jumpD = 420 + Math.hypot(xLand - xTakeoff, first.y - groundY) * 0.55;
+    this.entrance = { xStart, xTakeoff, walkD, crouchD, jumpD, dur: walkD + crouchD + jumpD };
   }
 
   private restoreVictims(): void {
@@ -531,6 +553,7 @@ class CatwalkInstance implements SaverInstance {
     this.perches = [];
     this.visits = [];
     this.loopD = 0;
+    this.entrance = null;
   }
 
   // ---- the performance, closed-form in tt ----
@@ -661,15 +684,54 @@ class CatwalkInstance implements SaverInstance {
     };
   }
 
-  /** Apply perch reactions to the page. Only perches move; only changed strings write. */
-  private applyPage(tt: number): void {
+  /**
+   * The prologue, evaluated at raw scaled time `tg` (0 ≤ tg < entrance.dur):
+   * walk in from offscreen → crouch and gather → the first leap, whose arc
+   * ends at the exact point and instant the loop's first landing begins.
+   */
+  private entranceAt(tg: number): CatFrame {
+    const E = this.entrance!;
+    const v0 = this.visits[0]!;
+    const first = this.perches[v0.perch]!;
+    const xLand = first.x + v0.dx;
+    const groundY = this.h - 8;
+
+    if (tg < E.walkD) {
+      const k = clamp(tg / E.walkD, 0, 1);
+      // Linear stride with a soft final step, so it settles into the crouch.
+      const x = lerp(E.xStart, E.xTakeoff, k < 0.85 ? k : 0.85 + 0.15 * smooth01((k - 0.85) / 0.15));
+      const bob = Math.abs(Math.sin(tg * 0.009)) * 2.4;
+      return { x, y: groundY - bob, face: E.xTakeoff >= E.xStart ? 1 : -1, angle: 0, state: 'walk', k: 1, edge: 0, visit: GROUND_VISIT };
+    }
+    if (tg < E.walkD + E.crouchD) {
+      const u = (tg - E.walkD) / E.crouchD;
+      return { x: E.xTakeoff, y: groundY, face: xLand >= E.xTakeoff ? 1 : -1, angle: 0, state: 'crouch', k: u, edge: 0, visit: GROUND_VISIT };
+    }
+    // Airborne — same arc law as the itinerary jumps.
+    const u = clamp((tg - E.walkD - E.crouchD) / E.jumpD, 0, 1);
+    const dist = Math.hypot(xLand - E.xTakeoff, first.y - groundY);
+    const arc = Math.max(46, dist * 0.32) * this.params.jumpArc + Math.max(0, groundY - first.y) * 0.25;
+    const ux = lerp(E.xTakeoff, xLand, smooth01(u));
+    const uy = lerp(groundY, first.y, u) - arc * 4 * u * (1 - u);
+    const dyd = (first.y - groundY) - arc * 4 * (1 - 2 * u);
+    const dxd = (xLand - E.xTakeoff) || 0.001;
+    return {
+      x: ux, y: uy, face: dxd >= 0 ? 1 : -1,
+      angle: clamp(Math.atan2(dyd, Math.abs(dxd)) * 0.5, -0.6, 0.6),
+      state: 'jump', k: u, edge: 0, visit: GROUND_VISIT,
+    };
+  }
+
+  /** Apply perch reactions to the page. Only perches move; only changed strings write.
+   *  `calm` holds every block at rest — the stage before the cat has arrived. */
+  private applyPage(tt: number, calm = false): void {
     for (let i = 0; i < this.perches.length; i++) {
       const p = this.perches[i]!;
       const v = this.victims[p.v]!;
-      const off = this.perchOffset(i, tt);
+      const off = calm ? 0 : this.perchOffset(i, tt);
       // Kneading rocks the perch side to side under the alternating paws.
       let rock = 0;
-      for (const vis of this.visits) {
+      if (!calm) for (const vis of this.visits) {
         if ((vis.action !== 'knead' && vis.action !== 'roll') || vis.perch !== i) continue;
         if (tt < vis.tA + 400 || tt > vis.tD - 300) continue;
         const env = smooth01(clamp((tt - vis.tA - 400) / 500, 0, 1)) * smooth01(clamp((vis.tD - 300 - tt) / 500, 0, 1));
@@ -699,7 +761,7 @@ class CatwalkInstance implements SaverInstance {
       const here = this.perches[vis.perch]!;
       const dir = tgt.cx >= here.x ? 1 : -1;
       let x = 0;
-      for (let k = 0; k < 3; k++) {
+      if (!calm) for (let k = 0; k < 3; k++) {
         const sk = vis.tA + 900 + k * 1150 + 190; // paw contact, not swing start
         if (sk > vis.tD) break;
         const tau = ((((tt - sk) % D) + D) % D) / 1000;
@@ -736,7 +798,10 @@ class CatwalkInstance implements SaverInstance {
   }
 
   private renderStill(): void {
-    this.renderFrame(this.t, this.ctxSaver.seed);
+    // A paused audience (reduced motion) must never see the empty
+    // pre-entrance stage — park the still just after the arrival instead.
+    const t = this.t === 0 && this.entrance ? (this.entrance.dur + 900) / Math.max(0.05, this.params.pace) : this.t;
+    this.renderFrame(t, this.ctxSaver.seed);
   }
 
   // ---- draw ----
@@ -778,14 +843,25 @@ class CatwalkInstance implements SaverInstance {
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
-    // Warm lamplight tint inside the pool.
+    // Warm lamplight tint inside the pool — and the purr: while the cat
+    // kneads or sleeps, the light breathes with it. Kneading purrs at a
+    // brisk ~1.2Hz; sleep is a slow ~0.45Hz swell. Closed-form in tt.
+    let breathe = 0;
+    const vis = cat.visit;
+    if ((cat.state === 'sleep' || cat.state === 'knead') && tt >= vis.tA && tt < vis.tD) {
+      const env = smooth01(clamp((tt - vis.tA - 600) / 900, 0, 1)) * smooth01(clamp((vis.tD - tt) / 700, 0, 1));
+      const hz = cat.state === 'knead' ? 1.2 : 0.45;
+      breathe = env * Math.sin(tt * 0.001 * hz * TAU);
+    }
+    const rw = R * 0.9 * (1 + 0.05 * breathe);
+    const wa = 0.1 * (1 + 0.4 * breathe);
     ctx.globalCompositeOperation = 'lighter';
-    const warmth = ctx.createRadialGradient(cat.x, cat.y - 14, 0, cat.x, cat.y - 14, R * 0.9);
-    warmth.addColorStop(0, 'rgba(255,214,150,0.1)');
+    const warmth = ctx.createRadialGradient(cat.x, cat.y - 14, 0, cat.x, cat.y - 14, rw);
+    warmth.addColorStop(0, `rgba(255,214,150,${wa.toFixed(3)})`);
     warmth.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = warmth;
     ctx.beginPath();
-    ctx.arc(cat.x, cat.y - 14, R * 0.9, 0, TAU);
+    ctx.arc(cat.x, cat.y - 14, rw, 0, TAU);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
@@ -1281,7 +1357,7 @@ class CatwalkInstance implements SaverInstance {
       { id: 'surface', label: 'Night canvas', kind: 'surface', el: this.canvas, description: 'Everything the cat adds over the page.' },
       { id: 'veil', label: 'Veil & lamplight pool', kind: 'pass' },
       { id: 'cat', label: 'The cat', kind: 'pass' },
-      { id: 'effects', label: 'Dust, Zzz, moth & emotes', kind: 'pass' },
+      { id: 'effects', label: 'Dust, Zzz, moth, purr & emotes', kind: 'pass' },
     ];
   }
 
@@ -1300,7 +1376,16 @@ class CatwalkInstance implements SaverInstance {
       this.render(tg, this.groundCat(tg));
       return;
     }
-    const tt = ((t * this.params.pace) % this.loopD + this.loopD) % this.loopD;
+    const tg = t * this.params.pace;
+    const E = this.entrance;
+    if (E && tg < E.dur) {
+      // The prologue: at t=0 there is no cat. The stage rests until it lands.
+      this.applyPage(0, true);
+      this.render(tg, this.entranceAt(tg));
+      return;
+    }
+    const tLoop = E ? tg - E.dur : tg;
+    const tt = (tLoop % this.loopD + this.loopD) % this.loopD;
     this.applyPage(tt);
     const cat = this.catAt(tt);
     // The cat rides its perch: catAt already reads perchOffset for its y.

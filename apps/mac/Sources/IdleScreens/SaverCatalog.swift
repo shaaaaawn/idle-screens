@@ -9,7 +9,7 @@ struct SaverEntry {
 enum SaverCatalog {
   static let all: [SaverEntry] = [
     SaverEntry(id: "toasters", label: "Flying Toasters"),
-    SaverEntry(id: "dvd", label: "DVD Bouncing Logo"),
+    SaverEntry(id: "dvd", label: "Bouncing Logo"),
     SaverEntry(id: "warp", label: "Warp"),
     SaverEntry(id: "fish", label: "Fish Aquarium"),
     SaverEntry(id: "rainstorm", label: "Rainstorm"),
@@ -17,9 +17,7 @@ enum SaverCatalog {
     SaverEntry(id: "globe", label: "Globe"),
     SaverEntry(id: "fade-out", label: "Fade Out"),
     SaverEntry(id: "bouncing-ball", label: "Bouncing Ball"),
-    SaverEntry(id: "logo", label: "Logo"),
     SaverEntry(id: "messages", label: "Messages"),
-    SaverEntry(id: "messages2", label: "Messages II"),
     SaverEntry(id: "pipes", label: "Pipes"),
     SaverEntry(id: "bsod", label: "BSOD"),
     SaverEntry(id: "flurry", label: "Flurry"),

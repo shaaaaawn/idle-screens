@@ -199,10 +199,15 @@ the attempt.
   toward stalk — and the bird always leaves two beats before arrival. Two
   actors, still 100% closed-form.
 - **Presence awareness at the seams.** The saver can't react to live input
-  (it *is* the idle state), but it owns its entrance and exit. On sleep: the
-  cat walks *in* from the screen edge rather than materializing. On wake: a
-  startle pose for 200ms as the dialog fades — the viewer catches the cat
-  noticing them. Both are deterministic overlays on the loop clock.
+  (it *is* the idle state), but it owns its entrance and exit. ~~On sleep: the
+  cat walks *in* from the screen edge rather than materializing.~~ **Shipped
+  (July 2026):** the entrance is a one-time prologue before the loop clock —
+  walk in from the nearest edge, a crouch-and-gather, and a first leap whose
+  arc lands at loop-time 0 so the ordinary landing spring greets the arrival;
+  the stage rests until then. The purr shipped with it: the lamplight pool
+  breathes while the cat kneads (~1.2Hz) or sleeps (~0.45Hz). Still open: the
+  wake-side — a 200ms startle pose as the dialog fades, the viewer catching
+  the cat noticing them.
 - **A kitten mode.** `catSize` low + playfulness pinned high is almost this
   already; a true kitten wants clumsier landings (overshoot the spring,
   scramble), shorter dwells, and a failed first jump that lands it back on

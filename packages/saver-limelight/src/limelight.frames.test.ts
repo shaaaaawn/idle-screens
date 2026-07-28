@@ -173,6 +173,43 @@ describe('limelight stages the live page', () => {
     host.remove();
   });
 
+  // Limelight owns two canvases — the one mounted in the host and a detached
+  // buffer the volumetric beam is carved in. Only the first is a real layer;
+  // handing the inspector the beam buffer would give it a toggle that points at
+  // nothing on screen. Every other saver in this release ratchets composition()
+  // this way, and it was an untested composition() that tripped the coverage
+  // gate on this branch to begin with.
+  it('describes its composition stack, binding the surface layer to the mounted canvas', () => {
+    const { host, page } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+
+    const stack = inst.composition?.() ?? [];
+    expect(stack.length).toBeGreaterThan(0);
+
+    // Bottom-up: the borrowed page sits under the light canvas, then passes.
+    expect(stack[0]?.kind).toBe('page');
+
+    const surface = stack.find((l) => l.kind === 'surface');
+    expect(surface?.el, 'the surface layer must point at a real canvas to be toggleable').toBeInstanceOf(
+      HTMLCanvasElement,
+    );
+    // The beam buffer is detached, so containment is what separates the two.
+    expect(host.contains(surface!.el as HTMLElement), 'surface must be the MOUNTED canvas, not the beam buffer').toBe(
+      true,
+    );
+
+    // The beam is a pass, not a layer with an element of its own.
+    expect(stack.find((l) => l.id === 'beam')?.el).toBeUndefined();
+
+    // Ids are what the inspector keys rows on, so they have to be unique.
+    const ids = stack.map((l) => l.id);
+    expect(new Set(ids).size, `duplicate layer ids: ${ids.join(', ')}`).toBe(ids.length);
+    for (const layer of stack) expect(layer.label).toMatch(/\S/);
+
+    inst.dispose();
+    host.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.filter = 'contrast(1.1)';

@@ -22,6 +22,43 @@ struct ChannelDeckView: View {
                 LabeledContent("scene", value: state?.scene?.label ?? state?.scene?.id ?? "—")
             }
 
+            // Mixing beats starting over: adopt any live scene onto this
+            // channel, keeping its id, viewers and paired screens.
+            Section("mix in a scene") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(app.channels.filter { $0.spec != nil && $0.id != credential.channelId }) { channel in
+                            Button {
+                                run {
+                                    try await app.adoptScene(
+                                        from: channel.id, into: credential.channelId)
+                                    state = try? await app.fetchState(for: credential.channelId)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                        .frame(width: 124, height: 70)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
+                                        }
+                                    Text(channel.displayLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.textSecondary)
+                                        .lineLimit(1)
+                                        .frame(width: 124, alignment: .leading)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSending)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 0))
+            }
+
             Section("savers") {
                 if app.savers.isEmpty, let error = app.vjError {
                     Text(error)
@@ -51,16 +88,17 @@ struct ChannelDeckView: View {
             }
 
             Section("controls") {
-                if app.pairedTV != nil {
+                if !app.pairedScreens.isEmpty {
                     Button {
                         run {
-                            let delivered = await app.pushToTV(channelId: credential.channelId)
-                            if !delivered {
-                                actionError = await app.pairPushError ?? "Couldn't reach the TV."
+                            let delivered = await app.pushToAllScreens(channelId: credential.channelId)
+                            if delivered == 0 {
+                                actionError = await app.pairPushError ?? "Couldn't reach your screens."
                             }
                         }
                     } label: {
-                        Label("Play on your screen", systemImage: "play.tv")
+                        Label(app.pairedScreens.count > 1 ? "Play on all screens" : "Play on your screen",
+                              systemImage: "play.tv")
                     }
                     .disabled(isSending)
                 }

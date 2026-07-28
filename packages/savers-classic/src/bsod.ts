@@ -13,6 +13,10 @@ export const bsodManifest: SaverManifest = {
   costTier: 'idle',
   motionIntensity: 'calm',
   reducedMotionFallback: 'static',
+  attribution: {
+    source: 'Parody/homage of historical OS crash screens',
+    license: 'Original implementation; screen text recreated from memory as parody — no third-party code or assets; trademarks belong to their owners',
+  },
   a11y: { flashSafe: true, notes: 'Static text screens, slow crossfade between them.' },
 };
 
