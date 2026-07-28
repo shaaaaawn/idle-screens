@@ -246,9 +246,10 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   braille map smears — concentric rings, grids, text blocks. This is the sharper
   read when composition detail matters.
 - `dominanceRanking(spec, opts)` — layers ranked by estimated visual weight
-  (area × alpha × contrast × glow/motion boosts; links count) — *where the eye
-  goes*, normalized to shares. Thin-but-bright structures (rings, streaks, link
-  lines) get a line-salience boost so they aren't crushed by filled discs.
+  (area × alpha × contrast × glow/motion boosts; links and persistence ink —
+  trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
+  shares. Thin-but-bright structures (rings, streaks, link lines) get a
+  line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `textSprites(spec, opts)` — the literal strings and rendered sizes of every

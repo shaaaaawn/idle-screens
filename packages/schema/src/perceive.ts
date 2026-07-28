@@ -609,7 +609,9 @@ export interface DominanceEntry {
 /**
  * Rank layers by estimated visual weight — where the eye goes. Weight is
  * on-screen area × alpha, scaled by contrast against the background, an
- * additive-glow boost, and a motion boost. Link lines count as area.
+ * additive-glow boost, and a motion boost. Link lines count as area, and so
+ * does persistence ink: trail ribbons and ghosting smear are modeled as swept
+ * ribbons, so a comet layer is ranked by its comet, not just its head.
  */
 export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): DominanceEntry[] {
   const scene = buildScene(spec, opts);
@@ -622,6 +624,31 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
     return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
   })();
 
+
+  // Persistence smears every moving sprite into a ribbon of real visual mass —
+  // for a comet layer the trail IS the visual event. Model both effects as
+  // swept ribbons (path length × stroke width × mean surviving alpha), using
+  // the straight-line displacement as a lower-bound path length and skipping
+  // wrap seams. First-pass fidelity, same spirit as GLOW_SPREAD.
+  const ghost = spec.ghosting ?? 0;
+  let ghostWindowMs = 0;
+  let ghostMeanW = 0;
+  if (ghost > 0) {
+    const dt = 1000 / 60;
+    const frames = Math.min(Math.ceil(Math.log(1 / 255) / Math.log(ghost)), LIMITS.maxGhostReplayFrames);
+    ghostWindowMs = frames * dt;
+    ghostMeanW = (ghost * (1 - Math.pow(ghost, frames))) / (1 - ghost) / frames;
+  }
+  const sweptDistance = (e: Entity, spanMs: number): number => {
+    const span = Math.min(spanMs, t);
+    if (span <= 0) return 0;
+    const p0 = posOf(scene, e, t - span);
+    const p1 = posOf(scene, e, t);
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return 0; // wrapped: ambiguous
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
     const lifeA = lifeAlphaAt(layer.life, t);
@@ -645,6 +672,19 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;
+
+      // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
+      // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
+      if (layer.trail) {
+        const fade = layer.trail.fade ?? 1;
+        const span = sweptDistance(e, layer.trail.length);
+        area += span * sz * 0.65 * Math.max(0, 1 - fade / 2) * a;
+      }
+      // Ghost smear: ink from m frames back survives at g^m, so the sweep over
+      // the visible window carries the window's mean surviving weight.
+      if (ghost > 0) {
+        area += sweptDistance(e, ghostWindowMs) * sz * ghostMeanW * a;
+      }
       lumAcc += spriteLuma(layer, e);
     }
     if (layer.links && entities.length > 1) {

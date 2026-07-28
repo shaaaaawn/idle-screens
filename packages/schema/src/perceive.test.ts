@@ -165,6 +165,26 @@ describe('persistence-aware perception (ghosting + trail)', () => {
     const diff = diffScenes(movers(), movers({ ghosting: 0.9 }));
     expect(diff.coverage.delta).toBeGreaterThan(0);
   });
+
+  it('dominance counts trail ribbons — a comet layer is ranked by its comet', () => {
+    const twoLayers = (withTrail: boolean): SaverSpec => spec([
+      { key: 'anchor', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [30, 30], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'comet', count: 1, sprite: { kind: 'circle', radius: [10, 10], color: '#88ccff' }, motion: { type: 'drift', speed: [200, 200] }, ...(withTrail ? { trail: { length: 1500, fade: 1 } } : {}) },
+    ]);
+    const bare = dominanceRanking(twoLayers(false)).find((r) => r.key === 'comet')!;
+    const trailed = dominanceRanking(twoLayers(true)).find((r) => r.key === 'comet')!;
+    expect(trailed.share).toBeGreaterThan(bare.share);
+  });
+
+  it('dominance counts ghosting smear for moving layers', () => {
+    const s = (ghosting?: number): SaverSpec => spec([
+      { key: 'still', count: 4, sprite: { kind: 'circle', radius: [25, 25], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'runner', count: 4, sprite: { kind: 'circle', radius: [10, 10], color: '#88ccff' }, motion: { type: 'drift', speed: [200, 200] } },
+    ], ghosting !== undefined ? { ghosting } : {});
+    const clear = dominanceRanking(s()).find((r) => r.key === 'runner')!;
+    const smeared = dominanceRanking(s(0.9)).find((r) => r.key === 'runner')!;
+    expect(smeared.share).toBeGreaterThan(clear.share);
+  });
 });
 
 describe('renderBrailleMap', () => {
