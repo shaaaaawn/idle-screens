@@ -1,0 +1,680 @@
+{
+  "runId": "run-2026-07-28T1742-baseline",
+  "createdAt": "2026-07-28T17:42:28.858Z",
+  "config": {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "t": 5000,
+    "seedFallback": 42
+  },
+  "provenance": {
+    "harness": "headless-vitest",
+    "label": "baseline re-run",
+    "note": "Headless re-score vs run-2026-07-25T1908-baseline-v0",
+    "operator": "eval:styles",
+    "parentRunId": "run-2026-07-25T1908-baseline-v0",
+    "versions": {
+      "styleDnaHash": "773845e7",
+      "styleDnaLabel": "artists@15",
+      "saverSpecFormat": 1,
+      "schemaPackage": "3.0.0",
+      "scorer": "style-eval-score@1",
+      "skill": "artistic-style-schema-eval@1"
+    },
+    "prompts": {
+      "skillPath": ".claude/skills/artistic-style-schema-eval/SKILL.md",
+      "benchmarkSource": "apps/playground/src/evals/benchmarks.ts@v1"
+    },
+    "scoringBands": {
+      "minCoverage": 0.002,
+      "minLuminanceVar": 0.00005,
+      "weights": {
+        "perception": 0.35,
+        "styleFit": 0.35,
+        "intentFit": 0.3
+      }
+    }
+  },
+  "suiteMedian": 0.9314583333333333,
+  "perArtist": [
+    {
+      "artistId": "monet",
+      "median": 0.972,
+      "mean": 0.9586999999999998,
+      "n": 10
+    },
+    {
+      "artistId": "van-gogh",
+      "median": 0.9049166666666666,
+      "mean": 0.9127333333333334,
+      "n": 10
+    },
+    {
+      "artistId": "seurat",
+      "median": 0.9737499999999999,
+      "mean": 0.9649416666666666,
+      "n": 10
+    },
+    {
+      "artistId": "picasso",
+      "median": 0.972,
+      "mean": 0.9545333333333332,
+      "n": 10
+    },
+    {
+      "artistId": "kandinsky",
+      "median": 0.8932499999999999,
+      "mean": 0.8826916666666668,
+      "n": 10
+    },
+    {
+      "artistId": "mondrian",
+      "median": 0.9125,
+      "mean": 0.9093833333333332,
+      "n": 10
+    },
+    {
+      "artistId": "hokusai",
+      "median": 0.92475,
+      "mean": 0.9015333333333333,
+      "n": 10
+    },
+    {
+      "artistId": "klimt",
+      "median": 0.972,
+      "mean": 0.9750333333333332,
+      "n": 10
+    },
+    {
+      "artistId": "rothko",
+      "median": 0.93875,
+      "mean": 0.9355833333333333,
+      "n": 10
+    },
+    {
+      "artistId": "kusama",
+      "median": 0.9055,
+      "mean": 0.8961666666666666,
+      "n": 10
+    },
+    {
+      "artistId": "magritte",
+      "median": 0.98425,
+      "mean": 0.9742166666666666,
+      "n": 10
+    },
+    {
+      "artistId": "malevich",
+      "median": 0.937,
+      "mean": 0.9296833333333334,
+      "n": 10
+    },
+    {
+      "artistId": "okeeffe",
+      "median": 0.9684999999999999,
+      "mean": 0.9673333333333334,
+      "n": 10
+    },
+    {
+      "artistId": "basquiat",
+      "median": 0.8932499999999999,
+      "mean": 0.8958166666666667,
+      "n": 10
+    },
+    {
+      "artistId": "riley",
+      "median": 0.9055,
+      "mean": 0.90655,
+      "n": 10
+    }
+  ],
+  "perBenchmark": [
+    {
+      "benchmarkId": "calm-horizon",
+      "median": 0.9684999999999999,
+      "variance": 0.004132687222222223
+    },
+    {
+      "benchmarkId": "dense-field",
+      "median": 0.937,
+      "variance": 0.0011900738888888894
+    },
+    {
+      "benchmarkId": "single-focal",
+      "median": 0.9591666666666667,
+      "variance": 0.0020609248765432095
+    },
+    {
+      "benchmarkId": "layered-depth",
+      "median": 0.8903333333333332,
+      "variance": 0.001498785987654322
+    },
+    {
+      "benchmarkId": "pulse-atmosphere",
+      "median": 0.9055,
+      "variance": 0.002574753888888889
+    }
+  ],
+  "gapHistogram": [
+    {
+      "gap": "No true broken-brush / dab sprite",
+      "count": 1
+    },
+    {
+      "gap": "No specular water reflection primitive",
+      "count": 1
+    },
+    {
+      "gap": "Limited atmospheric perspective fog",
+      "count": 1
+    },
+    {
+      "gap": "No impasto / stroke-width pressure",
+      "count": 1
+    },
+    {
+      "gap": "No true swirling vector-field brush",
+      "count": 1
+    },
+    {
+      "gap": "Cypress silhouette as path-of-marks only",
+      "count": 1
+    },
+    {
+      "gap": "No true pointillist size-locked dot grid with hue statistics",
+      "count": 1
+    },
+    {
+      "gap": "No optical-mix preview metric",
+      "count": 1
+    },
+    {
+      "gap": "No polygon / arbitrary facet sprite",
+      "count": 1
+    },
+    {
+      "gap": "No multi-view geometric deformation",
+      "count": 1
+    },
+    {
+      "gap": "No collage texture layers",
+      "count": 1
+    },
+    {
+      "gap": "No free bezier stroke sprite",
+      "count": 1
+    },
+    {
+      "gap": "No true triangle / arc primitives",
+      "count": 1
+    },
+    {
+      "gap": "Limited musical sync between layers",
+      "count": 1
+    },
+    {
+      "gap": "No true black grid-line primitive separate from rects",
+      "count": 1
+    },
+    {
+      "gap": "No constrained orthogonal layout solver",
+      "count": 1
+    },
+    {
+      "gap": "No contour-stroke / woodblock line sprite",
+      "count": 1
+    },
+    {
+      "gap": "No true wave-crest path generator",
+      "count": 1
+    },
+    {
+      "gap": "Mount Fuji as silhouette mask unsupported",
+      "count": 1
+    },
+    {
+      "gap": "No gold-leaf metallic material",
+      "count": 1
+    },
+    {
+      "gap": "No complex ornamental motif stamps",
+      "count": 1
+    },
+    {
+      "gap": "No figure underpainting layer",
+      "count": 1
+    },
+    {
+      "gap": "No soft-edged rectangle (rects are hard; circles approximate)",
+      "count": 1
+    },
+    {
+      "gap": "No monumental scale cue independent of count",
+      "count": 1
+    },
+    {
+      "gap": "No true color-bleed between stacked fields",
+      "count": 1
+    },
+    {
+      "gap": "No mirrored infinity-room reflection",
+      "count": 1
+    },
+    {
+      "gap": "No pumpkin / biomorphic mesh primitive",
+      "count": 1
+    },
+    {
+      "gap": "No true net (woven) topology beyond links",
+      "count": 1
+    },
+    {
+      "gap": "No object semantic sprites beyond emoji",
+      "count": 1
+    },
+    {
+      "gap": "No impossible scale juxtaposition helper",
+      "count": 1
+    },
+    {
+      "gap": "No trompe-l’oeil frame-within-frame",
+      "count": 1
+    },
+    {
+      "gap": "No rotated plane without spin-as-rotation-speed confusion for static poses",
+      "count": 1
+    },
+    {
+      "gap": "No true suprematist diagonal layout language",
+      "count": 1
+    },
+    {
+      "gap": "No petal / bezier bloom sprite",
+      "count": 1
+    },
+    {
+      "gap": "No bone silhouette",
+      "count": 1
+    },
+    {
+      "gap": "Soft curved bands unsupported (approx with regions)",
+      "count": 1
+    },
+    {
+      "gap": "No freehand graffiti stroke",
+      "count": 1
+    },
+    {
+      "gap": "Limited typographic scrawl (text sprites are clean)",
+      "count": 1
+    },
+    {
+      "gap": "No crown vector mark beyond emoji",
+      "count": 1
+    },
+    {
+      "gap": "No true sinusoidal stripe displacement mesh",
+      "count": 1
+    },
+    {
+      "gap": "Flash-safety caps limit authentic Op flicker (correctly)",
+      "count": 1
+    },
+    {
+      "gap": "No afterimage simulation",
+      "count": 1
+    }
+  ],
+  "failures": [],
+  "screenFingerprints": {
+    "monet--benchmark--calm-horizon": "f14fd754",
+    "monet--benchmark--dense-field": "aec89fc0",
+    "monet--benchmark--single-focal": "12e2a249",
+    "monet--benchmark--layered-depth": "9770bc99",
+    "monet--benchmark--pulse-atmosphere": "92528b10",
+    "monet--signature--sig-01": "38a4b14e",
+    "monet--signature--sig-02": "1878e3e8",
+    "monet--signature--sig-03": "5f2ff047",
+    "monet--signature--sig-04": "c4906c51",
+    "monet--signature--sig-05": "3a6e9bae",
+    "van-gogh--benchmark--calm-horizon": "13de1ecf",
+    "van-gogh--benchmark--dense-field": "35d486f0",
+    "van-gogh--benchmark--single-focal": "ad175633",
+    "van-gogh--benchmark--layered-depth": "3461c963",
+    "van-gogh--benchmark--pulse-atmosphere": "b6951a2e",
+    "van-gogh--signature--sig-01": "c5658ade",
+    "van-gogh--signature--sig-02": "0aa6d16d",
+    "van-gogh--signature--sig-03": "f0383eb4",
+    "van-gogh--signature--sig-04": "2f00e862",
+    "van-gogh--signature--sig-05": "a270b6fc",
+    "seurat--benchmark--calm-horizon": "590443e9",
+    "seurat--benchmark--dense-field": "c6b224ee",
+    "seurat--benchmark--single-focal": "656449ee",
+    "seurat--benchmark--layered-depth": "125be617",
+    "seurat--benchmark--pulse-atmosphere": "6d38ca36",
+    "seurat--signature--sig-01": "06ec548a",
+    "seurat--signature--sig-02": "f1160b30",
+    "seurat--signature--sig-03": "dfacacbe",
+    "seurat--signature--sig-04": "14a713f6",
+    "seurat--signature--sig-05": "15b74111",
+    "picasso--benchmark--calm-horizon": "696d9fb7",
+    "picasso--benchmark--dense-field": "ab2d3ac1",
+    "picasso--benchmark--single-focal": "3c2275f7",
+    "picasso--benchmark--layered-depth": "85d9232e",
+    "picasso--benchmark--pulse-atmosphere": "be31a0bc",
+    "picasso--signature--sig-01": "46eb5e0c",
+    "picasso--signature--sig-02": "cbceb476",
+    "picasso--signature--sig-03": "a81314f6",
+    "picasso--signature--sig-04": "a6a283bf",
+    "picasso--signature--sig-05": "c56b8565",
+    "kandinsky--benchmark--calm-horizon": "9de00ef4",
+    "kandinsky--benchmark--dense-field": "d7693e86",
+    "kandinsky--benchmark--single-focal": "6d8e5868",
+    "kandinsky--benchmark--layered-depth": "d905847d",
+    "kandinsky--benchmark--pulse-atmosphere": "385c8dae",
+    "kandinsky--signature--sig-01": "453093da",
+    "kandinsky--signature--sig-02": "80709f61",
+    "kandinsky--signature--sig-03": "2416500a",
+    "kandinsky--signature--sig-04": "dc72a065",
+    "kandinsky--signature--sig-05": "2e596f93",
+    "mondrian--benchmark--calm-horizon": "d7c5fc22",
+    "mondrian--benchmark--dense-field": "8f1ba5e3",
+    "mondrian--benchmark--single-focal": "86721c90",
+    "mondrian--benchmark--layered-depth": "9bab90f9",
+    "mondrian--benchmark--pulse-atmosphere": "988fce48",
+    "mondrian--signature--sig-01": "bd5d7082",
+    "mondrian--signature--sig-02": "41505f94",
+    "mondrian--signature--sig-03": "407ef6c2",
+    "mondrian--signature--sig-04": "aef6a8c2",
+    "mondrian--signature--sig-05": "e9747d77",
+    "hokusai--benchmark--calm-horizon": "b958d161",
+    "hokusai--benchmark--dense-field": "a00db539",
+    "hokusai--benchmark--single-focal": "7fafd5b2",
+    "hokusai--benchmark--layered-depth": "117df866",
+    "hokusai--benchmark--pulse-atmosphere": "b54897f1",
+    "hokusai--signature--sig-01": "6a168196",
+    "hokusai--signature--sig-02": "fe122571",
+    "hokusai--signature--sig-03": "c456529f",
+    "hokusai--signature--sig-04": "aaf84db7",
+    "hokusai--signature--sig-05": "e300f98f",
+    "klimt--benchmark--calm-horizon": "daf9d284",
+    "klimt--benchmark--dense-field": "49161008",
+    "klimt--benchmark--single-focal": "2cf1e1f8",
+    "klimt--benchmark--layered-depth": "9ffa1742",
+    "klimt--benchmark--pulse-atmosphere": "c0fb92f4",
+    "klimt--signature--sig-01": "e2838fbc",
+    "klimt--signature--sig-02": "43dbeae2",
+    "klimt--signature--sig-03": "874227fd",
+    "klimt--signature--sig-04": "d92159d7",
+    "klimt--signature--sig-05": "b48d6f4f",
+    "rothko--benchmark--calm-horizon": "d9d27739",
+    "rothko--benchmark--dense-field": "84b5cd8d",
+    "rothko--benchmark--single-focal": "cd6c1e82",
+    "rothko--benchmark--layered-depth": "1ef231ee",
+    "rothko--benchmark--pulse-atmosphere": "ee19335a",
+    "rothko--signature--sig-01": "df8a9f7e",
+    "rothko--signature--sig-02": "5a17a379",
+    "rothko--signature--sig-03": "5ebaa25b",
+    "rothko--signature--sig-04": "03f65996",
+    "rothko--signature--sig-05": "79962b5a",
+    "kusama--benchmark--calm-horizon": "2d9fbdda",
+    "kusama--benchmark--dense-field": "8a802c81",
+    "kusama--benchmark--single-focal": "20ea3ee1",
+    "kusama--benchmark--layered-depth": "34469b54",
+    "kusama--benchmark--pulse-atmosphere": "a0a4aa42",
+    "kusama--signature--sig-01": "ecc96172",
+    "kusama--signature--sig-02": "fc544e4d",
+    "kusama--signature--sig-03": "26f37e93",
+    "kusama--signature--sig-04": "d658290f",
+    "kusama--signature--sig-05": "a4f0d559",
+    "magritte--benchmark--calm-horizon": "20d515e6",
+    "magritte--benchmark--dense-field": "2fbf1c52",
+    "magritte--benchmark--single-focal": "3fb8a936",
+    "magritte--benchmark--layered-depth": "6e6b7f2c",
+    "magritte--benchmark--pulse-atmosphere": "ac75f811",
+    "magritte--signature--sig-01": "9d516f7d",
+    "magritte--signature--sig-02": "202c53ad",
+    "magritte--signature--sig-03": "7423ad8c",
+    "magritte--signature--sig-04": "6a9a5259",
+    "magritte--signature--sig-05": "dbeaa9d8",
+    "malevich--benchmark--calm-horizon": "89d03de7",
+    "malevich--benchmark--dense-field": "22af0127",
+    "malevich--benchmark--single-focal": "2beb2acb",
+    "malevich--benchmark--layered-depth": "b4a2bf82",
+    "malevich--benchmark--pulse-atmosphere": "4b0e3f93",
+    "malevich--signature--sig-01": "61ce66e2",
+    "malevich--signature--sig-02": "b7b6fb45",
+    "malevich--signature--sig-03": "eb8affef",
+    "malevich--signature--sig-04": "ee0e6746",
+    "malevich--signature--sig-05": "3a268218",
+    "okeeffe--benchmark--calm-horizon": "4968f1ef",
+    "okeeffe--benchmark--dense-field": "230c75dc",
+    "okeeffe--benchmark--single-focal": "e14615e4",
+    "okeeffe--benchmark--layered-depth": "9967b890",
+    "okeeffe--benchmark--pulse-atmosphere": "8cc39191",
+    "okeeffe--signature--sig-01": "353d984c",
+    "okeeffe--signature--sig-02": "1c6d1f58",
+    "okeeffe--signature--sig-03": "55e8819c",
+    "okeeffe--signature--sig-04": "3df0996a",
+    "okeeffe--signature--sig-05": "3bb653a9",
+    "basquiat--benchmark--calm-horizon": "ccdea1be",
+    "basquiat--benchmark--dense-field": "41a026e3",
+    "basquiat--benchmark--single-focal": "1ff5b77e",
+    "basquiat--benchmark--layered-depth": "3657fcf7",
+    "basquiat--benchmark--pulse-atmosphere": "d1ba4532",
+    "basquiat--signature--sig-01": "cc8765bf",
+    "basquiat--signature--sig-02": "dd96bacc",
+    "basquiat--signature--sig-03": "0a198781",
+    "basquiat--signature--sig-04": "39bf472b",
+    "basquiat--signature--sig-05": "182f3da2",
+    "riley--benchmark--calm-horizon": "0bfdeb21",
+    "riley--benchmark--dense-field": "ab2251e6",
+    "riley--benchmark--single-focal": "408eeab2",
+    "riley--benchmark--layered-depth": "b172c239",
+    "riley--benchmark--pulse-atmosphere": "f7989fb6",
+    "riley--signature--sig-01": "43db8301",
+    "riley--signature--sig-02": "3b85fb34",
+    "riley--signature--sig-03": "d5944c3c",
+    "riley--signature--sig-04": "4cc010a8",
+    "riley--signature--sig-05": "a6d30554"
+  },
+  "nextCycle": {
+    "weakArtists": [],
+    "collapsedBenchmarks": [
+      "dense-field",
+      "layered-depth"
+    ],
+    "topGaps": [
+      "No true broken-brush / dab sprite",
+      "No specular water reflection primitive",
+      "Limited atmospheric perspective fog",
+      "No impasto / stroke-width pressure",
+      "No true swirling vector-field brush",
+      "Cypress silhouette as path-of-marks only",
+      "No true pointillist size-locked dot grid with hue statistics",
+      "No optical-mix preview metric"
+    ],
+    "suggestedActions": [
+      "Diversify applicator recipes for collapsed benchmarks: dense-field, layered-depth",
+      "Graduate top schema gap → spec-feature-pipeline: No true broken-brush / dab sprite"
+    ]
+  },
+  "delta": {
+    "vsRunId": "run-2026-07-25T1908-baseline-v0",
+    "suiteMedianDelta": 0.0026249999999999885,
+    "newlyFailing": [],
+    "newlyPassing": [],
+    "gapDelta": [
+      {
+        "gap": "No true broken-brush / dab sprite",
+        "countDelta": 0
+      },
+      {
+        "gap": "No specular water reflection primitive",
+        "countDelta": 0
+      },
+      {
+        "gap": "Limited atmospheric perspective fog",
+        "countDelta": 0
+      },
+      {
+        "gap": "No impasto / stroke-width pressure",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true swirling vector-field brush",
+        "countDelta": 0
+      },
+      {
+        "gap": "Cypress silhouette as path-of-marks only",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true pointillist size-locked dot grid with hue statistics",
+        "countDelta": 0
+      },
+      {
+        "gap": "No optical-mix preview metric",
+        "countDelta": 0
+      },
+      {
+        "gap": "No polygon / arbitrary facet sprite",
+        "countDelta": 0
+      },
+      {
+        "gap": "No multi-view geometric deformation",
+        "countDelta": 0
+      },
+      {
+        "gap": "No collage texture layers",
+        "countDelta": 0
+      },
+      {
+        "gap": "No free bezier stroke sprite",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true triangle / arc primitives",
+        "countDelta": 0
+      },
+      {
+        "gap": "Limited musical sync between layers",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true black grid-line primitive separate from rects",
+        "countDelta": 0
+      },
+      {
+        "gap": "No constrained orthogonal layout solver",
+        "countDelta": 0
+      },
+      {
+        "gap": "No contour-stroke / woodblock line sprite",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true wave-crest path generator",
+        "countDelta": 0
+      },
+      {
+        "gap": "Mount Fuji as silhouette mask unsupported",
+        "countDelta": 0
+      },
+      {
+        "gap": "No gold-leaf metallic material",
+        "countDelta": 0
+      },
+      {
+        "gap": "No complex ornamental motif stamps",
+        "countDelta": 0
+      },
+      {
+        "gap": "No figure underpainting layer",
+        "countDelta": 0
+      },
+      {
+        "gap": "No soft-edged rectangle (rects are hard; circles approximate)",
+        "countDelta": 0
+      },
+      {
+        "gap": "No monumental scale cue independent of count",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true color-bleed between stacked fields",
+        "countDelta": 0
+      },
+      {
+        "gap": "No mirrored infinity-room reflection",
+        "countDelta": 0
+      },
+      {
+        "gap": "No pumpkin / biomorphic mesh primitive",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true net (woven) topology beyond links",
+        "countDelta": 0
+      },
+      {
+        "gap": "No object semantic sprites beyond emoji",
+        "countDelta": 0
+      },
+      {
+        "gap": "No impossible scale juxtaposition helper",
+        "countDelta": 0
+      },
+      {
+        "gap": "No trompe-l’oeil frame-within-frame",
+        "countDelta": 0
+      },
+      {
+        "gap": "No rotated plane without spin-as-rotation-speed confusion for static poses",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true suprematist diagonal layout language",
+        "countDelta": 0
+      },
+      {
+        "gap": "No petal / bezier bloom sprite",
+        "countDelta": 0
+      },
+      {
+        "gap": "No bone silhouette",
+        "countDelta": 0
+      },
+      {
+        "gap": "Soft curved bands unsupported (approx with regions)",
+        "countDelta": 0
+      },
+      {
+        "gap": "No freehand graffiti stroke",
+        "countDelta": 0
+      },
+      {
+        "gap": "Limited typographic scrawl (text sprites are clean)",
+        "countDelta": 0
+      },
+      {
+        "gap": "No crown vector mark beyond emoji",
+        "countDelta": 0
+      },
+      {
+        "gap": "No true sinusoidal stripe displacement mesh",
+        "countDelta": 0
+      },
+      {
+        "gap": "Flash-safety caps limit authentic Op flicker (correctly)",
+        "countDelta": 0
+      },
+      {
+        "gap": "No afterimage simulation",
+        "countDelta": 0
+      }
+    ]
+  }
+}

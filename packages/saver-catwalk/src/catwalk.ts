@@ -51,6 +51,7 @@ const PARAM_SPACE = {
 export const catwalkManifest: SaverManifest = {
   id: 'catwalk',
   label: 'Catwalk',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'low',

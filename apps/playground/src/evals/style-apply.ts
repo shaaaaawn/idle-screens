@@ -1,5 +1,6 @@
 import type { LayerSpec, MotionSpec, SaverSpec, SpriteSpec } from '@idle-screens/schema';
 import type { ArtistStyleProfile, BenchmarkIntent, EvalScreen, MotionKind, SignatureRecipe, SpriteKind } from './types';
+import { specLabel } from './public-identity';
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -502,7 +503,7 @@ export function applyStyle(intent: BenchmarkIntent, profile: ArtistStyleProfile)
     title: intent.title,
     intent: intent.intent,
     recipe: 'benchmark',
-    spec: finalizeSpec(profile, id, `${profile.artist}: ${intent.title}`, layers, seed),
+    spec: finalizeSpec(profile, id, specLabel(profile, intent.title), layers, seed),
   };
 }
 
@@ -522,7 +523,7 @@ export function applySignature(
     title: prompt.title,
     intent: prompt.intent,
     recipe: prompt.recipe,
-    spec: finalizeSpec(profile, id, `${profile.artist}: ${prompt.title}`, layers, seed),
+    spec: finalizeSpec(profile, id, specLabel(profile, prompt.title), layers, seed),
   };
 }
 

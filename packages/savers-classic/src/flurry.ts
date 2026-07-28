@@ -70,6 +70,7 @@ const PARAM_SPACE = {
 export const flurryManifest: SaverManifest = {
   id: 'flurry',
   label: 'Flurry',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

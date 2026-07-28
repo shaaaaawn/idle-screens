@@ -1,6 +1,20 @@
 import { createRng } from '@idle-screens/core';
+import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
 import { buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
 import { LIMITS, type SaverSpec, type SpecWarning } from './types';
+
+/**
+ * Minimum RGB-space colour distance (see `colourSeparation`) between a layer
+ * and its background before the layer stops reading as a distinct thing.
+ *
+ * Calibrated against real specs rather than picked: a layer painted the literal
+ * background hex measures 0.000, a near-background dark-on-dark layer ~0.036,
+ * while every one of the 15 shipped examples and all 150 style-eval screens
+ * clear it except the genuinely-flawed ones. Note this is a *colour* distance —
+ * a Seurat-style gold-on-grey field separates by 0.39 here but only 0.013 in
+ * luma, which is exactly why the measure is not luminance-based.
+ */
+const LOW_CONTRAST_FLOOR = 0.05;
 
 /**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
@@ -18,6 +32,8 @@ export function adviseSpec(
   const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
   const rng = createRng(spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
+  const bgLuma = backgroundLuma(spec);
+  const bgRgb = backgroundRgb(spec);
 
   let totalEntities = 0;
   let textLayerCount = 0;
@@ -65,6 +81,31 @@ export function adviseSpec(
           path: `layers[${li}]`,
           code: 'invisible-layer',
           message: `layer's max visible radius (${maxR.toFixed(1)}px × ${maxAlpha.toFixed(2)} alpha) is below perceptual floor`,
+        });
+      }
+    }
+
+    // Colour separation: a layer painted the same brightness as the plate
+    // behind it is invisible no matter how big or opaque it is. `invisible-layer`
+    // above only measures radius × alpha, so a full-strength layer in a
+    // background-matched colour passes every other check in this file.
+    if (entities.length > 0 && layer.sprite.kind !== 'emoji') {
+      // A palette layer is visible if ANY of its colours separates — flag only
+      // when every colour it can paint with disappears into the plate.
+      const seps = entities.map((e) => {
+        const hex = spriteHex(layer, e);
+        if (hex === null) return Infinity;
+        return colourSeparation(layer, { rgb: hexRgb(hex), luma: hexLuma(hex) }, { rgb: bgRgb, luma: bgLuma });
+      });
+      const best = Math.max(...seps);
+      if (best < LOW_CONTRAST_FLOOR) {
+        const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+        warnings.push({
+          path: `layers[${li}].sprite`,
+          code: 'low-contrast-layer',
+          message: additive
+            ? `additive layer adds almost no light (luma ${best.toFixed(3)}) — a "lighter"/"screen" layer is only as visible as it is bright`
+            : `layer colour is within ${best.toFixed(3)} of the background (floor ${LOW_CONTRAST_FLOOR}) — it will read as background, not as content`,
         });
       }
     }

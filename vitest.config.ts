@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import { evalHoldout } from './apps/playground/eval-holdout-plugin';
 
 export default defineConfig({
+  // The playground's holdout eval imports a virtual module. Root `pnpm test`
+  // (what CI runs) does not read apps/playground/vite.config.ts, so the plugin
+  // must be declared here as well or that import fails to resolve.
+  plugins: [evalHoldout(process.env.IDLE_EVAL_HOLDOUT_DIR ?? '')],
   test: {
     include: [
       'packages/**/src/**/*.test.ts',

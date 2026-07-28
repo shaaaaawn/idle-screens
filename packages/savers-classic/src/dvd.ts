@@ -54,6 +54,7 @@ const PARAM_SPACE = {
 export const dvdManifest: SaverManifest = {
   id: 'dvd',
   label: 'Bouncing Logo',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

@@ -29,10 +29,12 @@ interface Row {
 interface PerceiveHook {
   all(o: unknown): Promise<Row[]>;
   saver(id: string, o: { width?: number; height?: number; seed?: number; t?: number; dpr?: number }): Promise<Row>;
+  list(): Array<{ id: string; label: string; timeModel?: 'closed-form' | 'simulated' }>;
 }
 
-/** Frame-addressable imperative savers — reproducible pixel readings. */
-const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide', 'dvd', 'fade-out'];
+/** Frame-addressable imperative savers — reproducible pixel readings.
+ *  `pipes` and `mystify` joined with the July 2026 closed-form rewrites. */
+const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide', 'dvd', 'fade-out', 'pipes', 'mystify'];
 /** No canvas to read: these draw with elements + CSS transforms. */
 const CSS_SAVERS = ['toasters', 'fish', 'bouncing-ball', 'bsod'];
 /** Worker-ready savers must NOT be excluded — see the assertion below. */
@@ -42,6 +44,36 @@ const ready = async (page: Page, url = '/#dev'): Promise<void> => {
   await page.goto(url);
   await page.waitForFunction(() => !!(window as unknown as { __perceive?: unknown }).__perceive);
 };
+
+test('support verdicts agree with each manifest\'s timeModel claim', async ({ page }) => {
+  await ready(page);
+  const { models, rows } = await page.evaluate(async () => {
+    const p = (window as unknown as { __perceive: PerceiveHook }).__perceive;
+    return {
+      models: p.list(),
+      rows: await p.all({ width: 320, height: 200, seed: 42, t: 5000 }),
+    };
+  });
+  const modelOf = new Map(models.map((m) => [m.id, m.timeModel]));
+  // The whole catalog declares its time model — a new saver cannot slip in
+  // without stating one (this is the derived replacement for hand lists).
+  for (const m of models) {
+    expect(m.timeModel, `${m.id} must declare a timeModel`).toMatch(/^(closed-form|simulated)$/);
+  }
+  for (const r of rows) {
+    if (modelOf.get(r.id) === 'simulated') {
+      // A simulated saver may be read, but never certified deterministic —
+      // and it must say why the numbers wobble.
+      expect(r.support, `${r.id} is simulated`).not.toBe('deterministic');
+      if (r.support === 'sampled') {
+        expect(r.reason, `${r.id} explains its sampling`).toMatch(/simulat/i);
+      }
+    }
+    if (r.support === 'deterministic') {
+      expect(modelOf.get(r.id), `${r.id} is certified deterministic, so it must claim closed-form`).toBe('closed-form');
+    }
+  }
+});
 
 test('every canvas saver yields a picture; CSS savers say why they cannot', async ({ page }) => {
   await ready(page);
@@ -95,6 +127,7 @@ test('pixels report colour and whole-frame motion — signal the spec path lacks
       blackHole: await p.saver('black-hole', o),
       globe: await p.saver('globe', o),
       pipes: await p.saver('pipes', o),
+      fluid: await p.saver('fluid', o),
     };
   });
 
@@ -111,13 +144,15 @@ test('pixels report colour and whole-frame motion — signal the spec path lacks
   }
 
   // Motion needs a frame-addressable saver. Globe joined that club in the
-  // July 2026 modernization batch; pipes (accumulative) is the saver that
-  // legitimately stays sampled, so it carries the null-motion assertion.
+  // July 2026 modernization batch and pipes in the compiled-plan rewrite;
+  // fluid (a true simulation) is the saver that legitimately stays sampled,
+  // so it carries the null-motion assertion now.
   expect(rows.tide.motion, 'tide is frame-addressable').not.toBeNull();
   expect(rows.tide.motion!.rate).toBeGreaterThan(0);
   expect(rows.blackHole.motion).not.toBeNull();
   expect(rows.globe.motion, 'globe is frame-addressable since the P3 modernization').not.toBeNull();
-  expect(rows.pipes.motion, 'pipes is accumulative — only sampled, so motion would be meaningless').toBeNull();
+  expect(rows.pipes.motion, 'pipes is frame-addressable since the compiled-plan rewrite').not.toBeNull();
+  expect(rows.fluid.motion, 'fluid is a real simulation — only sampled, so motion would be meaningless').toBeNull();
 });
 
 /**

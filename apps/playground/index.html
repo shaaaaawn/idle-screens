@@ -617,26 +617,101 @@
         max-height: calc(100dvh - 48px);
         overflow-y: auto;
         overscroll-behavior: contain;
-        background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
-        padding: 18px 20px; color: #d8dde6;
-        display: flex; flex-direction: column; gap: 10px;
+        background: var(--bg-surface); border: 1px solid var(--line-strong);
+        border-radius: var(--r-lg);
+        padding: 18px 20px; color: var(--text);
+        display: flex; flex-direction: column; gap: 12px;
         box-shadow: 0 20px 60px rgba(0,0,0,.45);
       }
       .evals-modal-title { margin: 0; font-size: 16px; font-weight: 650; }
       .evals-modal-sub { margin: 0; font-size: 12px; opacity: 0.55; }
+
+      /* ---- form controls: ONE treatment for every field in the dialog ----
+         Previously `.evals-field input, .evals-field textarea` set
+         `font: 12px/1.35 inherit`. `inherit` is not a valid font-family token,
+         so the whole shorthand was invalid and dropped — every control fell
+         back to UA defaults (13.33px; Arial on <input>, monospace on
+         <textarea>), which is why the notes boxes rendered in a different
+         typeface from the text boxes beside them. `select` was never in the
+         selector at all, so the scope pickers kept full native chrome: grey
+         background, square corners, no padding.
+         Everything below is stated in longhand and covers all three tags. */
       .evals-field {
-        display: flex; flex-direction: column; gap: 4px;
-        font-size: 11px; opacity: 0.9;
+        display: flex; flex-direction: column; gap: 5px;
+        font: 500 11px/1.2 var(--sans); color: var(--text-dim);
       }
       /* Author `display:flex` otherwise beats the UA [hidden] rule. */
       .evals-field[hidden] { display: none !important; }
-      .evals-agent-targets { display: flex; flex-direction: column; gap: 10px; }
-      .evals-agent-estimate { margin: 0; font-size: 11px; opacity: 0.55; }
-      .evals-field input, .evals-field textarea {
-        border: 1px solid #2a2a38; background: #0e0e14; color: #e8eef8;
-        border-radius: 6px; padding: 7px 9px; font: 12px/1.35 inherit;
+      .evals-agent-targets { display: flex; flex-direction: column; gap: 12px; }
+
+      .evals-field > input,
+      .evals-field > textarea,
+      .evals-field > select {
+        width: 100%; box-sizing: border-box;
+        /* Lets a grid/flex track shrink under its content instead of forcing
+           the row wider than the dialog. */
+        min-width: 0;
+        font-family: var(--sans); font-size: 12px; line-height: 1.35;
+        color: var(--text);
+        background: var(--bg-chrome);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-sm);
+        padding: 7px 9px;
+        appearance: none;
       }
+      .evals-field > textarea { resize: vertical; min-height: 56px; }
+      .evals-field > select {
+        /* `appearance: none` drops the native arrow with the native chrome, so
+           the chevron is drawn back in. The popup itself stays native. */
+        padding-right: 28px; cursor: pointer;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238b95a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 9px 6px;
+      }
+      .evals-field > input:hover,
+      .evals-field > textarea:hover,
+      .evals-field > select:hover { border-color: var(--wb-border, #3a3a42); }
+      .evals-field > input:focus-visible,
+      .evals-field > textarea:focus-visible,
+      .evals-field > select:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-wash);
+      }
+      .evals-field ::placeholder { color: var(--text-faint); opacity: 1; }
+
+      /* The mode radios are the one grouped control; match the field chrome
+         rather than keeping the UA fieldset border. */
+      .evals-mode-fieldset {
+        margin: 0; padding: 10px 12px;
+        border: 1px solid var(--line); border-radius: var(--r-md);
+        background: var(--bg-sunken);
+      }
+      .evals-mode-fieldset > legend {
+        padding: 0 6px;
+        font: 600 10px/1 var(--mono); text-transform: uppercase;
+        letter-spacing: .06em; color: var(--text-faint);
+      }
+
+      /* The agent-only block is a plain <div>, so the dialog's flex `gap` stops
+         at its boundary and everything inside it stacked on bare margins — the
+         run estimate ended up glued to the "Max tool calls" label below it,
+         reading as that field's caption. Same column rhythm as the dialog.
+         The [hidden] guard is required: `display:flex` outranks the UA rule,
+         and this block is toggled by `.hidden` when Re-score mode is picked. */
+      .evals-modal [data-role='agent-opts'] {
+        display: flex; flex-direction: column; gap: 12px;
+      }
+      .evals-modal [data-role='agent-opts'][hidden] { display: none !important; }
+
       .evals-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      /* Artist / Benchmark / Screen share a row but only the ones the chosen
+         scope needs are visible. Under `1fr 1fr` a lone visible field sat in
+         column 1 at half width (it measured 131px against a 480px dialog).
+         Flex sizes to whatever is actually shown: one field spans, two split. */
+      .evals-agent-target-row { display: flex; gap: 10px; }
+      .evals-agent-target-row > .evals-field { flex: 1 1 0; min-width: 0; }
       .evals-modal-parent { margin: 0; font-size: 11px; opacity: 0.55; }
       .evals-modal-parent code { color: #8ec0ff; }
       .evals-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
@@ -665,19 +740,61 @@
       }
       .evals-nav-item:hover { background: #1a1a24; }
       .evals-nav-item.active { background: #1e2a3c; color: #fff; }
+      .evals-nav-item--empty { opacity: 0.4; }
+      .evals-nav-item--empty.active { opacity: 0.85; }
       .evals-nav-name { font-size: 12px; font-weight: 600; }
       .evals-nav-meta { font-size: 10px; opacity: 0.5; }
       .evals-main {
         display: flex; flex-direction: column; min-width: 0; height: 100%;
       }
+      .evals-hero {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px;
+        padding: 10px 18px; border-bottom: 1px solid #222230;
+        background: linear-gradient(180deg, #15151f 0%, #12121a 100%);
+      }
+      .evals-hero-main { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+      .evals-hero-label {
+        font-size: 13px; font-weight: 650; color: #e8eef8;
+        max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .evals-hero-median {
+        font: 600 22px/1 ui-monospace, monospace; color: #8ec0ff; letter-spacing: -0.02em;
+      }
+      .evals-hero-delta { font-size: 11px; opacity: 0.5; }
+      .evals-hero-stats {
+        display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+        font-size: 11px; color: #a8b0c0;
+      }
+      .evals-hero-stats b { color: #e8eef8; font-weight: 650; }
+      .evals-hero-model {
+        max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: #9cc6ff;
+      }
+      .evals-hero-dna { font: 10px ui-monospace, monospace; opacity: 0.45; }
+      .evals-hero-gaps { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+      .evals-hero-gap {
+        border: 1px solid #3a3040; background: #1c1520; color: #d4b8c8;
+        border-radius: 4px; padding: 3px 8px; font-size: 10px; cursor: default;
+        max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
       .evals-toolbar {
         display: flex; align-items: center; justify-content: space-between;
-        gap: 16px; padding: 12px 18px; border-bottom: 1px solid #222230;
+        gap: 16px; padding: 10px 18px; border-bottom: 1px solid #222230;
         background: #14141c;
       }
       .evals-title { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
       .evals-sub { margin: 2px 0 0; font-size: 11px; opacity: 0.5; }
-      .evals-toolbar-actions { display: flex; gap: 8px; }
+      .evals-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .evals-evidence {
+        display: inline-flex; border: 1px solid #2a2a38; border-radius: 7px; overflow: hidden;
+      }
+      .evals-evidence-btn {
+        border: 0; background: #181820; color: #9aa3b2;
+        padding: 6px 10px; font-size: 11px; cursor: pointer;
+      }
+      .evals-evidence-btn + .evals-evidence-btn { border-left: 1px solid #2a2a38; }
+      .evals-evidence-btn.active { background: #1a2740; color: #e8eef8; }
+      .evals-evidence-btn:disabled { opacity: 0.35; cursor: not-allowed; }
       .evals-btn {
         border: 1px solid #3a86ff; background: #1a3050; color: #dce8ff;
         border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
@@ -708,6 +825,15 @@
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
         gap: 12px;
+      }
+      /* Sparse agent reviews — larger tiles so a 1–6 screen hang reads as the show. */
+      .evals-compare-grid--sparse {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .evals-compare-grid--sparse .evals-tile-stage { aspect-ratio: 4 / 3; }
+      .evals-check-chip--evidence {
+        color: #c8e0ff; background: rgba(58,134,255,0.12); border-color: rgba(58,134,255,0.35);
       }
       .evals-tile {
         display: flex; flex-direction: column; align-items: stretch; gap: 0;
@@ -822,11 +948,14 @@
         opacity: .65; cursor: default;
         background: var(--bg-sunken);
       }
+      /* The dialog is a flex column with a `gap`; any margin here adds to it.
+         Only the negative top is kept, so a hint hugs the field it explains
+         instead of floating midway between two of them. */
       .evals-field-hint {
-        margin: -4px 0 10px; font-size: 11px; color: var(--text-faint);
+        margin: -4px 0 0; font-size: 11px; color: var(--text-faint);
       }
       .evals-conn {
-        margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--r-md);
+        margin: 0; border: 1px solid var(--line); border-radius: var(--r-md);
         background: var(--bg-sunken);
       }
       .evals-conn > summary {
@@ -869,8 +998,11 @@
         display: flex; align-items: center; gap: 8px; padding: 4px 0;
         font-size: 12.5px; color: var(--text-dim); cursor: pointer;
       }
+      /* Was declared twice with conflicting values (a hardcoded `opacity`
+         version up in the modal block, this token one down here). One rule now;
+         the top margin is dropped because the flex `gap` already spaces it. */
       .evals-agent-estimate {
-        margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-faint);
+        margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-faint);
       }
       .evals-agent-nokey {
         margin: 10px 0 0; padding: 10px 12px; font-size: 12px; line-height: 1.5;

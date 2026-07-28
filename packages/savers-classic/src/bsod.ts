@@ -8,6 +8,7 @@ import type {
 export const bsodManifest: SaverManifest = {
   id: 'bsod',
   label: 'BSOD',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',
   costTier: 'idle',

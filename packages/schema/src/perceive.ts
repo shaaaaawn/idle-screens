@@ -15,6 +15,7 @@
  */
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
+import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import {
   alphaAt,
   buildEntities,
@@ -54,6 +55,17 @@ const GLOW_SPREAD = 2.4;
  * a dim disc. Also a first-pass estimate.
  */
 const LINE_SALIENCE = 3.5;
+
+/**
+ * How many past-frame samples model the `ghosting` smear. The live renderer
+ * composites every 60 fps frame with persistence `g`, so ink from m frames ago
+ * survives at weight g^m; the analytic model samples that decay at GHOST_TAPS
+ * points across the visible window (until weight falls below 1/255, capped at
+ * LIMITS.maxGhostReplayFrames — the same bound as the renderer's seek warm-up
+ * replay), each tap carrying its bracket's summed weight. More taps sharpen the
+ * smear's shape; the total energy is set by `g`, not by this constant.
+ */
+const GHOST_TAPS = 12;
 
 // ---------------------------------------------------------------------------
 // Shared scene construction (mirrors describeScene/adviseSpec)
@@ -103,26 +115,6 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
     }
   }
   return p;
-}
-
-/** Perceptual luma (0..1) of a hex colour. */
-function hexLuma(hex: string): number {
-  const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
-  const n = parseInt(h.slice(1), 16);
-  if (Number.isNaN(n)) return 0.7;
-  const r = ((n >> 16) & 255) / 255;
-  const g = ((n >> 8) & 255) / 255;
-  const b = (n & 255) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function spriteLuma(layer: LayerSpec, e: Entity): number {
-  const s = layer.sprite;
-  if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
-    return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
-  }
-  if (s.kind === 'text') return hexLuma(s.color ?? '#e6e8ef');
-  return 0.75; // emoji: mid-bright approximation
 }
 
 /**
@@ -178,9 +170,14 @@ export interface LuminanceGridOptions extends PerceiveOptions {
 
 /**
  * Sample the spec into a coarse luminance image — analytically, no renderer.
- * Approximations (documented, deliberate): trails and ghosting are ignored,
- * soft circles use a linear falloff, background drift is sampled at its rest
- * position. Good enough to perceive composition, focus, and balance.
+ * Persistence is modeled, not simulated: because positions are pure functions
+ * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
+ * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
+ * re-uses drawTrail's sampling — past positions with decaying alpha and
+ * shrinking radius. Remaining approximations (documented, deliberate): soft
+ * circles use a linear falloff, background drift is sampled at its rest
+ * position. Good enough to perceive composition, focus, balance — and now
+ * smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   const scene = buildScene(spec, opts);
@@ -230,21 +227,71 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     else cells[idx] = cur * (1 - a) + lum * a;
   };
 
+  // Afterglow dots behind a moving entity — the analytic mirror of the
+  // renderer's drawTrail: past positions sampled with decaying alpha and
+  // shrinking radius, stopping at wrap seams.
+  const splatTrail = (layer: LayerSpec, e: Entity, tPass: number, lifeA: number, alphaScale: number): void => {
+    const trail = layer.trail;
+    if (!trail) return;
+    const fade = trail.fade ?? 1;
+    const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
+    const headAlpha = alphaAt(e, tPass) * lifeA;
+    const headSize = sizeAt(e, tPass);
+    const lum = spriteLuma(layer, e);
+    const soft = layer.sprite.kind === 'circle' && !!layer.sprite.soft;
+    const wrapOn = layer.wrap !== false;
+    const head = posOf(scene, e, tPass);
+    let prevX = head.x;
+    let prevY = head.y;
+    for (let s = 1; s <= n; s++) {
+      const k = s / n;
+      const pastT = tPass - k * trail.length;
+      if (pastT < 0) break;
+      const pos = posOf(scene, e, pastT);
+      if (wrapOn && (Math.abs(pos.x - prevX) > w / 2 || Math.abs(pos.y - prevY) > h / 2)) break;
+      prevX = pos.x;
+      prevY = pos.y;
+      const a = headAlpha * (1 - k * fade) * alphaScale;
+      if (a <= 0.004) break;
+      const rad = (headSize / 2) * (1 - k * 0.7);
+      if (rad < 0.2) break;
+      const c0 = Math.max(0, Math.floor((pos.x - rad) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((pos.x + rad) / cellW));
+      const r0 = Math.max(0, Math.floor((pos.y - rad) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((pos.y + rad) / cellH));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const dx = (c + 0.5) * cellW - pos.x;
+          const dy = (r + 0.5) * cellH - pos.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d > rad + Math.min(cellW, cellH) / 2) continue;
+          const wgt = soft ? Math.max(0.1, 1 - d / Math.max(rad, 1e-6)) : 1;
+          compose(r * cols + c, lum, Math.min(1, a * wgt), layer.blend);
+        }
+      }
+    }
+  };
+
+  // One composite pass at time tPass with all ink scaled by alphaScale — the
+  // analytic mirror of the renderer's paintFrame. Ghost passes call this with
+  // decayed weights; the live frame calls it with alphaScale 1.
+  const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = lifeAlphaAt(layer.life, t);
+    const lifeA = lifeAlphaAt(layer.life, tPass);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
-      const a = Math.min(1, alphaAt(e, t) * lifeA);
+      splatTrail(layer, e, tPass, lifeA, alphaScale);
+      const a = Math.min(1, alphaAt(e, tPass) * lifeA) * alphaScale;
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
-      const p = posOf(scene, e, t);
-      const sz = sizeAt(e, t);
+      const p = posOf(scene, e, tPass);
+      const sz = sizeAt(e, tPass);
       const s = layer.sprite;
 
       if (s.kind === 'streak') {
         // Stamp along the segment from tail to head.
-        const heading = headingAt(e, t, w, h) ?? 0;
+        const heading = headingAt(e, tPass, w, h) ?? 0;
         const steps = Math.max(2, Math.ceil(sz / Math.min(cellW, cellH)));
         const wgt = Math.min(1, ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) / cellH);
         for (let i = 0; i <= steps; i++) {
@@ -318,13 +365,13 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
 
     // Link lines are visual mass too (for chain scenes they ARE the scene).
     if (layer.links) {
-      const positions = entities.map((e) => posOf(scene, e, t));
+      const positions = entities.map((e) => posOf(scene, e, tPass));
       const maxDistPx = layer.links.maxDist * scale;
       const motionWraps = ['drift', 'rise', 'wander'].includes(layer.motion.type);
       const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false && motionWraps, w, h);
       const la = Math.min(1, (layer.links.alpha ?? 0.6) * lifeA);
       const lum = layer.links.color ? hexLuma(layer.links.color) : 0.7;
-      const wgt = Math.min(1, ((layer.links.width ?? 1) * scale) / cellH) * la;
+      const wgt = Math.min(1, ((layer.links.width ?? 1) * scale) / cellH) * la * alphaScale;
       for (const edge of edges) {
         const pi = positions[edge.i]!;
         const pj = positions[edge.j]!;
@@ -339,6 +386,29 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       }
     }
   }
+  };
+
+  // Ghosting: the renderer composites each 60 fps frame over the last with
+  // persistence g, so ink from m frames ago survives at weight g^m. Sample
+  // that decay across the visible window (weight ≥ 1/255, capped at the same
+  // maxGhostReplayFrames bound as the renderer's seek replay), oldest first so
+  // newer ink composites on top. Each tap stands in for the frames in its
+  // bracket and carries their summed surviving weight (geometric sum).
+  const ghost = spec.ghosting ?? 0;
+  if (ghost > 0) {
+    const dt = 1000 / 60;
+    const windowFrames = Math.min(Math.ceil(Math.log(1 / 255) / Math.log(ghost)), LIMITS.maxGhostReplayFrames);
+    const taps = Math.min(GHOST_TAPS, windowFrames);
+    const spacing = windowFrames / taps;
+    for (let i = taps; i >= 1; i--) {
+      const tPass = t - i * spacing * dt;
+      if (tPass < 0) continue;
+      const bracketWeight =
+        (Math.pow(ghost, (i - 1) * spacing + 1) * (1 - Math.pow(ghost, spacing))) / (1 - ghost);
+      splatPass(tPass, Math.min(1, bracketWeight));
+    }
+  }
+  splatPass(t, 1);
 
   // Deviation stats
   let sum = 0;
@@ -520,19 +590,42 @@ export interface DominanceEntry {
 /**
  * Rank layers by estimated visual weight — where the eye goes. Weight is
  * on-screen area × alpha, scaled by contrast against the background, an
- * additive-glow boost, and a motion boost. Link lines count as area.
+ * additive-glow boost, and a motion boost. Link lines count as area, and so
+ * does persistence ink: trail ribbons and ghosting smear are modeled as swept
+ * ribbons, so a comet layer is ranked by its comet, not just its head.
  */
 export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): DominanceEntry[] {
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
 
-  const bgMean = (() => {
-    const bg = spec.background;
-    if (!bg || bg.type === 'solid') return hexLuma(bg?.color ?? '#05050a');
-    return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
-  })();
+  const bgMean = backgroundLuma(spec);
 
+
+  // Persistence smears every moving sprite into a ribbon of real visual mass —
+  // for a comet layer the trail IS the visual event. Model both effects as
+  // swept ribbons (path length × stroke width × mean surviving alpha), using
+  // the straight-line displacement as a lower-bound path length and skipping
+  // wrap seams. First-pass fidelity, same spirit as GLOW_SPREAD.
+  const ghost = spec.ghosting ?? 0;
+  let ghostWindowMs = 0;
+  let ghostMeanW = 0;
+  if (ghost > 0) {
+    const dt = 1000 / 60;
+    const frames = Math.min(Math.ceil(Math.log(1 / 255) / Math.log(ghost)), LIMITS.maxGhostReplayFrames);
+    ghostWindowMs = frames * dt;
+    ghostMeanW = (ghost * (1 - Math.pow(ghost, frames))) / (1 - ghost) / frames;
+  }
+  const sweptDistance = (e: Entity, spanMs: number): number => {
+    const span = Math.min(spanMs, t);
+    if (span <= 0) return 0;
+    const p0 = posOf(scene, e, t - span);
+    const p1 = posOf(scene, e, t);
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return 0; // wrapped: ambiguous
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
     const lifeA = lifeAlphaAt(layer.life, t);
@@ -556,6 +649,19 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;
+
+      // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
+      // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
+      if (layer.trail) {
+        const fade = layer.trail.fade ?? 1;
+        const span = sweptDistance(e, layer.trail.length);
+        area += span * sz * 0.65 * Math.max(0, 1 - fade / 2) * a;
+      }
+      // Ghost smear: ink from m frames back survives at g^m, so the sweep over
+      // the visible window carries the window's mean surviving weight.
+      if (ghost > 0) {
+        area += sweptDistance(e, ghostWindowMs) * sz * ghostMeanW * a;
+      }
       lumAcc += spriteLuma(layer, e);
     }
     if (layer.links && entities.length > 1) {

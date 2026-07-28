@@ -17,7 +17,7 @@ object), then produce eval screens that measure whether the schema can
 
 Playground surface: `#evals` tab.
 Data: `apps/playground/src/evals/`.
-Loop: `idle-mono/loops/artistic-style-eval/`.
+Loop: `idle-mono/loops/evals-converge/`.
 
 ## When to use
 

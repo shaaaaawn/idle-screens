@@ -11,12 +11,12 @@ import { spotlight } from './spotlight';
 import { fadeOut, fadeOutDemoTrack } from './fade-out';
 import { bouncingBall } from './bouncing-ball';
 import { messages, messagesDemoTrack } from './messages';
-import { pipes } from './pipes';
+import { pipes, pipesDemoTrack } from './pipes';
 import { bsod } from './bsod';
 import { flurry, flurryDemoTrack } from './flurry';
 import { fluid } from './fluid';
 import { reactionDiffusion } from './reaction-diffusion';
-import { mystify } from './mystify';
+import { mystify, mystifyDemoTrack } from './mystify';
 
 export {
   toasters,
@@ -39,7 +39,7 @@ export {
 };
 
 /** All classic savers, for bulk registration. */
-export { messagesDemoTrack, dvdDemoTrack, warpDemoTrack, globeDemoTrack, fadeOutDemoTrack, flurryDemoTrack };
+export { messagesDemoTrack, dvdDemoTrack, warpDemoTrack, globeDemoTrack, fadeOutDemoTrack, flurryDemoTrack, pipesDemoTrack, mystifyDemoTrack };
 
 export const CLASSIC_SAVERS: SaverPlugin[] = [
   toasters,

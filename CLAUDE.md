@@ -39,13 +39,34 @@ pnpm install
 pnpm build                  # tsup build all packages (must run before typecheck on clean checkout)
 pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
-pnpm test                   # vitest run
+pnpm test                   # vitest run (NOT what CI runs — see preflight)
+pnpm test:coverage          # vitest + coverage thresholds (what CI runs)
 pnpm dev                    # Vite playground at localhost:5173
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
-pnpm test:all               # build + typecheck + lint + test + e2e (the full CI gate)
+pnpm test:all               # build + typecheck + lint + test + e2e (missing coverage!)
 ```
 
 **Important:** `pnpm build` must run before `pnpm typecheck` on a clean checkout. Packages typecheck against each other's emitted `dist/*.d.ts`, so the declarations must exist first.
+
+### Before opening or updating a PR (mandatory)
+
+Do **not** open / push a PR on a green-enough subset (`pnpm test`, a single package
+typecheck, “build passed”). CI runs `pnpm test:coverage` and, when `apps/linux/**`
+touches, Linux `cargo fmt --check` + clippy. From the mono root:
+
+```bash
+make preflight X=screens          # install + build + typecheck + lint + test:coverage
+make preflight X=screens ARGS=--e2e   # also Playwright (release PRs)
+```
+
+That script is `idle-mono/scripts/preflight.sh` — it fails on the first red step
+and is the agent/human gate. If the branch touches `apps/linux/**`, also:
+
+```bash
+cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+```
+
+(or let preflight’s linux fmt step do it when `cargo` is on PATH).
 
 **Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. See `apps/linux/README.md` for Arch deps (`webkitgtk-6.0`, etc.), hypridle wiring, and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
 
@@ -115,12 +136,21 @@ include a changeset in that PR.
 
 ### Release flow
 
+**Process playbook (inner→outer→develop):** `idle-mono/scripts/RELEASE.md`
+Helpers: `scripts/release.sh cut|dual-land|guide`.
+
 ```
-develop PR (includes .changeset/*.md when npm packages changed)
-    → merge to main
-release.yml runs CI, then changesets/action
-    → if pending changesets: opens "chore: version packages" PR
-    → merge that PR → pnpm changeset publish → npm
+# INNER — green develop tip first (discover failures here, not on GitHub):
+make preflight X=screens ARGS=--e2e
+scripts/release.sh cut <slug>          # if squash-diverged; else PR develop→main
+
+# OUTER — push only after local green; dual-land any CI fix onto develop:
+#   scripts/release.sh dual-land <sha>
+develop / release/* PR (changesets when npm packages changed)
+    → merge-commit to main (prefer not squash)
+release.yml → "version packages" PR → npm
+
+# BACK — sync develop ← main (ff or metadata-only); never leave release-only fixes
 ```
 
 On the same `main` push, GitHub Pages deploys the playground independently.

@@ -116,6 +116,77 @@ describe('renderDensityMap (G4)', () => {
   });
 });
 
+describe('persistence-aware perception (ghosting + trail)', () => {
+  const movers = (overrides: Partial<SaverSpec> = {}): SaverSpec => spec([
+    { count: 24, sprite: { kind: 'circle', radius: [5, 10], color: '#7fd0ff', soft: true }, alpha: [0.5, 0.9], motion: { type: 'drift', speed: [80, 150] } },
+  ], overrides);
+
+  it('ghosting is visible: a ghosted scene smears more than the same scene without', () => {
+    const off = luminanceGrid(movers());
+    const on = luminanceGrid(movers({ ghosting: 0.9 }));
+    expect(on.coverage).toBeGreaterThan(off.coverage);
+    expect(on.meanLuminance).toBeGreaterThan(off.meanLuminance);
+  });
+
+  it('more persistence means more smear (monotonic in g)', () => {
+    const low = luminanceGrid(movers({ ghosting: 0.5 }));
+    const high = luminanceGrid(movers({ ghosting: 0.95 }));
+    expect(high.coverage).toBeGreaterThan(low.coverage);
+  });
+
+  it('trail is visible: afterglow adds coverage behind moving entities', () => {
+    const bare = movers();
+    const trailed = movers();
+    trailed.layers[0]!.trail = { length: 1200, fade: 1 };
+    const off = luminanceGrid(bare);
+    const on = luminanceGrid(trailed);
+    expect(on.coverage).toBeGreaterThan(off.coverage);
+  });
+
+  it('stays deterministic with persistence in play', () => {
+    const s = movers({ ghosting: 0.9 });
+    s.layers[0]!.trail = { length: 800 };
+    expect(luminanceGrid(s)).toEqual(luminanceGrid(s));
+  });
+
+  it('a static ghosted scene keeps its composition (smear needs motion)', () => {
+    const still = spec([
+      { count: 8, sprite: { kind: 'circle', radius: [20, 30], color: '#ffffff' }, motion: { type: 'static' } },
+    ]);
+    const off = luminanceGrid(still);
+    const on = luminanceGrid({ ...still, ghosting: 0.9 });
+    // Same footprint: ghost taps land on the same cells for static entities.
+    expect(on.coverage).toBeCloseTo(off.coverage, 4);
+    expect(on.centroid!.x).toBeCloseTo(off.centroid!.x, 4);
+    expect(on.centroid!.y).toBeCloseTo(off.centroid!.y, 4);
+  });
+
+  it('diffScenes can now measure a ghosting change (the §10 misdiagnosis trap)', () => {
+    const diff = diffScenes(movers(), movers({ ghosting: 0.9 }));
+    expect(diff.coverage.delta).toBeGreaterThan(0);
+  });
+
+  it('dominance counts trail ribbons — a comet layer is ranked by its comet', () => {
+    const twoLayers = (withTrail: boolean): SaverSpec => spec([
+      { key: 'anchor', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [30, 30], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'comet', count: 1, sprite: { kind: 'circle', radius: [10, 10], color: '#88ccff' }, motion: { type: 'drift', speed: [200, 200] }, ...(withTrail ? { trail: { length: 1500, fade: 1 } } : {}) },
+    ]);
+    const bare = dominanceRanking(twoLayers(false)).find((r) => r.key === 'comet')!;
+    const trailed = dominanceRanking(twoLayers(true)).find((r) => r.key === 'comet')!;
+    expect(trailed.share).toBeGreaterThan(bare.share);
+  });
+
+  it('dominance counts ghosting smear for moving layers', () => {
+    const s = (ghosting?: number): SaverSpec => spec([
+      { key: 'still', count: 4, sprite: { kind: 'circle', radius: [25, 25], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'runner', count: 4, sprite: { kind: 'circle', radius: [10, 10], color: '#88ccff' }, motion: { type: 'drift', speed: [200, 200] } },
+    ], ghosting !== undefined ? { ghosting } : {});
+    const clear = dominanceRanking(s()).find((r) => r.key === 'runner')!;
+    const smeared = dominanceRanking(s(0.9)).find((r) => r.key === 'runner')!;
+    expect(smeared.share).toBeGreaterThan(clear.share);
+  });
+});
+
 describe('renderBrailleMap', () => {
   it('produces the documented dimensions and visible dots', () => {
     const grid = luminanceGrid(WARP_TUNNEL_SPEC);

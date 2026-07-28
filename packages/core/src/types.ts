@@ -144,6 +144,22 @@ export interface SaverManifest {
   /** Saver renders on a provided surface (canvas/OffscreenCanvas) and avoids DOM
    *  APIs, enabling Worker execution when the browser supports OffscreenCanvas. */
   workerReady?: boolean;
+  /**
+   * How the saver relates to time — a semantic claim about the program, not
+   * an API flag (renderFrame's presence is the API).
+   *
+   * - 'closed-form': every frame is a pure function of (t, seed, params) —
+   *   compiled plans, phase integrals, triangle waves, CSS keyframes. With
+   *   `renderFrame` this means scrubbing, seek-back determinism, and
+   *   reproducible perception readings; without it (DOM/CSS savers) the
+   *   motion is still periodic and pure, just not pixel-addressable by us.
+   * - 'simulated': state genuinely evolves by integration (fluid dynamics,
+   *   reaction-diffusion) — frames depend on history, sampling is the only
+   *   honest observation, and motion metrics between runs are meaningless.
+   *
+   * Tooling should prefer this over hardcoded per-saver capability lists.
+   */
+  timeModel?: 'closed-form' | 'simulated';
 }
 
 /** A registered saver: manifest + a (possibly lazy/async) mount factory. */

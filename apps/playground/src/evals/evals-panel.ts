@@ -1,7 +1,7 @@
 import { createRng, type SaverInstance } from '@idle-screens/core';
 import { compileSaver } from '@idle-screens/schema';
 import { bridgeAgentRunToTimeline } from './agent-bridge';
-import { openAgentPanel, runAgentEvalInteractive } from './agent-panel';
+import { runAgentEvalInteractive } from './agent-panel';
 import { getCatalog } from './catalog';
 import { createChamber, type ChamberEntry } from './chamber';
 import { buildInspector } from './inspector';
@@ -13,7 +13,12 @@ import {
   fingerprintScreens,
 } from './provenance';
 import { listRuns, loadRun, saveBrowserRun } from './run-store';
-import { screensForArtistRun, screensForCompareRun } from './screens-view';
+import {
+  authoredCountByArtist,
+  type EvidenceMode,
+  screensForArtistRun,
+  screensForCompareRun,
+} from './screens-view';
 import {
   buildRunTimeline,
   promptRunRequest,
@@ -42,7 +47,8 @@ export interface EvalsPanelOptions {
   onFullscreenChange?: (open: boolean) => void;
 }
 
-type ViewMode = 'compare' | 'artist' | 'gallery';
+/** Two lenses on the active evidence set — Gallery was retired (collided with playground Gallery). */
+type ViewMode = 'compare' | 'artist';
 
 function downloadJson(filename: string, data: unknown): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -135,12 +141,14 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   let mode: ViewMode = 'compare';
   let artistId = catalog.artists[0]?.id ?? 'monet';
   let benchmarkId = catalog.benchmarks[0]?.id ?? 'calm-horizon';
-  /** Gallery mode: true = the index wall of all artists, false = one artist's wall. */
-  let galleryIndex = true;
   let screen: EvalScreen | null = null;
   const compareByScreen = new Map<string, SaverInstance>();
   let lastResults: ScreenScore[] | null = null;
   let lastSummary: RunSummary | null = null;
+  /** Model-authored screens from the selected agent run (null = catalog / rescore). */
+  let activeScreens: EvalScreen[] | null = null;
+  /** Catalog = full DNA wall; Run = only authored evidence from the selected run. */
+  let evidenceMode: EvidenceMode = 'catalog';
   /** Only this tile + the selection keep a live rAF loop; everything else is a still. */
   let hoveredTile: string | null = null;
   let gridLive = true;
@@ -151,32 +159,30 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     <div class="evals-shell">
       <aside class="evals-nav" aria-label="Eval navigation">
         <div class="evals-mode">
-          <button type="button" class="evals-mode-btn active" data-mode="compare">Compare</button>
+          <button type="button" class="evals-mode-btn active" data-mode="compare">Cross-artist</button>
           <button type="button" class="evals-mode-btn" data-mode="artist">By artist</button>
-          <button type="button" class="evals-mode-btn" data-mode="gallery">Gallery</button>
         </div>
         <div class="evals-nav-list" data-nav="compare"></div>
         <div class="evals-nav-list" data-nav="artist" hidden></div>
       </aside>
       <section class="evals-main">
         <div class="evals-timeline-host" data-role="timeline"></div>
+        <div class="evals-hero" data-role="hero" hidden></div>
         <header class="evals-toolbar">
           <div class="evals-toolbar-meta">
             <h1 class="evals-title">Style Evals</h1>
             <p class="evals-sub" data-role="subtitle">Same benchmark × every artist — contrast StyleDNA side by side</p>
           </div>
           <div class="evals-toolbar-actions">
-            <span class="evals-toolbar-hint">Click to select · click again to enter the chamber</span>
+            <div class="evals-evidence" data-role="evidence" role="group" aria-label="Evidence source">
+              <button type="button" class="evals-evidence-btn active" data-evidence="catalog">Catalog</button>
+              <button type="button" class="evals-evidence-btn" data-evidence="run" disabled title="Select an agent run with authored screens">This run</button>
+            </div>
             <button type="button" class="evals-btn" data-act="chamber">Enter chamber</button>
-            <button type="button" class="evals-btn secondary" data-act="agent">Agent run…</button>
-            <button type="button" class="evals-btn secondary" data-act="export" disabled>Export run</button>
+            <button type="button" class="evals-btn secondary" data-act="export" disabled>Export pack</button>
           </div>
         </header>
 
-        <!-- One work area for both modes. They used to be two sibling panels
-             each carrying its own StyleDNA + scorecard column, which is what
-             let them stack on top of each other; a single grid + a single
-             inspector makes that failure structurally impossible. -->
         <div class="evals-body">
           <div class="evals-compare-wrap">
             <div class="evals-intent" data-role="intent"></div>
@@ -193,8 +199,99 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   const compareGrid = mount.querySelector('[data-role="compare-grid"]') as HTMLElement;
   const intentEl = mount.querySelector('[data-role="intent"]') as HTMLElement;
   const subtitleEl = mount.querySelector('[data-role="subtitle"]') as HTMLElement;
+  const heroEl = mount.querySelector('[data-role="hero"]') as HTMLElement;
   const timelineHost = mount.querySelector('[data-role="timeline"]') as HTMLElement;
   const exportBtn = mount.querySelector('[data-act="export"]') as HTMLButtonElement;
+  const evidenceBtns = [...mount.querySelectorAll<HTMLButtonElement>('.evals-evidence-btn')];
+
+  const syncEvidenceChrome = (): void => {
+    const hasAuthored = !!activeScreens?.length;
+    for (const btn of evidenceBtns) {
+      const id = btn.dataset.evidence as EvidenceMode;
+      btn.classList.toggle('active', id === evidenceMode);
+      if (id === 'run') {
+        btn.disabled = !hasAuthored;
+        btn.title = hasAuthored
+          ? 'Show only screens this run authored'
+          : 'Select an agent run with authored screens';
+      }
+    }
+  };
+
+  const paintHero = (): void => {
+    if (!lastSummary) {
+      heroEl.hidden = true;
+      heroEl.replaceChildren();
+      return;
+    }
+    heroEl.hidden = false;
+    const p = lastSummary.provenance;
+    const authoredN = activeScreens?.length ?? 0;
+    const scoredN = lastResults?.length ?? 0;
+    const validN = lastResults?.filter((r) => r.valid).length ?? 0;
+    const delta = lastSummary.delta;
+    const deltaTxt =
+      delta != null
+        ? `${delta.suiteMedianDelta >= 0 ? '+' : ''}${delta.suiteMedianDelta.toFixed(3)} vs prior`
+        : 'root run';
+    const gaps = lastSummary.nextCycle.topGaps.slice(0, 2);
+    heroEl.innerHTML = `
+      <div class="evals-hero-main">
+        <div class="evals-hero-label">${escapeHtml(p.label)}</div>
+        <div class="evals-hero-median">${lastSummary.suiteMedian.toFixed(3)}</div>
+        <div class="evals-hero-delta">${escapeHtml(deltaTxt)}</div>
+      </div>
+      <div class="evals-hero-stats">
+        <span><b>${p.harness === 'agent-loop' ? authoredN : scoredN}</b> ${p.harness === 'agent-loop' ? 'authored' : 'scored'}</span>
+        <span><b>${validN}</b> valid</span>
+        ${p.model ? `<span class="evals-hero-model">${escapeHtml(p.model.name)}</span>` : ''}
+        <span class="evals-hero-dna" title="StyleDNA hash">dna:${escapeHtml(p.versions.styleDnaHash.slice(0, 8))}</span>
+      </div>
+      <div class="evals-hero-gaps" data-role="hero-gaps"></div>
+    `;
+    const gapsHost = heroEl.querySelector('[data-role="hero-gaps"]')!;
+    if (gaps.length) {
+      for (const g of gaps) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'evals-hero-gap';
+        chip.textContent = g;
+        chip.title = 'Top schema gap from this run';
+        gapsHost.append(chip);
+      }
+    } else {
+      gapsHost.textContent = 'No open schema gaps';
+    }
+  };
+
+  const refreshArtistNavBadges = (): void => {
+    const counts = authoredCountByArtist(activeScreens);
+    artistNav.querySelectorAll<HTMLElement>('.evals-nav-item').forEach((el) => {
+      const id = el.dataset.id ?? '';
+      const meta = el.querySelector('.evals-nav-meta');
+      if (!meta) return;
+      const artist = catalog.artists.find((a) => a.id === id);
+      const n = counts.get(id);
+      if (activeScreens?.length && n != null) {
+        meta.textContent = `${artist?.movement ?? ''} · ${n} in run`;
+        el.classList.toggle('evals-nav-item--empty', n === 0);
+      } else if (activeScreens?.length) {
+        meta.textContent = `${artist?.movement ?? ''} · —`;
+        el.classList.add('evals-nav-item--empty');
+      } else {
+        meta.textContent = artist?.movement ?? '';
+        el.classList.remove('evals-nav-item--empty');
+      }
+    });
+  };
+
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
   const inspector = buildInspector(mount.querySelector('[data-role="inspector"]') as HTMLElement, {
     dnaText: (id) => dnaText(id, catalog),
@@ -230,9 +327,6 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     timeline.setRuns(listRuns());
   };
 
-  /** When a selected run carries model-authored specs, the grid shows those. */
-  let activeScreens: EvalScreen[] | null = null;
-
   const applyRun = (
     summary: RunSummary,
     results: ScreenScore[],
@@ -241,6 +335,8 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     lastSummary = summary;
     lastResults = results;
     activeScreens = authored?.length ? authored : null;
+    // Agent evidence defaults to "This run"; rescore stays on Catalog.
+    evidenceMode = activeScreens?.length ? 'run' : 'catalog';
     exportBtn.disabled = false;
     timeline.select(summary.runId);
     timeline.setProvenance(summary);
@@ -255,6 +351,9 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     }, { saverSpecFormat: catalog.screens[0]?.spec.schemaVersion ?? 1 }).versions;
     screenDrift = driftedScreens(summary.screenFingerprints, fingerprintScreens(fingerprintSource));
     timeline.setVersions(summary, compareVersions(summary.provenance.versions, currentVersions), screenDrift);
+    syncEvidenceChrome();
+    paintHero();
+    refreshArtistNavBadges();
     // After refreshView, not before: renderGrid unconditionally rewrites the
     // subtitle, so setting it first meant the provenance line never showed.
     refreshView();
@@ -525,155 +624,37 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   };
 
   /**
-   * Artist index card (Gallery mode): one live signature work standing in for
-   * the artist's whole wall. Click steps into the wall, not the inspector.
-   */
-  const buildArtistCard = (a: (typeof catalog.artists)[number]): HTMLElement => {
-    const works = catalog.screensByArtist.get(a.id) ?? [];
-    const showcase = works.find((s) => s.kind === 'signature') ?? works[0];
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'evals-tile evals-artist-card';
-    if (showcase) card.dataset.screenId = showcase.id;
-
-    const head = document.createElement('div');
-    head.className = 'evals-tile-head';
-    const nameEl = document.createElement('span');
-    nameEl.className = 'evals-tile-name';
-    nameEl.textContent = a.artist;
-    const metaEl = document.createElement('span');
-    metaEl.className = 'evals-tile-meta';
-    metaEl.textContent = `${a.movement} · ${a.years}`;
-    head.append(nameEl, metaEl);
-
-    const stage = document.createElement('div');
-    stage.className = 'evals-tile-stage';
-    card.append(head, stage);
-
-    card.addEventListener('click', () => {
-      artistId = a.id;
-      galleryIndex = false;
-      artistNav.querySelectorAll('.evals-nav-item').forEach((el) => {
-        el.classList.toggle('active', (el as HTMLElement).dataset.id === artistId);
-      });
-      renderGrid();
-    });
-    card.addEventListener('pointerenter', () => {
-      if (showcase) {
-        hoveredTile = showcase.id;
-        syncTiles();
-      }
-    });
-    card.addEventListener('pointerleave', () => {
-      if (showcase && hoveredTile === showcase.id) hoveredTile = null;
-      syncTiles();
-    });
-
-    if (showcase) mountStage(stage, showcase);
-    return card;
-  };
-
-  /**
-   * Both modes render a gallery of live screens plus the inspector.
-   * With agent-run evidence (`activeScreens`), only show what that run
-   * actually authored — no catalog blanks for screens the model never wrote.
-   * Without evidence (rescore / browsing), fall back to the full catalog slice.
+   * Stage contents for the active lens × evidence mode.
+   * Catalog = full DNA wall (authored overlaid). This run = authored only.
    */
   const screensForView = (): EvalScreen[] => {
-    if (mode === 'gallery') return [];
     if (mode === 'compare') {
       return screensForCompareRun(
         catalog.screens.filter((s) => s.kind === 'benchmark' && s.screenId === benchmarkId),
         activeScreens,
         benchmarkId,
+        evidenceMode,
       );
     }
     return screensForArtistRun(
       catalog.screensByArtist.get(artistId) ?? [],
       activeScreens,
       artistId,
+      evidenceMode,
     );
   };
 
   const renderGrid = (): void => {
     disposeCompare();
-    compareGrid.classList.remove('evals-compare-grid--wall');
+    compareGrid.classList.remove('evals-compare-grid--sparse');
 
     const screens = screensForView();
+    // Sparse agent reviews get larger tiles — a focused hanging, not a tiny grid.
+    if (screens.length > 0 && screens.length <= 6) {
+      compareGrid.classList.add('evals-compare-grid--sparse');
+    }
 
-    if (mode === 'gallery') {
-      compareGrid.classList.add('evals-compare-grid--wall');
-      if (galleryIndex) {
-        intentEl.innerHTML = '';
-        const title = document.createElement('div');
-        title.className = 'evals-intent-title';
-        title.textContent = 'The gallery — 15 artists, one wall each';
-        const body = document.createElement('div');
-        body.className = 'evals-intent-body';
-        body.textContent =
-          'Every StyleDNA profile is a hypothesis about how an artist compiles into SaverSpec. ' +
-          'Step into a wall to see the whole body of work — shared benchmarks and signature pieces.';
-        intentEl.append(title, body);
-        subtitleEl.textContent = `Gallery — ${catalog.artists.length} artists`;
-        const showcaseScreens = catalog.artists
-          .map((a) => {
-            const works = catalog.screensByArtist.get(a.id) ?? [];
-            return works.find((s) => s.kind === 'signature') ?? works[0];
-          })
-          .filter((s): s is EvalScreen => !!s);
-        chamber.setEntries(
-          chamberEntriesForArtist(showcaseScreens),
-          `The gallery — ${catalog.artists.length} artists`,
-        );
-        for (const a of catalog.artists) compareGrid.append(buildArtistCard(a));
-      } else {
-        const a = catalog.artists.find((x) => x.id === artistId);
-        intentEl.innerHTML = '';
-        const back = document.createElement('button');
-        back.type = 'button';
-        back.className = 'evals-gallery-back';
-        back.textContent = '← All artists';
-        back.addEventListener('click', () => {
-          galleryIndex = true;
-          renderGrid();
-        });
-        const title = document.createElement('div');
-        title.className = 'evals-intent-title';
-        title.textContent = `${a?.artist ?? artistId} — ${a?.movement ?? ''} (${a?.years ?? ''})`;
-        const body = document.createElement('div');
-        body.className = 'evals-intent-body';
-        body.textContent = a?.research.thesis ?? '';
-        const chips = document.createElement('div');
-        chips.className = 'evals-intent-chips';
-        for (const c of [
-          `tempo ${a?.research.tempo ?? '—'}`,
-          `depth ${a?.research.depth ?? '—'}`,
-          `sprites ${a?.markMaking.primarySprites.join(', ') || '—'}`,
-          `motions ${a?.motionDialect.preferred.join(', ') || '—'}`,
-          `blend ${a?.markMaking.blend ?? '—'}`,
-        ]) {
-          const chip = document.createElement('span');
-          chip.className = 'evals-check-chip';
-          chip.textContent = c;
-          chips.append(chip);
-        }
-        intentEl.append(back, title, body, chips);
-        subtitleEl.textContent = `${a?.artist ?? artistId} — gallery wall, ${screens.length} works`;
-        chamber.setEntries(
-          chamberEntriesForArtist(screens),
-          `${a?.artist ?? artistId} — ${screens.length} works`,
-        );
-        for (const kind of ['benchmark', 'signature'] as const) {
-          const group = screens.filter((s) => s.kind === kind);
-          if (!group.length) continue;
-          const label = document.createElement('div');
-          label.className = 'evals-grid-label';
-          label.textContent = kind === 'benchmark' ? 'Benchmarks — shared intents' : 'Signatures — artist-owned';
-          compareGrid.append(label);
-          for (const s of group) compareGrid.append(buildTile(s, s.title, s.recipe));
-        }
-      }
-    } else if (mode === 'compare') {
+    if (mode === 'compare') {
       const bench = catalog.benchmarks.find((b) => b.id === benchmarkId);
       intentEl.innerHTML = '';
       if (bench) {
@@ -685,6 +666,10 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         body.textContent = bench.intent;
         const chips = document.createElement('div');
         chips.className = 'evals-intent-chips';
+        const evidenceChip = document.createElement('span');
+        evidenceChip.className = 'evals-check-chip evals-check-chip--evidence';
+        evidenceChip.textContent = evidenceMode === 'run' ? 'evidence · this run' : 'evidence · catalog';
+        chips.append(evidenceChip);
         for (const c of describeChecks(bench.checks)) {
           const chip = document.createElement('span');
           chip.className = 'evals-check-chip';
@@ -693,14 +678,23 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         }
         intentEl.append(title, body, chips);
       }
-      subtitleEl.textContent =
-        `${catalog.benchmarks.find((b) => b.id === benchmarkId)?.title ?? benchmarkId} × ${screens.length}` +
-        (activeScreens?.length ? ' authored' : ` / ${catalog.artists.length} artists`) +
-        ' — same intent, different StyleDNA';
+      if (!lastSummary) {
+        subtitleEl.textContent =
+          `${bench?.title ?? benchmarkId} × ${screens.length} artists — catalog baseline`;
+      }
       chamber.setEntries(
         chamberEntriesForCompare(screens),
-        `${catalog.benchmarks.find((b) => b.id === benchmarkId)?.title ?? benchmarkId} — ${screens.length} artists, one intent`,
+        `${bench?.title ?? benchmarkId} — ${screens.length} artists, one intent`,
       );
+      if (!screens.length) {
+        const empty = document.createElement('div');
+        empty.className = 'evals-grid-empty';
+        empty.textContent =
+          evidenceMode === 'run'
+            ? 'This run didn’t author this benchmark for any artist.'
+            : 'No screens for this benchmark.';
+        compareGrid.append(empty);
+      }
       for (const s of screens) {
         const artist = catalog.artists.find((a) => a.id === s.artistId);
         compareGrid.append(buildTile(s, artist?.artist ?? s.artistId, artist?.movement ?? ''));
@@ -718,23 +712,33 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
       chips.className = 'evals-intent-chips';
       const benches = screens.filter((s) => s.kind === 'benchmark').length;
       const sigs = screens.filter((s) => s.kind === 'signature').length;
-      for (const c of [`${benches} benchmarks`, `${sigs} signatures`, `tempo ${a?.research.tempo ?? '—'}`, `depth ${a?.research.depth ?? '—'}`]) {
+      for (const c of [
+        evidenceMode === 'run' ? 'evidence · this run' : 'evidence · catalog',
+        `${benches} benchmarks`,
+        `${sigs} signatures`,
+        `tempo ${a?.research.tempo ?? '—'}`,
+      ]) {
         const chip = document.createElement('span');
         chip.className = 'evals-check-chip';
+        if (c.startsWith('evidence')) chip.classList.add('evals-check-chip--evidence');
         chip.textContent = c;
         chips.append(chip);
       }
       intentEl.append(title, body, chips);
-      subtitleEl.textContent = `${a?.artist ?? artistId} — ${screens.length} screens`;
+      if (!lastSummary) {
+        subtitleEl.textContent = `${a?.artist ?? artistId} — ${screens.length} screens`;
+      }
       chamber.setEntries(
         chamberEntriesForArtist(screens),
         `${a?.artist ?? artistId} — ${screens.length} screens`,
       );
-      // Group the artist's gallery so shared intents read apart from their own work.
-      if (!screens.length && activeScreens?.length) {
+      if (!screens.length) {
         const empty = document.createElement('div');
         empty.className = 'evals-grid-empty';
-        empty.textContent = 'This run didn’t author any screens for this artist.';
+        empty.textContent =
+          evidenceMode === 'run'
+            ? 'This run didn’t author any screens for this artist. Switch to Catalog, or pick another artist.'
+            : 'No screens for this artist.';
         compareGrid.append(empty);
       }
       for (const kind of ['benchmark', 'signature'] as const) {
@@ -765,8 +769,13 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     });
     compareNav.hidden = mode !== 'compare';
     artistNav.hidden = mode === 'compare';
-    // The Gallery tab always lands on the index; walls are entered from there.
-    if (mode === 'gallery') galleryIndex = true;
+    renderGrid();
+  };
+
+  const setEvidenceMode = (next: EvidenceMode): void => {
+    if (next === 'run' && !activeScreens?.length) return;
+    evidenceMode = next;
+    syncEvidenceChrome();
     renderGrid();
   };
 
@@ -797,7 +806,6 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
     btn.innerHTML = `<span class="evals-nav-name">${a.artist}</span><span class="evals-nav-meta">${a.movement}</span>`;
     btn.addEventListener('click', () => {
       artistId = a.id;
-      if (mode === 'gallery') galleryIndex = false;
       artistNav.querySelectorAll('.evals-nav-item').forEach((el) => {
         el.classList.toggle('active', (el as HTMLElement).dataset.id === artistId);
       });
@@ -809,28 +817,42 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   mount.querySelectorAll('.evals-mode-btn').forEach((b) =>
     b.addEventListener('click', () => {
       const m = (b as HTMLElement).dataset.mode as ViewMode;
-      if (m) setMode(m);
+      if (m === 'compare' || m === 'artist') setMode(m);
     }),
   );
+
+  for (const btn of evidenceBtns) {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.evidence as EvidenceMode;
+      if (next) setEvidenceMode(next);
+    });
+  }
 
   mount.querySelector('[data-act="chamber"]')?.addEventListener('click', () => {
     if (screen) chamber.open(screen.id);
   });
 
-  mount.querySelector('[data-act="agent"]')?.addEventListener('click', () => {
-    openAgentPanel({
-      catalog,
-      screenId: screen?.id ?? null,
-      benchmarkId,
-      artistId,
-    });
-  });
-
   exportBtn.addEventListener('click', () => {
     if (!lastSummary) return;
+    // Research / training pack: summary + scores + authored specs + gaps brief.
     downloadJson(`${lastSummary.runId}-summary.json`, lastSummary);
     if (lastResults?.length) {
       downloadJson(`${lastSummary.runId}-results.json`, lastResults);
+    }
+    if (activeScreens?.length) {
+      downloadJson(
+        `${lastSummary.runId}-authored.json`,
+        activeScreens.map((s) => ({
+          id: s.id,
+          artistId: s.artistId,
+          kind: s.kind,
+          screenId: s.screenId,
+          title: s.title,
+          intent: s.intent,
+          recipe: s.recipe,
+          spec: s.spec,
+        })),
+      );
     }
     const blob = new Blob([gapsMarkdown(lastSummary)], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
@@ -844,6 +866,7 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
   refreshView = renderGrid;
 
   setMode('compare');
+  syncEvidenceChrome();
 
   // Open on the newest run so provenance / next-cycle inputs are visible immediately.
   const newest = listRuns()[0];

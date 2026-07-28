@@ -529,19 +529,10 @@ function liveMode(): void {
       cfg.saver = id;
       gallery.setActive(id);
       window.__idleScreens?.setPlugin(id);
-      // ←/→ browse the overlay without going through openPreview, so the top
-      // bar has to follow the selection here too or it keeps naming whichever
-      // saver the overlay was opened on.
-      syncTopbarMode(currentView);
     },
     onExit: () => {
       previewIsOpen = false;
       gallery.setPlaying(currentView === 'gallery');
-      // setPlaying above un-gates the cards; without this the button keeps the
-      // label it had while the overlay was up ("▶ Play") even though the
-      // thumbnails are running again, so the next click reads as a no-op and
-      // actually pauses.
-      syncTopbarMode(currentView);
     },
     onOpenInDev: goToDev,
   });
@@ -645,6 +636,13 @@ function liveMode(): void {
       const saver = ALL_SAVERS.find((s) => s.manifest.id === id);
       if (!saver) return;
       cfg.saver = id;
+      // Deep link: the address bar always names the selected saver, so the
+      // state you are looking at is shareable as-is. replaceState (not push)
+      // — browsing the palette is one workbench state, not a history trail.
+      const url = new URL(location.href);
+      url.searchParams.set('saver', id);
+      url.hash = 'dev';
+      history.replaceState(null, '', url);
       rebuild(cfg);
       devProps.select(saver);
       setTopbarSaver(saver);
@@ -897,6 +895,7 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
         ${row('Package', `<code>${packageFor(s)}</code>`)}
         ${row('Backend', formatBackendLabel(m.id, minBackend, viewport()))}
         ${row('Cost', m.costTier ?? 'idle')}
+        ${row('Time model', m.timeModel ? `<span title="${m.timeModel === 'closed-form' ? 'Every frame is a pure function of (t, seed, params) — scrubbable and seek-back deterministic where renderFrame exists.' : 'State evolves by real integration — frames depend on history, so sampling is the only honest observation.'}">${m.timeModel}</span>` : '—')}
         ${row('Motion', m.motionIntensity ?? 'calm')}
         ${row('Passthrough', m.passthrough ? 'yes' : 'no')}
         ${row('Reduced motion', m.reducedMotionFallback ?? 'none')}
