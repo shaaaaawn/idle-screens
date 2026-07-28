@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/saver-limelight",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Passthrough theatre-light screensaver for idle-screens: a roaming key light that lifts the live page's blocks into set pieces and makes them cast shadows on each other. Seeded, paramSpace, control-track, frame-addressable.",
   "license": "MIT",
   "author": "Shawn Partridge",

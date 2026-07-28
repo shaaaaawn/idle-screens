@@ -1,5 +1,16 @@
 # @idle-screens/saver-limelight
 
+## 2.0.0
+
+### Patch Changes
+
+- bae7b6b: `SaverManifest.timeModel` (`'closed-form' | 'simulated'`) — a semantic claim
+  about how the saver relates to time, so tooling can prefer it over hardcoded
+  per-saver capability lists. Catalog savers declare theirs; the playground
+  properties panel surfaces the claim.
+- Updated dependencies [bae7b6b]
+  - @idle-screens/core@0.5.0
+
 ## 1.0.1
 
 ### Patch Changes
