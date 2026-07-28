@@ -663,7 +663,9 @@ class SlipstreamInstance implements SaverInstance {
       // Crossfade weight into the current bucket's geometry: the outgoing
       // set fades as the incoming one rises, so the field REFORMS instead of
       // snapping 4x a second. Pure in t (flowBucket is derived from t).
-      const FADE_MS = 120;
+      // 90ms keeps the double-draw window to ~1/3 of each bucket — the fade
+      // hides the pop; it does not need to linger.
+      const FADE_MS = 90;
       const k = this.prevLines.length
         ? smooth01(clamp((t - this.flowBucket * FLOW_BUCKET_MS) / FADE_MS, 0, 1))
         : 1;
@@ -701,8 +703,11 @@ class SlipstreamInstance implements SaverInstance {
       ctx.setLineDash([]);
 
       // Dust: motes advected along the cached polylines by arc-length offset —
-      // real particle advection with zero per-frame integration. Motes ride
-      // both sets during the fade so they migrate with the geometry.
+      // real particle advection with zero per-frame integration. Dust rides
+      // the CURRENT set only, at full weight: with the phase integral its
+      // per-bucket hop is just the geometry delta (a few px at most), and
+      // drawing 160 motes twice for a third of every bucket cost more than
+      // the hop was worth.
       const drawDust = (lines: Streamline[], scale: number): void => {
         if (scale <= 0.03 || !lines.length) return;
         for (const d of this.dust) {
@@ -723,8 +728,7 @@ class SlipstreamInstance implements SaverInstance {
           ctx.fill();
         }
       };
-      drawDust(this.prevLines, 1 - k);
-      drawDust(this.lines, k);
+      drawDust(this.lines, 1);
       ctx.globalCompositeOperation = 'source-over';
     }
   }
