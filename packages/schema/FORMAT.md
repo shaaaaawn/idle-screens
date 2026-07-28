@@ -195,6 +195,14 @@ the format never changes the entity stream of an existing spec — a spec author
 against an older runtime renders bit-identically on a newer one
 (`determinism-baseline.test.ts` guards this with snapshot streams).
 
+The same discipline applies to **meaning**, not just RNG draws: a new field may
+introduce a default, but a default must never *reinterpret* values that already
+exist in published specs. Ship the field opt-in first, flip the default only in
+a major, and write the stored-spec migration in the same change. (Learned the
+hard way when 2.3.0's `units: "viewport"` default invalidated live channels —
+see idle-server's G5 spec stamping, which now heals reads but can't excuse a
+repeat.)
+
 Positions are **analytic**: `positionAt(entity, t)` is a pure function, so
 `renderFrame(t, seed)` can seek anywhere instantly, trails sample the past for
 free, and streak headings derive from a finite difference. `ghosting` is the
