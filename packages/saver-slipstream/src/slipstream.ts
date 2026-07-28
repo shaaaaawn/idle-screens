@@ -117,6 +117,28 @@ interface Dust {
   ph: number;
 }
 
+/** How many quiet frames the next bucket's integration is spread across. */
+const PREBUILD_FRAMES = 10;
+
+/** An in-progress streamline build for one bucket (see `startBuild`). */
+interface FlowBuild {
+  bucket: number;
+  lines: Streamline[];
+  done: number;
+  total: number;
+  angle: number;
+  speed: number;
+  ax: number;
+  ay: number;
+  px: number;
+  py: number;
+  diag: number;
+  cx: number;
+  cy: number;
+  wobble: number[];
+  obstacles: Obstacle[];
+}
+
 interface Victim {
   el: HTMLElement;
   cx: number;
@@ -153,6 +175,7 @@ class SlipstreamInstance implements SaverInstance {
 
   private lines: Streamline[] = [];
   private prevLines: Streamline[] = [];
+  private pending: FlowBuild | null = null;
   private flowBucket = -1;
   /** Wind snapshot the cached lines were built with — reused per frame so the
    *  page's lean matches the lines exactly. */
@@ -293,10 +316,10 @@ class SlipstreamInstance implements SaverInstance {
    * and does not need to be. It is exact far from everything, divergence-free,
    * and visually parts around each block.
    */
-  private velocity(x: number, y: number, ax: number, ay: number, out: [number, number]): void {
+  private velocity(obstacles: Obstacle[], x: number, y: number, ax: number, ay: number, out: [number, number]): void {
     let vx = ax;
     let vy = ay;
-    for (const o of this.obstacles) {
+    for (const o of obstacles) {
       const dx = x - o.cx;
       const dy = y - o.cy;
       const r2 = dx * dx + dy * dy;
@@ -324,6 +347,7 @@ class SlipstreamInstance implements SaverInstance {
     this.victims = [];
     this.obstacles = [];
     this.flowBucket = -1;
+    this.pending = null; // built against the old obstacle set
     const page = this.ctxSaver.page;
     if (!page) return;
     let els = page.victims(VICTIM_SELECTOR);
@@ -394,12 +418,35 @@ class SlipstreamInstance implements SaverInstance {
    */
   private ensureFlow(t: number): void {
     const bucket = Math.floor(t / FLOW_BUCKET_MS);
-    if (bucket === this.flowBucket) return;
+    if (bucket === this.flowBucket) {
+      // Quiet frame: integrate a slice of the NEXT bucket's lines now, so
+      // the boundary never pays the whole rebuild in one frame. The prebuilt
+      // set is bit-identical to a synchronous build (same params, same fork
+      // sequence), so determinism is untouched.
+      if (!this.pending || this.pending.bucket !== bucket + 1) {
+        this.pending = this.startBuild(bucket + 1);
+      }
+      if (this.pending.done < this.pending.total) {
+        this.advanceBuild(this.pending, Math.max(2, Math.ceil(this.pending.total / PREBUILD_FRAMES)));
+      }
+      return;
+    }
     if (this.flowBucket >= 0 && bucket === this.flowBucket + 1) {
       this.prevLines = this.lines;
+      const pend = this.pending;
+      if (pend && pend.bucket === bucket) {
+        this.advanceBuild(pend, pend.total); // sync-finish any stragglers
+        this.lines = pend.lines;
+        this.bAngle = pend.angle;
+        this.bSpeed = pend.speed;
+        this.pending = null;
+        this.flowBucket = bucket;
+        return;
+      }
     } else {
       this.prevLines = bucket > 0 ? this.buildFlow(bucket - 1).lines : [];
     }
+    this.pending = null;
     const cur = this.buildFlow(bucket);
     this.lines = cur.lines;
     this.bAngle = cur.angle;
@@ -408,39 +455,50 @@ class SlipstreamInstance implements SaverInstance {
   }
 
   /**
-   * Build one bucket's streamlines. Pure in the bucket index: wind
-   * angle/speed are sampled at the bucket's centre time, seeds come from a
-   * bucket-independent fork, and the integrator is fixed-step.
+   * Open one bucket's build. Pure in the bucket index: wind angle/speed are
+   * sampled at the bucket's centre time, every line's seeded wobble is drawn
+   * up front (so partial builds consume the fork in the same order a full
+   * one does), and obstacles are snapshotted with this bucket's clearance.
    */
-  private buildFlow(bucket: number): { lines: Streamline[]; angle: number; speed: number } {
+  private startBuild(bucket: number): FlowBuild {
     const tc = bucket * FLOW_BUCKET_MS + FLOW_BUCKET_MS / 2;
     const p = this.paramsAt(tc);
     const angle = this.windAngleAt(p, tc);
-    const speed = p.windSpeed * this.gustAt(p, tc);
-
-    // Apply clearance by scaling obstacle radii for this bucket's integration.
-    const scaled = this.obstacles.map((o) => ({ cx: o.cx, cy: o.cy, r: o.r * p.clearance }));
-    const saved = this.obstacles;
-    this.obstacles = scaled;
-
     const ax = Math.cos(angle);
     const ay = Math.sin(angle);
-    // Seed line starts along the upwind edge, spread across the crosswind axis.
-    const px = -ay;
-    const py = ax;
-    const diag = Math.hypot(this.w, this.h);
-    const cx = this.w / 2;
-    const cy = this.h / 2;
-    const nLines = Math.round(p.lineCount);
+    const total = Math.round(p.lineCount);
     const lineRng = this.ctxSaver.rng.fork(0x51eea);
+    const wobble: number[] = new Array(total);
+    for (let i = 0; i < total; i++) wobble[i] = lineRng.next();
+    return {
+      bucket,
+      lines: new Array<Streamline>(total),
+      done: 0,
+      total,
+      angle,
+      speed: p.windSpeed * this.gustAt(p, tc),
+      ax,
+      ay,
+      px: -ay,
+      py: ax,
+      diag: Math.hypot(this.w, this.h),
+      cx: this.w / 2,
+      cy: this.h / 2,
+      wobble,
+      obstacles: this.obstacles.map((o) => ({ cx: o.cx, cy: o.cy, r: o.r * p.clearance })),
+    };
+  }
 
-    const lines: Streamline[] = new Array(nLines);
+  /** Integrate lines [done, done+count) of an open build. Fixed-step RK2. */
+  private advanceBuild(b: FlowBuild, count: number): void {
     const v: [number, number] = [0, 0];
-    for (let i = 0; i < nLines; i++) {
+    const end = Math.min(b.total, b.done + count);
+    for (; b.done < end; b.done++) {
+      const i = b.done;
       // Even spacing with a seeded wobble, so lines don't read as a grid.
-      const frac = (i + 0.5) / nLines - 0.5 + (lineRng.next() - 0.5) * (0.6 / nLines);
-      const sx = cx - ax * diag * 0.62 + px * frac * diag * 1.1;
-      const sy = cy - ay * diag * 0.62 + py * frac * diag * 1.1;
+      const frac = (i + 0.5) / b.total - 0.5 + (b.wobble[i]! - 0.5) * (0.6 / b.total);
+      const sx = b.cx - b.ax * b.diag * 0.62 + b.px * frac * b.diag * 1.1;
+      const sy = b.cy - b.ay * b.diag * 0.62 + b.py * frac * b.diag * 1.1;
 
       const pts = new Float32Array(MAX_STEPS * 2);
       let n = 0;
@@ -451,12 +509,12 @@ class SlipstreamInstance implements SaverInstance {
         pts[n * 2 + 1] = y;
         n++;
         // RK2 midpoint step, fixed length so arc-length ≈ n * STEP_PX.
-        this.velocity(x, y, ax, ay, v);
+        this.velocity(b.obstacles, x, y, b.ax, b.ay, v);
         let m = Math.hypot(v[0], v[1]);
         if (m < 1e-4) break;
         const mx = x + (v[0] / m) * STEP_PX * 0.5;
         const my = y + (v[1] / m) * STEP_PX * 0.5;
-        this.velocity(mx, my, ax, ay, v);
+        this.velocity(b.obstacles, mx, my, b.ax, b.ay, v);
         m = Math.hypot(v[0], v[1]);
         if (m < 1e-4) break;
         x += (v[0] / m) * STEP_PX;
@@ -475,7 +533,7 @@ class SlipstreamInstance implements SaverInstance {
             break;
           }
         }
-        const margin = diag * 0.25;
+        const margin = b.diag * 0.25;
         if (x < -margin || x > this.w + margin || y < -margin || y > this.h + margin) {
           // One more point so the line exits the frame cleanly.
           if (n < MAX_STEPS) {
@@ -486,11 +544,15 @@ class SlipstreamInstance implements SaverInstance {
           break;
         }
       }
-      lines[i] = { pts, n, len: (n - 1) * STEP_PX };
+      b.lines[i] = { pts, n, len: (n - 1) * STEP_PX };
     }
+  }
 
-    this.obstacles = saved;
-    return { lines, angle, speed };
+  /** Build one bucket's streamlines synchronously (the seek path). */
+  private buildFlow(bucket: number): { lines: Streamline[]; angle: number; speed: number } {
+    const b = this.startBuild(bucket);
+    this.advanceBuild(b, b.total);
+    return { lines: b.lines, angle: b.angle, speed: b.speed };
   }
 
   // ---- the wind acts on the page ----
@@ -500,9 +562,12 @@ class SlipstreamInstance implements SaverInstance {
    * wake feels the deflected wind, not the free stream — and shiver the small
    * ones. Hinged at the base like grass. Pure in `t`.
    */
+  /** Scratch for applyVictim — 90 victims/frame is real allocator churn. */
+  private readonly velScratch: [number, number] = [0, 0];
+
   private applyVictim(v: Victim, t: number, ax: number, ay: number): void {
-    const vel: [number, number] = [0, 0];
-    this.velocity(v.cx, v.cy, ax, ay, vel);
+    const vel = this.velScratch;
+    this.velocity(this.obstacles, v.cx, v.cy, ax, ay, vel);
     const p = this.params;
     const gust = this.gustAt(p, t);
     const strength = p.windSpeed * gust;
@@ -688,6 +753,7 @@ class SlipstreamInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.flowBucket = -1; // the cache is param-dependent; force a rebuild
+    this.pending = null; // as is any half-built next bucket
     this.phiBucket = -1; // the phase prefix sum is too
     this.phiBase = 0;
     if (this.paused) this.renderStill();

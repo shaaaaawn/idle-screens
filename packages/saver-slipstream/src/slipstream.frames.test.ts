@@ -257,6 +257,36 @@ describe('slipstream: the page is the boundary condition', () => {
     h2.remove();
   });
 
+  it('a prebuilt bucket adopted at the boundary equals a synchronous build', () => {
+    const lineSig = (i: Frameable): string => {
+      const lines = (i as unknown as { lines: { pts: Float32Array; n: number }[] }).lines;
+      return JSON.stringify(lines.map((l) => [l.n, l.pts[0], l.pts[1], l.pts[(l.n - 1) * 2]]));
+    };
+
+    // Warm path: quiet frames inside bucket 0 integrate bucket 1 a slice at
+    // a time; the boundary frame adopts the prebuilt set instead of paying
+    // the whole rebuild.
+    const { host, page } = makePage(GRID);
+    const warm = mount(ctx(host, page));
+    warm.applyTrack?.(demoTrack);
+    for (let t = 0; t < 240; t += 16) warm.renderFrame(t, 23);
+    warm.renderFrame(250, 23); // crosses into bucket 1 — adoption path
+    const adopted = lineSig(warm);
+
+    // Cold path: a fresh instance seeks straight to the same frame and
+    // builds bucket 1 synchronously.
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    cold.renderFrame(250, 23);
+    expect(lineSig(cold), 'prebuild is bit-identical to a sync build').toBe(adopted);
+
+    warm.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.transform = 'translateY(2px)';
