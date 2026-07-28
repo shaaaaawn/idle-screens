@@ -29,4 +29,11 @@ preserved exactly.
   analytic look-back sampling of the same closed-form arm path. Params:
   arms, speed, glow, trail, palette (aurora/ember/mono/spectrum), size.
 
+Pause/resume keeps its place. The closed-form loops these savers moved to
+derive logical time from the rAF clock, and `start()` re-anchors that origin —
+correct at mount, but it made the first frame after every `setPaused(false)`
+render logical time zero, so pausing and resuming (or toggling reduced motion)
+snapped Warp, DVD and Flurry back to their opening frame and restarted any
+applied control track. The frozen time is now carried across the re-anchor.
+
 Classic catalogue: 19 → 18 savers (logo folded into dvd).

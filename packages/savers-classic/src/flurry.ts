@@ -157,6 +157,15 @@ class FlurryInstance implements SaverInstance {
   private frameId: number | null = null;
   private paused = false;
   private startT = 0;
+  /** Logical time the next rAF origin resumes from.
+   *
+   *  `start()` re-anchors `startT` to the next frame's timestamp, so on its own
+   *  `now - startT` always begins at zero. Mount wants that; resuming from a
+   *  pause does not — without carrying the frozen `t` forward, every
+   *  pause/resume (and every reduced-motion toggle) snaps the scene back to its
+   *  opening frame and restarts any applied control track. Set only in
+   *  `setPaused(false)`, so first mount still starts at 0. */
+  private resumeFrom = 0;
   private t = STILL_T; // anchor frame until the loop (or a seek) moves it
 
   private params: Params = defaultParams(PARAM_SPACE) as unknown as Params;
@@ -342,7 +351,7 @@ class FlurryInstance implements SaverInstance {
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
     if (this.startT === 0) this.startT = now;
-    this.renderFrame(now - this.startT, this.ctxSaver.seed);
+    this.renderFrame(now - this.startT + this.resumeFrom, this.ctxSaver.seed);
   }
 
   /** Freeze on whatever frame we're actually at — not a fixed anchor — so
@@ -359,6 +368,7 @@ class FlurryInstance implements SaverInstance {
       this.stop();
       this.renderStill();
     } else {
+      this.resumeFrom = this.t;
       this.start();
     }
   }

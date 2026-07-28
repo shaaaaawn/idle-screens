@@ -529,10 +529,19 @@ function liveMode(): void {
       cfg.saver = id;
       gallery.setActive(id);
       window.__idleScreens?.setPlugin(id);
+      // ←/→ browse the overlay without going through openPreview, so the top
+      // bar has to follow the selection here too or it keeps naming whichever
+      // saver the overlay was opened on.
+      syncTopbarMode(currentView);
     },
     onExit: () => {
       previewIsOpen = false;
       gallery.setPlaying(currentView === 'gallery');
+      // setPlaying above un-gates the cards; without this the button keeps the
+      // label it had while the overlay was up ("▶ Play") even though the
+      // thumbnails are running again, so the next click reads as a no-op and
+      // actually pauses.
+      syncTopbarMode(currentView);
     },
     onOpenInDev: goToDev,
   });

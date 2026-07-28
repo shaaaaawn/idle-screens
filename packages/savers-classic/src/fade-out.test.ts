@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { createRng, sampleTrack, defaultParams, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { fadeOut, fadeOutManifest, fadeOutDemoTrack } from './fade-out';
 
@@ -45,9 +45,18 @@ function recordFillRects(): { calls: string[]; restore: () => void } {
 const W = 1280;
 const H = 800;
 
+/** Hosts handed to savers under test, torn down between cases — otherwise every
+ *  `ctx()` leaves its <div> on document.body and later tests run against a body
+ *  holding every previous test's canvas. */
+const hosts: HTMLElement[] = [];
+afterEach(() => {
+  for (const h of hosts.splice(0)) h.remove();
+});
+
 function ctx(seed = 7, reducedMotion = true): SaverContext {
   const host = document.createElement('div');
   document.body.append(host);
+  hosts.push(host);
   return {
     host,
     dpr: 1,
