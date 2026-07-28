@@ -940,6 +940,16 @@ test.describe('evals view', () => {
 });
 
 test.describe('right dock panels', () => {
+  test('properties show the time model, with fluid as the honest simulated case', async ({ page }) => {
+    await page.goto('/?saver=pipes#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    const tmRow = page.locator('#props-panel .wb-prop').filter({ has: page.locator('dt', { hasText: 'Time model' }) });
+    await expect(tmRow.locator('dd')).toHaveText('closed-form');
+
+    await pickSaver(page, 'fluid');
+    await expect(tmRow.locator('dd')).toHaveText('simulated');
+  });
+
   // <details> wraps its content in an anonymous box, so the old
   // `flex: 1 1 auto; min-height: 0` never shrank a panel body — it overflowed
   // its panel and got clipped, hiding whatever sat at the bottom (the Engine
