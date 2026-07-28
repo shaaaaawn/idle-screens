@@ -17,7 +17,7 @@ packages/
                                                          obstacles in an analytic flow field
   saver-catwalk/    @idle-screens/saver-catwalk      -- passthrough cat saver: a seeded-itinerary
                                                          cat parkours across the page's blocks
-  savers-classic/    @idle-screens/savers-classic     -- 19 classic savers (toasters, DVD, warp, etc.)
+  savers-classic/    @idle-screens/savers-classic     -- 17 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
@@ -39,7 +39,7 @@ pnpm install
 pnpm build                  # tsup build all packages (must run before typecheck on clean checkout)
 pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
-pnpm test                   # vitest run (455 unit tests)
+pnpm test                   # vitest run
 pnpm dev                    # Vite playground at localhost:5173
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
 pnpm test:all               # build + typecheck + lint + test + e2e (the full CI gate)

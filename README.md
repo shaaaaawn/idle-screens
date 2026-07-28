@@ -3,6 +3,10 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/shaaaaawn/idle-screens/ci.yml?branch=main&label=CI)](https://github.com/shaaaaawn/idle-screens/actions/workflows/ci.yml)
 [![core](https://img.shields.io/npm/v/@idle-screens/core?label=core)](https://www.npmjs.com/package/@idle-screens/core)
 [![saver-black-hole](https://img.shields.io/npm/v/@idle-screens/saver-black-hole?label=saver-black-hole)](https://www.npmjs.com/package/@idle-screens/saver-black-hole)
+[![saver-tide](https://img.shields.io/npm/v/@idle-screens/saver-tide?label=saver-tide)](https://www.npmjs.com/package/@idle-screens/saver-tide)
+[![saver-limelight](https://img.shields.io/npm/v/@idle-screens/saver-limelight?label=saver-limelight)](https://www.npmjs.com/package/@idle-screens/saver-limelight)
+[![saver-slipstream](https://img.shields.io/npm/v/@idle-screens/saver-slipstream?label=saver-slipstream)](https://www.npmjs.com/package/@idle-screens/saver-slipstream)
+[![saver-catwalk](https://img.shields.io/npm/v/@idle-screens/saver-catwalk?label=saver-catwalk)](https://www.npmjs.com/package/@idle-screens/saver-catwalk)
 [![savers-classic](https://img.shields.io/npm/v/@idle-screens/savers-classic?label=savers-classic)](https://www.npmjs.com/package/@idle-screens/savers-classic)
 [![schema](https://img.shields.io/npm/v/@idle-screens/schema?label=schema)](https://www.npmjs.com/package/@idle-screens/schema)
 [![validator](https://img.shields.io/npm/v/@idle-screens/validator?label=validator)](https://www.npmjs.com/package/@idle-screens/validator)
@@ -20,29 +24,31 @@ control signals do.
 ## Architecture
 
 ```
-                         +-----------------------+
-                         |    @idle-screens/     |
-                         |        core           |
-                         |  engine, <idle-screen> |
-                         |  element, RNG, control |
-                         |  track, types          |
-                         +----------+------------+
+                       +--------------------------+
+                       |     @idle-screens/       |
+                       |          core            |
+                       |  engine, <idle-screen>   |
+                       |  element, RNG, control   |
+                       |  track, types            |
+                       +------------+-------------+
                                     |
-        +------------+--------------+--------------+------------+
-        |            |              |              |            |
-   +----v-----+ +----v-----+ +------v------+ +-----v-----+ +----v-----+
-   | black-   | | tide     | | limelight   | | slipstream| | savers-  |
-   | hole     | | water    | | stage light | | wind flow | | classic  |
-   | lensing  | | Jacobian | | occlusion   | | field     | | 19       |
-   +----------+ +----------+ +-------------+ +-----------+ +----+-----+
-        |            |              |              |             |
-        +------------+------+-------+--------------+             |
-                            |                                    |
-                     +------v------+                      +------v------+
-                     | schema      |                      | (plugins)   |
-                     | declarative |                      +-------------+
-                     | saver format|
-                     +-------------+
+        +-------------+-------------+-------------+-------------+
+        |             |             |             |             |
+   +----v-----+ +-----v----+ +------v------+ +----v------+ +----v-----+
+   | black-   | | tide     | | limelight   | | slipstream| | catwalk  |
+   | hole     | | water    | | stage light | | wind flow | | roaming  |
+   | lensing  | | Jacobian | | occlusion   | | field     | | cat      |
+   +----------+ +----------+ +-------------+ +-----------+ +----------+
+             (the five passthrough savers -- they eat the live page)
+
+                                    |  (core, again)
+        +---------------------------+---------------+
+        |                                           |
+   +----v---------+                        +--------v--------+
+   | schema       |                        | savers-classic  |
+   | declarative  |                        | 17 classic      |
+   | saver format |                        | savers          |
+   +--------------+                        +-----------------+
 
    +----------------------+  +-----------------+
    | @idle-screens/       |  | @idle-screens/  |
@@ -53,8 +59,8 @@ control signals do.
         (standalone)             (standalone)
 
    +-------------------------------------------------------+
-   |                    playground                          |
-   |  Vite workbench (imports all 10, dev only)              |
+   |                    playground                         |
+   |  Vite workbench (imports all 10, dev only)            |
    +-------------------------------------------------------+
 ```
 
@@ -74,7 +80,7 @@ standalone with zero dependencies, so they can be used independently. The
 | [`@idle-screens/saver-limelight`](packages/saver-limelight) | Passthrough stage-light saver: page blocks gain height, cast silhouettes, and occlude each other under a roaming key light. |
 | [`@idle-screens/saver-slipstream`](packages/saver-slipstream) | Passthrough wind saver: page blocks are obstacles in an analytic potential-flow field; streamlines part around content and blocks lean with local wind. |
 | [`@idle-screens/saver-catwalk`](packages/saver-catwalk) | Passthrough cat screensaver: a silhouette cat parkours across the live page's own blocks — perches dip and spring under its weight, it naps on the warm ones. |
-| [`@idle-screens/savers-classic`](packages/savers-classic) | 19 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
+| [`@idle-screens/savers-classic`](packages/savers-classic) | 17 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
 | [`@idle-screens/validator`](packages/validator) | Photosensitivity (WCAG 2.3.1 flash) + performance validation. Feed it luminance samples and frame times, get a pass/fail safety verdict. |
 | [`@idle-screens/capabilities`](packages/capabilities) | Device and capability detection + saver eligibility tiering. Pure decide (Node-testable) + a thin browser detector. |
 | [`@idle-screens/schema`](packages/schema) | Declarative, agent-authorable saver format. Validate a data spec, then compile it into a runnable, seeded, flash-safe SaverPlugin. |
@@ -83,7 +89,7 @@ standalone with zero dependencies, so they can be used independently. The
 
 | App | What |
 | --- | --- |
-| [`playground`](apps/playground) | Vite dev workbench: saver palette, inline preview, determinism proof, safety/perf analysis, device capabilities, declarative schema editor. |
+| [`playground`](apps/playground) | Vite dev workbench. Gallery of every saver, fullscreen preview, a Blender-style keyframe timeline editor, the determinism proof, WCAG flash + perf analysis, device capability tiering, the declarative schema editor, text-readable frame perception, and an evals chamber for scoring savers against a rubric. |
 | [`mac`](apps/mac) | Native macOS menu-bar app (Swift). One borderless overlay per display, idle detection, channel mode, saver cycling, auto-updates from idlescreens.com. See [apps/mac/README.md](apps/mac/README.md). |
 | [`ios`](apps/ios) | Native iOS Watch + VJ client and tvOS host (Swift, XcodeGen). Gallery, channel deck, shared SpecSubset render path. See [apps/ios/README.md](apps/ios/README.md) and [docs/ios-release.md](docs/ios-release.md). |
 | [`linux`](apps/linux) | Native Wayland/Hyprland overlay (Rust + WebKitGTK 6). Layer-shell fullscreen saver, channel or bundled engine, hypridle integration. On the `develop` branch — see [apps/linux/README.md](apps/linux/README.md). |
@@ -95,10 +101,12 @@ standalone with zero dependencies, so they can be used independently. The
 
 ## Develop
 
+Node >= 22 is required.
+
 ```bash
 corepack enable pnpm      # this repo pins pnpm 9 via packageManager
 pnpm install
-pnpm build                # tsup build all packages
+pnpm build                # tsup build all packages -- run this FIRST
 pnpm typecheck
 pnpm lint
 pnpm test                 # vitest
@@ -106,6 +114,10 @@ pnpm dev                  # the Vite playground
 pnpm test:e2e             # Playwright (incl. the determinism proof)
 pnpm test:all             # build + typecheck + lint + test + e2e
 ```
+
+`pnpm build` must come before `pnpm typecheck` on a clean checkout: packages
+typecheck against each other's emitted `dist/*.d.ts`, so the declarations have
+to exist first.
 
 ### Linux app (Wayland / Hyprland, `develop` branch)
 
