@@ -15,6 +15,7 @@
  */
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
+import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import {
   alphaAt,
   buildEntities,
@@ -114,26 +115,6 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
     }
   }
   return p;
-}
-
-/** Perceptual luma (0..1) of a hex colour. */
-function hexLuma(hex: string): number {
-  const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
-  const n = parseInt(h.slice(1), 16);
-  if (Number.isNaN(n)) return 0.7;
-  const r = ((n >> 16) & 255) / 255;
-  const g = ((n >> 8) & 255) / 255;
-  const b = (n & 255) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function spriteLuma(layer: LayerSpec, e: Entity): number {
-  const s = layer.sprite;
-  if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
-    return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
-  }
-  if (s.kind === 'text') return hexLuma(s.color ?? '#e6e8ef');
-  return 0.75; // emoji: mid-bright approximation
 }
 
 /**
@@ -618,11 +599,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
 
-  const bgMean = (() => {
-    const bg = spec.background;
-    if (!bg || bg.type === 'solid') return hexLuma(bg?.color ?? '#05050a');
-    return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
-  })();
+  const bgMean = backgroundLuma(spec);
 
 
   // Persistence smears every moving sprite into a ribbon of real visual mass —

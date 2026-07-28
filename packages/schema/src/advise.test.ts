@@ -22,6 +22,89 @@ describe('adviseSpec', () => {
     }
   });
 
+  it('warns when a layer is painted its own background colour', () => {
+    // The failure `invisible-layer` cannot catch: full radius, full alpha, and
+    // still unseeable because the colour matches the plate behind it.
+    const camouflaged: SaverSpec = {
+      ...base,
+      background: { type: 'gradient', stops: [{ at: 0, color: '#2b0a06' }, { at: 1, color: '#2b0a06' }] },
+      layers: [{
+        count: 30,
+        sprite: { kind: 'circle', radius: [20, 40], color: '#2b0a06' },
+        alpha: [1, 1],
+        motion: { type: 'drift', speed: [10, 30] },
+      }],
+    };
+    const warnings = adviseSpec(camouflaged);
+    expect(warnings.map((w) => w.code)).toContain('low-contrast-layer');
+    expect(warnings.find((w) => w.code === 'low-contrast-layer')!.path).toBe('layers[0].sprite');
+    // Not a size/alpha problem — the other invisibility check stays quiet.
+    expect(warnings.map((w) => w.code)).not.toContain('invisible-layer');
+  });
+
+  it('judges additive layers by the light they add, not their difference', () => {
+    // Under `lighter` a background-matched colour still brightens the plate, so
+    // the question is whether the layer has any light to contribute at all.
+    const bg = { type: 'gradient' as const, stops: [{ at: 0, color: '#101010' }, { at: 1, color: '#101010' }] };
+    const dim: SaverSpec = {
+      ...base,
+      background: bg,
+      layers: [{
+        count: 30,
+        sprite: { kind: 'circle', radius: [20, 40], color: '#050505' },
+        blend: 'lighter',
+        motion: { type: 'drift', speed: [10, 30] },
+      }],
+    };
+    expect(adviseSpec(dim).map((w) => w.code)).toContain('low-contrast-layer');
+
+    // A bright additive layer is fine even though it sits on a similar-luma
+    // plate — difference would have mis-flagged it.
+    const bright: SaverSpec = {
+      ...dim,
+      layers: [{ ...dim.layers[0]!, sprite: { kind: 'circle', radius: [20, 40], color: '#ff4a1c' } }],
+    };
+    expect(adviseSpec(bright).map((w) => w.code)).not.toContain('low-contrast-layer');
+  });
+
+  it('does not flag equal-luminance, contrasting-hue fields', () => {
+    // Pointillism: golden dots over a pale grey-blue plate. Only 0.013 apart in
+    // luma — a luminance-based check flags this, and it is perfectly visible.
+    // This test exists to stop anyone "simplifying" colourSeparation back to a
+    // luma difference.
+    const pointillist: SaverSpec = {
+      ...base,
+      background: {
+        type: 'gradient',
+        stops: [{ at: 0, color: '#d8e0e8' }, { at: 0.6, color: '#c8d0c0' }, { at: 1, color: '#9aa888' }],
+      },
+      layers: [{
+        count: 60,
+        sprite: { kind: 'circle', radius: [2, 12], color: '#e8c060' },
+        alpha: [0.7, 1],
+        motion: { type: 'drift', speed: [5, 15] },
+      }],
+    };
+    expect(adviseSpec(pointillist).map((w) => w.code)).not.toContain('low-contrast-layer');
+  });
+
+  it('does not flag faint-but-coloured atmosphere', () => {
+    // The schema actively recommends this pattern ("tiny soft circles at low
+    // alpha"); low opacity is `invisible-layer`'s axis, not this one.
+    const atmosphere: SaverSpec = {
+      ...base,
+      background: { type: 'gradient', stops: [{ at: 0, color: '#05050a' }, { at: 1, color: '#05050a' }] },
+      layers: [{
+        count: 80,
+        sprite: { kind: 'circle', radius: [12, 24], color: '#8fb4d8', soft: true },
+        alpha: [0.15, 0.25],
+        blend: 'lighter',
+        motion: { type: 'drift', speed: [5, 15] },
+      }],
+    };
+    expect(adviseSpec(atmosphere).map((w) => w.code)).not.toContain('low-contrast-layer');
+  });
+
   it('warns on dense scenes (> 500 entities)', () => {
     const dense: SaverSpec = {
       ...base,
