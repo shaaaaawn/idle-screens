@@ -36,9 +36,46 @@ export type MotionKind =
  */
 export interface ArtistStyleProfile {
   id: string;
+  /**
+   * `study` — a reading of an existing artist's style. Published, and so
+   *   assume every frontier model already has priors for the name. A high
+   *   score can't distinguish "read the DNA" from "recognised the artist".
+   * `house` — an original style with no prior anywhere. Only DNA-following can
+   *   score well on it, which is what makes it the held-out tier.
+   *
+   * Running both and diffing the medians estimates how much of a score is
+   * recall rather than instruction-following.
+   */
+  origin: 'study' | 'house';
+  /** Attribution source. For `house` styles this is us. */
   artist: string;
   movement: string;
   years: string;
+  /**
+   * Cover identity. `artist` is a RESEARCH label — it names the prompt, and it
+   * is what makes the dataset precise and citable. It is not a product name.
+   *
+   * Consumer surfaces (channels, spec labels, captions) use `publicName` /
+   * `channelId` instead, uniformly, for every style. Only `publicNaming`
+   * varies: whether the artist may ALSO be credited by name on that surface.
+   *
+   * See `idle-mono/docs/eval-publishing-spec.md` §5 and ACCREDITATION.md.
+   */
+  publicName: string;
+  /** `evals-<slug>`. The channel this style's screens play on. */
+  channelId: string;
+  /**
+   * Reviewed, never computed — jurisdiction rules differ and a wrong computed
+   * flag is worse than a recorded one. Default `descriptive-only`; promoted
+   * only after review.
+   */
+  publicNaming: 'artist-named' | 'descriptive-only';
+  /**
+   * FACTUAL only — "in copyright until 2059", "living artist". Never an
+   * assessment of a person: this file is in a public MIT repo, so a rationale
+   * here would be a published legal opinion. Reasoning lives in the mono.
+   */
+  publicNamingNote: string;
   research: {
     thesis: string;
     visualPrinciples: string[];

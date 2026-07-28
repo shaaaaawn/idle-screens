@@ -8,9 +8,14 @@ import type { ArtistStyleProfile } from './types';
 export const ARTISTS: ArtistStyleProfile[] = [
   {
     id: 'monet',
+    origin: 'study',
     artist: 'Claude Monet',
     movement: 'Impressionism',
     years: '1870s–1920s',
+    publicName: 'Impressionist Light',
+    channelId: 'evals-impressionist-light',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1926).',
     research: {
       thesis:
         'Light dissolves solid form into vibrating optical mixtures. Horizon and water are stages for color temperature shifts, not line drawings. Atmosphere is the subject.',
@@ -67,9 +72,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'van-gogh',
+    origin: 'study',
     artist: 'Vincent van Gogh',
     movement: 'Post-Impressionism',
     years: '1886–1890',
+    publicName: 'Turbulent Stroke',
+    channelId: 'evals-turbulent-stroke',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1890).',
     research: {
       thesis:
         'Emotion is carried by directional stroke energy and heightened complementary contrast. Night skies coil; cypresses rise like flames; yellow and blue argue.',
@@ -124,9 +134,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'seurat',
+    origin: 'study',
     artist: 'Georges Seurat',
     movement: 'Pointillism / Neo-Impressionism',
     years: '1880s',
+    publicName: 'Pointillist Field',
+    channelId: 'evals-pointillist-field',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1891).',
     research: {
       thesis:
         'Color is optical mixture from discrete dots. Contours emerge from density, not lines. Orderly stasis with scientific calm.',
@@ -180,9 +195,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'picasso',
+    origin: 'study',
     artist: 'Pablo Picasso',
     movement: 'Cubism',
     years: '1907–1914 (analytic peak)',
+    publicName: 'Analytic Facets',
+    channelId: 'evals-analytic-facets',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Life+70 term runs to 2044 (d. 1973).',
     research: {
       thesis:
         'Form is fractured into interlocking planes seen from multiple angles at once. Earth palette, shallow space, edges over atmosphere.',
@@ -221,17 +241,22 @@ export const ARTISTS: ArtistStyleProfile[] = [
     durableKeys: ['plane.facetCount', 'palette.earthness', 'space.shallowness', 'edge.sharpness'],
     signaturePrompts: [
       { id: 'sig-01', title: 'Analytic Still Life', intent: 'Interlocking ochre planes in shallow space.', recipe: 'geometric-planes' },
-      { id: 'sig-02', title: 'Fragmented Guitar', intent: 'Angular linked shards suggesting an instrument.', recipe: 'linked-web' },
-      { id: 'sig-03', title: 'Demoiselles Facets', intent: 'Hard-edge stacked figure-planes.', recipe: 'hard-edge-blocks' },
+      { id: 'sig-02', title: 'Fragmented Instrument', intent: 'Angular linked shards suggesting an instrument.', recipe: 'linked-web' },
+      { id: 'sig-03', title: 'Stacked Figure Planes', intent: 'Hard-edge stacked figure-planes.', recipe: 'hard-edge-blocks' },
       { id: 'sig-04', title: 'Studio Table', intent: 'Grid of fractured rectangles.', recipe: 'grid-lattice' },
       { id: 'sig-05', title: 'Angular Parade', intent: 'Bouncing planar marks as marching facets.', recipe: 'gesture-streaks' },
     ],
   },
   {
     id: 'kandinsky',
+    origin: 'study',
     artist: 'Wassily Kandinsky',
     movement: 'Abstract / Bauhaus',
     years: '1910s–1930s',
+    publicName: 'Abstract Counterpoint',
+    channelId: 'evals-abstract-counterpoint',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1944).',
     research: {
       thesis:
         'Inner necessity expressed as geometric–organic counterpoint: circles, lines, and points in musical tension. Color is chordal.',
@@ -279,9 +304,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'mondrian',
+    origin: 'study',
     artist: 'Piet Mondrian',
     movement: 'De Stijl',
     years: '1917–1944',
+    publicName: 'Primary Grid',
+    channelId: 'evals-primary-grid',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1944).',
     research: {
       thesis:
         'Universal harmony through orthogonal black scaffolding and primary color planes. No diagonals, no nature imitation — pure relation.',
@@ -327,9 +357,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'hokusai',
+    origin: 'study',
     artist: 'Katsushika Hokusai',
     movement: 'Ukiyo-e',
     years: '1820s–1830s (Thirty-six Views)',
+    publicName: 'Ukiyo-e Wave',
+    channelId: 'evals-ukiyo-wave',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1849).',
     research: {
       thesis:
         'Flat color planes, bold contour energy, and dramatic natural motifs (wave, mountain, spray) organized in layered bands of near/far.',
@@ -385,9 +420,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'klimt',
+    origin: 'study',
     artist: 'Gustav Klimt',
     movement: 'Art Nouveau / Vienna Secession',
     years: '1898–1918',
+    publicName: 'Gold Tessera',
+    channelId: 'evals-gold-tessera',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1918).',
     research: {
       thesis:
         'Ornament as gold-leaf pattern fields: tesserae, spirals, and erotic stillness. Figures dissolve into decorative mosaic.',
@@ -442,9 +482,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'rothko',
+    origin: 'study',
     artist: 'Mark Rothko',
     movement: 'Color Field / Abstract Expressionism',
     years: '1949–1970',
+    publicName: 'Color Field',
+    channelId: 'evals-color-field',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Life+70 term runs to 2041 (d. 1970).',
     research: {
       thesis:
         'Soft-edged rectangular color masses float in luminous fields. Scale and hush produce emotion; edges breathe; almost nothing moves.',
@@ -483,18 +528,23 @@ export const ARTISTS: ArtistStyleProfile[] = [
     ],
     durableKeys: ['field.warmth', 'edge.softness', 'stack.balance', 'breath.period'],
     signaturePrompts: [
-      { id: 'sig-01', title: 'No. 61 Stack', intent: 'Three soft stacked color masses breathing.', recipe: 'pulsing-atmosphere' },
-      { id: 'sig-02', title: 'Chapel Hush', intent: 'Near-black field with deep crimson focal glow.', recipe: 'focal-orb' },
+      { id: 'sig-01', title: 'Stacked Color Masses', intent: 'Three soft stacked color masses breathing.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-02', title: 'Dark Chamber Hush', intent: 'Near-black field with deep crimson focal glow.', recipe: 'focal-orb' },
       { id: 'sig-03', title: 'Ochre Veil', intent: 'Horizontal soft bands almost still.', recipe: 'horizon-band' },
       { id: 'sig-04', title: 'Magenta Float', intent: 'Sparse large soft planes.', recipe: 'geometric-planes' },
-      { id: 'sig-05', title: 'Seagram Breath', intent: 'Slow pulse atmosphere, minimal marks.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-05', title: 'Slow Breath', intent: 'Slow pulse atmosphere, minimal marks.', recipe: 'pulsing-atmosphere' },
     ],
   },
   {
     id: 'kusama',
+    origin: 'study',
     artist: 'Yayoi Kusama',
     movement: 'Contemporary / Infinity Net',
     years: '1960s–present',
+    publicName: 'Infinity Field',
+    channelId: 'evals-infinity-field',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Living artist.',
     research: {
       thesis:
         'Obliteration by dots: infinity rooms, nets, and polka-dot fields that erase the self into repetition. Playful, obsessive, immersive.',
@@ -533,18 +583,23 @@ export const ARTISTS: ArtistStyleProfile[] = [
     ],
     durableKeys: ['dot.density', 'palette.neon', 'infinity.depth', 'pulse.obsession'],
     signaturePrompts: [
-      { id: 'sig-01', title: 'Infinity Dots', intent: 'All-over obliterating polka-dot cosmos.', recipe: 'all-over-infinity' },
-      { id: 'sig-02', title: 'Obliteration Room', intent: 'Orbiting neon dots around a void core.', recipe: 'spiral-orbit' },
-      { id: 'sig-03', title: 'Net Pulse', intent: 'Linked high-density dots with wave pulse.', recipe: 'linked-web' },
-      { id: 'sig-04', title: 'Pumpkin Field', intent: 'Dense yellow/black dotted field.', recipe: 'field-of-marks' },
+      { id: 'sig-01', title: 'All-Over Dot Field', intent: 'All-over obliterating polka-dot cosmos.', recipe: 'all-over-infinity' },
+      { id: 'sig-02', title: 'Void Core Orbit', intent: 'Orbiting neon dots around a void core.', recipe: 'spiral-orbit' },
+      { id: 'sig-03', title: 'Dotted Net Pulse', intent: 'Linked high-density dots with wave pulse.', recipe: 'linked-web' },
+      { id: 'sig-04', title: 'Yellow-Black Dot Field', intent: 'Dense yellow/black dotted field.', recipe: 'field-of-marks' },
       { id: 'sig-05', title: 'Mirror Ball Atmosphere', intent: 'Pulsing neon atmosphere.', recipe: 'pulsing-atmosphere' },
     ],
   },
   {
     id: 'magritte',
+    origin: 'study',
     artist: 'René Magritte',
     movement: 'Surrealism',
     years: '1926–1967',
+    publicName: 'Deadpan Surreal',
+    channelId: 'evals-deadpan-surreal',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Life+70 term runs to 2038 (d. 1967).',
     research: {
       thesis:
         'Clarity used against itself: ordinary objects in impossible relations, clean daylight modeling, riddle-space rather than dream-blur.',
@@ -591,18 +646,23 @@ export const ARTISTS: ArtistStyleProfile[] = [
     ],
     durableKeys: ['uncanny.focal', 'sky.daylight', 'object.scale', 'space.emptiness'],
     signaturePrompts: [
-      { id: 'sig-01', title: 'Son of Man Sky', intent: 'Clear sky, green band, single floating focal object.', recipe: 'focal-orb' },
-      { id: 'sig-02', title: 'Empire of Light', intent: 'Day/night horizon paradox via band + pulse.', recipe: 'horizon-band' },
-      { id: 'sig-03', title: 'Golconde Drift', intent: 'Sparse repeated falling/drifting figures (emoji).', recipe: 'field-of-marks' },
-      { id: 'sig-04', title: 'Castle in Pyrenees', intent: 'Heavy focal mass floating over calm sea band.', recipe: 'focal-orb' },
+      { id: 'sig-01', title: 'Floating Object Sky', intent: 'Clear sky, green band, single floating focal object.', recipe: 'focal-orb' },
+      { id: 'sig-02', title: 'Day-Night Paradox', intent: 'Day/night horizon paradox via band + pulse.', recipe: 'horizon-band' },
+      { id: 'sig-03', title: 'Repeated Figure Drift', intent: 'Sparse repeated falling/drifting figures (emoji).', recipe: 'field-of-marks' },
+      { id: 'sig-04', title: 'Floating Stone Mass', intent: 'Heavy focal mass floating over calm sea band.', recipe: 'focal-orb' },
       { id: 'sig-05', title: 'Path of Clouds', intent: 'Path-choreographed soft clouds, deadpan pace.', recipe: 'rising-forms' },
     ],
   },
   {
     id: 'malevich',
+    origin: 'study',
     artist: 'Kazimir Malevich',
     movement: 'Suprematism',
     years: '1915–1920s',
+    publicName: 'Suprematist Plane',
+    channelId: 'evals-suprematist-plane',
+    publicNaming: 'artist-named',
+    publicNamingNote: 'Works are in the public domain (d. 1935).',
     research: {
       thesis:
         'Non-objective sensation: floating geometric figures on white infinite ground. Cross, square, circle — pure feeling in space.',
@@ -647,9 +707,14 @@ export const ARTISTS: ArtistStyleProfile[] = [
   },
   {
     id: 'okeeffe',
+    origin: 'study',
     artist: 'Georgia O\'Keeffe',
     movement: 'American Modernism',
     years: '1920s–1960s',
+    publicName: 'Magnified Bloom',
+    channelId: 'evals-magnified-bloom',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Life+70 term runs to 2057 (d. 1986).',
     research: {
       thesis:
         'Natural forms magnified to abstraction: petals, bones, desert cliffs. Soft gradients, sensual curves, monumental close-up scale.',
@@ -695,18 +760,23 @@ export const ARTISTS: ArtistStyleProfile[] = [
     ],
     durableKeys: ['form.magnification', 'palette.desert', 'edge.curveSoftness', 'focal.intimacy'],
     signaturePrompts: [
-      { id: 'sig-01', title: 'Jimson Bloom', intent: 'Large soft focal bloom with petal-like satellites.', recipe: 'focal-orb' },
+      { id: 'sig-01', title: 'Large Petal Bloom', intent: 'Large soft focal bloom with petal-like satellites.', recipe: 'focal-orb' },
       { id: 'sig-02', title: 'Desert Cliff Bands', intent: 'Horizontal warm bands as landscape abstraction.', recipe: 'horizon-band' },
-      { id: 'sig-03', title: 'Pelvis Sky', intent: 'Ring forms framing atmospheric sky.', recipe: 'spiral-orbit' },
-      { id: 'sig-04', title: 'Red Canna Rise', intent: 'Rising warm forms, magnified.', recipe: 'rising-forms' },
+      { id: 'sig-03', title: 'Ring Forms Sky', intent: 'Ring forms framing atmospheric sky.', recipe: 'spiral-orbit' },
+      { id: 'sig-04', title: 'Rising Petal Forms', intent: 'Rising warm forms, magnified.', recipe: 'rising-forms' },
       { id: 'sig-05', title: 'Cloudscape Soft', intent: 'Pulsing soft atmosphere, sparse.', recipe: 'pulsing-atmosphere' },
     ],
   },
   {
     id: 'basquiat',
+    origin: 'study',
     artist: 'Jean-Michel Basquiat',
     movement: 'Neo-Expressionism',
     years: '1981–1988',
+    publicName: 'Neo-Expressive Scrawl',
+    channelId: 'evals-neo-expressive-scrawl',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Life+70 term runs to 2059 (d. 1988).',
     research: {
       thesis:
         'Raw graffiti energy: crowns, scrawled text, anatomical fragments, frantic layering on restless grounds. Urban tempo, crown as heraldic focal.',
@@ -748,16 +818,21 @@ export const ARTISTS: ArtistStyleProfile[] = [
     signaturePrompts: [
       { id: 'sig-01', title: 'Crown Herald', intent: 'Crown emoji focal amid chaotic marks.', recipe: 'focal-orb' },
       { id: 'sig-02', title: 'Untitled Scrawl', intent: 'Text + streak gesture field.', recipe: 'gesture-streaks' },
-      { id: 'sig-03', title: 'Anatomy Layer Cake', intent: 'Dense multi-layer urban energy.', recipe: 'field-of-marks' },
-      { id: 'sig-04', title: 'SAMO Pulse', intent: 'Linked chaotic web of accents.', recipe: 'linked-web' },
-      { id: 'sig-05', title: 'Skull Bounce', intent: 'Bouncing emoji/marks on dark ground.', recipe: 'all-over-infinity' },
+      { id: 'sig-03', title: 'Layered Urban Density', intent: 'Dense multi-layer urban energy.', recipe: 'field-of-marks' },
+      { id: 'sig-04', title: 'Tag Pulse', intent: 'Linked chaotic web of accents.', recipe: 'linked-web' },
+      { id: 'sig-05', title: 'Bouncing Glyph Field', intent: 'Bouncing emoji/marks on dark ground.', recipe: 'all-over-infinity' },
     ],
   },
   {
     id: 'riley',
+    origin: 'study',
     artist: 'Bridget Riley',
     movement: 'Op Art',
     years: '1960s–',
+    publicName: 'Optical Pulse',
+    channelId: 'evals-optical-pulse',
+    publicNaming: 'descriptive-only',
+    publicNamingNote: 'Living artist.',
     research: {
       thesis:
         'Perception is the medium: periodic structures induce vibration, warp, and afterimage. Precision grids and waves; motion is optical, not narrative.',
@@ -796,11 +871,11 @@ export const ARTISTS: ArtistStyleProfile[] = [
     ],
     durableKeys: ['period.frequency', 'contrast.optical', 'wave.angle', 'field.precision'],
     signaturePrompts: [
-      { id: 'sig-01', title: 'Movement in Squares', intent: 'Precision grid with optical pulse wave.', recipe: 'grid-lattice' },
-      { id: 'sig-02', title: 'Current Wave', intent: 'Streak field with traveling pulse.', recipe: 'gesture-streaks' },
-      { id: 'sig-03', title: 'Cataract Vibration', intent: 'Dense linked chains vibrating.', recipe: 'linked-web' },
-      { id: 'sig-04', title: 'Blaze Study', intent: 'All-over high-contrast dots/lines.', recipe: 'all-over-infinity' },
-      { id: 'sig-05', title: 'Arrest Atmosphere', intent: 'Pulsing optical atmosphere, controlled.', recipe: 'pulsing-atmosphere' },
+      { id: 'sig-01', title: 'Optical Grid Pulse', intent: 'Precision grid with optical pulse wave.', recipe: 'grid-lattice' },
+      { id: 'sig-02', title: 'Traveling Wave Streaks', intent: 'Streak field with traveling pulse.', recipe: 'gesture-streaks' },
+      { id: 'sig-03', title: 'Vibrating Chains', intent: 'Dense linked chains vibrating.', recipe: 'linked-web' },
+      { id: 'sig-04', title: 'High-Contrast All-Over', intent: 'All-over high-contrast dots/lines.', recipe: 'all-over-infinity' },
+      { id: 'sig-05', title: 'Controlled Optical Atmosphere', intent: 'Pulsing optical atmosphere, controlled.', recipe: 'pulsing-atmosphere' },
     ],
   },
 ];
