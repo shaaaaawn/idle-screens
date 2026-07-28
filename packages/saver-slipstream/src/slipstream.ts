@@ -158,6 +158,11 @@ class SlipstreamInstance implements SaverInstance {
   private bAngle = 0;
   private bSpeed = 1;
 
+  /** Prefix-sum cache for the advection phase integral (see `phaseAt`). */
+  private phiBucket = -1;
+  private phiBase = 0;
+  private phiCurSpeed = 1;
+
   private frameId: number | null = null;
   private paused = false;
   private startT = 0;
@@ -245,6 +250,38 @@ class SlipstreamInstance implements SaverInstance {
   private gustAt(p: Params, t: number): number {
     const g = p.gustiness;
     return 1 + g * (0.45 * Math.sin(t * 0.00021) + 0.3 * Math.sin(t * 0.00047 + 1.3) + 0.25 * Math.sin(t * 0.00009 + 4.2));
+  }
+
+  /** The wind speed a flow bucket was built with — sampled at its centre. */
+  private bucketSpeed(b: number): number {
+    const tc = b * FLOW_BUCKET_MS + FLOW_BUCKET_MS / 2;
+    const p = this.paramsAt(tc);
+    return p.windSpeed * this.gustAt(p, tc);
+  }
+
+  /**
+   * Cumulative advection phase: ∫ S(bucket(u)) du, where S is the per-bucket
+   * wind speed. Dashes and dust used to advance by `t * currentBucketSpeed`,
+   * which teleports every mote by t·ΔS at each bucket boundary — a twitch
+   * that GREW with uptime. The integral is continuous across buckets and
+   * still a pure function of t: the prefix sum grounds at bucket 0, so a cold
+   * seek rebuilds it exactly (O(buckets), a few sines each — cheap even for
+   * hour-deep seeks); steady playback pays O(1) per bucket.
+   */
+  private phaseAt(t: number): number {
+    const b = Math.floor(t / FLOW_BUCKET_MS);
+    if (b !== this.phiBucket) {
+      if (this.phiBucket >= 0 && b === this.phiBucket + 1) {
+        this.phiBase += this.phiCurSpeed * FLOW_BUCKET_MS;
+      } else {
+        let phi = 0;
+        for (let k = 0; k < b; k++) phi += this.bucketSpeed(k) * FLOW_BUCKET_MS;
+        this.phiBase = phi;
+      }
+      this.phiCurSpeed = this.bucketSpeed(b);
+      this.phiBucket = b;
+    }
+    return this.phiBase + this.phiCurSpeed * (t - b * FLOW_BUCKET_MS);
   }
 
   /**
@@ -539,7 +576,7 @@ class SlipstreamInstance implements SaverInstance {
       const dashLen = 34;
       const gapLen = 26;
       const cycle = dashLen + gapLen;
-      const flow = t * 0.11 * this.bSpeed;
+      const flow = this.phaseAt(t) * 0.11;
       ctx.setLineDash([dashLen, gapLen]);
       // Two passes per line: a wide soft underglow, then a bright core — the
       // dashes read as travelling light, not hairline scratches. A single 1px
@@ -564,10 +601,11 @@ class SlipstreamInstance implements SaverInstance {
 
       // Dust: motes advected along the cached polylines by arc-length offset —
       // real particle advection with zero per-frame integration.
+      const phi = this.phaseAt(t);
       for (const d of this.dust) {
         const ln = this.lines[Math.min(this.lines.length - 1, Math.floor(d.lane * this.lines.length))]!;
         if (ln.n < 2 || ln.len <= 0) continue;
-        const s = ((d.s0 + (t * 0.00006 * d.speed * this.bSpeed)) % 1 + 1) % 1;
+        const s = ((d.s0 + (phi * 0.00006 * d.speed)) % 1 + 1) % 1;
         const f = s * (ln.n - 1);
         const k = Math.floor(f);
         const frac = f - k;
@@ -609,6 +647,8 @@ class SlipstreamInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.flowBucket = -1; // the cache is param-dependent; force a rebuild
+    this.phiBucket = -1; // the phase prefix sum is too
+    this.phiBase = 0;
     if (this.paused) this.renderStill();
   }
 

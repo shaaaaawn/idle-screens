@@ -169,6 +169,38 @@ describe('slipstream: the page is the boundary condition', () => {
     host.remove();
   });
 
+  it('the advection phase is continuous across flow buckets and pure in t', () => {
+    const { host, page } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+    inst.applyTrack?.(demoTrack); // gusty, so bucket speeds genuinely differ
+
+    const phaseAt = (i: Frameable, t: number): number =>
+      (i as unknown as { phaseAt(t: number): number }).phaseAt(t);
+
+    // Continuity: dashes/dust used to advance by t * bucketSpeed, teleporting
+    // by t·ΔS at every boundary (worse the longer the saver ran). The phase
+    // integral may only advance by ~speed·dt across a boundary.
+    const maxSpeed = 3 * 2; // windSpeed ceiling × gust ceiling
+    for (const edge of [240, 480, 60_000, 600_000]) {
+      const before = phaseAt(inst, edge - 1);
+      const after = phaseAt(inst, edge + 1);
+      expect(after, `phase advances at t=${edge}`).toBeGreaterThan(before);
+      expect(after - before, `no teleport at t=${edge}`).toBeLessThan(maxSpeed * 2 + 0.01);
+    }
+
+    // Purity: a played-through instance and a cold seek agree exactly.
+    const played = phaseAt(inst, 30_000);
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    expect(phaseAt(cold, 30_000)).toBeCloseTo(played, 6);
+
+    inst.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.transform = 'translateY(2px)';
