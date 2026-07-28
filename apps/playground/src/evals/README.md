@@ -87,7 +87,7 @@ spec labels, channel ids, captions — goes through `public-identity.ts` and use
 ## Skill + loop
 
 - Skill: `idle-screens/.claude/skills/artistic-style-schema-eval/`
-- Loop: `idle-mono/loops/artistic-style-eval/`
+- Loop: `idle-mono/loops/evals-converge/`
 
 ## Next-cycle contract
 
