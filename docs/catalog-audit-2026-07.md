@@ -29,7 +29,7 @@ this one is the curator's ledger.*
 | spotlight | canvas2d | 0 | ✗ | ✓ | ✓ | params + upgrade to victim-aware PT (P7) |
 | bouncing-ball | css | 0 | ✗ | ✗ | ✓ | canvas port + squash/stretch params (P8) |
 | bsod | css | 0 | ✗ | ✗ | ✗ | keep DOM (it *is* a screenshot); add screens params (P9) |
-| pipes | canvas2d | 0 | ✗ | ✓ | n/a | params; renderFrame hard (accumulative) — document why (P10) |
+| pipes | canvas2d | 2 | ✓ | ✓ | n/a | DONE (July 2026): compiled-plan rewrite — renderFrame, tempo/density params, demo track. The audit's "renderFrame hard (accumulative)" was wrong; the catwalk's compile-the-history pattern applies to any seeded accumulation. |
 | mystify | canvas2d | 0 | ✗ | ✓ | ✓ | params (polygon count, trail, palette) (P11) |
 | fluid | canvas2d/gpu | 0 | ✗ | ✓(cpu) | n/a | params (emitters, palette); renderFrame impossible — document (P12) |
 | reaction-diffusion | canvas2d/gpu | 0 | ✗ | ✓(cpu) | n/a | same as fluid (P12) |
