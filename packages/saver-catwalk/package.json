@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/saver-catwalk",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Passthrough cat screensaver for idle-screens: a silhouette cat parkours across the live page's own blocks — perches dip and spring under its weight, it naps on the warm ones. Seeded itinerary, paramSpace, control-track, frame-addressable.",
   "license": "MIT",
   "author": "Shawn Partridge",
