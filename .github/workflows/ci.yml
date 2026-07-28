@@ -27,7 +27,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test:coverage
-      - name: Install Playwright
+      # Browsers live in ~/.cache/ms-playwright. Cache them by Playwright version
+      # so we skip the ~150–400MB Chromium download on hit. OS libs are NOT in
+      # that cache — always run install-deps on hit (apt, usually seconds).
+      # Official guidance: caching is optional; measured install here is ~25s cold.
+      # There is no usable "built-in Playwright" on ubuntu-latest; the closest
+      # built-in is system Google Chrome via channel:'chrome' (see playwright.config).
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}-chromium
+      - name: Install Playwright Chromium + OS deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
+      - name: Install Playwright OS deps only
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @idle-screens/playground exec playwright install-deps chromium
       - name: E2E (element + savers + determinism + config menu)
         run: pnpm test:e2e

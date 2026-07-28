@@ -120,6 +120,8 @@ export interface SaverInstance {
 export interface SaverManifest {
   id: string;
   label: string;
+  /** One-line summary for catalogs / agent tooling (e.g. MCP `listSavers`). */
+  description?: string;
   passthrough?: boolean;
   minBackend?: 'css' | 'canvas2d' | 'webgl2' | 'webgpu';
   costTier?: 'idle' | 'low' | 'medium' | 'high';

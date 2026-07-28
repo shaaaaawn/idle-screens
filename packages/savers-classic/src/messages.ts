@@ -49,6 +49,7 @@ const PARAM_SPACE = {
 export const messagesManifest: SaverManifest = {
   id: 'messages',
   label: 'Messages',
+  description: 'Typeset phrases cross the screen. Two modes: "fade" (appear and dissolve) and "drift" (travelling text — the former Messages II). Steerable: phrase, mode, speed, textScale, ink, glow, trail.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

@@ -70,6 +70,7 @@ const PARAM_SPACE = {
 export const flurryManifest: SaverManifest = {
   id: 'flurry',
   label: 'Flurry',
+  description: 'Smooth flowing particle trails like macOS Flurry.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

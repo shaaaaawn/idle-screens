@@ -47,6 +47,7 @@ type Params = Record<keyof typeof PARAM_SPACE, number>;
 export const mystifyManifest: SaverManifest = {
   id: 'mystify',
   label: 'Mystify',
+  description: 'Drifting polygons leave fading trails. Inspired by Windows Mystify.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

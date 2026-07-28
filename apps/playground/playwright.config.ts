@@ -12,7 +12,22 @@ export default defineConfig({
     baseURL: 'http://localhost:5177',
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      // Hermetic Playwright Chromium (CI caches ~/.cache/ms-playwright).
+      // To skip the browser download entirely and use the Google Chrome that
+      // ships on ubuntu-latest runners, set PLAYWRIGHT_CHROME_CHANNEL=chrome
+      // and drop `playwright install` (keep install-deps if needed). Tradeoff:
+      // less hermetic — Chrome version tracks the runner image, not PW.
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(process.env.PLAYWRIGHT_CHROME_CHANNEL
+          ? { channel: process.env.PLAYWRIGHT_CHROME_CHANNEL as 'chrome' | 'chromium' | 'msedge' }
+          : {}),
+      },
+    },
+  ],
   webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:5177',

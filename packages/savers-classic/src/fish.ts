@@ -12,6 +12,7 @@ import { BUBBLES, FISH, SEAFLOOR } from './fish-assets';
 export const fishManifest: SaverManifest = {
   id: 'fish',
   label: 'Fish Aquarium',
+  description: 'Emoji fish swim back and forth in a dark aquarium.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',

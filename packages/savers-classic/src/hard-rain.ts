@@ -18,6 +18,7 @@ import type {
 export const hardRainManifest: SaverManifest = {
   id: 'hard-rain',
   label: 'Hard Rain',
+  description: 'Dense vertical rain with splash effects.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

@@ -19,6 +19,7 @@ import type {
 export const rainstormManifest: SaverManifest = {
   id: 'rainstorm',
   label: 'Rainstorm',
+  description: 'Diagonal rain streaks with varying speed and opacity.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

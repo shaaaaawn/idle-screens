@@ -14,6 +14,7 @@ import type {
 export const bouncingBallManifest: SaverManifest = {
   id: 'bouncing-ball',
   label: 'Bouncing Ball',
+  description: 'A ball bounces around the screen.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',
