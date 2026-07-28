@@ -179,7 +179,9 @@ export function structuralSignature(spec: SaverSpec): string {
           ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
           : l.sprite.kind === 'text'
             ? [l.sprite.strings.length, l.sprite.cycle?.period]
-            : undefined,
+            : l.sprite.kind === 'textBlock'
+              ? [l.sprite.fontSize]
+              : undefined,
       ];
     }),
   ]);

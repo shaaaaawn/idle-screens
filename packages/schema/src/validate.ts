@@ -20,6 +20,7 @@ const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'col
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
 const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
@@ -62,6 +63,14 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");
+  }
+  if (spec.units === 'px' && Array.isArray(spec.layers)) {
+    for (const l of spec.layers) {
+      if (isObj(l) && isObj((l as Record<string, unknown>).sprite) && ((l as Record<string, unknown>).sprite as Record<string, unknown>).kind === 'textBlock') {
+        err('units', "textBlock dimensions are viewport fractions — units: 'px' is not supported with textBlock sprites");
+        break;
+      }
+    }
   }
   if (spec.referenceViewport !== undefined) {
     if (!isNum(spec.referenceViewport) || spec.referenceViewport < 100 || spec.referenceViewport > 8640) {
@@ -380,8 +389,28 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     }
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'textBlock') {
+    knownSet = KNOWN_TEXT_BLOCK;
+    if (typeof sprite.text !== 'string' || sprite.text.length === 0) {
+      err(`${path}.text`, 'must be a non-empty string');
+    } else if (sprite.text.length > LIMITS.maxTextBlockLength) {
+      err(`${path}.text`, `must be at most ${LIMITS.maxTextBlockLength} characters`);
+    }
+    if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
+      err(`${path}.maxWidth`, `must be a positive number up to ${LIMITS.maxTextBlockMaxWidth} (viewport fraction)`);
+    }
+    if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
+      err(`${path}.fontSize`, `must be between ${LIMITS.minTextBlockFontSize} and ${LIMITS.maxTextBlockFontSize} (viewport fraction)`);
+    }
+    if (sprite.lineHeight !== undefined && (!isNum(sprite.lineHeight) || sprite.lineHeight < 0.5 || sprite.lineHeight > 4)) {
+      err(`${path}.lineHeight`, 'must be between 0.5 and 4 (multiplier)');
+    }
+    if (sprite.align !== undefined && !['left', 'center', 'right'].includes(sprite.align as string)) {
+      err(`${path}.align`, "must be 'left' | 'center' | 'right'");
+    }
+    if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
     return;
   }
 

@@ -196,7 +196,24 @@ export type SpriteSpec =
    * range; `aspect` the height/width ratio range (default [1,1] = squares).
    * Mondrian blocks, confetti, city lights.
    */
-  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; colors?: string[]; colorWeights?: number[] };
+  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; colors?: string[]; colorWeights?: number[] }
+  /**
+   * Multi-line text block with deterministic line-breaking. Unlike `text` (one
+   * string drawn as a single fillText call), `textBlock` wraps `text` within
+   * `maxWidth` using a fixed metrics table so line breaks are identical across
+   * platforms (same seed → same frames). All dimensions are viewport-fraction
+   * (of `min(w,h)`), not px — addresses the absolute-font-size inconsistency.
+   * Use with `count: 1`, `motion: { type: 'static' }`, and `position`.
+   */
+  | {
+      kind: 'textBlock';
+      text: string;
+      maxWidth: number;
+      fontSize: number;
+      lineHeight?: number;
+      align?: 'left' | 'center' | 'right';
+      color?: string;
+    };
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
 export interface CycleSpec {
@@ -309,4 +326,8 @@ export const LIMITS = {
   maxPathPoints: 24,
   minPathDuration: 2000, // ms — a path lap can't be faster than this
   maxGridColumns: 100,
+  maxTextBlockLength: 2000,
+  minTextBlockFontSize: 0.01,
+  maxTextBlockFontSize: 0.2,
+  maxTextBlockMaxWidth: 1.0,
 } as const;

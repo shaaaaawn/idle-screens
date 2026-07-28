@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
-import { buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
 import { LIMITS, type SaverSpec, type SpecWarning } from './types';
 
 /**
@@ -44,7 +44,7 @@ export function adviseSpec(
     const entities = allEntities[li]!;
     totalEntities += entities.length;
 
-    const isText = layer.sprite.kind === 'text';
+    const isText = layer.sprite.kind === 'text' || layer.sprite.kind === 'textBlock';
     const isStaticText = isText && layer.motion.type === 'static';
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
@@ -119,9 +119,18 @@ export function adviseSpec(
     const entities = allEntities[li]!;
     for (const e of entities) {
       const r = e.size / 2;
-      const pixArea = layer.sprite.kind === 'circle'
-        ? Math.PI * r * r
-        : e.size * e.size; // text/emoji: approximate as square of font size
+      let pixArea: number;
+      if (layer.sprite.kind === 'circle') {
+        pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'textBlock') {
+        const fsPx = layer.sprite.fontSize * scale;
+        const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
+        const maxWPx = layer.sprite.maxWidth * scale;
+        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx);
+        pixArea = maxWPx * lines.length * lh * 0.55;
+      } else {
+        pixArea = e.size * e.size; // text/emoji: approximate as square of font size
+      }
       totalCoverage += (pixArea * e.alpha) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).

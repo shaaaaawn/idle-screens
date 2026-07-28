@@ -320,6 +320,21 @@
             "colorWeights": { "$ref": "#/definitions/colorWeights" }
           },
           "description": "Axis-aligned rectangle (rotates with spin) — Mondrian blocks, confetti, city lights."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "text", "maxWidth", "fontSize"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "textBlock" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "The text to render. Explicit \\n forces a line break." },
+            "maxWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 1.0, "description": "Block width as a viewport fraction of min(w,h)." },
+            "fontSize": { "type": "number", "minimum": 0.01, "maximum": 0.2, "description": "Font size as a viewport fraction of min(w,h)." },
+            "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 4, "description": "Line-height multiplier (like CSS). Default 1.4." },
+            "align": { "enum": ["left", "center", "right"], "description": "Text alignment within the block. Default 'left'." },
+            "color": { "$ref": "#/definitions/hexColor" }
+          },
+          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
         }
       ]
     },

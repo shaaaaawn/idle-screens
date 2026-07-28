@@ -7,7 +7,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, validateSpec } from './validate';
-import { alphaAt, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -263,7 +263,7 @@ class SpecInstance implements SaverInstance {
     const sprite = built.layer.sprite;
     const resolvedColor = sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect'
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
-      : sprite.kind === 'text' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
+      : sprite.kind === 'text' || sprite.kind === 'textBlock' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
     const wrap = built.layer.wrap !== false;
 
@@ -375,6 +375,28 @@ class SpecInstance implements SaverInstance {
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'textBlock') {
+      const unitScale = Math.min(this.w, this.h);
+      const fsPx = sprite.fontSize * unitScale;
+      const lh = (sprite.lineHeight ?? 1.4) * fsPx;
+      const maxWPx = sprite.maxWidth * unitScale;
+      const maxWEm = maxWPx / fsPx;
+      const lines = breakTextBlock(sprite.text, maxWEm);
+      const align = sprite.align ?? 'left';
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      ctx.font = `${fsPx}px system-ui, sans-serif`;
+      ctx.fillStyle = sprite.color ?? '#e6e8ef';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = align;
+      const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li]!.text, xOff, li * lh);
+      }
       ctx.restore();
       return;
     }
