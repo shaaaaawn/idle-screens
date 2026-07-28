@@ -188,6 +188,76 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     expect(swatted, 'some seed bats the chip').toBe(true);
   });
 
+  it('the entrance: at t=0 there is no cat — it walks in, gathers, and its first leap lands at loop-time 0', () => {
+    const { host, page, victims } = makePage();
+    const inst = mount(ctx(host, page));
+
+    const anyInst = inst as any;
+    const E = anyInst.entrance as { xStart: number; walkD: number; crouchD: number; dur: number };
+    expect(E, 'an itinerary compiles an entrance').toBeTruthy();
+    expect(E.dur).toBeGreaterThan(1500);
+
+    // Prologue poses in order: offscreen start → walk → crouch → jump.
+    expect(anyInst.entranceAt(0).x < 0 || anyInst.entranceAt(0).x > W, 'starts offscreen').toBe(true);
+    expect(anyInst.entranceAt(E.walkD - 10).state).toBe('walk');
+    expect(anyInst.entranceAt(E.walkD + 300).state).toBe('crouch');
+    expect(anyInst.entranceAt(E.dur - 50).state).toBe('jump');
+
+    // The arc's endpoint IS the loop's first landing point.
+    const arrive = anyInst.entranceAt(E.dur);
+    const land = anyInst.catAt(0);
+    expect(land.state).toBe('land');
+    expect(Math.abs(arrive.x - land.x)).toBeLessThan(0.5);
+
+    // The stage rests until the cat has arrived: no perch deforms mid-prologue.
+    for (let t = 0; t < E.dur - 20; t += 250) {
+      inst.renderFrame(t, 7);
+      expect(victims.every((el) => el.style.transform === ''), `calm page at t=${t}`).toBe(true);
+    }
+    // ...and the first landing rings the perch immediately after.
+    inst.renderFrame(E.dur + 450, 7);
+    expect(victims.some((el) => el.style.transform.startsWith('translateY'))).toBe(true);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  it('the purr: the lamplight pool breathes while the cat sleeps or kneads', () => {
+    // Personality decides whether a seed sleeps/kneads — probe a few seeds.
+    let found = false;
+    for (const seed of [3, 7, 9, 11, 23, 42]) {
+      const { host, page } = makePage();
+      const inst = mount({ ...ctx(host, page), rng: createRng(seed), seed });
+
+      const anyInst = inst as any;
+      const vis = (anyInst.visits as { action: string; tA: number; tD: number }[])
+        .find((v) => (v.action === 'sleep' || v.action === 'knead') && v.tD - v.tA > 3600);
+      if (!vis) { inst.dispose(); host.remove(); continue; }
+      found = true;
+
+      // Record the warmth gradient's inner stop across the dwell.
+      const alphas: number[] = [];
+      const g = { addColorStop: (_o: number, c: string) => {
+        const m = /^rgba\(255,214,150,([\d.]+)\)$/.exec(c);
+        if (m) alphas.push(Number(m[1]));
+      } };
+      anyInst.ctx.createRadialGradient = () => g;
+      const E = anyInst.entrance as { dur: number } | null;
+      const off = E ? E.dur : 0;
+      for (let tt = vis.tA + 1700; tt < vis.tD - 1500; tt += 90) {
+        inst.renderFrame(tt + off, seed);
+      }
+      expect(alphas.length).toBeGreaterThan(0);
+      const spread = Math.max(...alphas) - Math.min(...alphas);
+      expect(spread, 'the pool visibly breathes').toBeGreaterThan(0.02);
+
+      inst.dispose();
+      host.remove();
+      break;
+    }
+    expect(found, 'some probed seed sleeps or kneads long enough to purr').toBe(true);
+  });
+
   it('perch memory and zoomies appear across the seed population', () => {
     let sawFavorite = false;
     let sawZoomies = false;
