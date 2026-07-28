@@ -19,6 +19,7 @@ import {
   type AgentRun,
   type AgentRunTarget,
 } from './agent-run';
+import { persistAgentRun, SINK_ENABLED } from './artifact-sink';
 import type { AgentScreenArtifact } from './agent-artifact';
 import {
   mountAgentScopeControls,
@@ -147,6 +148,11 @@ export async function runAgentEvalInteractive(opts: {
       },
     });
     saveAgentRun(run);
+    // localStorage keeps 5 runs and evicts silently; disk is the durable copy.
+    void persistAgentRun(run).then((r) => {
+      if (r.ok) addLog(`  ▪ saved to ${r.path}`);
+      else if (SINK_ENABLED) addLog(`  ▪ disk save failed: ${r.error}`);
+    });
     return run.artifacts.length ? run : null;
   } finally {
     disposed = true;
@@ -364,6 +370,10 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
 
     if (!disposed) {
       saveAgentRun(run);
+      void persistAgentRun(run).then((r) => {
+        if (r.ok) addLog(`  ▪ saved to ${r.path}`);
+        else if (SINK_ENABLED) addLog(`  ▪ disk save failed: ${r.error}`);
+      });
       renderResults(run);
     }
   };
