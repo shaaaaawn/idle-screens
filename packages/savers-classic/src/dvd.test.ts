@@ -22,6 +22,7 @@ function stubContext2D(canvas: HTMLCanvasElement, log: unknown[]): CanvasRenderi
     lineTo: rec('lineTo'),
     quadraticCurveTo: rec('quadraticCurveTo'),
     arc: rec('arc'),
+    ellipse: rec('ellipse'),
     fill: rec('fill'),
     stroke: rec('stroke'),
     fillText: rec('fillText'),

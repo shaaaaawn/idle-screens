@@ -65,8 +65,8 @@ export const dvdManifest: SaverManifest = {
     notes: 'Hue steps once per wall hit and a brief corner burst on exact corner hits; no strobing.',
   },
   attribution: {
-    source: 'DVD player idle screen + After Dark logo bounce — concepts',
-    license: 'MIT, original implementation; no third-party assets',
+    source: 'DVD player idle screen + After Dark logo bounce — concepts. The DVD-Video logo is a trademark of DVD FLLC',
+    license: 'MIT, original implementation; logo drawn from scratch as nostalgic homage (the bouncing-DVD meme) — no third-party assets',
   },
   workerReady: true,
 };
@@ -241,22 +241,33 @@ class DvdInstance implements SaverInstance {
     c.closePath();
   }
 
-  /** The classic mark: a rounded pill with a bold italic "DVD" wordmark drawn
-   *  from paths/text — no trademarked disc/video-strip asset, just the shape
-   *  language the original evoked. */
+  /** The classic mark, as the meme remembers it: heavy italic "DVD" letters
+   *  over the wide disc ellipse with its centre hole. Drawn entirely from
+   *  text + ellipse paths — no imported asset. The DVD-Video logo shape is a
+   *  trademark of the DVD Format/Logo Licensing Corp; it appears here as the
+   *  nostalgic bouncing-logo homage (see CREDITS.md). */
   private drawDvd(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
-    this.roundRectPath(c, x, y, w, h, h * 0.24);
-    c.fillStyle = color;
-    c.fill();
+    // The letters. Real-logo proportions: the wordmark fills the top ~2/3.
     c.save();
-    c.translate(x + w / 2, y + h / 2);
-    c.rotate(-0.06); // a slight lean stands in for italic, without a matrix transform
-    c.fillStyle = '#04050a';
-    c.font = `900 ${Math.round(h * 0.6)}px "Arial Black", Arial, sans-serif`;
+    c.fillStyle = color;
+    c.font = `italic 900 ${Math.round(h * 0.66)}px "Arial Black", Arial, sans-serif`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillText('DVD', 0, 0);
+    c.fillText('DVD', x + w / 2, y + h * 0.32);
     c.restore();
+
+    // The disc: a wide flat ellipse under the letters, hole knocked out with
+    // the background ink (the field is always #04050a — see render()).
+    const cx = x + w / 2;
+    const cy = y + h * 0.8;
+    c.fillStyle = color;
+    c.beginPath();
+    c.ellipse(cx, cy, w * 0.5, h * 0.155, 0, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#04050a';
+    c.beginPath();
+    c.ellipse(cx, cy, w * 0.115, h * 0.052, 0, 0, Math.PI * 2);
+    c.fill();
   }
 
   private drawWordmark(c: Ctx2D, x: number, y: number, w: number, h: number, color: string): void {
@@ -422,10 +433,11 @@ export const dvdDemoTrack: ControlTrack = {
   duration: 16_000,
   loop: true,
   deltas: [
+    // The DVD logo IS the act; the other marks get a quick tour at the end.
     { t: 0, path: 'mark', value: 'dvd' },
-    { t: 4000, path: 'mark', value: 'diamond' },
-    { t: 8000, path: 'mark', value: 'ring' },
-    { t: 12_000, path: 'mark', value: 'idle-screens' },
+    { t: 10_000, path: 'mark', value: 'diamond' },
+    { t: 12_000, path: 'mark', value: 'ring' },
+    { t: 14_000, path: 'mark', value: 'idle-screens' },
     { t: 0, path: 'hue', value: 110 },
     { t: 8000, path: 'hue', value: 280, ease: 'smooth' },
     { t: 16_000, path: 'hue', value: 110, ease: 'smooth' },
