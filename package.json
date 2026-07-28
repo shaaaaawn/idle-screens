@@ -38,7 +38,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@playwright/test": "^1.62.0",
-    "@types/node": "^22.10.2",
+    "@types/node": "^22.20.1",
     "@vitest/coverage-v8": "^4.1.10",
     "@webgpu/types": "^0.1.71",
     "eslint": "^10.8.0",
