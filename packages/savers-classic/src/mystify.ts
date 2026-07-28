@@ -47,6 +47,7 @@ type Params = Record<keyof typeof PARAM_SPACE, number>;
 export const mystifyManifest: SaverManifest = {
   id: 'mystify',
   label: 'Mystify',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

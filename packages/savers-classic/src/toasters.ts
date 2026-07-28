@@ -13,6 +13,7 @@ import type { SaverContext, SaverInstance, SaverManifest, SaverPlugin } from '@i
 export const toastersManifest: SaverManifest = {
   id: 'toasters',
   label: 'Flying Toasters',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',
   costTier: 'low',

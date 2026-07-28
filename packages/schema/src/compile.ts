@@ -77,6 +77,9 @@ export function manifestFor(spec: SaverSpec): SaverManifest {
   return {
     id: spec.id,
     label: spec.label,
+    // Declarative specs are closed-form by construction: every entity is a
+    // pure function of (seed, t), which is the whole point of the format.
+    timeModel: 'closed-form',
     passthrough: false,
     minBackend: 'canvas2d',
     costTier,

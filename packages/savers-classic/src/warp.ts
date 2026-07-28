@@ -40,6 +40,7 @@ const PARAM_SPACE = {
 export const warpManifest: SaverManifest = {
   id: 'warp',
   label: 'Warp',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

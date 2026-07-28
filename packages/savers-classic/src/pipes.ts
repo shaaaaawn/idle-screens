@@ -56,6 +56,7 @@ type Params = Record<keyof typeof PARAM_SPACE, number>;
 export const pipesManifest: SaverManifest = {
   id: 'pipes',
   label: 'Pipes',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

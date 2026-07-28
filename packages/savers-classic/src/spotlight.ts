@@ -10,6 +10,7 @@ import type {
 export const spotlightManifest: SaverManifest = {
   id: 'spotlight',
   label: 'Spotlight',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'low',

@@ -11,6 +11,7 @@ import {
 export const reactionDiffusionManifest: SaverManifest = {
   id: 'reaction-diffusion',
   label: 'Reaction Diffusion',
+  timeModel: 'simulated',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

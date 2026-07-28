@@ -12,6 +12,7 @@ import { BUBBLES, FISH, SEAFLOOR } from './fish-assets';
 export const fishManifest: SaverManifest = {
   id: 'fish',
   label: 'Fish Aquarium',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'css',
   costTier: 'low',

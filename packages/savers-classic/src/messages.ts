@@ -49,6 +49,7 @@ const PARAM_SPACE = {
 export const messagesManifest: SaverManifest = {
   id: 'messages',
   label: 'Messages',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',
