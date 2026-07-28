@@ -1,5 +1,12 @@
 # @idle-screens/saver-black-hole
 
+## 3.0.1
+
+### Patch Changes
+
+- Updated dependencies [3a10f2c]
+  - @idle-screens/core@0.4.1
+
 ## 3.0.0
 
 ### Patch Changes

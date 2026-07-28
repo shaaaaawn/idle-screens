@@ -1,5 +1,19 @@
 # @idle-screens/saver-catwalk
 
+## 1.1.0
+
+### Minor Changes
+
+- 3a10f2c: Entrance prologue: the cat walks in from off-page and settles under lamplight
+  before the itinerary loop begins, so the first seconds feel like a curtain rise
+  rather than a mid-loop cut. The purr-adjacent lamplight pool follows the walk-in
+  so the landing perch is readable from the first frame.
+
+### Patch Changes
+
+- Updated dependencies [3a10f2c]
+  - @idle-screens/core@0.4.1
+
 ## 1.0.0
 
 ### Minor Changes
