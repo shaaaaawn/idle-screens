@@ -136,21 +136,19 @@ include a changeset in that PR.
 
 ### Release flow
 
-**Process playbook (inner→outer→develop):** `idle-mono/scripts/RELEASE.md`
-Helpers: `scripts/release.sh cut|dual-land|guide`.
+**Process playbook (promote-from-develop, no freeze):** `idle-mono/scripts/RELEASE.md`
+Helpers: `scripts/release.sh cut|promote|dual-land|guide`. Research canvas: `agentic-releases`.
 
 ```
-# INNER — green develop tip first (discover failures here, not on GitHub):
+# INNER — green Cut-From SHA; agents keep landing on develop afterward:
 make preflight X=screens ARGS=--e2e
-scripts/release.sh cut <slug>          # if squash-diverged; else PR develop→main
+scripts/release.sh cut <slug>          # snapshot; record Cut-From on the PR
 
-# OUTER — push only after local green; dual-land any CI fix onto develop:
-#   scripts/release.sh dual-land <sha>
-develop / release/* PR (changesets when npm packages changed)
-    → merge-commit to main (prefer not squash)
-release.yml → "version packages" PR → npm
+# OUTER — babysit CI; on red fix develop then promote (not dual-land first):
+#   scripts/release.sh promote <sha>
+release/* PR → merge-commit → version packages → npm
 
-# BACK — sync develop ← main (ff or metadata-only); never leave release-only fixes
+# BACK — metadata-sync only; mid-train develop commits = next cut
 ```
 
 On the same `main` push, GitHub Pages deploys the playground independently.
