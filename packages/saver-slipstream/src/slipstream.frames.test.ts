@@ -201,6 +201,32 @@ describe('slipstream: the page is the boundary condition', () => {
     h2.remove();
   });
 
+  it('page lean is continuous across a flow-bucket boundary', () => {
+    const { host, page, victims } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+    inst.applyTrack?.(demoTrack); // wind genuinely changing bucket to bucket
+
+    const rot = (el: HTMLElement): number =>
+      Number(/rotate\((-?[\d.]+)deg\)/.exec(el.style.transform)?.[1] ?? '0');
+
+    // The lean used to come from the bucket wind snapshot, so every block
+    // stepped at each 240ms boundary. Live wind means a 2ms hop across the
+    // boundary moves a block no more than a 2ms hop inside one.
+    const el = victims[0] as HTMLElement;
+    inst.renderFrame(15_119, 23);
+    const inside = rot(el);
+    inst.renderFrame(15_121, 23); // same bucket
+    const insideStep = Math.abs(rot(el) - inside);
+    inst.renderFrame(15_359, 23);
+    const before = rot(el);
+    inst.renderFrame(15_361, 23); // crosses the 15_360 boundary
+    const acrossStep = Math.abs(rot(el) - before);
+    expect(acrossStep, 'no per-bucket tick').toBeLessThan(Math.max(insideStep * 4, 0.05));
+
+    inst.dispose();
+    host.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.transform = 'translateY(2px)';

@@ -672,8 +672,15 @@ class SlipstreamInstance implements SaverInstance {
     this.t = t;
     this.applyParams(t);
     this.ensureFlow(t);
-    const ax = Math.cos(this.bAngle) * this.bSpeed;
-    const ay = Math.sin(this.bAngle) * this.bSpeed;
+    // The page leans with the LIVE wind, not the bucket snapshot the line
+    // cache was built with — the snapshot steps every FLOW_BUCKET_MS, which
+    // ticked every block 4x a second. The lines' geometry drifts at most a
+    // bucket behind; the lean being continuous matters far more than the two
+    // agreeing to the millisecond.
+    const angle = this.windAngleAt(this.params, t);
+    const speed = this.params.windSpeed * this.gustAt(this.params, t);
+    const ax = Math.cos(angle) * speed;
+    const ay = Math.sin(angle) * speed;
     for (const v of this.victims) this.applyVictim(v, t, ax, ay);
     this.render(t);
   }
