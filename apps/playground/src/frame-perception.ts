@@ -50,7 +50,8 @@ export interface FramePerception {
   /** Whole-frame motion, only when the saver is frame-addressable. */
   motion: FrameMotion | null;
   support: FrameSupport;
-  /** Why this saver is unsupported, when it is. */
+  /** Why this saver is unsupported — or, for 'sampled', why the numbers may
+   *  move run to run (derived from `manifest.timeModel` when declared). */
   reason?: string;
 }
 
@@ -267,8 +268,15 @@ function canvasIn(host: HTMLElement): HTMLCanvasElement | null {
  */
 export function wirePerceptionHarness(savers: SaverPlugin[]): void {
   (window as unknown as { __perceive?: unknown }).__perceive = {
-    list: (): Array<{ id: string; label: string; hasSpec: boolean }> =>
-      savers.map((s) => ({ id: s.manifest.id, label: s.manifest.label, hasSpec: false })),
+    list: (): Array<{ id: string; label: string; hasSpec: boolean; timeModel?: 'closed-form' | 'simulated' }> =>
+      savers.map((s) => ({
+        id: s.manifest.id,
+        label: s.manifest.label,
+        hasSpec: false,
+        // Exposed so tests/tools can derive capability expectations from the
+        // manifest instead of maintaining hand lists of saver ids.
+        timeModel: s.manifest.timeModel,
+      })),
     saver: (id: string, opts?: PerceiveFrameOptions): Promise<FramePerception> => {
       const saver = savers.find((s) => s.manifest.id === id);
       if (!saver) return Promise.reject(new Error(`unknown saver: ${id}`));
@@ -393,14 +401,33 @@ export async function perceiveSaverFrame(
 
     const grid = gridFromImageData(img);
 
-    // Second sample for motion. Only meaningful when the saver is
-    // frame-addressable — otherwise the two grabs are separated by whatever
-    // wall-clock happened to elapse, which is not a measurement.
+    // Support marries the API (renderFrame's presence) with the manifest's
+    // semantic claim. A saver that exposes renderFrame while declaring
+    // timeModel 'simulated' must NOT be certified deterministic — frames that
+    // depend on history make the reading a sample of this run, whatever the
+    // API shape. No catalog saver has that combination today; this guard is
+    // what keeps perception honest the day one does.
+    const timeModel = saver.manifest.timeModel;
+    const deterministic = addressable && timeModel !== 'simulated';
+
+    // Second sample for motion. Only meaningful when the reading is
+    // deterministic — otherwise the two grabs are separated by whatever
+    // wall-clock happened to elapse (or by simulation history), which is not
+    // a measurement.
     let motion: FrameMotion | null = null;
-    if (addressable) {
+    if (deterministic) {
       inst.renderFrame!(t + MOTION_DT, seed);
       motion = motionBetween(grid, gridFromImageData(ctx.getImageData(0, 0, canvas.width, canvas.height)), MOTION_DT);
       inst.renderFrame!(t, seed); // leave the surface on the requested frame
+    }
+    let reason: string | undefined;
+    if (!deterministic) {
+      reason =
+        timeModel === 'simulated'
+          ? 'Declares timeModel "simulated": state evolves by real integration, so this reading is a sample of one run — numbers move run to run.'
+          : timeModel === 'closed-form'
+            ? 'Motion is closed-form but not frame-addressable (no renderFrame); sampled from the live run at wall-clock time.'
+            : undefined;
     }
 
     return {
@@ -414,7 +441,8 @@ export async function perceiveSaverFrame(
       t,
       colors: dominantColors(img),
       motion,
-      support: addressable ? 'deterministic' : 'sampled',
+      support: deterministic ? 'deterministic' : 'sampled',
+      ...(reason ? { reason } : {}),
     };
   } catch (err) {
     return empty('unsupported', `Mount failed: ${err instanceof Error ? err.message : String(err)}`);
