@@ -9,6 +9,7 @@ import {
   type SaverInfo,
 } from '@idle-screens/capabilities';
 import { formatBackendLabel } from './preview-backend';
+import { escapeHtml } from './html';
 
 export interface DebugContext {
   saver: SaverPlugin | null;
@@ -31,11 +32,11 @@ const toInfo = (s: SaverPlugin): SaverInfo => ({
 
 function chip(label: string, on: boolean, title?: string): string {
   const cls = on ? 'dbg-chip on' : 'dbg-chip';
-  return `<span class="${cls}"${title ? ` title="${title}"` : ''}>${label}</span>`;
+  return `<span class="${cls}"${title ? ` title="${escapeHtml(title)}"` : ''}>${label}</span>`;
 }
 
 function stat(label: string, value: string, title?: string): string {
-  return `<span class="dbg-stat"${title ? ` title="${title}"` : ''}><span class="dbg-k">${label}</span><span class="dbg-v">${value}</span></span>`;
+  return `<span class="dbg-stat"${title ? ` title="${escapeHtml(title)}"` : ''}><span class="dbg-k">${label}</span><span class="dbg-v">${value}</span></span>`;
 }
 
 function eligClass(status: SaverEligibility['status']): string {
