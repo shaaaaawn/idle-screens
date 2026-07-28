@@ -1,6 +1,6 @@
 # @idle-screens/savers-classic
 
-## 4.0.0
+## 3.2.0
 
 ### Minor Changes
 
@@ -16,7 +16,7 @@
   per-saver capability lists. Catalog savers declare theirs; the playground
   properties panel surfaces the claim.
 - Updated dependencies [bae7b6b]
-  - @idle-screens/core@0.5.0
+  - @idle-screens/core@0.4.2
 
 ## 3.1.0
 

@@ -107,10 +107,26 @@ consumer-facing changes in any publishable package:
 
 | Change | Typical package(s) | Bump |
 | --- | --- | --- |
-| Engine / element / worker API | `@idle-screens/core` | minor or patch |
-| New or changed saver | `@idle-screens/savers-classic` or one of the `saver-*` packages | minor |
-| Schema format or compiler | `@idle-screens/schema` | minor (breaking → major) |
+| Engine / element / worker API | `@idle-screens/core` | **patch while core is 0.x**; minor only after 1.0.0 |
+| New or changed saver | `@idle-screens/savers-classic` or one of the `saver-*` packages | minor (feature) / patch (fix) |
+| Schema format or compiler | `@idle-screens/schema` | minor (additive) / major **only** for intentional breaks |
 | Validator or capabilities API | `@idle-screens/validator` or `@idle-screens/capabilities` | minor or patch |
+
+### Critical: `0.x` core minors cascade fake majors
+
+Changesets treats a **`minor` bump on a `0.x` package as breaking** for dependents
+(semver: `^0.4.0` does not include `0.5.0`). So a changeset like
+`'@idle-screens/core': minor` forces **major** bumps on schema, savers-classic,
+black-hole, catwalk, etc. — even when those packages' own changesets say
+`minor`/`patch`. That is why changelogs showed `## 4.0.0` / `## 3.0.0` under
+"### Minor Changes" (#34, #44).
+
+**Rule while `@idle-screens/core` is below 1.0.0:** every core changeset must be
+`patch` (features and fixes). Do not file `minor` or `major` on core unless you
+intentionally want a catalog-wide major cascade.
+
+**Graduation:** when ready, ship one planned `major` on core → `1.0.0`, accept
+one dependent major wave, then `minor` means minor again.
 
 One changeset per release batch is fine — summarize the whole npm-facing delta in
 a single file. Run `pnpm changeset` interactively, or author the markdown by

@@ -1,8 +1,8 @@
 # @idle-screens/core
 
-## 0.5.0
+## 0.4.2
 
-### Minor Changes
+### Patch Changes
 
 - bae7b6b: `SaverManifest.timeModel` (`'closed-form' | 'simulated'`) — a semantic claim
   about how the saver relates to time, so tooling can prefer it over hardcoded
