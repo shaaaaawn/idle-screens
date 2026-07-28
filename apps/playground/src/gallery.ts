@@ -61,6 +61,13 @@ export interface GalleryHandle {
    * tab is hidden; turning it back on restores per-visibility playback.
    */
   setPlaying(on: boolean): void;
+  /**
+   * The USER's own pause, kept separate from the gate above. Routing both
+   * through one flag would mean navigating away and back silently undoes a
+   * deliberate pause — the top bar would then disagree with what is on screen.
+   */
+  toggleUserPaused(): boolean;
+  isPlaying(): boolean;
 }
 
 interface CardRec {
@@ -79,6 +86,7 @@ export function buildGallery(mount: HTMLElement, groups: GalleryGroup[], opts: G
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let playing = true;
+  let userPaused = false;
   let query = '';
   let groupFilter = 'all';
 
@@ -174,7 +182,7 @@ export function buildGallery(mount: HTMLElement, groups: GalleryGroup[], opts: G
 
   // ---- playback gating ---------------------------------------------------
   const sync = (rec: CardRec): void => {
-    const on = playing && rec.visible && !document.hidden;
+    const on = playing && !userPaused && rec.visible && !document.hidden;
     rec.inst?.setPaused(!on);
     // Mirrored onto the DOM so playback state is assertable from e2e without
     // pixel-diffing canvases.
@@ -297,6 +305,12 @@ export function buildGallery(mount: HTMLElement, groups: GalleryGroup[], opts: G
       playing = on;
       syncAll();
     },
+    toggleUserPaused() {
+      userPaused = !userPaused;
+      syncAll();
+      return !userPaused;
+    },
+    isPlaying: () => playing && !userPaused,
   };
 }
 

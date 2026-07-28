@@ -117,6 +117,28 @@ interface Dust {
   ph: number;
 }
 
+/** How many quiet frames the next bucket's integration is spread across. */
+const PREBUILD_FRAMES = 10;
+
+/** An in-progress streamline build for one bucket (see `startBuild`). */
+interface FlowBuild {
+  bucket: number;
+  lines: Streamline[];
+  done: number;
+  total: number;
+  angle: number;
+  speed: number;
+  ax: number;
+  ay: number;
+  px: number;
+  py: number;
+  diag: number;
+  cx: number;
+  cy: number;
+  wobble: number[];
+  obstacles: Obstacle[];
+}
+
 interface Victim {
   el: HTMLElement;
   cx: number;
@@ -152,11 +174,18 @@ class SlipstreamInstance implements SaverInstance {
   private dust: Dust[] = [];
 
   private lines: Streamline[] = [];
+  private prevLines: Streamline[] = [];
+  private pending: FlowBuild | null = null;
   private flowBucket = -1;
   /** Wind snapshot the cached lines were built with — reused per frame so the
    *  page's lean matches the lines exactly. */
   private bAngle = 0;
   private bSpeed = 1;
+
+  /** Prefix-sum cache for the advection phase integral (see `phaseAt`). */
+  private phiBucket = -1;
+  private phiBase = 0;
+  private phiCurSpeed = 1;
 
   private frameId: number | null = null;
   private paused = false;
@@ -247,6 +276,38 @@ class SlipstreamInstance implements SaverInstance {
     return 1 + g * (0.45 * Math.sin(t * 0.00021) + 0.3 * Math.sin(t * 0.00047 + 1.3) + 0.25 * Math.sin(t * 0.00009 + 4.2));
   }
 
+  /** The wind speed a flow bucket was built with — sampled at its centre. */
+  private bucketSpeed(b: number): number {
+    const tc = b * FLOW_BUCKET_MS + FLOW_BUCKET_MS / 2;
+    const p = this.paramsAt(tc);
+    return p.windSpeed * this.gustAt(p, tc);
+  }
+
+  /**
+   * Cumulative advection phase: ∫ S(bucket(u)) du, where S is the per-bucket
+   * wind speed. Dashes and dust used to advance by `t * currentBucketSpeed`,
+   * which teleports every mote by t·ΔS at each bucket boundary — a twitch
+   * that GREW with uptime. The integral is continuous across buckets and
+   * still a pure function of t: the prefix sum grounds at bucket 0, so a cold
+   * seek rebuilds it exactly (O(buckets), a few sines each — cheap even for
+   * hour-deep seeks); steady playback pays O(1) per bucket.
+   */
+  private phaseAt(t: number): number {
+    const b = Math.floor(t / FLOW_BUCKET_MS);
+    if (b !== this.phiBucket) {
+      if (this.phiBucket >= 0 && b === this.phiBucket + 1) {
+        this.phiBase += this.phiCurSpeed * FLOW_BUCKET_MS;
+      } else {
+        let phi = 0;
+        for (let k = 0; k < b; k++) phi += this.bucketSpeed(k) * FLOW_BUCKET_MS;
+        this.phiBase = phi;
+      }
+      this.phiCurSpeed = this.bucketSpeed(b);
+      this.phiBucket = b;
+    }
+    return this.phiBase + this.phiCurSpeed * (t - b * FLOW_BUCKET_MS);
+  }
+
   /**
    * Analytic velocity at a point: uniform wind + one doublet per obstacle
    * (potential flow past a cylinder), plus a soft repulsion INSIDE a cylinder
@@ -255,10 +316,10 @@ class SlipstreamInstance implements SaverInstance {
    * and does not need to be. It is exact far from everything, divergence-free,
    * and visually parts around each block.
    */
-  private velocity(x: number, y: number, ax: number, ay: number, out: [number, number]): void {
+  private velocity(obstacles: Obstacle[], x: number, y: number, ax: number, ay: number, out: [number, number]): void {
     let vx = ax;
     let vy = ay;
-    for (const o of this.obstacles) {
+    for (const o of obstacles) {
       const dx = x - o.cx;
       const dy = y - o.cy;
       const r2 = dx * dx + dy * dy;
@@ -286,6 +347,7 @@ class SlipstreamInstance implements SaverInstance {
     this.victims = [];
     this.obstacles = [];
     this.flowBucket = -1;
+    this.pending = null; // built against the old obstacle set
     const page = this.ctxSaver.page;
     if (!page) return;
     let els = page.victims(VICTIM_SELECTOR);
@@ -349,45 +411,94 @@ class SlipstreamInstance implements SaverInstance {
   // ---- streamlines (cached per flow bucket) ----
 
   /**
-   * Rebuild the streamline cache for a bucket. Pure in the bucket index: wind
-   * angle/speed are sampled at the bucket's centre time, seeds come from a
-   * bucket-independent fork, and the integrator is fixed-step.
+   * Keep the line cache pointed at `t`'s bucket, and the PREVIOUS bucket's
+   * lines alongside it so the draw can crossfade — the geometry used to snap
+   * to its new shape every FLOW_BUCKET_MS, a 4Hz pop across the whole field.
+   * Both sets are pure in their bucket index, so seeking rebuilds the pair.
    */
   private ensureFlow(t: number): void {
     const bucket = Math.floor(t / FLOW_BUCKET_MS);
-    if (bucket === this.flowBucket) return;
+    if (bucket === this.flowBucket) {
+      // Quiet frame: integrate a slice of the NEXT bucket's lines now, so
+      // the boundary never pays the whole rebuild in one frame. The prebuilt
+      // set is bit-identical to a synchronous build (same params, same fork
+      // sequence), so determinism is untouched.
+      if (!this.pending || this.pending.bucket !== bucket + 1) {
+        this.pending = this.startBuild(bucket + 1);
+      }
+      if (this.pending.done < this.pending.total) {
+        this.advanceBuild(this.pending, Math.max(2, Math.ceil(this.pending.total / PREBUILD_FRAMES)));
+      }
+      return;
+    }
+    if (this.flowBucket >= 0 && bucket === this.flowBucket + 1) {
+      this.prevLines = this.lines;
+      const pend = this.pending;
+      if (pend && pend.bucket === bucket) {
+        this.advanceBuild(pend, pend.total); // sync-finish any stragglers
+        this.lines = pend.lines;
+        this.bAngle = pend.angle;
+        this.bSpeed = pend.speed;
+        this.pending = null;
+        this.flowBucket = bucket;
+        return;
+      }
+    } else {
+      this.prevLines = bucket > 0 ? this.buildFlow(bucket - 1).lines : [];
+    }
+    this.pending = null;
+    const cur = this.buildFlow(bucket);
+    this.lines = cur.lines;
+    this.bAngle = cur.angle;
+    this.bSpeed = cur.speed;
     this.flowBucket = bucket;
+  }
 
+  /**
+   * Open one bucket's build. Pure in the bucket index: wind angle/speed are
+   * sampled at the bucket's centre time, every line's seeded wobble is drawn
+   * up front (so partial builds consume the fork in the same order a full
+   * one does), and obstacles are snapshotted with this bucket's clearance.
+   */
+  private startBuild(bucket: number): FlowBuild {
     const tc = bucket * FLOW_BUCKET_MS + FLOW_BUCKET_MS / 2;
     const p = this.paramsAt(tc);
     const angle = this.windAngleAt(p, tc);
-    const speed = p.windSpeed * this.gustAt(p, tc);
-    this.bAngle = angle;
-    this.bSpeed = speed;
-
-    // Apply clearance by scaling obstacle radii for this bucket's integration.
-    const scaled = this.obstacles.map((o) => ({ cx: o.cx, cy: o.cy, r: o.r * p.clearance }));
-    const saved = this.obstacles;
-    this.obstacles = scaled;
-
     const ax = Math.cos(angle);
     const ay = Math.sin(angle);
-    // Seed line starts along the upwind edge, spread across the crosswind axis.
-    const px = -ay;
-    const py = ax;
-    const diag = Math.hypot(this.w, this.h);
-    const cx = this.w / 2;
-    const cy = this.h / 2;
-    const nLines = Math.round(p.lineCount);
+    const total = Math.round(p.lineCount);
     const lineRng = this.ctxSaver.rng.fork(0x51eea);
+    const wobble: number[] = new Array(total);
+    for (let i = 0; i < total; i++) wobble[i] = lineRng.next();
+    return {
+      bucket,
+      lines: new Array<Streamline>(total),
+      done: 0,
+      total,
+      angle,
+      speed: p.windSpeed * this.gustAt(p, tc),
+      ax,
+      ay,
+      px: -ay,
+      py: ax,
+      diag: Math.hypot(this.w, this.h),
+      cx: this.w / 2,
+      cy: this.h / 2,
+      wobble,
+      obstacles: this.obstacles.map((o) => ({ cx: o.cx, cy: o.cy, r: o.r * p.clearance })),
+    };
+  }
 
-    const lines: Streamline[] = new Array(nLines);
+  /** Integrate lines [done, done+count) of an open build. Fixed-step RK2. */
+  private advanceBuild(b: FlowBuild, count: number): void {
     const v: [number, number] = [0, 0];
-    for (let i = 0; i < nLines; i++) {
+    const end = Math.min(b.total, b.done + count);
+    for (; b.done < end; b.done++) {
+      const i = b.done;
       // Even spacing with a seeded wobble, so lines don't read as a grid.
-      const frac = (i + 0.5) / nLines - 0.5 + (lineRng.next() - 0.5) * (0.6 / nLines);
-      const sx = cx - ax * diag * 0.62 + px * frac * diag * 1.1;
-      const sy = cy - ay * diag * 0.62 + py * frac * diag * 1.1;
+      const frac = (i + 0.5) / b.total - 0.5 + (b.wobble[i]! - 0.5) * (0.6 / b.total);
+      const sx = b.cx - b.ax * b.diag * 0.62 + b.px * frac * b.diag * 1.1;
+      const sy = b.cy - b.ay * b.diag * 0.62 + b.py * frac * b.diag * 1.1;
 
       const pts = new Float32Array(MAX_STEPS * 2);
       let n = 0;
@@ -398,12 +509,12 @@ class SlipstreamInstance implements SaverInstance {
         pts[n * 2 + 1] = y;
         n++;
         // RK2 midpoint step, fixed length so arc-length ≈ n * STEP_PX.
-        this.velocity(x, y, ax, ay, v);
+        this.velocity(b.obstacles, x, y, b.ax, b.ay, v);
         let m = Math.hypot(v[0], v[1]);
         if (m < 1e-4) break;
         const mx = x + (v[0] / m) * STEP_PX * 0.5;
         const my = y + (v[1] / m) * STEP_PX * 0.5;
-        this.velocity(mx, my, ax, ay, v);
+        this.velocity(b.obstacles, mx, my, b.ax, b.ay, v);
         m = Math.hypot(v[0], v[1]);
         if (m < 1e-4) break;
         x += (v[0] / m) * STEP_PX;
@@ -422,7 +533,7 @@ class SlipstreamInstance implements SaverInstance {
             break;
           }
         }
-        const margin = diag * 0.25;
+        const margin = b.diag * 0.25;
         if (x < -margin || x > this.w + margin || y < -margin || y > this.h + margin) {
           // One more point so the line exits the frame cleanly.
           if (n < MAX_STEPS) {
@@ -433,11 +544,15 @@ class SlipstreamInstance implements SaverInstance {
           break;
         }
       }
-      lines[i] = { pts, n, len: (n - 1) * STEP_PX };
+      b.lines[i] = { pts, n, len: (n - 1) * STEP_PX };
     }
+  }
 
-    this.obstacles = saved;
-    this.lines = lines;
+  /** Build one bucket's streamlines synchronously (the seek path). */
+  private buildFlow(bucket: number): { lines: Streamline[]; angle: number; speed: number } {
+    const b = this.startBuild(bucket);
+    this.advanceBuild(b, b.total);
+    return { lines: b.lines, angle: b.angle, speed: b.speed };
   }
 
   // ---- the wind acts on the page ----
@@ -447,9 +562,12 @@ class SlipstreamInstance implements SaverInstance {
    * wake feels the deflected wind, not the free stream — and shiver the small
    * ones. Hinged at the base like grass. Pure in `t`.
    */
+  /** Scratch for applyVictim — 90 victims/frame is real allocator churn. */
+  private readonly velScratch: [number, number] = [0, 0];
+
   private applyVictim(v: Victim, t: number, ax: number, ay: number): void {
-    const vel: [number, number] = [0, 0];
-    this.velocity(v.cx, v.cy, ax, ay, vel);
+    const vel = this.velScratch;
+    this.velocity(this.obstacles, v.cx, v.cy, ax, ay, vel);
     const p = this.params;
     const gust = this.gustAt(p, t);
     const strength = p.windSpeed * gust;
@@ -539,48 +657,78 @@ class SlipstreamInstance implements SaverInstance {
       const dashLen = 34;
       const gapLen = 26;
       const cycle = dashLen + gapLen;
-      const flow = t * 0.11 * this.bSpeed;
+      const phi = this.phaseAt(t);
+      const flow = phi * 0.11;
+
+      // Crossfade weight into the current bucket's geometry: the outgoing
+      // set fades as the incoming one rises, so the field REFORMS instead of
+      // snapping 4x a second. Pure in t (flowBucket is derived from t).
+      // 90ms keeps the double-draw window to ~1/3 of each bucket — the fade
+      // hides the pop; it does not need to linger.
+      const FADE_MS = 90;
+      const k = this.prevLines.length
+        ? smooth01(clamp((t - this.flowBucket * FLOW_BUCKET_MS) / FADE_MS, 0, 1))
+        : 1;
+
       ctx.setLineDash([dashLen, gapLen]);
       // Two passes per line: a wide soft underglow, then a bright core — the
       // dashes read as travelling light, not hairline scratches. A single 1px
-      // pass at low alpha was invisible over any real content.
-      for (const [width, gain] of [[3.2, 0.4], [1.3, 1]] as const) {
-        ctx.lineWidth = width;
-        for (let i = 0; i < this.lines.length; i++) {
-          const ln = this.lines[i]!;
-          if (ln.n < 2) continue;
-          // Neighbouring lines breathe out of phase so the field shimmers.
-          const a = lop * gain * (0.34 + 0.16 * Math.sin(t * 0.0006 + i * 1.7));
-          if (a <= 0.008) continue;
-          ctx.strokeStyle = this.lineColor(a);
-          ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
-          ctx.beginPath();
-          ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
-          for (let k = 1; k < ln.n; k++) ctx.lineTo(ln.pts[k * 2]!, ln.pts[k * 2 + 1]!);
-          ctx.stroke();
+      // pass at low alpha was invisible over any real content. The OUTGOING
+      // set gets the core pass only; at its fading alpha the underglow is
+      // invisible and the strokes are the expensive part of this saver.
+      const strokeSet = (lines: Streamline[], scale: number, wide: boolean): void => {
+        if (scale <= 0.02 || !lines.length) return;
+        const passes: ReadonlyArray<readonly [number, number]> = wide
+          ? [[3.2, 0.4], [1.3, 1]]
+          : [[1.3, 1]];
+        for (const [width, gain] of passes) {
+          ctx.lineWidth = width;
+          for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i]!;
+            if (ln.n < 2) continue;
+            // Neighbouring lines breathe out of phase so the field shimmers.
+            const a = scale * lop * gain * (0.34 + 0.16 * Math.sin(t * 0.0006 + i * 1.7));
+            if (a <= 0.008) continue;
+            ctx.strokeStyle = this.lineColor(a);
+            ctx.lineDashOffset = -(flow % cycle) - i * 13.7;
+            ctx.beginPath();
+            ctx.moveTo(ln.pts[0]!, ln.pts[1]!);
+            for (let m = 1; m < ln.n; m++) ctx.lineTo(ln.pts[m * 2]!, ln.pts[m * 2 + 1]!);
+            ctx.stroke();
+          }
         }
-      }
+      };
+      strokeSet(this.prevLines, 1 - k, false);
+      strokeSet(this.lines, k, true);
       ctx.setLineDash([]);
 
       // Dust: motes advected along the cached polylines by arc-length offset —
-      // real particle advection with zero per-frame integration.
-      for (const d of this.dust) {
-        const ln = this.lines[Math.min(this.lines.length - 1, Math.floor(d.lane * this.lines.length))]!;
-        if (ln.n < 2 || ln.len <= 0) continue;
-        const s = ((d.s0 + (t * 0.00006 * d.speed * this.bSpeed)) % 1 + 1) % 1;
-        const f = s * (ln.n - 1);
-        const k = Math.floor(f);
-        const frac = f - k;
-        const x = ln.pts[k * 2]! + (ln.pts[Math.min(k + 1, ln.n - 1) * 2]! - ln.pts[k * 2]!) * frac;
-        const y = ln.pts[k * 2 + 1]! + (ln.pts[Math.min(k + 1, ln.n - 1) * 2 + 1]! - ln.pts[k * 2 + 1]!) * frac;
-        if (x < -10 || x > this.w + 10 || y < -10 || y > this.h + 10) continue;
-        const fade = Math.sin(s * Math.PI) * (0.5 + 0.5 * Math.sin(t * 0.0011 + d.ph));
-        if (fade <= 0.03) continue;
-        ctx.fillStyle = this.lineColor(0.5 * fade * lop * 1.6);
-        ctx.beginPath();
-        ctx.arc(x, y, d.size, 0, TAU);
-        ctx.fill();
-      }
+      // real particle advection with zero per-frame integration. Dust rides
+      // the CURRENT set only, at full weight: with the phase integral its
+      // per-bucket hop is just the geometry delta (a few px at most), and
+      // drawing 160 motes twice for a third of every bucket cost more than
+      // the hop was worth.
+      const drawDust = (lines: Streamline[], scale: number): void => {
+        if (scale <= 0.03 || !lines.length) return;
+        for (const d of this.dust) {
+          const ln = lines[Math.min(lines.length - 1, Math.floor(d.lane * lines.length))]!;
+          if (ln.n < 2 || ln.len <= 0) continue;
+          const s = ((d.s0 + (phi * 0.00006 * d.speed)) % 1 + 1) % 1;
+          const f = s * (ln.n - 1);
+          const ki = Math.floor(f);
+          const frac = f - ki;
+          const x = ln.pts[ki * 2]! + (ln.pts[Math.min(ki + 1, ln.n - 1) * 2]! - ln.pts[ki * 2]!) * frac;
+          const y = ln.pts[ki * 2 + 1]! + (ln.pts[Math.min(ki + 1, ln.n - 1) * 2 + 1]! - ln.pts[ki * 2 + 1]!) * frac;
+          if (x < -10 || x > this.w + 10 || y < -10 || y > this.h + 10) continue;
+          const fade = Math.sin(s * Math.PI) * (0.5 + 0.5 * Math.sin(t * 0.0011 + d.ph));
+          if (fade <= 0.03) continue;
+          ctx.fillStyle = this.lineColor(0.5 * fade * lop * 1.6 * scale);
+          ctx.beginPath();
+          ctx.arc(x, y, d.size, 0, TAU);
+          ctx.fill();
+        }
+      };
+      drawDust(this.lines, 1);
       ctx.globalCompositeOperation = 'source-over';
     }
   }
@@ -609,6 +757,9 @@ class SlipstreamInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.flowBucket = -1; // the cache is param-dependent; force a rebuild
+    this.pending = null; // as is any half-built next bucket
+    this.phiBucket = -1; // the phase prefix sum is too
+    this.phiBase = 0;
     if (this.paused) this.renderStill();
   }
 
@@ -632,8 +783,15 @@ class SlipstreamInstance implements SaverInstance {
     this.t = t;
     this.applyParams(t);
     this.ensureFlow(t);
-    const ax = Math.cos(this.bAngle) * this.bSpeed;
-    const ay = Math.sin(this.bAngle) * this.bSpeed;
+    // The page leans with the LIVE wind, not the bucket snapshot the line
+    // cache was built with — the snapshot steps every FLOW_BUCKET_MS, which
+    // ticked every block 4x a second. The lines' geometry drifts at most a
+    // bucket behind; the lean being continuous matters far more than the two
+    // agreeing to the millisecond.
+    const angle = this.windAngleAt(this.params, t);
+    const speed = this.params.windSpeed * this.gustAt(this.params, t);
+    const ax = Math.cos(angle) * speed;
+    const ay = Math.sin(angle) * speed;
     for (const v of this.victims) this.applyVictim(v, t, ax, ay);
     this.render(t);
   }

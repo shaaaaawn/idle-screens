@@ -50,3 +50,64 @@ pub fn mint_code(channel: Option<&str>) -> anyhow::Result<String> {
         .map(str::to_string)
         .context("pairing service response missing code")
 }
+
+/// Always-on control socket: keeps this screen reachable for phone pushes.
+///
+/// The webview only holds a channel socket while a saver window is up, so an
+/// idle tray-only install never registered with the relay — pairing looked
+/// fine on the phone but every push came back "has not connected yet" (the
+/// exact bug the macOS app hit). This runs for the life of the process,
+/// re-registering the device id and surfacing `{"type":"switch"}` pushes.
+pub fn spawn_control_socket(
+    initial_channel: Option<String>,
+    on_switch: impl Fn(String) + Send + 'static,
+) {
+    let mut channel = initial_channel.unwrap_or_else(|| "default".to_string());
+    std::thread::spawn(move || {
+        let mut backoff = std::time::Duration::from_secs(1);
+        loop {
+            let url = format!(
+                "wss://idlescreens.com/c/{channel}/ws?device={}",
+                device_id()
+            );
+            match tungstenite::connect(&url) {
+                Ok((mut socket, _)) => {
+                    log::info!("pair link connected on channel {channel}");
+                    backoff = std::time::Duration::from_secs(1);
+                    loop {
+                        match socket.read() {
+                            Ok(tungstenite::Message::Text(text)) => {
+                                if let Some(next) = switch_target(&text) {
+                                    log::info!("pair link: switch → {next}");
+                                    channel = next.clone();
+                                    on_switch(next);
+                                    break; // reconnect on the new channel
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                log::debug!("pair link closed: {e}");
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::debug!("pair link connect failed: {e}");
+                    std::thread::sleep(backoff);
+                    backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
+                }
+            }
+        }
+    });
+}
+
+/// Pull the target channel out of a `{"type":"switch","channelId":"..."}` frame.
+fn switch_target(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if value.get("type")?.as_str()? != "switch" {
+        return None;
+    }
+    let id = value.get("channelId")?.as_str()?;
+    (!id.is_empty()).then(|| id.to_string())
+}

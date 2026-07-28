@@ -19,6 +19,7 @@ import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_S
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
+import { escapeHtml, safeHttpUrl } from './html';
 import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
@@ -451,13 +452,29 @@ function liveMode(): void {
       : 'Play the selected saver’s inline preview';
   };
 
+  /**
+   * Which view can actually play the selected saver.
+   *
+   * The saver's NAME is meaningful everywhere — it is what the engine would
+   * show and what "Idle demo" would run. A transport only means something
+   * where that saver is on screen: the workbench viewport, or its gallery
+   * card. Docs and Settings have no such preview, and the Evals grid shows
+   * eval screens rather than catalogue savers, so there the button keeps its
+   * original job rather than pretending to drive something.
+   */
+  const hasTransport = (view: View): boolean => view === 'dev' || view === 'gallery';
+
+  const currentPlaying = (view: View): boolean =>
+    view === 'dev' ? devPlaying : view === 'gallery' ? gallery.isPlaying() : false;
+
   const syncTopbarMode = (view: View): void => {
     if (!tbBtn) return;
-    const dev = view === 'dev';
-    tbBtn.classList.toggle('is-transport', dev);
-    setTopbarSaver(dev ? (ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null) : null);
-    if (dev) {
-      setTopbarPlaying(devPlaying);
+    // The selected saver is shown on every view, not just the workbench.
+    setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? null);
+    const transport = hasTransport(view);
+    tbBtn.classList.toggle('is-transport', transport);
+    if (transport) {
+      setTopbarPlaying(currentPlaying(view));
     } else {
       delete tbBtn.dataset.playing;
       tbBtn.textContent = 'Idle demo';
@@ -468,8 +485,12 @@ function liveMode(): void {
   let devPlaying = false;
 
   tbBtn?.addEventListener('click', () => {
-    if (tbBtn.classList.contains('is-transport') && devTransport) {
+    if (currentView === 'dev' && devTransport) {
       devTransport();
+      return;
+    }
+    if (currentView === 'gallery') {
+      setTopbarPlaying(gallery.toggleUserPaused());
       return;
     }
     preview.close();
@@ -508,16 +529,26 @@ function liveMode(): void {
       cfg.saver = id;
       gallery.setActive(id);
       window.__idleScreens?.setPlugin(id);
+      // ←/→ browse the overlay without going through openPreview, so the top
+      // bar has to follow the selection here too or it keeps naming whichever
+      // saver the overlay was opened on.
+      syncTopbarMode(currentView);
     },
     onExit: () => {
       previewIsOpen = false;
       gallery.setPlaying(currentView === 'gallery');
+      // setPlaying above un-gates the cards; without this the button keeps the
+      // label it had while the overlay was up ("▶ Play") even though the
+      // thumbnails are running again, so the next click reads as a no-op and
+      // actually pauses.
+      syncTopbarMode(currentView);
     },
     onOpenInDev: goToDev,
   });
 
   function openPreview(id: string): void {
     cfg.saver = id;
+    setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === id) ?? null);
     rebuild(cfg);
     previewIsOpen = true;
     gallery.setActive(id);
@@ -616,7 +647,7 @@ function liveMode(): void {
       cfg.saver = id;
       rebuild(cfg);
       devProps.select(saver);
-      if (currentView === 'dev') setTopbarSaver(saver);
+      setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
         .forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.id === id));
@@ -818,6 +849,23 @@ interface PropertiesHandle {
   refresh(): void;
 }
 
+type Attribution = NonNullable<SaverPlugin['manifest']['attribution']>;
+
+/**
+ * Render the licence cell — as a link only when the manifest's URL is a real
+ * web address.
+ *
+ * Escaping alone would not make this safe: `href="javascript:…"` contains no
+ * character `escapeHtml` touches. A saver's manifest is in-repo today, but a
+ * third-party or generated saver is exactly the case attribution exists for,
+ * so the link fails closed to plain text rather than trusting the string.
+ */
+function attributionLicense(a: Attribution): string {
+  const href = a.url ? safeHttpUrl(a.url) : null;
+  const label = escapeHtml(a.license);
+  return href ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>` : label;
+}
+
 function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
   const panel = document.createElement('div');
   panel.className = 'wb-panel-content';
@@ -855,10 +903,10 @@ function buildPropertiesPanel(mount: HTMLElement): PropertiesHandle {
         ${row('Flash safe', flashSafe === undefined ? '—' : flashSafe ? 'yes' : 'no')}
         ${row('Worker ready', m.workerReady ? 'yes' : 'no')}
         ${m.paramSpace ? row('Params', String(Object.keys(m.paramSpace).length)) : ''}
-        ${m.attribution ? row('Source', `<span title="${m.attribution.source}">${m.attribution.source}</span>`) : ''}
-        ${m.attribution ? row('License', m.attribution.url ? `<a href="${m.attribution.url}" target="_blank" rel="noreferrer">${m.attribution.license}</a>` : m.attribution.license) : ''}
+        ${m.attribution ? row('Source', `<span title="${escapeHtml(m.attribution.source)}">${escapeHtml(m.attribution.source)}</span>`) : ''}
+        ${m.attribution ? row('License', attributionLicense(m.attribution)) : ''}
       </dl>
-      ${m.a11y?.notes ? `<p class="wb-note">${m.a11y.notes}</p>` : ''}`;
+      ${m.a11y?.notes ? `<p class="wb-note">${escapeHtml(m.a11y.notes)}</p>` : ''}`;
   };
 
   return {

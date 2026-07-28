@@ -4,6 +4,7 @@ import {
   costBudget,
   backendSupported,
   evaluateSaver,
+  eligibleSavers,
   playableSavers,
 } from './tier';
 import type { Backend, Capabilities, SaverInfo } from './types';
@@ -110,6 +111,32 @@ describe('evaluateSaver', () => {
   it('a calm saver with no fallback stays ok under reduced-motion', () => {
     const calm: SaverInfo = { id: 'c', minBackend: 'css', costTier: 'idle', motionIntensity: 'calm' };
     expect(evaluateSaver(calm, device('canvas2d', { reducedMotion: true })).status).toBe('ok');
+  });
+});
+
+describe('eligibleSavers', () => {
+  const savers: SaverInfo[] = [
+    { id: 'css-idle', minBackend: 'css', costTier: 'idle' },
+    { id: 'canvas-medium', minBackend: 'canvas2d', costTier: 'medium' },
+    { id: 'energetic', minBackend: 'css', costTier: 'idle', motionIntensity: 'energetic' },
+  ];
+
+  it('reports every saver, in input order, including the blocked ones', () => {
+    // Unlike playableSavers this filters nothing — the blocked entries are the
+    // point, since callers (the playground capabilities panel) render the reasons.
+    const caps = device('css', { reducedMotion: true });
+    const results = eligibleSavers(savers, caps);
+    expect(results.map((r) => r.id)).toEqual(['css-idle', 'canvas-medium', 'energetic']);
+    expect(results.map((r) => r.status)).toEqual(['ok', 'blocked', 'degraded']);
+  });
+
+  it('agrees with evaluateSaver called one at a time', () => {
+    const caps = device('canvas2d');
+    expect(eligibleSavers(savers, caps)).toEqual(savers.map((s) => evaluateSaver(s, caps)));
+  });
+
+  it('returns an empty list for an empty catalog', () => {
+    expect(eligibleSavers([], device('webgpu'))).toEqual([]);
   });
 });
 

@@ -50,7 +50,7 @@ test('the live overlay mounts the black hole on sleep', async ({ page }) => {
 // `messages2` was folded into `messages` in a7139c3.
 const SAVER_IDS = [
   'black-hole', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
-  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'logo', 'messages',
+  'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'messages',
 ];
 
 test('every saver mounts on sleep without errors', async ({ page }) => {

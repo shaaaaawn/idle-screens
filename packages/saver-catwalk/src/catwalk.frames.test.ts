@@ -3,13 +3,23 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRng, type PageContext, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { catwalk } from './index';
 
+/**
+ * Counts canvas clears. Every full repaint starts by clearing, so this is how a
+ * test can tell "it actually redrew" apart from "nothing happened" — the page
+ * transforms alone can't show it, since the steerable params (lightRadius,
+ * eyeGlow, tint, dust) only reach the canvas.
+ */
+let clears = 0;
+
 /* happy-dom has no Canvas2D — stub just enough for the cat to draw into. */
 function stubContext2D(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const gradient = { addColorStop: () => {} } as unknown as CanvasGradient;
   return {
     canvas,
     fillRect: () => {},
-    clearRect: () => {},
+    clearRect: () => {
+      clears += 1;
+    },
     beginPath: () => {},
     closePath: () => {},
     moveTo: () => {},
@@ -178,6 +188,76 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     expect(swatted, 'some seed bats the chip').toBe(true);
   });
 
+  it('the entrance: at t=0 there is no cat — it walks in, gathers, and its first leap lands at loop-time 0', () => {
+    const { host, page, victims } = makePage();
+    const inst = mount(ctx(host, page));
+
+    const anyInst = inst as any;
+    const E = anyInst.entrance as { xStart: number; walkD: number; crouchD: number; dur: number };
+    expect(E, 'an itinerary compiles an entrance').toBeTruthy();
+    expect(E.dur).toBeGreaterThan(1500);
+
+    // Prologue poses in order: offscreen start → walk → crouch → jump.
+    expect(anyInst.entranceAt(0).x < 0 || anyInst.entranceAt(0).x > W, 'starts offscreen').toBe(true);
+    expect(anyInst.entranceAt(E.walkD - 10).state).toBe('walk');
+    expect(anyInst.entranceAt(E.walkD + 300).state).toBe('crouch');
+    expect(anyInst.entranceAt(E.dur - 50).state).toBe('jump');
+
+    // The arc's endpoint IS the loop's first landing point.
+    const arrive = anyInst.entranceAt(E.dur);
+    const land = anyInst.catAt(0);
+    expect(land.state).toBe('land');
+    expect(Math.abs(arrive.x - land.x)).toBeLessThan(0.5);
+
+    // The stage rests until the cat has arrived: no perch deforms mid-prologue.
+    for (let t = 0; t < E.dur - 20; t += 250) {
+      inst.renderFrame(t, 7);
+      expect(victims.every((el) => el.style.transform === ''), `calm page at t=${t}`).toBe(true);
+    }
+    // ...and the first landing rings the perch immediately after.
+    inst.renderFrame(E.dur + 450, 7);
+    expect(victims.some((el) => el.style.transform.startsWith('translateY'))).toBe(true);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  it('the purr: the lamplight pool breathes while the cat sleeps or kneads', () => {
+    // Personality decides whether a seed sleeps/kneads — probe a few seeds.
+    let found = false;
+    for (const seed of [3, 7, 9, 11, 23, 42]) {
+      const { host, page } = makePage();
+      const inst = mount({ ...ctx(host, page), rng: createRng(seed), seed });
+
+      const anyInst = inst as any;
+      const vis = (anyInst.visits as { action: string; tA: number; tD: number }[])
+        .find((v) => (v.action === 'sleep' || v.action === 'knead') && v.tD - v.tA > 3600);
+      if (!vis) { inst.dispose(); host.remove(); continue; }
+      found = true;
+
+      // Record the warmth gradient's inner stop across the dwell.
+      const alphas: number[] = [];
+      const g = { addColorStop: (_o: number, c: string) => {
+        const m = /^rgba\(255,214,150,([\d.]+)\)$/.exec(c);
+        if (m) alphas.push(Number(m[1]));
+      } };
+      anyInst.ctx.createRadialGradient = () => g;
+      const E = anyInst.entrance as { dur: number } | null;
+      const off = E ? E.dur : 0;
+      for (let tt = vis.tA + 1700; tt < vis.tD - 1500; tt += 90) {
+        inst.renderFrame(tt + off, seed);
+      }
+      expect(alphas.length).toBeGreaterThan(0);
+      const spread = Math.max(...alphas) - Math.min(...alphas);
+      expect(spread, 'the pool visibly breathes').toBeGreaterThan(0.02);
+
+      inst.dispose();
+      host.remove();
+      break;
+    }
+    expect(found, 'some probed seed sleeps or kneads long enough to purr').toBe(true);
+  });
+
   it('perch memory and zoomies appear across the seed population', () => {
     let sawFavorite = false;
     let sawZoomies = false;
@@ -280,6 +360,48 @@ describe('catwalk: the page is the cat\'s furniture', () => {
     inst.renderFrame(9000, 7);
     inst.renderFrame(31_000, 7);
     inst.renderFrame(9000, 7);
+
+    inst.dispose();
+    host.remove();
+  });
+
+  // A paused saver runs no frames, so a steer has to repaint on the spot or the
+  // change stays invisible until something resumes it. tide and limelight both
+  // ratchet this; catwalk did not, and an untested applyTrack() is exactly what
+  // tripped the coverage gate on this branch.
+  it('applyTrack while paused repaints immediately, and sleepiness waits for a recompile', () => {
+    const { host, page, victims } = makePage();
+    const inst = mount(ctx(host, page));
+
+    inst.renderFrame(9000, 7);
+    inst.setPaused(true);
+    const paused = snapshot(victims);
+
+    // The actual invariant: steering a paused saver has to redraw on the spot.
+    // Count clears, because lightRadius only reaches the canvas — the page
+    // transforms this suite usually snapshots cannot show a canvas repaint.
+    clears = 0;
+    inst.applyTrack?.({
+      program: 'catwalk',
+      seed: 7,
+      deltas: [{ t: 0, path: 'lightRadius', value: 0.9 }],
+    });
+    expect(clears, 'a paused saver must repaint on steer, not wait for a frame').toBeGreaterThan(0);
+
+    // ...and the repaint must not re-seed: the cat holds its pose rather than
+    // teleporting every time a slider moves.
+    expect(snapshot(victims), 'steering must not disturb the cat’s pose').toEqual(paused);
+
+    // `sleepiness` is read once while compiling the itinerary, so a delta on it
+    // deliberately does NOT take hold until the next resize() recompiles. This
+    // asserts the documented behaviour rather than wishing it away: if someone
+    // later makes it live, this test should be updated, not silently pass.
+    inst.applyTrack?.({
+      program: 'catwalk',
+      seed: 7,
+      deltas: [{ t: 0, path: 'sleepiness', value: 1 }],
+    });
+    expect(snapshot(victims), 'sleepiness is itinerary-time, not frame-time').toEqual(paused);
 
     inst.dispose();
     host.remove();

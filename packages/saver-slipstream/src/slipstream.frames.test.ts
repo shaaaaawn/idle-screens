@@ -169,6 +169,124 @@ describe('slipstream: the page is the boundary condition', () => {
     host.remove();
   });
 
+  it('the advection phase is continuous across flow buckets and pure in t', () => {
+    const { host, page } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+    inst.applyTrack?.(demoTrack); // gusty, so bucket speeds genuinely differ
+
+    const phaseAt = (i: Frameable, t: number): number =>
+      (i as unknown as { phaseAt(t: number): number }).phaseAt(t);
+
+    // Continuity: dashes/dust used to advance by t * bucketSpeed, teleporting
+    // by t·ΔS at every boundary (worse the longer the saver ran). The phase
+    // integral may only advance by ~speed·dt across a boundary.
+    const maxSpeed = 3 * 2; // windSpeed ceiling × gust ceiling
+    for (const edge of [240, 480, 60_000, 600_000]) {
+      const before = phaseAt(inst, edge - 1);
+      const after = phaseAt(inst, edge + 1);
+      expect(after, `phase advances at t=${edge}`).toBeGreaterThan(before);
+      expect(after - before, `no teleport at t=${edge}`).toBeLessThan(maxSpeed * 2 + 0.01);
+    }
+
+    // Purity: a played-through instance and a cold seek agree exactly.
+    const played = phaseAt(inst, 30_000);
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    expect(phaseAt(cold, 30_000)).toBeCloseTo(played, 6);
+
+    inst.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
+  it('page lean is continuous across a flow-bucket boundary', () => {
+    const { host, page, victims } = makePage(GRID);
+    const inst = mount(ctx(host, page));
+    inst.applyTrack?.(demoTrack); // wind genuinely changing bucket to bucket
+
+    const rot = (el: HTMLElement): number =>
+      Number(/rotate\((-?[\d.]+)deg\)/.exec(el.style.transform)?.[1] ?? '0');
+
+    // The lean used to come from the bucket wind snapshot, so every block
+    // stepped at each 240ms boundary. Live wind means a 2ms hop across the
+    // boundary moves a block no more than a 2ms hop inside one.
+    const el = victims[0] as HTMLElement;
+    inst.renderFrame(15_119, 23);
+    const inside = rot(el);
+    inst.renderFrame(15_121, 23); // same bucket
+    const insideStep = Math.abs(rot(el) - inside);
+    inst.renderFrame(15_359, 23);
+    const before = rot(el);
+    inst.renderFrame(15_361, 23); // crosses the 15_360 boundary
+    const acrossStep = Math.abs(rot(el) - before);
+    expect(acrossStep, 'no per-bucket tick').toBeLessThan(Math.max(insideStep * 4, 0.05));
+
+    inst.dispose();
+    host.remove();
+  });
+
+  it('the crossfade pair (current + previous bucket lines) is reproducible from a cold seek', () => {
+    interface LineInternals {
+      lines: { pts: Float32Array; n: number }[];
+      prevLines: { pts: Float32Array; n: number }[];
+    }
+    const fingerprint = (i: Frameable): string => {
+      const { lines, prevLines } = i as unknown as LineInternals;
+      const sig = (set: LineInternals['lines']): number[] =>
+        set.slice(0, 5).flatMap((l) => [l.n, l.pts[0]!, l.pts[1]!, l.pts[(l.n - 1) * 2]!]);
+      return JSON.stringify({ n: lines.length, p: prevLines.length, a: sig(lines), b: sig(prevLines) });
+    };
+
+    const { host, page } = makePage(GRID);
+    const played = mount(ctx(host, page));
+    played.applyTrack?.(demoTrack);
+    for (let t = 0; t <= 1000; t += 16) played.renderFrame(t, 23);
+    const warm = fingerprint(played);
+
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    cold.renderFrame(1000, 23);
+    expect(fingerprint(cold), 'seek lands on the same current AND previous line sets').toBe(warm);
+
+    played.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
+  it('a prebuilt bucket adopted at the boundary equals a synchronous build', () => {
+    const lineSig = (i: Frameable): string => {
+      const lines = (i as unknown as { lines: { pts: Float32Array; n: number }[] }).lines;
+      return JSON.stringify(lines.map((l) => [l.n, l.pts[0], l.pts[1], l.pts[(l.n - 1) * 2]]));
+    };
+
+    // Warm path: quiet frames inside bucket 0 integrate bucket 1 a slice at
+    // a time; the boundary frame adopts the prebuilt set instead of paying
+    // the whole rebuild.
+    const { host, page } = makePage(GRID);
+    const warm = mount(ctx(host, page));
+    warm.applyTrack?.(demoTrack);
+    for (let t = 0; t < 240; t += 16) warm.renderFrame(t, 23);
+    warm.renderFrame(250, 23); // crosses into bucket 1 — adoption path
+    const adopted = lineSig(warm);
+
+    // Cold path: a fresh instance seeks straight to the same frame and
+    // builds bucket 1 synchronously.
+    const { host: h2, page: p2 } = makePage(GRID);
+    const cold = mount(ctx(h2, p2));
+    cold.applyTrack?.(demoTrack);
+    cold.renderFrame(250, 23);
+    expect(lineSig(cold), 'prebuild is bit-identical to a sync build').toBe(adopted);
+
+    warm.dispose();
+    cold.dispose();
+    host.remove();
+    h2.remove();
+  });
+
   it('restores every inline style it touched on dispose', () => {
     const { host, page, victims } = makePage(GRID);
     for (const el of victims) el.style.transform = 'translateY(2px)';

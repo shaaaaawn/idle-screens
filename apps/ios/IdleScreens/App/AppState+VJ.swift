@@ -3,11 +3,13 @@ import Foundation
 enum VJError: LocalizedError {
     case noToken(channelId: String)
     case tokenDeclined(channelId: String)
+    case noScene(channelId: String)
 
     var errorDescription: String? {
         switch self {
         case .noToken(let channelId): "No capability token stored for '\(channelId)'"
         case .tokenDeclined(let channelId): "Token declined by '\(channelId)'"
+        case .noScene(let channelId): "'\(channelId)' has no scene to mix in yet"
         }
     }
 }
@@ -47,6 +49,49 @@ extension AppState {
             ?? savers.randomElement()
         guard let starter else { return }
         try? await publish(saver: starter, to: channelId)
+    }
+
+    /// Fork any channel's current scene into a new channel you own. This is
+    /// the fastest path from "I like that" to "I can steer it" — the server
+    /// does it atomically and hands back the token, so there's no window
+    /// where the channel exists but isn't yours.
+    @discardableResult
+    func remix(_ sourceChannelId: String, label: String? = nil) async throws -> ChannelCredential {
+        isWorking = true
+        defer { isWorking = false }
+        let source = channels.first { $0.id == sourceChannelId }
+        let name = label?.isEmpty == false
+            ? label!
+            : "\(source?.displayLabel ?? sourceChannelId) remix"
+        let created = try await mcp.remixChannel(sourceChannelId: sourceChannelId, label: name)
+        let credential = ChannelCredential(
+            channelId: created.channelId, label: name, createdAt: Date())
+        credentials.append(credential)
+        store.save(credentials)
+        store.setToken(created.token, for: created.channelId)
+        await loadGallery()
+        return credential
+    }
+
+    /// Adopt another channel's current scene onto one you already own —
+    /// "mix": keep the channel (and its viewers/screens), change what plays.
+    func adoptScene(from sourceChannelId: String, into channelId: String) async throws {
+        let token = try requireToken(for: channelId)
+        guard let spec = rawSpec(of: sourceChannelId) else {
+            throw VJError.noScene(channelId: sourceChannelId)
+        }
+        isWorking = true
+        defer { isWorking = false }
+        try await mcp.publishSpec(
+            channelId: channelId, token: token, spec: spec,
+            seed: Self.randomSeed(), intent: "mixed in the scene from \(sourceChannelId)")
+    }
+
+    /// The gallery payload carries each channel's spec verbatim — publish
+    /// THAT, not a re-encoded SpecSubset (which would drop every field the
+    /// native renderer happens not to read).
+    private func rawSpec(of channelId: String) -> JSONValue? {
+        channels.first { $0.id == channelId }?.rawSpec
     }
 
     /// Add a channel created elsewhere. The token is verified against

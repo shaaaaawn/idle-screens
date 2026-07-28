@@ -117,6 +117,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self?.thumbnails.generateMissing(ids: self?.liveIds ?? SaverCatalog.ids)
     }
 
+    // Always-on control socket: keeps this Mac reachable for phone pushes
+    // even when the saver isn't showing (otherwise pairing looks connected on
+    // the phone but every push 409s).
+    PairLink.shared.onSwitch = { [weak self] channelId in
+      guard let self else { return }
+      self.defaults.set(channelId, forKey: Self.channelKey)
+      self.applyConfigToSaver()
+      self.statusItem.menu = self.buildMenu()
+      self.startSaver()
+    }
+    PairLink.shared.onStateChange = { [weak self] in
+      guard let self else { return }
+      self.statusItem.menu = self.buildMenu()
+    }
+    PairLink.shared.start(channelId: defaults.string(forKey: Self.channelKey))
+
     maybeAutoCheckForUpdates()
 
     // Debug: --about prints version + build provenance and exits.
@@ -189,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
     saver.showActivity = defaults.bool(forKey: Self.activityHUDKey)
     let channelId = defaults.string(forKey: Self.channelKey)
+    PairLink.shared.start(channelId: channelId)
     saver.channelURL = channelId.flatMap { id in
       // `device` registers this Mac's viewer socket so a paired iPhone can
       // retarget the display with a "switch" push.
@@ -269,6 +286,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       stop.target = self
       menu.addItem(stop)
     }
+
+    // Top level, next to casting: both are "this Mac talking to something
+    // else". It used to live under Content, two levels deep.
+    let pair = NSMenuItem(
+      title: "Pair iPhone…", action: #selector(pairPhone(_:)), keyEquivalent: "")
+    pair.target = self
+    menu.addItem(pair)
     menu.addItem(.separator())
 
     menu.addItem(saverPickerItem())
@@ -394,11 +418,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     channel.target = self
     channel.state = channelId.isEmpty ? .off : .on
     submenu.addItem(channel)
-
-    let pair = NSMenuItem(
-      title: "Pair iPhone…", action: #selector(pairPhone(_:)), keyEquivalent: "")
-    pair.target = self
-    submenu.addItem(pair)
 
     let item = NSMenuItem(title: "Content", action: nil, keyEquivalent: "")
     item.submenu = submenu
@@ -584,8 +603,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
           \(code)
 
-          The code expires in 5 minutes. Set a channel on this Mac \
-          (Content → Channel…) so pushes have a socket to reach.
+          The code expires in 5 minutes. This Mac stays reachable while \
+          idle screens is running — no channel setup needed.
           """
       case .failure(let error):
         alert.messageText = "Pairing unavailable"

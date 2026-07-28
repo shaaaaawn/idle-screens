@@ -10,48 +10,79 @@ struct MyChannelsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                ForEach(app.credentials) { credential in
-                    NavigationLink(value: credential) {
-                        HStack(spacing: 12) {
-                            // Live preview when the channel is in the public
-                            // gallery (specs come along for free with it).
-                            if let spec = app.channels.first(where: { $0.id == credential.channelId })?.spec {
-                                ScenePreviewView(spec: spec, fallbackSeed: credential.channelId)
-                                    .frame(width: 84, height: 47)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(credential.label)
-                                    .foregroundStyle(Color.textPrimary)
-                                Text(credential.channelId)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Creation is the point of this tab — lead with it.
+                    Button {
+                        showingNew = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("New channel")
+                                    .font(.headline)
+                                Text("Starts live with a scene on air")
                                     .font(.caption)
-                                    .foregroundStyle(Color.textSecondary)
+                                    .opacity(0.7)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.subheadline.weight(.semibold))
+                                .opacity(0.5)
+                        }
+                        .foregroundStyle(Color.appBackground)
+                        .padding(18)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.textPrimary, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .buttonStyle(.plain)
+
+                    if app.credentials.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Nothing of yours yet")
+                                .font(.headline)
+                                .foregroundStyle(Color.textPrimary)
+                            Text("Create a channel to publish scenes and steer them live — or add one you already control with its token.")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.textSecondary)
+                            Button("Add with a token") { showingAdd = true }
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.textPrimary)
+                                .padding(.top, 4)
+                        }
+                        .cardStyle()
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("your channels")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color.textPrimary)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 150), spacing: 12)],
+                                spacing: 16
+                            ) {
+                                ForEach(app.credentials) { credential in
+                                    NavigationLink(value: credential) {
+                                        channelCard(credential)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button("Remove", role: .destructive) {
+                                            app.removeChannel(credential)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    .listRowBackground(Color.appBackground)
                 }
-                .onDelete { indexSet in
-                    indexSet.forEach { app.removeChannel(app.credentials[$0]) }
-                }
+                .padding(20)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
             .background(Color.appBackground)
-            .overlay {
-                if app.credentials.isEmpty {
-                    ContentUnavailableView {
-                        Label("No channels", systemImage: "slider.horizontal.3")
-                    } description: {
-                        Text("Create a channel or add one you already control.")
-                    }
-                }
-            }
             .navigationDestination(for: ChannelCredential.self) { credential in
                 ChannelDeckView(credential: credential)
             }
-            .navigationTitle("vj")
+            .navigationTitle("create")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
@@ -62,6 +93,7 @@ struct MyChannelsView: View {
                     }
                 }
             }
+            .refreshable { await app.loadGallery() }
             .sheet(isPresented: $showingNew) {
                 NewChannelSheet { token in
                     createdToken = token
@@ -75,8 +107,10 @@ struct MyChannelsView: View {
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
             }
+            // Remix stores its token server-side in the same call, so there's
+            // nothing to reveal — only show the sheet for a real new token.
             .sheet(isPresented: Binding(
-                get: { createdToken != nil },
+                get: { !(createdToken ?? "").isEmpty },
                 set: { if !$0 { createdToken = nil } }
             )) {
                 if let token = createdToken {
@@ -84,33 +118,131 @@ struct MyChannelsView: View {
                 }
             }
         }
+        .task {
+            if app.channels.isEmpty { await app.loadGallery() }
+        }
+    }
+
+    /// Poster card for a channel you control — live scene when the gallery
+    /// knows it, plus what it's currently doing.
+    private func channelCard(_ credential: ChannelCredential) -> some View {
+        let channel = app.channels.first { $0.id == credential.channelId }
+        return VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                if let spec = channel?.spec {
+                    ScenePreviewView(spec: spec, fallbackSeed: credential.channelId)
+                } else {
+                    LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+            }
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .topLeading) {
+                if channel?.sleeping == true {
+                    Label("asleep", systemImage: "moon.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.textPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(6)
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
+            }
+
+            Text(credential.label)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(credential.channelId)
+                .font(.caption2)
+                .foregroundStyle(Color.textTertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
 // MARK: - New channel sheet
 
+/// Creating a channel starts from *something* — a scene you already like,
+/// or a classic saver — never a blank channel you then have to figure out.
+/// Picking a source and hitting Create is one step: the server forks it
+/// atomically (remixChannel) so the channel is yours the moment it exists.
 private struct NewChannelSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     var onCreated: (String) -> Void
 
+    private enum Source: Hashable {
+        case blank
+        case channel(String)
+        case saver(String)
+    }
+
     @State private var label = ""
-    @State private var tags = ""
+    @State private var source: Source = .blank
     @State private var error: String?
+    @State private var working = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Label", text: $label)
-                    TextField("Tags (comma separated)", text: $tags)
-                }
-                if let error {
-                    Section {
-                        Text(error).foregroundStyle(.red)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Name")
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        TextField("living room", text: $label)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(Color.textPrimary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Start from")
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        Text("Remix any channel's current scene, or open with a classic saver.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textSecondary)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                sourceTile(.blank, title: "Surprise me") {
+                                    ZStack {
+                                        LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                                                       startPoint: .top, endPoint: .bottom)
+                                        Image(systemName: "dice")
+                                            .font(.title2)
+                                            .foregroundStyle(Color.textSecondary)
+                                    }
+                                }
+                                ForEach(app.channels.filter { $0.spec != nil }) { channel in
+                                    sourceTile(.channel(channel.id), title: channel.displayLabel) {
+                                        ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
+                .padding(20)
             }
+            .background(Color.appBackground)
             .navigationTitle("New channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -118,24 +250,55 @@ private struct NewChannelSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { create() }
-                        .disabled(app.isWorking)
+                    Button(working ? "Creating…" : "Create") { create() }
+                        .disabled(working || app.isWorking)
                 }
             }
         }
-        .presentationDetents([.medium])
+    }
+
+    private func sourceTile<Art: View>(
+        _ value: Source, title: String, @ViewBuilder art: () -> Art
+    ) -> some View {
+        let selected = source == value
+        return Button {
+            source = value
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                art()
+                    .frame(width: 132, height: 74)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.5),
+                                          lineWidth: selected ? 2 : 1)
+                    }
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(selected ? Color.textPrimary : Color.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: 132, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func create() {
-        let tagList = tags
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        working = true
         Task {
+            defer { working = false }
             do {
-                let token = try await app.createChannel(label: label, tags: tagList)
-                dismiss()
-                onCreated(token)
+                switch source {
+                case .blank, .saver:
+                    let token = try await app.createChannel(label: label, tags: [])
+                    dismiss()
+                    onCreated(token)
+                case .channel(let sourceId):
+                    // Fork keeps the scene AND hands us the token in one call.
+                    _ = try await app.remix(sourceId, label: label)
+                    dismiss()
+                    onCreated("")
+                }
             } catch {
                 self.error = error.localizedDescription
             }
@@ -229,10 +392,10 @@ private struct TokenRevealSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
-            if let channelId, app.pairedTV != nil {
+            if let channelId, !app.pairedScreens.isEmpty {
                 Button {
                     Task {
-                        sentToTV = await app.pushToTV(channelId: channelId)
+                        sentToTV = await app.pushToAllScreens(channelId: channelId) > 0
                     }
                 } label: {
                     Label(sentToTV ? "Playing on your screen" : "Play on your screen",
@@ -274,5 +437,19 @@ private struct TokenRevealSheet: View {
         }
         .background(Color.appBackground.ignoresSafeArea())
         .presentationDetents([.medium])
+    }
+}
+
+// MARK: - Card container
+
+private extension View {
+    func cardStyle() -> some View {
+        padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1)
+            }
     }
 }

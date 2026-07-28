@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/mac-web",
-  "version": "0.0.6",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,6 @@
     "@idle-screens/schema": "workspace:*"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.1"
   }
 }

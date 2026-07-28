@@ -160,7 +160,6 @@ describe('detectCapabilities', () => {
   describe('OffscreenCanvas detection', () => {
     it('reports offscreenCanvas true when transferControlToOffscreen is available', async () => {
       const original = HTMLCanvasElement.prototype.transferControlToOffscreen;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (HTMLCanvasElement.prototype as any).transferControlToOffscreen = () => ({});
       try {
         const caps = await detect();
@@ -169,7 +168,6 @@ describe('detectCapabilities', () => {
         if (original) {
           HTMLCanvasElement.prototype.transferControlToOffscreen = original;
         } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           delete (HTMLCanvasElement.prototype as any).transferControlToOffscreen;
         }
       }
@@ -177,7 +175,6 @@ describe('detectCapabilities', () => {
 
     it('reports offscreenCanvas false when transferControlToOffscreen is absent', async () => {
       const original = HTMLCanvasElement.prototype.transferControlToOffscreen;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (HTMLCanvasElement.prototype as any).transferControlToOffscreen;
       try {
         const caps = await detect();

@@ -228,6 +228,12 @@ struct CompiledEntity: Equatable, Sendable {
     var size: Double        // radius / glyph size, spec units
     var aspect: Double      // rect height/width
     var color: String
+    /// Pre-parsed sRGB components. `Color(hex:)` runs a Scanner over the hex
+    /// string; doing that per sprite per frame was thousands of string parses
+    /// a second on an ordinary scene. Parse once, at compile time.
+    var red: Double = 1
+    var green: Double = 1
+    var blue: Double = 1
     var glyph: String?
     var alpha: Double
     var phase: Double       // pulse phase offset, radians
@@ -267,10 +273,32 @@ struct CompiledLayer: Equatable, Sendable {
 extension SpecSubset {
     /// Deterministic entity placement + velocities. Same seed → same scene.
     /// Sizes/speeds stay in the spec's own units — scaling happens at draw time.
-    func compile(seed: Int) -> [CompiledLayer] {
+    /// Hard ceilings so a hostile or accidentally-huge spec can't take the
+    /// device down. A published scene is untrusted input: nothing stops a
+    /// channel from carrying 200 layers of 400 sprites, and every gallery
+    /// tile compiles one. Without a budget that is a memory/CPU kill
+    /// (jetsam), which reads to the user as "the app crashes on that channel".
+    enum Budget {
+        /// Fullscreen viewer — generous, still bounded.
+        static let fullscreen = (layers: 60, entities: 4_000)
+        /// Gallery/preview tiles — many render at once, so each gets far less.
+        static let preview = (layers: 24, entities: 700)
+    }
+
+    /// - Parameter budget: layer and total-entity ceilings. Layers are kept in
+    ///   order (background first) and thinned proportionally rather than
+    ///   truncated, so a capped scene still looks like itself.
+    func compile(seed: Int, budget: (layers: Int, entities: Int) = Budget.fullscreen) -> [CompiledLayer] {
         var rng = Mulberry32(seed: UInt32(truncatingIfNeeded: seed))
         let resolvedUnits = units ?? .viewport
-        return layers.map { $0.compile(rng: &rng, units: resolvedUnits) }
+        let kept = layers.prefix(max(1, budget.layers))
+        let requested = kept.reduce(0) { $0 + max(0, min($1.count, 400)) }
+        // Uniform stride keeps every layer represented; dropping trailing
+        // layers would cut the foreground accents first.
+        let stride = requested > budget.entities
+            ? max(1, Int((Double(requested) / Double(budget.entities)).rounded(.up)))
+            : 1
+        return kept.map { $0.compile(rng: &rng, units: resolvedUnits, stride: stride) }
     }
 }
 
@@ -300,8 +328,11 @@ extension SpecSubset.Layer {
         return o
     }
 
-    func compile(rng: inout Mulberry32, units: SpecSubset.Units) -> CompiledLayer {
+    func compile(rng: inout Mulberry32, units: SpecSubset.Units, stride: Int = 1) -> CompiledLayer {
         var entities: [CompiledEntity] = []
+        var index = 0
+        // Draw the full count so the RNG stream (and therefore the scene's
+        // identity) is unchanged; keep every `stride`-th entity.
         let n = max(0, min(count, 400))
         // Wander: one shared oscillator set per layer (flock coherence), like
         // the web engine. Default meander: 60 for px specs, 0.05 viewport.
@@ -449,10 +480,20 @@ extension SpecSubset.Layer {
                 )
             }
 
+            // Thinning (budget) and geometry sanitation happen at the append:
+            // a NaN/∞ coordinate from a malformed spec would propagate into
+            // CoreGraphics and can hard-crash the render.
+            index += 1
+            if stride > 1, index % stride != 0 { continue }
+            guard x.isFinite, y.isFinite, vx.isFinite, vy.isFinite,
+                  size.isFinite, size >= 0, aspect.isFinite, alphaValue.isFinite
+            else { continue }
+
+            let rgb = Self.rgb(from: color)
             entities.append(CompiledEntity(
                 x: x, y: y, vx: vx, vy: vy,
                 size: size, aspect: aspect,
-                color: color, glyph: glyph,
+                color: color, red: rgb.0, green: rgb.1, blue: rgb.2, glyph: glyph,
                 alpha: alphaValue, phase: phase,
                 spinSpeed: spinSpeed, spinAngle: spinAngle,
                 motionType: motionType, bob: bob,
@@ -472,6 +513,16 @@ extension SpecSubset.Layer {
             wrap: wrap ?? true,
             pulse: pulse
         )
+    }
+
+    /// Hex → sRGB, once per entity at compile time (never per frame).
+    static func rgb(from hex: String) -> (Double, Double, Double) {
+        let cleaned = hex.trimmingCharacters(in: .alphanumerics.inverted)
+        var value: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&value)
+        return (Double((value >> 16) & 0xFF) / 255,
+                Double((value >> 8) & 0xFF) / 255,
+                Double(value & 0xFF) / 255)
     }
 
     private static func pair(_ arr: [Double]?, default fallback: (Double, Double)) -> (Double, Double) {

@@ -4,8 +4,7 @@ import SwiftUI
 /// "featured" and "channels" sections of 16:9 cards below the fold.
 struct ChannelGridView: View {
     @Environment(TVAppState.self) private var app
-    @State private var manualChannelId = ""
-    @State private var showingSettings = false
+    @FocusState private var focusedChannelId: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
@@ -16,6 +15,33 @@ struct ChannelGridView: View {
     private var featuredRail: [PublicChannel] { Array(featured.dropFirst()) }
     private var rest: [PublicChannel] {
         app.channels.filter { $0.tags?.contains("featured") != true }
+    }
+
+    /// The focused channel drives an ambient billboard behind the grid —
+    /// its scene, blurred and dimmed. Browsing feels like previewing.
+    @ViewBuilder private var focusBackdrop: some View {
+        let focused = app.channels.first { $0.id == focusedChannelId }
+        ZStack {
+            Color.appBackground
+            if let focused {
+                Group {
+                    if let spec = focused.spec, app.effectiveTier == .t3 {
+                        ScenePreviewView(spec: spec, fallbackSeed: focused.id)
+                    } else {
+                        ProceduralChannelArt(channelId: focused.id)
+                    }
+                }
+                .blur(radius: 90)
+                .opacity(0.26)
+                .id(focused.id)
+                .transition(.opacity)
+            }
+            // Keep legibility: darken toward the reading areas.
+            LinearGradient(colors: [.black.opacity(0.42), .black.opacity(0.18)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .animation(.easeInOut(duration: 0.6), value: focusedChannelId)
+        .ignoresSafeArea()
     }
 
     var body: some View {
@@ -33,13 +59,8 @@ struct ChannelGridView: View {
                             .foregroundStyle(Color.textSecondary)
                     }
                     Spacer()
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 32))
-                    }
-                    .buttonStyle(.borderless)
+                    // Settings lives in the top tab bar — no header chrome,
+                    // so the grid is the only focus surface on this screen.
                 }
                 .padding(.horizontal, 80)
                 .padding(.top, 40)
@@ -65,45 +86,38 @@ struct ChannelGridView: View {
                                         HeroChannelCard(channel: hero, height: geo.size.height * 0.58)
                                     }
                                     .buttonStyle(.card)
+                                    .focused($focusedChannelId, equals: hero.id)
                                 }
 
                                 if !featuredRail.isEmpty {
                                     ChannelSection(title: "featured") {
-                                        CardGrid(channels: featuredRail, columns: columns)
+                                        CardGrid(channels: featuredRail, columns: columns, focusBinding: $focusedChannelId)
                                     }
                                 }
 
                                 if !rest.isEmpty {
                                     ChannelSection(title: "channels") {
-                                        CardGrid(channels: rest, columns: columns)
+                                        CardGrid(channels: rest, columns: columns, focusBinding: $focusedChannelId)
                                     }
                                 }
                             }
 
-                            HStack(spacing: 24) {
-                                TextField("Enter channel ID", text: $manualChannelId)
-                                    .frame(width: 480)
-                                Button("Watch") {
-                                    let id = manualChannelId.trimmingCharacters(in: .whitespaces)
-                                    if !id.isEmpty { app.selectChannel(id) }
-                                }
-                                .disabled(manualChannelId.trimmingCharacters(in: .whitespaces).isEmpty)
-                            }
                         }
                         .padding(.horizontal, 80)
                         .padding(.bottom, 80)
                     }
                 }
             }
-            .background(Color.appBackground.ignoresSafeArea())
+            .background(focusBackdrop)
             .navigationDestination(isPresented: Binding(
                 get: { app.selectedChannelId != nil },
                 set: { if !$0 { app.exitChannel() } }
             )) {
                 ScreenSaverView()
-            }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView()
+                    // Fullscreen means fullscreen: no floating tab bar over
+                    // the scene while watching.
+                    .toolbar(.hidden, for: .tabBar)
+                    .toolbar(.hidden, for: .navigationBar)
             }
         }
         .task {
@@ -121,8 +135,8 @@ private struct ChannelSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             Text(title)
-                .font(.title3)
-                .foregroundStyle(Color.textSecondary)
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(Color.textPrimary.opacity(0.92))
             content
         }
     }
@@ -132,6 +146,8 @@ private struct CardGrid: View {
     @Environment(TVAppState.self) private var app
     let channels: [PublicChannel]
     let columns: [GridItem]
+    /// Reported upward so the focused card can drive the grid's billboard.
+    var focusBinding: FocusState<String?>.Binding
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 48) {
@@ -142,6 +158,7 @@ private struct CardGrid: View {
                     ChannelCard(channel: channel)
                 }
                 .buttonStyle(.card)
+                .focused(focusBinding, equals: channel.id)
             }
         }
     }
@@ -155,37 +172,57 @@ private struct ChannelCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Fixed 16:9 poster frame — thumbs arrive in arbitrary aspects;
-            // channels without one get deterministic generative art.
-            AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    ProceduralChannelArt(channelId: channel.id)
+            // Fixed 16:9 poster. Priority: live native scene (the product
+            // promise; canvas-capable t3 hardware only, rendered on a virtual
+            // 1080p canvas so it's an exact miniature of fullscreen) → web
+            // thumb → deterministic generative art.
+            Group {
+                if let spec = channel.spec,
+                   app.effectiveTier == .t3 || app.effectiveTier == .t2 {
+                    ScenePreviewView(spec: spec, fallbackSeed: channel.id, live: false)
+                        // Belt-and-suspenders: if the preview's canvas layer
+                        // ever drops out (system layer eviction renders it
+                        // transparent), designed art shows — never a black tile.
+                        .background(ProceduralChannelArt(channelId: channel.id))
+                        .opacity((channel.sleeping ?? false) ? 0.35 : 1)
+                } else {
+                    ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
+                        ProceduralChannelArt(channelId: channel.id)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                // Editorial kicker — category in caps above the title,
+                // the Apple TV+ lockup grammar.
+                if let tags = channel.tags?.filter({ $0 != "featured" }), !tags.isEmpty {
+                    Text(tags.prefix(2).joined(separator: " · ").uppercased())
+                        .font(.system(size: 20, weight: .semibold))
+                        .kerning(1.8)
+                        .foregroundStyle(Color.textTertiary)
+                        .lineLimit(1)
+                }
                 Text(channel.displayLabel)
-                    .font(.headline)
+                    .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(Color.textPrimary)
                     .lineLimit(1)
-                HStack(spacing: 12) {
-                    if let viewers = channel.viewers {
-                        Label("\(viewers)", systemImage: "eye")
-                    }
-                    if let tags = channel.tags, !tags.isEmpty {
-                        Text(tags.prefix(3).joined(separator: " · "))
-                            .lineLimit(1)
+                HStack(spacing: 10) {
+                    if channel.sleeping ?? false {
+                        Label("sleeping", systemImage: "moon.zzz.fill")
+                            .foregroundStyle(Color.textTertiary)
+                    } else if let viewers = channel.viewers, viewers > 0 {
+                        HStack(spacing: 8) {
+                            Circle().fill(Color.appAccent).frame(width: 9, height: 9)
+                            Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
+                        }
+                        .foregroundStyle(Color.textSecondary)
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(Color.textSecondary)
+                .font(.system(size: 23))
             }
         }
     }

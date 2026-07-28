@@ -6,7 +6,7 @@ struct ContentView: View {
             GalleryView()
                 .tabItem { Label("Watch", systemImage: "tv") }
             MyChannelsView()
-                .tabItem { Label("VJ", systemImage: "slider.horizontal.3") }
+                .tabItem { Label("Create", systemImage: "wand.and.stars") }
             PairedTVView()
                 .tabItem { Label("Screens", systemImage: "tv.badge.wifi") }
         }

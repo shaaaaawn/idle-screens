@@ -27,7 +27,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026072605"
+        CURRENT_PROJECT_VERSION: "2026072804"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -97,7 +97,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026072605"
+        CURRENT_PROJECT_VERSION: "2026072804"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "3"
