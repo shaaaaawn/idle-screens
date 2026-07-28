@@ -65,6 +65,7 @@ const PARAM_SPACE = {
 export const globeManifest: SaverManifest = {
   id: 'globe',
   label: 'Globe',
+  description: 'Wireframe rotating globe with latitude/longitude lines.',
   timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',

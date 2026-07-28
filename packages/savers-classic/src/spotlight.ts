@@ -10,6 +10,7 @@ import type {
 export const spotlightManifest: SaverManifest = {
   id: 'spotlight',
   label: 'Spotlight',
+  description: 'A transparent circle follows a path, revealing the page beneath. Passthrough saver.',
   timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',

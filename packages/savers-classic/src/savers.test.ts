@@ -12,12 +12,13 @@ describe('CLASSIC_SAVERS manifests (M1/M2)', () => {
     expect(CLASSIC_SAVERS.map((s) => s.manifest.id)).toEqual(EXPECTED_IDS);
   });
 
-  it('M1: every manifest has a unique id and a non-empty label', () => {
+  it('M1: every manifest has a unique id, non-empty label, and description', () => {
     const ids = CLASSIC_SAVERS.map((s) => s.manifest.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const s of CLASSIC_SAVERS) {
       expect(s.manifest.id).toMatch(/\S/);
       expect(s.manifest.label).toMatch(/\S/);
+      expect(s.manifest.description).toMatch(/\S/);
       expect(typeof s.mount).toBe('function');
     }
   });
