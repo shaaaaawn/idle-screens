@@ -103,7 +103,19 @@ retired `logo` solely because a dozen live e2e tests click the dvd card).
    and waste tokens explaining away the noise), AND a headless screenshot
    of their saver at defaults (there are capture scripts in the scratchpad
    pattern; a saver verified only through stubs has never been seen).
-6. Naming contracts (export names, param names) so integration is mechanical.
+   VERIFY THE VERIFICATION COMMANDS THEMSELVES before briefing — vitest's
+   include globs are repo-root-relative, so `pnpm --filter <pkg> exec
+   vitest run src/x.test.ts` finds nothing; the working file-scoped form is
+   `pnpm exec vitest run packages/<pkg>/src/x.test.ts` from the root. Two
+   batch-2 agents each burned a diagnosis loop on this.
+6. NEVER let agents hot-edit the dev server the OWNER is watching. Vite
+   aliases packages to src, so every partial save ships live: transient
+   type errors, half-written renderers, HMR wedges. In batch 2 the owner
+   experienced individually-green work as "glitches" and ordered a full
+   revert of five accepted savers. Agents verify against a throwaway
+   server/port (or the curator snapshots for them); the owner-facing
+   server only ever runs gated code.
+7. Naming contracts (export names, param names) so integration is mechanical.
 
 **Oversight:** launch in parallel only when file-disjoint; on completion,
 YOU run: full build → typecheck → lint → unit → e2e savers/worker → visual
