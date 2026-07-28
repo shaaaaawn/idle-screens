@@ -29,6 +29,7 @@ interface Row {
 interface PerceiveHook {
   all(o: unknown): Promise<Row[]>;
   saver(id: string, o: { width?: number; height?: number; seed?: number; t?: number; dpr?: number }): Promise<Row>;
+  list(): Array<{ id: string; label: string; timeModel?: 'closed-form' | 'simulated' }>;
 }
 
 /** Frame-addressable imperative savers — reproducible pixel readings.
@@ -43,6 +44,36 @@ const ready = async (page: Page, url = '/#dev'): Promise<void> => {
   await page.goto(url);
   await page.waitForFunction(() => !!(window as unknown as { __perceive?: unknown }).__perceive);
 };
+
+test('support verdicts agree with each manifest\'s timeModel claim', async ({ page }) => {
+  await ready(page);
+  const { models, rows } = await page.evaluate(async () => {
+    const p = (window as unknown as { __perceive: PerceiveHook }).__perceive;
+    return {
+      models: p.list(),
+      rows: await p.all({ width: 320, height: 200, seed: 42, t: 5000 }),
+    };
+  });
+  const modelOf = new Map(models.map((m) => [m.id, m.timeModel]));
+  // The whole catalog declares its time model — a new saver cannot slip in
+  // without stating one (this is the derived replacement for hand lists).
+  for (const m of models) {
+    expect(m.timeModel, `${m.id} must declare a timeModel`).toMatch(/^(closed-form|simulated)$/);
+  }
+  for (const r of rows) {
+    if (modelOf.get(r.id) === 'simulated') {
+      // A simulated saver may be read, but never certified deterministic —
+      // and it must say why the numbers wobble.
+      expect(r.support, `${r.id} is simulated`).not.toBe('deterministic');
+      if (r.support === 'sampled') {
+        expect(r.reason, `${r.id} explains its sampling`).toMatch(/simulat/i);
+      }
+    }
+    if (r.support === 'deterministic') {
+      expect(modelOf.get(r.id), `${r.id} is certified deterministic, so it must claim closed-form`).toBe('closed-form');
+    }
+  }
+});
 
 test('every canvas saver yields a picture; CSS savers say why they cannot', async ({ page }) => {
   await ready(page);
