@@ -1,102 +1,45 @@
 import SwiftUI
 import WebKit
 
-/// Full-screen channel viewer. Renders the scene **natively** from the live
-/// socket (same renderer as the tvOS app and the gallery previews) rather
-/// than embedding the website — instant first frame, no browser chrome, no
-/// page-load flash. The hosted page is kept only as the fallback for classic
-/// savers, which have no native representation.
+/// Full-screen channel viewer, rendered natively from the scene JSON.
+///
+/// Mirrors the hosted viewer's control bar (back · live status · actions) with
+/// native equivalents: the web's "QR / Remote" become "play on your screens"
+/// and live steering, because the phone *is* the remote. A RenderGuard steps
+/// the renderer down under load instead of letting a heavy scene kill the app.
 struct ChannelViewerView: View {
     let channelId: String
     var label: String?
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var session = ChannelSession()
+    @State private var guardrail = RenderGuard()
     @State private var showChrome = true
+    @State private var showInfo = false
     @State private var chromeTask: Task<Void, Never>?
+    @State private var toast: String?
+    @State private var pulse = false
+    @State private var showComposer = false
 
     private var seedSpec: SpecSubset? {
         app.channels.first { $0.id == channelId }?.spec
     }
 
+    private var canSteer: Bool { app.token(for: channelId) != nil }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            sceneLayer
+            sleepingLayer
+            overlayLayer
 
-            if session.isClassicSpec {
-                // Classic savers live only on the web engine.
-                HostedViewer(url: app.gallery.viewerURL(for: channelId))
-                    .ignoresSafeArea()
-            } else if session.hasScene {
-                NativeSceneView(
-                    layers: session.compiledScene,
-                    background: session.background,
-                    tier: .t3
-                )
-                .ignoresSafeArea()
-                .opacity(session.sleeping ? 0 : 1)
-                .animation(.easeInOut(duration: 0.6), value: session.sleeping)
-            } else {
-                ProgressView()
-                    .tint(.white)
-                    .controlSize(.large)
-            }
-
-            if session.sleeping {
-                VStack(spacing: 12) {
-                    Image(systemName: "moon.zzz")
-                        .font(.system(size: 34))
-                    Text("channel is sleeping")
-                        .font(.subheadline)
-                }
-                .foregroundStyle(Color.textSecondary.opacity(0.5))
-            }
-
-            // VJ overlay text, flashed to every viewer.
-            if let overlay = session.overlayText {
-                Text(overlay)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 14)
-                    .background(.black.opacity(0.55), in: Capsule())
-                    .transition(.opacity)
-            }
-
-            // Chrome fades out so the scene owns the screen; tap to bring back.
             if showChrome {
                 VStack {
-                    HStack(spacing: 12) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.headline)
-                                .foregroundStyle(.white)
-                                .padding(10)
-                                .background(.black.opacity(0.45), in: Circle())
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(label ?? channelId)
-                                .font(.headline)
-                                .foregroundStyle(.white)
-                            if let scene = session.sceneLabel {
-                                Text(scene)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.6))
-                            }
-                        }
-                        Spacer()
-                        if let viewers = session.viewers, viewers > 0 {
-                            Label("\(viewers)", systemImage: "eye.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.black.opacity(0.45), in: Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    topBar
                     Spacer()
+                    bottomBar
                 }
                 .transition(.opacity)
             }
@@ -107,26 +50,288 @@ struct ChannelViewerView: View {
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar, .tabBar)
         .animation(.easeInOut(duration: 0.25), value: showChrome)
+        .animation(.easeInOut(duration: 0.45), value: session.phase)
+        .animation(.easeInOut(duration: 0.45), value: session.hasScene)
+        .sheet(isPresented: $showComposer) {
+            ComposerSheet(channelId: channelId, session: session)
+                .presentationDetents([.height(150), .medium, .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showInfo) {
+            SceneInfoSheet(session: session, channelId: channelId, guardrail: guardrail)
+                .presentationDetents([.medium])
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guardrail.setActive(phase == .active)
+        }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            // Gallery tiles stay alive behind a pushed viewer. Fullscreen is one
+            // big canvas that deserves the whole device — nothing animating
+            // offscreen behind it earns its memory.
+            PreviewBudget.shared.enterFullscreen()
             session.start(channelId: channelId, seedSpec: seedSpec)
             revealChrome()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            PreviewBudget.shared.exitFullscreen()
             chromeTask?.cancel()
             session.stop()
         }
     }
 
-    /// Show the chrome, then auto-hide after a beat of no interaction.
+    // MARK: Scene
+
+    @ViewBuilder
+    private var sceneLayer: some View {
+        // The channel's own backdrop paints instantly and stays underneath, so
+        // entering never flashes black and the scene cross-fades in over it.
+        Color(hex: session.backdrop ?? "0A0A0F")
+            .ignoresSafeArea()
+
+        if session.isClassicSpec {
+            // Classic savers live only on the web engine.
+            HostedViewer(url: app.gallery.viewerURL(for: channelId))
+                .ignoresSafeArea()
+                .transition(.opacity)
+        } else if session.hasScene {
+            NativeSceneView(
+                layers: session.compiledScene,
+                background: session.background,
+                tier: guardrail.level.tier,
+                paused: guardrail.level == .paused,
+                onFrame: { duration, time in
+                    guardrail.recordFrame(duration: duration, at: time)
+                }
+            )
+            .ignoresSafeArea()
+            .opacity(session.sleeping ? 0 : 1)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.6), value: session.sleeping)
+        } else if session.phase == .unreachable {
+            // Designed failure state: say what happened, offer the way out.
+            VStack(spacing: 14) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 32))
+                    .foregroundStyle(Color.textSecondary)
+                Text("can't reach this channel")
+                    .font(.headline)
+                    .foregroundStyle(Color.textPrimary)
+                Button("Try again") { session.retry() }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.appBackground)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .background(Color.textPrimary, in: Capsule())
+            }
+            .transition(.opacity)
+        } else {
+            // Connecting: no spinner. The backdrop is already the channel's
+            // colour, so a quiet pulse beats a spinner that flashes for 200ms.
+            Circle()
+                .fill(Color.textPrimary.opacity(0.18))
+                .frame(width: 10, height: 10)
+                .scaleEffect(pulse ? 1.6 : 0.8)
+                .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
+                .onAppear { pulse = true }
+                .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var sleepingLayer: some View {
+        if session.sleeping {
+            VStack(spacing: 12) {
+                Image(systemName: "moon.zzz")
+                    .font(.system(size: 34))
+                Text("channel is sleeping")
+                    .font(.subheadline)
+            }
+            .foregroundStyle(Color.textSecondary.opacity(0.5))
+        }
+    }
+
+    @ViewBuilder
+    private var overlayLayer: some View {
+        if let overlay = session.overlayText {
+            Text(overlay)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .background(.black.opacity(0.55), in: Capsule())
+                .transition(.opacity)
+        }
+        if let toast {
+            VStack {
+                Spacer()
+                Text(toast)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.7), in: Capsule())
+                    .padding(.bottom, 120)
+            }
+            .transition(.opacity)
+        }
+    }
+
+    // MARK: Chrome — the web bar's native twin
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .glassCapsule(shape: Circle())
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label ?? channelId)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(session.sleeping ? Color.textTertiary : Color.appSuccess)
+                        .frame(width: 6, height: 6)
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .glassCapsule(shape: Capsule())
+            Spacer()
+            if let viewers = session.viewers, viewers > 0 {
+                Label("\(viewers)", systemImage: "eye.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .glassCapsule(shape: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private var statusText: String {
+        if let reason = guardrail.reason { return reason }
+        if session.sleeping { return "sleeping" }
+        return session.sceneLabel ?? "live"
+    }
+
+    /// Minimal, one-handed: a single glass cluster near the thumb. Labels are
+    /// gone — the composer is where anything wordy lives.
+    private var bottomBar: some View {
+        HStack(spacing: 8) {
+            Button { showComposer = true } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Compose")
+                        .font(.subheadline.weight(.medium))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCapsule(shape: Capsule())
+            }
+
+            if !app.pairedScreens.isEmpty {
+                glassIcon("play.tv") {
+                    Task {
+                        let n = await app.pushToAllScreens(channelId: channelId)
+                        flash(n > 0 ? "sent to \(n) screen\(n == 1 ? "" : "s")"
+                                    : app.pairPushError ?? "couldn't reach your screens")
+                    }
+                }
+            }
+            glassIcon("info.circle") { showInfo = true }
+            ShareLink(item: app.gallery.viewerURL(for: channelId)) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .glassCapsule(shape: Circle())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 24)
+    }
+
+    private func glassIcon(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .glassCapsule(shape: Circle())
+        }
+    }
+
+    private func flash(_ message: String) {
+        toast = message
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if toast == message { toast = nil }
+        }
+    }
+
+    /// Chrome fades so the scene owns the screen; tap anywhere brings it back.
     private func revealChrome() {
         showChrome = true
         chromeTask?.cancel()
         chromeTask = Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(ProcessInfo.processInfo.arguments.contains("-chrome-sticky") ? 600 : 6))
             guard !Task.isCancelled else { return }
             showChrome = false
+        }
+    }
+}
+
+// MARK: - Scene info
+
+/// What the scene JSON actually contains, natively — the detail the hosted
+/// page only hints at, plus what the renderer decided to do with it.
+private struct SceneInfoSheet: View {
+    let session: ChannelSession
+    let channelId: String
+    let guardrail: RenderGuard
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("scene") {
+                    LabeledContent("channel", value: channelId)
+                    LabeledContent("scene", value: session.sceneLabel ?? "—")
+                    LabeledContent("layers", value: "\(session.compiledScene.count)")
+                    LabeledContent("sprites",
+                                   value: "\(session.compiledScene.reduce(0) { $0 + $1.entities.count })")
+                    if let viewers = session.viewers {
+                        LabeledContent("viewers", value: "\(viewers)")
+                    }
+                }
+                Section("rendering") {
+                    LabeledContent("mode", value: guardrail.level.rawValue)
+                    LabeledContent("engine", value: "native")
+                    if let reason = guardrail.reason {
+                        LabeledContent("stepped down", value: reason)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
+            .navigationTitle("Scene")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

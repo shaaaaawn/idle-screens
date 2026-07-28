@@ -11,26 +11,41 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     let sleeping: Bool?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
+    /// The same spec as untouched JSON. `SpecSubset` is a lossy, decode-only
+    /// view (custom decoders, no encoder), so re-publishing it would drop
+    /// every field the renderer doesn't read. Mixing a scene onto another
+    /// channel must send the ORIGINAL — keep it verbatim.
+    let rawSpec: JSONValue?
 
     var id: String { channelId ?? label ?? "unknown" }
     var displayLabel: String { label ?? channelId ?? "unknown" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, channelId, label, tags, viewers, sleeping, scene
+        case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
     }
 
     private struct SceneWrap: Decodable {
         let spec: SpecSubset?
+        let rawSpec: JSONValue?
+
+        private enum Keys: String, CodingKey { case spec }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            spec = try? c.decodeIfPresent(SpecSubset.self, forKey: .spec)
+            rawSpec = try? c.decodeIfPresent(JSONValue.self, forKey: .spec)
+        }
     }
 
     init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
-         sleeping: Bool? = nil, spec: SpecSubset? = nil) {
+         sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
         self.viewers = viewers
         self.sleeping = sleeping
         self.spec = spec
+        self.rawSpec = rawSpec
     }
 
     init(from decoder: Decoder) throws {
@@ -43,7 +58,17 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         tags = try? c.decodeIfPresent([String].self, forKey: .tags)
         viewers = try? c.decodeIfPresent(Int.self, forKey: .viewers)
         sleeping = try? c.decodeIfPresent(Bool.self, forKey: .sleeping)
-        spec = (try? c.decodeIfPresent(SceneWrap.self, forKey: .scene))??.spec
+        // Prefer the RESOLVED spec (base + all steering deltas applied) —
+        // it's what the fullscreen viewer shows. The base `scene.spec` can be
+        // a placeholder that renders nothing like the live channel, which
+        // made posters render black/wrong while fullscreen looked fine.
+        let scene = (try? c.decodeIfPresent(SceneWrap.self, forKey: .scene)) ?? nil
+        spec = (try? c.decodeIfPresent(SpecSubset.self, forKey: .resolvedSpec))
+            ?? scene?.spec
+        // Same precedence for the verbatim copy, so mixing publishes exactly
+        // what the viewer is showing.
+        rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .resolvedSpec))
+            ?? scene?.rawSpec
     }
 }
 

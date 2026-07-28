@@ -39,6 +39,12 @@ struct ScreenSaverView: View {
             } else if app.compiledScene.isEmpty {
                 ProgressView()
                     .scaleEffect(2)
+            } else if SceneVisibility.verdict(layers: app.compiledScene,
+                                              background: app.specBackground) == .invisible {
+                // The scene would render as a black screen — indistinguishable
+                // from a broken app. Show a designed state instead.
+                NotBroadcastingView(channelId: app.selectedChannelId ?? "",
+                                    label: channelLabel)
             } else {
                 switch app.effectiveTier {
                 case .t3:
@@ -82,7 +88,7 @@ struct ScreenSaverView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: app.overlayText)
         .animation(.easeInOut(duration: 0.8), value: app.sleeping)
-        .animation(.easeInOut(duration: 0.4), value: showChrome)
+        .animation(.easeInOut(duration: 0.25), value: showChrome)
         .ignoresSafeArea()
         // The saver has no buttons, so give the remote somewhere to land and
         // handle the exits explicitly — Menu/Back must never feel dead.
@@ -142,6 +148,31 @@ struct ScreenSaverView: View {
             try? await Task.sleep(for: .seconds(3.5))
             guard !Task.isCancelled else { return }
             showChrome = false
+        }
+    }
+}
+
+/// Designed stand-in for scenes that would render invisibly (sub-pixel
+/// sprites, dark-on-dark): the channel's generative art, dimmed, with an
+/// honest one-liner — never an unexplained black screen.
+private struct NotBroadcastingView: View {
+    let channelId: String
+    let label: String
+
+    var body: some View {
+        ZStack {
+            ProceduralChannelArt(channelId: channelId)
+                .opacity(0.45)
+                .ignoresSafeArea()
+            VStack(spacing: 18) {
+                Text(label)
+                    .font(.system(size: 54, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("This channel isn't broadcasting visuals right now")
+                    .font(.system(size: 27))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .shadow(color: .black.opacity(0.6), radius: 20)
         }
     }
 }

@@ -10,6 +10,7 @@ struct PairedTVView: View {
     @State private var justPushed: String?
     @State private var screenKind: ScreenKind = .appleTV
     @State private var selectedScreen: String?
+    @State private var showingAddScreen = false
 
     /// The three screen hosts, each with the one step that puts it into
     /// pairing mode — shown one at a time instead of as a run-on sentence.
@@ -54,10 +55,25 @@ struct PairedTVView: View {
             .navigationTitle("screens")
             .background(Color.appBackground.ignoresSafeArea())
         }
+        .sheet(isPresented: $showingAddScreen) {
+            NavigationStack {
+                ScrollView { pairingForm.padding(20) }
+                    .background(Color.appBackground.ignoresSafeArea())
+                    .navigationTitle("Add a screen")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showingAddScreen = false }
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $showingScanner) {
             PairScannerSheet { code in
                 showingScanner = false
-                Task { await app.claimPairCode(code) }
+                Task {
+                    if await app.claimPairCode(code) { showingAddScreen = false }
+                }
             }
         }
         .task {
@@ -99,6 +115,18 @@ struct PairedTVView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 12)
 
+                pairingForm
+            }
+            .padding(20)
+        }
+    }
+
+    /// The pairing steps themselves — shared by the empty state and the
+    /// "Add a screen" sheet, so a second screen can be added by CODE, not
+    /// just QR (the Mac and Linux hosts only ever show a code).
+    @ViewBuilder
+    private var pairingForm: some View {
+        VStack(spacing: 28) {
                 // Step 1, per platform — pick your screen, get one instruction.
                 VStack(alignment: .leading, spacing: 12) {
                     stepHeader(1, "Put your screen in pairing mode")
@@ -130,7 +158,9 @@ struct PairedTVView: View {
                         Button {
                             let code = manualCode
                             manualCode = ""
-                            Task { await app.claimPairCode(code) }
+                            Task {
+                                if await app.claimPairCode(code) { showingAddScreen = false }
+                            }
                         } label: {
                             if app.isPairing {
                                 ProgressView().tint(Color.appBackground)
@@ -146,9 +176,21 @@ struct PairedTVView: View {
                         .foregroundStyle(Color.appBackground)
                         .disabled(manualCode.trimmingCharacters(in: .whitespaces).isEmpty || app.isPairing)
                     }
-                    Text("Codes expire five minutes after your screen shows them.")
-                        .font(.caption)
-                        .foregroundStyle(Color.textTertiary)
+                    HStack {
+                        Text("Codes expire five minutes after your screen shows them.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textTertiary)
+                        Spacer(minLength: 8)
+                        // Scanning is also reachable here, so the Add sheet
+                        // offers both routes without the hero button.
+                        Button {
+                            showingScanner = true
+                        } label: {
+                            Label("Scan", systemImage: "qrcode.viewfinder")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.textPrimary)
+                        }
+                    }
                 }
                 .cardStyle()
 
@@ -159,8 +201,6 @@ struct PairedTVView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardStyle()
                 }
-            }
-            .padding(20)
         }
     }
 
@@ -215,7 +255,7 @@ struct PairedTVView: View {
                             .foregroundStyle(Color.textPrimary)
                         Spacer()
                         Button {
-                            showingScanner = true
+                            showingAddScreen = true
                         } label: {
                             Label("Add", systemImage: "plus")
                                 .font(.subheadline.weight(.medium))

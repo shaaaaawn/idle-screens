@@ -11,12 +11,16 @@ struct HeroChannelCard: View {
     @Environment(TVAppState.self) private var app
 
     var body: some View {
-        AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
-            default:
-                ProceduralChannelArt(channelId: channel.id)
+        Group {
+            // Live scene billboard on canvas-capable hardware (visibility-
+            // guarded inside ScenePreviewView); thumb → art otherwise.
+            if let spec = channel.spec, app.effectiveTier == .t3 {
+                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+                    .background(ProceduralChannelArt(channelId: channel.id))
+            } else {
+                ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
+                    ProceduralChannelArt(channelId: channel.id)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -24,6 +28,14 @@ struct HeroChannelCard: View {
         .clipped()
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 14) {
+                // Editorial kicker above the billboard title (ATV+ grammar).
+                if let tags = channel.tags?.filter({ $0 != "featured" }), !tags.isEmpty {
+                    Text(tags.prefix(3).joined(separator: " · ").uppercased())
+                        .font(.system(size: 23, weight: .semibold))
+                        .kerning(2.2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
                 Text(channel.displayLabel)
                     .font(.system(size: 64, weight: .bold))
                     .foregroundStyle(.white)

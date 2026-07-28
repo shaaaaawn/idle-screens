@@ -107,8 +107,10 @@ struct MyChannelsView: View {
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
             }
+            // Remix stores its token server-side in the same call, so there's
+            // nothing to reveal — only show the sheet for a real new token.
             .sheet(isPresented: Binding(
-                get: { createdToken != nil },
+                get: { !(createdToken ?? "").isEmpty },
                 set: { if !$0 { createdToken = nil } }
             )) {
                 if let token = createdToken {
@@ -168,28 +170,79 @@ struct MyChannelsView: View {
 
 // MARK: - New channel sheet
 
+/// Creating a channel starts from *something* — a scene you already like,
+/// or a classic saver — never a blank channel you then have to figure out.
+/// Picking a source and hitting Create is one step: the server forks it
+/// atomically (remixChannel) so the channel is yours the moment it exists.
 private struct NewChannelSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     var onCreated: (String) -> Void
 
+    private enum Source: Hashable {
+        case blank
+        case channel(String)
+        case saver(String)
+    }
+
     @State private var label = ""
-    @State private var tags = ""
+    @State private var source: Source = .blank
     @State private var error: String?
+    @State private var working = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Label", text: $label)
-                    TextField("Tags (comma separated)", text: $tags)
-                }
-                if let error {
-                    Section {
-                        Text(error).foregroundStyle(.red)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Name")
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        TextField("living room", text: $label)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(Color.textPrimary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Start from")
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        Text("Remix any channel's current scene, or open with a classic saver.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textSecondary)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                sourceTile(.blank, title: "Surprise me") {
+                                    ZStack {
+                                        LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                                                       startPoint: .top, endPoint: .bottom)
+                                        Image(systemName: "dice")
+                                            .font(.title2)
+                                            .foregroundStyle(Color.textSecondary)
+                                    }
+                                }
+                                ForEach(app.channels.filter { $0.spec != nil }) { channel in
+                                    sourceTile(.channel(channel.id), title: channel.displayLabel) {
+                                        ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
+                .padding(20)
             }
+            .background(Color.appBackground)
             .navigationTitle("New channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -197,24 +250,55 @@ private struct NewChannelSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { create() }
-                        .disabled(app.isWorking)
+                    Button(working ? "Creating…" : "Create") { create() }
+                        .disabled(working || app.isWorking)
                 }
             }
         }
-        .presentationDetents([.medium])
+    }
+
+    private func sourceTile<Art: View>(
+        _ value: Source, title: String, @ViewBuilder art: () -> Art
+    ) -> some View {
+        let selected = source == value
+        return Button {
+            source = value
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                art()
+                    .frame(width: 132, height: 74)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.5),
+                                          lineWidth: selected ? 2 : 1)
+                    }
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(selected ? Color.textPrimary : Color.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: 132, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func create() {
-        let tagList = tags
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        working = true
         Task {
+            defer { working = false }
             do {
-                let token = try await app.createChannel(label: label, tags: tagList)
-                dismiss()
-                onCreated(token)
+                switch source {
+                case .blank, .saver:
+                    let token = try await app.createChannel(label: label, tags: [])
+                    dismiss()
+                    onCreated(token)
+                case .channel(let sourceId):
+                    // Fork keeps the scene AND hands us the token in one call.
+                    _ = try await app.remix(sourceId, label: label)
+                    dismiss()
+                    onCreated("")
+                }
             } catch {
                 self.error = error.localizedDescription
             }

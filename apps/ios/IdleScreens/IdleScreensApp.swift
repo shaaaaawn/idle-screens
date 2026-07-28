@@ -17,6 +17,13 @@ struct IdleScreensApp: App {
                     }
                 }
                 .task {
+                    // Crash/hang capture: MetricKit delivers the previous
+                    // run's diagnostics shortly after launch.
+                    CrashReporter.shared.start()
+                    if ProcessInfo.processInfo.arguments.contains("-print-diagnostics") {
+                        CrashReporter.shared.printReports()
+                    }
+
                     // Debug affordance (CLI testing, mirrors the TV's -channel):
                     // `simctl launch booted <id> -pair <code>` claims a pair
                     // code headlessly; `-push <channel>` pushes to the TV.

@@ -19,9 +19,25 @@ final class ChannelSession {
     private(set) var isClassicSpec = false
     private(set) var hasScene = false
 
+    /// Every state the viewer can be in, named. Without this the UI had only
+    /// "scene or spinner", so a socket that never delivered showed a spinner
+    /// forever and a failed connect looked identical to a slow one.
+    enum Phase: Equatable {
+        case connecting     // no frame yet — hold the channel's own backdrop
+        case live           // rendering
+        case unreachable    // gave up; offer a retry
+    }
+
+    private(set) var phase: Phase = .connecting
+    /// Backdrop colour taken from the spec before anything renders, so the
+    /// entry transition is channel-coloured rather than a black flash.
+    private(set) var backdrop: String?
+
+    private var channelId: String?
     private let ws: ChannelWSClient
     private let baseURL: URL
     private var task: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
 
     init(ws: ChannelWSClient = ChannelWSClient(), baseURL: URL = URL(string: Config.baseURL)!) {
         self.ws = ws
@@ -31,6 +47,10 @@ final class ChannelSession {
     /// Paint the gallery's inline spec immediately so the first frame is real
     /// content, then let the socket's snapshot replace it.
     func start(channelId: String, seedSpec: SpecSubset?) {
+        self.channelId = channelId
+        backdrop = seedSpec?.background?.primaryColor
+        phase = hasScene ? .live : .connecting
+        armConnectTimeout()
         if let seedSpec {
             apply(spec: seedSpec, fallbackSeed: seedSpec.seed)
         }
@@ -51,6 +71,26 @@ final class ChannelSession {
     func stop() {
         task?.cancel()
         task = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+    }
+
+    /// Retry after a failure — the user asked for it, so start clean.
+    func retry() {
+        guard let channelId else { return }
+        phase = .connecting
+        start(channelId: channelId, seedSpec: nil)
+    }
+
+    /// A socket that connects but never delivers is indistinguishable from a
+    /// slow one until you bound it. 10s is generous for a snapshot.
+    private func armConnectTimeout() {
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard let self, !Task.isCancelled, !self.hasScene else { return }
+            self.phase = .unreachable
+        }
     }
 
     func handle(_ event: ChannelWSEvent) {
@@ -93,9 +133,19 @@ final class ChannelSession {
     }
 
     private func apply(spec: SpecSubset, fallbackSeed: Int?) {
-        compiledScene = spec.compile(seed: spec.seed ?? fallbackSeed ?? 0)
+        compiledScene = spec.compile(seed: spec.seed ?? fallbackSeed ?? 0,
+                                     budget: SpecSubset.Budget.fullscreen)
         background = spec.background
         sceneLabel = spec.label ?? spec.id
         hasScene = !compiledScene.isEmpty
+        if hasScene {
+            phase = .live
+            timeoutTask?.cancel()
+        }
+        // Breadcrumb for MetricKit: if the app dies rendering this, the
+        // report names the channel and how heavy the scene was.
+        CrashReporter.shared.noteRendering(
+            channelId: channelId,
+            entityCount: compiledScene.reduce(0) { $0 + $1.entities.count })
     }
 }
