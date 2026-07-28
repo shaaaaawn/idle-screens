@@ -1,6 +1,6 @@
 # @idle-screens/saver-catwalk
 
-## 2.0.0
+## 1.1.1
 
 ### Patch Changes
 
@@ -9,7 +9,7 @@
   per-saver capability lists. Catalog savers declare theirs; the playground
   properties panel surfaces the claim.
 - Updated dependencies [bae7b6b]
-  - @idle-screens/core@0.5.0
+  - @idle-screens/core@0.4.2
 
 ## 1.1.0
 
