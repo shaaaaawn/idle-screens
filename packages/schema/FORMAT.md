@@ -195,6 +195,14 @@ the format never changes the entity stream of an existing spec — a spec author
 against an older runtime renders bit-identically on a newer one
 (`determinism-baseline.test.ts` guards this with snapshot streams).
 
+The same discipline applies to **meaning**, not just RNG draws: a new field may
+introduce a default, but a default must never *reinterpret* values that already
+exist in published specs. Ship the field opt-in first, flip the default only in
+a major, and write the stored-spec migration in the same change. (Learned the
+hard way when 2.3.0's `units: "viewport"` default invalidated live channels —
+see idle-server's G5 spec stamping, which now heals reads but can't excuse a
+repeat.)
+
 Positions are **analytic**: `positionAt(entity, t)` is a pure function, so
 `renderFrame(t, seed)` can seek anywhere instantly, trails sample the past for
 free, and streak headings derive from a finite difference. `ghosting` is the
@@ -214,11 +222,15 @@ for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
 
 `src/perceive.ts` translates a spec into modalities a **non-vision agent** can
 reason about, computed analytically from the entity model (no canvas, no
-renderer, deterministic, Node-safe). Note: the analytical model approximates
-but does not perfectly match canvas rendering — blend modes are simplified
-(`screen` ≈ `lighter`), wrapped link segments use straight interpolation, and
-background drift is sampled at rest. These are documented trade-offs for a
-zero-dependency, renderer-free analysis tool.
+renderer, deterministic, Node-safe). Persistence is part of the picture:
+`ghosting` is modeled as a decayed sum of past-frame splats (ink from m frames
+ago survives at weight gᵐ, mirroring the renderer's warm-up replay) and `trail`
+mirrors the renderer's past-position sampling — so the smear an audience sees
+is measurable, not invisible, in every output below. Note: the analytical model
+approximates but does not perfectly match canvas rendering — blend modes are
+simplified (`screen` ≈ `lighter`), wrapped link segments use straight
+interpolation, and background drift is sampled at rest. These are documented
+trade-offs for a zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
@@ -234,9 +246,10 @@ zero-dependency, renderer-free analysis tool.
   braille map smears — concentric rings, grids, text blocks. This is the sharper
   read when composition detail matters.
 - `dominanceRanking(spec, opts)` — layers ranked by estimated visual weight
-  (area × alpha × contrast × glow/motion boosts; links count) — *where the eye
-  goes*, normalized to shares. Thin-but-bright structures (rings, streaks, link
-  lines) get a line-salience boost so they aren't crushed by filled discs.
+  (area × alpha × contrast × glow/motion boosts; links and persistence ink —
+  trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
+  shares. Thin-but-bright structures (rings, streaks, link lines) get a
+  line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `textSprites(spec, opts)` — the literal strings and rendered sizes of every

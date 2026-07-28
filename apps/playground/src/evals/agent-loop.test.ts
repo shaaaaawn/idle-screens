@@ -168,4 +168,96 @@ describe('runAgentScreen', () => {
     expect(art.outcome).toBe('max-calls');
     expect(art.trajectory.some((m) => m.role === 'user' && m.content?.includes('Continue with tools'))).toBe(true);
   });
+
+  it('records a schema-rejected submission without versioning it', async () => {
+    const { chat } = fakeChat([
+      { content: null, toolCalls: [tc('submit_spec', { spec: { schemaVersion: 1 } })] },
+      { content: null, toolCalls: [tc('submit_spec', { spec: VALID_SPEC })] },
+      { content: null, toolCalls: [tc('finish', {})] },
+    ]);
+    const art = await runAgentScreen({
+      screen, profile, benchmark, model: 'test/model', maxToolCalls: 20, chat,
+    });
+    expect(art.versions).toHaveLength(1);
+    expect(art.rejections).toHaveLength(1);
+    const [rej] = art.rejections;
+    expect(rej!.reason).toBe('schema');
+    expect(rej!.afterVersion).toBe(0);
+    expect(rej!.validationErrors.length).toBeGreaterThan(0);
+    // The pairing that makes this a training example: the rejection sits
+    // immediately before the version that fixed it.
+    expect(art.versions[0]!.n).toBe(rej!.afterVersion + 1);
+  });
+
+  it('records unparseable tool arguments as an invalid-json rejection', async () => {
+    const badCall = {
+      id: 'call_bad',
+      type: 'function' as const,
+      function: { name: 'submit_spec', arguments: '{not json' },
+    };
+    const { chat } = fakeChat([
+      { content: null, toolCalls: [badCall] },
+      { content: null, toolCalls: [tc('finish', {})] },
+    ]);
+    const art = await runAgentScreen({
+      screen, profile, benchmark, model: 'test/model', maxToolCalls: 20, chat,
+    });
+    expect(art.rejections).toHaveLength(1);
+    expect(art.rejections[0]!.reason).toBe('invalid-json');
+    expect(art.versions).toHaveLength(0);
+  });
+
+  it('best is the highest-scoring version, not the last one', async () => {
+    // v2 is a single sparse layer — a genuine regression from the two-layer v1.
+    const weak: SaverSpec = { ...VALID_SPEC, layers: [VALID_SPEC.layers[0]!] };
+    const { chat } = fakeChat([
+      { content: null, toolCalls: [tc('submit_spec', { spec: VALID_SPEC })] },
+      { content: null, toolCalls: [tc('submit_spec', { spec: weak })] },
+      { content: null, toolCalls: [tc('finish', {})] },
+    ]);
+    const art = await runAgentScreen({
+      screen, profile, benchmark, model: 'test/model', maxToolCalls: 20, chat,
+    });
+    expect(art.final!.n).toBe(2);
+    expect(art.best!.n).toBe(1);
+    expect(art.best!.score.score).toBeGreaterThan(art.final!.score.score);
+  });
+
+  it('captures the resolved model the API reported, not just the one requested', async () => {
+    const { chat } = fakeChat([
+      {
+        content: null,
+        toolCalls: [tc('finish', {})],
+        served: {
+          model: 'vendor/model-2026-01-01',
+          provider: 'SomeProvider',
+          generationId: 'gen-abc',
+          usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 },
+        },
+      },
+    ]);
+    const art = await runAgentScreen({
+      screen, profile, benchmark, model: 'vendor/model', maxToolCalls: 20, chat,
+    });
+    expect(art.model).toBe('vendor/model');
+    expect(art.served?.model).toBe('vendor/model-2026-01-01');
+    expect(art.served?.provider).toBe('SomeProvider');
+    expect(art.served?.usage?.totalTokens).toBe(120);
+  });
+
+  it('sums token usage across rounds', async () => {
+    const usage = (n: number) => ({
+      usage: { promptTokens: n, completionTokens: n, totalTokens: 2 * n },
+      model: 'vendor/model-snap',
+    });
+    const { chat } = fakeChat([
+      { content: null, toolCalls: [tc('submit_spec', { spec: VALID_SPEC })], served: usage(10) },
+      { content: null, toolCalls: [tc('finish', {})], served: usage(5) },
+    ]);
+    const art = await runAgentScreen({
+      screen, profile, benchmark, model: 'vendor/model', maxToolCalls: 20, chat,
+    });
+    expect(art.served?.usage?.totalTokens).toBe(30);
+    expect(art.served?.model).toBe('vendor/model-snap');
+  });
 });

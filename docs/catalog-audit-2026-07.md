@@ -29,7 +29,7 @@ this one is the curator's ledger.*
 | spotlight | canvas2d | 0 | ✗ | ✓ | ✓ | params + upgrade to victim-aware PT (P7) |
 | bouncing-ball | css | 0 | ✗ | ✗ | ✓ | canvas port + squash/stretch params (P8) |
 | bsod | css | 0 | ✗ | ✗ | ✗ | keep DOM (it *is* a screenshot); add screens params (P9) |
-| pipes | canvas2d | 0 | ✗ | ✓ | n/a | params; renderFrame hard (accumulative) — document why (P10) |
+| pipes | canvas2d | 2 | ✓ | ✓ | n/a | DONE (July 2026): compiled-plan rewrite — renderFrame, tempo/density params, demo track. The audit's "renderFrame hard (accumulative)" was wrong; the catwalk's compile-the-history pattern applies to any seeded accumulation. |
 | mystify | canvas2d | 0 | ✗ | ✓ | ✓ | params (polygon count, trail, palette) (P11) |
 | fluid | canvas2d/gpu | 0 | ✗ | ✓(cpu) | n/a | params (emitters, palette); renderFrame impossible — document (P12) |
 | reaction-diffusion | canvas2d/gpu | 0 | ✗ | ✓(cpu) | n/a | same as fluid (P12) |
@@ -57,11 +57,15 @@ this one is the curator's ledger.*
    trademark; the saver must keep drawing a generic mark), bsod (visual
    reference to a Microsoft screen; needs a "parody/homage, no MS assets"
    note). Everything After Dark now carries `manifest.attribution`.
-5. **Observability asymmetry.** Only savers with `renderFrame` get scrubbing,
-   perception determinism, and honest thumbnails. The accumulative/simulated
-   three (pipes, fluid, RD) can't have it — that's fine, but the manifest
-   should SAY so (a `timeModel: 'closed-form' | 'accumulative' | 'simulated'`
-   field is the eventual fix; not urgent).
+5. **Observability asymmetry.** ~~Only savers with `renderFrame` get
+   scrubbing, perception determinism, and honest thumbnails; the manifest
+   should SAY why.~~ **DONE (July 2026):** `manifest.timeModel:
+   'closed-form' | 'simulated'` shipped in core after the pipes/mystify
+   rewrites collapsed 'accumulative' as a category. Every manifest declares
+   it (only fluid + reaction-diffusion are 'simulated'), schema-compiled
+   specs get it by construction, and the dev-tools Properties panel shows it
+   with a plain-language tooltip. Follow-up when convenient: derive the
+   perception e2e capability lists from the field instead of hand lists.
 6. **Pixel-perfection nits observed in gallery sweeps:** warp stars pop in at
    full alpha at the spawn radius (needs fade-in ramp); globe's wireframe
    aliases hard at DPR 1; dvd's CSS mark is a plain rect (reads cheap next to

@@ -55,6 +55,7 @@ const PARAM_SPACE = {
 export const tideManifest: SaverManifest = {
   id: 'tide',
   label: 'Tide',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'medium',

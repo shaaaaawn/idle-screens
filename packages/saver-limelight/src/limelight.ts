@@ -58,6 +58,7 @@ const PARAM_SPACE = {
 export const limelightManifest: SaverManifest = {
   id: 'limelight',
   label: 'Limelight',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'high',

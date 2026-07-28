@@ -19,6 +19,7 @@ import type {
 export const rainstormManifest: SaverManifest = {
   id: 'rainstorm',
   label: 'Rainstorm',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

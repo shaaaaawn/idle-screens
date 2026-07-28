@@ -58,6 +58,7 @@ const PARAM_SPACE = {
 export const slipstreamManifest: SaverManifest = {
   id: 'slipstream',
   label: 'Slipstream',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'high',

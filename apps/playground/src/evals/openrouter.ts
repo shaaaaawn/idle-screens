@@ -242,9 +242,33 @@ export interface ChatRequest {
   signal?: AbortSignal;
 }
 
+/**
+ * What the API actually did, as distinct from what we asked it to do.
+ *
+ * `ChatRequest.model` is a REQUEST. OpenRouter resolves it to a concrete
+ * snapshot and may route it to any of several providers, and which one you got
+ * is not recoverable later. A published comparison labelled with the requested
+ * id when a different snapshot answered is wrong in a way no amount of
+ * re-reading the dataset can fix — so it is captured at the only moment it
+ * exists.
+ *
+ * All fields optional: a scripted transport in tests supplies none of them,
+ * and older artifacts predate the capture.
+ */
+export interface ChatServed {
+  /** Resolved model id from the response body — the authoritative label. */
+  model?: string;
+  /** Upstream provider OpenRouter routed to. */
+  provider?: string;
+  /** Generation id, for reconciling against OpenRouter's own records. */
+  generationId?: string;
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+}
+
 export interface ChatResponse {
   content: string | null;
   toolCalls: ChatToolCall[];
+  served?: ChatServed;
 }
 
 /** OpenRouter failure with a machine-readable kind for the UI to branch on. */
@@ -289,7 +313,31 @@ export async function chatCompletion(req: ChatRequest): Promise<ChatResponse> {
   if (!res.ok) throw new ChatError('http', `OpenRouter chat: HTTP ${res.status}`);
   const body = (await res.json()) as {
     choices?: Array<{ message?: { content?: string | null; tool_calls?: ChatToolCall[] } }>;
+    model?: string;
+    id?: string;
+    provider?: string;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
   const msg = body.choices?.[0]?.message;
-  return { content: msg?.content ?? null, toolCalls: msg?.tool_calls ?? [] };
+  const served: ChatServed = {
+    ...(body.model ? { model: body.model } : {}),
+    ...(body.provider ? { provider: body.provider } : {}),
+    ...(body.id ? { generationId: body.id } : {}),
+    ...(body.usage
+      ? {
+          usage: {
+            ...(body.usage.prompt_tokens != null ? { promptTokens: body.usage.prompt_tokens } : {}),
+            ...(body.usage.completion_tokens != null
+              ? { completionTokens: body.usage.completion_tokens }
+              : {}),
+            ...(body.usage.total_tokens != null ? { totalTokens: body.usage.total_tokens } : {}),
+          },
+        }
+      : {}),
+  };
+  return {
+    content: msg?.content ?? null,
+    toolCalls: msg?.tool_calls ?? [],
+    ...(Object.keys(served).length ? { served } : {}),
+  };
 }

@@ -30,6 +30,7 @@ const PARAM_SPACE = {
 export const blackHoleManifest: SaverManifest = {
   id: 'black-hole',
   label: 'Black Hole',
+  timeModel: 'closed-form',
   passthrough: true,
   minBackend: 'canvas2d',
   costTier: 'medium',

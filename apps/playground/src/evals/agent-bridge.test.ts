@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SaverSpec } from '@idle-screens/schema';
 import { bridgeAgentRunToTimeline } from './agent-bridge';
 import type { AgentRun } from './agent-run';
+import type { AgentSpecVersion } from './agent-artifact';
 import { getCatalog } from './catalog';
 
 const tinySpec = (): SaverSpec => ({
@@ -26,27 +27,8 @@ describe('bridgeAgentRunToTimeline', () => {
 
   it('turns agent finals into authored screens + timeline summary', () => {
     const screen = catalog.screens.find((s) => s.id === 'monet--benchmark--calm-horizon')!;
-    const agent: AgentRun = {
-      runId: 'run-test-agent',
-      createdAt: new Date().toISOString(),
-      model: 'test/model',
-      maxToolCalls: 10,
-      styleDnaHash: 'deadbeef',
-      artifacts: [
-        {
-          screenId: screen.id,
-          artistId: screen.artistId,
-          benchmarkId: screen.screenId,
-          model: 'test/model',
-          maxToolCalls: 10,
-          toolCallsUsed: 4,
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          prompt: { system: 'sys', user: 'usr' },
-          trajectory: [],
-          versions: [],
-          initial: null,
-          final: {
+    // final === best here: one accepted version, so the two coincide.
+    const onlyVersion: AgentSpecVersion = {
             n: 1,
             spec: { ...tinySpec(), id: screen.id, label: screen.spec.label },
             score: {
@@ -72,7 +54,33 @@ describe('bridgeAgentRunToTimeline', () => {
               score: 0.85,
               notes: [],
             },
-          },
+          };
+    const agent: AgentRun = {
+      runId: 'run-test-agent',
+      createdAt: new Date().toISOString(),
+      evalId: 'style-authoring-v1',
+      model: 'test/model',
+      maxToolCalls: 10,
+      trials: 1,
+      styleDnaHash: 'deadbeef',
+      artifacts: [
+        {
+          screenId: screen.id,
+          artistId: screen.artistId,
+          benchmarkId: screen.screenId,
+          model: 'test/model',
+          trial: 0,
+          maxToolCalls: 10,
+          toolCallsUsed: 4,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          prompt: { system: 'sys', user: 'usr' },
+          trajectory: [],
+          versions: [],
+          rejections: [],
+          initial: null,
+          final: onlyVersion,
+          best: onlyVersion,
           outcome: 'finished',
         },
       ],

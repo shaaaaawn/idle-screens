@@ -44,7 +44,16 @@ export function hashStyleDna(profiles: ArtistStyleProfile[]): string {
         composition: p.composition,
         schemaGaps: p.schemaGaps,
         durableKeys: p.durableKeys,
-        signaturePrompts: p.signaturePrompts,
+        // Titles are display text — they set the spec's `label` and nothing
+        // else. Hashing them would move the DNA hash (and so mark every prior
+        // run incomparable) on a pure rename, while the geometry, the scores
+        // and the measurement are all untouched. Hash what determines a
+        // screen: its id, its intent, and its recipe.
+        signaturePrompts: p.signaturePrompts.map((s) => ({
+          id: s.id,
+          intent: s.intent,
+          recipe: s.recipe,
+        })),
       }),
     )
     .join('\n');

@@ -57,6 +57,7 @@ const PARAM_SPACE = {
 export const fadeOutManifest: SaverManifest = {
   id: 'fade-out',
   label: 'Fade Out',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

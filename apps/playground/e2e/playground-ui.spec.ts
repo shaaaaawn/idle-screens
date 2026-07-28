@@ -234,6 +234,26 @@ test.describe('saver outliner (dev view)', () => {
     await expect(page.locator('#dock-left .palette-item:not([hidden])')).toHaveCount(3);
     await expect(page.locator('#dock-left .palette-group').first()).toBeHidden();
   });
+
+  test('selecting a saver deep-links it: the URL is shareable and survives reload', async ({ page }) => {
+    await page.goto('/#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await pickSaver(page, 'pipes');
+    // The address bar always names the selection (replaceState, no history spam).
+    await expect.poll(() => page.url()).toContain('saver=pipes');
+    expect(page.url()).toContain('#dev');
+
+    // The link round-trips: a fresh load of that URL restores the selection.
+    await page.reload();
+    await page.waitForFunction(() => !!window.__idleScreens);
+    await expect(page.locator('#dock-left .palette-item.active')).toHaveAttribute('data-id', 'pipes');
+
+    // ...and picking another saver rewrites, not appends, browser history.
+    const before = await page.evaluate(() => history.length);
+    await pickSaver(page, 'warp');
+    await expect.poll(() => page.url()).toContain('saver=warp');
+    expect(await page.evaluate(() => history.length)).toBe(before);
+  });
 });
 
 test.describe('config panel (dev view)', () => {
@@ -439,6 +459,79 @@ test.describe('evals view', () => {
     await expect(page.locator('[data-role="subtitle"]')).toContainText('e2e run');
     await expect(page.locator('[data-role="subtitle"]')).toContainText('median');
     await expect(page.locator('[data-act="export"]')).toBeEnabled();
+  });
+
+  test('evidence toggle switches Catalog wall vs This run authored set', async ({ page }) => {
+    await page.goto('/#evals');
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+
+    const runId = await page.evaluate(() => {
+      const catalog = window.__evalsCatalog!;
+      const authored = catalog.screens.filter(
+        (s) => s.kind === 'benchmark' && s.screenId === 'calm-horizon',
+      );
+      const runId = 'run-e2e-evidence-toggle';
+      const createdAt = new Date().toISOString();
+      const summary = {
+        runId,
+        createdAt,
+        config: { viewport: { width: 1920, height: 1080 }, t: 5000, seedFallback: 42 },
+        suiteMedian: 0.5,
+        perArtist: [],
+        perBenchmark: [],
+        gapHistogram: [],
+        failures: [],
+        provenance: {
+          harness: 'agent-loop',
+          label: 'e2e evidence',
+          note: 'toggle',
+          versions: {
+            styleDnaHash: 'deadbeef',
+            styleDnaLabel: 'artists@15',
+            saverSpecFormat: 1,
+            scorer: 'style-eval-score@test',
+            skill: 'artistic-style-schema-eval@test',
+          },
+          prompts: { benchmarkSource: 'benchmarks.ts' },
+          scoringBands: {
+            minCoverage: 0.05,
+            minLuminanceVar: 0.01,
+            weights: { perception: 0.25, styleFit: 0.4, intentFit: 0.35 },
+          },
+        },
+        nextCycle: { weakArtists: [], collapsedBenchmarks: [], topGaps: [], suggestedActions: [] },
+        screenFingerprints: Object.fromEntries(authored.map((s) => [s.id, 'abcd1234'])),
+      };
+      localStorage.setItem(
+        'idle-screens:style-eval:run:' + runId,
+        JSON.stringify({ summary, results: [], authoredScreens: authored }),
+      );
+      const idx = JSON.parse(localStorage.getItem('idle-screens:style-eval:run-index') ?? '[]') as unknown[];
+      idx.unshift({
+        runId,
+        createdAt,
+        label: summary.provenance.label,
+        harness: 'agent-loop',
+        suiteMedian: 0.5,
+        styleDnaHash: 'deadbeef',
+        storage: 'browser',
+      });
+      localStorage.setItem('idle-screens:style-eval:run-index', JSON.stringify(idx));
+      return runId;
+    });
+
+    await page.reload();
+    await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
+    await page.locator(`.evals-tl-node[data-run-id="${runId}"]`).click();
+    await expect(page.locator('[data-role="hero"]')).toBeVisible();
+    await expect(page.locator('.evals-evidence-btn[data-evidence="run"]')).toHaveClass(/active/);
+
+    await page.locator('.evals-mode-btn[data-mode="artist"]').click();
+    expect(await page.locator('.evals-tile').count()).toBe(1);
+
+    await page.locator('.evals-evidence-btn[data-evidence="catalog"]').click();
+    await expect(page.locator('.evals-evidence-btn[data-evidence="catalog"]')).toHaveClass(/active/);
+    expect(await page.locator('.evals-tile').count()).toBe(10);
   });
 
   test('by-artist shows only authored screens from a partial agent run — no catalog blanks', async ({ page }) => {
@@ -675,9 +768,13 @@ test.describe('evals view', () => {
 
     await page.goto('/#evals');
     await page.waitForFunction(() => !!document.querySelector('.evals-tile'));
-    await page.locator('[data-act="agent"]').click();
-    await page.locator('.evals-agent-modal input[name="model"]').fill(hostile);
-    await page.locator('.evals-agent-modal [data-act="start"]').click();
+    // Single New run path (agent mode) — model id must never become HTML.
+    await page.locator('[data-act="new-run"]').click();
+    await page.locator('.evals-modal input[name="mode"][value="agent"]').check();
+    await page.locator('select[name="agentScope"]').selectOption('screen');
+    await page.locator('.evals-modal input[name="model"]').fill(hostile);
+    await page.locator('.evals-modal [name="label"]').fill('xss probe');
+    await page.locator('.evals-modal').evaluate((f: HTMLFormElement) => f.requestSubmit());
 
     const title = page.locator('.evals-modal-title');
     // The id still reaches the operator as text...
@@ -843,6 +940,16 @@ test.describe('evals view', () => {
 });
 
 test.describe('right dock panels', () => {
+  test('properties show the time model, with fluid as the honest simulated case', async ({ page }) => {
+    await page.goto('/?saver=pipes#dev');
+    await page.waitForFunction(() => !!window.__idleScreens);
+    const tmRow = page.locator('#props-panel .wb-prop').filter({ has: page.locator('dt', { hasText: 'Time model' }) });
+    await expect(tmRow.locator('dd')).toHaveText('closed-form');
+
+    await pickSaver(page, 'fluid');
+    await expect(tmRow.locator('dd')).toHaveText('simulated');
+  });
+
   // <details> wraps its content in an anonymous box, so the old
   // `flex: 1 1 auto; min-height: 0` never shrank a panel body — it overflowed
   // its panel and got clipped, hiding whatever sat at the bottom (the Engine

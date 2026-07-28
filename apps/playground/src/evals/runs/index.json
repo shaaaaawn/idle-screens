@@ -1,6 +1,16 @@
 {
   "runs": [
     {
+      "runId": "run-2026-07-28T1742-baseline",
+      "createdAt": "2026-07-28T17:42:28.858Z",
+      "label": "baseline re-run",
+      "harness": "headless-vitest",
+      "suiteMedian": 0.9314583333333333,
+      "styleDnaHash": "773845e7",
+      "parentRunId": "run-2026-07-25T1908-baseline-v0",
+      "storage": "disk"
+    },
+    {
       "runId": "run-2026-07-25T1908-baseline-v0",
       "createdAt": "2026-07-25T19:08:43.280Z",
       "label": "baseline v0",

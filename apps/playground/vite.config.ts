@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
+import { evalHoldout } from './eval-holdout-plugin';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -50,6 +51,72 @@ const forbidSecretsInBundle = (): import('vite').Plugin => ({
   },
 });
 
+/**
+ * Dev-only endpoint that writes a finished agent-eval run to disk.
+ *
+ * Agent runs cost real API calls and cannot be reproduced — the model behind a
+ * given id drifts — yet they live in localStorage behind a 5-run cap that
+ * silently evicts on quota. This gives them somewhere durable to land.
+ *
+ * The destination comes from IDLE_EVAL_SINK_DIR and there is no default: this
+ * repo is public and published to npm-adjacent surfaces, so it must not carry a
+ * hard-coded path into anyone's workspace. Unset means the plugin does nothing
+ * and the client-side sink reports itself off.
+ *
+ * `apply: 'serve'` — never in a build, never in the deployed playground.
+ */
+const evalSink = (dir: string): import('vite').Plugin => ({
+  name: 'eval-artifact-sink',
+  apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use('/__eval-sink', (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', () => {
+        void (async () => {
+          try {
+            const { mkdir, writeFile } = await import('node:fs/promises');
+            const { join, resolve, sep } = await import('node:path');
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+              runId?: string;
+              evalId?: string;
+              files?: Record<string, string>;
+            };
+            // runId and evalId land in a filesystem path, so they are treated
+            // as untrusted: anything but [A-Za-z0-9._-] is replaced, which
+            // takes `..` and separators out of play before they are joined.
+            const safe = (s: string | undefined, fallback: string): string =>
+              (s ?? '').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 120) || fallback;
+            const root = resolve(dir);
+            const outDir = join(root, safe(body.evalId, 'unknown-eval'), safe(body.runId, 'run'));
+            // Belt and braces: confirm the join stayed inside the sink root.
+            if (outDir !== root && !outDir.startsWith(root + sep)) {
+              res.statusCode = 400;
+              res.end('path escapes sink root');
+              return;
+            }
+            await mkdir(outDir, { recursive: true });
+            for (const [name, text] of Object.entries(body.files ?? {})) {
+              if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
+              await writeFile(join(outDir, name), text, 'utf8');
+            }
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: true, path: outDir }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(String(err));
+          }
+        })();
+      });
+    });
+  },
+});
+
 export default defineConfig(({ mode, command }) => {
   // Seed the Evals OpenRouter connection from the environment, for local dev
   // convenience only. A key saved in Settings always wins over it.
@@ -64,12 +131,21 @@ export default defineConfig(({ mode, command }) => {
          loadEnv(mode, process.cwd(), 'OPENROUTER_').OPENROUTER_API_KEY ??
          '')
       : '';
+  // Dev-server only, same reasoning as the key above: a build must not carry a
+  // developer's local path, and the deployed playground has no filesystem.
+  const sinkDir = command === 'serve' ? (process.env.IDLE_EVAL_SINK_DIR ?? '') : '';
+  // Held-out fixtures are dev-only for the same reason, plus one more: a build
+  // that could inline them would publish the thing they exist to keep private.
+  const holdoutDir = command === 'serve' ? (process.env.IDLE_EVAL_HOLDOUT_DIR ?? '') : '';
   return {
-  plugins: [forbidSecretsInBundle()],
+  plugins: [forbidSecretsInBundle(), evalHoldout(holdoutDir), ...(sinkDir ? [evalSink(sinkDir)] : [])],
   base: process.env.GITHUB_ACTIONS ? '/idle-screens/' : '/',
   define: {
     __SCHEMA_PKG_VERSION__: JSON.stringify(schemaPkgVersion),
     __OPENROUTER_API_KEY__: JSON.stringify(envOpenRouterKey),
+    // A flag, never the path — the path is a local detail the client has no
+    // use for and a build must not inline.
+    __EVAL_SINK__: JSON.stringify(sinkDir ? 'on' : ''),
   },
   server: { port: 5177, strictPort: true },
   preview: { port: 5177, strictPort: true },

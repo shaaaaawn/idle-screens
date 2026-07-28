@@ -65,6 +65,7 @@ const PARAM_SPACE = {
 export const globeManifest: SaverManifest = {
   id: 'globe',
   label: 'Globe',
+  timeModel: 'closed-form',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',

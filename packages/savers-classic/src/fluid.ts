@@ -16,6 +16,7 @@ import {
 export const fluidManifest: SaverManifest = {
   id: 'fluid',
   label: 'Fluid',
+  timeModel: 'simulated',
   passthrough: false,
   minBackend: 'canvas2d',
   costTier: 'low',
