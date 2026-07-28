@@ -1,5 +1,11 @@
 # @idle-screens/core
 
+## 0.4.3
+
+### Patch Changes
+
+- f0831ef: Add optional `SaverManifest.description` and fill it on every classic saver so hosts (e.g. MCP `listSavers`) can catalog from the package instead of a hand-maintained id list.
+
 ## 0.4.2
 
 ### Patch Changes
