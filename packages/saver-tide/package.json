@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/saver-tide",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Passthrough tide screensaver for idle-screens: a rising water field that refracts, shears and floats the live page's own content. Seeded, paramSpace, control-track, frame-addressable.",
   "license": "MIT",
   "author": "Shawn Partridge",
