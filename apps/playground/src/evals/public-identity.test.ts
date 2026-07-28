@@ -82,10 +82,12 @@ describe('public identity', () => {
   });
 
   /**
-   * The substantive claim, checked against the committed baseline rather than
-   * asserted: renaming titles and re-labelling specs moved no score at all.
+   * Lock against *accidental* score drift from presentation-only catalog edits
+   * (public names, titles, labels). When perception/scoring intentionally
+   * changes, refresh `runs/latest` via `WRITE_STYLE_EVAL_BASELINE=1` and land
+   * that artifact in the same PR — do not weaken this assertion.
    */
-  it('no score moved — the renames are presentation only', () => {
+  it('scores match the committed baseline', () => {
     const prior = new Map(
       readFileSync(new URL('./runs/latest/results.jsonl', import.meta.url), 'utf8')
         .trim()
