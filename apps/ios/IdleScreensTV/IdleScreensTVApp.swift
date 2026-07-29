@@ -16,6 +16,9 @@ struct IdleScreensTVApp: App {
                         PairView()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings") {
                         SettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-fallback") {
+                        // Debug: the always-renderable ambient stand-in.
+                        FallbackSceneView(channelId: "debug-preview")
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
                         // Debug: render one channel's poster tile in isolation

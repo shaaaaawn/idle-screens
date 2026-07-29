@@ -32,7 +32,9 @@ struct ScreenSaverView: View {
                 // previewScene doesn't support them — the thumb stream is the
                 // only live view; on repeated thumb failure show a fallback note.
                 if app.thumbFailed {
-                    ClassicFallbackView(channelId: app.selectedChannelId ?? "")
+                    // Never an error message: a seeded ambient scene we can
+                    // always render internally, with an honest caption.
+                    FallbackSceneView(channelId: app.selectedChannelId ?? "")
                 } else {
                     ThumbStreamView(channelId: app.selectedChannelId ?? "")
                 }
@@ -177,24 +179,3 @@ private struct NotBroadcastingView: View {
     }
 }
 
-/// Fallback for classic savers when the thumb stream fails —
-/// previewScene doesn't support classic specs, so point at the web viewer.
-private struct ClassicFallbackView: View {
-    let channelId: String
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "sparkles.tv")
-                .font(.system(size: 64))
-                .foregroundStyle(Color.appAccent)
-            Text("Classic saver")
-                .font(.system(size: 48, weight: .semibold))
-                .foregroundStyle(Color.textPrimary)
-            Text("view live at idlescreens.com/c/\(channelId)")
-                .font(.system(size: 28))
-                .foregroundStyle(Color.textSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.ignoresSafeArea())
-    }
-}
