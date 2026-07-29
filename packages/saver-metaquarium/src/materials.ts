@@ -45,6 +45,59 @@ function isEyes(m: Material): boolean {
   return m.name.startsWith('EYES-') || /eye/i.test(m.name);
 }
 
+/**
+ * Fish are solid creatures: authored GLBs sometimes ship alpha-BLEND
+ * materials (voxel atlases especially), which render the body see-through
+ * with fins visible through it. Force every fish material opaque with a
+ * depth write — the aquarium look comes from fog and bloom, not alpha.
+ */
+export function forceOpaque(root: Object3D): void {
+  root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    for (const m of materialsOf(mesh)) {
+      m.transparent = false;
+      m.opacity = 1;
+      m.depthWrite = true;
+      m.alphaTest = 0;
+      m.needsUpdate = true;
+    }
+  });
+}
+
+/**
+ * Which way does this fish face? The eyes mark the head: find the meshes with
+ * EYE materials and return the sign of their offset from the body center
+ * along `axis` ('x' or 'z'), or 0 when there are no eye meshes to read.
+ * Orientation becomes data-driven instead of a per-breed guess.
+ */
+export function eyeNoseSign(root: Object3D, axis: 'x' | 'z'): number {
+  let eyeSum = 0;
+  let eyeN = 0;
+  let bodySum = 0;
+  let bodyN = 0;
+  root.updateMatrixWorld(true);
+  root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh || !mesh.material || !mesh.geometry) return;
+    mesh.geometry.computeBoundingBox();
+    const bb = mesh.geometry.boundingBox;
+    if (!bb) return;
+    const centerLocal = bb.min.clone().add(bb.max).multiplyScalar(0.5);
+    const center = mesh.localToWorld(centerLocal);
+    const v = axis === 'x' ? center.x : center.z;
+    if (materialsOf(mesh).some(isEyes)) {
+      eyeSum += v;
+      eyeN++;
+    } else {
+      bodySum += v;
+      bodyN++;
+    }
+  });
+  if (eyeN === 0 || bodyN === 0) return 0;
+  return Math.sign(eyeSum / eyeN - bodySum / bodyN);
+}
+
 /** Does any material in this tree carry a texture map? Textured GLBs are
  *  atlas-styled fish whose look IS the texture — never recoat them. */
 export function hasTexturedMaterial(root: Object3D): boolean {

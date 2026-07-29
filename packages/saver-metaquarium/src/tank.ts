@@ -9,9 +9,13 @@ import {
   type SaverLayer,
 } from '@idle-screens/core';
 import {
+  AdditiveBlending,
   AmbientLight,
   AnimationMixer,
+  BackSide,
   Box3,
+  BufferAttribute,
+  BufferGeometry,
   CanvasTexture,
   CircleGeometry,
   Color,
@@ -27,6 +31,8 @@ import {
   MeshStandardMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  Points,
+  PointsMaterial,
   RepeatWrapping,
   Scene,
   ShaderMaterial,
@@ -53,17 +59,20 @@ import { makeFishPath, fishPose, type FishPath, type TankBounds } from './swim';
 import {
   applyFarmMaterials,
   applyNpcMaterials,
+  eyeNoseSign,
+  forceOpaque,
   hasTexturedMaterial,
   BLOOM_LAYER,
   MIAMI_VICE_COLORS,
 } from './materials';
+import { compileSwimPlan, swimPoseAt, type SwimPlan } from './plan';
 import { qualityFor, type TankQuality } from './quality';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 /** Hero mode: the singular fish wanders a tight volume around center stage so
  *  the orbiting camera always frames it. */
-const HERO_BOUNDS: TankBounds = { radius: 46, yMin: 26, yMax: 54 };
+const HERO_BOUNDS: TankBounds = { radius: 46, yMin: 32, yMax: 62 };
 const HERO_SCALE = 1.8;
 const WATER_Y = 88;
 const FISH_LENGTH = 18;
@@ -91,7 +100,12 @@ interface FishTemplate {
 
 interface Fish {
   group: Group;
+  /** Lissajous wander (school fish). Heroes travel a compiled plan instead. */
   path: FishPath;
+  plan: SwimPlan | null;
+  /** The model node inside the group (carries yaw correction + breathing). */
+  body: Object3D | null;
+  baseScale: number;
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
@@ -121,7 +135,12 @@ class TankInstance implements SaverInstance {
   /** Bundled-fish mode state (grow-on-steer); null when a farm populated us. */
   private bundled: { url: string; poolCap: number } | null = null;
   private heroMode = false;
+  private heroPlan: SwimPlan | null = null;
   private growing = false;
+  private readonly shafts: Mesh[] = [];
+  private motes: Points | null = null;
+  private moteBase: Float32Array | null = null;
+  private causticTexture: Texture | null = null;
 
   private w: number;
   private h: number;
@@ -187,14 +206,50 @@ class TankInstance implements SaverInstance {
     sun.position.set(300, 600, 0);
     this.scene.add(sun);
 
+    // Backdrop: a giant inward-facing sphere with a vertical water-column
+    // gradient — deep abyss below, light filtering from the surface above.
+    // Replaces the stark flat-color horizon with a place.
+    const backdrop = new Mesh(
+      new SphereGeometry(850, 32, 24),
+      new ShaderMaterial({
+        uniforms: {
+          uDeep: { value: new Color(0x01020a) },
+          uShallow: { value: new Color(0x0d2c66) },
+        },
+        vertexShader: BACKDROP_VERT,
+        fragmentShader: BACKDROP_FRAG,
+        side: BackSide,
+        depthWrite: false,
+      }),
+    );
+    this.scene.add(backdrop);
+
     const floor = new Mesh(
-      new CircleGeometry(360, 48),
-      new MeshStandardMaterial({ color: 0x081828, roughness: 0.9 }),
+      new CircleGeometry(600, 48),
+      new MeshStandardMaterial({ color: 0x0a1d33, roughness: 0.95 }),
     );
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
-    this.waterGeo = new PlaneGeometry(720, 720, 32, 32);
+    // Caustic light pools playing over the sand — drifts slowly in setState.
+    this.causticTexture = makeCausticTexture();
+    if (this.causticTexture) {
+      const caustics = new Mesh(
+        new CircleGeometry(420, 48),
+        new MeshBasicMaterial({
+          map: this.causticTexture,
+          transparent: true,
+          opacity: 0.09,
+          blending: AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      caustics.rotation.x = -Math.PI / 2;
+      caustics.position.y = 0.4;
+      this.scene.add(caustics);
+    }
+
+    this.waterGeo = new PlaneGeometry(1400, 1400, 32, 32);
     this.waterBase = Float32Array.from(this.waterGeo.attributes.position!.array);
     this.waterTexture = makeWaterTexture();
     const waterMat = new MeshBasicMaterial({
@@ -211,6 +266,58 @@ class TankInstance implements SaverInstance {
     water.renderOrder = 1;
     water.layers.enable(BLOOM_LAYER);
     this.scene.add(water);
+
+    // Light shafts: soft additive blades swaying from the surface. The
+    // cheapest possible god rays, and they sell "underwater" instantly.
+    if (!this.thumbnail) {
+      for (let i = 0; i < 5; i++) {
+        const shaft = new Mesh(
+          new PlaneGeometry(26 + i * 9, 240),
+          new ShaderMaterial({
+            uniforms: { uOpacity: { value: 0.16 + (i % 3) * 0.04 } },
+            vertexShader: SHAFT_VERT,
+            fragmentShader: SHAFT_FRAG,
+            transparent: true,
+            blending: AdditiveBlending,
+            depthWrite: false,
+            side: DoubleSide,
+          }),
+        );
+        const angle = (i / 5) * Math.PI * 2;
+        shaft.position.set(Math.cos(angle) * (40 + i * 22), WATER_Y - 30, Math.sin(angle) * (40 + i * 22));
+        shaft.rotation.y = angle + 0.6;
+        this.shafts.push(shaft);
+        this.scene.add(shaft);
+      }
+    }
+
+    // Marine snow: slow-rising motes. Closed-form per-mote positions.
+    const moteCount = this.thumbnail ? 60 : 220;
+    const moteRng = ctx.rng.fork(0x0e5);
+    this.moteBase = new Float32Array(moteCount * 4);
+    for (let i = 0; i < moteCount; i++) {
+      const r = 30 + moteRng.next() * 180;
+      const a = moteRng.next() * Math.PI * 2;
+      this.moteBase[i * 4] = Math.cos(a) * r;
+      this.moteBase[i * 4 + 1] = moteRng.next() * WATER_Y;
+      this.moteBase[i * 4 + 2] = Math.sin(a) * r;
+      this.moteBase[i * 4 + 3] = 0.5 + moteRng.next(); // rise-speed factor
+    }
+    const moteGeo = new BufferGeometry();
+    moteGeo.setAttribute('position', new BufferAttribute(new Float32Array(moteCount * 3), 3));
+    this.motes = new Points(
+      moteGeo,
+      new PointsMaterial({
+        color: 0x9fd8ff,
+        size: 1.4,
+        transparent: true,
+        opacity: 0.45,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      }),
+    );
+    this.scene.add(this.motes);
 
     void this.populate();
 
@@ -317,12 +424,19 @@ class TankInstance implements SaverInstance {
           if (!npc || textured) {
             applyFarmMaterials(scene, this.ctxSaver.rng.fork(hashCode(url)));
           }
+          forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
+          // Model-forward → the group's +Z (lookAt orients +Z along travel).
+          // The nose is wherever the EYES are: read their offset along the
+          // long axis instead of guessing a per-breed convention.
+          const longX = size.x > size.z;
+          const nose = eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
+          const yaw = longX ? (nose > 0 ? -Math.PI / 2 : Math.PI / 2) : nose > 0 ? 0 : Math.PI;
           return {
             scene,
             clip: gltf.animations[0] ?? null,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
-            yaw: size.x > size.z ? Math.PI / 2 : 0,
+            yaw,
             npc,
             textured,
           };
@@ -339,6 +453,7 @@ class TankInstance implements SaverInstance {
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
+    let bodyNode: Object3D | null = null;
     let clipDuration = 0;
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
@@ -348,6 +463,7 @@ class TankInstance implements SaverInstance {
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
+      bodyNode = body;
       if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -365,9 +481,14 @@ class TankInstance implements SaverInstance {
       group.add(body, tailMesh);
       tail = tailMesh;
     }
-    group.scale.multiplyScalar(path.scale);
+    const isHero = this.heroMode && index === 0;
+    const plan = isHero
+      ? (this.heroPlan ??= compileSwimPlan(this.ctxSaver.rng.fork(0xf1), HERO_BOUNDS))
+      : null;
+    const baseScale = isHero ? HERO_SCALE : path.scale;
+    group.scale.multiplyScalar(baseScale);
     this.scene.add(group);
-    this.fish.push({ group, path, mixer, clipDuration, tail });
+    this.fish.push({ group, path, plan, body: bodyNode, baseScale, mixer, clipDuration, tail });
     this.ctxSaver.host.dataset.mqFish = String(this.fish.length);
   }
 
@@ -384,16 +505,33 @@ class TankInstance implements SaverInstance {
   private setState(t: number): void {
     const tSec = t / 1000;
     this.applyParams(t);
+    const speed = this.num('swimSpeed');
 
+    // Camera: in hero mode it's a pet-cam — a slow orbit around the FISH
+    // (its slightly-lagged position, so the framing breathes with the swim);
+    // otherwise it orbits tank center as before. All closed-form.
     const az = MathUtils.degToRad(this.num('cameraAzimuth') + this.num('autoRotate') * tSec);
     const el = MathUtils.degToRad(this.num('cameraElevation'));
     const dist = this.num('cameraDistance');
+    let tx = 0;
+    let ty = 35;
+    let tz = 0;
+    let lookAhead: { x: number; y: number; z: number } | null = null;
+    if (this.heroMode && this.heroPlan) {
+      const now = swimPoseAt(this.heroPlan, tSec, speed);
+      const lag = swimPoseAt(this.heroPlan, tSec - 0.45, speed);
+      tx = (now.x + lag.x) / 2;
+      ty = (now.y + lag.y) / 2;
+      tz = (now.z + lag.z) / 2;
+      lookAhead = { x: tx + now.fx * 9, y: ty + now.fy * 9, z: tz + now.fz * 9 };
+    }
     this.camera.position.set(
-      Math.cos(el) * Math.sin(az) * dist,
-      Math.sin(el) * dist + 40,
-      Math.cos(el) * Math.cos(az) * dist,
+      tx + Math.cos(el) * Math.sin(az) * dist,
+      Math.max(10, ty + Math.sin(el) * dist),
+      tz + Math.cos(el) * Math.cos(az) * dist,
     );
-    this.camera.lookAt(0, 35, 0);
+    if (lookAhead) this.camera.lookAt(lookAhead.x, lookAhead.y, lookAhead.z);
+    else this.camera.lookAt(0, 35, 0);
 
     const fogHex = String(this.params.fogColor ?? this.space.fogColor?.default ?? '#030009');
     this.fogColor.set(fogHex);
@@ -407,8 +545,30 @@ class TankInstance implements SaverInstance {
     }
     pos.needsUpdate = true;
     if (this.waterTexture) this.waterTexture.offset.set(tSec * 0.008, tSec * 0.005);
+    if (this.causticTexture) this.causticTexture.offset.set(tSec * 0.011, tSec * -0.007);
 
-    const speed = this.num('swimSpeed');
+    for (let i = 0; i < this.shafts.length; i++) {
+      const shaft = this.shafts[i]!;
+      shaft.rotation.z = Math.sin(tSec * 0.07 + i * 1.7) * 0.1;
+      shaft.position.y = WATER_Y - 30 + Math.sin(tSec * 0.05 + i) * 6;
+    }
+
+    if (this.motes && this.moteBase) {
+      const arr = (this.motes.geometry.getAttribute('position') as BufferAttribute)
+        .array as Float32Array;
+      const n = this.moteBase.length / 4;
+      for (let i = 0; i < n; i++) {
+        const bx = this.moteBase[i * 4]!;
+        const by = this.moteBase[i * 4 + 1]!;
+        const bz = this.moteBase[i * 4 + 2]!;
+        const rise = this.moteBase[i * 4 + 3]!;
+        arr[i * 3] = bx + Math.sin(tSec * 0.22 + i * 1.31) * 3;
+        arr[i * 3 + 1] = (by + tSec * 2.4 * rise) % WATER_Y;
+        arr[i * 3 + 2] = bz + Math.cos(tSec * 0.18 + i * 0.77) * 3;
+      }
+      this.motes.geometry.getAttribute('position').needsUpdate = true;
+    }
+
     const visible = Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
     if (this.bundled && visible > this.fish.length && !this.growing) {
       void this.growTo(visible);
@@ -417,6 +577,30 @@ class TankInstance implements SaverInstance {
       const f = this.fish[i]!;
       f.group.visible = i < visible;
       if (!f.group.visible) continue;
+      if (f.plan) {
+        // Hero locomotion: travel the compiled itinerary nose-first, bank
+        // into turns, breathe, and beat the tail in time with distance —
+        // fast water means a busy tail, a dawdle means a lazy one.
+        const p = swimPoseAt(f.plan, tSec, speed);
+        f.group.position.set(p.x, p.y, p.z);
+        f.group.lookAt(p.x + p.fx, p.y + p.fy, p.z + p.fz);
+        f.group.rotateZ(p.roll);
+        // Pose probe for e2e/debug: position + forward, coarse fixed-point.
+        this.ctxSaver.host.dataset.mqPose = [
+          p.x.toFixed(1),
+          p.y.toFixed(1),
+          p.z.toFixed(1),
+          p.fx.toFixed(2),
+          p.fy.toFixed(2),
+          p.fz.toFixed(2),
+        ].join(',');
+        const breathe = 1 + Math.sin(tSec * 2.1) * 0.008;
+        f.group.scale.setScalar(f.baseScale * breathe);
+        if (f.mixer && f.clipDuration > 0) {
+          f.mixer.setTime(((p.dist * 0.045) % f.clipDuration + f.clipDuration) % f.clipDuration);
+        }
+        continue;
+      }
       const pose = fishPose(f.path, tSec, speed);
       f.group.position.set(pose.x, pose.y, pose.z);
       f.group.lookAt(pose.x + pose.hx, pose.y + pose.hy, pose.z + pose.hz);
@@ -597,8 +781,48 @@ class TankInstance implements SaverInstance {
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqBackend;
+    delete this.ctxSaver.host.dataset.mqPose;
   }
 }
+
+// ---- scene shaders ----
+
+const BACKDROP_VERT = /* glsl */ `
+  varying vec3 vWorld;
+  void main() {
+    vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const BACKDROP_FRAG = /* glsl */ `
+  uniform vec3 uDeep;
+  uniform vec3 uShallow;
+  varying vec3 vWorld;
+  void main() {
+    float k = smoothstep(-150.0, 380.0, vWorld.y);
+    gl_FragColor = vec4(mix(uDeep, uShallow, k), 1.0);
+  }
+`;
+
+const SHAFT_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const SHAFT_FRAG = /* glsl */ `
+  uniform float uOpacity;
+  varying vec2 vUv;
+  void main() {
+    float vertical = vUv.y * vUv.y;                    // bright at the surface
+    float edges = sin(vUv.x * 3.14159);                // soft blade edges
+    float a = vertical * edges * uOpacity;
+    gl_FragColor = vec4(vec3(0.55, 0.75, 1.0) * a, a);
+  }
+`;
 
 /** Deterministic 32-bit string hash (FNV-1a) for rng fork salts. */
 function hashCode(s: string): number {
@@ -638,6 +862,34 @@ function makeWaterTexture(): Texture | null {
   const tex = new CanvasTexture(c);
   tex.wrapS = tex.wrapT = RepeatWrapping;
   tex.repeat.set(5, 5);
+  return tex;
+}
+
+/** Caustic light-pool tile for the sand — brighter, sparser than the water
+ *  tile. Fixed constants: identical every mount. */
+function makeCausticTexture(): Texture | null {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.clearRect(0, 0, 256, 256);
+  for (let i = 0; i < 70; i++) {
+    const x = (i * 97) % 256;
+    const y = (i * 151) % 256;
+    const r = 5 + ((i * 41) % 11);
+    const grad = g.createRadialGradient(x, y, r * 0.3, x, y, r);
+    grad.addColorStop(0, 'rgba(150,220,255,0)');
+    grad.addColorStop(0.7, 'rgba(150,220,255,0.35)');
+    grad.addColorStop(1, 'rgba(150,220,255,0)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new CanvasTexture(c);
+  tex.wrapS = tex.wrapT = RepeatWrapping;
+  tex.repeat.set(6, 6);
   return tex;
 }
 

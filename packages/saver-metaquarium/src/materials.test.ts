@@ -4,6 +4,8 @@ import { Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, T
 import {
   applyFarmMaterials,
   applyNpcMaterials,
+  eyeNoseSign,
+  forceOpaque,
   hasTexturedMaterial,
   BLOOM_LAYER,
   MIAMI_VICE_COLORS,
@@ -81,6 +83,30 @@ describe('metaquarium material contract', () => {
     expect(body.material).toBe(mat); // same material, retuned
     expect(mat.emissiveIntensity).toBeCloseTo(0.9); // 0.9 / max channel (1.0)
     expect(body.layers.isEnabled(BLOOM_LAYER)).toBe(true);
+  });
+
+  it('forceOpaque solidifies alpha-blend fish materials (the see-through-body bug)', () => {
+    const { root, body } = npcFish();
+    const mat = body.material as MeshStandardMaterial;
+    mat.transparent = true;
+    mat.opacity = 0.4;
+    mat.depthWrite = false;
+    forceOpaque(root);
+    expect(mat.transparent).toBe(false);
+    expect(mat.opacity).toBe(1);
+    expect(mat.depthWrite).toBe(true);
+  });
+
+  it('eyeNoseSign reads the head end from the EYE meshes, 0 without eyes', () => {
+    const { root, eyes, body, glow } = npcFish();
+    eyes.position.x = 5; // eyes toward +x → nose is +x
+    expect(eyeNoseSign(root, 'x')).toBe(1);
+    eyes.position.x = -5;
+    expect(eyeNoseSign(root, 'x')).toBe(-1);
+    (body.material as MeshStandardMaterial).name = 'VICE-body';
+    (eyes.material as MeshStandardMaterial).name = 'fin'; // no eye materials left
+    (glow.material as MeshStandardMaterial).name = 'fin2';
+    expect(eyeNoseSign(root, 'x')).toBe(0);
   });
 
   it('detects texture atlases, and the farm lane never recoats them — even white ones', () => {
