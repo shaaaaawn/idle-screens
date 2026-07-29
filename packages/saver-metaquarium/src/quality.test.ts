@@ -1,12 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { isSoftwareGL, qualityFor } from './quality';
+import { effectivePixelRatio, isSoftwareGL, qualityFor } from './quality';
 
 describe('metaquarium quality tiers', () => {
   it('high tier (WebGPU-class) gets the full tank — but never retina-full pixels', () => {
     const q = qualityFor('high');
     // 1.5 cap + half-res bloom: retina-full through the bloom chain measured
     // ~20fps on an M1 Max; this config measures 60.
-    expect(q).toEqual({ maxPixelRatio: 1.5, antialias: true, bloomScale: 0.5, fishCap: 24 });
+    expect(q).toEqual({
+      maxPixelRatio: 1.5,
+      antialias: true,
+      bloomScale: 0.5,
+      fishCap: 24,
+      pixelBudget: 2_400_000,
+    });
+  });
+
+  it('effectivePixelRatio enforces the pixel budget at fullscreen sizes', () => {
+    const q = qualityFor('high');
+    // 720p window: budget is not the binding constraint (dpr cap is).
+    expect(effectivePixelRatio(1280, 720, 2, q)).toBeCloseTo(1.5);
+    // 4K-class fullscreen: budget binds — backing stays ≤ ~2.4 Mpix.
+    const pr = effectivePixelRatio(2560, 1440, 2, q);
+    expect(2560 * pr * (1440 * pr)).toBeLessThanOrEqual(q.pixelBudget * 1.01);
+    expect(pr).toBeGreaterThanOrEqual(0.5);
   });
 
   it('standard tier (WebGL2) trades resolution for headroom', () => {

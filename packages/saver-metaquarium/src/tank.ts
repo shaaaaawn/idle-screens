@@ -67,7 +67,7 @@ import {
   MIAMI_VICE_COLORS,
 } from './materials';
 import { compileSwimPlan, swimPoseAt, type SwimPlan } from './plan';
-import { isSoftwareGL, qualityFor, type TankQuality } from './quality';
+import { effectivePixelRatio, isSoftwareGL, qualityFor, type TankQuality } from './quality';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
@@ -120,11 +120,17 @@ class TankInstance implements SaverInstance {
   private readonly renderer: WebGLRenderer;
   private quality: TankQuality;
   private softwareGL = false;
+  /** Adaptive-governor render-scale multiplier; only ever steps down. */
+  private govScale = 1;
+  private frameTimes: number[] = [];
+  private lastFrameAt = 0;
+  private lastGovCheck = 0;
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly waterGeo: PlaneGeometry;
-  private readonly waterBase: Float32Array;
   private readonly waterTexture: Texture | null;
+  /** Single time uniform shared by the water + mote shaders. */
+  private readonly timeUniform = { value: 0 };
   private readonly fogColor = new Color();
   private readonly abort = new AbortController();
   private bloomComposer: EffectComposer | null = null;
@@ -140,7 +146,6 @@ class TankInstance implements SaverInstance {
   private growing = false;
   private readonly shafts: Mesh[] = [];
   private motes: Points | null = null;
-  private moteBase: Float32Array | null = null;
   private causticTexture: Texture | null = null;
 
   private w: number;
@@ -197,7 +202,7 @@ class TankInstance implements SaverInstance {
     );
     this.softwareGL = isSoftwareGL(rendererName);
     if (this.softwareGL) this.quality = qualityFor('minimal');
-    this.renderer.setPixelRatio(Math.min(ctx.dpr, this.quality.maxPixelRatio));
+    this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = LinearToneMapping;
@@ -261,7 +266,6 @@ class TankInstance implements SaverInstance {
     }
 
     this.waterGeo = new PlaneGeometry(1400, 1400, 32, 32);
-    this.waterBase = Float32Array.from(this.waterGeo.attributes.position!.array);
     this.waterTexture = makeWaterTexture();
     const waterMat = new MeshBasicMaterial({
       color: 0x0044ff,
@@ -271,11 +275,23 @@ class TankInstance implements SaverInstance {
       depthWrite: false,
       side: DoubleSide,
     });
+    // Wave displacement on the GPU: one uniform per frame instead of a
+    // 1089-vertex CPU rewrite + re-upload (the old per-frame hitch source).
+    waterMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTankTime = this.timeUniform;
+      shader.vertexShader = `uniform float uTankTime;\n${shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        transformed.z += sin(uTankTime * 1.2 + position.x * 0.025 + position.y * 0.018) * 3.5;`,
+      )}`;
+    };
     const water = new Mesh(this.waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.y = WATER_Y;
     water.renderOrder = 1;
-    water.layers.enable(BLOOM_LAYER);
+    // NOT on the bloom layer: the original put it there, but a 1400x1400
+    // textured transparent plane re-rendering through every bloom pass is a
+    // large slice of the frame for a barely-visible halo.
     this.scene.add(water);
 
     // Light shafts: soft additive blades swaying from the surface. The
@@ -302,32 +318,51 @@ class TankInstance implements SaverInstance {
       }
     }
 
-    // Marine snow: slow-rising motes. Closed-form per-mote positions.
+    // Marine snow: slow-rising motes, fully GPU-driven — base positions and
+    // per-mote rise/phase are static attributes; motion comes from the same
+    // time uniform, so per-frame CPU cost is zero.
     const moteCount = this.thumbnail ? 60 : 220;
     const moteRng = ctx.rng.fork(0x0e5);
-    this.moteBase = new Float32Array(moteCount * 4);
+    const motePos = new Float32Array(moteCount * 3);
+    const moteRise = new Float32Array(moteCount);
+    const motePhase = new Float32Array(moteCount);
     for (let i = 0; i < moteCount; i++) {
       const r = 30 + moteRng.next() * 180;
       const a = moteRng.next() * Math.PI * 2;
-      this.moteBase[i * 4] = Math.cos(a) * r;
-      this.moteBase[i * 4 + 1] = moteRng.next() * WATER_Y;
-      this.moteBase[i * 4 + 2] = Math.sin(a) * r;
-      this.moteBase[i * 4 + 3] = 0.5 + moteRng.next(); // rise-speed factor
+      motePos[i * 3] = Math.cos(a) * r;
+      motePos[i * 3 + 1] = moteRng.next() * WATER_Y;
+      motePos[i * 3 + 2] = Math.sin(a) * r;
+      moteRise[i] = 0.5 + moteRng.next();
+      motePhase[i] = moteRng.next() * Math.PI * 2;
     }
     const moteGeo = new BufferGeometry();
-    moteGeo.setAttribute('position', new BufferAttribute(new Float32Array(moteCount * 3), 3));
-    this.motes = new Points(
-      moteGeo,
-      new PointsMaterial({
-        color: 0x9fd8ff,
-        size: 1.4,
-        transparent: true,
-        opacity: 0.45,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        sizeAttenuation: true,
-      }),
-    );
+    moteGeo.setAttribute('position', new BufferAttribute(motePos, 3));
+    moteGeo.setAttribute('aRise', new BufferAttribute(moteRise, 1));
+    moteGeo.setAttribute('aPhase', new BufferAttribute(motePhase, 1));
+    const moteMat = new PointsMaterial({
+      color: 0x9fd8ff,
+      size: 1.4,
+      transparent: true,
+      opacity: 0.45,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+    moteMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTankTime = this.timeUniform;
+      shader.vertexShader = `uniform float uTankTime;
+attribute float aRise;
+attribute float aPhase;
+${shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        transformed.y = mod(position.y + uTankTime * 2.4 * aRise, ${WATER_Y.toFixed(1)});
+        transformed.x += sin(uTankTime * 0.22 + aPhase) * 3.0;
+        transformed.z += cos(uTankTime * 0.18 + aPhase * 0.7) * 3.0;`,
+      )}`;
+    };
+    this.motes = new Points(moteGeo, moteMat);
+    this.motes.frustumCulled = false; // GPU-displaced; static bounds lie
     this.scene.add(this.motes);
 
     void this.populate();
@@ -561,13 +596,9 @@ class TankInstance implements SaverInstance {
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
-    const pos = this.waterGeo.attributes.position!;
-    for (let i = 0; i < pos.count; i++) {
-      const bx = this.waterBase[i * 3]!;
-      const by = this.waterBase[i * 3 + 1]!;
-      pos.setZ(i, Math.sin(tSec * 1.2 + bx * 0.025 + by * 0.018) * 3.5);
-    }
-    pos.needsUpdate = true;
+    // One uniform drives water waves + motes on the GPU; textures drift via
+    // offset (also uniforms). No per-frame geometry uploads remain.
+    this.timeUniform.value = tSec;
     if (this.waterTexture) this.waterTexture.offset.set(tSec * 0.008, tSec * 0.005);
     if (this.causticTexture) this.causticTexture.offset.set(tSec * 0.011, tSec * -0.007);
 
@@ -575,22 +606,6 @@ class TankInstance implements SaverInstance {
       const shaft = this.shafts[i]!;
       shaft.rotation.z = Math.sin(tSec * 0.07 + i * 1.7) * 0.1;
       shaft.position.y = WATER_Y - 30 + Math.sin(tSec * 0.05 + i) * 6;
-    }
-
-    if (this.motes && this.moteBase) {
-      const arr = (this.motes.geometry.getAttribute('position') as BufferAttribute)
-        .array as Float32Array;
-      const n = this.moteBase.length / 4;
-      for (let i = 0; i < n; i++) {
-        const bx = this.moteBase[i * 4]!;
-        const by = this.moteBase[i * 4 + 1]!;
-        const bz = this.moteBase[i * 4 + 2]!;
-        const rise = this.moteBase[i * 4 + 3]!;
-        arr[i * 3] = bx + Math.sin(tSec * 0.22 + i * 1.31) * 3;
-        arr[i * 3 + 1] = (by + tSec * 2.4 * rise) % WATER_Y;
-        arr[i * 3 + 2] = bz + Math.cos(tSec * 0.18 + i * 0.77) * 3;
-      }
-      this.motes.geometry.getAttribute('position').needsUpdate = true;
     }
 
     const visible = Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
@@ -639,7 +654,7 @@ class TankInstance implements SaverInstance {
   // ---- selective bloom (two-composer approach; original recipe:
   //      strength 0.25–0.35, radius 0.12, threshold 0.65) ----
   private initComposers(): void {
-    const pr = Math.min(this.ctxSaver.dpr, this.quality.maxPixelRatio);
+    const pr = this.pr();
 
     this.bloomComposer = new EffectComposer(this.renderer);
     this.bloomComposer.renderToScreen = false;
@@ -715,9 +730,52 @@ class TankInstance implements SaverInstance {
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
     if (this.startT === 0) this.startT = now;
+    this.governFrame(now);
     this.t = now - this.startT;
     this.setState(this.t);
     this.renderScene();
+  }
+
+  /** Effective pixel ratio: DPR ∩ tier cap ∩ pixel budget ∩ governor. */
+  private pr(): number {
+    return Math.max(
+      0.5,
+      effectivePixelRatio(this.w, this.h, this.ctxSaver.dpr, this.quality) * this.govScale,
+    );
+  }
+
+  private applyPr(): void {
+    const pr = this.pr();
+    this.renderer.setPixelRatio(pr);
+    this.renderer.setSize(this.w, this.h, false);
+    this.bloomComposer?.setPixelRatio(pr * this.quality.bloomScale);
+    this.finalComposer?.setPixelRatio(pr);
+    this.bloomComposer?.setSize(this.w, this.h);
+    this.finalComposer?.setSize(this.w, this.h);
+  }
+
+  /**
+   * Adaptive governor (the tvOS FrameWatchdog idea): whatever the machine,
+   * fluid motion beats resolution. When the median frame time over a ~2s
+   * window exceeds budget, step render resolution down 20% (floor 0.55×) —
+   * it only ever steps DOWN; a resize/remount resets it. Render quality is
+   * presentation, not program state, so determinism claims are untouched.
+   */
+  private governFrame(now: number): void {
+    if (this.lastFrameAt > 0) {
+      const dt = now - this.lastFrameAt;
+      if (dt < 250) this.frameTimes.push(dt); // ignore tab-hidden gaps
+    }
+    this.lastFrameAt = now;
+    if (now - this.lastGovCheck < 2000 || this.frameTimes.length < 30) return;
+    this.lastGovCheck = now;
+    const sorted = [...this.frameTimes].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1]!;
+    this.frameTimes = [];
+    if (median > 21 && this.govScale > 0.56) {
+      this.govScale *= 0.8;
+      this.applyPr();
+    }
   }
 
   private renderStill(): void {
@@ -739,15 +797,8 @@ class TankInstance implements SaverInstance {
   resize(width: number, height: number, dpr?: number): void {
     this.w = width;
     this.h = height;
-    const pr = dpr !== undefined ? Math.min(dpr, this.quality.maxPixelRatio) : undefined;
-    if (pr !== undefined) this.renderer.setPixelRatio(pr);
-    this.renderer.setSize(width, height, false);
-    if (pr !== undefined) {
-      this.bloomComposer?.setPixelRatio(pr * this.quality.bloomScale);
-      this.finalComposer?.setPixelRatio(pr);
-    }
-    this.bloomComposer?.setSize(width, height);
-    this.finalComposer?.setSize(width, height);
+    if (dpr !== undefined) this.ctxSaver.dpr = dpr;
+    this.applyPr();
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     if (this.paused) this.renderStill();
