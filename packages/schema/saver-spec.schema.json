@@ -1221,13 +1221,27 @@
           "required": [
             "type"
           ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "cut",
-              "description": "Only 'cut' is supported in v1; 'fade' is rejected at validation."
+          "oneOf": [
+            {
+              "properties": {
+                "type": { "const": "cut" }
+              },
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "morph" },
+                "dur": {
+                  "type": "number",
+                  "minimum": 200,
+                  "maximum": 5000,
+                  "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
+                }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
             }
-          }
+          ]
         }
       }
     }

@@ -1,4 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
+import { structuralSignature } from './steer';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -654,8 +655,12 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
+      } else if (s.transition.type === 'morph') {
+        if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
+          err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
+        }
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut' (fade not yet supported)");
+        err(`${p}.transition.type`, "must be 'cut' or 'morph'");
       }
     }
 
@@ -672,6 +677,25 @@ export function validateSequence(seq: unknown): ValidationResult {
 
   if (seq.loop === true && hasDurationless) {
     err('loop', 'loop: true requires all segments to have a duration');
+  }
+
+  // Warn when morph is requested but signatures differ (will fall back to cut)
+  if (errors.length === 0 && Array.isArray(seq.segments)) {
+    for (let i = 0; i < seq.segments.length; i++) {
+      const s = seq.segments[i];
+      if (!isObj(s) || !isObj(s.transition) || s.transition.type !== 'morph') continue;
+      const next = seq.segments[i + 1];
+      if (!next || !isObj(next) || !isObj(s.scene) || !isObj(next.scene)) continue;
+      const sigA = structuralSignature(s.scene as unknown as SaverSpec);
+      const sigB = structuralSignature((next as Record<string, unknown>).scene as unknown as SaverSpec);
+      if (sigA !== sigB) {
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-structural-mismatch',
+          message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors, warnings };

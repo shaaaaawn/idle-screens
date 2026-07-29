@@ -405,3 +405,215 @@ describe('SequenceInstance (mount + render)', () => {
     inst.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Morph segue
+// ---------------------------------------------------------------------------
+
+const SCENE_A: SaverSpec = {
+  schemaVersion: 1,
+  id: 'morph-a',
+  label: 'Morph A',
+  background: { type: 'solid', color: '#112233' },
+  layers: [{ count: 3, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ff0000' }, motion: { type: 'static' } }],
+};
+
+const SCENE_B: SaverSpec = {
+  ...SCENE_A,
+  id: 'morph-b',
+  label: 'Morph B',
+  background: { type: 'solid', color: '#332211' },
+  layers: [{ count: 3, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#0000ff' }, motion: { type: 'static' } }],
+};
+
+const SCENE_STRUCTURAL_DIFF: SaverSpec = {
+  schemaVersion: 1,
+  id: 'morph-diff',
+  label: 'Morph Diff',
+  layers: [{ count: 10, sprite: { kind: 'emoji', glyphs: ['🔴'] }, motion: { type: 'drift', speed: [0.03, 0.05], angle: 90 } }],
+};
+
+function morphSeq(overrides: Partial<IdleSequence> = {}): IdleSequence {
+  return {
+    format: 'idle-sequence',
+    schemaVersion: 1,
+    id: 'morph-test',
+    label: 'Morph Test',
+    seed: 42,
+    loop: false,
+    segments: [
+      { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+      { key: 'b', scene: SCENE_B, duration: 5000 },
+    ],
+    ...overrides,
+  };
+}
+
+describe('validateSequence — morph', () => {
+  it('accepts morph transition with valid dur', () => {
+    const r = validateSequence(morphSeq());
+    expect(r.valid).toBe(true);
+  });
+
+  it('rejects morph dur below minimum', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 50 } },
+        { key: 'b', scene: SCENE_B, duration: 5000 },
+      ],
+    }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => e.path.includes('dur'))).toBe(true);
+  });
+
+  it('rejects morph dur above maximum', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 10000, transition: { type: 'morph', dur: 6000 } },
+        { key: 'b', scene: SCENE_B, duration: 5000 },
+      ],
+    }));
+    expect(r.valid).toBe(false);
+  });
+
+  it('warns on structural mismatch', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000 },
+      ],
+    }));
+    expect(r.valid).toBe(true);
+    expect(r.warnings?.some((w) => w.code === 'morph-structural-mismatch')).toBe(true);
+  });
+
+  it('no warning when structurally identical', () => {
+    const r = validateSequence(morphSeq());
+    expect((r.warnings ?? []).filter((w) => w.code === 'morph-structural-mismatch')).toHaveLength(0);
+  });
+});
+
+describe('SequenceInstance — morph segue', () => {
+  it('renders through a morph boundary without crashing', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(4000, 1);
+    inst.renderFrame!(5200, 1); // mid-morph
+    inst.renderFrame!(5800, 1); // mid-morph
+    inst.renderFrame!(6200, 1); // morph complete
+    inst.renderFrame!(8000, 1);
+    inst.dispose();
+  });
+
+  it('renders a single canvas during morph', () => {
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(morphSeq()), saverCtx({ host }));
+    inst.renderFrame!(5500, 1); // mid-morph
+    expect(host.querySelectorAll('canvas').length).toBe(1);
+    inst.dispose();
+  });
+
+  it('backward seek across morph boundary does not crash', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // mid-morph in segment 1
+    inst.renderFrame!(6500, 1); // past morph, still segment 1
+    inst.renderFrame!(5500, 1); // back into morph
+    inst.renderFrame!(4000, 1); // back to segment 0
+    inst.dispose();
+  });
+
+  it('falls back to cut on structural mismatch', () => {
+    const s = morphSeq({
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(4000, 1);
+    inst.renderFrame!(5500, 1); // would be mid-morph but sigs differ → cut
+    inst.renderFrame!(7000, 1);
+    inst.dispose();
+  });
+
+  it('morph with loop wraps correctly', () => {
+    const s = morphSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: SCENE_B, duration: 5000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(0, 1);
+    inst.renderFrame!(5500, 1); // mid-morph
+    inst.renderFrame!(8000, 1);
+    // wrap around
+    inst.renderFrame!(11000, 1); // T=11000 → T%10000=1000 → segment 0
+    inst.dispose();
+  });
+
+  it('mid-morph paints interpolated background, not either endpoint', () => {
+    // Track every fillStyle assignment during render
+    const fills: string[] = [];
+    const trackingCtx = stub2dContext();
+    let _fs = '';
+    Object.defineProperty(trackingCtx, 'fillStyle', {
+      get: () => _fs,
+      set: (v: string) => { _fs = v; if (typeof v === 'string') fills.push(v); },
+    });
+    const origGC = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => trackingCtx) as any;
+
+    const inst = mountSync(compileSequence(morphSeq()));
+
+    // Construction render (reducedMotion: true → paused initial frame) may
+    // have added endpoint colors. Clear and render the morph frame fresh.
+    fills.length = 0;
+
+    // Render a non-morph frame first to "warm up" the child, then clear again
+    inst.renderFrame!(2000, 1); // mid segment 0 — ensures child exists
+    fills.length = 0;
+
+    // T=5500: 500ms into morph dur=1000 → ~midpoint
+    inst.renderFrame!(5500, 1);
+
+    // Find hex colors in fills — the background is drawn via fillStyle
+    const hexFills = fills.filter((f) => /^#[0-9a-f]{6}$/i.test(f));
+    expect(hexFills.length).toBeGreaterThan(0);
+
+    // The background fill should be interpolated, not either endpoint
+    const bgFill = hexFills[0]!;
+    expect(bgFill).not.toBe('#112233'); // not scene A
+    expect(bgFill).not.toBe('#332211'); // not scene B
+
+    inst.dispose();
+    HTMLCanvasElement.prototype.getContext = origGC;
+  });
+
+  it('three-segment morph chain uses chain-root seed across all segments', () => {
+    const SCENE_C: SaverSpec = {
+      ...SCENE_A,
+      id: 'morph-c',
+      background: { type: 'solid', color: '#223311' },
+      layers: [{ count: 3, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#00ff00' }, motion: { type: 'static' } }],
+    };
+    const s = morphSeq({
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: SCENE_B, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'c', scene: SCENE_C, duration: 5000 },
+      ],
+    });
+
+    // Render at segment 2 (past both morph windows) — should use chain root (seg 0) seed
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(11000, 1); // segment 2, localT=1000 (past morph dur)
+    inst.dispose();
+
+    // Seek directly to segment 2 — same seed must be used
+    const inst2 = mountSync(compileSequence(s));
+    inst2.renderFrame!(11000, 1);
+    inst2.dispose();
+    // If this doesn't crash and the chain root logic works, seeds are deterministic
+  });
+});

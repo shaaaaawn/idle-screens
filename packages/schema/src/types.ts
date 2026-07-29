@@ -340,9 +340,9 @@ export const LIMITS = {
 // Sequence envelope — multi-segment timeline over unmodified SaverSpecs
 // ---------------------------------------------------------------------------
 
-export interface SequenceTransition {
-  type: 'cut';
-}
+export type SequenceTransition =
+  | { type: 'cut' }
+  | { type: 'morph'; dur: number };
 
 export interface SequenceSegment {
   key: string;

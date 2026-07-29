@@ -1,7 +1,8 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
-import { LIMITS, type SaverSpec, type SpecWarning } from './types';
+import { structuralSignature } from './steer';
+import { LIMITS, type IdleSequence, type SaverSpec, type SpecWarning } from './types';
 
 /**
  * Minimum RGB-space colour distance (see `colourSeparation`) between a layer
@@ -231,6 +232,52 @@ export function adviseSpec(
         code: 'off-center',
         message: `centroid at (${(cx / w).toFixed(2)}, ${(cy / h).toFixed(2)}) — composition is heavily offset from center`,
       });
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Non-blocking advisory warnings for a validated sequence envelope.
+ * Checks cross-segment luminance jumps at boundaries and per-segment advisories.
+ */
+export function adviseSequence(
+  seq: IdleSequence,
+  viewport = { width: 1920, height: 1080 },
+): SpecWarning[] {
+  const warnings: SpecWarning[] = [];
+
+  for (let i = 0; i < seq.segments.length; i++) {
+    const segWarnings = adviseSpec(seq.segments[i]!.scene, viewport);
+    for (const w of segWarnings) {
+      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message });
+    }
+  }
+
+  for (let i = 0; i < seq.segments.length - 1; i++) {
+    const lumaA = backgroundLuma(seq.segments[i]!.scene);
+    const lumaB = backgroundLuma(seq.segments[i + 1]!.scene);
+    const delta = Math.abs(lumaA - lumaB);
+    if (delta > 0.5) {
+      warnings.push({
+        path: `segments[${i}]`,
+        code: 'boundary-luminance-jump',
+        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut`,
+      });
+    }
+
+    const tr = seq.segments[i]!.transition;
+    if (tr?.type === 'morph') {
+      const sigA = structuralSignature(seq.segments[i]!.scene);
+      const sigB = structuralSignature(seq.segments[i + 1]!.scene);
+      if (sigA !== sigB) {
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-structural-mismatch',
+          message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      }
     }
   }
 

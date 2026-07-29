@@ -594,6 +594,24 @@ class SpecInstance implements SaverInstance {
     if (this.paused) this.renderFrame(0, this.seed);
   }
 
+  /**
+   * Replace the rendered spec without triggering a transition glide.
+   * Checks structural signature — use `hotSwapPaint` when the caller
+   * already knows the signature is unchanged (e.g. mid-morph lerp).
+   */
+  hotSwapSpec(spec: SaverSpec): void {
+    this.effSpec = spec;
+    const sig = structuralSignature(this.effSpec);
+    if (sig !== this.lastStructural) this.rebuild();
+    else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
+  /** Paint-only hot-swap: skips structuralSignature (caller guarantees match). */
+  hotSwapPaint(spec: SaverSpec): void {
+    this.effSpec = spec;
+    this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
   dispose(): void {
     this.stop();
     if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
@@ -625,6 +643,12 @@ class SequenceInstance implements SaverInstance {
   private readonly children: (SpecInstance | null)[];
   private activeIndex = -1;
   private paused = false;
+  /**
+   * When a morph is active, the child at `morphFromIndex` renders with a
+   * lerped spec. The child stays keyed to the *outgoing* segment's slot so
+   * its seed (and entity placement) is continuous.
+   */
+  private morphFromIndex = -1;
 
   constructor(seq: IdleSequence, ctx: SaverContext) {
     this.seq = seq;
@@ -644,11 +668,36 @@ class SequenceInstance implements SaverInstance {
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
   }
 
+  private childSeed(index: number, fallback: number): number {
+    return this.seq.segments[index]!.scene.seed ?? this.seq.seed ?? fallback;
+  }
+
   private childScene(index: number): SaverSpec {
     const seg = this.seq.segments[index]!;
     if (seg.scene.seed != null) return seg.scene;
     if (this.seq.seed != null) return { ...seg.scene, seed: this.seq.seed + index };
     return seg.scene;
+  }
+
+  /** Whether the boundary from `from` to `from+1` should morph. */
+  private canMorph(from: number): boolean {
+    const seg = this.seq.segments[from];
+    if (!seg || seg.transition?.type !== 'morph') return false;
+    const next = this.seq.segments[from + 1];
+    if (!next) return false;
+    return structuralSignature(seg.scene) === structuralSignature(next.scene);
+  }
+
+  /** Walk back through consecutive morph boundaries to find the chain origin. */
+  private morphChainRoot(index: number): number {
+    let i = index;
+    while (i > 0 && this.canMorph(i - 1)) i--;
+    return i;
+  }
+
+  private morphDur(from: number): number {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'morph' ? tr.dur : 0;
   }
 
   private ensureChild(index: number): SpecInstance {
@@ -674,16 +723,70 @@ class SequenceInstance implements SaverInstance {
     const resolved = resolveSegment(this.seq, T);
     const { index, localT } = resolved;
 
-    if (index !== this.activeIndex) {
-      for (let i = 0; i < this.children.length; i++) {
-        if (i !== index) this.releaseChild(i);
-      }
-      this.activeIndex = index;
-    }
+    // Check if the *previous* segment has a morph into this one
+    const prevIdx = index > 0 ? index - 1 : -1;
+    const morphActive = prevIdx >= 0
+      && this.canMorph(prevIdx)
+      && localT < this.morphDur(prevIdx);
 
-    const child = this.ensureChild(index);
-    const childSeed = this.seq.segments[index]!.scene.seed ?? this.seq.seed ?? seed;
-    child.renderFrame(localT, childSeed);
+    if (morphActive) {
+      // Morph in progress: keep the child keyed to the chain root
+      // (preserves its seed/entity placement through chained morphs).
+      const chainRoot = this.morphChainRoot(index);
+      this.morphFromIndex = prevIdx;
+      this.activeIndex = index;
+
+      // Release all children except the chain root's slot
+      for (let i = 0; i < this.children.length; i++) {
+        if (i !== chainRoot) this.releaseChild(i);
+      }
+
+      const child = this.ensureChild(chainRoot);
+      const dur = this.morphDur(prevIdx);
+      const k = easeSmooth(localT / dur);
+      const specA = this.childScene(prevIdx);
+      const specB = this.childScene(index);
+      child.hotSwapPaint(lerpSpec(specA, specB, k));
+      child.renderFrame(localT, this.childSeed(chainRoot, seed));
+    } else {
+      // No morph (or morph complete). If we were morphing, finalize.
+      if (this.morphFromIndex >= 0) {
+        // Morph just completed — release the chain-root child.
+        const oldRoot = this.morphChainRoot(this.morphFromIndex);
+        this.releaseChild(oldRoot);
+        if (oldRoot !== this.morphFromIndex) this.releaseChild(this.morphFromIndex);
+        this.morphFromIndex = -1;
+      }
+
+      if (index !== this.activeIndex) {
+        for (let i = 0; i < this.children.length; i++) {
+          if (i !== index) this.releaseChild(i);
+        }
+        this.activeIndex = index;
+      }
+
+      // Determine the effective seed: if this segment was reached via a
+      // morph chain, use the chain-root's seed so entity placement is
+      // continuous across all morphed segments and seeks match playthrough.
+      const chainRoot = this.morphChainRoot(index);
+      const useMorphSeed = chainRoot < index;
+      const effSeed = useMorphSeed ? this.childSeed(chainRoot, seed) : this.childSeed(index, seed);
+
+      // If using morph seed, mount the child with the chain root's scene+seed
+      // but immediately hot-swap to the current segment's spec.
+      let child: SpecInstance;
+      if (useMorphSeed && !this.children[index]) {
+        const rootScene = this.childScene(chainRoot);
+        child = new SpecInstance(rootScene, this.childCtx);
+        this.children[index] = child;
+        if (this.paused) child.setPaused(true);
+        child.hotSwapSpec(this.childScene(index));
+      } else {
+        child = this.ensureChild(index);
+        if (useMorphSeed) child.hotSwapSpec(this.childScene(index));
+      }
+      child.renderFrame(localT, effSeed);
+    }
   }
 
   setPaused(paused: boolean): void {

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { adviseSpec } from './advise';
+import { adviseSpec, adviseSequence } from './advise';
 import { describeScene } from './describe';
 import { EXAMPLE_SPECS } from './examples/index';
-import type { SaverSpec } from './types';
+import type { IdleSequence, SaverSpec } from './types';
 
 const base: SaverSpec = {
   schemaVersion: 1,
@@ -218,5 +218,78 @@ describe('describeScene', () => {
     expect(layer.linksExpected).toBeGreaterThan(0);
     expect(layer.connectedComponents).toBeGreaterThan(0);
     expect(layer.isolatedNodes).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// adviseSequence
+// ---------------------------------------------------------------------------
+
+describe('adviseSequence', () => {
+  const scene: SaverSpec = {
+    schemaVersion: 1,
+    id: 'seq-adv',
+    label: 'Seq Advise',
+    background: { type: 'solid', color: '#111111' },
+    layers: [{ count: 3, sprite: { kind: 'circle', radius: [5, 10], color: '#ffffff' }, motion: { type: 'static' } }],
+  };
+
+  function mkSeq(overrides: Partial<IdleSequence> = {}): IdleSequence {
+    return {
+      format: 'idle-sequence',
+      schemaVersion: 1,
+      id: 'adv-test',
+      label: 'Advise Test',
+      seed: 1,
+      loop: false,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000 },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('returns no warnings for structurally identical segments', () => {
+    const warnings = adviseSequence(mkSeq());
+    expect(warnings.filter((w) => w.code === 'boundary-luminance-jump')).toHaveLength(0);
+  });
+
+  it('warns on large luminance jump at boundary', () => {
+    const dark: SaverSpec = { ...scene, background: { type: 'solid', color: '#000000' } };
+    const bright: SaverSpec = { ...scene, background: { type: 'solid', color: '#ffffff' } };
+    const warnings = adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene: dark, duration: 5000 },
+        { key: 'b', scene: bright, duration: 5000 },
+      ],
+    }));
+    expect(warnings.some((w) => w.code === 'boundary-luminance-jump')).toBe(true);
+  });
+
+  it('warns on morph structural mismatch', () => {
+    const diffScene: SaverSpec = {
+      ...scene,
+      layers: [{ count: 10, sprite: { kind: 'emoji', glyphs: ['🔴'] }, motion: { type: 'static' } }],
+    };
+    const warnings = adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: diffScene, duration: 5000 },
+      ],
+    }));
+    expect(warnings.some((w) => w.code === 'morph-structural-mismatch')).toBe(true);
+  });
+
+  it('propagates per-segment advisories', () => {
+    const camoScene: SaverSpec = {
+      ...scene,
+      background: { type: 'solid', color: '#ffffff' },
+      layers: [{ count: 5, sprite: { kind: 'circle', radius: [5, 10], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    const warnings = adviseSequence(mkSeq({
+      segments: [{ key: 'a', scene: camoScene, duration: 5000 }],
+    }));
+    expect(warnings.some((w) => w.path.startsWith('segments[0].scene.'))).toBe(true);
   });
 });
