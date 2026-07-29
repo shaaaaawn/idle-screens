@@ -100,3 +100,36 @@ test('MQ2: hero tank stages a single textured fish and wakes cleanly', async ({ 
     .toBe(false);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * Workbench-churn stability: browsers cap live WebGL contexts (~16) and kill
+ * the oldest past the cap. Every mount creates a context, so 18 mount/dispose
+ * cycles crash unless dispose() force-releases via forceContextLoss(). This
+ * is the "dev tools are janky and crash" regression gate.
+ */
+test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ page }) => {
+  test.setTimeout(90_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const contextErrors: string[] = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error' && /context/i.test(m.text())) contextErrors.push(m.text());
+  });
+
+  await page.goto('/?saver=metaquarium');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  for (let i = 0; i < 18; i++) {
+    await page.evaluate(() => window.__idleScreens!.sleep());
+    await expect
+      .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+      .not.toBe('');
+    await page.evaluate(() => window.__idleScreens!.wake());
+    await page.waitForTimeout(100);
+  }
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
+    .toBeGreaterThanOrEqual(1);
+  expect(contextErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

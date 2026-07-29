@@ -1,4 +1,5 @@
 import {
+  createRng,
   sampleTrack,
   defaultParams,
   type ControlTrack,
@@ -125,7 +126,6 @@ class TankInstance implements SaverInstance {
   private readonly waterTexture: Texture | null;
   private readonly fogColor = new Color();
   private readonly abort = new AbortController();
-  private readonly templates = new Map<string, Promise<FishTemplate | null>>();
   private bloomComposer: EffectComposer | null = null;
   private finalComposer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
@@ -408,7 +408,12 @@ class TankInstance implements SaverInstance {
   }
 
   private template(url: string, npc: boolean): Promise<FishTemplate | null> {
-    let p = this.templates.get(url);
+    // Module-level cache: the dev workbench remounts savers constantly
+    // (saver picker, previews, stage switches) — re-fetching and re-parsing
+    // the GLB every mount is what made it feel janky. Templates are shared
+    // across instances and never disposed by them (clones share geometry).
+    const key = `${npc ? 'npc' : 'farm'}|${url}`;
+    let p = TEMPLATE_CACHE.get(key);
     if (!p) {
       p = (async (): Promise<FishTemplate | null> => {
         try {
@@ -420,9 +425,12 @@ class TankInstance implements SaverInstance {
           const textured = hasTexturedMaterial(scene);
           // Textured fish always keep their authored look, whichever lane
           // loaded them. Fork keyed on the URL: any rescue coat / emissive
-          // retune is stable across mounts and independent of load order.
+          // retune is stable across mounts and independent of load order —
+          // seeded from the URL alone, so the shared template cache can never
+          // leak one session's seed into another, and a fish's rescue coat is
+          // part of its identity (same for every viewer).
           if (!npc || textured) {
-            applyFarmMaterials(scene, this.ctxSaver.rng.fork(hashCode(url)));
+            applyFarmMaterials(scene, createRng(hashCode(url)));
           }
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -440,11 +448,16 @@ class TankInstance implements SaverInstance {
             npc,
             textured,
           };
-        } catch {
+        } catch (err) {
+          // A dispose-abort must not poison the shared cache — later mounts
+          // retry. Real failures stay cached as null (no retry storms).
+          if ((err as Partial<DOMException>).name === 'AbortError') {
+            TEMPLATE_CACHE.delete(key);
+          }
           return null;
         }
       })();
-      this.templates.set(url, p);
+      TEMPLATE_CACHE.set(key, p);
     }
     return p;
   }
@@ -651,6 +664,9 @@ class TankInstance implements SaverInstance {
 
   // ---- render ----
   private renderScene(): void {
+    // A lost context (workbench churn, GPU pressure) must degrade to a
+    // freeze, never a crash loop — rendering into it throws.
+    if (this.renderer.getContext()?.isContextLost?.()) return;
     const strength = this.num('bloomStrength');
     if (strength <= 0 || this.thumbnail) {
       this.renderer.render(this.scene, this.camera);
@@ -755,29 +771,36 @@ class TankInstance implements SaverInstance {
     this.disposed = true;
     this.stop();
     this.abort.abort();
-    const disposeObject = (obj: Object3D): void => {
-      obj.traverse((o) => {
-        const mesh = o as Partial<Mesh>;
-        if (mesh.geometry) mesh.geometry.dispose();
-        const mats: Material[] = Array.isArray(mesh.material)
-          ? mesh.material
-          : mesh.material
-            ? [mesh.material]
-            : [];
-        for (const m of mats) {
-          const tex = (m as Partial<MeshBasicMaterial>).map;
-          if (tex) tex.dispose();
-          m.dispose();
-        }
-      });
-    };
-    disposeObject(this.scene);
-    for (const p of this.templates.values()) {
-      void p.then((tpl) => tpl && disposeObject(tpl.scene));
+    // Fish clones share geometry (and farm-lane materials) with the module
+    // TEMPLATE_CACHE — disposing them would corrupt every later mount. Pull
+    // the fish out before sweeping the scene-owned resources.
+    for (const f of this.fish) {
+      f.mixer?.stopAllAction();
+      this.scene.remove(f.group);
     }
+    this.fish = [];
+    this.scene.traverse((o) => {
+      const mesh = o as Partial<Mesh>;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mats: Material[] = Array.isArray(mesh.material)
+        ? mesh.material
+        : mesh.material
+          ? [mesh.material]
+          : [];
+      for (const m of mats) {
+        const tex = (m as Partial<MeshBasicMaterial>).map;
+        if (tex) tex.dispose();
+        m.dispose();
+      }
+    });
     this.bloomComposer?.dispose();
     this.finalComposer?.dispose();
     this.renderer.dispose();
+    // Release the GL context NOW. Browsers cap live WebGL contexts (~16) and
+    // dispose() alone leaves the release to GC — workbench churn (mount,
+    // preview, remount) exhausts the pool and the browser starts killing
+    // contexts, which is exactly the "janky and crashes" dev-tools failure.
+    this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqBackend;
@@ -823,6 +846,13 @@ const SHAFT_FRAG = /* glsl */ `
     gl_FragColor = vec4(vec3(0.55, 0.75, 1.0) * a, a);
   }
 `;
+
+/**
+ * Parsed-GLB template cache, shared across every tank instance in the page.
+ * Bounded by the set of distinct fish URLs a session touches; entries are
+ * never disposed by instances (SkeletonUtils clones share the geometry).
+ */
+const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 
 /** Deterministic 32-bit string hash (FNV-1a) for rng fork salts. */
 function hashCode(s: string): number {

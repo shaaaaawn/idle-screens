@@ -33,8 +33,10 @@ interface PerceiveHook {
 }
 
 /** Frame-addressable imperative savers — reproducible pixel readings.
- *  `pipes` and `mystify` joined with the July 2026 closed-form rewrites. */
-const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide', 'dvd', 'fade-out', 'pipes', 'mystify'];
+ *  `pipes` and `mystify` joined with the July 2026 closed-form rewrites;
+ *  `metaquarium` reads through the GPU-canvas scratch-copy path (WebGL with
+ *  preserveDrawingBuffer). */
+const DETERMINISTIC_IMPERATIVE = ['black-hole', 'tide', 'dvd', 'fade-out', 'pipes', 'mystify', 'metaquarium'];
 /** No canvas to read: these draw with elements + CSS transforms. */
 const CSS_SAVERS = ['toasters', 'fish', 'bouncing-ball', 'bsod'];
 /** Worker-ready savers must NOT be excluded — see the assertion below. */

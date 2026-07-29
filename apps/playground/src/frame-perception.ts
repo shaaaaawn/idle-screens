@@ -384,17 +384,43 @@ export async function perceiveSaverFrame(
       );
     }
 
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    // A 2d canvas reads directly. A GPU canvas (WebGL/WebGPU) can't hand out
+    // a 2d context, but its PRESENTED frame is still drawImage-able — copy it
+    // into a scratch 2d canvas and read that. Reliable when the renderer
+    // preserves its drawing buffer (metaquarium sets preserveDrawingBuffer
+    // for exactly this readback family: thumbs, validator, perception).
+    const direct = canvas.getContext('2d', { willReadFrequently: true });
+    let ctx = direct;
+    let scratch: HTMLCanvasElement | null = null;
+    if (!ctx) {
+      scratch = document.createElement('canvas');
+      scratch.width = canvas.width;
+      scratch.height = canvas.height;
+      ctx = scratch.getContext('2d', { willReadFrequently: true });
+    }
     if (!ctx) {
       return empty(
         'unsupported',
         'Canvas has no readable 2D context (WebGL/WebGPU readback needs the renderer’s cooperation).',
       );
     }
+    const readCtx = ctx;
+    const readFrame = (): ImageData => {
+      if (scratch) {
+        readCtx.clearRect(0, 0, scratch.width, scratch.height);
+        readCtx.drawImage(canvas, 0, 0);
+      }
+      return readCtx.getImageData(
+        0,
+        0,
+        scratch ? scratch.width : canvas.width,
+        scratch ? scratch.height : canvas.height,
+      );
+    };
 
     let img: ImageData;
     try {
-      img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      img = readFrame();
     } catch (err) {
       return empty('unsupported', `Pixel read blocked: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -417,7 +443,7 @@ export async function perceiveSaverFrame(
     let motion: FrameMotion | null = null;
     if (deterministic) {
       inst.renderFrame!(t + MOTION_DT, seed);
-      motion = motionBetween(grid, gridFromImageData(ctx.getImageData(0, 0, canvas.width, canvas.height)), MOTION_DT);
+      motion = motionBetween(grid, gridFromImageData(readFrame()), MOTION_DT);
       inst.renderFrame!(t, seed); // leave the surface on the requested frame
     }
     let reason: string | undefined;
