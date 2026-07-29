@@ -7,7 +7,8 @@ deterministic, flash-safe `SaverPlugin`. There is no code in a spec: no
 scripting, no network access, no DOM access.
 
 - **Machine-readable schema:** [`saver-spec.schema.json`](./saver-spec.schema.json)
-  (JSON Schema draft-07), importable as
+  (JSON Schema draft-07), covering SaverSpec scenes and `idle-sequence`
+  envelopes (`oneOf`, discriminated by `format: "idle-sequence"`). Importable as
   `@idle-screens/schema/saver-spec.schema.json`.
 - **Runtime validator:** `validateSpec(spec)` / `assertValidSpec(spec)` — used by
   `compileSaver()`, which refuses to run an invalid spec.
