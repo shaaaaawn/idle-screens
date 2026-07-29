@@ -3,7 +3,7 @@ import type { Rng } from './rng';
 /** How a parameter interpolates between control-track deltas. */
 export type Ease = 'step' | 'linear' | 'smooth';
 
-export type ParamType = 'number' | 'color' | 'bool' | 'enum';
+export type ParamType = 'number' | 'color' | 'bool' | 'enum' | 'string';
 export type ParamValue = number | string | boolean;
 
 /** One typed, ranged, interpolatable knob: an agent's steering surface. */
@@ -66,6 +66,10 @@ export interface SaverContext {
   /** Seeded PRNG. Use this, never Math.random(), for determinism. */
   rng: Rng;
   seed: number;
+  /** Initial paramSpace overrides for this mount (e.g. a channel's published
+   *  `{id, params}` scene). Savers treat these as the new defaults; live
+   *  steering via applyTrack still layers on top. Optional. */
+  params?: Record<string, ParamValue>;
   reducedMotion: boolean;
   /** Present for passthrough savers (over the live page). */
   page?: PageContext;

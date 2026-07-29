@@ -14,6 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
+import { metaquarium, createMetaquarium } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -45,6 +46,7 @@ const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
   { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
   { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
+  { id: 'saver-metaquarium', label: '@idle-screens/saver-metaquarium', savers: [metaquarium] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -67,7 +69,33 @@ const SAVER_GROUPS: SaverGroup[] = [
   },
 ];
 
-const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
+/**
+ * Engine/harness-only metaquarium variants, deliberately OUTSIDE the groups:
+ * the gallery live-mounts every grouped saver, and three extra WebGL tanks
+ * (one fetching the live farm) per page load is exactly the cost tiles must
+ * not pay. `?saver=metaquarium-fixture` and the e2e harness still reach them.
+ */
+const METAQUARIUM_VARIANTS: SaverPlugin[] = [
+  createMetaquarium({
+    id: 'metaquarium-farm',
+    label: 'Metaquarium (Live Farm)',
+    params: { farmUrl: '/farm/y2k/stream/cache', bloomStrength: 0.45 },
+  }),
+  createMetaquarium({
+    id: 'metaquarium-fixture',
+    label: 'Metaquarium (Fixture)',
+    params: {
+      farmUrl: '/assets/metaquarium/farm-fixture.json',
+      ipfsGateway: '/assets/metaquarium/',
+      fishCount: 3,
+    },
+  }),
+];
+
+/** Gallery/preview/perception spine: the curated groups only. */
+const GROUPED_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
+/** Engine + harness registry: everything addressable, variants included. */
+const ALL_SAVERS = [...GROUPED_SAVERS, ...METAQUARIUM_VARIANTS];
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
@@ -75,6 +103,7 @@ const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-limelight': 'limelight',
   'saver-slipstream': 'slipstream',
   'saver-catwalk': 'catwalk',
+  'saver-metaquarium': 'metaquarium',
   'savers-classic': 'classic',
   schema: 'schema',
 };
@@ -91,7 +120,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
 );
 
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
-  // Same filter affordance as the gallery's — 33 savers is too many to scan.
+  // Same filter affordance as the gallery's — 36 savers is too many to scan.
   const filter = document.createElement('div');
   filter.className = 'palette-filter';
   const search = document.createElement('input');
@@ -498,7 +527,7 @@ function liveMode(): void {
   });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
-  wirePerceptionHarness(ALL_SAVERS);
+  wirePerceptionHarness(GROUPED_SAVERS);
   wireSchemaHarness();
 
   type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';

@@ -39,7 +39,7 @@ function lerpValue(type: string, a: ParamValue, b: ParamValue, p: number): Param
     const cb = parseHex(b);
     if (ca && cb) return toHex([lerp(ca[0], cb[0], p), lerp(ca[1], cb[1], p), lerp(ca[2], cb[2], p)]);
   }
-  return p >= 1 ? b : a; // bool / enum / step
+  return p >= 1 ? b : a; // bool / enum / string / step
 }
 
 function evalPath(

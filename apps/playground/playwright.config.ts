@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Overridable so parallel checkouts (worktrees, agents) can run e2e without
+// colliding on 5177 — vite.config.ts reads the same variable.
+const PORT = Number(process.env.PLAYGROUND_PORT ?? 5177);
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -9,7 +13,7 @@ export default defineConfig({
   retries: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5177',
+    baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -30,7 +34,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:5177',
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
