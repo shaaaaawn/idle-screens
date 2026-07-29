@@ -28,9 +28,9 @@ export function buildRightDock(mount: HTMLElement): RightDockHandle {
   const stack = document.createElement('div');
   stack.className = 'wb-stack wb-stack-right';
 
-  const props = makePanel('Properties', true);
-  const engine = makePanel('Engine', true);
-  const layersPanel = makePanel('Layers', false);
+  const props = makePanel('Properties', true, 'wb-panel-props');
+  const engine = makePanel('Engine', true, 'wb-panel-engine');
+  const layersPanel = makePanel('Layers', true, 'wb-panel-layers');
   // Open by default: perception now has something to show for EVERY saver with
   // a canvas, not just schema ones, so a collapsed panel hid the main readout.
   const percPanel = makePanel('Perception', true, 'wb-panel-perception');

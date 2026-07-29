@@ -1,12 +1,13 @@
 import {
   createRng,
   type ControlTrack,
+  type ParamDelta,
   type SaverContext,
   type SaverInstance,
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
-import { assertValidSpec, validateSpec } from './validate';
+import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
 import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
@@ -15,8 +16,9 @@ import {
   structuralSignature,
   type SteerDelta,
 } from './steer';
-import type { LayerSpec, SaverSpec } from './types';
+import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
+import { resolveSegment } from './sequence';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -99,6 +101,7 @@ interface Built {
 
 class SpecInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly ownsCanvas: boolean;
   private readonly ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private readonly saverCtx: SaverContext;
   private readonly seed: number;
@@ -129,12 +132,14 @@ class SpecInstance implements SaverInstance {
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
       canvas = ctx.surface;
+      this.ownsCanvas = false;
     } else {
       const el = document.createElement('canvas');
       el.style.cssText = 'display:block;width:100%;height:100%';
       el.setAttribute('aria-hidden', 'true');
       ctx.host.appendChild(el);
       canvas = el;
+      this.ownsCanvas = true;
     }
     this.canvas = canvas;
     const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
@@ -591,7 +596,7 @@ class SpecInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    if (typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
+    if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
   }
 }
 
@@ -605,6 +610,150 @@ export function compileSaver(spec: unknown): SaverPlugin {
   return {
     manifest: manifestFor(valid),
     mount: (ctx: SaverContext) => new SpecInstance(valid, ctx),
+    spec: valid,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sequence — multi-segment timeline compiled as a single SaverPlugin
+// ---------------------------------------------------------------------------
+
+class SequenceInstance implements SaverInstance {
+  private readonly seq: IdleSequence;
+  private readonly childCtx: SaverContext;
+  private readonly canvas: HTMLCanvasElement | null;
+  private readonly children: (SpecInstance | null)[];
+  private activeIndex = -1;
+  private paused = false;
+
+  constructor(seq: IdleSequence, ctx: SaverContext) {
+    this.seq = seq;
+
+    let surface = ctx.surface ?? null;
+    let canvas: HTMLCanvasElement | null = null;
+    if (!surface && typeof document !== 'undefined') {
+      canvas = document.createElement('canvas');
+      canvas.style.cssText = 'display:block;width:100%;height:100%';
+      canvas.setAttribute('aria-hidden', 'true');
+      ctx.host.appendChild(canvas);
+      surface = canvas;
+    }
+    this.canvas = canvas;
+
+    this.childCtx = { ...ctx, surface: surface!, reducedMotion: true };
+    this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
+  }
+
+  private childScene(index: number): SaverSpec {
+    const seg = this.seq.segments[index]!;
+    if (seg.scene.seed != null) return seg.scene;
+    if (this.seq.seed != null) return { ...seg.scene, seed: this.seq.seed + index };
+    return seg.scene;
+  }
+
+  private ensureChild(index: number): SpecInstance {
+    if (index < 0 || index >= this.seq.segments.length) index = 0;
+    let child = this.children[index];
+    if (!child) {
+      child = new SpecInstance(this.childScene(index), this.childCtx);
+      this.children[index] = child;
+      if (this.paused) child.setPaused(true);
+    }
+    return child;
+  }
+
+  private releaseChild(index: number): void {
+    const child = this.children[index];
+    if (child) {
+      child.dispose();
+      this.children[index] = null;
+    }
+  }
+
+  renderFrame(T: number, seed: number): void {
+    const resolved = resolveSegment(this.seq, T);
+    const { index, localT } = resolved;
+
+    if (index !== this.activeIndex) {
+      for (let i = 0; i < this.children.length; i++) {
+        if (i !== index) this.releaseChild(i);
+      }
+      this.activeIndex = index;
+    }
+
+    const child = this.ensureChild(index);
+    const childSeed = this.seq.segments[index]!.scene.seed ?? this.seq.seed ?? seed;
+    child.renderFrame(localT, childSeed);
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    for (const child of this.children) {
+      child?.setPaused(paused);
+    }
+  }
+
+  resize(width: number, height: number, dpr?: number): void {
+    for (const child of this.children) {
+      child?.resize(width, height, dpr);
+    }
+  }
+
+  applyTrack(track: ControlTrack): void {
+    const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    const segDelta = deltas.find((d) => d.path === 'sequence.segment');
+    if (segDelta !== undefined && typeof segDelta.value === 'number') {
+      const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
+      if (idx !== this.activeIndex) {
+        for (let i = 0; i < this.children.length; i++) {
+          if (i !== idx) this.releaseChild(i);
+        }
+        this.activeIndex = idx;
+        const child = this.ensureChild(idx);
+        child.renderFrame(0, this.seq.segments[idx]!.scene.seed ?? this.seq.seed ?? 0);
+      }
+    }
+
+    const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
+    if (childDeltas.length > 0 && this.activeIndex >= 0) {
+      const child = this.children[this.activeIndex];
+      child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+    }
+  }
+
+  dispose(): void {
+    for (let i = 0; i < this.children.length; i++) {
+      this.releaseChild(i);
+    }
+    if (this.canvas) this.canvas.remove();
+  }
+}
+
+function sequenceManifest(seq: IdleSequence): SaverManifest {
+  const maxTotal = seq.segments.reduce((max, s) => {
+    const t = s.scene.layers.reduce((n, l) => n + l.count, 0);
+    return Math.max(max, t);
+  }, 0);
+  const costTier = maxTotal < 30 ? 'idle' : maxTotal < 150 ? 'low' : maxTotal < 400 ? 'medium' : 'high';
+  return {
+    id: seq.id,
+    label: seq.label,
+    timeModel: 'closed-form',
+    passthrough: false,
+    minBackend: 'canvas2d',
+    costTier,
+    motionIntensity: 'moderate',
+    reducedMotionFallback: 'static',
+    a11y: { flashSafe: true },
+    workerReady: false,
+  };
+}
+
+export function compileSequence(spec: unknown): SaverPlugin {
+  const valid = assertValidSequence(spec);
+  return {
+    manifest: sequenceManifest(valid),
+    mount: (ctx: SaverContext) => new SequenceInstance(valid, ctx),
     spec: valid,
   };
 }

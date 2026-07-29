@@ -330,4 +330,36 @@ export const LIMITS = {
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
   maxTextBlockMaxWidth: 1.0,
+  maxSegments: 24,
+  minSegmentDuration: 1000, // ms — flash-safety floor: segment cuts are luminance transitions
+  maxTransitionDur: 5000,
+  minTransitionDur: 200,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Sequence envelope — multi-segment timeline over unmodified SaverSpecs
+// ---------------------------------------------------------------------------
+
+export interface SequenceTransition {
+  type: 'cut';
+}
+
+export interface SequenceSegment {
+  key: string;
+  scene: SaverSpec;
+  /** Segment duration in ms. Only the final segment may omit this (holds until input). */
+  duration?: number;
+  /** How the segment advances: 'auto' (timer), 'input' (external event), 'either'. */
+  advance?: 'auto' | 'input' | 'either';
+  transition?: SequenceTransition;
+}
+
+export interface IdleSequence {
+  format: 'idle-sequence';
+  schemaVersion: 1;
+  id: string;
+  label: string;
+  seed?: number;
+  loop: boolean;
+  segments: SequenceSegment[];
+}

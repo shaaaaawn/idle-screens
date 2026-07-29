@@ -85,3 +85,36 @@ export function defineWorkbench(): void {
 }
 
 defineWorkbench();
+
+function syncToggle(btn: HTMLElement, side: 'left' | 'right', dev: HTMLElement): void {
+  const collapsed = dev.classList.contains(`${side}-collapsed`);
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.textContent = side === 'left'
+    ? (collapsed ? '›' : '‹')
+    : (collapsed ? '‹' : '›');
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const dev = document.getElementById('view-dev');
+    const tl = document.getElementById('wb-toggle-left');
+    const tr = document.getElementById('wb-toggle-right');
+    if (!dev || !tl || !tr) return;
+
+    if (localStorage.getItem('wb-left-collapsed') === '1') dev.classList.add('left-collapsed');
+    if (localStorage.getItem('wb-right-collapsed') === '1') dev.classList.add('right-collapsed');
+    syncToggle(tl, 'left', dev);
+    syncToggle(tr, 'right', dev);
+
+    tl.addEventListener('click', () => {
+      dev.classList.toggle('left-collapsed');
+      localStorage.setItem('wb-left-collapsed', dev.classList.contains('left-collapsed') ? '1' : '0');
+      syncToggle(tl, 'left', dev);
+    });
+    tr.addEventListener('click', () => {
+      dev.classList.toggle('right-collapsed');
+      localStorage.setItem('wb-right-collapsed', dev.classList.contains('right-collapsed') ? '1' : '0');
+      syncToggle(tr, 'right', dev);
+    });
+  });
+}
