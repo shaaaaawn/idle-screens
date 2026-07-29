@@ -47,6 +47,21 @@ export function farmMetadata(raw: unknown): FarmFish[] {
   return Array.isArray(meta) ? meta : [];
 }
 
+/** Resolve the hero fish's model URL by token: find it in the farm metadata
+ *  and route its `3d` asset through the gateway; `fallback` (the bundled
+ *  hero) when the token is missing or has no model. Pure — the tank's live
+ *  fish-swap resolves through this. */
+export function heroUrlFor(
+  meta: FarmFish[],
+  token: string,
+  gateway: string,
+  fallback: string,
+): string {
+  const fish = meta.find((f) => tokenOf(f) === token);
+  const asset = fish?.['3d'];
+  return typeof asset === 'string' ? resolveAssetUrl(asset, gateway) : fallback;
+}
+
 /**
  * Choose the tank's population. Explicit `tokens` pin exact fish; otherwise a
  * seeded Fisher-Yates shuffle makes "which fish live in this tank" a pure

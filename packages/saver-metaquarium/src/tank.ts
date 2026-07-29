@@ -55,7 +55,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
-import { farmMetadata, pickFarmFish, resolveAssetUrl } from './farm';
+import { farmMetadata, heroUrlFor, pickFarmFish, resolveAssetUrl } from './farm';
 import { makeFishPath, fishPose, type FishPath, type TankBounds } from './swim';
 import {
   applyFarmMaterials,
@@ -139,6 +139,10 @@ class TankInstance implements SaverInstance {
   private gotoBlend = 0;
   private heroDist = 0;
   private lastStateT = -1;
+  /** Which fish the hero currently IS (fishToken|fishUrl); steering either
+   *  param swaps the hero in place, mid-swim. */
+  private heroKey = '';
+  private heroSwapping = false;
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly waterGeo: PlaneGeometry;
@@ -405,10 +409,13 @@ ${shader.vertexShader.replace(
       // fish); setState grows the pool on demand when fishCount is steered up.
       const want = Math.max(1, Math.round(Number(this.space.fishCount?.default ?? 1)));
       const pool = Math.min(want, poolCap);
-      urls = new Array<string>(pool).fill(this.str('fishUrl'));
+      this.heroKey = this.heroSrcKey();
+      const heroUrl = await this.resolveHeroUrl();
+      urls = new Array<string>(pool).fill(heroUrl);
       npc = true; // untextured bundled breeds get the seeded-palette coat
-      this.bundled = { url: this.str('fishUrl'), poolCap };
+      this.bundled = { url: heroUrl, poolCap };
       this.heroMode = pool === 1;
+      this.markHero(heroUrl);
     }
     if (this.disposed) return;
 
@@ -437,6 +444,72 @@ ${shader.vertexShader.replace(
       return { ...p, scale: p.scale * HERO_SCALE };
     }
     return makeFishPath(rng.fork(i), BOUNDS);
+  }
+
+  /** Identity of the hero-source params; steering either one swaps the hero. */
+  private heroSrcKey(): string {
+    return `${this.str('fishToken').trim()}|${this.str('fishUrl')}`;
+  }
+
+  /** Publish which fish the hero currently IS (filename, or token when the
+   *  farm resolved one) — the observable seam for swap tests and debugging. */
+  private markHero(url: string): void {
+    const token = this.str('fishToken').trim();
+    const file = url.split('/').pop() ?? url;
+    this.ctxSaver.host.dataset.mqHero = token ? `token:${token}` : file;
+  }
+
+  /** Resolve the hero's GLB: fishToken through the farm (farmUrl, or the
+   *  host's '/farm' proxy by default), else fishUrl. Never throws — the
+   *  bundled hero is always the fallback. */
+  private async resolveHeroUrl(): Promise<string> {
+    const token = this.str('fishToken').trim();
+    const fallback = this.str('fishUrl');
+    if (!token) return fallback;
+    try {
+      const src = this.str('farmUrl') || '/farm/y2k/stream/cache';
+      const res = await fetch(src, { signal: this.abort.signal });
+      if (!res.ok) return fallback;
+      const meta = farmMetadata(await res.json());
+      return heroUrlFor(meta, token, this.str('ipfsGateway'), fallback);
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** Live hero swap: load the new fish and graft it onto the hero in place —
+   *  same plan, same travelled distance, so the swim never hitches. Keeps
+   *  the old fish when the new one fails to load (never blank). */
+  private async swapHero(): Promise<void> {
+    if (this.heroSwapping) return;
+    this.heroSwapping = true;
+    try {
+      const key = this.heroSrcKey();
+      const url = await this.resolveHeroUrl();
+      const tpl = await this.template(url, true);
+      if (this.disposed || this.heroSrcKey() !== key) return; // superseded mid-load
+      this.heroKey = key;
+      const hero = this.fish[0];
+      if (!hero || !tpl) return; // load failed: keep the fish we have
+      this.markHero(url);
+      hero.group.clear();
+      const body = cloneSkinned(tpl.scene);
+      if (tpl.npc && !tpl.textured) applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7));
+      body.scale.setScalar(tpl.norm);
+      body.rotation.y = tpl.yaw;
+      hero.group.add(body);
+      hero.body = body;
+      if (tpl.clip) {
+        hero.mixer = new AnimationMixer(body);
+        hero.mixer.clipAction(tpl.clip).play();
+        hero.clipDuration = tpl.clip.duration;
+      } else {
+        hero.mixer = null;
+        hero.clipDuration = 0;
+      }
+    } finally {
+      this.heroSwapping = false;
+    }
   }
 
   /** Grow the bundled pool to `n` fish (steered fishCount above pool size). */
@@ -641,12 +714,16 @@ ${shader.vertexShader.replace(
       const bob = Math.sin(tSec * 1.7) * 1.6 * Math.max(g, gi * 0.7);
       y += bob;
 
-      // Facing: wander tangent, blended toward the viewer while greeting
-      // (and softly while parked at a goto target).
+      // Facing: wander tangent, blended toward a 3/4 PORTRAIT of the viewer
+      // while greeting — the camera axis rotated ~35°, so the head, flank
+      // and a side-mounted eye all read (a fish never mugs dead-on).
       const face = Math.max(g, gg * 0.55);
-      let fx = p.fx + (camDirX - p.fx) * face;
+      const pa = 0.62; // portrait angle, radians
+      const portraitX = camDirX * Math.cos(pa) - camDirZ * Math.sin(pa);
+      const portraitZ = camDirX * Math.sin(pa) + camDirZ * Math.cos(pa);
+      let fx = p.fx + (portraitX - p.fx) * face;
       let fy = p.fy + (0.12 - p.fy) * face;
-      let fz = p.fz + (camDirZ - p.fz) * face;
+      let fz = p.fz + (portraitZ - p.fz) * face;
       const fm = Math.hypot(fx, fy, fz) || 1;
       fx /= fm;
       fy /= fm;
@@ -705,6 +782,10 @@ ${shader.vertexShader.replace(
     const visible = Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
     if (this.bundled && visible > this.fish.length && !this.growing) {
       void this.growTo(visible);
+    }
+    // Steering fishToken/fishUrl swaps the hero live, mid-swim.
+    if (this.heroMode && this.heroKey && !this.heroSwapping && this.heroSrcKey() !== this.heroKey) {
+      void this.swapHero();
     }
     for (let i = 0; i < this.fish.length; i++) {
       const f = this.fish[i]!;
@@ -961,6 +1042,7 @@ ${shader.vertexShader.replace(
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqBackend;
     delete this.ctxSaver.host.dataset.mqPose;
+    delete this.ctxSaver.host.dataset.mqHero;
   }
 }
 

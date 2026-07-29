@@ -37,8 +37,13 @@ export const METAQUARIUM_PARAMS = {
    *  default — glow, not strobe (the flash gate cares). */
   bloomStrength: { type: 'number', default: 0.35, min: 0, max: 1.5, ease: 'smooth' },
   /** Hero GLB used when no farm is configured (bundled-fish mode). The
-   *  default is a real textured Metaquarium betafish (atlas + Swim clip). */
+   *  default is Fish #1 of the Metaquarium (textured atlas + glow accents +
+   *  Swim clip). Steering this mid-run SWAPS the hero in place. */
   fishUrl: { type: 'string', default: '/assets/metaquarium/hero-fish.glb' },
+  /** Hero fish by token id ("257"): resolves its model through the farm and
+   *  swaps the hero live when steered. Empty = use fishUrl. Falls back to
+   *  fishUrl when the farm or token is unavailable (never blank). */
+  fishToken: { type: 'string', default: '' },
   /** Metaquarium farm endpoint returning `{message: {metadata: [...]}}` (or a
    *  bare metadata array). Empty = bundled-fish mode. */
   farmUrl: { type: 'string', default: '' },

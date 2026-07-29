@@ -52,6 +52,10 @@ export const demoTrack: ControlTrack = {
     { t: 17_000, path: 'fogColor', value: '#04002c', dur: 5_000 },
     { t: 22_000, path: 'behavior', value: 'dart' },
     { t: 25_500, path: 'behavior', value: 'auto' },
+    // Fish swap, live mid-swim (offline: the classic voxel beta joins, then
+    // Fish #1 returns).
+    { t: 27_000, path: 'fishUrl', value: '/assets/metaquarium/beta-fish.glb' },
+    { t: 35_000, path: 'fishUrl', value: '/assets/metaquarium/hero-fish.glb' },
     { t: 26_000, path: 'bloomStrength', value: 0.6, dur: 4_000 },
     { t: 30_000, path: 'fogColor', value: '#030009', dur: 5_000 },
     { t: 34_000, path: 'bloomStrength', value: 0.35, dur: 4_000 },

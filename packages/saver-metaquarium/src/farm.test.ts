@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { farmMetadata, pickFarmFish, resolveAssetUrl, tokenOf, type FarmFish } from './farm';
+import { farmMetadata, heroUrlFor, pickFarmFish, resolveAssetUrl, tokenOf, type FarmFish } from './farm';
 
 const fish = (token: number, model = true): FarmFish => ({
   name: `Fish ${token} of the Metaquarium`,
@@ -36,6 +36,17 @@ describe('metaquarium farm', () => {
     expect(resolveAssetUrl(picked!.transparent_icon!, 'https://ipfs.io/ipfs/')).toBe(
       'https://ipfs.io/ipfs/QmT/7.png',
     );
+  });
+
+  it('heroUrlFor resolves a token to its gateway model URL, falling back safely', () => {
+    const meta = [fish(1), fish(257)];
+    expect(heroUrlFor(meta, '257', 'https://ipfs.io/ipfs/', '/local/hero.glb')).toBe(
+      'https://ipfs.io/ipfs/Qm257/fish_257_3d.glb',
+    );
+    expect(heroUrlFor(meta, '999', 'https://ipfs.io/ipfs/', '/local/hero.glb')).toBe(
+      '/local/hero.glb',
+    );
+    expect(heroUrlFor([fish(1, false)], '1', 'g/', '/local/hero.glb')).toBe('/local/hero.glb');
   });
 
   it('unwraps both the farm envelope and a bare array', () => {
