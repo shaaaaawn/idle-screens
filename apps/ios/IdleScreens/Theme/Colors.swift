@@ -8,6 +8,9 @@ extension Color {
     static let appPrimary       = Color(hex: "8B7CFF")
     static let appAccent        = Color(hex: "5EEAD4")
     static let appSuccess       = Color(hex: "30D158")
+    /// Softer than system red — errors here are recoverable ("that code
+    /// expired"), and full-saturation red reads as damage.
+    static let appDanger        = Color(hex: "FF6B6B")
     static let textPrimary      = Color.white
     static let textSecondary    = Color(hex: "8E8E93")
     static let textTertiary     = Color(hex: "48484A")
@@ -33,6 +36,7 @@ extension ShapeStyle where Self == Color {
     static var appPrimary: Color       { Color.appPrimary }
     static var appAccent: Color        { Color.appAccent }
     static var appSuccess: Color       { Color.appSuccess }
+    static var appDanger: Color        { Color.appDanger }
     static var textPrimary: Color      { Color.textPrimary }
     static var textSecondary: Color    { Color.textSecondary }
     static var textTertiary: Color     { Color.textTertiary }

@@ -14,7 +14,7 @@ export interface LayersHandle {
   dispose(): void;
 }
 
-const SPRITE_KINDS: readonly SpriteSpec['kind'][] = ['circle', 'ring', 'streak', 'rect', 'emoji', 'text'];
+const SPRITE_KINDS: readonly SpriteSpec['kind'][] = ['circle', 'ring', 'streak', 'rect', 'emoji', 'text', 'textBlock'];
 const MOTION_TYPES: readonly MotionSpec['type'][] = ['drift', 'rise', 'bounce', 'static', 'orbit', 'wander', 'warp', 'path'];
 
 function cloneSpec(spec: SaverSpec): SaverSpec {
@@ -29,6 +29,7 @@ function defaultSprite(kind: SpriteSpec['kind']): SpriteSpec {
     case 'rect': return { kind: 'rect', width: [0.005, 0.015], color: '#ffffff' };
     case 'emoji': return { kind: 'emoji', glyphs: ['⭐'] };
     case 'text': return { kind: 'text', strings: ['hello'], color: '#ffffff' };
+    case 'textBlock': return { kind: 'textBlock', text: 'Hello world', maxWidth: 0.5, fontSize: 0.04 };
   }
 }
 

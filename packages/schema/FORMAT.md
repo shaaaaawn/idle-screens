@@ -7,7 +7,8 @@ deterministic, flash-safe `SaverPlugin`. There is no code in a spec: no
 scripting, no network access, no DOM access.
 
 - **Machine-readable schema:** [`saver-spec.schema.json`](./saver-spec.schema.json)
-  (JSON Schema draft-07), importable as
+  (JSON Schema draft-07), covering SaverSpec scenes and `idle-sequence`
+  envelopes (`oneOf`, discriminated by `format: "idle-sequence"`). Importable as
   `@idle-screens/schema/saver-spec.schema.json`.
 - **Runtime validator:** `validateSpec(spec)` / `assertValidSpec(spec)` — used by
   `compileSaver()`, which refuses to run an invalid spec.
@@ -29,7 +30,8 @@ Additions to version 1 so far, all optional and backward compatible:
 `ghosting`, `wander` / `warp` / `path` motions, `ring` / `streak` / `rect`
 sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
-(2026-07-21 — "the v1 ceiling").
+(2026-07-21 — "the v1 ceiling");
+`textBlock` sprite — deterministic multi-line text with viewport-unit sizing.
 
 ## Safety invariants
 
@@ -154,6 +156,18 @@ with distance, removing pop-in at the cutoff.
   (rain that reads as rain, shooting stars, warp stars)
 - `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
   rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
+- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
+  multi-line text block with deterministic line-breaking. All dimensions are
+  viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
+  textBlock sprites at validation time. `position` is always the block's
+  **top-left corner** regardless of `align` (align moves text within the box,
+  not the box itself — different from the `text` sprite where `align`/`baseline`
+  shift the meaning of `position`). Line breaks are computed from a fixed
+  character-class metrics table so wrapping is identical across platforms; note
+  that the table is approximate — a painted line may slightly exceed `maxWidth`
+  when the real font is wider than the table estimates, so `maxWidth` is a
+  layout target, not a hard clip.
+  Use with `count: 1`, `motion: { type: "static" }`, and `position`.
 
 `circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
 per-entity palette pick) and `colorWeights: [...]` (relative weights, same
@@ -270,6 +284,55 @@ Known approximations (deliberate): trails and ghosting are not sampled, text ink
 is estimated from font size × string length. Good enough to perceive
 composition, focus, balance, and motion — not a substitute for a human (or VLM)
 judgement of beauty.
+
+## Sequence envelope (`idle-sequence`)
+
+A second top-level format that composes multiple SaverSpecs into a sequenced
+timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
+
+```jsonc
+{
+  "format": "idle-sequence",
+  "schemaVersion": 1,
+  "id": "my-sequence",
+  "label": "My Sequence",
+  "seed": 42,           // optional; forwarded to children without their own seed
+  "loop": false,
+  "segments": [
+    { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
+    { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
+    { "key": "outro",  "scene": { /* SaverSpec */ } }  // durationless: holds forever
+  ]
+}
+```
+
+**Segments:** 1–24 segments, each carrying an unmodified SaverSpec. Keys must
+be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
+the final segment may omit duration (holds indefinitely).
+
+**Advance mode:** `auto` (default), `input`, or `either`. Validated but not
+wired to runtime behavior — timer/input drivers are planned for a follow-up.
+
+**Transitions:** `{ type: 'cut' }` is the only supported transition. `fade` is
+defined as a type but rejected at validation.
+
+**Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
+sums of durations. Half-open segments: `[start, start+duration)`. With
+`loop: true`, `T` wraps at the sum of all durations (loop is incompatible with
+a durationless final segment).
+
+**Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
+viewer needs zero changes. All children share a single canvas; only the active
+segment's `SpecInstance` is alive at any time. `workerReady` is `false` (the
+worker compile-hook does not dispatch sequences).
+
+**Steering:** segment switching uses the `sequence.segment` delta path via
+`applyTrack`. The `SequenceInstance` intercepts this path before delegation.
+Remaining deltas are forwarded to the active child's `applyTrack`.
+
+**Seed:** `seq.seed` is forwarded to children that lack a scene-level seed
+(offset by segment index for independence). Children with their own seed are
+unaffected.
 
 ## Examples
 

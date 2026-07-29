@@ -118,23 +118,20 @@ extension AppState {
     /// (`https://idlescreens.com/pair/<code>`) and the custom scheme
     /// (`idlescreens://pair/<code>`).
     static func pairCode(from url: URL) -> String? {
-        let parts = url.pathComponents.filter { $0 != "/" }
-        if url.scheme == "idlescreens" {
-            // idlescreens://pair/<code> — "pair" is the host, the code the path.
-            if url.host == "pair", let code = parts.first { return code }
-        }
-        if let i = parts.firstIndex(of: "pair"), parts.indices.contains(i + 1) {
-            return parts[i + 1]
-        }
-        return nil
+        PairCodeFormat.pairCode(fromURL: url)
     }
 
     /// Claim a scanned/typed pair code, adding (or refreshing) that screen.
     /// Multiple screens can be paired at once — one phone, every display.
     @discardableResult
     func claimPairCode(_ rawCode: String) async -> Bool {
-        let code = rawCode.uppercased().filter { $0.isLetter || $0.isNumber }
-        guard !code.isEmpty else { return false }
+        // Normalising HERE rather than in the view means every entry point —
+        // typed, pasted, scanned, universal link — gets URL unwrapping and
+        // alphabet filtering for free.
+        guard let code = PairCodeFormat.normalize(rawCode) else {
+            pairClaimError = "That doesn't look like a pairing code."
+            return false
+        }
         isPairing = true
         defer { isPairing = false }
         do {
@@ -153,16 +150,19 @@ extension AppState {
                 pairedScreens.append(screen)
             }
             savePairedScreens()
+            pairClaimError = nil
             pairPushError = nil
             await refreshScreenStatuses()
             return true
         } catch {
             // Claim failures are almost always a wrong/expired code (or the
-            // service being unreachable) — say that, not "HTTP 404".
+            // service being unreachable) — say that, not "HTTP 404". Kept in
+            // its OWN field: a failed push must not greet the user as a stale
+            // error the next time they open "Add a screen".
             if let pairError = error as? PairError, case .httpError = pairError {
-                pairPushError = "Couldn't pair — check the code on your screen and try again."
+                pairClaimError = "That code didn't work. It may have expired — your screen can show a fresh one."
             } else {
-                pairPushError = error.localizedDescription
+                pairClaimError = error.localizedDescription
             }
             return false
         }

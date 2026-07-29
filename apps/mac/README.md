@@ -64,7 +64,9 @@ Debug flags on the binary: `--show` (start the saver immediately), `--hold`
 (don't dismiss on input, for inspection), `--diagnostics` (print the diagnostics
 report and exit), `--check-updates` (run a bundle refresh and exit), `--probe`
 (show the saver, then print the webview's rendered state), `--activity` (print
-the system-activity snapshot and exit).
+the system-activity snapshot and exit), `--display <id>` (limit `--show` to one
+display, the same targeting the menu's "Play on" rows use), `--access` (open the
+Pairing & Access window at launch, which also exercises the pair endpoint).
 
 **System Activity.** The menu's **System Activity…** shows what's running in
 the background: Docker containers, Apple `container` containers, MCP server

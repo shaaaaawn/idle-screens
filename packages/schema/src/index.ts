@@ -6,4 +6,5 @@ export * from './steer';
 export * from './advise';
 export * from './describe';
 export * from './perceive';
+export * from './sequence';
 export * from './examples';

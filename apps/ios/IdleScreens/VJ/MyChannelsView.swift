@@ -165,6 +165,27 @@ struct MyChannelsView: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // The token is in the Keychain the whole time — refusing to show it
+        // again just because its one-time sheet was dismissed strands the
+        // user from a credential they still hold.
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = credential.channelId
+            } label: {
+                Label("Copy channel ID", systemImage: "doc.on.doc")
+            }
+            if let token = app.token(for: credential.channelId) {
+                Button {
+                    UIPasteboard.general.string = token
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } label: {
+                    Label("Copy steering token", systemImage: "key")
+                }
+            }
+            ShareLink(item: app.gallery.viewerURL(for: credential.channelId)) {
+                Label("Share channel", systemImage: "square.and.arrow.up")
+            }
+        }
     }
 }
 
@@ -237,7 +258,7 @@ private struct NewChannelSheet: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.appDanger)
                     }
                 }
                 .padding(20)
@@ -316,25 +337,67 @@ private struct AddExistingChannelSheet: View {
     @State private var token = ""
     @State private var error: String?
 
+    /// Local checks first — a malformed token shouldn't cost a round trip
+    /// that comes back as an opaque failure.
+    private var tokenProblem: String? { ChannelTokenFormat.tokenProblem(token) }
+
+    private var canSubmit: Bool {
+        !channelId.isEmpty && ChannelTokenFormat.isPlausibleToken(token) && !app.isWorking
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Channel ID", text: $channelId)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("Token (isk_…)", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        // Capability tokens aren't passwords — suppress the
-                        // "Save Password?" prompt autofill would offer.
-                        .textContentType(.oneTimeCode)
+                    HStack {
+                        TextField("Channel ID or link", text: $channelId)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            // Paste a viewer URL and keep only the id — the
+                            // link is what people actually have to hand.
+                            .onChange(of: channelId) { _, new in
+                                if new.contains("/"),
+                                   let id = ChannelTokenFormat.channelId(from: new) {
+                                    channelId = id
+                                }
+                            }
+                        pasteButton(into: $channelId, transform: {
+                            ChannelTokenFormat.channelId(from: $0)
+                        })
+                    }
+                } header: {
+                    Text("Channel")
                 } footer: {
-                    Text("The token is verified with the channel before it is saved.")
+                    Text("Paste the channel's link and we'll keep just the id.")
                 }
+
+                Section {
+                    HStack {
+                        SecureField("isk_…", text: $token)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            // Capability tokens aren't passwords — suppress the
+                            // "Save Password?" prompt autofill would offer.
+                            .textContentType(.oneTimeCode)
+                        pasteButton(into: $token, transform: {
+                            ChannelTokenFormat.normalizeToken($0)
+                        })
+                    }
+                } header: {
+                    Text("Token")
+                } footer: {
+                    if let tokenProblem {
+                        Label(tokenProblem, systemImage: "exclamationmark.circle.fill")
+                            .foregroundStyle(Color.appDanger)
+                    } else {
+                        Text("Verified with the channel before it's saved to your Keychain.")
+                    }
+                }
+
                 if let error {
                     Section {
-                        Text(error).foregroundStyle(.red)
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.appDanger)
                     }
                 }
             }
@@ -345,27 +408,57 @@ private struct AddExistingChannelSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Verify & add") { add() }
-                        .disabled(channelId.isEmpty || token.isEmpty || app.isWorking)
+                    if app.isWorking {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Verify & add") { add() }
+                            .disabled(!canSubmit)
+                    }
                 }
             }
         }
         .presentationDetents([.medium])
     }
 
+    /// `hasStrings` is the only pasteboard query that doesn't trigger the
+    /// system "would like to paste" alert — the clipboard's CONTENT is read
+    /// inside the tap handler, so the prompt only appears once the user has
+    /// actually asked for a paste.
+    @ViewBuilder
+    private func pasteButton(into field: Binding<String>,
+                             transform: @escaping (String) -> String?) -> some View {
+        if UIPasteboard.general.hasStrings {
+            Button {
+                if let clipboard = UIPasteboard.general.string,
+                   let value = transform(clipboard) {
+                    field.wrappedValue = value
+                }
+            } label: {
+                Image(systemName: "doc.on.clipboard")
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func add() {
+        error = nil
         Task {
             do {
-                try await app.addExistingChannel(channelId: channelId, token: token)
+                try await app.addExistingChannel(
+                    channelId: channelId,
+                    token: ChannelTokenFormat.normalizeToken(token))
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 dismiss()
             } catch {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
                 self.error = error.localizedDescription
             }
         }
     }
 }
 
-// MARK: - One-time token reveal
+// MARK: - Token reveal (new channel)
 
 private struct TokenRevealSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -373,6 +466,7 @@ private struct TokenRevealSheet: View {
     let token: String
     var channelId: String?
     @State private var sentToTV = false
+    @State private var copied = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -380,13 +474,13 @@ private struct TokenRevealSheet: View {
 
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 40))
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(Color.textPrimary)
 
             Text("Your channel is live")
                 .font(.title2)
                 .foregroundStyle(Color.textPrimary)
 
-            Text("A starter scene is already on air — steer it from the deck behind this sheet. This capability token is shown once; it's saved to your Keychain, so copy it only if you'll VJ from another device.")
+            Text("A starter scene is already on air — steer it from the deck behind this sheet. The token below is saved to your Keychain; copy it if you'll VJ from another device. You can get it again any time by long-pressing the channel.")
                 .font(.subheadline)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
@@ -404,7 +498,8 @@ private struct TokenRevealSheet: View {
                         .padding(.vertical, 14)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(sentToTV ? .appSuccess : .appAccent)
+                .tint(sentToTV ? .appSuccess : .textPrimary)
+                .foregroundStyle(sentToTV ? Color.textPrimary : Color.appBackground)
                 .disabled(sentToTV)
                 .padding(.horizontal, 40)
             }
@@ -420,14 +515,21 @@ private struct TokenRevealSheet: View {
 
             Button {
                 UIPasteboard.general.string = token
+                copied = true
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             } label: {
-                Label("Copy token", systemImage: "doc.on.doc")
+                // Copying to a clipboard is invisible — without the state
+                // change there's nothing to tell you the tap registered.
+                Label(copied ? "Copied" : "Copy token",
+                      systemImage: copied ? "checkmark" : "doc.on.doc")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.appPrimary)
+            .tint(copied ? .appSuccess : .textPrimary)
+            .foregroundStyle(copied ? Color.textPrimary : Color.appBackground)
             .padding(.horizontal, 40)
+            .animation(.easeOut(duration: 0.2), value: copied)
 
             Spacer()
 
