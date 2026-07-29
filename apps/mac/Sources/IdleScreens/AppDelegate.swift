@@ -24,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let activeStartKey = "activeStartHour"  // -1 = disabled
   private static let activeEndKey = "activeEndHour"
   private static let perDisplayKey = "perDisplaySaver"  // [displayId: saverId]
+  private static let perDisplayChannelKey = "perDisplayChannel"  // [displayId: channelId]
+  private static let playTargetKey = "playTarget"  // displayId, "" = all displays
+  private static let recentChannelsKey = "recentChannels"
   private static let hotkeyEnabledKey = "hotkeyEnabled"
   private static let hotCornerKey = "hotCorner"  // ScreenCorner rawValue, "" = off
   private static let favoritesKey = "favoriteSavers"
@@ -40,6 +43,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
   private var perDisplaySaver: [String: String] {
     defaults.dictionary(forKey: Self.perDisplayKey) as? [String: String] ?? [:]
+  }
+  private var perDisplayChannel: [String: String] {
+    defaults.dictionary(forKey: Self.perDisplayChannelKey) as? [String: String] ?? [:]
+  }
+  /// Which display the "play this channel" rows act on. "" = all displays.
+  private var playTarget: String { defaults.string(forKey: Self.playTargetKey) ?? "" }
+  /// Channels this Mac actually played, most recent first — what the menu
+  /// offers before falling back to featured ones.
+  private var recentChannels: [String] {
+    defaults.stringArray(forKey: Self.recentChannelsKey) ?? []
+  }
+
+  private func rememberChannel(_ id: String) {
+    guard !id.isEmpty else { return }
+    var list = recentChannels.filter { $0 != id }
+    list.insert(id, at: 0)
+    defaults.set(Array(list.prefix(5)), forKey: Self.recentChannelsKey)
   }
 
   private var savedThreshold: TimeInterval {
@@ -181,9 +201,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Debug: --show triggers the saver immediately (it will dismiss on first
     // input, so this is only useful for smoke tests and screenshots).
+    // `--display <id>` limits it to one display, like picking a target in the
+    // menu — the same code path, without a click.
     if CommandLine.arguments.contains("--show") {
+      let args = CommandLine.arguments
+      let only = args.firstIndex(of: "--display").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-        self?.saver.show()
+        self?.saver.show(onlyDisplay: only)
       }
     }
   }
@@ -206,13 +230,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.showActivity = defaults.bool(forKey: Self.activityHUDKey)
     let channelId = defaults.string(forKey: Self.channelKey)
     PairLink.shared.start(channelId: channelId)
-    saver.channelURL = channelId.flatMap { id in
-      // `device` registers this Mac's viewer socket so a paired iPhone can
-      // retarget the display with a "switch" push.
-      id.isEmpty
-        ? nil
-        : URL(string: "https://idlescreens.com/channel/\(id)?device=\(PairDevice.deviceId)")
+    saver.channelURL = channelId.flatMap { $0.isEmpty ? nil : Self.channelURL(for: $0) }
+    saver.perDisplayChannelURL = perDisplayChannel.compactMapValues { id in
+      id.isEmpty ? nil : Self.channelURL(for: id)
     }
+  }
+
+  /// The viewer URL for a channel. `device` registers this Mac's viewer socket
+  /// so a paired iPhone can retarget the display with a "switch" push.
+  private static func channelURL(for id: String) -> URL? {
+    ServerEndpoint.url(
+      "/channel/\(id)", query: [URLQueryItem(name: "device", value: PairDevice.deviceId)])
   }
 
   /// Idle-triggered start honors all the "should we?" gates. Manual start
@@ -262,6 +290,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func buildMenu() -> NSMenu {
     let menu = NSMenu()
 
+    // Populate from cache now; refresh behind the menu. The callback only
+    // fires when the list actually changed, so this can't loop.
+    if ChannelCatalog.isStale {
+      ChannelCatalog.refresh { [weak self] in
+        guard let self else { return }
+        self.statusItem.menu = self.buildMenu()
+      }
+    }
+
     // Version + build provenance up top — dev builds and releases look
     // identical in the menu bar otherwise.
     let about = NSMenuItem(
@@ -295,13 +332,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     menu.addItem(pair)
     menu.addItem(.separator())
 
+    addPlayRows(to: menu)
+    menu.addItem(.separator())
+
     menu.addItem(saverPickerItem())
     if NSScreen.screens.count > 1 {
       menu.addItem(displaysItem())
     }
     menu.addItem(startAfterItem())
     menu.addItem(activeHoursItem())
-    menu.addItem(contentItem())
 
     menu.addItem(.separator())
     menu.addItem(
@@ -344,6 +383,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     menu.addItem(quit)
 
     return menu
+  }
+
+  /// The fast path: pick a display, pick a channel, it's playing. Deliberately
+  /// flat — every option is a visible row in the main menu, no submenus, no
+  /// typing an id from memory. Clicking a channel starts it immediately (any
+  /// input dismisses, same as always).
+  private func addPlayRows(to menu: NSMenu) {
+    let screens = NSScreen.screens
+    let target = playTarget
+
+    if screens.count > 1 {
+      menu.addItem(sectionHeader("Play on"))
+      let all = NSMenuItem(
+        title: "All Displays", action: #selector(setPlayTarget(_:)), keyEquivalent: "")
+      all.target = self
+      all.representedObject = ""
+      all.state = target.isEmpty ? .on : .off
+      menu.addItem(all)
+
+      for (index, screen) in screens.enumerated() {
+        let key = SaverController.displayKey(screen)
+        let name = screen.localizedName.isEmpty ? "Display \(index + 1)" : screen.localizedName
+        let item = NSMenuItem(title: name, action: #selector(setPlayTarget(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = key
+        item.state = target == key ? .on : .off
+        menu.addItem(item)
+      }
+    }
+
+    // What that target is currently set to — the global channel when playing
+    // to everything, otherwise this display's own assignment.
+    let current =
+      target.isEmpty
+      ? (defaults.string(forKey: Self.channelKey) ?? "") : (perDisplayChannel[target] ?? "")
+
+    menu.addItem(sectionHeader("Play channel"))
+    let bundled = NSMenuItem(
+      title: "Bundled Savers", action: #selector(playChannel(_:)), keyEquivalent: "")
+    bundled.target = self
+    bundled.representedObject = ""
+    bundled.state = current.isEmpty ? .on : .off
+    menu.addItem(bundled)
+
+    let catalog = ChannelCatalog.menuList(recent: recentChannels)
+    for entry in catalog {
+      let item = NSMenuItem(
+        title: entry.displayLabel, action: #selector(playChannel(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = entry.id
+      item.state = current == entry.id ? .on : .off
+      menu.addItem(item)
+    }
+    // A channel set by hand (or pushed by a phone) that isn't in the list still
+    // shows its state rather than silently reading as "Bundled Savers".
+    if !current.isEmpty, !catalog.contains(where: { $0.id == current }) {
+      let item = NSMenuItem(
+        title: current, action: #selector(playChannel(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = current
+      item.state = .on
+      menu.addItem(item)
+    }
+    if catalog.isEmpty {
+      menu.addItem(sectionHeader("  (channel list loading…)"))
+    }
+
+    // Named for what it does: the menu list is short on purpose, and this is
+    // where the rest of them are.
+    let other = NSMenuItem(
+      title: "All Channels…", action: #selector(setChannel(_:)), keyEquivalent: "")
+    other.target = self
+    menu.addItem(other)
+  }
+
+  /// A non-clickable label row. Section headings keep the flat list readable
+  /// without pushing anything into a submenu.
+  private func sectionHeader(_ title: String) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    item.isEnabled = false
+    return item
   }
 
   private func saverPickerItem() -> NSMenuItem {
@@ -398,28 +518,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       submenu.addItem(item)
     }
     let item = NSMenuItem(title: "Start After", action: nil, keyEquivalent: "")
-    item.submenu = submenu
-    return item
-  }
-
-  private func contentItem() -> NSMenuItem {
-    let submenu = NSMenu()
-    let channelId = defaults.string(forKey: Self.channelKey) ?? ""
-
-    let bundled = NSMenuItem(
-      title: "Bundled Savers", action: #selector(useBundled(_:)), keyEquivalent: "")
-    bundled.target = self
-    bundled.state = channelId.isEmpty ? .on : .off
-    submenu.addItem(bundled)
-
-    let channel = NSMenuItem(
-      title: channelId.isEmpty ? "Channel…" : "Channel: \(channelId)…",
-      action: #selector(setChannel(_:)), keyEquivalent: "")
-    channel.target = self
-    channel.state = channelId.isEmpty ? .off : .on
-    submenu.addItem(channel)
-
-    let item = NSMenuItem(title: "Content", action: nil, keyEquivalent: "")
     item.submenu = submenu
     return item
   }
@@ -555,32 +653,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusItem.menu = buildMenu()
   }
 
-  @objc private func useBundled(_ sender: NSMenuItem) {
-    defaults.removeObject(forKey: Self.channelKey)
-    applyConfigToSaver()
-    statusItem.menu = buildMenu()
-  }
-
+  /// The full channel list, for the ones the menu doesn't show. A combo box
+  /// rather than a bare text field: every channel is in the dropdown, and
+  /// typing still works for an id the catalog hasn't caught up with.
   @objc private func setChannel(_ sender: NSMenuItem) {
+    let target = playTarget
+    let targetName =
+      target.isEmpty
+      ? "all displays"
+      : (NSScreen.screens.first { SaverController.displayKey($0) == target }?.localizedName
+        ?? "this display")
+
     let alert = NSAlert()
-    alert.messageText = "Show an idlescreens.com channel"
+    alert.messageText = "Play a channel on \(targetName)"
     alert.informativeText =
-      "Enter a channel id (e.g. default, lobby, studio). The Mac becomes a live display for that channel, steerable over MCP. Leave blank to use bundled savers."
-    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-    field.stringValue = defaults.string(forKey: Self.channelKey) ?? ""
-    alert.accessoryView = field
-    alert.addButton(withTitle: "Set")
+      "Pick a channel, or type an id. The screen becomes a live display for it, steerable over MCP. Leave blank for bundled savers."
+
+    let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
+    combo.addItems(withObjectValues: ChannelCatalog.cached.map(\.id))
+    combo.completes = true
+    combo.stringValue =
+      target.isEmpty
+      ? (defaults.string(forKey: Self.channelKey) ?? "") : (perDisplayChannel[target] ?? "")
+    alert.accessoryView = combo
+    alert.addButton(withTitle: "Play")
     alert.addButton(withTitle: "Cancel")
     NSApp.activate(ignoringOtherApps: true)
     guard alert.runModal() == .alertFirstButtonReturn else { return }
-    let id = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if id.isEmpty {
-      defaults.removeObject(forKey: Self.channelKey)
+
+    // Same path as clicking a channel row, so it also starts playing.
+    let picked = NSMenuItem()
+    picked.representedObject = combo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    playChannel(picked)
+  }
+
+  @objc private func setPlayTarget(_ sender: NSMenuItem) {
+    guard let key = sender.representedObject as? String else { return }
+    defaults.set(key, forKey: Self.playTargetKey)
+    statusItem.menu = buildMenu()
+  }
+
+  /// One click from the menu to a channel on a screen: assign it to the
+  /// current target, then start it right now. Empty id = back to bundled savers.
+  @objc private func playChannel(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    let target = playTarget
+
+    if target.isEmpty {
+      // "All displays" is the global channel — clear the per-display overrides
+      // so nothing keeps quietly overriding it.
+      if id.isEmpty { defaults.removeObject(forKey: Self.channelKey) } else {
+        defaults.set(id, forKey: Self.channelKey)
+      }
+      defaults.removeObject(forKey: Self.perDisplayChannelKey)
     } else {
-      defaults.set(id, forKey: Self.channelKey)
+      var map = perDisplayChannel
+      if id.isEmpty { map.removeValue(forKey: target) } else { map[target] = id }
+      defaults.set(map, forKey: Self.perDisplayChannelKey)
     }
+
+    rememberChannel(id)
     applyConfigToSaver()
     statusItem.menu = buildMenu()
+
+    // Restart so the new assignment takes effect on a session already showing.
+    if saver.isShowing { saver.dismiss() }
+    saver.brightness = nightBrightness()
+    saver.show(onlyDisplay: target.isEmpty ? nil : target)
   }
 
   @objc private func showAbout(_ sender: NSMenuItem) {
