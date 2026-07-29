@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The "Screens" tab: pair with any idle screen — Apple TV, a Mac, or a
 /// Linux display — by scanning its QR (or typing the
@@ -67,14 +68,19 @@ struct PairedTVView: View {
                         }
                     }
             }
+            // A failure from last time is not news about this attempt.
+            .onAppear { app.pairClaimError = nil }
         }
         .sheet(isPresented: $showingScanner) {
-            PairScannerSheet { code in
-                showingScanner = false
-                Task {
-                    if await app.claimPairCode(code) { showingAddScreen = false }
-                }
-            }
+            PairScannerSheet(
+                onCode: { code in
+                    showingScanner = false
+                    claim(code)
+                },
+                onEnterManually: {
+                    showingScanner = false
+                    showingAddScreen = true
+                })
         }
         .task {
             await app.refreshScreenStatuses()
@@ -142,65 +148,68 @@ struct PairedTVView: View {
                 }
                 .cardStyle()
 
-                // Step 2 — code entry with a real, obvious button.
-                VStack(alignment: .leading, spacing: 12) {
-                    stepHeader(2, "Scan the QR, or enter its code")
-                    HStack(spacing: 10) {
-                        TextField("K7M2PW", text: $manualCode)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .font(.system(.title3, design: .monospaced))
-                            .multilineTextAlignment(.center)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity)
-                            .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 10))
+                // Step 2 — the code itself. Six cells that submit on their own
+                // once full; no "Pair" button to hunt for.
+                VStack(alignment: .leading, spacing: 14) {
+                    stepHeader(2, "Enter the code, or scan the QR")
 
-                        Button {
-                            let code = manualCode
-                            manualCode = ""
-                            Task {
-                                if await app.claimPairCode(code) { showingAddScreen = false }
-                            }
-                        } label: {
-                            if app.isPairing {
-                                ProgressView().tint(Color.appBackground)
-                                    .frame(width: 62, height: 44)
-                            } else {
-                                Text("Pair")
-                                    .font(.headline)
-                                    .frame(width: 62, height: 44)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.textPrimary)
-                        .foregroundStyle(Color.appBackground)
-                        .disabled(manualCode.trimmingCharacters(in: .whitespaces).isEmpty || app.isPairing)
+                    PairCodeField(code: $manualCode, isBusy: app.isPairing) { code in
+                        claim(code)
                     }
-                    HStack {
-                        Text("Codes expire five minutes after your screen shows them.")
+
+                    // The claim error belongs HERE, under the field that
+                    // caused it — not in a card at the bottom of the form.
+                    if let error = app.pairClaimError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(Color.textTertiary)
+                            .foregroundStyle(Color.appDanger)
+                            .transition(.opacity)
+                    }
+
+                    HStack(spacing: 12) {
+                        if app.isPairing {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small).tint(Color.textSecondary)
+                                Text("Pairing…")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        } else {
+                            Text("Codes last five minutes.")
+                                .font(.caption)
+                                .foregroundStyle(Color.textTertiary)
+                        }
                         Spacer(minLength: 8)
-                        // Scanning is also reachable here, so the Add sheet
-                        // offers both routes without the hero button.
                         Button {
                             showingScanner = true
                         } label: {
-                            Label("Scan", systemImage: "qrcode.viewfinder")
+                            Label("Scan QR", systemImage: "qrcode.viewfinder")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Color.textPrimary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .glassCapsule(shape: Capsule())
                         }
                     }
                 }
                 .cardStyle()
+                .animation(.easeOut(duration: 0.2), value: app.pairClaimError)
+                .animation(.easeOut(duration: 0.2), value: app.isPairing)
+        }
+    }
 
-                if let error = app.pairPushError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardStyle()
-                }
+    /// Claim a code, and say so out loud when it lands — a sheet that just
+    /// vanishes leaves the user unsure whether anything happened.
+    private func claim(_ code: String) {
+        Task {
+            if await app.claimPairCode(code) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                manualCode = ""
+                showingAddScreen = false
+                showingScanner = false
+            } else {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
         }
     }
 
