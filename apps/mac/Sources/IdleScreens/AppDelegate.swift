@@ -813,8 +813,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let alert = NSAlert()
     alert.messageText = "Cast \(saverId) to a channel"
     alert.informativeText =
-      "Publishes this saver to an idlescreens.com channel so other screens mirror it. Enter a channel id (e.g. default, lobby, studio)."
-    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+      "Publishes this saver to a channel so other screens mirror it. Claimed channels need their capability token — you'll be asked for it if so."
+    let field = NSComboBox(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
+    field.addItems(withObjectValues: ChannelCatalog.cached.map(\.id))
+    field.completes = true
     field.stringValue = defaults.string(forKey: Self.channelKey) ?? "default"
     alert.accessoryView = field
     alert.addButton(withTitle: "Cast")
@@ -823,6 +825,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     guard alert.runModal() == .alertFirstButtonReturn else { return }
     let channel = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !channel.isEmpty else { return }
+    cast(saverId: saverId, to: channel, allowTokenPrompt: true)
+  }
+
+  /// Publish, and — when the channel turns out to be claimed — ask for its
+  /// capability token once and retry. A protected channel is a solvable
+  /// problem, not a dead end: the token is all that's missing.
+  private func cast(saverId: String, to channel: String, allowTokenPrompt: Bool) {
     ChannelClient.cast(
       saverId: saverId, channelId: channel, seed: UInt32.random(in: 0...UInt32.max)
     ) { [weak self] success, message in
@@ -831,9 +840,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.defaults.set(channel, forKey: Self.castChannelKey)
         self.setStatusIcon("antenna.radiowaves.left.and.right")
         self.statusItem.menu = self.buildMenu()  // reveal "Stop Casting"
+        self.alert("Cast", message)
+        return
+      }
+      if allowTokenPrompt, ChannelToken.isProtectionFailure(message),
+        self.promptForToken(channel: channel)
+      {
+        // Retry once with the token just stored; a second failure is real.
+        self.cast(saverId: saverId, to: channel, allowTokenPrompt: false)
+        return
       }
       self.alert("Cast", message)
     }
+  }
+
+  /// Ask for a channel's capability token and store it in the Keychain.
+  /// Returns false when the user cancels or leaves it blank.
+  private func promptForToken(channel: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "“\(channel)” is protected"
+    alert.informativeText =
+      "This channel was claimed, so writing to it needs its capability token — the string returned when it was created. It's stored in your Keychain for next time."
+    let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+    field.placeholderString = "Capability token"
+    alert.accessoryView = field
+    alert.addButton(withTitle: "Save & Cast")
+    alert.addButton(withTitle: "Cancel")
+    NSApp.activate(ignoringOtherApps: true)
+    guard alert.runModal() == .alertFirstButtonReturn else { return false }
+    let token = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !token.isEmpty else { return false }
+    return ChannelToken.save(token, for: channel)
   }
 
   @objc private func checkForUpdates(_ sender: NSMenuItem) {

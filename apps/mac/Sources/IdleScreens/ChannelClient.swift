@@ -8,23 +8,43 @@ enum ChannelClient {
     ServerEndpoint.url("/mcp") ?? URL(string: "https://idlescreens.com/mcp")!
   }
 
+  /// Server errors arrive as a JSON body relayed verbatim through MCP
+  /// (`{"error": "This channel is protected…"}`). Show the sentence, not the
+  /// JSON — the raw object in an alert reads like a crash.
+  static func readableError(_ text: String?) -> String? {
+    guard let text, !text.isEmpty else { return nil }
+    if let data = text.data(using: .utf8),
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let message = object["error"] as? String, !message.isEmpty
+    {
+      return message
+    }
+    return text
+  }
+
   /// Publish a classic saver (by id) to a channel. completion runs on the main
   /// thread with (success, message).
   static func cast(
     saverId: String, channelId: String, seed: UInt32,
     completion: @escaping (Bool, String) -> Void
   ) {
+    // Claimed channels reject writes without their capability token; the open
+    // defaults (default, lobby, studio) ignore it. Send whatever we've stored.
+    var arguments: [String: Any] = [
+      "channelId": channelId,
+      "spec": ["id": saverId],
+      "seed": Int(seed & 0x7FFF_FFFF),
+    ]
+    if let token = ChannelToken.load(for: channelId) {
+      arguments["token"] = token
+    }
     let payload: [String: Any] = [
       "jsonrpc": "2.0",
       "id": 1,
       "method": "tools/call",
       "params": [
         "name": "publishScene",
-        "arguments": [
-          "channelId": channelId,
-          "spec": ["id": saverId],
-          "seed": Int(seed & 0x7FFF_FFFF),
-        ],
+        "arguments": arguments,
       ],
     ]
     guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
@@ -56,7 +76,7 @@ enum ChannelClient {
           let message = (result?["content"] as? [[String: Any]])?
             .compactMap { $0["text"] as? String }
             .joined(separator: " ")
-          completion(false, (message?.isEmpty == false ? message : nil) ?? "Publish failed.")
+          completion(false, readableError(message) ?? "Publish failed.")
           return
         }
         // The MCP result text notes confirmed=true when a viewer rendered it.
