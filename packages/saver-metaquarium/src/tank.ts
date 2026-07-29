@@ -67,7 +67,7 @@ import {
   MIAMI_VICE_COLORS,
 } from './materials';
 import { compileSwimPlan, swimPoseAt, type SwimPlan } from './plan';
-import { qualityFor, type TankQuality } from './quality';
+import { isSoftwareGL, qualityFor, type TankQuality } from './quality';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
@@ -118,7 +118,8 @@ class TankInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement;
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
-  private readonly quality: TankQuality;
+  private quality: TankQuality;
+  private softwareGL = false;
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly waterGeo: PlaneGeometry;
@@ -176,17 +177,27 @@ class TankInstance implements SaverInstance {
     }
     this.canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
 
-    // preserveDrawingBuffer: three consumers read this canvas back — channel
-    // thumb capture, the playground flash-gate sampler, and the determinism
-    // e2e's toDataURL. Without it they all read black.
+    // preserveDrawingBuffer stays FALSE: on ANGLE/Metal it taxes every frame
+    // with a buffer copy (a real chunk of the observed 20fps). Readback
+    // consumers (validator sampler, perception scratch-copy) read in the SAME
+    // task as renderFrame, where the buffer is still intact by spec; anything
+    // async (channel thumbs) must request its own frame first.
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
       antialias: quality.antialias,
       stencil: false,
-      preserveDrawingBuffer: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(ctx.dpr, quality.maxPixelRatio));
+    // Software rasterizer (headless CI, GPU-blocklisted machines): every
+    // real-GPU assumption inverts — drop to the floor and skip bloom.
+    const glInfo = this.renderer.getContext();
+    const dbg = glInfo.getExtension('WEBGL_debug_renderer_info');
+    const rendererName = String(
+      dbg ? glInfo.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : glInfo.getParameter(glInfo.RENDERER),
+    );
+    this.softwareGL = isSoftwareGL(rendererName);
+    if (this.softwareGL) this.quality = qualityFor('minimal');
+    this.renderer.setPixelRatio(Math.min(ctx.dpr, this.quality.maxPixelRatio));
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = LinearToneMapping;
@@ -668,7 +679,7 @@ class TankInstance implements SaverInstance {
     // freeze, never a crash loop — rendering into it throws.
     if (this.renderer.getContext()?.isContextLost?.()) return;
     const strength = this.num('bloomStrength');
-    if (strength <= 0 || this.thumbnail) {
+    if (strength <= 0 || this.thumbnail || this.softwareGL) {
       this.renderer.render(this.scene, this.camera);
       return;
     }

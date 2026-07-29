@@ -176,10 +176,19 @@ export const fluid: SaverPlugin = {
   nothing naming the cause. Also guard the render loop with
   `renderer.getContext()?.isContextLost?.()` so a lost context freezes
   instead of throwing every frame.
-- **Create the renderer with `preserveDrawingBuffer: true`.** Three separate
-  consumers read the canvas back after the fact: channel thumb capture, the
-  validator's flash-gate sampler, and frame-perception's scratch-copy
-  readback. Without it they all read black.
+- **Do NOT set `preserveDrawingBuffer: true`** — on ANGLE/Metal it taxes
+  every frame with a buffer copy (measured: 20fps → 60fps on an M1 Max by
+  removing it). Readback consumers (validator sampler, perception
+  scratch-copy) must read in the SAME task as `renderFrame`, where the
+  buffer is still intact by spec; anything async (channel thumbs) must
+  trigger a fresh `renderFrame` first.
+- **Cap pixel ratio ~1.5 and run bloom at half resolution.** Retina-full
+  through a post-processing chain is ~15 Mpix per pass; the visual delta is
+  slight softness, the cost is the whole frame budget.
+- **Detect software GL** (`SwiftShader`/`llvmpipe` in
+  `WEBGL_debug_renderer_info`) and drop to the cheapest tier with no
+  post-processing — headless CI runs on it, and every real-GPU assumption
+  inverts there.
 - **Cache parsed remote assets (GLB templates) at MODULE level**, keyed by
   URL, shared across instances. Instances must then never dispose template
   resources — `SkeletonUtils.clone` shares geometry — so pull spawned
