@@ -313,8 +313,14 @@ the final segment may omit duration (holds indefinitely).
 **Advance mode:** `auto` (default), `input`, or `either`. Validated but not
 wired to runtime behavior — timer/input drivers are planned for a follow-up.
 
-**Transitions:** `{ type: 'cut' }` is the only supported transition. `fade` is
-defined as a type but rejected at validation.
+**Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
+`{ type: 'morph', dur: number }` smoothly interpolates paint properties
+(colors, opacity values) over `dur` ms when crossing into the next segment.
+Morph requires structurally identical adjacent segments (same
+`structuralSignature`); if they differ, the engine falls back to cut and the
+validator emits a `morph-structural-mismatch` warning. During a morph, entity
+placement inherits the outgoing segment's seed — the incoming segment's own
+seed is unused. `dur` must be between 200 and 5000 ms.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
