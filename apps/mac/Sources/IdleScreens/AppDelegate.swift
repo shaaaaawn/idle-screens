@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let hotkey = HotkeyManager()
   private let hotCorner = HotCorner()
   private let onboarding = Onboarding()
+  private let access = AccessWindow()
   private let thumbnails = ThumbnailRenderer()
 
   private let defaults = UserDefaults.standard
@@ -199,6 +200,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
+    // Debug: --access opens the pairing window at launch (it mints a code, so
+    // it's also a live check of the pairing endpoint).
+    if CommandLine.arguments.contains("--access") {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        self?.access.show()
+      }
+    }
+
     // Debug: --show triggers the saver immediately (it will dismiss on first
     // input, so this is only useful for smoke tests and screenshots).
     // `--display <id>` limits it to one display, like picking a target in the
@@ -327,7 +336,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Top level, next to casting: both are "this Mac talking to something
     // else". It used to live under Content, two levels deep.
     let pair = NSMenuItem(
-      title: "Pair iPhone…", action: #selector(pairPhone(_:)), keyEquivalent: "")
+      title: PairLink.shared.isConnected ? "Pairing & Access…" : "Pairing & Access… (offline)",
+      action: #selector(pairPhone(_:)), keyEquivalent: "")
     pair.target = self
     menu.addItem(pair)
     menu.addItem(.separator())
@@ -730,28 +740,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     alert.runModal()
   }
 
+  /// Opens the window that owns pairing *and* channel tokens. It used to be a
+  /// modal that showed a code to retype and nothing else.
   @objc private func pairPhone(_ sender: NSMenuItem) {
-    let channelId = defaults.string(forKey: Self.channelKey)
-    PairDevice.mintCode(channelId: channelId) { result in
-      let alert = NSAlert()
-      switch result {
-      case .success(let code):
-        alert.messageText = "Pair your iPhone"
-        alert.informativeText = """
-          In idle screens on your iPhone, open the TV tab and enter:
-
-          \(code)
-
-          The code expires in 5 minutes. This Mac stays reachable while \
-          idle screens is running — no channel setup needed.
-          """
-      case .failure(let error):
-        alert.messageText = "Pairing unavailable"
-        alert.informativeText = error.localizedDescription
-      }
-      NSApp.activate(ignoringOtherApps: true)
-      alert.runModal()
-    }
+    access.show()
   }
 
   @objc private func toggleDefault(_ sender: NSMenuItem) {
