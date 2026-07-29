@@ -4,7 +4,9 @@ import Foundation
 /// (a single stateless JSON-RPC POST — no client library needed). Used by
 /// "Cast this Mac" so other screens mirror what this Mac is showing.
 enum ChannelClient {
-  static let endpoint = URL(string: "https://idlescreens.com/mcp")!
+  static var endpoint: URL {
+    ServerEndpoint.url("/mcp") ?? URL(string: "https://idlescreens.com/mcp")!
+  }
 
   /// Publish a classic saver (by id) to a channel. completion runs on the main
   /// thread with (success, message).

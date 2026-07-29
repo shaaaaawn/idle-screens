@@ -22,7 +22,13 @@ enum PairDevice {
     channelId: String?,
     completion: @escaping (Result<String, Error>) -> Void
   ) {
-    var request = URLRequest(url: URL(string: "https://idlescreens.com/api/pair/new")!)
+    guard let endpoint = ServerEndpoint.url("/api/pair/new") else {
+      completion(.failure(NSError(
+        domain: "PairDevice", code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Bad server URL — check the serverBaseURL default."])))
+      return
+    }
+    var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     var body: [String: String] = ["deviceId": deviceId]

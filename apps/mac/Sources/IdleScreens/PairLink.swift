@@ -56,9 +56,11 @@ final class PairLink: NSObject {
   private func connect() {
     guard !stopped else { return }
     task?.cancel(with: .goingAway, reason: nil)
-    var components = URLComponents(string: "wss://idlescreens.com/c/\(channelId)/ws")!
-    components.queryItems = [URLQueryItem(name: "device", value: PairDevice.deviceId)]
-    guard let url = components.url else { return }
+    guard
+      let url = ServerEndpoint.socketURL(
+        "/c/\(channelId)/ws",
+        query: [URLQueryItem(name: "device", value: PairDevice.deviceId)])
+    else { return }
     let socket = session.webSocketTask(with: url)
     task = socket
     socket.resume()
