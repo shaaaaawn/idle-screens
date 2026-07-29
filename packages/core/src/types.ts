@@ -188,6 +188,11 @@ export interface IdleScreensConfig {
   disableOnLocalhost: boolean;
   /** Which registered saver to show. */
   defaultPluginId: string;
+  /** Saver to mount when the ACTIVE saver faults at runtime (throws in its
+   *  loop, loses its GL context and errors, etc.). The screen must stay a
+   *  screen: on fault the element swaps to this saver (e.g. 'bsod'), and if
+   *  it too fails, to a built-in DOM fault screen. Optional. */
+  crashSaverId?: string;
   /** How to pick across sleeps. */
   selection: 'fixed' | 'random' | 'rotate';
   /** Show the clock chrome (non-passthrough savers only). */

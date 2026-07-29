@@ -92,10 +92,49 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
 ];
 
+/**
+ * Dev-only chaos saver: mounts a canvas, then throws from its own rAF loop —
+ * the runtime-fault repro that exercises core's crash ladder (crashSaverId →
+ * built-in fault screen). Engine/harness addressable, never in the gallery.
+ */
+const chaosSaver: SaverPlugin = {
+  manifest: {
+    id: 'chaos',
+    label: 'Chaos (dev)',
+    description: 'Throws from its render loop shortly after mount. For crash-path testing.',
+    motionIntensity: 'calm',
+    timeModel: 'closed-form',
+    a11y: { flashSafe: true },
+  },
+  mount(ctx: SaverContext): SaverInstance {
+    const canvas = document.createElement('canvas');
+    canvas.width = ctx.width;
+    canvas.height = ctx.height;
+    canvas.style.cssText = 'display:block;width:100%;height:100%';
+    ctx.host.appendChild(canvas);
+    const g = canvas.getContext('2d');
+    if (g) {
+      g.fillStyle = '#123';
+      g.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    const timer = setTimeout(() => {
+      throw new Error('chaos: simulated saver runtime fault');
+    }, 400);
+    return {
+      setPaused: () => {},
+      resize: () => {},
+      dispose: () => {
+        clearTimeout(timer);
+        canvas.remove();
+      },
+    };
+  },
+};
+
 /** Gallery/preview/perception spine: the curated groups only. */
 const GROUPED_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
 /** Engine + harness registry: everything addressable, variants included. */
-const ALL_SAVERS = [...GROUPED_SAVERS, ...METAQUARIUM_VARIANTS];
+const ALL_SAVERS = [...GROUPED_SAVERS, ...METAQUARIUM_VARIANTS, chaosSaver];
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
@@ -404,6 +443,11 @@ function liveMode(): void {
     seed: c.seed,
     configMenu: c.configMenu,
     workerUrl,
+    // Runtime saver faults degrade to the BSOD — the crash screen we already
+    // own. If it can't mount, core's built-in fault screen is the floor.
+    // `?crashSaver=` overrides for e2e (e.g. targeting the faulting saver
+    // itself to exercise the built-in floor).
+    crashSaverId: params.get('crashSaver') ?? 'bsod',
   });
 
   const origMatchMedia = window.matchMedia.bind(window);

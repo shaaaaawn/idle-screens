@@ -16,3 +16,10 @@ validation.
 core: `ParamType` gains `'string'` (snaps like enum — asset ids, token lists),
 and `SaverContext.params` carries initial paramSpace overrides at mount (the
 seam a channel's published `{id, params}` scene mounts through).
+
+core: graceful runtime-fault ladder — when the active saver throws in its
+loop (GL crash, bad frame), the `<idle-screen>` element swaps to the saver
+configured as `crashSaverId` (the BSOD, fittingly) instead of freezing on a
+black rectangle, falling back to a built-in flash-safe DOM fault screen when
+that saver is missing, is the faulted saver itself, or faults too. Engine
+gains `pluginById(id)`. The screen stays a screen; any key still wakes.

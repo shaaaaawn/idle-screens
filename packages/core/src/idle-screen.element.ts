@@ -1,6 +1,7 @@
 import { effect } from './reactive';
 import { IdleScreensEngine } from './engine';
 import { createRng } from './rng';
+import { renderFaultScreen } from './fault-screen';
 import type { IdleScreensConfig, PageContext, SaverInstance, SaverPlugin } from './types';
 import type { WorkerInbound, WorkerOutbound } from './worker-protocol';
 
@@ -124,6 +125,9 @@ export class IdleScreenElement extends HostBase {
   private menuBuilt = false;
 
   private instance: SaverInstance | null = null;
+  /** Runtime-fault state: one crash swap per sleep; reset on each mount. */
+  private crashed = false;
+  private activeSaverId = '';
   private worker: Worker | null = null;
   private cachedWorker: { worker: Worker; url: string } | null = null;
   private currentWorkerUrl: string | null = null;
@@ -372,12 +376,20 @@ export class IdleScreenElement extends HostBase {
     const eng = this._engine!;
     this.dialog.classList.toggle('passthrough', passthrough);
     this.dialog.classList.toggle('reduced', eng.reducedMotion.value);
+    this.crashed = false;
+    this.activeSaverId = plugin.manifest.id;
     if (!this.dialog.open) {
       this.dialog.classList.remove('leaving');
       this.dialog.showModal();
       this.arm();
       this.scheduleHint();
       window.addEventListener('resize', this.onResize);
+      // Runtime crash guard: an uncaught error while a NON-passthrough saver
+      // owns the screen is, in practice, the saver's render loop dying (a GL
+      // crash, a bad frame). Passthrough savers share the page with the
+      // site's own scripts, so attribution there is unsafe — skip them.
+      window.addEventListener('error', this.onRuntimeError);
+      window.addEventListener('unhandledrejection', this.onRuntimeRejection);
     }
     // (Re)mount the active saver.
     const token = ++this.mountToken;
@@ -548,6 +560,9 @@ export class IdleScreenElement extends HostBase {
   private close(): void {
     if (!this.dialog?.open) return;
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('error', this.onRuntimeError);
+    window.removeEventListener('unhandledrejection', this.onRuntimeRejection);
+    this.crashed = false;
     if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
     this.dialog.classList.remove('show-fallback');
     this.hintEl.classList.remove('show');
@@ -614,9 +629,84 @@ export class IdleScreenElement extends HostBase {
       this.resizeTimer = null;
       if (!this.instance || !this.dialog?.open) return;
       const newDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-      this.instance.resize(window.innerWidth, window.innerHeight, newDpr);
+      try {
+        this.instance.resize(window.innerWidth, window.innerHeight, newDpr);
+      } catch (err) {
+        this.engageCrashScreen(err);
+      }
     }, 150);
   };
+
+  /** An uncaught error while a non-passthrough saver owns the screen is the
+   *  saver's loop dying. Swap to the crash saver instead of freezing black. */
+  private readonly onRuntimeError = (ev: ErrorEvent): void => {
+    if (!this.dialog?.open || !this.instance) return;
+    if (this._engine?.pluginById(this.activeSaverId)?.manifest.passthrough) return; // page noise, not ours
+    this.engageCrashScreen(ev.error ?? ev.message);
+  };
+
+  private readonly onRuntimeRejection = (ev: PromiseRejectionEvent): void => {
+    if (!this.dialog?.open || !this.instance) return;
+    if (this._engine?.pluginById(this.activeSaverId)?.manifest.passthrough) return;
+    this.engageCrashScreen(ev.reason);
+  };
+
+  /**
+   * The graceful-degradation ladder for runtime saver faults. The screen must
+   * stay a screen: dispose the faulted instance, then mount the configured
+   * crash saver (config.crashSaverId — the BSOD, fittingly), and if that is
+   * missing, IS the faulted saver, or faults too, render the built-in DOM
+   * fault screen. One swap per sleep; any key still wakes.
+   */
+  private engageCrashScreen(err: unknown): void {
+    if (this.crashed || !this.dialog?.open) return;
+    this.crashed = true;
+    const faultedId = this.activeSaverId;
+    const message = err instanceof Error ? err.message : String(err ?? 'unknown fault');
+    console.warn(`[idle-screen] saver "${faultedId}" faulted at runtime:`, err);
+    ++this.mountToken; // invalidate any in-flight mount
+    try {
+      this.instance?.dispose();
+    } catch {
+      /* the faulted instance may not even dispose cleanly */
+    }
+    this.instance = null;
+    this.surface.replaceChildren();
+
+    const eng = this._engine;
+    const crashId = eng?.config.crashSaverId;
+    const crashPlugin = crashId && crashId !== faultedId ? eng?.pluginById(crashId) : undefined;
+    if (crashPlugin && eng) {
+      const token = this.mountToken;
+      void Promise.resolve()
+        .then(() =>
+          crashPlugin.mount({
+            host: this.surface,
+            dpr: typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
+            width: window.innerWidth,
+            height: window.innerHeight,
+            rng: createRng(eng.config.seed >>> 0),
+            seed: eng.config.seed >>> 0,
+            reducedMotion: eng.reducedMotion.value,
+          }),
+        )
+        .then((inst) => {
+          if (token !== this.mountToken || !this.dialog?.open) {
+            inst.dispose();
+            return;
+          }
+          this.instance = inst;
+          inst.setPaused(eng.reducedMotion.value);
+        })
+        .catch(() => {
+          if (token !== this.mountToken || !this.dialog?.open) return;
+          this.surface.replaceChildren();
+          renderFaultScreen(this.surface, { saverId: faultedId, message });
+        });
+    } else {
+      renderFaultScreen(this.surface, { saverId: faultedId, message });
+    }
+  }
 
   private onWakeInput(): void {
     if (!this.armed) return; // grace period after sleeping
@@ -625,6 +715,8 @@ export class IdleScreenElement extends HostBase {
 
   private teardown(): void {
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('error', this.onRuntimeError);
+    window.removeEventListener('unhandledrejection', this.onRuntimeRejection);
     if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
     void this.disposeInstance();
     this.terminateCachedWorker();
