@@ -1,4 +1,4 @@
-import { LIMITS, SCHEMA_VERSION, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
+import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -20,6 +20,7 @@ const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'col
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
 const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
@@ -62,6 +63,14 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");
+  }
+  if (spec.units === 'px' && Array.isArray(spec.layers)) {
+    for (const l of spec.layers) {
+      if (isObj(l) && isObj((l as Record<string, unknown>).sprite) && ((l as Record<string, unknown>).sprite as Record<string, unknown>).kind === 'textBlock') {
+        err('units', "textBlock dimensions are viewport fractions — units: 'px' is not supported with textBlock sprites");
+        break;
+      }
+    }
   }
   if (spec.referenceViewport !== undefined) {
     if (!isNum(spec.referenceViewport) || spec.referenceViewport < 100 || spec.referenceViewport > 8640) {
@@ -380,8 +389,28 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     }
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'textBlock') {
+    knownSet = KNOWN_TEXT_BLOCK;
+    if (typeof sprite.text !== 'string' || sprite.text.length === 0) {
+      err(`${path}.text`, 'must be a non-empty string');
+    } else if (sprite.text.length > LIMITS.maxTextBlockLength) {
+      err(`${path}.text`, `must be at most ${LIMITS.maxTextBlockLength} characters`);
+    }
+    if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
+      err(`${path}.maxWidth`, `must be a positive number up to ${LIMITS.maxTextBlockMaxWidth} (viewport fraction)`);
+    }
+    if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
+      err(`${path}.fontSize`, `must be between ${LIMITS.minTextBlockFontSize} and ${LIMITS.maxTextBlockFontSize} (viewport fraction)`);
+    }
+    if (sprite.lineHeight !== undefined && (!isNum(sprite.lineHeight) || sprite.lineHeight < 0.5 || sprite.lineHeight > 4)) {
+      err(`${path}.lineHeight`, 'must be between 0.5 and 4 (multiplier)');
+    }
+    if (sprite.align !== undefined && !['left', 'center', 'right'].includes(sprite.align as string)) {
+      err(`${path}.align`, "must be 'left' | 'center' | 'right'");
+    }
+    if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
     return;
   }
 
@@ -558,4 +587,100 @@ export function assertValidSpec(spec: unknown): SaverSpec {
     throw new Error(`invalid saver spec:\n${r.errors.map((e) => `  ${e.path || '<root>'}: ${e.message}`).join('\n')}`);
   }
   return spec as SaverSpec;
+}
+
+/**
+ * Validate a sequence envelope. Each segment's `scene` goes through `validateSpec`;
+ * sequence-level rules (segment count, duration floors, key uniqueness, transition
+ * bounds) are checked here.
+ */
+export function validateSequence(seq: unknown): ValidationResult {
+  const errors: SpecError[] = [];
+  const warnings: SpecWarning[] = [];
+  const err = (path: string, message: string): void => void errors.push({ path, message });
+
+  if (!isObj(seq)) return { valid: false, errors: [{ path: '', message: 'sequence must be an object' }], warnings: [] };
+
+  if (seq.format !== 'idle-sequence') err('format', "must be 'idle-sequence'");
+  if (seq.schemaVersion !== SCHEMA_VERSION) err('schemaVersion', `must be ${SCHEMA_VERSION}`);
+  if (!isStr(seq.id) || seq.id.trim() === '') err('id', 'must be a non-empty string');
+  if (!isStr(seq.label) || seq.label.trim() === '') err('label', 'must be a non-empty string');
+  if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
+  if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
+
+  if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
+    err('segments', 'must be a non-empty array');
+    return { valid: false, errors, warnings };
+  }
+
+  if (seq.segments.length > LIMITS.maxSegments) {
+    err('segments', `at most ${LIMITS.maxSegments} segments`);
+  }
+
+  const keys = new Set<string>();
+  let hasDurationless = false;
+
+  for (let i = 0; i < seq.segments.length; i++) {
+    const s = seq.segments[i];
+    const p = `segments[${i}]`;
+    if (!isObj(s)) { err(p, 'must be an object'); continue; }
+
+    if (!isStr(s.key) || s.key.trim() === '') {
+      err(`${p}.key`, 'must be a non-empty string');
+    } else if (keys.has(s.key as string)) {
+      err(`${p}.key`, `duplicate key '${s.key}'`);
+    } else {
+      keys.add(s.key as string);
+    }
+
+    if (s.duration !== undefined) {
+      if (hasDurationless) {
+        err(`${p}.duration`, 'a segment after a durationless segment may not have a duration');
+      }
+      if (!isNum(s.duration) || s.duration < LIMITS.minSegmentDuration) {
+        err(`${p}.duration`, `must be >= ${LIMITS.minSegmentDuration} ms`);
+      }
+    } else {
+      if (i < seq.segments.length - 1) {
+        err(`${p}.duration`, 'only the final segment may omit duration');
+      }
+      hasDurationless = true;
+    }
+
+    if (s.advance !== undefined && !['auto', 'input', 'either'].includes(s.advance as string)) {
+      err(`${p}.advance`, "must be 'auto' | 'input' | 'either'");
+    }
+
+    if (s.transition !== undefined) {
+      if (!isObj(s.transition)) {
+        err(`${p}.transition`, 'must be an object');
+      } else if (s.transition.type !== 'cut') {
+        err(`${p}.transition.type`, "must be 'cut' (fade not yet supported)");
+      }
+    }
+
+    if (isObj(s.scene)) {
+      const sceneResult = validateSpec(s.scene);
+      for (const e of sceneResult.errors) errors.push({ path: `${p}.scene.${e.path}`, message: e.message });
+      if (sceneResult.warnings) {
+        for (const w of sceneResult.warnings) warnings.push({ path: `${p}.scene.${w.path}`, code: w.code, message: w.message });
+      }
+    } else {
+      err(`${p}.scene`, 'must be a valid SaverSpec object');
+    }
+  }
+
+  if (seq.loop === true && hasDurationless) {
+    err('loop', 'loop: true requires all segments to have a duration');
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+export function assertValidSequence(seq: unknown): IdleSequence {
+  const r = validateSequence(seq);
+  if (!r.valid) {
+    throw new Error(`invalid sequence:\n${r.errors.map((e) => `  ${e.path || '<root>'}: ${e.message}`).join('\n')}`);
+  }
+  return seq as IdleSequence;
 }

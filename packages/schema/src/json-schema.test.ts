@@ -86,4 +86,39 @@ describe('saver-spec.schema.json', () => {
     expect(check(spec)).toBe(false);
     expect(validateSpec(spec).valid).toBe(true); // runtime tolerates unknowns
   });
+
+  it('accepts a minimal idle-sequence envelope', () => {
+    const scene = {
+      schemaVersion: 1, id: 's', label: 'S',
+      layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['⭐'] }, motion: { type: 'static' } }],
+    };
+    const seq = {
+      format: 'idle-sequence',
+      schemaVersion: 1,
+      id: 'seq',
+      label: 'Seq',
+      loop: false,
+      segments: [
+        { key: 'a', scene, duration: 2000 },
+        { key: 'b', scene },
+      ],
+    };
+    expect(check(seq)).toBe(true);
+  });
+
+  it('rejects idle-sequence with fade transition (v1 is cut-only)', () => {
+    const scene = {
+      schemaVersion: 1, id: 's', label: 'S',
+      layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['⭐'] }, motion: { type: 'static' } }],
+    };
+    const seq = {
+      format: 'idle-sequence',
+      schemaVersion: 1,
+      id: 'seq',
+      label: 'Seq',
+      loop: false,
+      segments: [{ key: 'a', scene, duration: 2000, transition: { type: 'fade' } }],
+    };
+    expect(check(seq)).toBe(false);
+  });
 });
