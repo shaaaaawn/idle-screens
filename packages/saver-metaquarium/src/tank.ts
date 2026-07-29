@@ -66,7 +66,13 @@ import {
   BLOOM_LAYER,
   MIAMI_VICE_COLORS,
 } from './materials';
-import { compileSwimPlan, swimPoseAt, type SwimPlan } from './plan';
+import {
+  behaviorWindow,
+  compileSwimPlan,
+  distanceAt,
+  swimPoseAtDistance,
+  type SwimPlan,
+} from './plan';
 import { effectivePixelRatio, isSoftwareGL, qualityFor, type TankQuality } from './quality';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 
@@ -125,6 +131,14 @@ class TankInstance implements SaverInstance {
   private frameTimes: number[] = [];
   private lastFrameAt = 0;
   private lastGovCheck = 0;
+  /** Hero behavior blends (ease in playback, snap on scrubs) + travelled
+   *  distance (integrates through behavior speed so modes glide). */
+  private greetBlend = 0;
+  private dartBlend = 0;
+  private idleBlend = 0;
+  private gotoBlend = 0;
+  private heroDist = 0;
+  private lastStateT = -1;
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly waterGeo: PlaneGeometry;
@@ -566,28 +580,108 @@ ${shader.vertexShader.replace(
     this.applyParams(t);
     const speed = this.num('swimSpeed');
 
-    // Camera: in hero mode it's a pet-cam — a slow orbit around the FISH
-    // (its slightly-lagged position, so the framing breathes with the swim);
-    // otherwise it orbits tank center as before. All closed-form.
+    // ---- hero behavior blends ------------------------------------------
+    // Targets are closed-form (mode param + periodic auto windows); the
+    // blends ease during continuous playback and SNAP on scrubs, so
+    // renderFrame(t) seeks stay reproducible.
+    const dtSec = this.lastStateT >= 0 ? (t - this.lastStateT) / 1000 : 0;
+    const scrub = dtSec <= 0 || dtSec > 0.25;
+    this.lastStateT = t;
+    const mode = this.str('behavior');
+    const tGreet = mode === 'greet' ? 1 : mode === 'auto' ? behaviorWindow(tSec, 47, 9, 2.5) : 0;
+    const tDart = mode === 'dart' ? 1 : mode === 'auto' ? behaviorWindow(tSec + 21, 83, 3.5, 1) : 0;
+    const tIdle = mode === 'idle' ? 1 : 0;
+    const tGoto = mode === 'goto' ? 1 : 0;
+    const ease = (cur: number, target: number): number =>
+      scrub ? target : cur + (target - cur) * Math.min(1, dtSec * 2.2);
+    const g = (this.greetBlend = ease(this.greetBlend, tGreet));
+    const gd = (this.dartBlend = ease(this.dartBlend, tDart));
+    const gi = (this.idleBlend = ease(this.idleBlend, tIdle));
+    const gg = (this.gotoBlend = ease(this.gotoBlend, tGoto));
+
+    // ---- hero pose ------------------------------------------------------
+    // Distance integrates through the behavior speed multiplier so mode
+    // changes glide (never teleport); a scrub resets to the closed-form
+    // wander distance — the deterministic baseline.
     const az = MathUtils.degToRad(this.num('cameraAzimuth') + this.num('autoRotate') * tSec);
     const el = MathUtils.degToRad(this.num('cameraElevation'));
     const dist = this.num('cameraDistance');
+    // Unit direction from the fish toward the camera (the orbit offset).
+    const camDirX = Math.cos(el) * Math.sin(az);
+    const camDirY = Math.sin(el);
+    const camDirZ = Math.cos(el) * Math.cos(az);
+
+    let hero: {
+      x: number;
+      y: number;
+      z: number;
+      fx: number;
+      fy: number;
+      fz: number;
+      roll: number;
+      clipPhase: number;
+    } | null = null;
+    if (this.heroMode && this.heroPlan) {
+      const speedMul =
+        (1 + gd * 1.9) * (1 - 0.85 * g) * (1 - 0.9 * gi) * (1 - 0.75 * gg);
+      if (scrub) this.heroDist = distanceAt(this.heroPlan, tSec, speed);
+      else this.heroDist += this.heroPlan.cruise * speed * speedMul * dtSec;
+      const p = swimPoseAtDistance(this.heroPlan, this.heroDist);
+
+      // goto: glide toward the steered target point.
+      const gtX = this.num('fishTargetX') * HERO_BOUNDS.radius * 0.9;
+      const gtY =
+        HERO_BOUNDS.yMin + this.num('fishTargetY') * (HERO_BOUNDS.yMax - HERO_BOUNDS.yMin);
+      const gtZ = this.num('fishTargetZ') * HERO_BOUNDS.radius * 0.9;
+      const x = p.x + (gtX - p.x) * gg;
+      let y = p.y + (gtY - p.y) * gg;
+      const z = p.z + (gtZ - p.z) * gg;
+
+      // greet/idle: hold station with a gentle bob — alive, never frozen.
+      const bob = Math.sin(tSec * 1.7) * 1.6 * Math.max(g, gi * 0.7);
+      y += bob;
+
+      // Facing: wander tangent, blended toward the viewer while greeting
+      // (and softly while parked at a goto target).
+      const face = Math.max(g, gg * 0.55);
+      let fx = p.fx + (camDirX - p.fx) * face;
+      let fy = p.fy + (0.12 - p.fy) * face;
+      let fz = p.fz + (camDirZ - p.fz) * face;
+      const fm = Math.hypot(fx, fy, fz) || 1;
+      fx /= fm;
+      fy /= fm;
+      fz /= fm;
+
+      // Fins keep moving whatever the mode: tail beats with distance while
+      // cruising, flutters with time while holding station.
+      const clipPhase = this.heroDist * 0.045 + tSec * 0.4 * Math.max(g, gi);
+      hero = { x, y, z, fx, fy, fz, roll: p.roll * (1 - face), clipPhase };
+    }
+
+    // ---- camera ---------------------------------------------------------
+    // Pet-cam: orbit the fish (lagged along its path so framing breathes);
+    // greeting dollies IN — the fish comes up close and looks at you.
     let tx = 0;
     let ty = 35;
     let tz = 0;
     let lookAhead: { x: number; y: number; z: number } | null = null;
-    if (this.heroMode && this.heroPlan) {
-      const now = swimPoseAt(this.heroPlan, tSec, speed);
-      const lag = swimPoseAt(this.heroPlan, tSec - 0.45, speed);
-      tx = (now.x + lag.x) / 2;
-      ty = (now.y + lag.y) / 2;
-      tz = (now.z + lag.z) / 2;
-      lookAhead = { x: tx + now.fx * 9, y: ty + now.fy * 9, z: tz + now.fz * 9 };
+    let camDist = dist;
+    if (hero && this.heroPlan) {
+      const lag = swimPoseAtDistance(this.heroPlan, this.heroDist - 6);
+      tx = (hero.x + lag.x) / 2;
+      ty = (hero.y + lag.y) / 2;
+      tz = (hero.z + lag.z) / 2;
+      lookAhead = {
+        x: tx + hero.fx * 9 * (1 - g),
+        y: ty + hero.fy * 9 * (1 - g),
+        z: tz + hero.fz * 9 * (1 - g),
+      };
+      camDist = dist + (54 - dist) * g;
     }
     this.camera.position.set(
-      tx + Math.cos(el) * Math.sin(az) * dist,
-      Math.max(10, ty + Math.sin(el) * dist),
-      tz + Math.cos(el) * Math.cos(az) * dist,
+      tx + camDirX * camDist,
+      Math.max(10, ty + camDirY * camDist),
+      tz + camDirZ * camDist,
     );
     if (lookAhead) this.camera.lookAt(lookAhead.x, lookAhead.y, lookAhead.z);
     else this.camera.lookAt(0, 35, 0);
@@ -616,27 +710,27 @@ ${shader.vertexShader.replace(
       const f = this.fish[i]!;
       f.group.visible = i < visible;
       if (!f.group.visible) continue;
-      if (f.plan) {
-        // Hero locomotion: travel the compiled itinerary nose-first, bank
-        // into turns, breathe, and beat the tail in time with distance —
-        // fast water means a busy tail, a dawdle means a lazy one.
-        const p = swimPoseAt(f.plan, tSec, speed);
-        f.group.position.set(p.x, p.y, p.z);
-        f.group.lookAt(p.x + p.fx, p.y + p.fy, p.z + p.fz);
-        f.group.rotateZ(p.roll);
+      if (f.plan && hero) {
+        // Hero: the behavior-blended pose computed above — travel nose-first,
+        // bank into turns, hold station and face the viewer while greeting.
+        f.group.position.set(hero.x, hero.y, hero.z);
+        f.group.lookAt(hero.x + hero.fx, hero.y + hero.fy, hero.z + hero.fz);
+        f.group.rotateZ(hero.roll);
         // Pose probe for e2e/debug: position + forward, coarse fixed-point.
         this.ctxSaver.host.dataset.mqPose = [
-          p.x.toFixed(1),
-          p.y.toFixed(1),
-          p.z.toFixed(1),
-          p.fx.toFixed(2),
-          p.fy.toFixed(2),
-          p.fz.toFixed(2),
+          hero.x.toFixed(1),
+          hero.y.toFixed(1),
+          hero.z.toFixed(1),
+          hero.fx.toFixed(2),
+          hero.fy.toFixed(2),
+          hero.fz.toFixed(2),
         ].join(',');
         const breathe = 1 + Math.sin(tSec * 2.1) * 0.008;
         f.group.scale.setScalar(f.baseScale * breathe);
         if (f.mixer && f.clipDuration > 0) {
-          f.mixer.setTime(((p.dist * 0.045) % f.clipDuration + f.clipDuration) % f.clipDuration);
+          f.mixer.setTime(
+            ((hero.clipPhase % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          );
         }
         continue;
       }

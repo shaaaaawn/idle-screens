@@ -90,6 +90,11 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       fishCount: 3,
     },
   }),
+  createMetaquarium({
+    id: 'metaquarium-greet',
+    label: 'Metaquarium (Greet)',
+    params: { behavior: 'greet' },
+  }),
 ];
 
 /**

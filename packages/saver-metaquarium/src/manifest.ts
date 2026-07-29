@@ -19,6 +19,18 @@ export const METAQUARIUM_PARAMS = {
   fishCount: { type: 'number', default: 1, min: 1, max: 24, ease: 'step' },
   /** Swim time-scale multiplier. */
   swimSpeed: { type: 'number', default: 1, min: 0.2, max: 3, ease: 'smooth' },
+  /** Hero behavior. 'auto' wanders with periodic greets (the fish notices
+   *  you) and rare darts; the rest force a mode: 'greet' faces the viewer up
+   *  close, 'idle' hovers, 'dart' sprints, 'goto' swims to fishTarget*. */
+  behavior: {
+    type: 'enum',
+    default: 'auto',
+    options: ['auto', 'wander', 'greet', 'idle', 'dart', 'goto'],
+  },
+  /** Steer target for behavior 'goto', normalized tank coords. */
+  fishTargetX: { type: 'number', default: 0, min: -1, max: 1, ease: 'smooth' },
+  fishTargetY: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+  fishTargetZ: { type: 'number', default: 0, min: -1, max: 1, ease: 'smooth' },
   /** Water/atmosphere color (background + fog). */
   fogColor: { type: 'color', default: '#030009', ease: 'smooth' },
   /** Selective bloom strength; 0 disables the composers entirely. Kept low by

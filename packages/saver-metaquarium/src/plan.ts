@@ -140,9 +140,35 @@ function paramForDistance(plan: SwimPlan, dist: number): number {
   return ((lo + frac) / ARC_SAMPLES) * n;
 }
 
+/**
+ * Periodic behavior window, closed form: 0 outside, smoothly ramping to 1
+ * inside a `windowSec` interval that recurs every `periodSec`. Drives the
+ * auto-pilot's "notice the viewer" greets and occasional darts — a pure
+ * function of t, so scrubbing lands mid-greet exactly where it should.
+ */
+export function behaviorWindow(
+  tSec: number,
+  periodSec: number,
+  windowSec: number,
+  rampSec: number,
+): number {
+  const phase = ((tSec % periodSec) + periodSec) % periodSec;
+  if (phase >= windowSec) return 0;
+  const up = Math.min(1, phase / rampSec);
+  const down = Math.min(1, (windowSec - phase) / rampSec);
+  const w = Math.min(up, down);
+  return w * w * (3 - 2 * w); // smoothstep
+}
+
 /** Pose at `tSec` — position, unit forward tangent, bank roll, distance. */
 export function swimPoseAt(plan: SwimPlan, tSec: number, speed = 1): SwimPose {
-  const dist = distanceAt(plan, tSec, speed);
+  return swimPoseAtDistance(plan, distanceAt(plan, tSec, speed));
+}
+
+/** Pose at an explicit arc distance — the seam for behavior-modulated speed
+ *  (the tank integrates distance so speed changes glide instead of
+ *  teleporting; scrubs reset to the closed-form distance). */
+export function swimPoseAtDistance(plan: SwimPlan, dist: number): SwimPose {
   const g = paramForDistance(plan, dist);
   const [x, y, z] = splineAt(plan.points, g);
 
