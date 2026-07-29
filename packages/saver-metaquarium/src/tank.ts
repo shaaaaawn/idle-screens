@@ -51,7 +51,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
@@ -63,7 +62,6 @@ import {
   eyeNoseSign,
   forceOpaque,
   hasTexturedMaterial,
-  BLOOM_LAYER,
   MIAMI_VICE_COLORS,
 } from './materials';
 import {
@@ -151,10 +149,8 @@ class TankInstance implements SaverInstance {
   private readonly timeUniform = { value: 0 };
   private readonly fogColor = new Color();
   private readonly abort = new AbortController();
-  private bloomComposer: EffectComposer | null = null;
-  private finalComposer: EffectComposer | null = null;
+  private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
-  private mixPass: ShaderPass | null = null;
   private fish: Fish[] = [];
   private disposed = false;
   /** Bundled-fish mode state (grow-on-steer); null when a farm populated us. */
@@ -826,66 +822,39 @@ ${shader.vertexShader.replace(
     }
   }
 
-  // ---- selective bloom (two-composer approach; original recipe:
-  //      strength 0.25–0.35, radius 0.12, threshold 0.65) ----
-  private initComposers(): void {
+  // ---- bloom (single composer — one scene draw, not two) ----
+  // The old two-composer selective-bloom pattern rendered the scene TWICE per
+  // frame (once for the bloom layer, once for the final composite). That alone
+  // halved the framerate. A single composer with a high threshold (0.82) lets
+  // only the genuinely bright GLOW materials bloom; the fish body palette sits
+  // well below that in luminance and stays clean.
+  private initComposer(): void {
     const pr = this.pr();
-
-    this.bloomComposer = new EffectComposer(this.renderer);
-    this.bloomComposer.renderToScreen = false;
-    this.bloomComposer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloomPass = new UnrealBloomPass(
       new Vector2(this.w, this.h),
       this.num('bloomStrength'),
       0.12,
-      0.65,
+      0.82,
     );
-    this.bloomComposer.addPass(this.bloomPass);
-    this.bloomComposer.setPixelRatio(pr * this.quality.bloomScale);
-    this.bloomComposer.setSize(this.w, this.h);
-
-    this.finalComposer = new EffectComposer(this.renderer);
-    this.finalComposer.addPass(new RenderPass(this.scene, this.camera));
-    this.mixPass = new ShaderPass(
-      new ShaderMaterial({
-        uniforms: {
-          baseTexture: { value: null },
-          bloomTexture: { value: null },
-        },
-        vertexShader: MIX_VERT,
-        fragmentShader: MIX_FRAG,
-      }),
-      'baseTexture',
-    );
-    this.finalComposer.addPass(this.mixPass);
-    this.finalComposer.addPass(new OutputPass());
-    this.finalComposer.setPixelRatio(pr);
-    this.finalComposer.setSize(this.w, this.h);
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(new OutputPass());
+    this.composer.setPixelRatio(pr);
+    this.composer.setSize(this.w, this.h);
   }
 
   // ---- render ----
   private renderScene(): void {
-    // A lost context (workbench churn, GPU pressure) must degrade to a
-    // freeze, never a crash loop — rendering into it throws.
     if (this.renderer.getContext()?.isContextLost?.()) return;
     const strength = this.num('bloomStrength');
     if (strength <= 0 || this.thumbnail || this.softwareGL) {
       this.renderer.render(this.scene, this.camera);
       return;
     }
-    if (!this.bloomComposer) this.initComposers();
+    if (!this.composer) this.initComposer();
     this.bloomPass!.strength = strength;
-
-    // Pass 1: only BLOOM_LAYER meshes render → bloom target
-    this.scene.background = null;
-    this.camera.layers.set(BLOOM_LAYER);
-    this.bloomComposer!.render();
-
-    // Pass 2: full scene + additive bloom composite
-    this.scene.background = this.fogColor;
-    this.camera.layers.enableAll();
-    this.mixPass!.uniforms.bloomTexture!.value = this.bloomComposer!.readBuffer.texture;
-    this.finalComposer!.render();
+    this.composer!.render();
   }
 
   // ---- loop ----
@@ -923,10 +892,8 @@ ${shader.vertexShader.replace(
     const pr = this.pr();
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(this.w, this.h, false);
-    this.bloomComposer?.setPixelRatio(pr * this.quality.bloomScale);
-    this.finalComposer?.setPixelRatio(pr);
-    this.bloomComposer?.setSize(this.w, this.h);
-    this.finalComposer?.setSize(this.w, this.h);
+    this.composer?.setPixelRatio(pr);
+    this.composer?.setSize(this.w, this.h);
   }
 
   /**
@@ -1030,8 +997,7 @@ ${shader.vertexShader.replace(
         m.dispose();
       }
     });
-    this.bloomComposer?.dispose();
-    this.finalComposer?.dispose();
+    this.composer?.dispose();
     this.renderer.dispose();
     // Release the GL context NOW. Browsers cap live WebGL contexts (~16) and
     // dispose() alone leaves the release to GC — workbench churn (mount,
@@ -1346,21 +1312,3 @@ export function mountTank(
   }
 }
 
-// ---- mix shader (additive bloom over base scene) ----
-
-const MIX_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const MIX_FRAG = /* glsl */ `
-  uniform sampler2D baseTexture;
-  uniform sampler2D bloomTexture;
-  varying vec2 vUv;
-  void main() {
-    gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv);
-  }
-`;

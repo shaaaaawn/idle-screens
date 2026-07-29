@@ -12,8 +12,9 @@ export const METAQUARIUM_PARAMS = {
   cameraElevation: { type: 'number', default: 15, min: -5, max: 60, ease: 'smooth' },
   /** Camera distance from tank center, world units. */
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
-  /** Continuous orbit speed, degrees/second. */
-  autoRotate: { type: 'number', default: 1.5, min: 0, max: 12, ease: 'smooth' },
+  /** Continuous orbit speed, degrees/second. Zero by default: the tank is
+   *  still, letting the fish movement carry the scene. Steer up for an orbit. */
+  autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },
   /** Visible fish. Default 1 = hero mode: one fish center-stage in its own
    *  tank; the pool grows on demand when steered up (never shrinks). */
   fishCount: { type: 'number', default: 1, min: 1, max: 24, ease: 'step' },
