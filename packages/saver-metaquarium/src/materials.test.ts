@@ -107,7 +107,7 @@ describe('metaquarium material contract', () => {
     root.add(mesh);
     applyNpcMaterials(root, createRng(7).fork(1));
     expect(Array.isArray(mesh.material)).toBe(true);
-    const mats = mesh.material as MeshBasicMaterial[];
+    const mats = mesh.material as unknown as MeshBasicMaterial[];
     expect(mats).toHaveLength(2);
     expect(mats[0]).toBeInstanceOf(MeshBasicMaterial);
     expect(mats[1]).toBeInstanceOf(MeshBasicMaterial);
