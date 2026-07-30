@@ -20,57 +20,10 @@ async function surfaceDataset(page: Page): Promise<{ fish: number; backend: stri
 }
 
 /**
- * The metaquarium fixture tank exercises the whole farm pipeline offline:
- * fetch the farm envelope JSON, resolve `ipfs://` model URLs through the
- * gateway param, stream GLBs in progressively, and swim them — on a WebGL2
- * canvas, with no page errors. `data-mq-fish` on the saver host reports the
- * spawned population; `data-mq-backend` reports which fidelity rung mounted
- * (headless runners without WebGL2 get the canvas-2d silhouette tank, which
- * skips the network pipeline by design).
- */
-test('MQ1: fixture farm populates the tank through the ipfs gateway param', async ({ page }) => {
-  const pageErrors: string[] = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
-
-  await page.goto('/?saver=metaquarium-fixture');
-  await page.waitForFunction(() => !!window.__idleScreens);
-  await page.evaluate(() => window.__idleScreens!.sleep());
-
-  // Async mount: capabilities probe + lazy three chunk — allow a cold start.
-  await expect
-    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
-    .not.toBe('');
-  const { backend } = await surfaceDataset(page);
-
-  if (backend === 'webgl2') {
-    // All three fixture fish spawn (progressively, so poll), fetched through
-    // the farm fixture + gateway-relative GLB URL.
-    await expect
-      .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
-      .toBe(3);
-    const isWebgl2Canvas = await page.evaluate(() => {
-      const canvas = document
-        .querySelector('idle-screen')
-        ?.shadowRoot?.querySelector<HTMLCanvasElement>('.surface canvas');
-      return !!canvas && !!canvas.getContext('webgl2');
-    });
-    expect(isWebgl2Canvas).toBe(true);
-  } else {
-    // No WebGL2 on this runner: the 2D silhouette fallback still renders a
-    // populated tank (never blank) without touching the network.
-    expect(backend).toBe('canvas2d');
-    await expect.poll(async () => (await surfaceDataset(page)).fish).toBeGreaterThan(0);
-  }
-
-  expect(pageErrors).toEqual([]);
-});
-
-/**
- * Hero mode (no farm): the default metaquarium saver stages exactly ONE
- * textured hero fish — the pool is sized to the need, not MAX_FISH — and
+ * Default metaquarium: mounts a WebGL2 tank, spawns the fish pool, and
  * survives wake/dispose cleanly.
  */
-test('MQ2: hero tank stages a single textured fish and wakes cleanly', async ({ page }) => {
+test('MQ1: default tank mounts and populates on WebGL2', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
@@ -78,17 +31,21 @@ test('MQ2: hero tank stages a single textured fish and wakes cleanly', async ({ 
   await page.waitForFunction(() => !!window.__idleScreens);
   await page.evaluate(() => window.__idleScreens!.sleep());
 
-  await expect.poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 }).not.toBe('');
-  const { backend } = await surfaceDataset(page);
-  if (backend === 'webgl2') {
-    // Exactly one GLB clone — hero mode spawns what it needs, nothing more.
-    await expect
-      .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
-      .toBe(1);
-  } else {
-    // 2D fallback seeds its silhouette pool up front.
-    await expect.poll(async () => (await surfaceDataset(page)).fish).toBeGreaterThan(0);
-  }
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('webgl2');
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(1);
+
+  const isWebgl2Canvas = await page.evaluate(() => {
+    const canvas = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLCanvasElement>('.surface canvas');
+    return !!canvas && !!canvas.getContext('webgl2');
+  });
+  expect(isWebgl2Canvas).toBe(true);
 
   await page.evaluate(() => window.__idleScreens!.wake());
   await expect
@@ -102,10 +59,31 @@ test('MQ2: hero tank stages a single textured fish and wakes cleanly', async ({ 
 });
 
 /**
+ * School variant: fishCount=6, verifies all six are visible in the pool.
+ */
+test('MQ2: school variant spawns at least 6 fish', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('webgl2');
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
+    .toBeGreaterThanOrEqual(6);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Workbench-churn stability: browsers cap live WebGL contexts (~16) and kill
  * the oldest past the cap. Every mount creates a context, so 18 mount/dispose
- * cycles crash unless dispose() force-releases via forceContextLoss(). This
- * is the "dev tools are janky and crash" regression gate.
+ * cycles crash unless dispose() force-releases via forceContextLoss().
  */
 test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ page }) => {
   test.setTimeout(90_000);

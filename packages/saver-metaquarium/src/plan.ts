@@ -1,14 +1,15 @@
 import type { Rng } from '@idle-screens/core';
-import type { TankBounds } from './swim';
+
+export interface TankBounds {
+  radius: number;
+  yMin: number;
+  yMax: number;
+}
 
 /**
- * First-principles hero swim: a fish TRAVELS — nose first, banking into
- * turns, easing between cruise and dawdle — instead of oscillating on a
- * Lissajous. The itinerary is a compiled plan (catwalk pattern): a seeded
- * closed loop of waypoints fitted with a Catmull-Rom spline and an
- * arc-length table, all built once from the rng. Rendering only evaluates:
- * pose is a pure function of (plan, t), so `renderFrame(t, seed)` stays
- * frame-addressable and scrubbing works.
+ * Catmull-Rom spline swim: a seeded closed loop of waypoints with arc-length
+ * parameterization. Pose is a pure function of (plan, distance), so
+ * `renderFrame(t, seed)` stays frame-addressable and scrubbing works.
  */
 
 export interface SwimPlan {
@@ -37,7 +38,7 @@ export interface SwimPose {
   dist: number;
 }
 
-const ARC_SAMPLES = 512;
+const ARC_SAMPLES = 1024;
 
 function catmullRom(
   p0: number,
@@ -79,13 +80,16 @@ function splineAt(points: SwimPlan['points'], g: number): [number, number, numbe
  * loop reads as purposeful wandering, never a circle.
  */
 export function compileSwimPlan(rng: Rng, bounds: TankBounds): SwimPlan {
-  const n = 8 + rng.int(0, 3); // 8–11 waypoints
+  const n = 16 + rng.int(0, 4);
   const points: SwimPlan['points'] = [];
   const ySpan = bounds.yMax - bounds.yMin;
   for (let i = 0; i < n; i++) {
     const baseAngle = (i / n) * Math.PI * 2;
-    const angle = baseAngle + rng.range(-0.35, 0.35);
-    const radius = bounds.radius * rng.range(0.35, 0.95);
+    const angle = baseAngle + rng.range(-0.25, 0.25);
+    const inner = i % 2 === 0;
+    const radius = inner
+      ? bounds.radius * rng.range(0.15, 0.45)
+      : bounds.radius * rng.range(0.55, 0.85);
     const y = bounds.yMin + ySpan * rng.range(0.2, 0.8);
     points.push([Math.cos(angle) * radius, y, Math.sin(angle) * radius]);
   }
@@ -104,10 +108,10 @@ export function compileSwimPlan(rng: Rng, bounds: TankBounds): SwimPlan {
 
   // Cruise + gentle speed wobble: sometimes dawdling, sometimes keen — the
   // integral of each harmonic is closed-form, so distance(t) never drifts.
-  const cruise = 16 + rng.range(0, 6);
+  const cruise = 8 + rng.range(0, 4);
   const wobble = [
-    { amp: cruise * 0.35, w: 0.11 + rng.range(0, 0.05), phase: rng.range(0, Math.PI * 2) },
-    { amp: cruise * 0.2, w: 0.043 + rng.range(0, 0.02), phase: rng.range(0, Math.PI * 2) },
+    { amp: cruise * 0.18, w: 0.11 + rng.range(0, 0.05), phase: rng.range(0, Math.PI * 2) },
+    { amp: cruise * 0.1, w: 0.043 + rng.range(0, 0.02), phase: rng.range(0, Math.PI * 2) },
   ];
 
   return { points, arc, totalLength: total, cruise, wobble };
@@ -140,26 +144,6 @@ function paramForDistance(plan: SwimPlan, dist: number): number {
   return ((lo + frac) / ARC_SAMPLES) * n;
 }
 
-/**
- * Periodic behavior window, closed form: 0 outside, smoothly ramping to 1
- * inside a `windowSec` interval that recurs every `periodSec`. Drives the
- * auto-pilot's "notice the viewer" greets and occasional darts — a pure
- * function of t, so scrubbing lands mid-greet exactly where it should.
- */
-export function behaviorWindow(
-  tSec: number,
-  periodSec: number,
-  windowSec: number,
-  rampSec: number,
-): number {
-  const phase = ((tSec % periodSec) + periodSec) % periodSec;
-  if (phase >= windowSec) return 0;
-  const up = Math.min(1, phase / rampSec);
-  const down = Math.min(1, (windowSec - phase) / rampSec);
-  const w = Math.min(up, down);
-  return w * w * (3 - 2 * w); // smoothstep
-}
-
 /** Pose at `tSec` — position, unit forward tangent, bank roll, distance. */
 export function swimPoseAt(plan: SwimPlan, tSec: number, speed = 1): SwimPose {
   return swimPoseAtDistance(plan, distanceAt(plan, tSec, speed));
@@ -172,8 +156,7 @@ export function swimPoseAtDistance(plan: SwimPlan, dist: number): SwimPose {
   const g = paramForDistance(plan, dist);
   const [x, y, z] = splineAt(plan.points, g);
 
-  // Tangent + turn rate from small arc steps (spline eval is cheap & pure).
-  const step = plan.points.length / ARC_SAMPLES;
+  const step = (plan.points.length / ARC_SAMPLES) * 8;
   const ahead = splineAt(plan.points, g + step);
   const behind = splineAt(plan.points, g - step + plan.points.length);
   let fx = ahead[0] - behind[0];
@@ -190,7 +173,7 @@ export function swimPoseAtDistance(plan: SwimPlan, dist: number): SwimPose {
   let turn = h1 - h0;
   if (turn > Math.PI) turn -= Math.PI * 2;
   if (turn < -Math.PI) turn += Math.PI * 2;
-  const roll = Math.max(-0.5, Math.min(0.5, turn * 6));
+  const roll = Math.max(-0.35, Math.min(0.35, turn * 3.5));
 
   return { x, y, z, fx, fy, fz, roll, dist };
 }

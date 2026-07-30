@@ -1,7 +1,7 @@
+import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
-  createRng,
-  sampleTrack,
   defaultParams,
+  sampleTrack,
   type ControlTrack,
   type ParamSpace,
   type ParamValue,
@@ -10,111 +10,87 @@ import {
   type SaverLayer,
 } from '@idle-screens/core';
 import {
-  AdditiveBlending,
-  AmbientLight,
   AnimationMixer,
-  BackSide,
   Box3,
-  BufferAttribute,
-  BufferGeometry,
-  CanvasTexture,
   CircleGeometry,
   Color,
   ConeGeometry,
-  DirectionalLight,
-  DoubleSide,
   Fog,
   Group,
+  HemisphereLight,
   LinearToneMapping,
   MathUtils,
   Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
   PerspectiveCamera,
-  PlaneGeometry,
-  Points,
-  PointsMaterial,
-  RepeatWrapping,
   Scene,
-  ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
-  Vector2,
   Vector3,
   WebGLRenderer,
   type AnimationClip,
-  type Object3D,
   type Material,
-  type Texture,
+  type Object3D,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { resolveIpfsUrl } from './ipfs';
 import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
-import { farmMetadata, heroUrlFor, pickFarmFish, resolveAssetUrl } from './farm';
-import { makeFishPath, fishPose, type FishPath, type TankBounds } from './swim';
 import {
-  applyFarmMaterials,
   applyNpcMaterials,
   eyeNoseSign,
   forceOpaque,
-  hasTexturedMaterial,
   MIAMI_VICE_COLORS,
 } from './materials';
 import {
-  behaviorWindow,
   compileSwimPlan,
   distanceAt,
   swimPoseAtDistance,
   type SwimPlan,
+  type TankBounds,
 } from './plan';
-import { effectivePixelRatio, isSoftwareGL, qualityFor, type TankQuality } from './quality';
-import type { CapabilityTier } from '@idle-screens/capabilities';
+import {
+  effectivePixelRatio,
+  isSoftwareGL,
+  qualityFor,
+  type TankQuality,
+} from './quality';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
-/** Hero mode: the singular fish wanders a tight volume around center stage so
- *  the orbiting camera always frames it. */
-const HERO_BOUNDS: TankBounds = { radius: 46, yMin: 32, yMax: 62 };
-const HERO_SCALE = 1.8;
-const WATER_Y = 88;
 const FISH_LENGTH = 18;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
 const GLB_CONCURRENCY = 3;
 
-/**
- * The rendering recipe follows the shipped Metaquarium exhibits, not the code
- * defaults: LinearToneMapping (the original overrides its ACES default at
- * runtime), exposure 1, sRGB out, dark fog, and selective bloom over a
- * `GLOW-*` layer. Fish bodies are unlit (authored atlases for farm fish,
- * seeded palette for the bundled breed — see materials.ts), so scene lighting
- * shapes only the floor and PBR parts and can never wash the fish to white.
- */
+// ---------------------------------------------------------------------------
+// Template cache — shared across instances, never disposed by them.
+// ---------------------------------------------------------------------------
+
 interface FishTemplate {
   scene: Object3D;
   clip: AnimationClip | null;
   norm: number;
   yaw: number;
-  /** Bundled/NPC breed → per-clone seeded palette materials. */
-  npc: boolean;
-  /** Carries a texture atlas — its look IS the texture; never recoat. */
-  textured: boolean;
 }
+
+const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
+
+// ---------------------------------------------------------------------------
+// Fish instance — one per visible fish in the scene.
+// ---------------------------------------------------------------------------
 
 interface Fish {
   group: Group;
-  /** Lissajous wander (school fish). Heroes travel a compiled plan instead. */
-  path: FishPath;
-  plan: SwimPlan | null;
-  /** The model node inside the group (carries yaw correction + breathing). */
+  plan: SwimPlan;
   body: Object3D | null;
   baseScale: number;
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
 }
+
+// ---------------------------------------------------------------------------
+// TankInstance — the studs: renderer, fog, floor, fish on spline plans.
+// ---------------------------------------------------------------------------
 
 class TankInstance implements SaverInstance {
   private readonly ctxSaver: SaverContext;
@@ -123,44 +99,17 @@ class TankInstance implements SaverInstance {
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
   private quality: TankQuality;
-  private softwareGL = false;
-  /** Adaptive-governor render-scale multiplier; only ever steps down. */
   private govScale = 1;
   private frameTimes: number[] = [];
   private lastFrameAt = 0;
   private lastGovCheck = 0;
-  /** Hero behavior blends (ease in playback, snap on scrubs) + travelled
-   *  distance (integrates through behavior speed so modes glide). */
-  private greetBlend = 0;
-  private dartBlend = 0;
-  private idleBlend = 0;
-  private gotoBlend = 0;
-  private heroDist = 0;
-  private lastStateT = -1;
-  /** Which fish the hero currently IS (fishToken|fishUrl); steering either
-   *  param swaps the hero in place, mid-swim. */
-  private heroKey = '';
-  private heroSwapping = false;
+
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
-  private readonly waterGeo: PlaneGeometry;
-  private readonly waterTexture: Texture | null;
-  /** Single time uniform shared by the water + mote shaders. */
-  private readonly timeUniform = { value: 0 };
   private readonly fogColor = new Color();
   private readonly abort = new AbortController();
-  private composer: EffectComposer | null = null;
-  private bloomPass: UnrealBloomPass | null = null;
   private fish: Fish[] = [];
   private disposed = false;
-  /** Bundled-fish mode state (grow-on-steer); null when a farm populated us. */
-  private bundled: { url: string; poolCap: number } | null = null;
-  private heroMode = false;
-  private heroPlan: SwimPlan | null = null;
-  private growing = false;
-  private readonly shafts: Mesh[] = [];
-  private motes: Points | null = null;
-  private causticTexture: Texture | null = null;
 
   private w: number;
   private h: number;
@@ -171,10 +120,8 @@ class TankInstance implements SaverInstance {
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
-  /** dpr < 0.5 = thumbnail-scale mount (gallery tile): small school, no bloom
-   *  composers — UnrealBloom's shader compile is a main-thread spike a wall of
-   *  tiles must not pay, and a 320px card shows no meaningful halo anyway. */
   private readonly thumbnail: boolean;
+  private activeFishUrl = '';
 
   constructor(ctx: SaverContext, space: ParamSpace, quality: TankQuality) {
     this.ctxSaver = ctx;
@@ -196,26 +143,20 @@ class TankInstance implements SaverInstance {
     }
     this.canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
 
-    // preserveDrawingBuffer stays FALSE: on ANGLE/Metal it taxes every frame
-    // with a buffer copy (a real chunk of the observed 20fps). Readback
-    // consumers (validator sampler, perception scratch-copy) read in the SAME
-    // task as renderFrame, where the buffer is still intact by spec; anything
-    // async (channel thumbs) must request its own frame first.
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
       antialias: quality.antialias,
       stencil: false,
       powerPreference: 'high-performance',
     });
-    // Software rasterizer (headless CI, GPU-blocklisted machines): every
-    // real-GPU assumption inverts — drop to the floor and skip bloom.
     const glInfo = this.renderer.getContext();
     const dbg = glInfo.getExtension('WEBGL_debug_renderer_info');
     const rendererName = String(
-      dbg ? glInfo.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : glInfo.getParameter(glInfo.RENDERER),
+      dbg
+        ? glInfo.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+        : glInfo.getParameter(glInfo.RENDERER),
     );
-    this.softwareGL = isSoftwareGL(rendererName);
-    if (this.softwareGL) this.quality = qualityFor('minimal');
+    if (isSoftwareGL(rendererName)) this.quality = qualityFor('minimal');
     this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
@@ -229,155 +170,16 @@ class TankInstance implements SaverInstance {
     this.scene.fog = new Fog(this.fogColor.getHex(), 60, 500);
     this.scene.background = this.fogColor;
 
-    // Exhibit lighting (ambient #ade5ff, rays #daf3ff). Fish bodies are unlit;
-    // these shape the floor, water and PBR parts only.
-    this.scene.add(new AmbientLight(0xade5ff, 2.6));
-    const sun = new DirectionalLight(0xdaf3ff, 1.1);
-    sun.position.set(300, 600, 0);
-    this.scene.add(sun);
-
-    // Backdrop: a giant inward-facing sphere with a vertical water-column
-    // gradient — deep abyss below, light filtering from the surface above.
-    // Replaces the stark flat-color horizon with a place.
-    const backdrop = new Mesh(
-      new SphereGeometry(850, 32, 24),
-      new ShaderMaterial({
-        uniforms: {
-          uDeep: { value: new Color(0x01020a) },
-          uShallow: { value: new Color(0x0d2c66) },
-        },
-        vertexShader: BACKDROP_VERT,
-        fragmentShader: BACKDROP_FRAG,
-        side: BackSide,
-        depthWrite: false,
-      }),
-    );
-    this.scene.add(backdrop);
-
     const floor = new Mesh(
-      new CircleGeometry(600, 48),
-      new MeshStandardMaterial({ color: 0x0a1d33, roughness: 0.95 }),
+      new CircleGeometry(600, 32),
+      new MeshBasicMaterial({ color: 0x0a1d33 }),
     );
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
-    // Caustic light pools playing over the sand — drifts slowly in setState.
-    this.causticTexture = makeCausticTexture();
-    if (this.causticTexture) {
-      const caustics = new Mesh(
-        new CircleGeometry(420, 48),
-        new MeshBasicMaterial({
-          map: this.causticTexture,
-          transparent: true,
-          opacity: 0.09,
-          blending: AdditiveBlending,
-          depthWrite: false,
-        }),
-      );
-      caustics.rotation.x = -Math.PI / 2;
-      caustics.position.y = 0.4;
-      this.scene.add(caustics);
-    }
-
-    this.waterGeo = new PlaneGeometry(1400, 1400, 32, 32);
-    this.waterTexture = makeWaterTexture();
-    const waterMat = new MeshBasicMaterial({
-      color: 0x0044ff,
-      map: this.waterTexture,
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-      side: DoubleSide,
-    });
-    // Wave displacement on the GPU: one uniform per frame instead of a
-    // 1089-vertex CPU rewrite + re-upload (the old per-frame hitch source).
-    waterMat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTankTime = this.timeUniform;
-      shader.vertexShader = `uniform float uTankTime;\n${shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        transformed.z += sin(uTankTime * 1.2 + position.x * 0.025 + position.y * 0.018) * 3.5;`,
-      )}`;
-    };
-    const water = new Mesh(this.waterGeo, waterMat);
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = WATER_Y;
-    water.renderOrder = 1;
-    // NOT on the bloom layer: the original put it there, but a 1400x1400
-    // textured transparent plane re-rendering through every bloom pass is a
-    // large slice of the frame for a barely-visible halo.
-    this.scene.add(water);
-
-    // Light shafts: soft additive blades swaying from the surface. The
-    // cheapest possible god rays, and they sell "underwater" instantly.
-    if (!this.thumbnail) {
-      for (let i = 0; i < 5; i++) {
-        const shaft = new Mesh(
-          new PlaneGeometry(26 + i * 9, 240),
-          new ShaderMaterial({
-            uniforms: { uOpacity: { value: 0.16 + (i % 3) * 0.04 } },
-            vertexShader: SHAFT_VERT,
-            fragmentShader: SHAFT_FRAG,
-            transparent: true,
-            blending: AdditiveBlending,
-            depthWrite: false,
-            side: DoubleSide,
-          }),
-        );
-        const angle = (i / 5) * Math.PI * 2;
-        shaft.position.set(Math.cos(angle) * (40 + i * 22), WATER_Y - 30, Math.sin(angle) * (40 + i * 22));
-        shaft.rotation.y = angle + 0.6;
-        this.shafts.push(shaft);
-        this.scene.add(shaft);
-      }
-    }
-
-    // Marine snow: slow-rising motes, fully GPU-driven — base positions and
-    // per-mote rise/phase are static attributes; motion comes from the same
-    // time uniform, so per-frame CPU cost is zero.
-    const moteCount = this.thumbnail ? 60 : 220;
-    const moteRng = ctx.rng.fork(0x0e5);
-    const motePos = new Float32Array(moteCount * 3);
-    const moteRise = new Float32Array(moteCount);
-    const motePhase = new Float32Array(moteCount);
-    for (let i = 0; i < moteCount; i++) {
-      const r = 30 + moteRng.next() * 180;
-      const a = moteRng.next() * Math.PI * 2;
-      motePos[i * 3] = Math.cos(a) * r;
-      motePos[i * 3 + 1] = moteRng.next() * WATER_Y;
-      motePos[i * 3 + 2] = Math.sin(a) * r;
-      moteRise[i] = 0.5 + moteRng.next();
-      motePhase[i] = moteRng.next() * Math.PI * 2;
-    }
-    const moteGeo = new BufferGeometry();
-    moteGeo.setAttribute('position', new BufferAttribute(motePos, 3));
-    moteGeo.setAttribute('aRise', new BufferAttribute(moteRise, 1));
-    moteGeo.setAttribute('aPhase', new BufferAttribute(motePhase, 1));
-    const moteMat = new PointsMaterial({
-      color: 0x9fd8ff,
-      size: 1.4,
-      transparent: true,
-      opacity: 0.45,
-      blending: AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-    moteMat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTankTime = this.timeUniform;
-      shader.vertexShader = `uniform float uTankTime;
-attribute float aRise;
-attribute float aPhase;
-${shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        transformed.y = mod(position.y + uTankTime * 2.4 * aRise, ${WATER_Y.toFixed(1)});
-        transformed.x += sin(uTankTime * 0.22 + aPhase) * 3.0;
-        transformed.z += cos(uTankTime * 0.18 + aPhase * 0.7) * 3.0;`,
-      )}`;
-    };
-    this.motes = new Points(moteGeo, moteMat);
-    this.motes.frustumCulled = false; // GPU-displaced; static bounds lie
-    this.scene.add(this.motes);
+    // Gentle hemisphere so MeshStandardMaterial eyes render their authored detail.
+    // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
+    this.scene.add(new HemisphereLight(0xffffff, 0x4466aa, 1.5));
 
     void this.populate();
 
@@ -387,199 +189,73 @@ ${shader.vertexShader.replace(
   }
 
   // ---- fish sourcing ----
+
   private str(key: string): string {
     const v = this.params[key];
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
   }
 
   private async populate(): Promise<void> {
-    // Thumbnail-scale mounts keep the school small so a wall of tiles
-    // doesn't pay for 24 skinned clones per tile.
     const poolCap = this.thumbnail ? Math.min(6, MAX_FISH) : MAX_FISH;
-    const farmUrl = this.str('farmUrl');
-    let urls: string[] = [];
-    let npc = false;
-    if (farmUrl) urls = await this.farmFishUrls(farmUrl).catch(() => []);
-    if (urls.length === 0) {
-      // Bundled mode spawns only what the tank needs NOW (hero mode = one
-      // fish); setState grows the pool on demand when fishCount is steered up.
-      const want = Math.max(1, Math.round(Number(this.space.fishCount?.default ?? 1)));
-      const pool = Math.min(want, poolCap);
-      this.heroKey = this.heroSrcKey();
-      const heroUrl = await this.resolveHeroUrl();
-      urls = new Array<string>(pool).fill(heroUrl);
-      npc = true; // untextured bundled breeds get the seeded-palette coat
-      this.bundled = { url: heroUrl, poolCap };
-      this.heroMode = pool === 1;
-      this.markHero(heroUrl);
-    }
-    if (this.disposed) return;
+    const pool = Math.min(poolCap, this.quality.fishCap);
+    const fishUrl = this.activeFishUrl || this.str('fishUrl');
+    this.activeFishUrl = fishUrl;
 
-    const jobs = urls.slice(0, poolCap).map((url, i) => ({ url, i, path: this.pathAt(i) }));
-
+    const jobs = Array.from({ length: pool }, (_, i) => i);
     let next = 0;
     const worker = async (): Promise<void> => {
       while (next < jobs.length && !this.disposed) {
-        const job = jobs[next++]!;
-        const tpl = await this.template(job.url, npc);
-        if (this.disposed) return;
-        this.spawn(tpl, job.path, job.i);
+        const i = jobs[next++]!;
+        const tpl = await this.template(fishUrl);
+        if (this.disposed || this.activeFishUrl !== fishUrl) return;
+        this.spawn(tpl, i);
       }
     };
     await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
     if (this.paused) this.renderStill();
   }
 
-  /** Deterministic swim path for fish index `i` — independent of spawn order
-   *  (each index forks its own stream). The hero (index 0 in hero mode) stays
-   *  center stage in a tighter, larger-scaled orbit. */
-  private pathAt(i: number): FishPath {
-    const rng = this.ctxSaver.rng.fork(0x715);
-    if (i === 0 && this.heroMode) {
-      const p = makeFishPath(rng.fork(0), HERO_BOUNDS);
-      return { ...p, scale: p.scale * HERO_SCALE };
+  private swapFish(url: string): void {
+    for (const f of this.fish) {
+      f.mixer?.stopAllAction();
+      this.scene.remove(f.group);
     }
-    return makeFishPath(rng.fork(i), BOUNDS);
+    this.fish = [];
+    this.activeFishUrl = url;
+    void this.populate();
   }
 
-  /** Identity of the hero-source params; steering either one swaps the hero. */
-  private heroSrcKey(): string {
-    return `${this.str('fishToken').trim()}|${this.str('fishUrl')}`;
-  }
-
-  /** Publish which fish the hero currently IS (filename, or token when the
-   *  farm resolved one) — the observable seam for swap tests and debugging. */
-  private markHero(url: string): void {
-    const token = this.str('fishToken').trim();
-    const file = url.split('/').pop() ?? url;
-    this.ctxSaver.host.dataset.mqHero = token ? `token:${token}` : file;
-  }
-
-  /** Resolve the hero's GLB: fishToken through the farm (farmUrl, or the
-   *  host's '/farm' proxy by default), else fishUrl. Never throws — the
-   *  bundled hero is always the fallback. */
-  private async resolveHeroUrl(): Promise<string> {
-    const token = this.str('fishToken').trim();
-    const fallback = this.str('fishUrl');
-    if (!token) return fallback;
-    try {
-      const src = this.str('farmUrl') || '/farm/y2k/stream/cache';
-      const res = await fetch(src, { signal: this.abort.signal });
-      if (!res.ok) return fallback;
-      const meta = farmMetadata(await res.json());
-      return heroUrlFor(meta, token, this.str('ipfsGateway'), fallback);
-    } catch {
-      return fallback;
-    }
-  }
-
-  /** Live hero swap: load the new fish and graft it onto the hero in place —
-   *  same plan, same travelled distance, so the swim never hitches. Keeps
-   *  the old fish when the new one fails to load (never blank). */
-  private async swapHero(): Promise<void> {
-    if (this.heroSwapping) return;
-    this.heroSwapping = true;
-    try {
-      const key = this.heroSrcKey();
-      const url = await this.resolveHeroUrl();
-      const tpl = await this.template(url, true);
-      if (this.disposed || this.heroSrcKey() !== key) return; // superseded mid-load
-      this.heroKey = key;
-      const hero = this.fish[0];
-      if (!hero || !tpl) return; // load failed: keep the fish we have
-      this.markHero(url);
-      hero.group.clear();
-      const body = cloneSkinned(tpl.scene);
-      if (tpl.npc && !tpl.textured) applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7));
-      body.scale.setScalar(tpl.norm);
-      body.rotation.y = tpl.yaw;
-      hero.group.add(body);
-      hero.body = body;
-      if (tpl.clip) {
-        hero.mixer = new AnimationMixer(body);
-        hero.mixer.clipAction(tpl.clip).play();
-        hero.clipDuration = tpl.clip.duration;
-      } else {
-        hero.mixer = null;
-        hero.clipDuration = 0;
-      }
-    } finally {
-      this.heroSwapping = false;
-    }
-  }
-
-  /** Grow the bundled pool to `n` fish (steered fishCount above pool size). */
-  private async growTo(n: number): Promise<void> {
-    if (!this.bundled || this.growing) return;
-    this.growing = true;
-    try {
-      const target = Math.min(n, this.bundled.poolCap, MAX_FISH);
-      const tpl = await this.template(this.bundled.url, true);
-      for (let i = this.fish.length; i < target && !this.disposed; i++) {
-        this.spawn(tpl, this.pathAt(i), i);
-      }
-    } finally {
-      this.growing = false;
-    }
-  }
-
-  private async farmFishUrls(farmUrl: string): Promise<string[]> {
-    const res = await fetch(farmUrl, { signal: this.abort.signal });
-    if (!res.ok) throw new Error(`farm ${res.status}`);
-    const meta = farmMetadata(await res.json());
-    const tokens = this.str('tankTokens')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const picked = pickFarmFish(meta, tokens, this.ctxSaver.rng.fork(0xfa12), MAX_FISH);
-    const gateway = this.str('ipfsGateway');
-    return picked.map((f) => resolveAssetUrl(f['3d']!, gateway));
-  }
-
-  private template(url: string, npc: boolean): Promise<FishTemplate | null> {
-    // Module-level cache: the dev workbench remounts savers constantly
-    // (saver picker, previews, stage switches) — re-fetching and re-parsing
-    // the GLB every mount is what made it feel janky. Templates are shared
-    // across instances and never disposed by them (clones share geometry).
-    const key = `${npc ? 'npc' : 'farm'}|${url}`;
+  private template(url: string): Promise<FishTemplate | null> {
+    const key = url;
     let p = TEMPLATE_CACHE.get(key);
     if (!p) {
       p = (async (): Promise<FishTemplate | null> => {
         try {
-          const res = await fetch(url, { signal: this.abort.signal });
+          const res = await fetch(resolveIpfsUrl(url), {
+            signal: this.abort.signal,
+          });
           if (!res.ok) throw new Error(`fish glb ${res.status}`);
           const buf = await res.arrayBuffer();
           const gltf = await new GLTFLoader().parseAsync(buf, '');
           const scene = gltf.scene;
-          const textured = hasTexturedMaterial(scene);
-          // Textured fish always keep their authored look, whichever lane
-          // loaded them. Fork keyed on the URL: any rescue coat / emissive
-          // retune is stable across mounts and independent of load order —
-          // seeded from the URL alone, so the shared template cache can never
-          // leak one session's seed into another, and a fish's rescue coat is
-          // part of its identity (same for every viewer).
-          if (!npc || textured) {
-            applyFarmMaterials(scene, createRng(hashCode(url)));
-          }
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
-          // Model-forward → the group's +Z (lookAt orients +Z along travel).
-          // The nose is wherever the EYES are: read their offset along the
-          // long axis instead of guessing a per-breed convention.
           const longX = size.x > size.z;
           const nose = eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
-          const yaw = longX ? (nose > 0 ? -Math.PI / 2 : Math.PI / 2) : nose > 0 ? 0 : Math.PI;
+          const yaw = longX
+            ? nose > 0
+              ? -Math.PI / 2
+              : Math.PI / 2
+            : nose > 0
+            ? 0
+            : Math.PI;
           return {
             scene,
             clip: gltf.animations[0] ?? null,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
-            npc,
-            textured,
           };
         } catch (err) {
-          // A dispose-abort must not poison the shared cache — later mounts
-          // retry. Real failures stay cached as null (no retry storms).
           if ((err as Partial<DOMException>).name === 'AbortError') {
             TEMPLATE_CACHE.delete(key);
           }
@@ -591,17 +267,18 @@ ${shader.vertexShader.replace(
     return p;
   }
 
-  private spawn(tpl: FishTemplate | null, path: FishPath, index: number): void {
+  private spawn(tpl: FishTemplate | null, index: number): void {
+    const rng = this.ctxSaver.rng.fork(0x715);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS);
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
     let bodyNode: Object3D | null = null;
     let clipDuration = 0;
+
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      if (tpl.npc && !tpl.textured) {
-        applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
-      }
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
@@ -612,29 +289,39 @@ ${shader.vertexShader.replace(
         clipDuration = tpl.clip.duration;
       }
     } else {
-      // Never-blank: a procedural palette fish stands in when a GLB fails.
-      const coat = this.ctxSaver.rng.fork(0xc0a7 + index).pick(MIAMI_VICE_COLORS);
+      const coat = this.ctxSaver.rng
+        .fork(0xc0a7 + index)
+        .pick(MIAMI_VICE_COLORS);
       const mat = new MeshBasicMaterial({ color: new Color(coat) });
       const body = new Mesh(new SphereGeometry(FISH_LENGTH / 2, 12, 8), mat);
       body.scale.set(1, 0.55, 0.4);
-      const tailMesh = new Mesh(new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8), mat);
+      const tailMesh = new Mesh(
+        new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8),
+        mat,
+      );
       tailMesh.rotation.z = Math.PI / 2;
       tailMesh.position.x = -FISH_LENGTH * 0.62;
       group.add(body, tailMesh);
       tail = tailMesh;
     }
-    const isHero = this.heroMode && index === 0;
-    const plan = isHero
-      ? (this.heroPlan ??= compileSwimPlan(this.ctxSaver.rng.fork(0xf1), HERO_BOUNDS))
-      : null;
-    const baseScale = isHero ? HERO_SCALE : path.scale;
+
+    const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
     group.scale.multiplyScalar(baseScale);
     this.scene.add(group);
-    this.fish.push({ group, path, plan, body: bodyNode, baseScale, mixer, clipDuration, tail });
+    this.fish.push({
+      group,
+      plan,
+      body: bodyNode,
+      baseScale,
+      mixer,
+      clipDuration,
+      tail,
+    });
     this.ctxSaver.host.dataset.mqFish = String(this.fish.length);
   }
 
   // ---- params / state ----
+
   private applyParams(t: number): void {
     if (this.track) this.params = sampleTrack(this.space, this.track, t);
   }
@@ -649,217 +336,68 @@ ${shader.vertexShader.replace(
     this.applyParams(t);
     const speed = this.num('swimSpeed');
 
-    // ---- hero behavior blends ------------------------------------------
-    // Targets are closed-form (mode param + periodic auto windows); the
-    // blends ease during continuous playback and SNAP on scrubs, so
-    // renderFrame(t) seeks stay reproducible.
-    const dtSec = this.lastStateT >= 0 ? (t - this.lastStateT) / 1000 : 0;
-    const scrub = dtSec <= 0 || dtSec > 0.25;
-    this.lastStateT = t;
-    const mode = this.str('behavior');
-    const tGreet = mode === 'greet' ? 1 : mode === 'auto' ? behaviorWindow(tSec, 47, 9, 2.5) : 0;
-    const tDart = mode === 'dart' ? 1 : mode === 'auto' ? behaviorWindow(tSec + 21, 83, 3.5, 1) : 0;
-    const tIdle = mode === 'idle' ? 1 : 0;
-    const tGoto = mode === 'goto' ? 1 : 0;
-    const ease = (cur: number, target: number): number =>
-      scrub ? target : cur + (target - cur) * Math.min(1, dtSec * 2.2);
-    const g = (this.greetBlend = ease(this.greetBlend, tGreet));
-    const gd = (this.dartBlend = ease(this.dartBlend, tDart));
-    const gi = (this.idleBlend = ease(this.idleBlend, tIdle));
-    const gg = (this.gotoBlend = ease(this.gotoBlend, tGoto));
+    const url = this.str('fishUrl');
+    if (url && url !== this.activeFishUrl) this.swapFish(url);
 
-    // ---- hero pose ------------------------------------------------------
-    // Distance integrates through the behavior speed multiplier so mode
-    // changes glide (never teleport); a scrub resets to the closed-form
-    // wander distance — the deterministic baseline.
-    const az = MathUtils.degToRad(this.num('cameraAzimuth') + this.num('autoRotate') * tSec);
+    // Camera orbit
+    const az = MathUtils.degToRad(
+      this.num('cameraAzimuth') + this.num('autoRotate') * tSec,
+    );
     const el = MathUtils.degToRad(this.num('cameraElevation'));
     const dist = this.num('cameraDistance');
-    // Unit direction from the fish toward the camera (the orbit offset).
-    const camDirX = Math.cos(el) * Math.sin(az);
-    const camDirY = Math.sin(el);
-    const camDirZ = Math.cos(el) * Math.cos(az);
-
-    let hero: {
-      x: number;
-      y: number;
-      z: number;
-      fx: number;
-      fy: number;
-      fz: number;
-      roll: number;
-      clipPhase: number;
-    } | null = null;
-    if (this.heroMode && this.heroPlan) {
-      const speedMul =
-        (1 + gd * 1.9) * (1 - 0.85 * g) * (1 - 0.9 * gi) * (1 - 0.75 * gg);
-      if (scrub) this.heroDist = distanceAt(this.heroPlan, tSec, speed);
-      else this.heroDist += this.heroPlan.cruise * speed * speedMul * dtSec;
-      const p = swimPoseAtDistance(this.heroPlan, this.heroDist);
-
-      // goto: glide toward the steered target point.
-      const gtX = this.num('fishTargetX') * HERO_BOUNDS.radius * 0.9;
-      const gtY =
-        HERO_BOUNDS.yMin + this.num('fishTargetY') * (HERO_BOUNDS.yMax - HERO_BOUNDS.yMin);
-      const gtZ = this.num('fishTargetZ') * HERO_BOUNDS.radius * 0.9;
-      const x = p.x + (gtX - p.x) * gg;
-      let y = p.y + (gtY - p.y) * gg;
-      const z = p.z + (gtZ - p.z) * gg;
-
-      // greet/idle: hold station with a gentle bob — alive, never frozen.
-      const bob = Math.sin(tSec * 1.7) * 1.6 * Math.max(g, gi * 0.7);
-      y += bob;
-
-      // Facing: wander tangent, blended toward a 3/4 PORTRAIT of the viewer
-      // while greeting — the camera axis rotated ~35°, so the head, flank
-      // and a side-mounted eye all read (a fish never mugs dead-on).
-      const face = Math.max(g, gg * 0.55);
-      const pa = 0.62; // portrait angle, radians
-      const portraitX = camDirX * Math.cos(pa) - camDirZ * Math.sin(pa);
-      const portraitZ = camDirX * Math.sin(pa) + camDirZ * Math.cos(pa);
-      let fx = p.fx + (portraitX - p.fx) * face;
-      let fy = p.fy + (0.12 - p.fy) * face;
-      let fz = p.fz + (portraitZ - p.fz) * face;
-      const fm = Math.hypot(fx, fy, fz) || 1;
-      fx /= fm;
-      fy /= fm;
-      fz /= fm;
-
-      // Fins keep moving whatever the mode: tail beats with distance while
-      // cruising, flutters with time while holding station.
-      const clipPhase = this.heroDist * 0.045 + tSec * 0.4 * Math.max(g, gi);
-      hero = { x, y, z, fx, fy, fz, roll: p.roll * (1 - face), clipPhase };
-    }
-
-    // ---- camera ---------------------------------------------------------
-    // Pet-cam: orbit the fish (lagged along its path so framing breathes);
-    // greeting dollies IN — the fish comes up close and looks at you.
-    let tx = 0;
-    let ty = 35;
-    let tz = 0;
-    let lookAhead: { x: number; y: number; z: number } | null = null;
-    let camDist = dist;
-    if (hero && this.heroPlan) {
-      const lag = swimPoseAtDistance(this.heroPlan, this.heroDist - 6);
-      tx = (hero.x + lag.x) / 2;
-      ty = (hero.y + lag.y) / 2;
-      tz = (hero.z + lag.z) / 2;
-      lookAhead = {
-        x: tx + hero.fx * 9 * (1 - g),
-        y: ty + hero.fy * 9 * (1 - g),
-        z: tz + hero.fz * 9 * (1 - g),
-      };
-      camDist = dist + (54 - dist) * g;
-    }
     this.camera.position.set(
-      tx + camDirX * camDist,
-      Math.max(10, ty + camDirY * camDist),
-      tz + camDirZ * camDist,
+      Math.cos(el) * Math.sin(az) * dist,
+      Math.max(10, 15 + Math.sin(el) * dist),
+      Math.cos(el) * Math.cos(az) * dist,
     );
-    if (lookAhead) this.camera.lookAt(lookAhead.x, lookAhead.y, lookAhead.z);
-    else this.camera.lookAt(0, 35, 0);
+    this.camera.lookAt(0, 35, 0);
 
-    const fogHex = String(this.params.fogColor ?? this.space.fogColor?.default ?? '#030009');
+    // Fog color
+    const fogHex = String(
+      this.params.fogColor ?? this.space.fogColor?.default ?? '#030009',
+    );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
-    // One uniform drives water waves + motes on the GPU; textures drift via
-    // offset (also uniforms). No per-frame geometry uploads remain.
-    this.timeUniform.value = tSec;
-    if (this.waterTexture) this.waterTexture.offset.set(tSec * 0.008, tSec * 0.005);
-    if (this.causticTexture) this.causticTexture.offset.set(tSec * 0.011, tSec * -0.007);
-
-    for (let i = 0; i < this.shafts.length; i++) {
-      const shaft = this.shafts[i]!;
-      shaft.rotation.z = Math.sin(tSec * 0.07 + i * 1.7) * 0.1;
-      shaft.position.y = WATER_Y - 30 + Math.sin(tSec * 0.05 + i) * 6;
-    }
-
-    const visible = Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
-    if (this.bundled && visible > this.fish.length && !this.growing) {
-      void this.growTo(visible);
-    }
-    // Steering fishToken/fishUrl swaps the hero live, mid-swim.
-    if (this.heroMode && this.heroKey && !this.heroSwapping && this.heroSrcKey() !== this.heroKey) {
-      void this.swapHero();
-    }
+    // Fish
+    const visible = Math.min(
+      Math.round(this.num('fishCount')),
+      this.quality.fishCap,
+    );
     for (let i = 0; i < this.fish.length; i++) {
       const f = this.fish[i]!;
       f.group.visible = i < visible;
       if (!f.group.visible) continue;
-      if (f.plan && hero) {
-        // Hero: the behavior-blended pose computed above — travel nose-first,
-        // bank into turns, hold station and face the viewer while greeting.
-        f.group.position.set(hero.x, hero.y, hero.z);
-        f.group.lookAt(hero.x + hero.fx, hero.y + hero.fy, hero.z + hero.fz);
-        f.group.rotateZ(hero.roll);
-        // Pose probe for e2e/debug: position + forward, coarse fixed-point.
-        this.ctxSaver.host.dataset.mqPose = [
-          hero.x.toFixed(1),
-          hero.y.toFixed(1),
-          hero.z.toFixed(1),
-          hero.fx.toFixed(2),
-          hero.fy.toFixed(2),
-          hero.fz.toFixed(2),
-        ].join(',');
-        const breathe = 1 + Math.sin(tSec * 2.1) * 0.008;
-        f.group.scale.setScalar(f.baseScale * breathe);
-        if (f.mixer && f.clipDuration > 0) {
-          f.mixer.setTime(
-            ((hero.clipPhase % f.clipDuration) + f.clipDuration) % f.clipDuration,
-          );
-        }
-        continue;
-      }
-      const pose = fishPose(f.path, tSec, speed);
+
+      const d = distanceAt(f.plan, tSec, speed);
+      const pose = swimPoseAtDistance(f.plan, d);
       f.group.position.set(pose.x, pose.y, pose.z);
-      f.group.lookAt(pose.x + pose.hx, pose.y + pose.hy, pose.z + pose.hz);
+      f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
+      f.group.rotateZ(pose.roll);
+
+      const breathe = 1 + Math.sin(tSec * 2.1 + i) * 0.008;
+      f.group.scale.setScalar(f.baseScale * breathe);
+
       if (f.mixer && f.clipDuration > 0) {
-        f.mixer.setTime((tSec * speed + f.path.clipOffset) % f.clipDuration);
+        f.mixer.setTime(
+          (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+        );
       } else if (f.tail) {
-        f.tail.rotation.y = Math.sin((tSec * speed + f.path.clipOffset) * 6) * 0.5;
+        f.tail.rotation.y = Math.sin(tSec * speed * 6 + i) * 0.5;
       }
     }
-  }
-
-  // ---- bloom (single composer — one scene draw, not two) ----
-  // The old two-composer selective-bloom pattern rendered the scene TWICE per
-  // frame (once for the bloom layer, once for the final composite). That alone
-  // halved the framerate. A single composer with a high threshold (0.82) lets
-  // only the genuinely bright GLOW materials bloom; the fish body palette sits
-  // well below that in luminance and stays clean.
-  private initComposer(): void {
-    const pr = this.pr();
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloomPass = new UnrealBloomPass(
-      new Vector2(this.w, this.h),
-      this.num('bloomStrength'),
-      0.12,
-      0.82,
-    );
-    this.composer.addPass(this.bloomPass);
-    this.composer.addPass(new OutputPass());
-    this.composer.setPixelRatio(pr);
-    this.composer.setSize(this.w, this.h);
   }
 
   // ---- render ----
+
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
-    const strength = this.num('bloomStrength');
-    if (strength <= 0 || this.thumbnail || this.softwareGL) {
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
-    if (!this.composer) this.initComposer();
-    this.bloomPass!.strength = strength;
-    this.composer!.render();
+    this.renderer.render(this.scene, this.camera);
   }
 
-  // ---- loop ----
   private start(): void {
-    if (this.frameId !== null || typeof requestAnimationFrame === 'undefined') return;
+    if (this.frameId !== null || typeof requestAnimationFrame === 'undefined')
+      return;
     this.startT = 0;
     this.frameId = requestAnimationFrame((now) => this.loop(now));
   }
@@ -880,11 +418,11 @@ ${shader.vertexShader.replace(
     this.renderScene();
   }
 
-  /** Effective pixel ratio: DPR ∩ tier cap ∩ pixel budget ∩ governor. */
   private pr(): number {
     return Math.max(
       0.5,
-      effectivePixelRatio(this.w, this.h, this.ctxSaver.dpr, this.quality) * this.govScale,
+      effectivePixelRatio(this.w, this.h, this.ctxSaver.dpr, this.quality) *
+        this.govScale,
     );
   }
 
@@ -892,21 +430,12 @@ ${shader.vertexShader.replace(
     const pr = this.pr();
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(this.w, this.h, false);
-    this.composer?.setPixelRatio(pr);
-    this.composer?.setSize(this.w, this.h);
   }
 
-  /**
-   * Adaptive governor (the tvOS FrameWatchdog idea): whatever the machine,
-   * fluid motion beats resolution. When the median frame time over a ~2s
-   * window exceeds budget, step render resolution down 20% (floor 0.55×) —
-   * it only ever steps DOWN; a resize/remount resets it. Render quality is
-   * presentation, not program state, so determinism claims are untouched.
-   */
   private governFrame(now: number): void {
     if (this.lastFrameAt > 0) {
       const dt = now - this.lastFrameAt;
-      if (dt < 250) this.frameTimes.push(dt); // ignore tab-hidden gaps
+      if (dt < 250) this.frameTimes.push(dt);
     }
     this.lastFrameAt = now;
     if (now - this.lastGovCheck < 2000 || this.frameTimes.length < 30) return;
@@ -926,7 +455,9 @@ ${shader.vertexShader.replace(
   }
 
   // ---- SaverInstance ----
+
   setPaused(paused: boolean): void {
+    if (this.paused === paused) return;
     this.paused = paused;
     if (paused) {
       this.stop();
@@ -953,6 +484,7 @@ ${shader.vertexShader.replace(
 
   renderFrame(t: number, _seed: number): void {
     this.t = t;
+    if (typeof performance !== 'undefined') this.governFrame(performance.now());
     this.setState(t);
     this.renderScene();
   }
@@ -964,10 +496,9 @@ ${shader.vertexShader.replace(
         label: 'Tank',
         kind: 'surface',
         el: this.canvas,
-        description: 'WebGL2 aquarium: floor, water, fog',
+        description:
+          'WebGL2 aquarium: floor, fog, fish on Catmull-Rom spline paths',
       },
-      { id: 'fish', label: 'Fish', kind: 'pass', description: 'GLB fish on seeded swim paths' },
-      { id: 'bloom', label: 'Bloom', kind: 'pass', description: 'Selective glow (GLOW-* layer)' },
     ];
   }
 
@@ -975,9 +506,6 @@ ${shader.vertexShader.replace(
     this.disposed = true;
     this.stop();
     this.abort.abort();
-    // Fish clones share geometry (and farm-lane materials) with the module
-    // TEMPLATE_CACHE — disposing them would corrupt every later mount. Pull
-    // the fish out before sweeping the scene-owned resources.
     for (const f of this.fish) {
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
@@ -989,310 +517,25 @@ ${shader.vertexShader.replace(
       const mats: Material[] = Array.isArray(mesh.material)
         ? mesh.material
         : mesh.material
-          ? [mesh.material]
-          : [];
+        ? [mesh.material]
+        : [];
       for (const m of mats) {
         const tex = (m as Partial<MeshBasicMaterial>).map;
         if (tex) tex.dispose();
         m.dispose();
       }
     });
-    this.composer?.dispose();
     this.renderer.dispose();
-    // Release the GL context NOW. Browsers cap live WebGL contexts (~16) and
-    // dispose() alone leaves the release to GC — workbench churn (mount,
-    // preview, remount) exhausts the pool and the browser starts killing
-    // contexts, which is exactly the "janky and crashes" dev-tools failure.
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqBackend;
-    delete this.ctxSaver.host.dataset.mqPose;
-    delete this.ctxSaver.host.dataset.mqHero;
   }
 }
 
-// ---- scene shaders ----
-
-const BACKDROP_VERT = /* glsl */ `
-  varying vec3 vWorld;
-  void main() {
-    vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const BACKDROP_FRAG = /* glsl */ `
-  uniform vec3 uDeep;
-  uniform vec3 uShallow;
-  varying vec3 vWorld;
-  void main() {
-    float k = smoothstep(-150.0, 380.0, vWorld.y);
-    gl_FragColor = vec4(mix(uDeep, uShallow, k), 1.0);
-  }
-`;
-
-const SHAFT_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const SHAFT_FRAG = /* glsl */ `
-  uniform float uOpacity;
-  varying vec2 vUv;
-  void main() {
-    float vertical = vUv.y * vUv.y;                    // bright at the surface
-    float edges = sin(vUv.x * 3.14159);                // soft blade edges
-    float a = vertical * edges * uOpacity;
-    gl_FragColor = vec4(vec3(0.55, 0.75, 1.0) * a, a);
-  }
-`;
-
-/**
- * Parsed-GLB template cache, shared across every tank instance in the page.
- * Bounded by the set of distinct fish URLs a session touches; entries are
- * never disposed by instances (SkeletonUtils clones share the geometry).
- */
-const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
-
-/** Deterministic 32-bit string hash (FNV-1a) for rng fork salts. */
-function hashCode(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-/** Seeded-free procedural caustic-ish tile for the water plane (the original
- *  ships water.jpg; we synthesize to stay self-contained). Pure function of
- *  nothing — same texture every run. */
-function makeWaterTexture(): Texture | null {
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  if (!g) return null;
-  g.fillStyle = '#0a2a4a';
-  g.fillRect(0, 0, 128, 128);
-  g.globalAlpha = 0.5;
-  for (let i = 0; i < 40; i++) {
-    // Fixed constants, not rng: this is a static tile, identical every mount.
-    const x = (i * 37) % 128;
-    const y = (i * 53) % 128;
-    const r = 6 + ((i * 29) % 18);
-    const grad = g.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, 'rgba(120,200,255,0.35)');
-    grad.addColorStop(1, 'rgba(120,200,255,0)');
-    g.fillStyle = grad;
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
-  }
-  const tex = new CanvasTexture(c);
-  tex.wrapS = tex.wrapT = RepeatWrapping;
-  tex.repeat.set(5, 5);
-  return tex;
-}
-
-/** Caustic light-pool tile for the sand — brighter, sparser than the water
- *  tile. Fixed constants: identical every mount. */
-function makeCausticTexture(): Texture | null {
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  if (!g) return null;
-  g.clearRect(0, 0, 256, 256);
-  for (let i = 0; i < 70; i++) {
-    const x = (i * 97) % 256;
-    const y = (i * 151) % 256;
-    const r = 5 + ((i * 41) % 11);
-    const grad = g.createRadialGradient(x, y, r * 0.3, x, y, r);
-    grad.addColorStop(0, 'rgba(150,220,255,0)');
-    grad.addColorStop(0.7, 'rgba(150,220,255,0.35)');
-    grad.addColorStop(1, 'rgba(150,220,255,0)');
-    g.fillStyle = grad;
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
-  }
-  const tex = new CanvasTexture(c);
-  tex.wrapS = tex.wrapT = RepeatWrapping;
-  tex.repeat.set(6, 6);
-  return tex;
-}
-
-// ---- 2D fallback (no WebGL2: headless CI, ancient GPUs) ----
-// The lowest rung of the fidelity ladder: same seeded fish paths, same palette,
-// drawn as canvas-2d silhouettes against the fog gradient. Never blank.
-class Tank2DFallback implements SaverInstance {
-  private readonly ctxSaver: SaverContext;
-  private readonly space: ParamSpace;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ownsCanvas: boolean;
-  private readonly g: CanvasRenderingContext2D | null;
-  private readonly paths: { path: FishPath; coat: string }[];
-  private frameId: number | null = null;
-  private paused = false;
-  private startT = 0;
-  private t = 0;
-  private w: number;
-  private h: number;
-  private params: Record<string, ParamValue>;
-  private track: ControlTrack | null = null;
-
-  constructor(ctx: SaverContext, space: ParamSpace) {
-    this.ctxSaver = ctx;
-    this.space = space;
-    this.params = defaultParams(space);
-    this.w = ctx.width;
-    this.h = ctx.height;
-    if (ctx.surface instanceof HTMLCanvasElement) {
-      this.canvas = ctx.surface;
-      this.ownsCanvas = false;
-    } else {
-      this.canvas = document.createElement('canvas');
-      this.canvas.style.cssText = 'display:block;width:100%;height:100%';
-      ctx.host.appendChild(this.canvas);
-      this.ownsCanvas = true;
-    }
-    this.sizeCanvas();
-    this.g = this.canvas.getContext('2d');
-    const rng = ctx.rng.fork(0x715);
-    this.paths = Array.from({ length: MAX_FISH }, (_, i) => ({
-      path: makeFishPath(rng.fork(i), BOUNDS),
-      coat: rng.fork(0xc0a7 + i).pick(MIAMI_VICE_COLORS),
-    }));
-    ctx.host.dataset.mqFish = String(this.paths.length);
-    this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderStill();
-    else this.start();
-  }
-
-  private sizeCanvas(): void {
-    const pr = Math.min(this.ctxSaver.dpr, 2);
-    this.canvas.width = Math.round(this.w * pr);
-    this.canvas.height = Math.round(this.h * pr);
-  }
-
-  private num(key: string): number {
-    const v = this.params[key];
-    return typeof v === 'number' ? v : Number(this.space[key]?.default ?? 0);
-  }
-
-  private draw(t: number): void {
-    if (!this.g) return;
-    if (this.track) this.params = sampleTrack(this.space, this.track, t);
-    const g = this.g;
-    const W = this.canvas.width;
-    const H = this.canvas.height;
-    const tSec = t / 1000;
-    const fogHex = String(this.params.fogColor ?? this.space.fogColor?.default ?? '#030009');
-    const grad = g.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#0a2a4a');
-    grad.addColorStop(1, fogHex);
-    g.fillStyle = grad;
-    g.fillRect(0, 0, W, H);
-
-    const speed = this.num('swimSpeed');
-    const visible = Math.round(this.num('fishCount'));
-    const sx = W / (BOUNDS.radius * 2.4);
-    for (let i = 0; i < Math.min(visible, this.paths.length); i++) {
-      const { path, coat } = this.paths[i]!;
-      const pose = fishPose(path, tSec, speed);
-      const x = W / 2 + pose.x * sx;
-      const y = H - ((pose.y - BOUNDS.yMin) / (BOUNDS.yMax - BOUNDS.yMin)) * H * 0.7 - H * 0.15;
-      const len = FISH_LENGTH * path.scale * sx * 0.8;
-      const dir = pose.hx >= 0 ? 1 : -1;
-      g.fillStyle = coat;
-      g.beginPath();
-      g.ellipse(x, y, len / 2, len / 4, 0, 0, Math.PI * 2);
-      g.fill();
-      g.beginPath();
-      g.moveTo(x - dir * (len / 2), y);
-      g.lineTo(x - dir * (len * 0.85), y - len / 5);
-      g.lineTo(x - dir * (len * 0.85), y + len / 5);
-      g.closePath();
-      g.fill();
-    }
-  }
-
-  private start(): void {
-    if (this.frameId !== null || typeof requestAnimationFrame === 'undefined') return;
-    this.startT = 0;
-    this.frameId = requestAnimationFrame((now) => this.loop(now));
-  }
-
-  private stop(): void {
-    if (this.frameId !== null) {
-      cancelAnimationFrame(this.frameId);
-      this.frameId = null;
-    }
-  }
-
-  private loop(now: number): void {
-    this.frameId = requestAnimationFrame((n) => this.loop(n));
-    if (this.startT === 0) this.startT = now;
-    this.t = now - this.startT;
-    this.draw(this.t);
-  }
-
-  private renderStill(): void {
-    this.draw(this.t);
-  }
-
-  setPaused(paused: boolean): void {
-    this.paused = paused;
-    if (paused) {
-      this.stop();
-      this.renderStill();
-    } else {
-      this.start();
-    }
-  }
-
-  resize(width: number, height: number, dpr?: number): void {
-    this.w = width;
-    this.h = height;
-    if (dpr !== undefined) this.ctxSaver.dpr = dpr;
-    this.sizeCanvas();
-    if (this.paused) this.renderStill();
-  }
-
-  applyTrack(track: ControlTrack): void {
-    this.track = track;
-    if (this.paused) this.renderStill();
-  }
-
-  renderFrame(t: number, _seed: number): void {
-    this.t = t;
-    this.draw(t);
-  }
-
-  composition(): SaverLayer[] {
-    return [
-      {
-        id: 'tank-2d',
-        label: 'Tank (2D fallback)',
-        kind: 'surface',
-        el: this.canvas,
-        description: 'Canvas-2D silhouette tank (no WebGL2)',
-      },
-    ];
-  }
-
-  dispose(): void {
-    this.stop();
-    if (this.ownsCanvas) this.canvas.remove();
-    delete this.ctxSaver.host.dataset.mqFish;
-    delete this.ctxSaver.host.dataset.mqBackend;
-  }
-}
+// ---------------------------------------------------------------------------
+// Factory — single entry point for mounting a tank.
+// ---------------------------------------------------------------------------
 
 export function mountTank(
   ctx: SaverContext,
@@ -1300,15 +543,7 @@ export function mountTank(
   tier: CapabilityTier = 'standard',
 ): SaverInstance {
   const resolved = withDefaults(space, ctx.params);
-  try {
-    const inst = new TankInstance(ctx, resolved, qualityFor(tier));
-    ctx.host.dataset.mqBackend = 'webgl2';
-    return inst;
-  } catch {
-    // No WebGL2 (headless CI, blocked GPU): never blank — 2D silhouette tank.
-    const inst = new Tank2DFallback(ctx, resolved);
-    ctx.host.dataset.mqBackend = 'canvas2d';
-    return inst;
-  }
+  const inst = new TankInstance(ctx, resolved, qualityFor(tier));
+  ctx.host.dataset.mqBackend = 'webgl2';
+  return inst;
 }
-

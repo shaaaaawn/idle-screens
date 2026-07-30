@@ -20,38 +20,10 @@ export const METAQUARIUM_PARAMS = {
   fishCount: { type: 'number', default: 1, min: 1, max: 24, ease: 'step' },
   /** Swim time-scale multiplier. */
   swimSpeed: { type: 'number', default: 1, min: 0.2, max: 3, ease: 'smooth' },
-  /** Hero behavior. 'auto' wanders with periodic greets (the fish notices
-   *  you) and rare darts; the rest force a mode: 'greet' faces the viewer up
-   *  close, 'idle' hovers, 'dart' sprints, 'goto' swims to fishTarget*. */
-  behavior: {
-    type: 'enum',
-    default: 'auto',
-    options: ['auto', 'wander', 'greet', 'idle', 'dart', 'goto'],
-  },
-  /** Steer target for behavior 'goto', normalized tank coords. */
-  fishTargetX: { type: 'number', default: 0, min: -1, max: 1, ease: 'smooth' },
-  fishTargetY: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
-  fishTargetZ: { type: 'number', default: 0, min: -1, max: 1, ease: 'smooth' },
   /** Water/atmosphere color (background + fog). */
   fogColor: { type: 'color', default: '#030009', ease: 'smooth' },
-  /** Selective bloom strength; 0 disables the composers entirely. Kept low by
-   *  default — glow, not strobe (the flash gate cares). */
-  bloomStrength: { type: 'number', default: 0.35, min: 0, max: 1.5, ease: 'smooth' },
-  /** Hero GLB used when no farm is configured (bundled-fish mode). The
-   *  default is Fish #1 of the Metaquarium (textured atlas + glow accents +
-   *  Swim clip). Steering this mid-run SWAPS the hero in place. */
-  fishUrl: { type: 'string', default: '/assets/metaquarium/hero-fish.glb' },
-  /** Hero fish by token id ("257"): resolves its model through the farm and
-   *  swaps the hero live when steered. Empty = use fishUrl. Falls back to
-   *  fishUrl when the farm or token is unavailable (never blank). */
-  fishToken: { type: 'string', default: '' },
-  /** Metaquarium farm endpoint returning `{message: {metadata: [...]}}` (or a
-   *  bare metadata array). Empty = bundled-fish mode. */
-  farmUrl: { type: 'string', default: '' },
-  /** Gateway prefix that `ipfs://` asset URLs resolve through. */
-  ipfsGateway: { type: 'string', default: 'https://ipfs.io/ipfs/' },
-  /** Comma-separated token ids to show ("42,257"). Empty = seeded selection. */
-  tankTokens: { type: 'string', default: '' },
+  /** GLB model URL for the fish (supports ipfs:// scheme). */
+  fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -83,7 +55,7 @@ export const metaquariumManifest: SaverManifest = {
   id: 'metaquarium',
   label: 'Metaquarium',
   description:
-    'A living fish tank: Metaquarium NFT fish swim seeded analytic paths through a dark, fogged, bloom-lit aquarium. The screen is a tank.',
+    'A living fish tank: skinned GLB fish swim seeded Catmull-Rom paths through a dark, fogged aquarium.',
   minBackend: 'webgl2',
   costTier: 'medium',
   motionIntensity: 'calm',
@@ -93,12 +65,12 @@ export const metaquariumManifest: SaverManifest = {
   paramSpace: METAQUARIUM_PARAMS,
   attribution: {
     source: 'Metaquarium (metaquarium.xyz) — original artwork and fish models by Shawn Partridge',
-    license: 'MIT port of first-party artwork; live fish assets stream from the Metaquarium farm',
+    license: 'MIT port of first-party artwork',
     url: 'https://metaquarium.xyz',
   },
   a11y: {
     flashSafe: true,
-    notes: 'Slow ambient swim in a dark fogged tank; low static bloom, no strobing.',
+    notes: 'Slow ambient swim in a dark fogged tank; no strobing.',
   },
 };
 

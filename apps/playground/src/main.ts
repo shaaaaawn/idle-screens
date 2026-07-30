@@ -24,6 +24,7 @@ import { escapeHtml, safeHttpUrl } from './html';
 import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
+import { buildParamsPanel } from './params-panel';
 import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
@@ -71,30 +72,16 @@ const SAVER_GROUPS: SaverGroup[] = [
 ];
 
 /**
- * Engine/harness-only metaquarium variants, deliberately OUTSIDE the groups:
- * the gallery live-mounts every grouped saver, and three extra WebGL tanks
- * (one fetching the live farm) per page load is exactly the cost tiles must
- * not pay. `?saver=metaquarium-fixture` and the e2e harness still reach them.
+ * Engine/harness-only metaquarium variant, deliberately OUTSIDE the groups:
+ * the gallery live-mounts every grouped saver, and an extra WebGL tank per
+ * page load is exactly the cost tiles must not pay. `?saver=metaquarium-school`
+ * and the e2e harness still reach it.
  */
 const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
-    id: 'metaquarium-farm',
-    label: 'Metaquarium (Live Farm)',
-    params: { farmUrl: '/farm/y2k/stream/cache', bloomStrength: 0.45 },
-  }),
-  createMetaquarium({
-    id: 'metaquarium-fixture',
-    label: 'Metaquarium (Fixture)',
-    params: {
-      farmUrl: '/assets/metaquarium/farm-fixture.json',
-      ipfsGateway: '/assets/metaquarium/',
-      fishCount: 3,
-    },
-  }),
-  createMetaquarium({
-    id: 'metaquarium-greet',
-    label: 'Metaquarium (Greet)',
-    params: { behavior: 'greet' },
+    id: 'metaquarium-school',
+    label: 'Metaquarium (School)',
+    params: { fishCount: 6 },
   }),
 ];
 
@@ -670,12 +657,17 @@ function liveMode(): void {
     const { debug, perception, layers } = right;
     const { timeline } = bottom;
 
+    const devParams = buildParamsPanel(right.params, timeline);
+    devParams.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
+
+    timeline.onTrackChange = () => devParams.refresh();
+
     let percThrottleId = 0;
     let pendingT = 0;
     timeline.onTimeChange = (t) => {
       pendingT = t;
       if (percThrottleId) return;
-      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); }, 250);
+      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); devParams.refresh(); }, 250);
     };
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
@@ -724,6 +716,7 @@ function liveMode(): void {
       history.replaceState(null, '', url);
       rebuild(cfg);
       devProps.select(saver);
+      devParams.select(saver);
       setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
@@ -810,6 +803,7 @@ function liveMode(): void {
         }
         requestAnimationFrame(() => {
           devProps.refresh();
+          devParams.refresh();
           debug.setContext(previewCtx);
         });
       }).catch(() => { /* superseded by a newer selection */ });

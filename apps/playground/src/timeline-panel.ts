@@ -1,4 +1,4 @@
-import type { ControlTrack, Ease, ParamDelta, ParamSpace, SaverPlugin, SaverInstance } from '@idle-screens/core';
+import type { ControlTrack, Ease, ParamDelta, ParamSpace, ParamValue, SaverPlugin, SaverInstance } from '@idle-screens/core';
 import { sampleTrack } from '@idle-screens/core';
 import {
   buildTimelineProfile,
@@ -12,6 +12,10 @@ export interface TimelineHandle {
   setSaver(saver: SaverPlugin, instance: SaverInstance | null, seed?: number): void;
   loadTrack(track: ControlTrack): void;
   onTimeChange: ((t: number) => void) | null;
+  /** Insert/update a param delta at the current playhead time. */
+  setParam(path: string, value: ParamValue): void;
+  /** Current playhead time in ms. */
+  currentTime(): number;
   /** Play/pause the inline preview — the same action as the transport button. */
   togglePlay(): void;
   isPlaying(): boolean;
@@ -21,6 +25,7 @@ export interface TimelineHandle {
    * never disagree about whether the preview is running.
    */
   onPlayingChange: ((playing: boolean) => void) | null;
+  onTrackChange: ((track: ControlTrack) => void) | null;
 }
 
 /** Smallest window the time axis may zoom to — below this, keys overlap anyway. */
@@ -269,6 +274,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     updateValues();
     syncPreview(playheadT);
     syncEditControls();
+    trackChangeCallback?.(track);
   };
 
   // ---- rendering ---------------------------------------------------------
@@ -297,11 +303,21 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     syncPreview(playheadT);
   };
 
+  const autoFitHeight = (): void => {
+    const devView = section.closest('#view-dev') as HTMLElement | null;
+    if (!devView) return;
+    const laneCount = currentProfile?.lanes.length ?? 0;
+    const ideal = 29 + 19 + laneCount * 21 + 4;
+    const maxPx = Math.max(180, window.innerHeight * 0.2);
+    devView.style.setProperty('--bottom', `${clamp(ideal, 140, maxPx)}px`);
+  };
+
   const refresh = (): void => {
     if (!currentProfile || !currentSaver) return;
     renderTimeAxis();
     updateChannels();
     updateValues();
+    autoFitHeight();
     modeBadge.textContent = modeLabel(currentProfile.mode);
     modeBadge.title =
       currentProfile.mode === 'track'
@@ -403,7 +419,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
           dot.dataset.t = String(d.t);
           dot.tabIndex = editable ? 0 : -1;
           dot.title = editable
-            ? `t=${d.t}ms v=${String(d.value)} ease=${d.ease ?? 'step'}\nDrag to retime · click to select · E cycles ease · Del removes`
+            ? `t=${d.t}ms v=${String(d.value)} ease=${d.ease ?? 'step'}\nDrag to retime · V edit value · E cycle ease · D duplicate · Del remove · right-click for menu`
             : `t=${d.t}ms v=${String(d.value)} ease=${d.ease ?? 'step'}`;
           if (selected?.path === lane.key && selected.index === idx) dot.classList.add('is-selected');
           track.append(dot);
@@ -509,6 +525,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
   // ---- scrubbing ---------------------------------------------------------
   let timeChangeCallback: ((t: number) => void) | null = null;
   let playingChangeCallback: ((p: boolean) => void) | null = null;
+  let trackChangeCallback: ((track: ControlTrack) => void) | null = null;
 
   const scrubTo = (t: number): void => {
     const dur = currentProfile?.duration ?? 0;
@@ -603,6 +620,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
   /** Double-click an empty spot on a param lane to key the current value there. */
   channelsEl.addEventListener('dblclick', (e) => {
     if (currentProfile?.mode !== 'track') return;
+    if ((e.target as HTMLElement).closest('.tl-keyframe')) return;
     const laneTrack = (e.target as HTMLElement).closest<HTMLElement>('.tl-lane-track');
     if (!laneTrack?.dataset.lane) return;
     const space = currentSaver?.manifest.paramSpace as ParamSpace | undefined;
@@ -637,14 +655,193 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     commitEdit(track);
   };
 
-  /** Edit the selected key's value from the lane's value cell. */
+  /** Prompt-edit a delta's value, reused by context menu, double-click, V key. */
+  const editDeltaValue = (path: string, index: number): void => {
+    const track = ownTrack();
+    if (!track) return;
+    const space = currentSaver?.manifest.paramSpace as ParamSpace | undefined;
+    const def = space?.[path];
+    if (!def) return;
+    const delta = track.deltas[index];
+    if (!delta) return;
+    const current = String(delta.value);
+    const next = window.prompt(`${path} value`, current);
+    if (next == null) return;
+    const value = def.type === 'number' ? Number(next) : def.type === 'bool' ? next === 'true' : next;
+    if (def.type === 'number' && Number.isNaN(value as number)) return;
+    delta.value = value;
+    commitEdit(track);
+  };
+
+  /** Prompt-edit a delta's time. */
+  const editDeltaTime = (index: number): void => {
+    const track = ownTrack();
+    if (!track) return;
+    const delta = track.deltas[index];
+    if (!delta) return;
+    const current = String(delta.t);
+    const next = window.prompt('Time (ms)', current);
+    if (next == null) return;
+    const t = Math.round(Number(next));
+    if (Number.isNaN(t) || t < 0) return;
+    delta.t = clamp(t, 0, currentProfile?.duration ?? t);
+    commitEdit(track);
+    scrubTo(delta.t);
+  };
+
+  /** Duplicate a delta, offset by 500ms. */
+  const duplicateDelta = (index: number): void => {
+    const track = ownTrack();
+    if (!track) return;
+    const delta = track.deltas[index];
+    if (!delta) return;
+    const dur = currentProfile?.duration ?? 0;
+    const newT = clamp(delta.t + 500, 0, dur);
+    track.deltas.push({ ...structuredClone(delta), t: newT });
+    selected = { path: delta.path, index: track.deltas.length - 1 };
+    commitEdit(track);
+    scrubTo(newT);
+  };
+
+  /** Edit the selected key's value (V key or context menu). */
+  const editSelectedValue = (): void => {
+    if (!selected || selected.index < 0 || currentProfile?.mode !== 'track') return;
+    editDeltaValue(selected.path, selected.index);
+  };
+
+  // ---- context menu -------------------------------------------------------
+  let ctxMenu: HTMLElement | null = null;
+
+  const closeContextMenu = (): void => {
+    ctxMenu?.remove();
+    ctxMenu = null;
+  };
+
+  const ctxItem = (label: string, shortcut: string, action: () => void, danger = false): HTMLButtonElement => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    if (danger) btn.className = 'tl-ctx-danger';
+    if (shortcut) {
+      const sc = document.createElement('span');
+      sc.className = 'tl-ctx-shortcut';
+      sc.textContent = shortcut;
+      btn.append(label, sc);
+    } else {
+      btn.textContent = label;
+    }
+    btn.addEventListener('click', () => { closeContextMenu(); action(); });
+    return btn;
+  };
+
+  const showContextMenu = (x: number, y: number, path: string, index: number): void => {
+    closeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'tl-context-menu';
+
+    const track = ownTrack();
+    const delta = track?.deltas[index];
+    const ease = delta?.ease ?? 'step';
+
+    menu.append(
+      ctxItem('Edit value…', 'V', () => editDeltaValue(path, index)),
+      ctxItem('Edit time…', '', () => editDeltaTime(index)),
+    );
+
+    const hr1 = document.createElement('hr');
+    menu.append(hr1);
+
+    for (const e of EASES) {
+      const label = e === ease ? `✓ Ease: ${e}` : `  Ease: ${e}`;
+      menu.append(ctxItem(label, e === ease ? 'E' : '', () => {
+        if (!track || !delta) return;
+        delta.ease = e;
+        commitEdit(track);
+      }));
+    }
+
+    const hr2 = document.createElement('hr');
+    menu.append(hr2);
+    menu.append(ctxItem('Duplicate', 'D', () => duplicateDelta(index)));
+    menu.append(ctxItem('Delete', 'Del', () => {
+      selected = { path, index };
+      removeSelectedKey();
+    }, true));
+
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    document.body.append(menu);
+
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = `${x - rect.width}px`;
+    if (rect.bottom > window.innerHeight) menu.style.top = `${y - rect.height}px`;
+
+    ctxMenu = menu;
+  };
+
+  document.addEventListener('pointerdown', (e) => {
+    if (ctxMenu && !ctxMenu.contains(e.target as Node)) closeContextMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && ctxMenu) { closeContextMenu(); e.stopPropagation(); }
+  }, true);
+
+  channelsEl.addEventListener('contextmenu', (e) => {
+    if (currentProfile?.mode !== 'track') return;
+
+    const dot = (e.target as HTMLElement).closest<HTMLElement>('.tl-keyframe');
+    if (dot) {
+      e.preventDefault();
+      const path = dot.dataset.path!;
+      const index = Number(dot.dataset.index);
+      selected = { path, index };
+      channelsEl.querySelectorAll('.tl-keyframe.is-selected').forEach((n) => n.classList.remove('is-selected'));
+      dot.classList.add('is-selected');
+      showContextMenu(e.clientX, e.clientY, path, index);
+      return;
+    }
+
+    const laneTrack = (e.target as HTMLElement).closest<HTMLElement>('.tl-lane-track');
+    if (laneTrack?.dataset.lane) {
+      e.preventDefault();
+      const space = currentSaver?.manifest.paramSpace as ParamSpace | undefined;
+      const path = laneTrack.dataset.lane;
+      if (!space?.[path]) return;
+      const track = ownTrack();
+      if (!track) return;
+      const t = clamp(Math.round(timeAtClientX(e.clientX) / SNAP_MS) * SNAP_MS, 0, currentProfile.duration);
+      const value = sampleTrack(space, track, t)[path] ?? space[path]!.default;
+
+      const menu = document.createElement('div');
+      menu.className = 'tl-context-menu';
+      menu.append(ctxItem(`Add keyframe at ${(t / 1000).toFixed(2)}s`, '', () => {
+        track.deltas.push({ t, path, value, ease: space[path]!.ease ?? 'linear' });
+        commitEdit(track);
+        scrubTo(t);
+      }));
+      menu.style.left = `${e.clientX}px`;
+      menu.style.top = `${e.clientY}px`;
+      document.body.append(menu);
+      const rect = menu.getBoundingClientRect();
+      if (rect.right > window.innerWidth) menu.style.left = `${e.clientX - rect.width}px`;
+      if (rect.bottom > window.innerHeight) menu.style.top = `${e.clientY - rect.height}px`;
+      ctxMenu = menu;
+    }
+  });
+
+  /** Double-click a keyframe dot to edit its value. */
   channelsEl.addEventListener('dblclick', (e) => {
+    const dot = (e.target as HTMLElement).closest<HTMLElement>('.tl-keyframe');
+    if (dot && currentProfile?.mode === 'track') {
+      e.stopPropagation();
+      editDeltaValue(dot.dataset.path!, Number(dot.dataset.index));
+      return;
+    }
+
     const cell = (e.target as HTMLElement).closest<HTMLElement>('.tl-lane-value');
     if (!cell || currentProfile?.mode !== 'track') return;
     const path = cell.dataset.lane!;
     const track = ownTrack();
     if (!track) return;
-    // Edit the key at the playhead if there is one; otherwise key a new value.
     const at = track.deltas.findIndex((d) => d.path === path && Math.abs(d.t - playheadT) < 1);
     const current = cell.textContent ?? '';
     const next = window.prompt(`${path} at ${(playheadT / 1000).toFixed(2)}s`, current);
@@ -829,6 +1026,11 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
       case '+': case '=': e.preventDefault(); zoomAbout(playheadT, 1 / 1.4); break;
       case '-': case '_': e.preventDefault(); zoomAbout(playheadT, 1.4); break;
       case 'e': case 'E': e.preventDefault(); cycleSelectedEase(); break;
+      case 'v': case 'V': e.preventDefault(); editSelectedValue(); break;
+      case 'd': case 'D':
+        e.preventDefault();
+        if (selected && selected.index >= 0) duplicateDelta(selected.index);
+        break;
       case 'Delete': case 'Backspace': e.preventDefault(); removeSelectedKey(); break;
       default: break;
     }
@@ -866,6 +1068,23 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
       if (currentInstance) startPlay();
     },
 
+    setParam(path: string, value: ParamValue) {
+      if (!currentProfile || currentProfile.mode !== 'track') return;
+      const track = ownTrack();
+      if (!track) return;
+      const space = currentSaver?.manifest.paramSpace as ParamSpace | undefined;
+      if (!space?.[path]) return;
+      const existing = track.deltas.find((d) => d.path === path && d.t === playheadT);
+      if (existing) {
+        existing.value = value;
+      } else {
+        track.deltas.push({ t: playheadT, path, value, ease: space[path]!.ease ?? 'step' });
+      }
+      commitEdit(track);
+    },
+
+    currentTime: () => playheadT,
+
     togglePlay,
     isPlaying: () => playing,
 
@@ -873,5 +1092,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     set onTimeChange(cb: ((t: number) => void) | null) { timeChangeCallback = cb; },
     get onPlayingChange() { return playingChangeCallback; },
     set onPlayingChange(cb: ((p: boolean) => void) | null) { playingChangeCallback = cb; },
+    get onTrackChange() { return trackChangeCallback; },
+    set onTrackChange(cb: ((track: ControlTrack) => void) | null) { trackChangeCallback = cb; },
   };
 }

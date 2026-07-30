@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "playground",
+      "name": "mq-playground",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite"],
-      "autoPort": true,
+      "runtimeArgs": ["vite", "--port", "5299"],
+      "port": 5299,
       "cwd": "apps/playground"
     }
   ]
