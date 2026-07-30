@@ -3,7 +3,7 @@ import type { Rng } from './rng';
 /** How a parameter interpolates between control-track deltas. */
 export type Ease = 'step' | 'linear' | 'smooth';
 
-export type ParamType = 'number' | 'color' | 'bool' | 'enum';
+export type ParamType = 'number' | 'color' | 'bool' | 'enum' | 'string';
 export type ParamValue = number | string | boolean;
 
 /** One typed, ranged, interpolatable knob: an agent's steering surface. */
@@ -66,6 +66,10 @@ export interface SaverContext {
   /** Seeded PRNG. Use this, never Math.random(), for determinism. */
   rng: Rng;
   seed: number;
+  /** Initial paramSpace overrides for this mount (e.g. a channel's published
+   *  `{id, params}` scene). Savers treat these as the new defaults; live
+   *  steering via applyTrack still layers on top. Optional. */
+  params?: Record<string, ParamValue>;
   reducedMotion: boolean;
   /** Present for passthrough savers (over the live page). */
   page?: PageContext;
@@ -184,6 +188,11 @@ export interface IdleScreensConfig {
   disableOnLocalhost: boolean;
   /** Which registered saver to show. */
   defaultPluginId: string;
+  /** Saver to mount when the ACTIVE saver faults at runtime (throws in its
+   *  loop, loses its GL context and errors, etc.). The screen must stay a
+   *  screen: on fault the element swaps to this saver (e.g. 'bsod'), and if
+   *  it too fails, to a built-in DOM fault screen. Optional. */
+  crashSaverId?: string;
   /** How to pick across sleeps. */
   selection: 'fixed' | 'random' | 'rotate';
   /** Show the clock chrome (non-passthrough savers only). */

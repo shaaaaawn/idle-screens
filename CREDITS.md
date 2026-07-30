@@ -41,6 +41,7 @@ The following savers are original to this project:
 | Tide | Passthrough water saver: a rising wave field whose analytic Jacobian is handed to each page block as a real affine transform, so live content shears and refracts rather than merely translating. Buoyant blocks raft on the surface; heavy ones sink out of focus. Original. |
 | Limelight | Passthrough theatre-light saver. A roaming key light gives each page block a height, stands it off the page with parallax, and casts its silhouette across the stage — and blocks dim each other by standing in the way, so the content occludes itself. Original. |
 | Catwalk | Passthrough cat saver. A silhouette cat parkours across the page's blocks on a seeded itinerary — perches dip and ring under its landings, sag while it sits, and it naps on the ones it likes. Original. |
+| Metaquarium | three.js aquarium port of Metaquarium (metaquarium.xyz), Shawn Partridge's NFT fish-tank artwork. Live NFT fish stream from the Metaquarium farm over IPFS with their authored materials; the bundled breed wears seeded Miami-Vice palette coats. First-party artwork; MIT port. |
 | Slipstream | Passthrough wind saver: the page's blocks are obstacles in an analytic potential-flow field — streamlines thread between the content and part around it, and blocks lean with the local deflected wind, hinged at their base like grass. The page is the boundary condition. Original. |
 | Warp | Starfield warp effect. Original canvas2d implementation. |
 | Pipes | 3D pipe growth. Original canvas2d implementation. |

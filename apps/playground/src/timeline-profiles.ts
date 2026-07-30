@@ -4,6 +4,7 @@ import { demoTrack as tideDemo } from '@idle-screens/saver-tide';
 import { demoTrack as limelightDemo } from '@idle-screens/saver-limelight';
 import { demoTrack as slipstreamDemo } from '@idle-screens/saver-slipstream';
 import { demoTrack as catwalkDemo } from '@idle-screens/saver-catwalk';
+import { demoTrack as metaquariumDemo } from '@idle-screens/saver-metaquarium';
 import { messagesDemoTrack, dvdDemoTrack, warpDemoTrack, globeDemoTrack, fadeOutDemoTrack, flurryDemoTrack, pipesDemoTrack, mystifyDemoTrack } from '@idle-screens/savers-classic';
 
 export const PREVIEW_DURATION_MS = 6000;
@@ -20,6 +21,7 @@ const DEMO_TRACKS: Record<string, ControlTrack> = {
   limelight: limelightDemo,
   slipstream: slipstreamDemo,
   catwalk: catwalkDemo,
+  metaquarium: metaquariumDemo,
   messages: messagesDemoTrack,
   dvd: dvdDemoTrack,
   warp: warpDemoTrack,

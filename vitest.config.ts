@@ -28,6 +28,7 @@ export default defineConfig({
         'packages/saver-limelight/src/**/*.ts',
         'packages/saver-slipstream/src/**/*.ts',
         'packages/saver-catwalk/src/**/*.ts',
+        'packages/saver-metaquarium/src/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',
@@ -45,6 +46,11 @@ export default defineConfig({
         'packages/saver-limelight/src/index.ts',
         'packages/saver-slipstream/src/index.ts',
         'packages/saver-catwalk/src/index.ts',
+        'packages/saver-metaquarium/src/index.ts',
+        // WebGL renderer + async mount wiring — unit-hostile; covered by
+        // playground e2e (metaquarium.spec.ts) in a real browser.
+        'packages/saver-metaquarium/src/tank.ts',
+        'packages/saver-metaquarium/src/metaquarium.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
@@ -151,6 +157,15 @@ export default defineConfig({
           branches: 81,
           functions: 78,
           lines: 88,
+        },
+        // saver-metaquarium (pure modules only — tank.ts/metaquarium.ts are
+        // WebGL + async mount wiring, excluded above and covered by e2e):
+        // measured 2026-07-29 → 100 / 92.59 / 100 / 100; gate at −2.
+        'packages/saver-metaquarium/src/**': {
+          statements: 98,
+          branches: 90,
+          functions: 98,
+          lines: 98,
         },
       },
     },

@@ -103,6 +103,14 @@ describe('sampleTrack', () => {
     expect(sampleTrack(espace, et, 100).e).toBe('b');
   });
 
+  it('C11b: string params switch at the delta, no blending', () => {
+    const sspace: ParamSpace = { s: { type: 'string', default: '0xabc', ease: 'linear' } };
+    const st = track([{ t: 100, path: 's', value: '0xdef' }]);
+    expect(sampleTrack(sspace, st, 50).s).toBe('0xabc');
+    expect(sampleTrack(sspace, st, 100).s).toBe('0xdef');
+    expect(sampleTrack(sspace, st, 9999).s).toBe('0xdef');
+  });
+
   it('C12: loop + duration wraps t; no wrap without both', () => {
     const t = track([{ t: 0, path: 'x', value: 0 }, { t: 1000, path: 'x', value: 10 }]);
     const looped = track(t.deltas, { loop: true, duration: 1000 });
