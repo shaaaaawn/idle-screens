@@ -5,6 +5,7 @@ import {
   distanceAt,
   swimPoseAt,
   swimPoseAtDistance,
+  type SwimPlan,
   type TankBounds,
 } from './plan';
 
@@ -74,5 +75,20 @@ describe('swim plan', () => {
       const { roll } = swimPoseAt(plan, t, 1.5);
       expect(Math.abs(roll)).toBeLessThanOrEqual(0.35 + 1e-6);
     }
+  });
+
+  it('degenerate plan (coincident points) returns a finite pose', () => {
+    const pts: Array<[number, number, number]> = Array.from({ length: 8 }, () => [0, 40, 0]);
+    const arc = new Float32Array(1025);
+    const plan: SwimPlan = {
+      points: pts,
+      arc,
+      totalLength: 1,
+      cruise: 1,
+      wobble: [],
+    };
+    const pose = swimPoseAtDistance(plan, 0.5);
+    expect(Number.isFinite(pose.x)).toBe(true);
+    expect(Number.isFinite(pose.fx)).toBe(true);
   });
 });

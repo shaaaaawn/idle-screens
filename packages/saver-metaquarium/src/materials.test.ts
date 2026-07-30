@@ -89,4 +89,27 @@ describe('metaquarium material contract', () => {
     (glow.material as MeshStandardMaterial).name = 'fin2';
     expect(eyeNoseSign(root, 'x')).toBe(0);
   });
+
+  it('eyeNoseSign supports z axis', () => {
+    const { root, eyes } = npcFish();
+    eyes.position.z = 5;
+    expect(eyeNoseSign(root, 'z')).toBe(1);
+  });
+
+  it('applyNpcMaterials handles multi-material meshes', () => {
+    const geo = new SphereGeometry(1, 4, 4);
+    const mat1 = new MeshStandardMaterial({ name: 'VICE-body' });
+    mat1.name = 'VICE-body';
+    const mat2 = new MeshStandardMaterial({ name: 'GLOW-fin' });
+    mat2.name = 'GLOW-fin';
+    const mesh = new Mesh(geo, [mat1, mat2]);
+    const root = new Group();
+    root.add(mesh);
+    applyNpcMaterials(root, createRng(7).fork(1));
+    expect(Array.isArray(mesh.material)).toBe(true);
+    const mats = mesh.material as MeshBasicMaterial[];
+    expect(mats).toHaveLength(2);
+    expect(mats[0]).toBeInstanceOf(MeshBasicMaterial);
+    expect(mats[1]).toBeInstanceOf(MeshBasicMaterial);
+  });
 });

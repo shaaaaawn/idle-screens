@@ -72,6 +72,7 @@ interface FishTemplate {
   yaw: number;
 }
 
+const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,16 @@ class TankInstance implements SaverInstance {
     for (const f of this.fish) {
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
+      f.group.traverse((o) => {
+        const mesh = o as Partial<Mesh>;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const mats: Material[] = Array.isArray(mesh.material)
+          ? mesh.material
+          : mesh.material
+          ? [mesh.material]
+          : [];
+        for (const m of mats) m.dispose();
+      });
     }
     this.fish = [];
     this.activeFishUrl = url;
@@ -262,6 +273,10 @@ class TankInstance implements SaverInstance {
           return null;
         }
       })();
+      if (TEMPLATE_CACHE.size >= TEMPLATE_CACHE_CAP) {
+        const oldest = TEMPLATE_CACHE.keys().next().value;
+        if (oldest !== undefined) TEMPLATE_CACHE.delete(oldest);
+      }
       TEMPLATE_CACHE.set(key, p);
     }
     return p;
@@ -445,6 +460,9 @@ class TankInstance implements SaverInstance {
     this.frameTimes = [];
     if (median > 21 && this.govScale > 0.56) {
       this.govScale *= 0.8;
+      this.applyPr();
+    } else if (median < 14 && this.govScale < 1) {
+      this.govScale = Math.min(1, this.govScale * 1.15);
       this.applyPr();
     }
   }
