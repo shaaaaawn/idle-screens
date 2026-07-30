@@ -27,7 +27,11 @@ final class AppState {
 
     var pairedScreens: [PairedScreen] = []
     var isPairing = false
+    /// Failure pushing a channel to an already-paired screen.
     var pairPushError: String?
+    /// Failure claiming a pair code. Separate from `pairPushError` so a failed
+    /// push doesn't surface as a stale error inside "Add a screen".
+    var pairClaimError: String?
 
     init() {
         let baseURL = URL(string: Config.baseURL)!

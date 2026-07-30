@@ -18,6 +18,7 @@ import { adviseSpec } from './advise';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import {
   alphaAt,
+  breakTextBlock,
   buildEntities,
   headingAt,
   lifeAlphaAt,
@@ -138,6 +139,33 @@ function textBox(
     cy: baseline === 'top' ? p.y + fh * 0.6 : baseline === 'bottom' ? p.y - fh * 0.6 : p.y,
     halfX: fw / 2,
     halfY: fh * 0.6,
+  };
+}
+
+function textBlockBox(
+  s: Extract<LayerSpec['sprite'], { kind: 'textBlock' }>,
+  _e: Entity,
+  p: { x: number; y: number },
+  w: number,
+  h: number,
+): { cx: number; cy: number; halfX: number; halfY: number } {
+  const unitScale = Math.min(w, h);
+  const fsPx = s.fontSize * unitScale;
+  const lh = (s.lineHeight ?? 1.4) * fsPx;
+  const maxWPx = s.maxWidth * unitScale;
+  const maxWEm = maxWPx / fsPx;
+  const lines = breakTextBlock(s.text, maxWEm);
+  const totalH = lines.length * lh;
+  const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+  const align = s.align ?? 'left';
+  const cx = align === 'center' ? p.x + maxWPx / 2
+    : align === 'right' ? p.x + maxWPx - maxLineW / 2
+    : p.x + maxLineW / 2;
+  return {
+    cx,
+    cy: p.y + totalH / 2,
+    halfX: maxLineW / 2,
+    halfY: totalH / 2,
   };
 }
 
@@ -316,6 +344,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         centerY = box.cy;
         halfX = box.halfX;
         halfY = box.halfY;
+      } else if (s.kind === 'textBlock') {
+        const box = textBlockBox(s, e, p, w, h);
+        centerX = box.cx;
+        centerY = box.cy;
+        halfX = box.halfX;
+        halfY = box.halfY;
       }
       const circular = s.kind === 'circle' || s.kind === 'ring';
       const soft = s.kind === 'circle' && !!s.soft;
@@ -331,7 +365,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const r0 = Math.max(0, Math.floor((centerY - reachY) / cellH));
       const r1 = Math.min(rows - 1, Math.floor((centerY + reachY) / cellH));
       // Glyphs don't fill their box — ink is sparse.
-      const inkWeight = s.kind === 'text' || s.kind === 'emoji' ? 0.55 : 1;
+      const inkWeight = s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
@@ -563,6 +597,13 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
   const t = opts.t ?? 5000;
   const out: TextSpriteInfo[] = [];
   scene.layers.forEach(({ layer, entities }, layerIndex) => {
+    if (layer.sprite.kind === 'textBlock') {
+      const s = layer.sprite;
+      const unitScale = Math.min(scene.w, scene.h);
+      const sizePx = s.fontSize * unitScale;
+      out.push({ layerIndex, key: layer.key, strings: [s.text], count: entities.length, sizePx: Math.round(sizePx) });
+      return;
+    }
     if (layer.sprite.kind !== 'text') return;
     const s = layer.sprite;
     const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
@@ -645,7 +686,10 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 });
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55; // sparse glyph ink
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
+      } else if (s.kind === 'textBlock') {
+        const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;

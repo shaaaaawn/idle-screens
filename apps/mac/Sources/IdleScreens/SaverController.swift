@@ -36,6 +36,11 @@ final class SaverController: NSObject, WKNavigationDelegate {
   /// Per-display saver overrides, keyed by display id (NSScreenNumber). A
   /// display absent here follows the global pinned/cycle saver.
   var perDisplaySaver: [String: String] = [:]
+
+  /// Per-display channel overrides, keyed by `displayKey`. A display listed
+  /// here shows that channel; every other display still runs bundled savers,
+  /// so "channel on the TV, savers on the laptop" is a valid state.
+  var perDisplayChannelURL: [String: URL] = [:]
   /// Overlay brightness 0..1 for night mode (1 = full). Passed to the engine.
   var brightness: Double = 1.0
   /// Favorited saver ids. When non-empty, cycle/browse draw only from these.
@@ -70,6 +75,8 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
   // Per-session coordination state.
   private var sessionSeed: UInt32 = 0
+  /// Non-nil while the current session is pinned to one display.
+  private var sessionDisplayKey: String?
   private var currentIndex = 0
   private var lastBrowseAt = Date.distantPast
   /// Mouse movement only wakes once the machine has genuinely gone idle.
@@ -104,16 +111,23 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
   // MARK: - Show / dismiss
 
-  func show() {
+  /// `onlyDisplay` limits the session to one display (its `displayKey`) —
+  /// "play this channel on that monitor" without blacking out the others.
+  /// Input anywhere still dismisses the whole session; the wake monitors are
+  /// app-wide by design, so a single-display overlay is not a background mode.
+  func show(onlyDisplay: String? = nil) {
     guard !isShowing else { return }
     isShowing = true
+    sessionDisplayKey = onlyDisplay
 
     // One seed + one saver choice for the whole session, shared by every
     // display so a multi-monitor setup shows the same thing in sync.
     sessionSeed = UInt32.random(in: 0...UInt32.max)
     pool = buildPool()
     currentIndex = startIndex()
-    NSLog("[idle-screens] saver show: \(NSScreen.screens.count) screen(s), saver=\(currentSaverId ?? "channel")")
+    NSLog(
+      "[idle-screens] saver show: \(sessionScreens.count) screen(s)"
+        + (onlyDisplay == nil ? "" : " (single display)"))
 
     buildWindows()
     NSApp.activate(ignoringOtherApps: true)
@@ -132,6 +146,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
   @objc func dismiss() {
     guard isShowing else { return }
     isShowing = false
+    sessionDisplayKey = nil
     NSLog("[idle-screens] saver dismiss")
 
     removeWakeMonitors()
@@ -168,8 +183,16 @@ final class SaverController: NSObject, WKNavigationDelegate {
     buildWindows()
   }
 
+  /// The screens this session covers — all of them, or just the one the user
+  /// targeted. Recomputed on hotplug so a single-display session isn't
+  /// silently promoted to every display by `screensChanged()`.
+  private var sessionScreens: [NSScreen] {
+    guard let key = sessionDisplayKey else { return NSScreen.screens }
+    return NSScreen.screens.filter { Self.displayKey($0) == key }
+  }
+
   private func buildWindows() {
-    for screen in NSScreen.screens {
+    for screen in sessionScreens {
       let window = makeWindow(for: screen)
       windows.append(window)
       fadeIn(window)
@@ -183,16 +206,21 @@ final class SaverController: NSObject, WKNavigationDelegate {
     SaverSelection.buildPool(catalogIds: catalogIds, hidden: hidden, favorites: favorites)
   }
 
-  /// The global saver id (pinned or current cycle position); nil in channel mode.
+  /// What a given display should load: its own channel if one is assigned,
+  /// else the global channel, else nil (bundled savers).
+  func channelURL(forDisplay key: String) -> URL? {
+    perDisplayChannelURL[key] ?? channelURL
+  }
+
+  /// The global saver id (pinned or current cycle position).
   private var currentSaverId: String? {
-    guard channelURL == nil else { return nil }
-    return SaverSelection.saverAt(pool: pool, index: currentIndex)
+    SaverSelection.saverAt(pool: pool, index: currentIndex)
   }
 
   /// Resolve the saver id for a specific display: its per-display override if
-  /// set, otherwise the global saver. nil in channel mode.
+  /// set, otherwise the global saver. nil when that display is in channel mode.
   private func saverId(forDisplay key: String) -> String? {
-    guard channelURL == nil else { return nil }
+    guard channelURL(forDisplay: key) == nil else { return nil }
     return SaverSelection.saverId(
       forDisplay: key,
       perDisplayOverride: perDisplaySaver[key],
@@ -211,8 +239,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
   private func startCycle() {
     stopCycle()
-    // Only cycle for the bundled engine, when not pinned, with a positive period.
-    guard channelURL == nil, pinnedSaver == nil, cycleSeconds > 0, pool.count > 1
+    // Only cycle for the bundled engine, when not pinned, with a positive
+    // period — and only if some display is actually running bundled savers.
+    guard pinnedSaver == nil, cycleSeconds > 0, pool.count > 1,
+      overlays.contains(where: \.followsGlobal)
     else { return }
     let t = Timer(timeInterval: cycleSeconds, repeats: true) { [weak self] _ in
       guard let self else { return }
@@ -239,7 +269,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
   /// Push docker/container/MCP/dev-server activity into every overlay while
   /// showing. First push waits for the page to load; then refresh periodically.
   private func startActivityUpdates() {
-    guard showActivity, channelURL == nil else { return }
+    // Skip entirely when every display is on a channel — the HUD bridge only
+    // exists in the bundled page.
+    guard showActivity, overlays.contains(where: { channelURL(forDisplay: $0.key) == nil })
+    else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
       self?.pushActivity()
     }
@@ -265,7 +298,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
       else { return }
       let js =
         "window.__idleScreensMac && window.__idleScreensMac.setActivity && window.__idleScreensMac.setActivity(\(json))"
-      for overlay in self.overlays {
+      for overlay in self.overlays where self.channelURL(forDisplay: overlay.key) == nil {
         overlay.webView.evaluateJavaScript(js, completionHandler: nil)
       }
     }
@@ -290,15 +323,19 @@ final class SaverController: NSObject, WKNavigationDelegate {
 
     let key = Self.displayKey(screen)
     let resolvedId = saverId(forDisplay: key)
-    let follows = channelURL != nil || perDisplaySaver[key]?.isEmpty != false
-      || !catalogIds.contains(perDisplaySaver[key] ?? "")
-    let webView = makeWebView(frame: NSRect(origin: .zero, size: screen.frame.size), saverId: resolvedId)
+    let channel = channelURL(forDisplay: key)
+    // A display showing a channel follows nothing — the cycle timer must not
+    // try to swap savers underneath it.
+    let follows = channel == nil
+      && (perDisplaySaver[key]?.isEmpty != false || !catalogIds.contains(perDisplaySaver[key] ?? ""))
+    let webView = makeWebView(
+      frame: NSRect(origin: .zero, size: screen.frame.size), saverId: resolvedId, channel: channel)
     overlays.append(Overlay(key: key, webView: webView, followsGlobal: follows))
     window.contentView = webView
     return window
   }
 
-  private func makeWebView(frame: NSRect, saverId: String?) -> WKWebView {
+  private func makeWebView(frame: NSRect, saverId: String?, channel: URL?) -> WKWebView {
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
     let webView = WKWebView(frame: frame, configuration: config)
@@ -309,8 +346,8 @@ final class SaverController: NSObject, WKNavigationDelegate {
       webView.isInspectable = true
     }
 
-    if let channelURL {
-      webView.load(URLRequest(url: channelURL))
+    if let channel {
+      webView.load(URLRequest(url: channel))
     } else {
       loadBundled(into: webView, saverId: saverId)
     }
@@ -354,7 +391,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
   }
 
   private func handleLoadFailure(_ webView: WKWebView, _ error: Error) {
-    if channelURL != nil {
+    // Per display: only the overlay that was showing a channel falls back to
+    // bundled savers; the others were never on a channel to begin with.
+    let key = overlays.first(where: { $0.webView === webView })?.key
+    if let key, channelURL(forDisplay: key) != nil {
       channelFallback(webView, error)
       return
     }
@@ -390,10 +430,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
     }
   }
   private func channelFallback(_ webView: WKWebView, _ error: Error) {
-    guard channelURL != nil, webView.url?.isFileURL != true else { return }
+    guard webView.url?.isFileURL != true else { return }
     NSLog("[idle-screens] channel load failed (\(error.localizedDescription)); using bundled")
-    // channelURL is set, so saverId(forDisplay:) returns nil — force a global
-    // saver choice for the fallback.
+    // This display is in channel mode, so saverId(forDisplay:) returns nil —
+    // force a global saver choice for the fallback.
     if pool.isEmpty { pool = buildPool() }
     currentIndex = startIndex()
     let fallbackId = pool.isEmpty ? nil : pool[currentIndex % pool.count]
@@ -404,9 +444,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
   // that overlay so the screen self-heals instead of showing black.
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
     NSLog("[idle-screens] web content process terminated; reloading overlay")
-    if let channelURL {
-      webView.load(URLRequest(url: channelURL))
-    } else if let overlay = overlays.first(where: { $0.webView === webView }) {
+    guard let overlay = overlays.first(where: { $0.webView === webView }) else { return }
+    if let channel = channelURL(forDisplay: overlay.key) {
+      webView.load(URLRequest(url: channel))
+    } else {
       loadBundled(into: webView, saverId: saverId(forDisplay: overlay.key))
     }
   }
@@ -422,7 +463,8 @@ final class SaverController: NSObject, WKNavigationDelegate {
   // MARK: - Browse (arrow keys while showing)
 
   func browse(delta: Int) {
-    guard channelURL == nil, isShowing, pool.count > 1 else { return }
+    // Browsing steers the bundled displays; channel displays ignore it.
+    guard isShowing, pool.count > 1, overlays.contains(where: \.followsGlobal) else { return }
     lastBrowseAt = Date()
     currentIndex = (currentIndex + delta + pool.count) % pool.count
     guard let id = currentSaverId else { return }
@@ -438,7 +480,7 @@ final class SaverController: NSObject, WKNavigationDelegate {
   /// Overlay keys while showing. Returns true if the key was handled (so the
   /// saver stays up). 123/124 = ←/→, 3 = F, 51 = Delete, 36 = Return.
   private func handleOverlayKey(_ keyCode: UInt16) -> Bool {
-    guard channelURL == nil, isShowing else { return false }
+    guard isShowing, overlays.contains(where: \.followsGlobal) else { return false }
     switch keyCode {
     case 123, 124:
       browse(delta: keyCode == 124 ? 1 : -1)

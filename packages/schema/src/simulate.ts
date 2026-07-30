@@ -174,13 +174,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   const out: Entity[] = [];
   for (let i = 0; i < effectiveCount; i++) {
     const size =
-      sprite.kind === 'circle' || sprite.kind === 'ring'
-        ? rng.range(sprite.radius[0], sprite.radius[1]) * 2 * scale
-        : sprite.kind === 'streak'
-          ? rng.range(sprite.length[0], sprite.length[1]) * scale
-          : sprite.kind === 'rect'
-            ? rng.range(sprite.width[0], sprite.width[1]) * scale
-            : rng.range(smin, smax) * scale;
+      sprite.kind === 'textBlock'
+        ? sprite.fontSize * scale
+        : sprite.kind === 'circle' || sprite.kind === 'ring'
+          ? rng.range(sprite.radius[0], sprite.radius[1]) * 2 * scale
+          : sprite.kind === 'streak'
+            ? rng.range(sprite.length[0], sprite.length[1]) * scale
+            : sprite.kind === 'rect'
+              ? rng.range(sprite.width[0], sprite.width[1]) * scale
+              : rng.range(smin, smax) * scale;
     // Guarded extra draw: only rect sprites with an aspect range consume it.
     const size2 = sprite.kind === 'rect'
       ? size * (sprite.aspect ? rng.range(sprite.aspect[0], sprite.aspect[1]) : 1)
@@ -660,4 +662,77 @@ export function linkPairs(
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic text-block line breaking
+// ---------------------------------------------------------------------------
+
+const CHAR_NARROW = new Set('iIljtf1!|.,;:\'"()[]{}');
+const CHAR_WIDE = new Set('mwMWGOQD@%');
+
+/**
+ * Approximate glyph width as a fraction of em. Uses character-class buckets
+ * so line breaks are identical across platforms (no measureText). The average
+ * across Latin text lands near 0.55, close to perceive.ts's 0.62 heuristic
+ * but with per-class refinement.
+ */
+function charWidthEm(ch: string): number {
+  if (ch === ' ' || ch === '\t') return 0.3;
+  if (CHAR_NARROW.has(ch)) return 0.35;
+  if (CHAR_WIDE.has(ch)) return 0.72;
+  return 0.55;
+}
+
+function textWidthEm(str: string): number {
+  let w = 0;
+  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!);
+  return w;
+}
+
+export interface TextBlockLine {
+  text: string;
+  widthEm: number;
+}
+
+/**
+ * Break `text` into lines that fit within `maxWidthEm` em-widths. Splits on
+ * whitespace; a single word wider than the limit gets its own line unbroken.
+ * Explicit `\n` always forces a break. Pure, deterministic, no canvas needed.
+ */
+export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[] {
+  const paragraphs = text.split('\n');
+  const lines: TextBlockLine[] = [];
+
+  for (const para of paragraphs) {
+    if (para.length === 0) {
+      lines.push({ text: '', widthEm: 0 });
+      continue;
+    }
+    const words = para.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0) {
+      lines.push({ text: '', widthEm: 0 });
+      continue;
+    }
+
+    let lineText = words[0]!;
+    let lineW = textWidthEm(lineText);
+    const spaceW = charWidthEm(' ');
+
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i]!;
+      const wordW = textWidthEm(word);
+      if (lineW + spaceW + wordW <= maxWidthEm) {
+        lineText += ' ' + word;
+        lineW += spaceW + wordW;
+      } else {
+        lines.push({ text: lineText, widthEm: lineW });
+        lineText = word;
+        lineW = wordW;
+      }
+    }
+    lines.push({ text: lineText, widthEm: lineW });
+  }
+
+  return lines;
 }

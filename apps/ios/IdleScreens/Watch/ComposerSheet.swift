@@ -1,19 +1,7 @@
 import SwiftUI
 
-/// Liquid Glass where the OS has it, material where it doesn't. Native glass
-/// samples and refracts what's behind it, which is exactly right over a live
-/// scene — a flat black scrim would kill the artwork it sits on.
-extension View {
-    @ViewBuilder
-    func glassCapsule<S: InsettableShape>(shape: S) -> some View {
-        if #available(iOS 26, *) {
-            glassEffect(.regular.interactive(), in: shape)
-        } else {
-            background(.ultraThinMaterial, in: shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-        }
-    }
-}
+// glassCapsule / glassPanel live in Theme/Glass.swift — shared by the composer
+// chrome and the pairing surfaces.
 
 /// The composer: the channel's controls, one drag away from the scene.
 ///

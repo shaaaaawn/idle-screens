@@ -26,7 +26,7 @@ export function spriteLuma(layer: LayerSpec, e: Entity): number {
   if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
     return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
   }
-  if (s.kind === 'text') return hexLuma(s.color ?? '#e6e8ef');
+  if (s.kind === 'text' || s.kind === 'textBlock') return hexLuma(s.color ?? '#e6e8ef');
   return 0.75; // emoji: mid-bright approximation
 }
 
@@ -36,7 +36,7 @@ export function spriteHex(layer: LayerSpec, e: Entity): string | null {
   if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
     return s.colors?.[e.colorIndex] ?? s.color;
   }
-  if (s.kind === 'text') return s.color ?? '#e6e8ef';
+  if (s.kind === 'text' || s.kind === 'textBlock') return s.color ?? '#e6e8ef';
   return null; // emoji carry their own palette
 }
 

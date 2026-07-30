@@ -1,29 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://idlescreens.com/schemas/saver-spec-1.schema.json",
-  "title": "SaverSpec (format version 1)",
-  "description": "Declarative, agent-authorable screensaver: a static background plus layers of moving sprites. No code, no network, no strobe primitive — safety by construction. This schema is stricter than the runtime validator (unknown properties are rejected here to catch authoring typos; the runtime ignores them). Cross-field rules the schema cannot express: total entities across all layers must be <= 800; range pairs must satisfy min <= max.",
-  "type": "object",
-  "required": ["schemaVersion", "id", "label", "layers"],
-  "additionalProperties": false,
-  "properties": {
-    "schemaVersion": { "const": 1, "description": "Format version. Independent of the npm package version." },
-    "id": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Unique kebab-case saver id." },
-    "label": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Human-readable name." },
-    "seed": { "type": "number", "description": "Deterministic RNG seed. Same spec + same seed = identical frames. Falls back to the host's seed." },
-    "motionIntensity": { "enum": ["calm", "moderate", "energetic"], "description": "Advisory intensity for capability/reduced-motion gating." },
-    "units": { "enum": ["px", "viewport"], "description": "Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h)." },
-    "referenceViewport": { "type": "number", "minimum": 100, "maximum": 8640, "description": "Resolution the spec was designed at (default 1080). Entity counts density-scale above it." },
-    "ghosting": { "type": "number", "minimum": 0, "maximum": 0.95, "description": "Frame persistence 0..0.95: each frame composites over a faded copy of the last, so moving entities smear (Mystify trails, long-exposure light). Flash-safe — only smooths luminance. Seeks stay deterministic via a fixed-step warm-up replay." },
-    "background": { "$ref": "#/definitions/background" },
-    "layers": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 36,
-      "items": { "$ref": "#/definitions/layer" },
-      "description": "Rendered back-to-front. At most 36 layers; at most 800 entities total."
+  "title": "Idle Screens document (format version 1)",
+  "description": "Either a SaverSpec (declarative screensaver scene) or an idle-sequence envelope (multi-segment timeline over SaverSpecs). Discriminated by the presence of `format: \"idle-sequence\"`. This schema is stricter than the runtime validators (unknown properties are rejected here to catch authoring typos; the runtime ignores them). Cross-field rules the schema cannot express for SaverSpecs: total entities across all layers must be <= 800; range pairs must satisfy min <= max. For sequences: unique segment keys; durationless only on the final segment; loop requires all durations.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/saverSpec"
+    },
+    {
+      "$ref": "#/definitions/idleSequence"
     }
-  },
+  ],
   "definitions": {
     "hexColor": {
       "type": "string",
@@ -32,21 +19,32 @@
     },
     "range01": {
       "type": "array",
-      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
       "minItems": 2,
       "maxItems": 2,
       "description": "[min, max] with min <= max, both 0..1."
     },
     "positiveRange": {
       "type": "array",
-      "items": { "type": "number", "exclusiveMinimum": 0 },
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
       "minItems": 2,
       "maxItems": 2,
       "description": "[min, max] px with 0 < min <= max."
     },
     "speedRange": {
       "type": "array",
-      "items": { "type": "number", "minimum": 0, "maximum": 4000 },
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 4000
+      },
       "minItems": 2,
       "maxItems": 2,
       "description": "[min, max] px/sec, capped at 4000 so nothing teleports."
@@ -55,51 +53,93 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "color"],
+          "required": [
+            "type",
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "solid" },
-            "color": { "$ref": "#/definitions/hexColor" }
+            "type": {
+              "const": "solid"
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "stops"],
+          "required": [
+            "type",
+            "stops"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "gradient" },
+            "type": {
+              "const": "gradient"
+            },
             "stops": {
               "type": "array",
               "minItems": 2,
               "items": {
                 "type": "object",
-                "required": ["at", "color"],
+                "required": [
+                  "at",
+                  "color"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "at": { "type": "number", "minimum": 0, "maximum": 1, "description": "0 = top, 1 = bottom." },
-                  "color": { "$ref": "#/definitions/hexColor" }
+                  "at": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "0 = top, 1 = bottom."
+                  },
+                  "color": {
+                    "$ref": "#/definitions/hexColor"
+                  }
                 }
               },
               "description": "Vertical gradient stops, top to bottom."
             },
             "band": {
               "type": "object",
-              "required": ["color", "height"],
+              "required": [
+                "color",
+                "height"
+              ],
               "additionalProperties": false,
               "properties": {
-                "color": { "$ref": "#/definitions/hexColor" },
-                "height": { "type": "number", "exclusiveMinimum": 0, "description": "Band height in px (e.g. an aquarium seafloor)." }
+                "color": {
+                  "$ref": "#/definitions/hexColor"
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Band height in px (e.g. an aquarium seafloor)."
+                }
               }
             },
             "drift": {
               "type": "object",
-              "required": ["period"],
+              "required": [
+                "period"
+              ],
               "additionalProperties": false,
               "properties": {
-                "period": { "type": "number", "minimum": 10000, "description": "Full cycle period in ms. Floor of 10 s." },
-                "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.3, "description": "How far stops shift (fraction of 0..1 range). Default 0.15, max 0.3." }
+                "period": {
+                  "type": "number",
+                  "minimum": 10000,
+                  "description": "Full cycle period in ms. Floor of 10 s."
+                },
+                "amount": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 0.3,
+                  "description": "How far stops shift (fraction of 0..1 range). Default 0.15, max 0.3."
+                }
               },
-              "description": "Slow oscillation of gradient stop positions — makes the background feel alive."
+              "description": "Slow oscillation of gradient stop positions \u2014 makes the background feel alive."
             }
           }
         }
@@ -107,235 +147,627 @@
     },
     "layer": {
       "type": "object",
-      "required": ["count", "sprite", "motion"],
+      "required": [
+        "count",
+        "sprite",
+        "motion"
+      ],
       "additionalProperties": false,
       "properties": {
-        "count": { "type": "integer", "minimum": 1, "maximum": 400, "description": "Entities in this layer (max 400 per layer, 800 total)." },
-        "sprite": { "$ref": "#/definitions/sprite" },
-        "motion": { "$ref": "#/definitions/motion" },
-        "size": { "$ref": "#/definitions/positiveRange", "description": "Sprite size range in px (font size for emoji/text; ignored for circle)." },
-        "wrap": { "type": "boolean", "description": "Wrap to the opposite edge when leaving the viewport. Default true." },
-        "flip": { "type": "boolean", "description": "Flip the sprite horizontally to face its heading. Default false." },
-        "alpha": { "$ref": "#/definitions/range01", "description": "Per-entity opacity range. Default [1, 1]." },
-        "blend": { "enum": ["lighter", "screen", "multiply"], "description": "Compositing: 'lighter' = additive glow, 'screen' = gentle additive for pale backgrounds, 'multiply' = darkening (shadows). Omit for normal source-over." },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400,
+          "description": "Entities in this layer (max 400 per layer, 800 total)."
+        },
+        "sprite": {
+          "$ref": "#/definitions/sprite"
+        },
+        "motion": {
+          "$ref": "#/definitions/motion"
+        },
+        "size": {
+          "$ref": "#/definitions/positiveRange",
+          "description": "Sprite size range in px (font size for emoji/text; ignored for circle)."
+        },
+        "wrap": {
+          "type": "boolean",
+          "description": "Wrap to the opposite edge when leaving the viewport. Default true."
+        },
+        "flip": {
+          "type": "boolean",
+          "description": "Flip the sprite horizontally to face its heading. Default false."
+        },
+        "alpha": {
+          "$ref": "#/definitions/range01",
+          "description": "Per-entity opacity range. Default [1, 1]."
+        },
+        "blend": {
+          "enum": [
+            "lighter",
+            "screen",
+            "multiply"
+          ],
+          "description": "Compositing: 'lighter' = additive glow, 'screen' = gentle additive for pale backgrounds, 'multiply' = darkening (shadows). Omit for normal source-over."
+        },
         "region": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "x": { "$ref": "#/definitions/range01" },
-            "y": { "$ref": "#/definitions/range01" }
+            "x": {
+              "$ref": "#/definitions/range01"
+            },
+            "y": {
+              "$ref": "#/definitions/range01"
+            }
           },
           "description": "Fractional spawn window (constrains placement, not travel). Default full viewport."
         },
         "pulse": {
           "type": "object",
-          "required": ["amp", "period"],
+          "required": [
+            "amp",
+            "period"
+          ],
           "additionalProperties": false,
           "properties": {
-            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Opacity breathing amplitude, capped at 0.5." },
-            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; floor of 500 (max 2 Hz — flash-safety)." },
+            "amp": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 0.5,
+              "description": "Opacity breathing amplitude, capped at 0.5."
+            },
+            "period": {
+              "type": "number",
+              "minimum": 500,
+              "description": "Breathing period in ms; floor of 500 (max 2 Hz \u2014 flash-safety)."
+            },
             "wave": {
               "type": "object",
-              "required": ["wavelength"],
+              "required": [
+                "wavelength"
+              ],
               "additionalProperties": false,
               "properties": {
-                "wavelength": { "type": "number", "exclusiveMinimum": 0, "description": "Spatial wavelength (px or viewport-units)." },
-                "angle": { "type": "number", "description": "Propagation direction in degrees (0 = rightward). Default 0." }
+                "wavelength": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Spatial wavelength (px or viewport-units)."
+                },
+                "angle": {
+                  "type": "number",
+                  "description": "Propagation direction in degrees (0 = rightward). Default 0."
+                }
               },
-              "description": "Derive each entity's phase from its position: breathing becomes a traveling wave across the field (ripples, wind through grass). Neighbors are out of phase by construction — still flash-safe."
+              "description": "Derive each entity's phase from its position: breathing becomes a traveling wave across the field (ripples, wind through grass). Neighbors are out of phase by construction \u2014 still flash-safe."
             }
           },
-          "description": "Sinusoidal opacity breathing. Per-entity seeded phase — a layer can never strobe in unison."
+          "description": "Sinusoidal opacity breathing. Per-entity seeded phase \u2014 a layer can never strobe in unison."
         },
         "spin": {
           "description": "Per-entity rotation speed in degrees/sec (positive = clockwise). A scalar applies one speed to all entities; a [min,max] range gives each entity a seeded speed. Each entity gets a seeded starting angle.",
           "oneOf": [
-            { "type": "number", "minimum": -360, "maximum": 360 },
-            { "type": "array", "items": { "type": "number", "minimum": -360, "maximum": 360 }, "minItems": 2, "maxItems": 2 }
+            {
+              "type": "number",
+              "minimum": -360,
+              "maximum": 360
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -360,
+                "maximum": 360
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
           ]
         },
         "grow": {
           "type": "object",
-          "required": ["amp", "period"],
+          "required": [
+            "amp",
+            "period"
+          ],
           "additionalProperties": false,
           "properties": {
-            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.8, "description": "Size breathing amplitude as fraction of base size (0.3 = ±30%)." },
-            "period": { "type": "number", "minimum": 500, "description": "Breathing period in ms; same flash-safety floor as pulse." }
+            "amp": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 0.8,
+              "description": "Size breathing amplitude as fraction of base size (0.3 = \u00b130%)."
+            },
+            "period": {
+              "type": "number",
+              "minimum": 500,
+              "description": "Breathing period in ms; same flash-safety floor as pulse."
+            }
           },
           "description": "Sinusoidal size breathing. Per-entity seeded phase. Composes with any sprite kind."
         },
-        "key": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Addressable name so setParam can use key.field paths." },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Addressable name so setParam can use key.field paths."
+        },
         "position": {
           "type": "object",
-          "required": ["x", "y"],
+          "required": [
+            "x",
+            "y"
+          ],
           "additionalProperties": false,
           "properties": {
-            "x": { "type": "number", "minimum": 0, "maximum": 1 },
-            "y": { "type": "number", "minimum": 0, "maximum": 1 }
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
           },
           "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
         },
         "trail": {
           "type": "object",
-          "required": ["length"],
+          "required": [
+            "length"
+          ],
           "additionalProperties": false,
           "properties": {
-            "length": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000, "description": "Trail duration in ms. How far back the afterglow extends." },
-            "fade": { "type": "number", "minimum": 0, "maximum": 1, "description": "Opacity fade factor along the trail. 1 = full fade to 0 (default), 0 = uniform opacity." }
+            "length": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 5000,
+              "description": "Trail duration in ms. How far back the afterglow extends."
+            },
+            "fade": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Opacity fade factor along the trail. 1 = full fade to 0 (default), 0 = uniform opacity."
+            }
           },
-          "description": "Afterglow trail behind moving entities. Sampled analytically — no state, fully deterministic."
+          "description": "Afterglow trail behind moving entities. Sampled analytically \u2014 no state, fully deterministic."
         },
         "links": {
           "type": "object",
-          "required": ["k", "maxDist"],
+          "required": [
+            "k",
+            "maxDist"
+          ],
           "additionalProperties": false,
           "properties": {
-            "k": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Connect to the k nearest neighbors." },
-            "maxDist": { "type": "number", "exclusiveMinimum": 0, "description": "Maximum link distance (px or viewport-units)." },
-            "color": { "$ref": "#/definitions/hexColor", "description": "Link color. Defaults to per-entity color." },
-            "alpha": { "type": "number", "minimum": 0, "maximum": 1, "description": "Link opacity. Defaults to entity alpha." },
-            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 1." },
-            "mode": { "enum": ["nearest", "chain", "random"], "description": "'nearest' (default) k-nearest within maxDist; 'chain' connects entities in order (Mystify polygons — ignores k/maxDist); 'random' a fixed deterministic wiring filtered by maxDist." },
-            "falloff": { "type": "boolean", "description": "Fade link alpha with distance/maxDist — removes pop-in at the cutoff." },
-            "closed": { "type": "boolean", "description": "Chain mode: join the last entity back to the first (closed polygon)." }
+            "k": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "description": "Connect to the k nearest neighbors."
+            },
+            "maxDist": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Maximum link distance (px or viewport-units)."
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor",
+              "description": "Link color. Defaults to per-entity color."
+            },
+            "alpha": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Link opacity. Defaults to entity alpha."
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Stroke width (px or viewport-units). Default 1."
+            },
+            "mode": {
+              "enum": [
+                "nearest",
+                "chain",
+                "random"
+              ],
+              "description": "'nearest' (default) k-nearest within maxDist; 'chain' connects entities in order (Mystify polygons \u2014 ignores k/maxDist); 'random' a fixed deterministic wiring filtered by maxDist."
+            },
+            "falloff": {
+              "type": "boolean",
+              "description": "Fade link alpha with distance/maxDist \u2014 removes pop-in at the cutoff."
+            },
+            "closed": {
+              "type": "boolean",
+              "description": "Chain mode: join the last entity back to the first (closed polygon)."
+            }
           },
           "description": "Draw lines between entities. The layer's entity count (count field) must be <= 200 for performance."
         },
         "layout": {
           "type": "object",
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "grid" },
-            "columns": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Grid columns. Default: aspect-fit square-ish grid." },
+            "type": {
+              "const": "grid"
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Grid columns. Default: aspect-fit square-ish grid."
+            },
             "jitter": {
               "oneOf": [
-                { "type": "number", "minimum": 0, "maximum": 1 },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
                 {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "x": { "type": "number", "minimum": 0, "maximum": 1 },
-                    "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
                   }
                 }
               ],
               "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
             }
           },
-          "description": "Place entities on a grid (row-major, within region) instead of random scatter — Matrix columns, LED walls, uniform dot fields."
+          "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
         },
         "life": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enter": { "type": "number", "minimum": 0, "description": "Layer fades in starting at this time (ms)." },
-            "exit": { "type": "number", "minimum": 0, "description": "Layer fades out starting at this time (ms). Must be > enter." },
-            "fade": { "type": "number", "minimum": 0, "description": "Fade ramp duration in ms. Default 1000." }
+            "enter": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Layer fades in starting at this time (ms)."
+            },
+            "exit": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Layer fades out starting at this time (ms). Must be > enter."
+            },
+            "fade": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Fade ramp duration in ms. Default 1000."
+            }
           },
-          "description": "Layer lifecycle for act structure (stars first, dancers at t=3000). Pure function of t — deterministic and seekable."
+          "description": "Layer lifecycle for act structure (stars first, dancers at t=3000). Pure function of t \u2014 deterministic and seekable."
         }
       },
-      "if": { "required": ["position"] },
-      "then": { "properties": { "count": { "const": 1 } } }
+      "if": {
+        "required": [
+          "position"
+        ]
+      },
+      "then": {
+        "properties": {
+          "count": {
+            "const": 1
+          }
+        }
+      }
     },
     "sprite": {
       "oneOf": [
         {
           "type": "object",
-          "required": ["kind", "glyphs"],
+          "required": [
+            "kind",
+            "glyphs"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "emoji" },
-            "glyphs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Emoji picked per entity (seeded)." },
-            "cycle": { "$ref": "#/definitions/cycle" }
+            "kind": {
+              "const": "emoji"
+            },
+            "glyphs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              },
+              "description": "Emoji picked per entity (seeded)."
+            },
+            "cycle": {
+              "$ref": "#/definitions/cycle"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "strings"],
+          "required": [
+            "kind",
+            "strings"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "text" },
-            "strings": { "type": "array", "minItems": 1, "items": { "type": "string" } },
-            "color": { "$ref": "#/definitions/hexColor" },
-            "font": { "type": "string", "description": "CSS font shorthand, e.g. 'bold 24px monospace'." },
-            "align": { "enum": ["left", "center", "right"] },
-            "baseline": { "enum": ["top", "middle", "bottom"] },
-            "maxWidth": { "type": "number", "exclusiveMinimum": 0 },
-            "cycle": { "$ref": "#/definitions/cycle" }
+            "kind": {
+              "const": "text"
+            },
+            "strings": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            },
+            "font": {
+              "type": "string",
+              "description": "CSS font shorthand, e.g. 'bold 24px monospace'."
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "baseline": {
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ]
+            },
+            "maxWidth": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "cycle": {
+              "$ref": "#/definitions/cycle"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "radius", "color"],
+          "required": [
+            "kind",
+            "radius",
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "circle" },
-            "radius": { "$ref": "#/definitions/positiveRange" },
-            "color": { "$ref": "#/definitions/hexColor" },
-            "soft": { "type": "boolean", "description": "Radial falloff (glow orb) instead of a hard disc." },
-            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick). Falls back to color." },
-            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+            "kind": {
+              "const": "circle"
+            },
+            "radius": {
+              "$ref": "#/definitions/positiveRange"
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            },
+            "soft": {
+              "type": "boolean",
+              "description": "Radial falloff (glow orb) instead of a hard disc."
+            },
+            "colors": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "Per-entity color palette (seeded pick). Falls back to color."
+            },
+            "colorWeights": {
+              "$ref": "#/definitions/colorWeights"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["kind", "radius", "color"],
+          "required": [
+            "kind",
+            "radius",
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "ring" },
-            "radius": { "$ref": "#/definitions/positiveRange" },
-            "color": { "$ref": "#/definitions/hexColor" },
-            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default ~2px." },
-            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
-            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+            "kind": {
+              "const": "ring"
+            },
+            "radius": {
+              "$ref": "#/definitions/positiveRange"
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Stroke width (px or viewport-units). Default ~2px."
+            },
+            "colors": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "Per-entity color palette (seeded pick)."
+            },
+            "colorWeights": {
+              "$ref": "#/definitions/colorWeights"
+            }
           },
-          "description": "Unfilled circle — bubbles, portals, sonar pings."
+          "description": "Unfilled circle \u2014 bubbles, portals, sonar pings."
         },
         {
           "type": "object",
-          "required": ["kind", "length", "color"],
+          "required": [
+            "kind",
+            "length",
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "streak" },
-            "length": { "$ref": "#/definitions/positiveRange", "description": "Segment length range (px or viewport-units)." },
-            "color": { "$ref": "#/definitions/hexColor" },
-            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default ~2px." },
-            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
-            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+            "kind": {
+              "const": "streak"
+            },
+            "length": {
+              "$ref": "#/definitions/positiveRange",
+              "description": "Segment length range (px or viewport-units)."
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Stroke width (px or viewport-units). Default ~2px."
+            },
+            "colors": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "Per-entity color palette (seeded pick)."
+            },
+            "colorWeights": {
+              "$ref": "#/definitions/colorWeights"
+            }
           },
-          "description": "A line oriented along the entity's heading with a faded tail — rain that reads as rain, shooting stars, warp stars."
+          "description": "A line oriented along the entity's heading with a faded tail \u2014 rain that reads as rain, shooting stars, warp stars."
         },
         {
           "type": "object",
-          "required": ["kind", "width", "color"],
+          "required": [
+            "kind",
+            "width",
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "const": "rect" },
-            "width": { "$ref": "#/definitions/positiveRange", "description": "Horizontal size range (px or viewport-units)." },
-            "aspect": { "$ref": "#/definitions/positiveRange", "description": "Height/width ratio range. Default [1,1] = squares." },
-            "color": { "$ref": "#/definitions/hexColor" },
-            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
-            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+            "kind": {
+              "const": "rect"
+            },
+            "width": {
+              "$ref": "#/definitions/positiveRange",
+              "description": "Horizontal size range (px or viewport-units)."
+            },
+            "aspect": {
+              "$ref": "#/definitions/positiveRange",
+              "description": "Height/width ratio range. Default [1,1] = squares."
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            },
+            "colors": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "Per-entity color palette (seeded pick)."
+            },
+            "colorWeights": {
+              "$ref": "#/definitions/colorWeights"
+            }
           },
-          "description": "Axis-aligned rectangle (rotates with spin) — Mondrian blocks, confetti, city lights."
+          "description": "Axis-aligned rectangle (rotates with spin) \u2014 Mondrian blocks, confetti, city lights."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "maxWidth",
+            "fontSize"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "textBlock"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "The text to render. Explicit \\n forces a line break."
+            },
+            "maxWidth": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1.0,
+              "description": "Block width as a viewport fraction of min(w,h)."
+            },
+            "fontSize": {
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 0.2,
+              "description": "Font size as a viewport fraction of min(w,h)."
+            },
+            "lineHeight": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 4,
+              "description": "Line-height multiplier (like CSS). Default 1.4."
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ],
+              "description": "Text alignment within the block. Default 'left'."
+            },
+            "color": {
+              "$ref": "#/definitions/hexColor"
+            }
+          },
+          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
         }
       ]
     },
     "colorWeights": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "number", "minimum": 0 },
-      "contains": { "type": "number", "exclusiveMinimum": 0 },
+      "items": {
+        "type": "number",
+        "minimum": 0
+      },
+      "contains": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
       "description": "Relative weights for the colors[] pick, same length as colors. At least one weight must be > 0. 'Mostly cool tones, occasional ember' without duplicating entries."
     },
     "cycle": {
       "type": "object",
-      "required": ["period"],
+      "required": [
+        "period"
+      ],
       "additionalProperties": false,
       "properties": {
-        "period": { "type": "number", "minimum": 500, "description": "Cycling period in ms; floor of 500 (flash-safety)." }
+        "period": {
+          "type": "number",
+          "minimum": 500,
+          "description": "Cycling period in ms; floor of 500 (flash-safety)."
+        }
       },
       "description": "Rotate through sprite variants over time. Each entity offsets by its seeded phase."
     },
@@ -343,74 +775,143 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "speed"],
+          "required": [
+            "type",
+            "speed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "drift" },
-            "speed": { "$ref": "#/definitions/speedRange" },
-            "angle": { "type": "number", "description": "Heading in degrees: 0 = right, 90 = down. Default 0." },
-            "bidirectional": { "type": "boolean", "description": "Randomly flip horizontal direction per entity (fish)." },
-            "bob": { "type": "number", "description": "Vertical wobble amplitude in px." }
+            "type": {
+              "const": "drift"
+            },
+            "speed": {
+              "$ref": "#/definitions/speedRange"
+            },
+            "angle": {
+              "type": "number",
+              "description": "Heading in degrees: 0 = right, 90 = down. Default 0."
+            },
+            "bidirectional": {
+              "type": "boolean",
+              "description": "Randomly flip horizontal direction per entity (fish)."
+            },
+            "bob": {
+              "type": "number",
+              "description": "Vertical wobble amplitude in px."
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "speed"],
+          "required": [
+            "type",
+            "speed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "rise" },
-            "speed": { "$ref": "#/definitions/speedRange" },
-            "sway": { "type": "number", "description": "Horizontal sway amplitude in px (bubbles)." }
+            "type": {
+              "const": "rise"
+            },
+            "speed": {
+              "$ref": "#/definitions/speedRange"
+            },
+            "sway": {
+              "type": "number",
+              "description": "Horizontal sway amplitude in px (bubbles)."
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "speed"],
+          "required": [
+            "type",
+            "speed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "bounce" },
-            "speed": { "$ref": "#/definitions/speedRange" }
+            "type": {
+              "const": "bounce"
+            },
+            "speed": {
+              "$ref": "#/definitions/speedRange"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "static", "description": "Entity stays exactly where placed. Use with position for pinned elements." }
+            "type": {
+              "const": "static",
+              "description": "Entity stays exactly where placed. Use with position for pinned elements."
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "speed", "radius"],
+          "required": [
+            "type",
+            "speed",
+            "radius"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "orbit" },
+            "type": {
+              "const": "orbit"
+            },
             "speed": {
               "type": "array",
-              "items": { "type": "number", "minimum": 0, "maximum": 180 },
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 180
+              },
               "minItems": 2,
               "maxItems": 2,
               "description": "[min, max] angular velocity in degrees/sec, capped at 180."
             },
-            "radius": { "$ref": "#/definitions/positiveRange", "description": "[min, max] orbit radius in px." },
+            "radius": {
+              "$ref": "#/definitions/positiveRange",
+              "description": "[min, max] orbit radius in px."
+            },
             "center": {
               "oneOf": [
                 {
                   "type": "object",
-                  "required": ["x", "y"],
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "additionalProperties": false,
                   "properties": {
-                    "x": { "type": "number", "minimum": 0, "maximum": 1 },
-                    "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
                   }
                 },
                 {
                   "type": "object",
-                  "required": ["layer"],
+                  "required": [
+                    "layer"
+                  ],
                   "additionalProperties": false,
                   "properties": {
-                    "layer": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Key of a count-1 parent layer to orbit (moons around a wandering planet). One level deep only — the parent may not itself orbit a layer." }
+                    "layer": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "description": "Key of a count-1 parent layer to orbit (moons around a wandering planet). One level deep only \u2014 the parent may not itself orbit a layer."
+                    }
                   }
                 }
               ],
@@ -420,37 +921,76 @@
         },
         {
           "type": "object",
-          "required": ["type", "speed"],
+          "required": [
+            "type",
+            "speed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "wander" },
-            "speed": { "$ref": "#/definitions/speedRange" },
-            "angle": { "type": "number", "description": "Base heading in degrees. Omit for a seeded heading per entity." },
-            "meander": { "type": "number", "exclusiveMinimum": 0, "description": "Harmonic amplitude (px or viewport-units). Default ~0.05 viewport-units. How far paths curve away from the base line." },
-            "coherence": { "type": "number", "minimum": 0, "maximum": 1, "description": "0 = each entity wanders independently; 1 = the whole layer undulates in unison (fake flocking). Default 0." }
+            "type": {
+              "const": "wander"
+            },
+            "speed": {
+              "$ref": "#/definitions/speedRange"
+            },
+            "angle": {
+              "type": "number",
+              "description": "Base heading in degrees. Omit for a seeded heading per entity."
+            },
+            "meander": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Harmonic amplitude (px or viewport-units). Default ~0.05 viewport-units. How far paths curve away from the base line."
+            },
+            "coherence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "0 = each entity wanders independently; 1 = the whole layer undulates in unison (fake flocking). Default 0."
+            }
           },
-          "description": "Organic harmonic drift — base velocity plus 3 seeded sine octaves per axis. Flowing curved paths (Flurry streams, aurora, jellyfish) with zero simulation state."
+          "description": "Organic harmonic drift \u2014 base velocity plus 3 seeded sine octaves per axis. Flowing curved paths (Flurry streams, aurora, jellyfish) with zero simulation state."
         },
         {
           "type": "object",
-          "required": ["type", "speed"],
+          "required": [
+            "type",
+            "speed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "warp" },
+            "type": {
+              "const": "warp"
+            },
             "speed": {
               "type": "array",
-              "items": { "type": "number", "minimum": 0, "maximum": 1.5 },
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1.5
+              },
               "minItems": 2,
               "maxItems": 2,
               "description": "[min, max] depth-units/sec (1 = full near-to-far span per second), capped at 1.5."
             },
             "center": {
               "type": "object",
-              "required": ["x", "y"],
+              "required": [
+                "x",
+                "y"
+              ],
               "additionalProperties": false,
               "properties": {
-                "x": { "type": "number", "minimum": 0, "maximum": 1 },
-                "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
               },
               "description": "Vanishing point as fractional viewport position. Default {0.5, 0.5}."
             }
@@ -459,33 +999,251 @@
         },
         {
           "type": "object",
-          "required": ["type", "points", "duration"],
+          "required": [
+            "type",
+            "points",
+            "duration"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "path" },
+            "type": {
+              "const": "path"
+            },
             "points": {
               "type": "array",
               "minItems": 2,
               "maxItems": 24,
               "items": {
                 "type": "object",
-                "required": ["x", "y"],
+                "required": [
+                  "x",
+                  "y"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "x": { "type": "number", "minimum": 0, "maximum": 1 },
-                  "y": { "type": "number", "minimum": 0, "maximum": 1 }
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
                 }
               },
               "description": "Waypoints as fractional viewport positions."
             },
-            "duration": { "type": "number", "minimum": 2000, "description": "Time for one full lap in ms (min 2000)." },
-            "curve": { "enum": ["linear", "smooth"], "description": "'smooth' (default) = Catmull-Rom spline through the points; 'linear' = straight segments." },
-            "closed": { "type": "boolean", "description": "Loop the path (default true). Open paths ping-pong." },
-            "scatter": { "type": "number", "exclusiveMinimum": 0, "description": "Seeded per-entity offset (px or viewport-units) so entities sharing a path don't stack." }
+            "duration": {
+              "type": "number",
+              "minimum": 2000,
+              "description": "Time for one full lap in ms (min 2000)."
+            },
+            "curve": {
+              "enum": [
+                "linear",
+                "smooth"
+              ],
+              "description": "'smooth' (default) = Catmull-Rom spline through the points; 'linear' = straight segments."
+            },
+            "closed": {
+              "type": "boolean",
+              "description": "Loop the path (default true). Open paths ping-pong."
+            },
+            "scatter": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Seeded per-entity offset (px or viewport-units) so entities sharing a path don't stack."
+            }
           },
-          "description": "Choreographed spline motion — figure-eights, sweeping arcs, patrol routes. Each entity gets a seeded phase offset along the path."
+          "description": "Choreographed spline motion \u2014 figure-eights, sweeping arcs, patrol routes. Each entity gets a seeded phase offset along the path."
         }
       ]
+    },
+    "saverSpec": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "id",
+        "label",
+        "layers"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "description": "Format version. Independent of the npm package version."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Unique kebab-case saver id."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Human-readable name."
+        },
+        "seed": {
+          "type": "number",
+          "description": "Deterministic RNG seed. Same spec + same seed = identical frames. Falls back to the host's seed."
+        },
+        "motionIntensity": {
+          "enum": [
+            "calm",
+            "moderate",
+            "energetic"
+          ],
+          "description": "Advisory intensity for capability/reduced-motion gating."
+        },
+        "units": {
+          "enum": [
+            "px",
+            "viewport"
+          ],
+          "description": "Dimensional unit system. 'viewport' = all sizes/speeds/distances are fractions of min(w,h)."
+        },
+        "referenceViewport": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 8640,
+          "description": "Resolution the spec was designed at (default 1080). Entity counts density-scale above it."
+        },
+        "ghosting": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.95,
+          "description": "Frame persistence 0..0.95: each frame composites over a faded copy of the last, so moving entities smear (Mystify trails, long-exposure light). Flash-safe \u2014 only smooths luminance. Seeks stay deterministic via a fixed-step warm-up replay."
+        },
+        "background": {
+          "$ref": "#/definitions/background"
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 36,
+          "items": {
+            "$ref": "#/definitions/layer"
+          },
+          "description": "Rendered back-to-front. At most 36 layers; at most 800 entities total."
+        }
+      },
+      "description": "A single declarative screensaver scene (layers of sprites over a background)."
+    },
+    "idleSequence": {
+      "type": "object",
+      "required": [
+        "format",
+        "schemaVersion",
+        "id",
+        "label",
+        "loop",
+        "segments"
+      ],
+      "additionalProperties": false,
+      "description": "Multi-segment timeline over unmodified SaverSpecs. Discriminated by format: 'idle-sequence'. Cross-field rules (durationless only on final segment, loop incompatible with durationless tail, unique keys) are enforced by validateSequence(), not this schema.",
+      "properties": {
+        "format": {
+          "const": "idle-sequence",
+          "description": "Discriminator \u2014 distinguishes this envelope from a SaverSpec."
+        },
+        "schemaVersion": {
+          "const": 1,
+          "description": "Format version. Independent of the npm package version."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Unique kebab-case sequence id."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Human-readable name."
+        },
+        "seed": {
+          "type": "number",
+          "description": "Optional seed forwarded to children that lack their own (offset by segment index)."
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "When true, global time wraps over the sum of segment durations. Requires every segment to have a duration."
+        },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "description": "1\u201324 segments. Only the final segment may omit duration (holds indefinitely).",
+          "items": {
+            "$ref": "#/definitions/sequenceSegment"
+          }
+        }
+      }
+    },
+    "sequenceSegment": {
+      "type": "object",
+      "required": [
+        "key",
+        "scene"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Unique segment key within the sequence."
+        },
+        "scene": {
+          "$ref": "#/definitions/saverSpec",
+          "description": "Unmodified SaverSpec for this segment."
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 1000,
+          "description": "Segment duration in ms (min 1000 for flash safety). Omit only on the final segment."
+        },
+        "advance": {
+          "enum": [
+            "auto",
+            "input",
+            "either"
+          ],
+          "description": "How the segment advances. Validated; runtime drivers planned for a follow-up."
+        },
+        "transition": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "type": { "const": "cut" }
+              },
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "morph" },
+                "dur": {
+                  "type": "number",
+                  "minimum": 200,
+                  "maximum": 5000,
+                  "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
+                }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   }
 }

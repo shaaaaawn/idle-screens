@@ -28,7 +28,7 @@ struct BuildInfo: Decodable {
     """
     Version \(appVersion)
     Build: \(current.kind) · \(current.commit) · \(current.date)
-    Server: https://idlescreens.com
+    Server: \(ServerEndpoint.base.absoluteString)
     """
   }
 }

@@ -52,6 +52,13 @@ final class TVAppState {
     /// Set by ThumbStreamView after repeated thumb failures — forces the t0 floor.
     var thumbFailed = false
     private(set) var watchdogDowngraded = false
+    /// Learned per-channel caps ("this scene proved too heavy at tier X on
+    /// this box") — persisted, applied on every future open of that channel.
+    let tierCaps = TierCapStore()
+    /// Pre-render complexity cap for the CURRENT scene (transient); set from
+    /// SceneComplexity when a schema compiles obviously heavy.
+    private(set) var complexityCap: CapabilityTier?
+
 
     var tierOverride: CapabilityTier? {
         didSet {
@@ -63,6 +70,12 @@ final class TVAppState {
         if thumbFailed { return .t0 }
         var tier = tierOverride ?? detectedTier
         if watchdogDowngraded { tier = tier.downgraded() }
+        // Adaptive downscaling for this schema: upfront complexity guess,
+        // then anything the watchdog taught us about this channel before.
+        if let cap = complexityCap { tier = CapabilityTier.lower(of: tier, cap) }
+        if let id = selectedChannelId, let learned = tierCaps.cap(for: id) {
+            tier = CapabilityTier.lower(of: tier, learned)
+        }
         return tier
     }
 
@@ -157,6 +170,7 @@ final class TVAppState {
         isClassicSpec = false
         thumbFailed = false
         watchdogDowngraded = false
+        complexityCap = nil
         UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
         // Instant first frame: the gallery payload carries each channel's
         // inline spec, so render it immediately instead of holding a spinner
@@ -166,6 +180,7 @@ final class TVAppState {
         if let cached = channels.first(where: { $0.id == channelId })?.spec {
             compiledScene = cached.compile(seed: cached.seed ?? 0)
             specBackground = cached.background
+            complexityCap = SceneComplexity.precap(for: compiledScene)
         }
         openSocket(channelId: channelId, watching: true)
     }
@@ -274,6 +289,7 @@ final class TVAppState {
             // render. Keep the raw JSON; ScreenSaverView routes to the thumb stream.
             isClassicSpec = true
             compiledScene = []
+        complexityCap = SceneComplexity.precap(for: compiledScene)
             specBackground = nil
             return
         }
@@ -289,6 +305,11 @@ final class TVAppState {
     func watchdogDidTrigger() {
         guard !watchdogDowngraded else { return }
         watchdogDowngraded = true
+        // Learn: this channel's scene was too heavy at the tier we just ran.
+        // Next open starts at the downgraded tier instead of re-janking.
+        if let id = selectedChannelId {
+            tierCaps.record(effectiveTier, for: id)
+        }
     }
 
     func reportThumbFailure() {
