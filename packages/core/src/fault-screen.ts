@@ -16,6 +16,8 @@ export interface FaultInfo {
 export function renderFaultScreen(host: HTMLElement, info: FaultInfo): HTMLElement {
   const root = document.createElement('div');
   root.className = 'is-fault-screen';
+  root.setAttribute('role', 'alert');
+  root.setAttribute('aria-live', 'assertive');
   root.style.cssText = [
     'position:absolute',
     'inset:0',

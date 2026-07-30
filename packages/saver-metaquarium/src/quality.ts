@@ -31,3 +31,17 @@ export function effectivePixelRatio(
 export function isSoftwareGL(renderer: string): boolean {
   return /swiftshader|llvmpipe|software|swangle/i.test(renderer);
 }
+
+/** Probe the default GL context for a software renderer before creating a
+ *  WebGLRenderer so antialias/quality tier match from the first frame. */
+export function probeSoftwareGL(): boolean {
+  if (typeof document === 'undefined') return false;
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (!gl) return false;
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const renderer = String(
+    dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+  );
+  return isSoftwareGL(renderer);
+}

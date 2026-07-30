@@ -16,7 +16,7 @@ declare global {
 }
 
 const ALL_IDS = [
-  'black-hole', 'tide', 'limelight', 'catwalk', 'slipstream', 'metaquarium', 'metaquarium-fixture', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
+  'black-hole', 'tide', 'limelight', 'catwalk', 'slipstream', 'metaquarium', 'metaquarium-school', 'toasters', 'dvd', 'warp', 'fish', 'rainstorm', 'hard-rain',
   'globe', 'spotlight', 'fade-out', 'bouncing-ball', 'messages',
   'pipes', 'bsod', 'flurry', 'fluid', 'reaction-diffusion', 'mystify', 'snowfall', 'lanterns',
   'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets',

@@ -639,15 +639,37 @@ export class IdleScreenElement extends HostBase {
 
   /** An uncaught error while a non-passthrough saver owns the screen is the
    *  saver's loop dying. Swap to the crash saver instead of freezing black. */
+  private static readonly SAVER_FAULT_LOC =
+    /idle-screens|saver-|@idle-screens|three|metaquarium|schema|core|capabilities/i;
+
+  private isSaverRelatedRuntimeFault(ev: ErrorEvent): boolean {
+    const filename = ev.filename;
+    if (typeof filename === 'string' && filename.length > 0) {
+      return IdleScreenElement.SAVER_FAULT_LOC.test(filename);
+    }
+    return true;
+  }
+
+  private isSaverRelatedRejection(ev: PromiseRejectionEvent): boolean {
+    const hint = String((ev.reason as Error)?.stack ?? ev.reason ?? '');
+    if (!hint) return true;
+    if (IdleScreenElement.SAVER_FAULT_LOC.test(hint)) return true;
+    // No script URL in the hint → treat as saver-owned (inline / synthetic).
+    // A same-origin page URL without saver markers is host noise — skip.
+    return !/https?:\/\//i.test(hint);
+  }
+
   private readonly onRuntimeError = (ev: ErrorEvent): void => {
     if (!this.dialog?.open || !this.instance) return;
     if (this._engine?.pluginById(this.activeSaverId)?.manifest.passthrough) return; // page noise, not ours
+    if (!this.isSaverRelatedRuntimeFault(ev)) return;
     this.engageCrashScreen(ev.error ?? ev.message);
   };
 
   private readonly onRuntimeRejection = (ev: PromiseRejectionEvent): void => {
     if (!this.dialog?.open || !this.instance) return;
     if (this._engine?.pluginById(this.activeSaverId)?.manifest.passthrough) return;
+    if (!this.isSaverRelatedRejection(ev)) return;
     this.engageCrashScreen(ev.reason);
   };
 
@@ -659,10 +681,25 @@ export class IdleScreenElement extends HostBase {
    * fault screen. One swap per sleep; any key still wakes.
    */
   private engageCrashScreen(err: unknown): void {
-    if (this.crashed || !this.dialog?.open) return;
-    this.crashed = true;
+    if (!this.dialog?.open) return;
     const faultedId = this.activeSaverId;
     const message = err instanceof Error ? err.message : String(err ?? 'unknown fault');
+
+    if (this.crashed) {
+      console.warn(`[idle-screen] saver "${faultedId}" faulted again at runtime:`, err);
+      ++this.mountToken;
+      try {
+        this.instance?.dispose();
+      } catch {
+        /* the faulted instance may not even dispose cleanly */
+      }
+      this.instance = null;
+      this.surface.replaceChildren();
+      renderFaultScreen(this.surface, { saverId: faultedId, message });
+      return;
+    }
+
+    this.crashed = true;
     console.warn(`[idle-screen] saver "${faultedId}" faulted at runtime:`, err);
     ++this.mountToken; // invalidate any in-flight mount
     try {
@@ -688,6 +725,7 @@ export class IdleScreenElement extends HostBase {
             rng: createRng(eng.config.seed >>> 0),
             seed: eng.config.seed >>> 0,
             reducedMotion: eng.reducedMotion.value,
+            page: crashPlugin.manifest.passthrough ? this.pageContext() : undefined,
           }),
         )
         .then((inst) => {

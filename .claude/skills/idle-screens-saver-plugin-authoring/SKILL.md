@@ -240,8 +240,12 @@ export const fluid: SaverPlugin = {
    (e.g. N=256 grid × ~1.5 steps). The fluid saver's `for i<200` warmup is
    cheap because its CPU grid is 96×96×1 step; copying that loop count to a
    256×256×32-step simulation freezes the main thread for seconds.
-5. **Self-contained:** NO external asset URLs. Substitute emoji drawn via canvas
-   `fillText`, canvas-drawn shapes, inline SVG data URIs, or DOM text.
+5. **Self-contained:** NO external asset URLs for classic canvas/DOM savers.
+   Substitute emoji drawn via canvas `fillText`, canvas-drawn shapes, inline
+   SVG data URIs, or DOM text. **WebGL savers** may load remote assets via
+   steerable params (`fishUrl`-style HTTPS / `ipfs://` GLBs) when templates
+   are cached at module level — see the WebGL laws section above. Default
+   remains no external URLs for canvas savers.
 6. **Deep (steerable) savers** add a typed `paramSpace` to the manifest and read
    params each frame from a control-track:
    `const p = this.track ? sampleTrack(PARAM_SPACE, this.track, t) : this.defaults;`

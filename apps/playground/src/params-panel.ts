@@ -1,4 +1,4 @@
-import type { ParamDef, ParamSpace, ParamValue, SaverPlugin } from '@idle-screens/core';
+import type { ParamDef, ParamValue, SaverPlugin } from '@idle-screens/core';
 import { sampleTrack } from '@idle-screens/core';
 import type { TimelineHandle } from './timeline-panel';
 
@@ -88,8 +88,15 @@ function buildControl(
     });
     dd.append(sel);
     update = (v) => {
-      const m = ALL_FISH.find((f) => f.url === String(v));
-      sel.value = m ? m.url : String(v);
+      const s = String(v);
+      const m = ALL_FISH.find((f) => f.url === s);
+      if (!m && s && !Array.from(sel.options).some((o) => o.value === s)) {
+        const o = document.createElement('option');
+        o.value = s;
+        o.textContent = s.split('/').pop() ?? s;
+        sel.prepend(o);
+      }
+      sel.value = m ? m.url : s;
     };
   } else if (def.type === 'number') {
     const range = document.createElement('input');
@@ -194,8 +201,14 @@ export function buildParamsPanel(
     const dl = document.createElement('dl');
     dl.className = 'wb-props wb-params-list';
 
+    const t = timeline.currentTime();
+    const track = timeline.getTrack();
+    const sampled = track
+      ? sampleTrack(space, track, t)
+      : Object.fromEntries(Object.entries(space).map(([k, def]) => [k, def.default]));
+
     for (const [path, def] of Object.entries(space)) {
-      const value = def.default;
+      const value = sampled[path] ?? def.default;
       const { row, update } = buildControl(path, def, value, (v) => {
         timeline.setParam(path, v);
       });
@@ -210,14 +223,10 @@ export function buildParamsPanel(
     if (!currentSaver?.manifest.paramSpace) return;
     const space = currentSaver.manifest.paramSpace;
     const t = timeline.currentTime();
-
-    const track = { program: currentSaver.manifest.id, seed: 0, deltas: [] as any[] };
-    try {
-      const stored = localStorage.getItem(`idleScreens.timeline.edit:${currentSaver.manifest.id}`);
-      if (stored) Object.assign(track, JSON.parse(stored));
-    } catch { /* use defaults */ }
-
-    const values = sampleTrack(space, track, t);
+    const track = timeline.getTrack();
+    const values = track
+      ? sampleTrack(space, track, t)
+      : Object.fromEntries(Object.entries(space).map(([k, def]) => [k, def.default]));
     for (const c of controls) {
       const v = values[c.path];
       if (v !== undefined) c.update(v);

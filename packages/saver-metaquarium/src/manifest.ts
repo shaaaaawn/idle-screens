@@ -23,7 +23,7 @@ export const METAQUARIUM_PARAMS = {
   /** Water/atmosphere color (background + fog). */
   fogColor: { type: 'color', default: '#030009', ease: 'smooth' },
   /** GLB model URL for the fish (supports ipfs:// scheme). */
-  fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
+  fishUrl: { type: 'string', default: '/assets/metaquarium/fish-257-angelfish.glb' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish

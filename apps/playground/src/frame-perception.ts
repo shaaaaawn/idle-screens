@@ -386,9 +386,8 @@ export async function perceiveSaverFrame(
 
     // A 2d canvas reads directly. A GPU canvas (WebGL/WebGPU) can't hand out
     // a 2d context, but its PRESENTED frame is still drawImage-able — copy it
-    // into a scratch 2d canvas and read that. Reliable when the renderer
-    // preserves its drawing buffer (metaquarium sets preserveDrawingBuffer
-    // for exactly this readback family: thumbs, validator, perception).
+    // into a scratch 2d canvas and read that in the SAME task as renderFrame
+    // (metaquarium does not set preserveDrawingBuffer).
     const direct = canvas.getContext('2d', { willReadFrequently: true });
     let ctx = direct;
     let scratch: HTMLCanvasElement | null = null;

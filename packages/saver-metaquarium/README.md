@@ -57,7 +57,7 @@ frame loop (rAF or renderFrame(t)):
 | fishCount | number | 1 | Visible fish (step) |
 | swimSpeed | number | 1 | Swim time-scale multiplier |
 | fogColor | color | #030009 | Atmosphere / background |
-| fishUrl | string | hero-fish.glb | GLB model URL |
+| fishUrl | string | /assets/metaquarium/fish-257-angelfish.glb | GLB model URL |
 
 ## File map
 

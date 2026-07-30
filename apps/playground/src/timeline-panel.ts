@@ -16,6 +16,8 @@ export interface TimelineHandle {
   setParam(path: string, value: ParamValue): void;
   /** Current playhead time in ms. */
   currentTime(): number;
+  /** Current track without taking ownership (read-only peek). */
+  getTrack(): ControlTrack | null;
   /** Play/pause the inline preview — the same action as the transport button. */
   togglePlay(): void;
   isPlaying(): boolean;
@@ -255,6 +257,9 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     currentProfile.track = owned;
     return owned;
   };
+
+  const peekTrack = (): ControlTrack | null =>
+    edits.get(saverId()) ?? currentProfile?.track ?? null;
 
   /** Badge + export/reset enablement. Owned in one place so an edit made in
    *  this session enables Discard immediately, not only after a reload. */
@@ -738,7 +743,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     const menu = document.createElement('div');
     menu.className = 'tl-context-menu';
 
-    const track = ownTrack();
+    const track = peekTrack();
     const delta = track?.deltas[index];
     const ease = delta?.ease ?? 'step';
 
@@ -753,9 +758,12 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     for (const e of EASES) {
       const label = e === ease ? `✓ Ease: ${e}` : `  Ease: ${e}`;
       menu.append(ctxItem(label, e === ease ? 'E' : '', () => {
-        if (!track || !delta) return;
-        delta.ease = e;
-        commitEdit(track);
+        const owned = ownTrack();
+        if (!owned) return;
+        const d = owned.deltas[index];
+        if (!d) return;
+        d.ease = e;
+        commitEdit(owned);
       }));
     }
 
@@ -1070,6 +1078,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
 
     setParam(path: string, value: ParamValue) {
       if (!currentProfile || currentProfile.mode !== 'track') return;
+      if (playing) stopPlay();
       const track = ownTrack();
       if (!track) return;
       const space = currentSaver?.manifest.paramSpace as ParamSpace | undefined;
@@ -1084,6 +1093,8 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     },
 
     currentTime: () => playheadT,
+
+    getTrack: peekTrack,
 
     togglePlay,
     isPlaying: () => playing,

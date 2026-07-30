@@ -51,7 +51,7 @@ import {
 } from './plan';
 import {
   effectivePixelRatio,
-  isSoftwareGL,
+  probeSoftwareGL,
   qualityFor,
   type TankQuality,
 } from './quality';
@@ -108,7 +108,6 @@ class TankInstance implements SaverInstance {
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
-  private readonly abort = new AbortController();
   private fish: Fish[] = [];
   private disposed = false;
 
@@ -144,20 +143,14 @@ class TankInstance implements SaverInstance {
     }
     this.canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
 
+    if (probeSoftwareGL()) this.quality = qualityFor('minimal');
+
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
-      antialias: quality.antialias,
+      antialias: this.quality.antialias,
       stencil: false,
       powerPreference: 'high-performance',
     });
-    const glInfo = this.renderer.getContext();
-    const dbg = glInfo.getExtension('WEBGL_debug_renderer_info');
-    const rendererName = String(
-      dbg
-        ? glInfo.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
-        : glInfo.getParameter(glInfo.RENDERER),
-    );
-    if (isSoftwareGL(rendererName)) this.quality = qualityFor('minimal');
     this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
@@ -242,9 +235,7 @@ class TankInstance implements SaverInstance {
     if (!p) {
       p = (async (): Promise<FishTemplate | null> => {
         try {
-          const res = await fetch(resolveIpfsUrl(url), {
-            signal: this.abort.signal,
-          });
+          const res = await fetch(resolveIpfsUrl(url));
           if (!res.ok) throw new Error(`fish glb ${res.status}`);
           const buf = await res.arrayBuffer();
           const gltf = await new GLTFLoader().parseAsync(buf, '');
@@ -266,10 +257,8 @@ class TankInstance implements SaverInstance {
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
           };
-        } catch (err) {
-          if ((err as Partial<DOMException>).name === 'AbortError') {
-            TEMPLATE_CACHE.delete(key);
-          }
+        } catch {
+          TEMPLATE_CACHE.delete(key);
           return null;
         }
       })();
@@ -502,7 +491,6 @@ class TankInstance implements SaverInstance {
 
   renderFrame(t: number, _seed: number): void {
     this.t = t;
-    if (typeof performance !== 'undefined') this.governFrame(performance.now());
     this.setState(t);
     this.renderScene();
   }
@@ -523,7 +511,6 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
-    this.abort.abort();
     for (const f of this.fish) {
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);

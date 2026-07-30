@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Overridable so parallel checkouts (worktrees, agents) can run e2e without
 // colliding on 5177 — vite.config.ts reads the same variable.
-const PORT = Number(process.env.PLAYGROUND_PORT ?? 5177);
+const PORT = Number(process.env.PLAYGROUND_PORT) || 5177;
 
 export default defineConfig({
   testDir: './e2e',

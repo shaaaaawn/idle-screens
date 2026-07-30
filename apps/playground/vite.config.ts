@@ -150,7 +150,7 @@ export default defineConfig(({ mode, command }) => {
   server: {
     // PLAYGROUND_PORT lets parallel checkouts (worktrees, agents) run dev/e2e
     // without colliding on 5177 — playwright.config.ts reads the same variable.
-    port: Number(process.env.PLAYGROUND_PORT ?? 5177),
+    port: Number(process.env.PLAYGROUND_PORT) || 5177,
     strictPort: true,
     // Metaquarium farm API allowlists Origins server-side (localhost is
     // rejected); the proxy wears the allowlisted Origin. Dev-only.
@@ -176,11 +176,6 @@ export default defineConfig(({ mode, command }) => {
       'three',
       'three/examples/jsm/loaders/GLTFLoader.js',
       'three/examples/jsm/utils/SkeletonUtils.js',
-      'three/examples/jsm/postprocessing/EffectComposer.js',
-      'three/examples/jsm/postprocessing/RenderPass.js',
-      'three/examples/jsm/postprocessing/ShaderPass.js',
-      'three/examples/jsm/postprocessing/UnrealBloomPass.js',
-      'three/examples/jsm/postprocessing/OutputPass.js',
     ],
   },
   resolve: {
