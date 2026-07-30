@@ -14,6 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
+import { metaquarium, createMetaquarium } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -23,6 +24,7 @@ import { escapeHtml, safeHttpUrl } from './html';
 import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
+import { buildParamsPanel } from './params-panel';
 import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
@@ -45,6 +47,7 @@ const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
   { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
   { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
+  { id: 'saver-metaquarium', label: '@idle-screens/saver-metaquarium', savers: [metaquarium] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -68,7 +71,63 @@ const SAVER_GROUPS: SaverGroup[] = [
   },
 ];
 
-const ALL_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
+/**
+ * Engine/harness-only metaquarium variant, deliberately OUTSIDE the groups:
+ * the gallery live-mounts every grouped saver, and an extra WebGL tank per
+ * page load is exactly the cost tiles must not pay. `?saver=metaquarium-school`
+ * and the e2e harness still reach it.
+ */
+const METAQUARIUM_VARIANTS: SaverPlugin[] = [
+  createMetaquarium({
+    id: 'metaquarium-school',
+    label: 'Metaquarium (School)',
+    params: { fishCount: 6 },
+  }),
+];
+
+/**
+ * Dev-only chaos saver: mounts a canvas, then throws from its own rAF loop —
+ * the runtime-fault repro that exercises core's crash ladder (crashSaverId →
+ * built-in fault screen). Engine/harness addressable, never in the gallery.
+ */
+const chaosSaver: SaverPlugin = {
+  manifest: {
+    id: 'chaos',
+    label: 'Chaos (dev)',
+    description: 'Throws from its render loop shortly after mount. For crash-path testing.',
+    motionIntensity: 'calm',
+    timeModel: 'closed-form',
+    a11y: { flashSafe: true },
+  },
+  mount(ctx: SaverContext): SaverInstance {
+    const canvas = document.createElement('canvas');
+    canvas.width = ctx.width;
+    canvas.height = ctx.height;
+    canvas.style.cssText = 'display:block;width:100%;height:100%';
+    ctx.host.appendChild(canvas);
+    const g = canvas.getContext('2d');
+    if (g) {
+      g.fillStyle = '#123';
+      g.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    const timer = setTimeout(() => {
+      throw new Error('chaos: simulated saver runtime fault');
+    }, 400);
+    return {
+      setPaused: () => {},
+      resize: () => {},
+      dispose: () => {
+        clearTimeout(timer);
+        canvas.remove();
+      },
+    };
+  },
+};
+
+/** Gallery/preview/perception spine: the curated groups only. */
+const GROUPED_SAVERS = SAVER_GROUPS.flatMap((g) => g.savers);
+/** Engine + harness registry: everything addressable, variants included. */
+const ALL_SAVERS = [...GROUPED_SAVERS, ...METAQUARIUM_VARIANTS, chaosSaver];
 
 const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-black-hole': 'black-hole',
@@ -76,6 +135,7 @@ const GROUP_SHORT_LABEL: Record<string, string> = {
   'saver-limelight': 'limelight',
   'saver-slipstream': 'slipstream',
   'saver-catwalk': 'catwalk',
+  'saver-metaquarium': 'metaquarium',
   'savers-classic': 'classic',
   schema: 'schema',
 };
@@ -92,7 +152,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
 );
 
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
-  // Same filter affordance as the gallery's — 33 savers is too many to scan.
+  // Same filter affordance as the gallery's — 36 savers is too many to scan.
   const filter = document.createElement('div');
   filter.className = 'palette-filter';
   const search = document.createElement('input');
@@ -376,6 +436,11 @@ function liveMode(): void {
     seed: c.seed,
     configMenu: c.configMenu,
     workerUrl,
+    // Runtime saver faults degrade to the BSOD — the crash screen we already
+    // own. If it can't mount, core's built-in fault screen is the floor.
+    // `?crashSaver=` overrides for e2e (e.g. targeting the faulting saver
+    // itself to exercise the built-in floor).
+    crashSaverId: params.get('crashSaver') ?? 'bsod',
   });
 
   const origMatchMedia = window.matchMedia.bind(window);
@@ -499,7 +564,7 @@ function liveMode(): void {
   });
 
   void wireCapabilitiesHarness(ALL_SAVERS);
-  wirePerceptionHarness(ALL_SAVERS);
+  wirePerceptionHarness(GROUPED_SAVERS);
   wireSchemaHarness();
 
   type View = 'gallery' | 'dev' | 'docs' | 'evals' | 'settings';
@@ -592,12 +657,17 @@ function liveMode(): void {
     const { debug, perception, layers } = right;
     const { timeline } = bottom;
 
+    const devParams = buildParamsPanel(right.params, timeline);
+    devParams.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
+
+    timeline.onTrackChange = () => devParams.refresh();
+
     let percThrottleId = 0;
     let pendingT = 0;
     timeline.onTimeChange = (t) => {
       pendingT = t;
       if (percThrottleId) return;
-      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); }, 250);
+      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); devParams.refresh(); }, 250);
     };
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
@@ -646,6 +716,7 @@ function liveMode(): void {
       history.replaceState(null, '', url);
       rebuild(cfg);
       devProps.select(saver);
+      devParams.select(saver);
       setTopbarSaver(saver);
       document
         .querySelectorAll('#dock-left .palette-item')
@@ -732,6 +803,7 @@ function liveMode(): void {
         }
         requestAnimationFrame(() => {
           devProps.refresh();
+          devParams.refresh();
           debug.setContext(previewCtx);
         });
       }).catch(() => { /* superseded by a newer selection */ });

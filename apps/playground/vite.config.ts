@@ -147,18 +147,44 @@ export default defineConfig(({ mode, command }) => {
     // use for and a build must not inline.
     __EVAL_SINK__: JSON.stringify(sinkDir ? 'on' : ''),
   },
-  server: { port: 5177, strictPort: true },
+  server: {
+    // PLAYGROUND_PORT lets parallel checkouts (worktrees, agents) run dev/e2e
+    // without colliding on 5177 — playwright.config.ts reads the same variable.
+    port: Number(process.env.PLAYGROUND_PORT) || 5177,
+    strictPort: true,
+    // Metaquarium farm API allowlists Origins server-side (localhost is
+    // rejected); the proxy wears the allowlisted Origin. Dev-only.
+    proxy: {
+      '/farm': {
+        target: 'https://f0ag1g19u8.execute-api.us-west-1.amazonaws.com/production/backend',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/farm/, ''),
+        headers: { Origin: 'https://metaquarium.xyz' },
+      },
+    },
+  },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a
   // direct dep of this app so it resolves) instead of letting Vite discover it mid-load,
   // which returns 504 "Outdated Optimize Dep" and breaks the first page load.
-  optimizeDeps: { include: ['@preact/signals-core'] },
+  // Same for three (+ the example modules the metaquarium tank uses): it's behind a
+  // dynamic import, so without pre-bundling Vite discovers it mid-test and the cold
+  // transform stalls every suite that mounts a saver.
+  optimizeDeps: {
+    include: [
+      '@preact/signals-core',
+      'three',
+      'three/examples/jsm/loaders/GLTFLoader.js',
+      'three/examples/jsm/utils/SkeletonUtils.js',
+    ],
+  },
   resolve: {
     alias: {
       '@idle-screens/core': src('core'),
       '@idle-screens/saver-black-hole': src('saver-black-hole'),
       '@idle-screens/saver-catwalk': src('saver-catwalk'),
       '@idle-screens/saver-limelight': src('saver-limelight'),
+      '@idle-screens/saver-metaquarium': src('saver-metaquarium'),
       '@idle-screens/saver-slipstream': src('saver-slipstream'),
       '@idle-screens/saver-tide': src('saver-tide'),
       '@idle-screens/savers-classic': src('savers-classic'),

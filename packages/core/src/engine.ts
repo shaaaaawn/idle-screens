@@ -101,6 +101,11 @@ export class IdleScreensEngine {
     return this.plugins.map((p) => ({ id: p.manifest.id, label: p.manifest.label }));
   }
 
+  /** Look up a registered plugin (e.g. the configured crash saver). */
+  pluginById(id: string): SaverPlugin | undefined {
+    return this.plugins.find((p) => p.manifest.id === id);
+  }
+
   /** Begin idle detection + listeners + debug hook. */
   init(): void {
     if (this.started || !hasWindow) return;

@@ -4,6 +4,7 @@ import { buildPerceptionPanel, type PerceptionHandle } from './perception-panel'
 
 export interface RightDockHandle {
   props: HTMLElement;
+  params: HTMLElement;
   engine: HTMLElement;
   layers: LayersHandle;
   debug: DebugHandle;
@@ -29,6 +30,7 @@ export function buildRightDock(mount: HTMLElement): RightDockHandle {
   stack.className = 'wb-stack wb-stack-right';
 
   const props = makePanel('Properties', true, 'wb-panel-props');
+  const params = makePanel('Parameters', true);
   const engine = makePanel('Engine', true, 'wb-panel-engine');
   const layersPanel = makePanel('Layers', true, 'wb-panel-layers');
   // Open by default: perception now has something to show for EVERY saver with
@@ -36,11 +38,12 @@ export function buildRightDock(mount: HTMLElement): RightDockHandle {
   const percPanel = makePanel('Perception', true, 'wb-panel-perception');
   const debugPanel = makePanel('Debug', true, 'wb-panel-debug');
 
-  stack.append(props.section, engine.section, layersPanel.section, percPanel.section, debugPanel.section);
+  stack.append(props.section, params.section, engine.section, layersPanel.section, percPanel.section, debugPanel.section);
   mount.append(stack);
 
   return {
     props: props.body,
+    params: params.body,
     engine: engine.body,
     layers: buildLayersPanel(layersPanel.body),
     perception: buildPerceptionPanel(percPanel.body),

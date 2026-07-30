@@ -19,11 +19,13 @@
     "@idle-screens/saver-black-hole": "workspace:*",
     "@idle-screens/saver-catwalk": "workspace:*",
     "@idle-screens/saver-limelight": "workspace:*",
+    "@idle-screens/saver-metaquarium": "workspace:*",
     "@idle-screens/saver-slipstream": "workspace:*",
     "@idle-screens/saver-tide": "workspace:*",
     "@idle-screens/savers-classic": "workspace:*",
     "@idle-screens/schema": "workspace:*",
     "@idle-screens/validator": "workspace:*",
-    "@preact/signals-core": "^1.14.4"
+    "@preact/signals-core": "^1.14.4",
+    "three": "^0.185.0"
   }
 }

@@ -167,6 +167,43 @@ export const fluid: SaverPlugin = {
   surface). Don't set `workerReady: true` on WebGPU savers.
 - Seeded RNG still applies — use `ctx.rng` for emitter initialization.
 
+### WebGL (three.js) savers — hard-won laws (metaquarium, 2026-07)
+
+- **`dispose()` MUST call `renderer.forceContextLoss()`** after
+  `renderer.dispose()`. Browsers cap live WebGL contexts (~16) and kill the
+  oldest past the cap; dispose alone waits on GC, so workbench churn (saver
+  picker, previews, remounts) exhausts the pool → "janky and crashes" with
+  nothing naming the cause. Also guard the render loop with
+  `renderer.getContext()?.isContextLost?.()` so a lost context freezes
+  instead of throwing every frame.
+- **Do NOT set `preserveDrawingBuffer: true`** — on ANGLE/Metal it taxes
+  every frame with a buffer copy (measured: 20fps → 60fps on an M1 Max by
+  removing it). Readback consumers (validator sampler, perception
+  scratch-copy) must read in the SAME task as `renderFrame`, where the
+  buffer is still intact by spec; anything async (channel thumbs) must
+  trigger a fresh `renderFrame` first.
+- **Cap pixel ratio ~1.5 and run bloom at half resolution.** Retina-full
+  through a post-processing chain is ~15 Mpix per pass; the visual delta is
+  slight softness, the cost is the whole frame budget.
+- **Detect software GL** (`SwiftShader`/`llvmpipe` in
+  `WEBGL_debug_renderer_info`) and drop to the cheapest tier with no
+  post-processing — headless CI runs on it, and every real-GPU assumption
+  inverts there.
+- **Cache parsed remote assets (GLB templates) at MODULE level**, keyed by
+  URL, shared across instances. Instances must then never dispose template
+  resources — `SkeletonUtils.clone` shares geometry — so pull spawned
+  objects out of the scene before sweeping scene-owned resources in
+  `dispose()`. Seed any template-time randomness from the URL (not
+  `ctx.rng`) so the cache can't leak one session's seed into another.
+  Delete a cache entry on fetch abort (dispose race), keep real failures
+  cached (no retry storms).
+- **A wall of tiles must not pay for a tank**: `ctx.dpr < 0.5` marks a
+  thumbnail-scale mount (gallery hands `dpr = cardWidth/refWidth`) — cap the
+  asset pool and skip post-processing composers there (UnrealBloom's shader
+  compile is a main-thread spike per tile).
+- Reference: `packages/saver-metaquarium/src/tank.ts` (+ `plan.ts` for the
+  compiled swim itinerary, `materials.ts` for authored-vs-recoat lanes).
+
 ## Rules
 1. **Render into `ctx.host` (or `ctx.surface`).** Canvas savers: check `ctx.surface`
    first — if present, use it as your canvas (this is the Worker/OffscreenCanvas path).
@@ -203,8 +240,12 @@ export const fluid: SaverPlugin = {
    (e.g. N=256 grid × ~1.5 steps). The fluid saver's `for i<200` warmup is
    cheap because its CPU grid is 96×96×1 step; copying that loop count to a
    256×256×32-step simulation freezes the main thread for seconds.
-5. **Self-contained:** NO external asset URLs. Substitute emoji drawn via canvas
-   `fillText`, canvas-drawn shapes, inline SVG data URIs, or DOM text.
+5. **Self-contained:** NO external asset URLs for classic canvas/DOM savers.
+   Substitute emoji drawn via canvas `fillText`, canvas-drawn shapes, inline
+   SVG data URIs, or DOM text. **WebGL savers** may load remote assets via
+   steerable params (`fishUrl`-style HTTPS / `ipfs://` GLBs) when templates
+   are cached at module level — see the WebGL laws section above. Default
+   remains no external URLs for canvas savers.
 6. **Deep (steerable) savers** add a typed `paramSpace` to the manifest and read
    params each frame from a control-track:
    `const p = this.track ? sampleTrack(PARAM_SPACE, this.track, t) : this.defaults;`
