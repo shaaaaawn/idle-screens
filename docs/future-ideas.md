@@ -33,6 +33,7 @@
 | G3  | `spin` as `[min, max]` range  | **Shipped (2.4.0)** | Full chain; scalar streams byte-identical (determinism suite) |
 | G4  | Higher-res / sizable perception grid | **Shipped (2.4.0)** | `renderDensityMap` + `perceiveScene().text` (text listing)   |
 | G5  | Spec version stamping / migration | Open     | Schema 2.3.0 viewport-unit default broke previously-valid live channels |
+| G6  | `reveal` on textBlock — animated typing/deleting | Open | One numeric paint param rides the existing steer glide; iOS/tvOS native renderer must follow |
 
 ---
 
@@ -182,6 +183,42 @@ thumb going forward: a new field may default, but a default must never
 
 **Where.** `idle-server/src/screen-channel.ts` (stored state),
 `worker.ts` publish path; schema changelog discipline in this repo.
+
+### G6 — `reveal` on textBlock: animated typing and deleting
+
+**Problem.** textBlock is static: text appears fully formed. Typewriter-style
+reveal (and deletion) is the most-requested text animation for presentations,
+captions over sequences, and live VJ messaging — but steering `sprite.text`
+can never animate it (`lerpSpec` steps non-color strings straight to the
+target), and per-keystroke `setParam` calls are absurd against role budgets.
+
+**Proposal.** An optional `reveal` group on the textBlock sprite:
+`{ progress?: 0..1, mode?: 'typewriter'|'word'|'line', caret?, speed? }`.
+The invariant: **layout always runs on the full text** (`breakTextBlock`
+unchanged); reveal only masks which glyphs are painted, so lines never
+reflow, the box never resizes, and perceive/SVG-preview stay exact.
+`progress` is numeric paint → it rides the existing `dur`/`ease` glide
+machinery (one steer call types a whole block) and stays out of
+`structuralSignature` by construction. `speed` (graphemes/sec) makes progress
+a pure function of `t` for self-typing captions in sequence segments. `caret`
+blinks as a square wave of `t`, capped ≤ 3 Hz. Grapheme-safe slicing (never
+split surrogate pairs/ZWJ clusters) via a small shared classifier — same
+philosophy as the fixed width-metrics table, and for the same determinism
+reason (`Intl.Segmenter` is not cross-engine deterministic).
+
+**Where.** `packages/schema/src/types.ts`, `simulate.ts` (shared slicing
+helpers), `compile.ts` (masked draw + caret), `validate.ts` (caps),
+`perceive.ts` (visible-fraction modeling), `FORMAT.md`; server
+`SCHEMA_REFERENCE` sync at release.
+
+**Native parity debt (do not lose this):** the iOS/tvOS app renders the spec
+subset natively in Swift (`apps/ios/IdleScreens/Render/`) and does **not**
+implement textBlock reveal — until it does, native clients must degrade to
+showing the full text (progress treated as 1). Track alongside any other
+subset gaps before the next iOS/tvOS release.
+
+Design doc (mono-level, with the full gate-by-gate analysis):
+`idle-mono/docs/text-reveal-design.md`.
 
 ### Deferred / noted, not adopted
 
