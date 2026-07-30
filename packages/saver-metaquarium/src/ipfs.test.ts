@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, FISH_CATALOG, DEFAULT_FISH, type FishEntry } from './ipfs';
+import { resolveIpfsUrl, FISH_CATALOG, DEFAULT_FISH } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {

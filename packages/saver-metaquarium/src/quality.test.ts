@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { effectivePixelRatio, isSoftwareGL, qualityFor } from './quality';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { effectivePixelRatio, isSoftwareGL, probeSoftwareGL, qualityFor } from './quality';
 
 describe('metaquarium quality tiers', () => {
   it('high tier gets the full tank', () => {
@@ -38,5 +38,63 @@ describe('metaquarium quality tiers', () => {
       expect(q.antialias).toBe(false);
       expect(q.fishCap).toBeLessThanOrEqual(8);
     }
+  });
+});
+
+describe('probeSoftwareGL', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('returns false when document is unavailable', () => {
+    vi.stubGlobal('document', undefined);
+    expect(probeSoftwareGL()).toBe(false);
+  });
+
+  it('returns false when no WebGL context can be created', () => {
+    const canvas = {
+      getContext: vi.fn().mockReturnValue(null),
+    };
+    vi.stubGlobal('document', {
+      createElement: vi.fn().mockReturnValue(canvas),
+    });
+    expect(probeSoftwareGL()).toBe(false);
+    expect(canvas.getContext).toHaveBeenCalledWith('webgl2');
+  });
+
+  it('detects SwiftShader via WEBGL_debug_renderer_info', () => {
+    const UNMASKED = 0x9246;
+    const gl = {
+      RENDERER: 0x1f01,
+      getExtension: vi.fn().mockReturnValue({ UNMASKED_RENDERER_WEBGL: UNMASKED }),
+      getParameter: vi.fn((p: number) =>
+        p === UNMASKED
+          ? 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0)))'
+          : 'WebGL',
+      ),
+    };
+    const canvas = {
+      getContext: vi.fn().mockImplementation((type: string) => (type === 'webgl2' ? gl : null)),
+    };
+    vi.stubGlobal('document', {
+      createElement: vi.fn().mockReturnValue(canvas),
+    });
+    expect(probeSoftwareGL()).toBe(true);
+  });
+
+  it('returns false for a hardware renderer string', () => {
+    const gl = {
+      RENDERER: 0x1f01,
+      getExtension: vi.fn().mockReturnValue(null),
+      getParameter: vi.fn().mockReturnValue('ANGLE Metal Renderer: Apple M1 Max'),
+    };
+    const canvas = {
+      getContext: vi.fn().mockReturnValue(gl),
+    };
+    vi.stubGlobal('document', {
+      createElement: vi.fn().mockReturnValue(canvas),
+    });
+    expect(probeSoftwareGL()).toBe(false);
   });
 });
