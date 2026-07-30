@@ -31,7 +31,8 @@ Additions to version 1 so far, all optional and backward compatible:
 sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
 (2026-07-21 — "the v1 ceiling");
-`textBlock` sprite — deterministic multi-line text with viewport-unit sizing.
+`textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
+`textBlock.reveal` — animated typing/deleting via one steerable paint param.
 
 ## Safety invariants
 
@@ -168,6 +169,25 @@ with distance, removing pop-in at the cutoff.
   when the real font is wider than the table estimates, so `maxWidth` is a
   layout target, not a hard clip.
   Use with `count: 1`, `motion: { type: "static" }`, and `position`.
+
+  textBlock also accepts `reveal` — animated typing/deleting:
+  `{ "reveal": { "progress": 1, "mode": "typewriter", "speed": 0, "caret": true } }`.
+  Layout always runs on the **full** text; reveal only masks which glyphs are
+  painted, so lines never reflow and the block never resizes while typing.
+  `progress` (0–1, default 1) is the frontier — it is a numeric **paint**
+  param, so steering it with `dur`/`ease` animates typing in a single
+  `setParam` call, and gliding it back toward 0 deletes. `mode` quantizes the
+  frontier per grapheme (`typewriter`, default), per `word`, or per `line`.
+  `speed` (graphemes/sec, max 120) makes the block type itself from scene
+  start: effective progress is `min(progress, speed·t/total)`, so a steered
+  `progress` can still hold or delete a self-typing block. `caret` draws a
+  blinking caret at the frontier (`true`, or `{ "blink": 1.2, "color": "#fff" }`;
+  blink is in full cycles/sec, capped at 3 for flash safety, and is a square
+  wave of `t` like every other animation). With `align: "center"`/`"right"`
+  the revealing line stays anchored to its alignment as it types — only
+  left-aligned text reads as a classic typewriter. To "edit" text live:
+  glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
+  back to 1.
 
 `circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
 per-entity palette pick) and `colorWeights: [...]` (relative weights, same

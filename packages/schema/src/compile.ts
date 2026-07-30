@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -391,6 +391,11 @@ class SpecInstance implements SaverInstance {
       const maxWEm = maxWPx / fsPx;
       const lines = breakTextBlock(sprite.text, maxWEm);
       const align = sprite.align ?? 'left';
+      // Reveal masks glyphs; layout above always ran on the full text, so
+      // lines never reflow while typing.
+      const reveal = sprite.reveal;
+      const rs = reveal ? revealState(lines, reveal, t) : null;
+      const fullLines = rs ? rs.fullLines : lines.length;
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
@@ -399,8 +404,25 @@ class SpecInstance implements SaverInstance {
       ctx.textBaseline = 'top';
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
-      for (let li = 0; li < lines.length; li++) {
+      for (let li = 0; li < fullLines; li++) {
         ctx.fillText(lines[li]!.text, xOff, li * lh);
+      }
+      if (rs && rs.partialText.length > 0) {
+        ctx.fillText(rs.partialText, xOff, fullLines * lh);
+      }
+      if (rs && reveal!.caret) {
+        const cfg = reveal!.caret === true ? {} : reveal!.caret;
+        const hz = Math.min(3, cfg.blink ?? 1.2);
+        const on = hz <= 0 || Math.floor((t / 1000) * hz * 2) % 2 === 0;
+        if (on) {
+          // measureText is paint-only here: it positions the caret against the
+          // platform's real glyph widths but never influences layout, which
+          // stays on the fixed metrics table.
+          const pw = ctx.measureText(rs.caretPrefix).width;
+          const cx = align === 'center' ? xOff + pw / 2 : align === 'right' ? xOff : pw;
+          ctx.fillStyle = cfg.color ?? sprite.color ?? '#e6e8ef';
+          ctx.fillRect(cx + fsPx * 0.06, rs.caretLine * lh, Math.max(1, fsPx * 0.08), fsPx);
+        }
       }
       ctx.restore();
       return;
@@ -649,6 +671,11 @@ class SequenceInstance implements SaverInstance {
    * its seed (and entity placement) is continuous.
    */
   private morphFromIndex = -1;
+  private readonly seed: number;
+  private frameId: number | null = null;
+  private startT = 0;
+  private baseT = 0;
+  private lastT = 0;
 
   constructor(seq: IdleSequence, ctx: SaverContext) {
     this.seq = seq;
@@ -664,8 +691,16 @@ class SequenceInstance implements SaverInstance {
     }
     this.canvas = canvas;
 
+    // Prefer the sequence's own seed (same precedence SpecInstance uses for
+    // scene.seed ?? ctx.seed). Children still resolve per-segment via childSeed.
+    this.seed = ((seq.seed ?? ctx.seed ?? 0) >>> 0) || 1;
+    // Children are always parent-driven: reducedMotion:true keeps SpecInstance
+    // from starting its own rAF. SequenceInstance.loop is the only clock.
     this.childCtx = { ...ctx, surface: surface!, reducedMotion: true };
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
+    this.paused = ctx.reducedMotion;
+    if (this.paused) this.renderFrame(0, this.seed);
+    else this.start();
   }
 
   private childSeed(index: number, fallback: number): number {
@@ -706,7 +741,9 @@ class SequenceInstance implements SaverInstance {
     if (!child) {
       child = new SpecInstance(this.childScene(index), this.childCtx);
       this.children[index] = child;
-      if (this.paused) child.setPaused(true);
+      // Belt-and-suspenders: never let a child self-drive, even if childCtx
+      // reducedMotion is ever relaxed.
+      child.setPaused(true);
     }
     return child;
   }
@@ -717,6 +754,27 @@ class SequenceInstance implements SaverInstance {
       child.dispose();
       this.children[index] = null;
     }
+  }
+
+  private start(): void {
+    if (this.frameId !== null || typeof requestAnimationFrame === 'undefined') return;
+    this.startT = 0;
+    this.frameId = requestAnimationFrame((now) => this.loop(now));
+  }
+
+  private stop(): void {
+    if (this.frameId !== null) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
+    this.baseT = this.lastT;
+  }
+
+  private loop(now: number): void {
+    this.frameId = requestAnimationFrame((n) => this.loop(n));
+    if (this.startT === 0) this.startT = now;
+    this.lastT = now - this.startT + this.baseT;
+    this.renderFrame(this.lastT, this.seed);
   }
 
   renderFrame(T: number, seed: number): void {
@@ -779,7 +837,7 @@ class SequenceInstance implements SaverInstance {
         const rootScene = this.childScene(chainRoot);
         child = new SpecInstance(rootScene, this.childCtx);
         this.children[index] = child;
-        if (this.paused) child.setPaused(true);
+        child.setPaused(true);
         child.hotSwapSpec(this.childScene(index));
       } else {
         child = this.ensureChild(index);
@@ -791,8 +849,13 @@ class SequenceInstance implements SaverInstance {
 
   setPaused(paused: boolean): void {
     this.paused = paused;
+    if (paused) this.stop();
+    else this.start();
+    // Do NOT forward pause=false to children — that would start SpecInstance
+    // rAF loops alongside SequenceInstance.loop (double clock, wrong localT).
+    // Children stay paused; the parent loop is the sole driver.
     for (const child of this.children) {
-      child?.setPaused(paused);
+      child?.setPaused(true);
     }
   }
 
@@ -825,6 +888,7 @@ class SequenceInstance implements SaverInstance {
   }
 
   dispose(): void {
+    this.stop();
     for (let i = 0; i < this.children.length; i++) {
       this.releaseChild(i);
     }

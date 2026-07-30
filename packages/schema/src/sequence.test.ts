@@ -384,6 +384,88 @@ describe('SequenceInstance (mount + render)', () => {
     inst.dispose();
   });
 
+  /**
+   * F11 — sequences used to mount with no rAF loop (black canvas). Stub the
+   * browser clock so we can assert the parent self-drives and that pause/resume
+   * never starts a second (child) loop.
+   */
+  function stubRafQueue() {
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
+      const id = nextId++;
+      pending.set(id, cb);
+      return id;
+    });
+    const caf = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
+      pending.delete(Number(id));
+    });
+    const tick = (now: number) => {
+      const batch = [...pending.entries()];
+      for (const [id, cb] of batch) {
+        pending.delete(id);
+        cb(now);
+      }
+    };
+    const restore = () => {
+      raf.mockRestore();
+      caf.mockRestore();
+    };
+    return { pending, tick, restore };
+  }
+
+  it('self-drives via rAF after mount (F11 — not black)', () => {
+    const { pending, tick, restore } = stubRafQueue();
+    mockCtx.fillRect = vi.fn();
+    const inst = mountSync(compileSequence(seq()));
+
+    expect(pending.size).toBe(1);
+    expect(mockCtx.fillRect).not.toHaveBeenCalled();
+
+    tick(16);
+    expect(mockCtx.fillRect).toHaveBeenCalled();
+    // Loop reschedules itself — still exactly one outstanding frame.
+    expect(pending.size).toBe(1);
+
+    inst.dispose();
+    expect(pending.size).toBe(0);
+    restore();
+  });
+
+  it('keeps a single parent rAF across pause/resume (no child double-drive)', () => {
+    const { pending, tick, restore } = stubRafQueue();
+    const inst = mountSync(compileSequence(seq()));
+
+    tick(16); // ensure a child SpecInstance exists
+    expect(pending.size).toBe(1);
+
+    inst.setPaused(true);
+    expect(pending.size).toBe(0);
+
+    inst.setPaused(false);
+    // Regression: forwarding pause=false to children started a second rAF.
+    expect(pending.size).toBe(1);
+
+    tick(100);
+    expect(pending.size).toBe(1);
+
+    inst.dispose();
+    expect(pending.size).toBe(0);
+    restore();
+  });
+
+  it('reducedMotion paints one frame and does not schedule rAF', () => {
+    const { pending, restore } = stubRafQueue();
+    mockCtx.fillRect = vi.fn();
+    const inst = mountSync(compileSequence(seq()), saverCtx({ reducedMotion: true }));
+
+    expect(pending.size).toBe(0);
+    expect(mockCtx.fillRect).toHaveBeenCalled();
+
+    inst.dispose();
+    restore();
+  });
+
   it('does not throw on resize', () => {
     const inst = mountSync(compileSequence(seq()));
     inst.renderFrame!(2000, 1);

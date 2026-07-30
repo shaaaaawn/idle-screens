@@ -21,7 +21,9 @@ const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'col
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
+const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret']);
+const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
 const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
@@ -410,6 +412,39 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.align`, "must be 'left' | 'center' | 'right'");
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.reveal !== undefined) {
+      const rv = sprite.reveal as Record<string, unknown>;
+      if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
+        err(`${path}.reveal`, 'must be an object');
+      } else {
+        for (const k of Object.keys(rv)) {
+          if (!KNOWN_REVEAL.has(k)) err(`${path}.reveal.${k}`, 'unknown reveal field');
+        }
+        if (rv.progress !== undefined && (!isNum(rv.progress) || rv.progress < 0 || rv.progress > 1)) {
+          err(`${path}.reveal.progress`, 'must be a number between 0 and 1');
+        }
+        if (rv.mode !== undefined && !['typewriter', 'word', 'line'].includes(rv.mode as string)) {
+          err(`${path}.reveal.mode`, "must be 'typewriter' | 'word' | 'line'");
+        }
+        if (rv.speed !== undefined && (!isNum(rv.speed) || rv.speed < 0 || rv.speed > LIMITS.maxRevealSpeed)) {
+          err(`${path}.reveal.speed`, `must be between 0 and ${LIMITS.maxRevealSpeed} (graphemes/sec)`);
+        }
+        if (rv.caret !== undefined && typeof rv.caret !== 'boolean') {
+          const caret = rv.caret as Record<string, unknown>;
+          if (typeof caret !== 'object' || caret === null || Array.isArray(caret)) {
+            err(`${path}.reveal.caret`, 'must be a boolean or an object');
+          } else {
+            for (const k of Object.keys(caret)) {
+              if (!KNOWN_REVEAL_CARET.has(k)) err(`${path}.reveal.caret.${k}`, 'unknown caret field');
+            }
+            if (caret.blink !== undefined && (!isNum(caret.blink) || caret.blink <= 0 || caret.blink > LIMITS.maxCaretBlinkHz)) {
+              err(`${path}.reveal.caret.blink`, `must be between 0 (exclusive) and ${LIMITS.maxCaretBlinkHz} Hz (flash safety)`);
+            }
+            if (caret.color !== undefined) color(caret.color, `${path}.reveal.caret.color`, err);
+          }
+        }
+      }
+    }
   } else {
     err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
     return;

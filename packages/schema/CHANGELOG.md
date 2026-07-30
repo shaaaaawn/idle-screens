@@ -1,5 +1,28 @@
 # @idle-screens/schema
 
+## 3.4.0
+
+### Minor Changes
+
+- fdefb61: Add `textBlock.reveal` — animated typing/deleting via one steerable paint param
+
+  Optional `reveal` on textBlock sprites: `{ progress, mode: "typewriter", speed, caret }`.
+  Layout always runs on the full text; reveal only masks which glyphs are painted, so
+  alignment stays stable as text types. Steer `reveal.progress` (and optionally `speed`)
+  live via setParam — agents can glide to 0, swap `text` while invisible, then reveal again.
+
+  ***
+
+### Patch Changes
+
+- d9c0d3b: Fix idle-sequence black canvas — SequenceInstance now self-drives via rAF
+
+  Sequences mounted but never painted in live viewers: SpecInstance runs its own
+  requestAnimationFrame loop, SequenceInstance did not. Add the same
+  start/stop/loop clock, keep child SpecInstances parent-driven (never forward
+  pause=false to children — that double-scheduled rAF), and prefer seq.seed for
+  the outer clock seed.
+
 ## 3.3.0
 
 ### Minor Changes

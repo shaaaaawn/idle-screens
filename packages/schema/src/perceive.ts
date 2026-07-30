@@ -24,6 +24,7 @@ import {
   lifeAlphaAt,
   linkEdges,
   positionAt,
+  revealState,
   sizeAt,
   type Entity,
 } from './simulate';
@@ -167,6 +168,24 @@ function textBlockBox(
     halfX: maxLineW / 2,
     halfY: totalH / 2,
   };
+}
+
+/**
+ * Effective reveal fraction of a textBlock at time t (1 = fully shown).
+ * Mirrors the renderer's `revealState` exactly — same line breaking, same
+ * grapheme counting — so the perceived ink matches the painted ink.
+ */
+function textBlockRevealFraction(
+  s: Extract<LayerSpec['sprite'], { kind: 'textBlock' }>,
+  w: number,
+  h: number,
+  t: number,
+): number {
+  if (!s.reveal) return 1;
+  const unitScale = Math.min(w, h);
+  const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
+  const lines = breakTextBlock(s.text, maxWEm);
+  return revealState(lines, s.reveal, t).progress;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,8 +383,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const c1 = Math.min(cols - 1, Math.floor((centerX + reachX) / cellW));
       const r0 = Math.max(0, Math.floor((centerY - reachY) / cellH));
       const r1 = Math.min(rows - 1, Math.floor((centerY + reachY) / cellH));
-      // Glyphs don't fill their box — ink is sparse.
-      const inkWeight = s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1;
+      // Glyphs don't fill their box — ink is sparse. A revealing textBlock
+      // has proportionally less ink lit.
+      const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
+        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) : 1);
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
@@ -584,6 +605,8 @@ export interface TextSpriteInfo {
   count: number;
   /** Representative rendered glyph height in px at the sample viewport. */
   sizePx: number;
+  /** For a revealing textBlock: effective 0..1 fraction shown at sample t. */
+  revealed?: number;
 }
 
 /**
@@ -601,7 +624,9 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
       const s = layer.sprite;
       const unitScale = Math.min(scene.w, scene.h);
       const sizePx = s.fontSize * unitScale;
-      out.push({ layerIndex, key: layer.key, strings: [s.text], count: entities.length, sizePx: Math.round(sizePx) });
+      const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [s.text], count: entities.length, sizePx: Math.round(sizePx) };
+      if (s.reveal) info.revealed = Math.round(textBlockRevealFraction(s, scene.w, scene.h, t) * 100) / 100;
+      out.push(info);
       return;
     }
     if (layer.sprite.kind !== 'text') return;
@@ -689,7 +714,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t);
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;
