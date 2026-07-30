@@ -169,6 +169,24 @@ function userPrompt(
   return lines.join('\n');
 }
 
+/**
+ * The exact prompt `runAgentScreen` would send for this target, exported so a
+ * headless harness (e.g. a mono-side eval set where the "model" is an agent
+ * CLI driving files, not an OpenRouter transport) can replicate the loop
+ * faithfully instead of paraphrasing it.
+ */
+export function buildAgentPrompt(
+  screen: EvalScreen,
+  profile: ArtistStyleProfile,
+  benchmark: BenchmarkIntent | null,
+  maxToolCalls: number,
+): { system: string; user: string } {
+  return {
+    system: systemPrompt(profile, maxToolCalls),
+    user: userPrompt(screen, profile, benchmark),
+  };
+}
+
 function isAbort(err: unknown, signal?: AbortSignal): boolean {
   return (
     signal?.aborted === true ||
