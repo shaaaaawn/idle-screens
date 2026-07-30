@@ -1,5 +1,12 @@
 # @idle-screens/saver-slipstream
 
+## 1.0.4
+
+### Patch Changes
+
+- Updated dependencies [374814d]
+  - @idle-screens/core@0.4.4
+
 ## 1.0.3
 
 ### Patch Changes

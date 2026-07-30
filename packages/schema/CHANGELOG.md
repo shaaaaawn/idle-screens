@@ -1,5 +1,12 @@
 # @idle-screens/schema
 
+## 3.4.1
+
+### Patch Changes
+
+- Updated dependencies [374814d]
+  - @idle-screens/core@0.4.4
+
 ## 3.4.0
 
 ### Minor Changes
