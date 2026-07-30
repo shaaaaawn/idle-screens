@@ -25,6 +25,7 @@
     "@idle-screens/savers-classic": "workspace:*",
     "@idle-screens/schema": "workspace:*",
     "@idle-screens/validator": "workspace:*",
-    "@preact/signals-core": "^1.14.4"
+    "@preact/signals-core": "^1.14.4",
+    "three": "^0.185.0"
   }
 }
