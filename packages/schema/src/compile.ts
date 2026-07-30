@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -391,6 +391,11 @@ class SpecInstance implements SaverInstance {
       const maxWEm = maxWPx / fsPx;
       const lines = breakTextBlock(sprite.text, maxWEm);
       const align = sprite.align ?? 'left';
+      // Reveal masks glyphs; layout above always ran on the full text, so
+      // lines never reflow while typing.
+      const reveal = sprite.reveal;
+      const rs = reveal ? revealState(lines, reveal, t) : null;
+      const fullLines = rs ? rs.fullLines : lines.length;
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
@@ -399,8 +404,25 @@ class SpecInstance implements SaverInstance {
       ctx.textBaseline = 'top';
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
-      for (let li = 0; li < lines.length; li++) {
+      for (let li = 0; li < fullLines; li++) {
         ctx.fillText(lines[li]!.text, xOff, li * lh);
+      }
+      if (rs && rs.partialText.length > 0) {
+        ctx.fillText(rs.partialText, xOff, fullLines * lh);
+      }
+      if (rs && reveal!.caret) {
+        const cfg = reveal!.caret === true ? {} : reveal!.caret;
+        const hz = Math.min(3, cfg.blink ?? 1.2);
+        const on = hz <= 0 || Math.floor((t / 1000) * hz * 2) % 2 === 0;
+        if (on) {
+          // measureText is paint-only here: it positions the caret against the
+          // platform's real glyph widths but never influences layout, which
+          // stays on the fixed metrics table.
+          const pw = ctx.measureText(rs.caretPrefix).width;
+          const cx = align === 'center' ? xOff + pw / 2 : align === 'right' ? xOff : pw;
+          ctx.fillStyle = cfg.color ?? sprite.color ?? '#e6e8ef';
+          ctx.fillRect(cx + fsPx * 0.06, rs.caretLine * lh, Math.max(1, fsPx * 0.08), fsPx);
+        }
       }
       ctx.restore();
       return;

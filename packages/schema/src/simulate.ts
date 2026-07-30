@@ -736,3 +736,148 @@ export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[
 
   return lines;
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic text reveal (textBlock `reveal` — typing/deleting)
+// ---------------------------------------------------------------------------
+
+// Combining/attaching code points that must never be painted without their
+// base: combining diacritics, variation selectors, skin-tone modifiers,
+// keycap. Deliberately a fixed table rather than Intl.Segmenter, which is
+// not required to segment identically across engines — same philosophy (and
+// same determinism reason) as the charWidthEm buckets above.
+function isClusterExtend(cp: number): boolean {
+  return (
+    (cp >= 0x0300 && cp <= 0x036f) || // combining diacritics
+    (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x20d0 && cp <= 0x20ff) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) || // variation selectors
+    (cp >= 0x1f3fb && cp <= 0x1f3ff) || // skin tones
+    cp === 0x20e3 // combining enclosing keycap
+  );
+}
+
+function isRegionalIndicator(cp: number): boolean {
+  return cp >= 0x1f1e6 && cp <= 0x1f1ff;
+}
+
+const ZWJ = 0x200d;
+
+/**
+ * Split a string into paint-safe grapheme clusters: surrogate pairs stay
+ * whole, combining marks / variation selectors / skin tones attach to their
+ * base, ZWJ joins sequences (emoji families), regional indicators pair up
+ * (flags). Deterministic across engines by construction.
+ */
+export function graphemeClusters(text: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const cp = text.codePointAt(i)!;
+    let end = i + (cp > 0xffff ? 2 : 1);
+    // Flag pair: two regional indicators form one cluster.
+    if (isRegionalIndicator(cp) && end < text.length) {
+      const next = text.codePointAt(end)!;
+      if (isRegionalIndicator(next)) end += next > 0xffff ? 2 : 1;
+    }
+    // Attach extenders and ZWJ-joined sequences.
+    while (end < text.length) {
+      const next = text.codePointAt(end)!;
+      if (isClusterExtend(next)) {
+        end += next > 0xffff ? 2 : 1;
+      } else if (next === ZWJ && end + 1 < text.length) {
+        const after = text.codePointAt(end + 1)!;
+        end += 1 + (after > 0xffff ? 2 : 1);
+      } else {
+        break;
+      }
+    }
+    out.push(text.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
+export interface TextRevealInput {
+  progress?: number;
+  mode?: 'typewriter' | 'word' | 'line';
+  speed?: number;
+}
+
+export interface RevealState {
+  /** Effective 0..1 progress after combining authored progress and speed at t. */
+  progress: number;
+  /** Number of fully visible lines. */
+  fullLines: number;
+  /** Grapheme-safe visible prefix of the next line ('' when none). */
+  partialText: string;
+  /** Caret anchor: line index and the visible prefix on that line. */
+  caretLine: number;
+  caretPrefix: string;
+}
+
+/**
+ * Resolve which glyphs of a broken textBlock are visible at time `tMs`.
+ * Pure function of (lines, reveal, tMs) — the renderer paints exactly this,
+ * and perceive models exactly this, so agents and pixels agree. `speed` is
+ * graphemes/sec regardless of mode; mode only quantizes the frontier.
+ */
+export function revealState(lines: TextBlockLine[], reveal: TextRevealInput, tMs: number): RevealState {
+  const lineClusters = lines.map((l) => graphemeClusters(l.text));
+  const totalGraphemes = lineClusters.reduce((n, c) => n + c.length, 0);
+
+  const authored = Math.max(0, Math.min(1, reveal.progress ?? 1));
+  const speed = reveal.speed ?? 0;
+  const timed = speed > 0 && totalGraphemes > 0 ? Math.min(1, (speed * tMs) / 1000 / totalGraphemes) : 1;
+  const progress = Math.min(authored, timed);
+
+  const mode = reveal.mode ?? 'typewriter';
+  let fullLines = 0;
+  let partialText = '';
+
+  if (mode === 'line') {
+    fullLines = Math.round(progress * lines.length);
+  } else if (mode === 'word') {
+    const lineWords = lines.map((l) => (l.text.length === 0 ? [] : l.text.split(' ')));
+    const totalWords = lineWords.reduce((n, ws) => n + ws.length, 0);
+    let remaining = Math.round(progress * totalWords);
+    for (const ws of lineWords) {
+      if (remaining >= ws.length) {
+        remaining -= ws.length;
+        fullLines++;
+        // A zero-word (empty) line is "full" for free; keep consuming.
+        continue;
+      }
+      if (remaining > 0) partialText = ws.slice(0, remaining).join(' ');
+      break;
+    }
+  } else {
+    let remaining = Math.round(progress * totalGraphemes);
+    for (const clusters of lineClusters) {
+      if (remaining >= clusters.length) {
+        remaining -= clusters.length;
+        fullLines++;
+        continue;
+      }
+      if (remaining > 0) partialText = clusters.slice(0, remaining).join('');
+      break;
+    }
+  }
+
+  // Caret sits at the reveal frontier: end of the partial line, else end of
+  // the last full line, else the start of the block.
+  let caretLine: number;
+  let caretPrefix: string;
+  if (partialText.length > 0) {
+    caretLine = fullLines;
+    caretPrefix = partialText;
+  } else if (fullLines > 0) {
+    caretLine = fullLines - 1;
+    caretPrefix = lines[fullLines - 1]!.text;
+  } else {
+    caretLine = 0;
+    caretPrefix = '';
+  }
+
+  return { progress, fullLines, partialText, caretLine, caretPrefix };
+}

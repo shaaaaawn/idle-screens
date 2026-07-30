@@ -213,7 +213,40 @@ export type SpriteSpec =
       lineHeight?: number;
       align?: 'left' | 'center' | 'right';
       color?: string;
+      reveal?: TextRevealSpec;
     };
+
+/**
+ * Animated typing/deleting for `textBlock`. Layout always runs on the FULL
+ * text — reveal only masks which glyphs are painted, so lines never reflow
+ * and the block's box never changes size. `progress` is a numeric paint
+ * param (excluded from the structural signature), so steering it with
+ * `dur`/`ease` animates typing client-side in one call; gliding it back to 0
+ * deletes. With center/right `align`, the revealing line stays anchored to
+ * its alignment as it types (only left-aligned text reads as a classic
+ * typewriter).
+ */
+export interface TextRevealSpec {
+  /**
+   * 0..1 fraction of the text revealed (default 1 = fully shown). Quantized
+   * by `mode`. Steerable paint — glide it to animate typing or deleting.
+   */
+  progress?: number;
+  /** Reveal granularity: per-grapheme (default), per-word, or per-line. */
+  mode?: 'typewriter' | 'word' | 'line';
+  /**
+   * Self-typing rate in graphemes/second from scene start (media time). The
+   * effective progress is `min(progress, speed·t/total)` — so a steered
+   * `progress` can hold or delete even while `speed` is set. 0 = off.
+   */
+  speed?: number;
+  /**
+   * Caret at the reveal frontier. `true` for defaults, or configure blink
+   * rate (Hz, full cycles/sec, capped at 3 for flash safety) and color.
+   * Blink is a square wave of `t` — deterministic like everything else.
+   */
+  caret?: boolean | { blink?: number; color?: string };
+}
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
 export interface CycleSpec {
@@ -330,6 +363,8 @@ export const LIMITS = {
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
   maxTextBlockMaxWidth: 1.0,
+  maxRevealSpeed: 120, // graphemes/sec — faster than any readable typing
+  maxCaretBlinkHz: 3, // full blink cycles/sec — WCAG 2.3.1 flash-safety cap
   maxSegments: 24,
   minSegmentDuration: 1000, // ms — flash-safety floor: segment cuts are luminance transitions
   maxTransitionDur: 5000,
