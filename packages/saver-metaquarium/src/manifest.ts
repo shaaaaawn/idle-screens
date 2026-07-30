@@ -22,8 +22,10 @@ export const METAQUARIUM_PARAMS = {
   swimSpeed: { type: 'number', default: 1, min: 0.2, max: 3, ease: 'smooth' },
   /** Water/atmosphere color (background + fog). */
   fogColor: { type: 'color', default: '#030009', ease: 'smooth' },
-  /** GLB model URL for the fish (supports ipfs:// scheme). */
-  fishUrl: { type: 'string', default: '/assets/metaquarium/fish-257-angelfish.glb' },
+  /** GLB model URL for the fish (supports ipfs:// scheme). Package default
+   *  is the IPFS hero fish so npm / channel hosts work without playground
+   *  static assets; the playground overrides this to a local GLB. */
+  fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
