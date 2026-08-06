@@ -1,5 +1,15 @@
 # @idle-screens/schema
 
+## 3.4.2
+
+### Patch Changes
+
+- 8d8973b: Auto-default `sprite.color` from `colors[0]` when missing (F3)
+
+  Before validation, if a sprite declares `colors[]` but omits `color`, default
+  `color` to `colors[0]`. Applies in both `validateSpec()` and per-segment scene
+  normalization in `validateSequence()`.
+
 ## 3.4.1
 
 ### Patch Changes
