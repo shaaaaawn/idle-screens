@@ -49,7 +49,27 @@ function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[]
  * Warnings are non-blocking advisories about unknown/misplaced properties and
  * near-zero speeds. They don't prevent compilation but indicate likely authoring mistakes.
  */
+/**
+ * Normalize: if a sprite has `colors[]` but no `color`, default `color` to
+ * `colors[0]`. Author intent is unambiguous (pick from the palette), and
+ * requiring both is a known footgun (F3). Mutates the spec in place — the
+ * added field is always correct.
+ */
+function normalizeColors(spec: unknown): void {
+  if (!isObj(spec) || !Array.isArray(spec.layers)) return;
+  for (const layer of spec.layers) {
+    if (!isObj(layer)) continue;
+    const sprite = (layer as Record<string, unknown>).sprite;
+    if (!isObj(sprite)) continue;
+    const sp = sprite as Record<string, unknown>;
+    if (Array.isArray(sp.colors) && sp.colors.length > 0 && sp.color === undefined) {
+      sp.color = sp.colors[0];
+    }
+  }
+}
+
 export function validateSpec(spec: unknown): ValidationResult {
+  normalizeColors(spec);
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -631,6 +651,14 @@ export function assertValidSpec(spec: unknown): SaverSpec {
  * bounds) are checked here.
  */
 export function validateSequence(seq: unknown): ValidationResult {
+  // Normalize each segment's scene (F3: colors-without-color auto-default)
+  if (isObj(seq) && Array.isArray(seq.segments)) {
+    for (const seg of seq.segments) {
+      if (isObj(seg) && isObj((seg as Record<string, unknown>).scene)) {
+        normalizeColors((seg as Record<string, unknown>).scene);
+      }
+    }
+  }
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
