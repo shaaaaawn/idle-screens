@@ -5,6 +5,11 @@ on:
     branches: [main, develop]
   pull_request:
   workflow_call:
+    inputs:
+      skip_e2e:
+        description: Skip Playwright e2e (Release path — PR already ran full CI)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,16 +39,19 @@ jobs:
       # There is no usable "built-in Playwright" on ubuntu-latest; the closest
       # built-in is system Google Chrome via channel:'chrome' (see playwright.config).
       - name: Cache Playwright browsers
+        # inputs.skip_e2e is only set on workflow_call; push/PR leave it empty → run e2e.
+        if: ${{ inputs.skip_e2e != true }}
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}-chromium
       - name: Install Playwright Chromium + OS deps
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        if: ${{ inputs.skip_e2e != true && steps.playwright-cache.outputs.cache-hit != 'true' }}
         run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
       - name: Install Playwright OS deps only
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        if: ${{ inputs.skip_e2e != true && steps.playwright-cache.outputs.cache-hit == 'true' }}
         run: pnpm --filter @idle-screens/playground exec playwright install-deps chromium
       - name: E2E (element + savers + determinism + config menu)
+        if: ${{ inputs.skip_e2e != true }}
         run: pnpm test:e2e
