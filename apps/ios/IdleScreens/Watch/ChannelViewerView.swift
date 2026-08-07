@@ -10,6 +10,9 @@ import WebKit
 struct ChannelViewerView: View {
     let channelId: String
     var label: String?
+    /// False for a page the pager has built but you haven't swiped to yet.
+    /// Only the page you're actually looking at holds a socket.
+    var isActive: Bool = true
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -19,6 +22,7 @@ struct ChannelViewerView: View {
     @State private var showInfo = false
     @State private var chromeTask: Task<Void, Never>?
     @State private var toast: String?
+    @State private var waking = false
     @State private var pulse = false
     @State private var showComposer = false
 
@@ -71,8 +75,20 @@ struct ChannelViewerView: View {
             // big canvas that deserves the whole device — nothing animating
             // offscreen behind it earns its memory.
             PreviewBudget.shared.enterFullscreen()
-            session.start(channelId: channelId, seedSpec: seedSpec)
+            if isActive { session.start(channelId: channelId, seedSpec: seedSpec) }
             revealChrome()
+        }
+        // A paging TabView builds the neighbouring pages before you reach them.
+        // Without this gate every neighbour opens its own channel socket, so
+        // swiping through ten channels would leave ten live connections behind.
+        .onChange(of: isActive) { _, nowActive in
+            if nowActive {
+                session.start(channelId: channelId, seedSpec: seedSpec)
+                revealChrome()
+            } else {
+                chromeTask?.cancel()
+                session.stop()
+            }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -140,16 +156,64 @@ struct ChannelViewerView: View {
         }
     }
 
+    /// Sleeping used to be a dead end: a moon and a shrug, even when waking it
+    /// was one call away. If you can steer it, the state IS the button.
     @ViewBuilder
     private var sleepingLayer: some View {
         if session.sleeping {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 Image(systemName: "moon.zzz")
                     .font(.system(size: 34))
-                Text("channel is sleeping")
-                    .font(.subheadline)
+                    .foregroundStyle(Color.textSecondary)
+                Text("sleeping")
+                    .font(.headline)
+                    .foregroundStyle(Color.textPrimary)
+
+                if canSteer {
+                    Button {
+                        wake()
+                    } label: {
+                        Group {
+                            if waking {
+                                ProgressView().tint(Color.appBackground)
+                            } else {
+                                Label("Wake it", systemImage: "sun.max.fill")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                        }
+                        .frame(minWidth: 132, minHeight: 22)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(Color.appBackground)
+                        .background(Color.textPrimary, in: Capsule())
+                    }
+                    .disabled(waking)
+                } else {
+                    // Don't offer an action that would 403. Say what's true.
+                    Text("It'll come back when its owner wakes it.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.textSecondary)
+                }
             }
-            .foregroundStyle(Color.textSecondary.opacity(0.5))
+            .padding(28)
+            .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
+            .transition(.opacity)
+        }
+    }
+
+    private func wake() {
+        guard let token = app.token(for: channelId), !waking else { return }
+        waking = true
+        Task {
+            defer { waking = false }
+            do {
+                try await app.mcp.wake(channelId: channelId, token: token)
+                // The socket pushes the real state; this just avoids a beat of
+                // the button sitting there looking ignored.
+                session.optimisticallyAwake()
+            } catch {
+                flash("couldn't wake it — try again")
+            }
         }
     }
 

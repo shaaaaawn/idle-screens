@@ -10,7 +10,15 @@ final class ChannelSession {
     private(set) var compiledScene: [CompiledLayer] = []
     private(set) var background: SpecSubset.Background?
     private(set) var sleeping = false
+
+    /// Flip locally the instant a wake is accepted. The socket will push the
+    /// authoritative state a moment later; without this the button looks
+    /// ignored for a full round trip.
+    func optimisticallyAwake() { sleeping = false }
     private(set) var viewers: Int?
+    /// Saved presets on this channel. The server has sent these on every state
+    /// push since presets existed; nothing rendered them until now.
+    private(set) var presets: [String] = []
     private(set) var overlayText: String?
     private(set) var sceneLabel: String?
     /// True when the channel publishes a classic saver (`{"id":"warp"}`),
@@ -97,6 +105,7 @@ final class ChannelSession {
         switch event {
         case .snapshot(let snapshot):
             sleeping = snapshot.sleeping ?? sleeping
+            if let names = snapshot.presets { presets = names }
             viewers = snapshot.viewers
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 decode(spec, fallbackSeed: snapshot.epoch)
