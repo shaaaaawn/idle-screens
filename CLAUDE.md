@@ -86,8 +86,8 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 ## Build, CI, and deploy
 
-- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main` and `develop`, plus PRs and `workflow_call`.
-- **Release** (`.github/workflows/release.yml`): uses `changesets/action` to version-bump and publish to npm on push to `main`. Requires `NPM_TOKEN` secret (granular access token with "Bypass 2FA"). Both `NPM_TOKEN` and `NODE_AUTH_TOKEN` env vars must be set (setup-node creates `.npmrc` using `NODE_AUTH_TOKEN`, overriding changesets' `NPM_TOKEN` `.npmrc`).
+- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main` and `develop`, plus PRs and `workflow_call`. `workflow_call` accepts `skip_e2e` (Release uses this — PR already ran full e2e).
+- **Release** (`.github/workflows/release.yml`): on push to `main` (and `workflow_dispatch` retry). Slim CI (no e2e) → `changesets/action` opens "chore: version packages" → **auto-merges** that PR → **publishes in the same run**. Prefer **npm Trusted Publishing (OIDC)** (`id-token: write`, npm ≥ 11.5.1). Optional secrets: `NPM_TOKEN` (legacy fallback until every package has a Trusted Publisher), `RELEASE_GITHUB_TOKEN` (PAT/app so the version merge can also re-trigger Pages/CI; without it, same-run publish still works), `IDLE_SERVER_DISPATCH_TOKEN` (PAT with `repo` on private idle-server — fires Consume after publish).
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
 - **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test in an Arch container. Triggers on `apps/linux/**` changes on `main` and `develop`.
@@ -162,7 +162,7 @@ scripts/release.sh cut <slug>          # snapshot; record Cut-From on the PR
 
 # OUTER — babysit CI; on red fix develop then promote (not dual-land first):
 #   scripts/release.sh promote <sha>
-release/* PR → merge-commit → version packages → npm
+release/* PR → merge-commit → Release auto-merges version PR + publishes npm
 
 # BACK — metadata-sync only; mid-train develop commits = next cut
 ```
@@ -229,8 +229,26 @@ If the merge is *not* ff-only, `develop` has diverged and needs a real merge;
 investigate before publishing anything else.
 
 Config: `.changeset/config.json` — `access: "public"`, `baseBranch: "main"`,
-`updateInternalDependencies: "patch"`. Requires `NPM_TOKEN` (+ `NODE_AUTH_TOKEN`
-for setup-node) in GitHub secrets.
+`updateInternalDependencies: "patch"`.
+
+### npm Trusted Publishing (required once; then drop `NPM_TOKEN`)
+
+For each published `@idle-screens/*` package on npmjs.com → **Settings → Trusted
+Publisher → GitHub Actions**:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `shaaaaawn` |
+| Repository | `idle-screens` |
+| Workflow filename | `release.yml` (filename only) |
+| Environment | _(leave empty)_ |
+| Allowed actions | `npm publish` |
+
+Packages: `core`, `schema`, `savers-classic`, `saver-black-hole`, `saver-catwalk`,
+`saver-tide`, `saver-limelight`, `saver-slipstream`, `saver-metaquarium`,
+`validator`, `capabilities`. After all eleven are configured and a Release has
+published via OIDC, remove the repo `NPM_TOKEN` secret and prefer
+"Require two-factor authentication and disallow tokens" on the packages.
 
 ## Branching
 
