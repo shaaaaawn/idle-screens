@@ -132,6 +132,7 @@ jobs:
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish after version merge (same run)
+        id: same_run_publish
         if: steps.automerge.outputs.merged == 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN || '' }}
@@ -145,3 +146,25 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
           pnpm changeset publish
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      # Product half: ping idle-server to bump floors + regen SCHEMA_REFERENCE +
+      # push main (Deploy ships). Needs IDLE_SERVER_DISPATCH_TOKEN (PAT with
+      # repo scope on idle-server). Soft-skip when unset so Release still greens.
+      - name: Dispatch idle-server consume
+        if: steps.changesets.outputs.published == 'true' || steps.same_run_publish.outputs.published == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.IDLE_SERVER_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::No IDLE_SERVER_DISPATCH_TOKEN — skip auto-consume."
+            echo "Manual: scripts/release.sh sync-server --smoke --commit --push"
+            exit 0
+          fi
+          gh api repos/shaaaaawn/idle-server/dispatches \
+            --method POST \
+            -f event_type='idle-screens-published' \
+            -f 'client_payload[reason]=idle-screens-release'
+          echo "Dispatched idle-screens-published → idle-server Consume workflow"
