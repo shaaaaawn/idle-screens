@@ -4,12 +4,14 @@ enum VJError: LocalizedError {
     case noToken(channelId: String)
     case tokenDeclined(channelId: String)
     case noScene(channelId: String)
+    case tokenNotStored
 
     var errorDescription: String? {
         switch self {
         case .noToken(let channelId): "No capability token stored for '\(channelId)'"
         case .tokenDeclined(let channelId): "Token declined by '\(channelId)'"
         case .noScene(let channelId): "'\(channelId)' has no scene to mix in yet"
+        case .tokenNotStored: "The token was verified but couldn't be saved to your Keychain."
         }
     }
 }
@@ -35,7 +37,11 @@ extension AppState {
         )
         credentials.append(credential)
         store.save(credentials)
-        store.setToken(created.token, for: created.channelId)
+        // A discarded failure here is the worst outcome: the channel exists on
+        // the server and is listed as yours, but nothing can ever steer it.
+        if !store.setToken(created.token, for: created.channelId) {
+            vjError = "Couldn't save this channel's token to your Keychain. Copy it now — you'll need it to steer this channel."
+        }
         await publishStarter(to: created.channelId)
         return created.token
     }
@@ -68,7 +74,9 @@ extension AppState {
             channelId: created.channelId, label: name, createdAt: Date())
         credentials.append(credential)
         store.save(credentials)
-        store.setToken(created.token, for: created.channelId)
+        if !store.setToken(created.token, for: created.channelId) {
+            vjError = "Couldn't save the remix's token to your Keychain."
+        }
         await loadGallery()
         return credential
     }
@@ -108,7 +116,9 @@ extension AppState {
             credentials.append(ChannelCredential(channelId: channelId, label: label, createdAt: Date()))
             store.save(credentials)
         }
-        store.setToken(token, for: channelId)
+        guard store.setToken(token, for: channelId) else {
+            throw VJError.tokenNotStored
+        }
     }
 
     func removeChannel(_ credential: ChannelCredential) {
