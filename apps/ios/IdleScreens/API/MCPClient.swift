@@ -187,6 +187,29 @@ actor MCPClient {
         ])
     }
 
+    /// Bring a saved preset back on air. The format is deterministic, so the
+    /// recalled scene renders exactly as it did when it was saved.
+    func recall(channelId: String, token: String, presetName: String) async throws {
+        try await callTool("recall", arguments: [
+            "channelId": .string(channelId),
+            "token": .string(token),
+            "name": .string(presetName),
+            "agent": .string("idle-screens-ios"),
+            "harness": .string("ios-app"),
+        ])
+    }
+
+    /// Bookmark the channel's current scene under a name.
+    func savePreset(channelId: String, token: String, name: String) async throws {
+        try await callTool("savePreset", arguments: [
+            "channelId": .string(channelId),
+            "token": .string(token),
+            "name": .string(name),
+            "agent": .string("idle-screens-ios"),
+            "harness": .string("ios-app"),
+        ])
+    }
+
     func overlay(channelId: String, token: String, text: String,
                  tag: String? = nil, ttl: Int? = nil) async throws {
         var args: [String: JSONValue] = [
