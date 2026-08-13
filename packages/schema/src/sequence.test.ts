@@ -473,6 +473,42 @@ describe('SequenceInstance (mount + render)', () => {
     inst.dispose();
   });
 
+  /**
+   * Children are created lazily, so a resize must outlive the children that
+   * exist when it arrives. Both halves of the bug: a viewer that mounts in an
+   * unpainted tab (0×0) resizes before the first frame ever runs, and a
+   * segment cut after any resize used to remount at the stale mount-time size
+   * (the live symptom: a permanent 1×1 canvas).
+   */
+  it('resize before the first frame reaches the lazily-created child', () => {
+    const { restore } = stubRafQueue();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(seq()), saverCtx({ host, width: 0, height: 0 }));
+
+    inst.resize(1920, 1080);
+    inst.renderFrame!(0, 1);
+
+    const canvas = host.querySelector('canvas')!;
+    expect(canvas.width).toBe(1920);
+    expect(canvas.height).toBe(1080);
+    inst.dispose();
+    restore();
+  });
+
+  it('a segment switch after resize keeps the new size (and dpr)', () => {
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(seq()), saverCtx({ host }));
+    inst.renderFrame!(0, 1); // child for segment a, mounted at 640×400
+
+    inst.resize(1920, 1080, 2);
+    inst.renderFrame!(6000, 1); // segment b — a brand-new child
+
+    const canvas = host.querySelector('canvas')!;
+    expect(canvas.width).toBe(3840); // 1920 × dpr 2
+    expect(canvas.height).toBe(2160);
+    inst.dispose();
+  });
+
   it('seq.seed is wired to children without scene-level seeds', () => {
     const s = seq({
       seed: 777,
