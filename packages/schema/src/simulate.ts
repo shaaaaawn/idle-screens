@@ -116,7 +116,16 @@ function weightedIndex(u: number, weights: number[]): number {
  *  `scale` multiplies every dimensional draw (default 1). Used for viewport units.
  *  `countScale` multiplies entity count for density-aware scaling (default 1). */
 export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, scale = 1, countScale = 1): Entity[] {
-  const effectiveCount = countScale === 1
+  // Grid layers are EXEMPT from count scaling. A grid is an exact lattice —
+  // columns × rows, authored cell by cell — and scaling its count doesn't thin
+  // it like a scatter field, it TRUNCATES it row-major: the last cells simply
+  // never spawn. Found live (Entablature, 2026-08-14): on a viewport at
+  // countScale ≈ 0.67, an 18-column single-row grid rendered 12 cells and died
+  // at two-thirds width, while the analytic perception path (countScale 1)
+  // showed it full-width — a renderer-vs-perception split that burned four
+  // publishes to isolate. Upscaling is equally wrong: it invents phantom cells
+  // beyond the authored lattice. Grid cost is already bounded by maxPerLayer.
+  const effectiveCount = countScale === 1 || layer.layout?.type === 'grid'
     ? layer.count
     : Math.max(1, Math.min(
         Math.round(layer.count * countScale),

@@ -43,6 +43,32 @@ describe('buildEntities (seeded, deterministic)', () => {
     expect(a).not.toEqual(b);
   });
 
+  it('grid layers are exempt from count scaling — the lattice never truncates', () => {
+    // A scaled count doesn't thin a grid like a scatter field, it truncates it
+    // row-major. Live failure this pins: an 18-column single-row grid at
+    // countScale 0.67 rendered 12 cells and stopped at two-thirds width, while
+    // the analytic path (countScale 1) showed it full-width.
+    const grid: LayerSpec = {
+      count: 18,
+      sprite: { kind: 'rect', width: [0.028, 0.028], aspect: [1.5, 1.5], color: '#14100c' },
+      motion: { type: 'static' },
+      layout: { type: 'grid', columns: 18, jitter: 0 },
+      region: { x: [0.02, 0.98], y: [0.19, 0.23] },
+    };
+    for (const cs of [0.5, 0.67, 1, 1.6]) {
+      const ents = buildEntities(grid, createRng(42), W, H, Math.min(W, H), cs);
+      expect(ents, `countScale ${cs}`).toHaveLength(18);
+      const xs = ents.map((e) => e.x0 / W);
+      // The row spans its region: first cell near the left edge, last near the right.
+      expect(Math.min(...xs)).toBeLessThan(0.08);
+      expect(Math.max(...xs)).toBeGreaterThan(0.92);
+    }
+
+    // Scatter layers keep scaling — the exemption is grid-only.
+    const scatter = buildEntities(driftLayer, createRng(42), W, H, 1, 0.5);
+    expect(scatter).toHaveLength(10);
+  });
+
   it('region constrains spawn; alpha resolves per entity; defaults leave both untouched', () => {
     const regioned = buildEntities(
       { ...driftLayer, region: { x: [0.25, 0.5], y: [0, 0.4] }, alpha: [0.3, 0.8] },
