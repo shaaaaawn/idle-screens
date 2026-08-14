@@ -30,9 +30,14 @@ jobs:
       - uses: actions/checkout@v7
       - id: classify
         run: |
-          msg=$(git log -1 --pretty=%s)
-          echo "head_subject=$msg"
-          if [[ "$msg" == "chore: version packages"* ]] || [[ "$msg" == "Version Packages"* ]]; then
+          subject=$(git log -1 --pretty=%s)
+          body=$(git log -1 --pretty=%b)
+          echo "head_subject=$subject"
+          # Merge commits are "Merge pull request #N …", not the inner
+          # "chore: version packages" subject — match either.
+          if [[ "$subject" == "chore: version packages"* ]] \
+            || [[ "$subject" == "Version Packages"* ]] \
+            || [[ "$subject$body" == *"version packages"* ]]; then
             echo "is_version=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_version=false" >> "$GITHUB_OUTPUT"
@@ -75,8 +80,10 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       # Trusted Publishing needs npm >= 11.5.1 (Node 22 ships older).
+      # Pin: `npm@latest` (11.6+) rejects `--git-checks`, which changesets
+      # still passes, and the publish dies with EUNKNOWNCONFIG.
       - name: Upgrade npm for Trusted Publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.1
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
