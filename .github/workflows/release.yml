@@ -88,23 +88,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      - name: Configure npm auth (OIDC or legacy token)
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          if [ -n "${NPM_TOKEN:-}" ]; then
-            echo "Using secrets.NPM_TOKEN (legacy fallback)."
-            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "$npmrc"
-          else
-            echo "Using npm Trusted Publishing (OIDC) — no long-lived token."
-            # setup-node may write a blank _authToken that blocks OIDC detection.
-            if [ -f "$npmrc" ]; then
-              sed -i '/_authToken/d' "$npmrc"
-            fi
-          fi
-
       - name: Create release PR or publish
         id: changesets
         uses: changesets/action@v1
@@ -112,16 +95,13 @@ jobs:
           publish: pnpm changeset publish
           title: "chore: version packages"
           commit: "chore: version packages"
-          # Prefer a PAT/app token so the merged version commit can also fire
-          # Pages/CI; fall back to GITHUB_TOKEN + same-run publish below.
           github-token: ${{ secrets.RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
-          # Empty string (not unset) so changesets/action doesn't invent a
-          # broken token path when relying on OIDC.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN || '' }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || '' }}
-          NPM_CONFIG_PROVENANCE: "true"
+          # Same pairing that published 3.4.2. Do not append a second
+          # _authToken line — that concatenates the registry URL and 401s.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Auto-merge the mechanical version PR so humans aren't the second gate.
       # Then publish in this same run — required when using GITHUB_TOKEN because
@@ -142,9 +122,8 @@ jobs:
         id: same_run_publish
         if: steps.automerge.outputs.merged == 'true'
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN || '' }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || '' }}
-          NPM_CONFIG_PROVENANCE: "true"
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           git fetch origin main
