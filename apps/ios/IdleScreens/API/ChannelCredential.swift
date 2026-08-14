@@ -39,7 +39,12 @@ final class CredentialStore: @unchecked Sendable {
         KeychainHelper.load(key: Self.tokenKey(for: channelId))
     }
 
-    func setToken(_ token: String, for channelId: String) {
+    /// Returns whether the token actually landed. Callers must not assume it
+    /// did: a discarded failure leaves the channel listed under "yours" with no
+    /// credential behind it, which is indistinguishable from someone else's
+    /// channel and needs no device migration to happen.
+    @discardableResult
+    func setToken(_ token: String, for channelId: String) -> Bool {
         KeychainHelper.save(key: Self.tokenKey(for: channelId), value: token)
     }
 

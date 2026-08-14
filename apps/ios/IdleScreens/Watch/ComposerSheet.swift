@@ -19,14 +19,31 @@ struct ComposerSheet: View {
     @State private var overlayText = ""
     @State private var busy = false
     @State private var note: String?
+    @State private var savingPreset = false
+    @State private var presetName = ""
 
     private var canSteer: Bool { app.token(for: channelId) != nil }
+
+    /// You created this channel, but there is no token behind it — a failed
+    /// Keychain write, or a device that restored the list without the
+    /// credentials. Without this state the app tells the OWNER of a channel
+    /// "watching — remix to steer", which reads as "this was never yours".
+    private var ownedButUnlocked: Bool {
+        !canSteer && app.credentials.contains { $0.channelId == channelId }
+    }
+
+    private var steerStatus: String {
+        if canSteer { return "you can steer this" }
+        return ownedButUnlocked ? "yours — token missing on this device"
+                                : "watching — remix to steer"
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     transport
+                    presetShelf
                     if canSteer {
                         sceneShelf
                         overlayRow
@@ -49,6 +66,14 @@ struct ComposerSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert("Name this preset", isPresented: $savingPreset) {
+                TextField("cozy evening", text: $presetName)
+                    .textInputAutocapitalization(.never)
+                Button("Save") { commitPreset() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("The scene on air right now, saved under a name you can bring back.")
+            }
         }
     }
 
@@ -61,9 +86,9 @@ struct ComposerSheet: View {
                     .font(.headline)
                     .foregroundStyle(Color.textPrimary)
                     .lineLimit(1)
-                Text(canSteer ? "you can steer this" : "watching — remix to steer")
+                Text(steerStatus)
                     .font(.caption)
-                    .foregroundStyle(Color.textSecondary)
+                    .foregroundStyle(ownedButUnlocked ? Color.appDanger : Color.textSecondary)
             }
             Spacer()
             if canSteer {
@@ -96,6 +121,87 @@ struct ComposerSheet: View {
     }
 
     // MARK: Expanded
+
+    /// Presets are the user's OWN saved moments, so they come before the
+    /// catalogue of everyone else's channels. The server has been sending
+    /// these on every state push all along.
+    @ViewBuilder
+    private var presetShelf: some View {
+        if canSteer {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("your presets")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Spacer()
+                    Button {
+                        savingPreset = true
+                        presetName = ""
+                    } label: {
+                        Label("Save this", systemImage: "bookmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.textPrimary)
+                    }
+                    .disabled(!session.hasScene || busy)
+                }
+
+                if session.presets.isEmpty {
+                    Text("Save a scene you like and it lands here, ready to bring back exactly as it looked.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textTertiary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(session.presets, id: \.self) { name in
+                                Button {
+                                    recall(name)
+                                } label: {
+                                    Label(name, systemImage: "bookmark.fill")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(Color.textPrimary)
+                                        .padding(.horizontal, 13)
+                                        .padding(.vertical, 9)
+                                        .glassCapsule(shape: Capsule())
+                                }
+                                .disabled(busy)
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private func recall(_ name: String) {
+        guard let token = app.token(for: channelId) else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await app.mcp.recall(channelId: channelId, token: token, presetName: name)
+                note = "recalled “\(name)”"
+            } catch {
+                note = "couldn't recall “\(name)”"
+            }
+        }
+    }
+
+    private func commitPreset() {
+        let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let token = app.token(for: channelId) else { return }
+        savingPreset = false
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await app.mcp.savePreset(channelId: channelId, token: token, name: name)
+                note = "saved “\(name)”"
+            } catch {
+                note = "couldn't save “\(name)”"
+            }
+        }
+    }
 
     private var sceneShelf: some View {
         VStack(alignment: .leading, spacing: 10) {

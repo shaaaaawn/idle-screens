@@ -13,7 +13,8 @@ struct GalleryView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     if let hero = heroChannel {
-                        HeroBillboard(channel: hero, compact: sizeClass != .regular)
+                        HeroBillboard(channel: hero, compact: sizeClass != .regular,
+                                      peers: app.channels)
                             .padding(.horizontal, 16)
                     }
                     ForEach(shelves) { shelf in
@@ -53,10 +54,14 @@ struct GalleryView: View {
 
     // MARK: Curation
 
-    /// Featured channels compete for the billboard, but visual richness picks
-    /// the winner — a near-black minimal scene makes a terrible hero even
-    /// when it's tagged featured.
+    /// `default` is the channel the product curates nightly to represent
+    /// itself, so it leads — a billboard that changes identity between visits
+    /// teaches nobody what this place is. Featured-plus-richness stays as the
+    /// fallback for when `default` isn't in the payload.
     private var heroChannel: PublicChannel? {
+        if let curated = app.channels.first(where: { $0.id == "default" }) {
+            return curated
+        }
         let featured = app.channels.filter { $0.tags?.contains("featured") == true }
         let pool = featured.isEmpty ? app.channels : featured
         return pool.max { Self.richness($0) < Self.richness($1) }
@@ -111,9 +116,11 @@ struct GalleryView: View {
 private struct HeroBillboard: View {
     let channel: PublicChannel
     let compact: Bool
+    var peers: [PublicChannel] = []
 
     var body: some View {
-        NavigationLink(destination: ChannelViewerView(channelId: channel.id, label: channel.displayLabel)) {
+        NavigationLink(destination: ChannelPager(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
             ChannelPreviewTile(channel: channel)
                 .aspectRatio(compact ? 4.0 / 5.0 : 21.0 / 9.0, contentMode: .fit)
                 .overlay(alignment: .bottom) {
@@ -180,7 +187,7 @@ private struct ChannelShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(channels) { channel in
-                        ChannelCard(channel: channel, width: cardWidth)
+                        ChannelCard(channel: channel, width: cardWidth, peers: channels)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -194,9 +201,13 @@ private struct ChannelShelf: View {
 private struct ChannelCard: View {
     let channel: PublicChannel
     let width: CGFloat
+    /// The shelf this card sits in, so the viewer can page sideways through
+    /// the row you actually entered from rather than the whole catalogue.
+    var peers: [PublicChannel] = []
 
     var body: some View {
-        NavigationLink(destination: ChannelViewerView(channelId: channel.id, label: channel.displayLabel)) {
+        NavigationLink(destination: ChannelPager(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
             VStack(alignment: .leading, spacing: 8) {
                 ChannelPreviewTile(channel: channel)
                     .frame(width: width, height: width * 9 / 16)
