@@ -19,6 +19,12 @@ struct IdleScreensTVApp: App {
                     } else if ProcessInfo.processInfo.arguments.contains("-fallback") {
                         // Debug: the always-renderable ambient stand-in.
                         FallbackSceneView(channelId: "debug-preview")
+                    } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-classic"),
+                              ProcessInfo.processInfo.arguments.indices.contains(i + 1),
+                              let kind = ClassicSaverKind.supported(id: ProcessInfo.processInfo.arguments[i + 1]) {
+                        // Debug: render a native classic-saver port in isolation
+                        // (bisects renderer bugs from channel-routing bugs).
+                        ClassicSaverView(kind: kind, seed: 7)
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
                         // Debug: render one channel's poster tile in isolation

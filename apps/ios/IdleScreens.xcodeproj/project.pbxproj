@@ -49,10 +49,12 @@
 		6886483A377898CA5E3C86C8 /* PairCodeField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A88C730E2ED055EB1FB0901 /* PairCodeField.swift */; };
 		6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */; };
 		6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5408F494FA3C16573E5AB /* MockTransport.swift */; };
+		70C0E78D93C5088327E16069 /* ClassicSaverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */; };
 		730801F453F51D04CF89FDD5 /* DeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */; };
 		768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */; };
 		791C3C15DA09CFF41821BA91 /* HeroChannelCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */; };
 		7A47F321D6901C9BC1260706 /* AppState+Pair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 193F27EA5CA4F1DF5743170E /* AppState+Pair.swift */; };
+		7B69F636BC80E106DFB08467 /* ClassicSaverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */; };
 		7C0F2B7CD88A66A026151AC6 /* ChannelPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D31BF09CB14E15E96FF8AF3 /* ChannelPager.swift */; };
 		7EEF7298E422281920E9E145 /* ComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7837B2C4483DFA183A8676 /* ComposerSheet.swift */; };
 		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
@@ -110,6 +112,7 @@
 		E8E8841AC339243ACEE363A7 /* SpriteSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E14B7DC8B4215FD925DF86 /* SpriteSceneView.swift */; };
 		E99AC3B406D45D209C250781 /* ChannelHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3551860E6D059B5B5C52CA1D /* ChannelHistoryTests.swift */; };
 		EB42D92297C875AE1D90D6FE /* PairScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7F4750FA16A1F3B0A2CC2 /* PairScannerSheet.swift */; };
+		EFBA0E53460E557E09B17401 /* ClassicSaverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */; };
 		F3EE120CD3D2878E2E9EC31F /* TierAdaptationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF2E551F84EA28ED9D1FFB4 /* TierAdaptationTests.swift */; };
 		F9BDE21EC58743E685ECB2BC /* SequenceSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5828A2F4795C7D4E960B4563 /* SequenceSubset.swift */; };
 		FAA24B135B3D42596FE624FA /* PerceptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */; };
@@ -175,6 +178,7 @@
 		28B72E150FD50FD2B4798EF0 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 		297E491830405A999EBA8D60 /* IdleScreens.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IdleScreens.entitlements; sourceTree = "<group>"; };
 		2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelTokenFormat.swift; sourceTree = "<group>"; };
+		2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSaverTests.swift; sourceTree = "<group>"; };
 		3551860E6D059B5B5C52CA1D /* ChannelHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelHistoryTests.swift; sourceTree = "<group>"; };
 		3E37A31FE436FF8B8A25DF6F /* IdleScreensTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreensTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		405E7ECF8B202E738942F67E /* ThumbImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbImage.swift; sourceTree = "<group>"; };
@@ -203,6 +207,7 @@
 		72D357847ECE6961DDCD4E7D /* ProceduralArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProceduralArtTests.swift; sourceTree = "<group>"; };
 		734C05B9186BD117E244C887 /* GalleryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryClient.swift; sourceTree = "<group>"; };
 		75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSaverView.swift; sourceTree = "<group>"; };
 		7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LobbyFixtureTests.swift; sourceTree = "<group>"; };
 		773AA4A5F9D47466B26A7AA9 /* PairedTVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedTVView.swift; sourceTree = "<group>"; };
 		7822D79CA74B34F90F5AE612 /* IdleScreensTVTopShelf.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = IdleScreensTVTopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -253,6 +258,7 @@
 			isa = PBXGroup;
 			children = (
 				B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */,
+				7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */,
 				509A862BA7882BBAF02B5774 /* FallbackSceneView.swift */,
 				64B5A0CBD688755360E23C34 /* NativeSceneView.swift */,
 				87EA16DECCBE319A1BBDEC0E /* PreviewBudget.swift */,
@@ -341,6 +347,7 @@
 				414EED19151EF752ABADB644 /* CapabilityTierTests.swift */,
 				DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */,
 				1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */,
+				2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */,
 				08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */,
 				7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */,
 				F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */,
@@ -632,6 +639,7 @@
 				768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */,
 				88B2B6D27BAB0AD99141A1FF /* ChannelViewerView.swift in Sources */,
 				B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */,
+				7B69F636BC80E106DFB08467 /* ClassicSaverView.swift in Sources */,
 				E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */,
 				7EEF7298E422281920E9E145 /* ComposerSheet.swift in Sources */,
 				16BB0182A7846CEBB7FC0D26 /* ContentView.swift in Sources */,
@@ -676,6 +684,7 @@
 				8D299D989B033D3506072932 /* ChannelHistory.swift in Sources */,
 				0034F065C3FBE82F797CA09D /* ChannelTokenFormat.swift in Sources */,
 				4FDE466BCFAEE3788424E6DA /* ChannelWSClient.swift in Sources */,
+				EFBA0E53460E557E09B17401 /* ClassicSaverView.swift in Sources */,
 				E6C221E7819340F08F51E919 /* Colors.swift in Sources */,
 				AB15733A41C56719B73B883A /* FallbackSceneView.swift in Sources */,
 				08541755AD614AEBC9684487 /* GalleryClient.swift in Sources */,
@@ -715,6 +724,7 @@
 				C4184B1F397DC4CD4B42440F /* CapabilityTierTests.swift in Sources */,
 				638257243A24B750EBBCB208 /* CategoryShelfTests.swift in Sources */,
 				6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */,
+				70C0E78D93C5088327E16069 /* ClassicSaverTests.swift in Sources */,
 				730801F453F51D04CF89FDD5 /* DeepLinkTests.swift in Sources */,
 				B39D9751769F3397C53C5EF0 /* LobbyFixtureTests.swift in Sources */,
 				4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */,
