@@ -348,8 +348,12 @@ class TankInstance implements SaverInstance {
     }
     if (!this.mixMode) {
       // Single-breed: the pool never shrinks while the url is stable
-      // (steering fishCount down just hides); a url change rebuilds at n.
-      const stable = this.wantUrls.length > 0 && this.wantUrls[0] === url;
+      // (steering fishCount down just hides); a url change — or leaving mix
+      // mode, however the mix happened to start — rebuilds at n. Without the
+      // mode check, a mix whose first breed equals fishUrl would keep its
+      // slots on clear while any other mix would not (review, PR #72).
+      const wasSingle = this.wantKey === '' || this.wantKey.startsWith('one:');
+      const stable = wasSingle && this.wantUrls.length > 0 && this.wantUrls[0] === url;
       const len = stable ? Math.max(n, Math.min(this.wantUrls.length, cap)) : n;
       want = Array.from({ length: len }, () => url);
     }
