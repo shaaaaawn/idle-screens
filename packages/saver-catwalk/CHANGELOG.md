@@ -1,5 +1,12 @@
 # @idle-screens/saver-catwalk
 
+## 1.1.4
+
+### Patch Changes
+
+- Updated dependencies [1204859]
+  - @idle-screens/core@0.4.5
+
 ## 1.1.3
 
 ### Patch Changes

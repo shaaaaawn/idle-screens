@@ -1,5 +1,12 @@
 # @idle-screens/savers-classic
 
+## 3.2.3
+
+### Patch Changes
+
+- Updated dependencies [1204859]
+  - @idle-screens/core@0.4.5
+
 ## 3.2.2
 
 ### Patch Changes
