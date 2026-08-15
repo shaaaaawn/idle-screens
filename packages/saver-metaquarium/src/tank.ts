@@ -150,6 +150,9 @@ class TankInstance implements SaverInstance {
   private readonly fogColor = new Color();
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
+  /** Slots requested so far (spawned or in flight). Never decreases except
+   *  across a swapFish teardown. */
+  private poolTarget = 0;
   private disposed = false;
 
   private w: number;
@@ -237,13 +240,33 @@ class TankInstance implements SaverInstance {
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
   }
 
-  private async populate(): Promise<void> {
+  /** Ceiling the pool may ever reach on this device. */
+  private poolCapNow(): number {
     const poolCap = this.thumbnail ? Math.min(6, MAX_FISH) : MAX_FISH;
-    const pool = Math.min(poolCap, this.quality.fishCap);
+    return Math.min(poolCap, this.quality.fishCap);
+  }
+
+  /** Initial population: exactly the fish the current fishCount asks for.
+   *  The pool then grows on demand when steered up (see grow) and never
+   *  shrinks — steering down just hides fish. */
+  private async populate(): Promise<void> {
     const fishUrl = this.activeFishUrl || this.str('fishUrl');
     this.activeFishUrl = fishUrl;
+    this.poolTarget = 0;
+    await this.grow(Math.max(1, Math.round(this.num('fishCount'))));
+  }
 
-    const jobs = Array.from({ length: pool }, (_, i) => i);
+  /** Spawn slots [poolTarget, min(to, cap)). Idempotent for to <= poolTarget;
+   *  concurrent calls cannot double-spawn a slot because poolTarget advances
+   *  synchronously before any await. */
+  private grow(to: number): Promise<void> {
+    const from = this.poolTarget;
+    const target = Math.min(to, this.poolCapNow());
+    if (target <= from || this.disposed) return Promise.resolve();
+    this.poolTarget = target;
+    const fishUrl = this.activeFishUrl;
+
+    const jobs = Array.from({ length: target - from }, (_, i) => from + i);
     let next = 0;
     const worker = async (): Promise<void> => {
       while (next < jobs.length && !this.disposed) {
@@ -253,8 +276,11 @@ class TankInstance implements SaverInstance {
         this.spawn(tpl, i);
       }
     };
-    await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
-    if (this.paused) this.renderStill();
+    return Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker)).then(
+      () => {
+        if (this.paused) this.renderStill();
+      },
+    );
   }
 
   private swapFish(url: string): void {
@@ -421,11 +447,12 @@ class TankInstance implements SaverInstance {
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
-    // Fish
+    // Fish — steering up past the pool spawns the missing slots on demand.
     const visible = Math.min(
       Math.round(this.num('fishCount')),
       this.quality.fishCap,
     );
+    if (visible > this.poolTarget) void this.grow(visible);
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
