@@ -149,9 +149,11 @@ export function swimPoseAt(plan: SwimPlan, tSec: number, speed = 1): SwimPose {
   return swimPoseAtDistance(plan, distanceAt(plan, tSec, speed));
 }
 
-/** Pose at an explicit arc distance — the seam for behavior-modulated speed
- *  (the tank integrates distance so speed changes glide instead of
- *  teleporting; scrubs reset to the closed-form distance). */
+/** Pose at an explicit arc distance — the seam for behavior-modulated speed.
+ *  When the track steers swimSpeed, the tank feeds this the closed-form
+ *  integral of the speed curve (core's `integrateParam`) so speed changes
+ *  glide instead of teleporting, while staying a pure function of (t, track)
+ *  — scrubbing and renderFrame(t) keep working. */
 export function swimPoseAtDistance(plan: SwimPlan, dist: number): SwimPose {
   const g = paramForDistance(plan, dist);
   const [x, y, z] = splineAt(plan.points, g);

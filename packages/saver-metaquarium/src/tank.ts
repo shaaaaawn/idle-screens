@@ -1,6 +1,7 @@
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
+  integrateParam,
   sampleTrack,
   type ControlTrack,
   type ParamSpace,
@@ -126,6 +127,11 @@ class TankInstance implements SaverInstance {
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
+  /** Does the track steer swimSpeed? Decided once per applyTrack. When it
+   *  does, distance comes from the closed-form integral of the speed curve
+   *  (speed changes glide); when it does not, the legacy constant-speed
+   *  formula is kept bit-for-bit. */
+  private speedTracked = false;
   private readonly thumbnail: boolean;
   private activeFishUrl = '';
 
@@ -354,6 +360,13 @@ class TankInstance implements SaverInstance {
     const tSec = t / 1000;
     this.applyParams(t);
     const speed = this.num('swimSpeed');
+    // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
+    // glide (MQ11 — multiplying the whole elapsed integral teleported every
+    // fish proportionally to elapsed time). Constant speed keeps the legacy
+    // closed form exactly. Both are pure functions of (t, track).
+    const warpSec = this.speedTracked && this.track
+      ? integrateParam(this.space, this.track, 'swimSpeed', t) / 1000
+      : tSec * speed;
 
     const url = this.str('fishUrl');
     if (url && url !== this.activeFishUrl) this.swapFish(url);
@@ -388,7 +401,9 @@ class TankInstance implements SaverInstance {
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
 
-      const d = distanceAt(f.plan, tSec, speed);
+      const d = this.speedTracked
+        ? distanceAt(f.plan, warpSec, 1)
+        : distanceAt(f.plan, tSec, speed);
       const pose = swimPoseAtDistance(f.plan, d);
       f.group.position.set(pose.x, pose.y, pose.z);
       f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
@@ -402,7 +417,8 @@ class TankInstance implements SaverInstance {
           (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
-        f.tail.rotation.y = Math.sin(tSec * speed * 6 + f.index) * 0.5;
+        // warpSec === tSec·speed when speed is constant — same phase as before.
+        f.tail.rotation.y = Math.sin(warpSec * 6 + f.index) * 0.5;
       }
     }
   }
@@ -501,6 +517,7 @@ class TankInstance implements SaverInstance {
 
   applyTrack(track: ControlTrack): void {
     this.track = track;
+    this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
     if (this.paused) this.renderStill();
   }
 
