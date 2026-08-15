@@ -2,6 +2,7 @@ import { effect } from './reactive';
 import { IdleScreensEngine } from './engine';
 import { createRng } from './rng';
 import { renderFaultScreen } from './fault-screen';
+import { isSaverFaultFilename, isSaverFaultRejectionHint } from './fault-attribution';
 import type { IdleScreensConfig, PageContext, SaverInstance, SaverPlugin } from './types';
 import type { WorkerInbound, WorkerOutbound } from './worker-protocol';
 
@@ -638,25 +639,15 @@ export class IdleScreenElement extends HostBase {
   };
 
   /** An uncaught error while a non-passthrough saver owns the screen is the
-   *  saver's loop dying. Swap to the crash saver instead of freezing black. */
-  private static readonly SAVER_FAULT_LOC =
-    /idle-screens|saver-|@idle-screens|three|metaquarium|schema|core|capabilities/i;
-
+   *  saver's loop dying. Swap to the crash saver instead of freezing black.
+   *  Attribution semantics live in fault-attribution.ts (unit-tested). */
   private isSaverRelatedRuntimeFault(ev: ErrorEvent): boolean {
-    const filename = ev.filename;
-    if (typeof filename === 'string' && filename.length > 0) {
-      return IdleScreenElement.SAVER_FAULT_LOC.test(filename);
-    }
-    return true;
+    return isSaverFaultFilename(ev.filename, location.origin);
   }
 
   private isSaverRelatedRejection(ev: PromiseRejectionEvent): boolean {
     const hint = String((ev.reason as Error)?.stack ?? ev.reason ?? '');
-    if (!hint) return true;
-    if (IdleScreenElement.SAVER_FAULT_LOC.test(hint)) return true;
-    // No script URL in the hint → treat as saver-owned (inline / synthetic).
-    // A same-origin page URL without saver markers is host noise — skip.
-    return !/https?:\/\//i.test(hint);
+    return isSaverFaultRejectionHint(hint, location.origin);
   }
 
   private readonly onRuntimeError = (ev: ErrorEvent): void => {

@@ -41,37 +41,48 @@ struct ScreenSaverView: View {
             } else if app.compiledScene.isEmpty {
                 ProgressView()
                     .scaleEffect(2)
-            } else if SceneVisibility.verdict(layers: app.compiledScene,
+            } else if app.activeSequence == nil,
+                      SceneVisibility.verdict(layers: app.compiledScene,
                                               background: app.specBackground) == .invisible {
+                // Sequence segments skip this gate: a near-black "curtain"
+                // act is authored darkness with the next act on a timer,
+                // not a channel that stopped broadcasting.
                 // The scene would render as a black screen — indistinguishable
                 // from a broken app. Show a designed state instead.
                 NotBroadcastingView(channelId: app.selectedChannelId ?? "",
                                     label: channelLabel)
             } else {
-                switch app.effectiveTier {
-                case .t3:
-                    NativeSceneView(
-                        layers: app.compiledScene,
-                        background: app.specBackground,
-                        tier: .t3,
-                        watchdog: app.watchdog,
-                        onDowngrade: { app.watchdogDidTrigger() }
-                    )
-                case .t2:
-                    // GPU sprite renderer — no watchdog; SpriteKit maintains
-                    // its own frame pacing and this tier IS the fallback.
-                    SpriteSceneView(
-                        layers: app.compiledScene,
-                        background: app.specBackground
-                    )
-                case .t1:
-                    ThumbStreamView(channelId: app.selectedChannelId ?? "")
-                case .t0:
-                    PerceptionView(
-                        specJSON: app.currentSpecJSON,
-                        backgroundColor: app.specBackground?.primaryColor
-                    )
+                Group {
+                    switch app.effectiveTier {
+                    case .t3:
+                        NativeSceneView(
+                            layers: app.compiledScene,
+                            background: app.specBackground,
+                            tier: .t3,
+                            watchdog: app.watchdog,
+                            onDowngrade: { app.watchdogDidTrigger() }
+                        )
+                    case .t2:
+                        // GPU sprite renderer — no watchdog; SpriteKit maintains
+                        // its own frame pacing and this tier IS the fallback.
+                        SpriteSceneView(
+                            layers: app.compiledScene,
+                            background: app.specBackground
+                        )
+                    case .t1:
+                        ThumbStreamView(channelId: app.selectedChannelId ?? "")
+                    case .t0:
+                        PerceptionView(
+                            specJSON: app.currentSpecJSON,
+                            backgroundColor: app.specBackground?.primaryColor
+                        )
+                    }
                 }
+                // Sequence segments rebuild the renderer identity and fade
+                // per the segment's transition (cut = instant, morph = timed
+                // crossfade — true spec-lerp morph is a follow-up).
+                .id(app.sequenceSegmentKey)
+                .transition(.opacity)
             }
 
             if let overlay = app.overlayText {
@@ -89,6 +100,8 @@ struct ScreenSaverView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: app.overlayText)
+        .animation(.easeInOut(duration: max(0.001, app.sequenceCrossfade)),
+                   value: app.sequenceSegmentKey)
         .animation(.easeInOut(duration: 0.8), value: app.sleeping)
         .animation(.easeInOut(duration: 0.25), value: showChrome)
         .ignoresSafeArea()

@@ -171,6 +171,7 @@ final class TVAppState {
         thumbFailed = false
         watchdogDowngraded = false
         complexityCap = nil
+        stopSequence()
         UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
         // Instant first frame: the gallery payload carries each channel's
         // inline spec, so render it immediately instead of holding a spinner
@@ -283,13 +284,23 @@ final class TVAppState {
 
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {
         currentSpecJSON = json
-        guard let data = try? JSONEncoder().encode(json),
-              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
+        guard let data = try? JSONEncoder().encode(json) else { return }
+        // Sequence envelope? Route to the timeline player — it carries no
+        // top-level layers, so without this check it would misroute to the
+        // classic/thumb path (which is why sequence channels used to break).
+        if let seq = try? JSONDecoder().decode(SequenceSubset.self, from: data),
+           SequenceSubset.isSequenceDocument(format: seq.format),
+           !seq.segments.isEmpty {
+            isClassicSpec = false
+            startSequence(seq, fallbackSeed: fallbackSeed)
+            return
+        }
+        stopSequence()
+        guard let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
             // Not a schema spec (e.g. classic saver {"id":"warp"}) — no native
             // render. Keep the raw JSON; ScreenSaverView routes to the thumb stream.
             isClassicSpec = true
             compiledScene = []
-        complexityCap = SceneComplexity.precap(for: compiledScene)
             specBackground = nil
             return
         }
@@ -298,6 +309,67 @@ final class TVAppState {
         let seed = spec.seed ?? fallbackSeed ?? 0
         compiledScene = spec.compile(seed: seed)
         specBackground = spec.background
+        complexityCap = SceneComplexity.precap(for: compiledScene)
+    }
+
+    // MARK: Sequence playback
+
+    /// The active idle-sequence, when the channel publishes one. Segments
+    /// advance on a wall-clock timeline; each segment compiles into the same
+    /// compiledScene the tier renderers already draw.
+    private(set) var activeSequence: SequenceSubset?
+    private var sequenceEpoch: Date?
+    private var sequenceTask: Task<Void, Never>?
+    /// Key of the on-screen segment — the player crossfades on change.
+    private(set) var sequenceSegmentKey: String?
+    /// Crossfade duration entering the current segment (0 = hard cut).
+    private(set) var sequenceCrossfade: TimeInterval = 0
+
+    private func startSequence(_ seq: SequenceSubset, fallbackSeed: Int?) {
+        // WS snapshots repeat the document — restart only on real change.
+        guard seq != activeSequence else { return }
+        sequenceTask?.cancel()
+        activeSequence = seq
+        sequenceEpoch = Date()
+        applySegment(seq, at: 0, fallbackSeed: fallbackSeed)
+        scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
+    }
+
+    private func stopSequence() {
+        sequenceTask?.cancel()
+        sequenceTask = nil
+        activeSequence = nil
+        sequenceEpoch = nil
+        sequenceSegmentKey = nil
+        sequenceCrossfade = 0
+    }
+
+    private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
+        let resolved = seq.resolve(at: T)
+        let segment = seq.segments[resolved.index]
+        sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
+        sequenceSegmentKey = segment.key ?? "segment-\(resolved.index)"
+        let scene = segment.scene
+        let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
+        compiledScene = scene.compile(seed: seed)
+        specBackground = scene.background
+        complexityCap = SceneComplexity.precap(for: compiledScene)
+    }
+
+    private func scheduleSequenceAdvance(fallbackSeed: Int?) {
+        sequenceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let seq = self.activeSequence,
+                      let epoch = self.sequenceEpoch else { return }
+                let now = Date().timeIntervalSince(epoch)
+                // A durationless tail with no loop holds forever.
+                guard let wait = seq.nextBoundary(after: now) else { return }
+                try? await Task.sleep(for: .seconds(wait + 0.02))
+                guard !Task.isCancelled else { return }
+                self.applySegment(seq, at: Date().timeIntervalSince(epoch),
+                                  fallbackSeed: fallbackSeed)
+            }
+        }
     }
 
     // MARK: Tier reporting

@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { metaquarium, createMetaquarium } from '@idle-screens/saver-metaquarium';
+import { metaquarium, createMetaquarium, FISH_CATALOG } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -83,7 +83,38 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     label: 'Metaquarium (School)',
     params: { fishCount: 6 },
   }),
+  // Mixed breeds against bundled GLBs: ids resolve through a local-asset
+  // catalog so the mix path is network-free (and e2e-deterministic).
+  createMetaquarium({
+    id: 'metaquarium-mix',
+    label: 'Metaquarium (Mix)',
+    params: { fishMix: '257:2,100:1' },
+    catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
+  }),
+  // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
+  // params at non-default values so the pack is visible on mount.
+  createMetaquarium({
+    id: 'metaquarium-atmosphere',
+    label: 'Metaquarium (Atmosphere)',
+    params: {
+      fishCount: 3,
+      moteDensity: 0.85,
+      moteColor: '#8fe3ff',
+      fogNear: 34,
+      fogFar: 300,
+      fogColor: '#02131f',
+      floorColor: '#0d3a33',
+    },
+    catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
+  }),
 ];
+// The full metaquarium example suite, one URL each (all e2e-covered):
+//   ?saver=metaquarium               hero default (1 fish, pool grows on demand)
+//   ?saver=metaquarium-school        fishCount=6 population
+//   ?saver=metaquarium-mix           fishMix breeds, local-asset catalog
+//   ?saver=metaquarium-atmosphere    motes + fog depth + floor tint
+//   ?saver=metaquarium + timeline "metaquarium" profile → 40s all-feature tour
+//   (swimSpeed glide, growth, atmosphere — the package demoTrack)
 
 /**
  * Dev-only chaos saver: mounts a canvas, then throws from its own rAF loop —

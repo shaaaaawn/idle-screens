@@ -1,7 +1,7 @@
 {
   "name": "@idle-screens/saver-metaquarium",
   "version": "0.1.0",
-  "description": "Metaquarium screensaver for idle-screens: a three.js fish tank with seeded analytic swim, GLB fish streamed from the Metaquarium farm, selective bloom, and a steerable camera. The screen is a tank.",
+  "description": "Metaquarium screensaver for idle-screens: a three.js fish tank with seeded analytic swim, GLB fish streamed from the Metaquarium farm, seeded neon palette coats, and a steerable camera. The screen is a tank.",
   "license": "MIT",
   "author": "Shawn Partridge",
   "repository": {

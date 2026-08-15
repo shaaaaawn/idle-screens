@@ -56,6 +56,13 @@ enum SceneVisibility {
                     guard entity.size >= 4 else { continue }
                     let glyphs = Double(max(1, entity.glyph?.count ?? 1))
                     area = entity.size * entity.size * 0.55 * glyphs
+                case .textBlock(let text, let maxWidth, let fontSize, let lineHeight, _, _, _):
+                    let fsPx = fontSize * dim
+                    guard fsPx >= 2 else { continue }
+                    let lh = lineHeight * fsPx
+                    let maxWPx = maxWidth * dim
+                    let lineCount = breakTextBlock(text: text, maxWidthEm: maxWPx / fsPx).count
+                    area = maxWPx * lh * Double(lineCount)
                 case .unknown:
                     continue
                 }

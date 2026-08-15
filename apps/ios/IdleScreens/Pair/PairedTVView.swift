@@ -12,6 +12,11 @@ struct PairedTVView: View {
     @State private var screenKind: ScreenKind = .appleTV
     @State private var selectedScreen: String?
     @State private var showingAddScreen = false
+    /// The Add sheet needs its OWN scanner binding. Two `.sheet` modifiers on
+    /// the same view share one presentation anchor, so asking the root to show
+    /// the scanner while it is already presenting "Add a screen" silently does
+    /// nothing — which made Scan QR dead for anyone who already had a screen.
+    @State private var showingScannerInSheet = false
 
     /// The three screen hosts, each with the one step that puts it into
     /// pairing mode — shown one at a time instead of as a run-on sentence.
@@ -58,7 +63,7 @@ struct PairedTVView: View {
         }
         .sheet(isPresented: $showingAddScreen) {
             NavigationStack {
-                ScrollView { pairingForm.padding(20) }
+                ScrollView { pairingForm(scanBinding: $showingScannerInSheet).padding(20) }
                     .background(Color.appBackground.ignoresSafeArea())
                     .navigationTitle("Add a screen")
                     .navigationBarTitleDisplayMode(.inline)
@@ -70,6 +75,15 @@ struct PairedTVView: View {
             }
             // A failure from last time is not news about this attempt.
             .onAppear { app.pairClaimError = nil }
+            // Presented from INSIDE this sheet, so it gets this sheet's anchor.
+            .sheet(isPresented: $showingScannerInSheet) {
+                PairScannerSheet(
+                    onCode: { code in
+                        showingScannerInSheet = false
+                        claim(code)
+                    },
+                    onEnterManually: { showingScannerInSheet = false })
+            }
         }
         .sheet(isPresented: $showingScanner) {
             PairScannerSheet(
@@ -121,7 +135,7 @@ struct PairedTVView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 12)
 
-                pairingForm
+                pairingForm(scanBinding: $showingScanner)
             }
             .padding(20)
         }
@@ -130,8 +144,13 @@ struct PairedTVView: View {
     /// The pairing steps themselves — shared by the empty state and the
     /// "Add a screen" sheet, so a second screen can be added by CODE, not
     /// just QR (the Mac and Linux hosts only ever show a code).
+    ///
+    /// `scanBinding` is passed in rather than fixed because the two callers
+    /// present the scanner from different anchors: the empty state is the root
+    /// view, the Add sheet is itself a presented sheet. A single shared binding
+    /// works for exactly one of them and silently fails for the other.
     @ViewBuilder
-    private var pairingForm: some View {
+    private func pairingForm(scanBinding: Binding<Bool>) -> some View {
         VStack(spacing: 28) {
                 // Step 1, per platform — pick your screen, get one instruction.
                 VStack(alignment: .leading, spacing: 12) {
@@ -181,7 +200,7 @@ struct PairedTVView: View {
                         }
                         Spacer(minLength: 8)
                         Button {
-                            showingScanner = true
+                            scanBinding.wrappedValue = true
                         } label: {
                             Label("Scan QR", systemImage: "qrcode.viewfinder")
                                 .font(.caption.weight(.semibold))

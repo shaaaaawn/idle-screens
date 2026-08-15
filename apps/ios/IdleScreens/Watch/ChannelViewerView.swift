@@ -25,6 +25,7 @@ struct ChannelViewerView: View {
     @State private var waking = false
     @State private var pulse = false
     @State private var showComposer = false
+    @State private var showTimeline = false
 
     private var seedSpec: SpecSubset? {
         app.channels.first { $0.id == channelId }?.spec
@@ -51,6 +52,18 @@ struct ChannelViewerView: View {
         .statusBarHidden(!showChrome)
         .contentShape(Rectangle())
         .onTapGesture { revealChrome() }
+        // Vertical is TIME. Horizontal belongs to the pager (which channel),
+        // so this only fires on a gesture that is unambiguously vertical —
+        // otherwise a slightly-diagonal page swipe would yank open history.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    let dy = value.translation.height
+                    let dx = value.translation.width
+                    guard abs(dy) > abs(dx) * 1.8, dy > 60 else { return }
+                    showTimeline = true
+                }
+        )
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar, .tabBar)
         .animation(.easeInOut(duration: 0.25), value: showChrome)
@@ -60,6 +73,11 @@ struct ChannelViewerView: View {
             ComposerSheet(channelId: channelId, session: session)
                 .presentationDetents([.height(150), .medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showTimeline) {
+            ChannelTimelineSheet(channelId: channelId, canSteer: canSteer)
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showInfo) {
@@ -369,10 +387,50 @@ private struct SceneInfoSheet: View {
     let session: ChannelSession
     let channelId: String
     let guardrail: RenderGuard
+    @Environment(AppState.self) private var app
+    @State private var events: [ChannelEvent] = []
+    @State private var loadingHistory = true
+
+    /// The most recent event that actually says who/what/why. Plenty of events
+    /// carry no attribution; showing "agent" with no model and no intent is
+    /// worse than showing nothing.
+    private var provenance: ChannelEvent? {
+        events.first { $0.hasAttribution }
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                // Provenance leads. It is the one thing this product knows
+                // that a screenshot of the same scene would not.
+                if let event = provenance {
+                    Section("how this scene got here") {
+                        if let intent = event.intent, !intent.isEmpty {
+                            Text(intent)
+                                .font(.callout)
+                                .foregroundStyle(Color.textPrimary)
+                        }
+                        LabeledContent("author", value: event.actor ?? "agent")
+                        if let model = event.model, !model.isEmpty {
+                            LabeledContent("model", value: model)
+                        }
+                        if let harness = event.harness, !harness.isEmpty {
+                            LabeledContent("via", value: harness)
+                        }
+                        LabeledContent("when",
+                                       value: event.date.formatted(.relative(presentation: .named)))
+                    }
+                } else if loadingHistory {
+                    Section("how this scene got here") {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("reading the channel's history…")
+                                .font(.footnote)
+                                .foregroundStyle(Color.textSecondary)
+                        }
+                    }
+                }
+
                 Section("scene") {
                     LabeledContent("channel", value: channelId)
                     LabeledContent("scene", value: session.sceneLabel ?? "—")
@@ -396,6 +454,10 @@ private struct SceneInfoSheet: View {
             .background(Color.appBackground)
             .navigationTitle("Scene")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                defer { loadingHistory = false }
+                events = (try? await app.gallery.fetchHistory(channelId: channelId)) ?? []
+            }
         }
     }
 }

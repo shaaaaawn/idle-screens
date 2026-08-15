@@ -26,6 +26,26 @@ export const METAQUARIUM_PARAMS = {
    *  is the IPFS hero fish so npm / channel hosts work without playground
    *  static assets; the playground overrides this to a local GLB. */
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
+  /** Mixed population DSL: comma-separated `id[:count]` of catalog token ids
+   *  or breed aliases — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
+   *  the expanded total clamps to the device tier's fish cap. Non-empty mix
+   *  OVERRIDES fishUrl and fishCount; empty string = single-breed mode.
+   *  Unknown ids/bad counts degrade (good tokens still parse); raw URLs are
+   *  not accepted here — use fishUrl for a custom single-breed GLB. */
+  fishMix: { type: 'string', default: '', ease: 'step' },
+  /** Fog start distance, world units. Default matches the tank's original
+   *  hardcoded Fog(60, 500) — steering below pulls the murk close. */
+  fogNear: { type: 'number', default: 60, min: 20, max: 200, ease: 'smooth' },
+  /** Fog full-opacity distance. Kept under the camera far plane (1200);
+   *  the tank enforces far > near + 20. */
+  fogFar: { type: 'number', default: 500, min: 120, max: 1100, ease: 'smooth' },
+  /** Plankton mote density, 0-1 of the device tier's mote budget. Default 0
+   *  = off, so the baseline look is untouched until steered. */
+  moteDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Mote tint. */
+  moteColor: { type: 'color', default: '#7fd6ff', ease: 'smooth' },
+  /** Floor disc color. Default is the original hardcoded navy. */
+  floorColor: { type: 'color', default: '#0a1d33', ease: 'smooth' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -79,6 +99,10 @@ export const metaquariumManifest: SaverManifest = {
 /** Options for {@link createMetaquarium}-style variants: a distinct id/label and
  *  overridden param defaults (e.g. a farm-connected tank). */
 export interface MetaquariumOptions {
+  /** Override the fish catalog fishMix ids resolve against — the seam the
+   *  playground uses to point ids at bundled local GLBs (offline e2e), and
+   *  the future farm/pack extension point. */
+  catalog?: import('./ipfs').FishEntry[];
   id?: string;
   label?: string;
   params?: Partial<Record<keyof typeof METAQUARIUM_PARAMS, ParamValue>>;
@@ -102,3 +126,34 @@ export function withDefaults(
 export function paramSpaceWith(overrides: MetaquariumOptions['params']): ParamSpace {
   return withDefaults(METAQUARIUM_PARAMS, overrides as Record<string, ParamValue> | undefined);
 }
+
+/**
+ * Defensive read of a tracked number param. The server validates nothing on
+ * the classic steering lane (any path, any value reaches the saver), and MCP
+ * harnesses with untyped `value` params stringify numbers — so "22" arrives
+ * where 22 was meant. Finite numbers pass; finite numeric strings coerce;
+ * anything else falls back to the def's default; the result clamps to the
+ * def's min/max. Zero-dep on purpose: hosts can reuse it to sanitize.
+ */
+export function coerceNum(
+  def: { default?: ParamValue; min?: number; max?: number } | undefined,
+  v: ParamValue | undefined,
+): number {
+  let n: number | null = null;
+  if (typeof v === 'number' && Number.isFinite(v)) n = v;
+  else if (typeof v === 'string' && v.trim() !== '') {
+    const parsed = Number(v);
+    if (Number.isFinite(parsed)) n = parsed;
+  }
+  if (n === null) {
+    const d = def?.default;
+    if (typeof d === 'number' && Number.isFinite(d)) n = d;
+    else if (typeof d === 'string' && d.trim() !== '' && Number.isFinite(Number(d))) n = Number(d);
+    else n = 0;
+  }
+  if (def?.min !== undefined && n < def.min) n = def.min;
+  if (def?.max !== undefined && n > def.max) n = def.max;
+  return n;
+}
+
+export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';

@@ -216,8 +216,92 @@ struct NativeSceneView: View {
             layer.rotate(by: .degrees(spin))
             layer.draw(text, at: .zero, anchor: .center)
 
+        case .textBlock(let tbText, let maxWidth, let fontSize, let lineHeight,
+                        let align, let tbColor, let reveal):
+            drawTextBlock(text: tbText, maxWidth: maxWidth, fontSize: fontSize,
+                          lineHeight: lineHeight, align: align, color: tbColor,
+                          reveal: reveal, at: point, dim: dim, alpha: alpha,
+                          spin: spin, t: t, ctx: &ctx)
+
         case .unknown:
             break
+        }
+    }
+
+    // MARK: - TextBlock (t3 only — full reveal animation)
+
+    private func drawTextBlock(
+        text tbText: String, maxWidth: Double, fontSize: Double,
+        lineHeight: Double, align: String, color tbColor: String,
+        reveal: SpecSubset.TextRevealSpec?, at point: CGPoint,
+        dim: CGFloat, alpha: Double, spin: Double, t: TimeInterval,
+        ctx: inout GraphicsContext
+    ) {
+        let fsPx = fontSize * dim
+        guard fsPx > 0.5 else { return }
+        let lh = lineHeight * fsPx
+        let maxWPx = maxWidth * dim
+        let maxWEm = maxWPx / fsPx
+        let lines = breakTextBlock(text: tbText, maxWidthEm: maxWEm)
+        guard !lines.isEmpty else { return }
+
+        let rs = reveal.map { revealState(lines: lines, reveal: $0, t: t) }
+        let visibleLines = rs?.fullLines ?? lines.count
+
+        let rgb = SpecSubset.Layer.rgb(from: tbColor)
+        let fillColor = Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2,
+                               opacity: alpha)
+
+        var layer = ctx
+        layer.translateBy(x: point.x, y: point.y)
+        if spin != 0 { layer.rotate(by: .degrees(spin)) }
+
+        let anchor: UnitPoint
+        let xOff: CGFloat
+        switch align {
+        case "center": anchor = .top; xOff = maxWPx / 2
+        case "right": anchor = .topTrailing; xOff = maxWPx
+        default: anchor = .topLeading; xOff = 0
+        }
+
+        let font: Font = .system(size: fsPx)
+        for li in 0..<visibleLines {
+            let lineView = Text(lines[li].text).font(font).foregroundStyle(fillColor)
+            layer.draw(lineView, at: CGPoint(x: xOff, y: CGFloat(li) * lh),
+                       anchor: anchor)
+        }
+
+        if let rs, !rs.partialText.isEmpty {
+            let partial = Text(rs.partialText).font(font).foregroundStyle(fillColor)
+            layer.draw(partial, at: CGPoint(x: xOff, y: CGFloat(visibleLines) * lh),
+                       anchor: anchor)
+        }
+
+        if let rs, let caretCfg = reveal?.caret {
+            let hz = min(3.0, caretCfg.blink ?? 1.2)
+            let on = hz <= 0 || Int(t * hz * 2) % 2 == 0
+            if on {
+                #if canImport(UIKit)
+                let uiFont = UIFont.systemFont(ofSize: fsPx)
+                let pw = (rs.caretPrefix as NSString)
+                    .size(withAttributes: [.font: uiFont]).width
+                #else
+                let pw = textWidthEm(rs.caretPrefix) * fsPx
+                #endif
+                let cx: CGFloat
+                switch align {
+                case "center": cx = xOff + pw / 2
+                case "right": cx = xOff
+                default: cx = pw
+                }
+                let caretRGB = caretCfg.color.map { SpecSubset.Layer.rgb(from: $0) } ?? rgb
+                let caretColor = Color(.sRGB, red: caretRGB.0, green: caretRGB.1,
+                                        blue: caretRGB.2, opacity: alpha)
+                let caretRect = CGRect(x: cx + fsPx * 0.06,
+                                       y: CGFloat(rs.caretLine) * lh,
+                                       width: max(1, fsPx * 0.08), height: fsPx)
+                layer.fill(Path(caretRect), with: .color(caretColor))
+            }
         }
     }
 }

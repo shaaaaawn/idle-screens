@@ -63,8 +63,17 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         // a placeholder that renders nothing like the live channel, which
         // made posters render black/wrong while fullscreen looked fine.
         let scene = (try? c.decodeIfPresent(SceneWrap.self, forKey: .scene)) ?? nil
-        spec = (try? c.decodeIfPresent(SpecSubset.self, forKey: .resolvedSpec))
-            ?? scene?.spec
+        // Sequence channels serve an `idle-sequence` envelope (no top-level
+        // layers) as their resolvedSpec; poster the first segment's scene so
+        // the grid shows real art instead of falling back to thumbs.
+        if let seq = try? c.decodeIfPresent(SequenceSubset.self, forKey: .resolvedSpec),
+           SequenceSubset.isSequenceDocument(format: seq.format),
+           let first = seq.segments.first {
+            spec = first.scene
+        } else {
+            spec = (try? c.decodeIfPresent(SpecSubset.self, forKey: .resolvedSpec))
+                ?? scene?.spec
+        }
         // Same precedence for the verbatim copy, so mixing publishes exactly
         // what the viewer is showing.
         rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .resolvedSpec))
