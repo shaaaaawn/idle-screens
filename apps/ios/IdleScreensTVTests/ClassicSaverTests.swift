@@ -12,7 +12,78 @@ final class ClassicSaverTests: XCTestCase {
         XCTAssertNil(ClassicSaverKind.supported(id: nil))
     }
 
+    // MARK: - Seeding
+
+    func testChannelSeedIsStableAndDistinct() {
+        // Poster and fullscreen derive the field from the same channel id,
+        // so they must agree — and differ between channels.
+        let a = ClassicSaverKind.seed(forChannel: "coral-tide-f2")
+        XCTAssertEqual(a, ClassicSaverKind.seed(forChannel: "coral-tide-f2"))
+        XCTAssertNotEqual(a, ClassicSaverKind.seed(forChannel: "wild-meadow-88"))
+    }
+
     // MARK: - Tier gating
+
+    @MainActor
+    func testClassicRendersOnPre4KHardware() {
+        // The pre-4K boxes (t2) are the floor these ports exist for: line
+        // strokes are affordable there even though the schema renderer's
+        // per-entity gradients are not.
+        let app = TVAppState()
+        app.tierOverride = .t2
+        XCTAssertEqual(app.classicRenderTier, .t2)
+        app.tierOverride = .t3
+        XCTAssertEqual(app.classicRenderTier, .t3)
+        // Thumb-stream tiers keep the stream.
+        app.tierOverride = .t1
+        XCTAssertNil(app.classicRenderTier)
+        app.tierOverride = .t0
+        XCTAssertNil(app.classicRenderTier)
+    }
+
+    @MainActor
+    func testWatchdogDowngradeDropsClassicRenderer() {
+        let app = TVAppState()
+        app.tierOverride = .t2
+        XCTAssertNotNil(app.classicRenderTier)
+        app.watchdogDidTrigger()
+        XCTAssertNil(app.classicRenderTier, "a janking port must yield to the thumb stream")
+    }
+
+    func testTierQualityLadder() {
+        // t2 thins the field rather than dropping the saver.
+        XCTAssertEqual(WarpField.starCount(for: .t3), WarpField.density)
+        XCTAssertLessThan(WarpField.starCount(for: .t2), WarpField.density)
+        XCTAssertEqual(RainField.scale(for: .t3), 1)
+        XCTAssertLessThan(RainField.scale(for: .t2), 1)
+        // Thinner field, longer streaks — same stroke count, fuller read.
+        XCTAssertGreaterThan(WarpField.streak(for: .t2), WarpField.streak(for: .t3))
+        // Thinning keeps star identity: the survivors are the same stars.
+        let full = WarpField(seed: 5, count: WarpField.density)
+        let thin = WarpField(seed: 5, count: WarpField.starCount(for: .t2))
+        XCTAssertEqual(Array(full.stars.prefix(thin.stars.count)), thin.stars)
+    }
+
+    // MARK: - Poster routing
+
+    func testClassicChannelDecodesSaverIdForPosters() throws {
+        let json = #"{"id":"coral-tide-f2","label":"coral tide","resolvedSpec":{"id":"warp"}}"#
+        let channel = try JSONDecoder().decode(PublicChannel.self, from: Data(json.utf8))
+        XCTAssertNil(channel.spec, "classic docs carry no layers")
+        XCTAssertEqual(channel.classicSaverId, "warp")
+        XCTAssertEqual(ClassicSaverKind.supported(id: channel.classicSaverId), .warp)
+    }
+
+    func testSchemaChannelHasNoClassicSaverId() throws {
+        let json = """
+        {"id":"lanterns","resolvedSpec":{"seed":88,"layers":[
+          {"count":4,"sprite":{"kind":"circle","radius":[0.01,0.02],"color":"#fff"},
+           "motion":{"type":"drift","speed":[0.001,0.002]}}]}}
+        """
+        let channel = try JSONDecoder().decode(PublicChannel.self, from: Data(json.utf8))
+        XCTAssertNotNil(channel.spec)
+        XCTAssertNil(channel.classicSaverId)
+    }
 
     @MainActor
     func testHardwareTierIgnoresThumbFailure() {

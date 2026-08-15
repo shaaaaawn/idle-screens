@@ -17,30 +17,66 @@ enum ClassicSaverKind: String, CaseIterable, Sendable {
     static func supported(id: String?) -> ClassicSaverKind? {
         id.flatMap(ClassicSaverKind.init(rawValue:))
     }
+
+    /// Seed a classic saver from its channel id (FNV-1a), not the publish
+    /// epoch: the field then stays put across re-publishes AND the grid
+    /// poster shows the same field the viewer will open into.
+    static func seed(forChannel channelId: String) -> Int {
+        var hash: UInt32 = 2_166_136_261
+        for byte in channelId.utf8 {
+            hash = (hash ^ UInt32(byte)) &* 16_777_619
+        }
+        return Int(hash)
+    }
 }
 
-/// Fullscreen native renderer for a supported classic saver. 60fps Canvas —
-/// t3 hardware only; callers gate on tier.
+/// Native renderer for a supported classic saver.
+///
+/// These savers stroke lines rather than rasterizing per-entity gradients,
+/// so unlike the schema renderer they stay affordable below t3: the older
+/// (pre-4K) boxes get a thinner field at 30fps instead of the thumb stream.
+/// `live: false` draws one fixed frame — for poster tiles, where a wall of
+/// animating canvases would exhaust the render-layer budget.
 struct ClassicSaverView: View {
     let kind: ClassicSaverKind
     let seed: Int
+    var tier: CapabilityTier = .t3
+    var live: Bool = true
+
+    /// Poster frame time: far enough in that the field looks populated
+    /// rather than caught mid-spawn.
+    private static let posterT: Double = 3000
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { ctx, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 100_000) * 1000 // ms, bounded
-                switch kind {
-                case .warp:
-                    WarpField.shared(seed: UInt32(truncatingIfNeeded: seed))
-                        .draw(in: &ctx, size: size, t: t)
-                case .rainstorm:
-                    RainField.shared(seed: UInt32(truncatingIfNeeded: seed))
-                        .draw(in: &ctx, size: size, t: t)
+        Group {
+            if live {
+                // t2 halves the frame rate as well as the field: 30fps is the
+                // same budget the GPU sprite tier targets.
+                TimelineView(.animation(minimumInterval: tier == .t3 ? nil : 1.0 / 30.0)) { timeline in
+                    Canvas { ctx, size in
+                        // Bounded so the ms clock keeps double precision over
+                        // a screensaver's (indefinite) run.
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: 100_000) * 1000
+                        draw(&ctx, size, t)
+                    }
                 }
+            } else {
+                Canvas { ctx, size in draw(&ctx, size, Self.posterT) }
             }
         }
-        .ignoresSafeArea()
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double) {
+        let seed32 = UInt32(truncatingIfNeeded: seed)
+        switch kind {
+        case .warp:
+            WarpField.shared(seed: seed32, count: WarpField.starCount(for: tier))
+                .draw(in: &ctx, size: size, t: t, streak: WarpField.streak(for: tier))
+        case .rainstorm:
+            RainField.shared(seed: seed32, scale: RainField.scale(for: tier))
+                .draw(in: &ctx, size: size, t: t)
+        }
     }
 }
 
@@ -64,7 +100,22 @@ struct WarpField: Sendable {
     static let baseRate = 0.000727
     static let fadeInEnd = 0.15
     static let fadeOutStart = 0.94
+    /// The web engine's default star count.
     static let density = 520
+
+    /// Stars to draw per frame. Below t3 the field thins to roughly the
+    /// same per-frame budget the schema renderer uses at t2; the stars that
+    /// survive are the same ones (identity is per-index, not per-count).
+    static func starCount(for tier: CapabilityTier) -> Int {
+        tier == .t3 ? density : 220
+    }
+
+    /// Streak elongation. A thinned field reads as an empty sky at the
+    /// web's default, so t2 trades length for count — a longer line costs
+    /// the same one stroke, and the warp reads full again.
+    static func streak(for tier: CapabilityTier) -> Double {
+        tier == .t3 ? 0.4 : 0.75
+    }
 
     init(seed: UInt32, count: Int = WarpField.density) {
         stars = (0..<count).map { i in
@@ -80,16 +131,17 @@ struct WarpField: Sendable {
         }
     }
 
-    /// Building 520 forked streams is cheap but not per-frame cheap; one
-    /// field per seed is plenty (the view outlives the channel).
-    private static let cache = Locked<[UInt32: WarpField]>([:])
-    static func shared(seed: UInt32) -> WarpField {
+    /// Building hundreds of forked streams is cheap but not per-frame cheap;
+    /// one field per (seed, count) is plenty (the view outlives the channel).
+    private static let cache = Locked<[String: WarpField]>([:])
+    static func shared(seed: UInt32, count: Int = WarpField.density) -> WarpField {
         cache.withLock { store in
-            if let field = store[seed] { return field }
-            let field = WarpField(seed: seed)
+            let key = "\(seed)|\(count)"
+            if let field = store[key] { return field }
+            let field = WarpField(seed: seed, count: count)
             // The saver shows one seed at a time; keep the cache tiny.
             if store.count > 4 { store.removeAll() }
-            store[seed] = field
+            store[key] = field
             return field
         }
     }
@@ -183,9 +235,15 @@ struct RainField: Sendable {
 
     static let flashPeriod = 8000.0 // ms
 
+    /// Drop-count multiplier for a tier — below t3 the storm thins instead
+    /// of falling back to a broken thumb.
+    static func scale(for tier: CapabilityTier) -> Double {
+        tier == .t3 ? 1 : 0.4
+    }
+
     /// Depth specs mirror the web's r1/r2, r3/r4, r5/r6 tiers, built for a
     /// 1920×1080 canvas (the TV never resizes mid-flight).
-    init(seed: UInt32, width w: Double = 1920, height h: Double = 1080) {
+    init(seed: UInt32, scale: Double = 1, width w: Double = 1920, height h: Double = 1080) {
         var rng = Mulberry32(seed: seed)
         let area = (w * h) / (1280 * 800)
         let specs: [(count: Double, minLen: Double, maxLen: Double,
@@ -198,7 +256,7 @@ struct RainField: Sendable {
         layers = specs.map { s in
             // Cap the area scale: the web grows counts unbounded with canvas
             // size; ~1000 strokes/frame is past the TV Canvas budget.
-            let n = max(8, Int((s.count * min(area, 1.35)).rounded()))
+            let n = max(8, Int((s.count * min(area, 1.35) * scale).rounded()))
             let drops = (0..<n).map { _ -> Drop in
                 Drop(x0: rng.next() * (w + 80) - 40,
                      y0: rng.next() * (2 * h) - h,
@@ -211,13 +269,14 @@ struct RainField: Sendable {
         }
     }
 
-    private static let cache = Locked<[UInt32: RainField]>([:])
-    static func shared(seed: UInt32) -> RainField {
+    private static let cache = Locked<[String: RainField]>([:])
+    static func shared(seed: UInt32, scale: Double = 1) -> RainField {
         cache.withLock { store in
-            if let field = store[seed] { return field }
-            let field = RainField(seed: seed)
+            let key = "\(seed)|\(scale)"
+            if let field = store[key] { return field }
+            let field = RainField(seed: seed, scale: scale)
             if store.count > 4 { store.removeAll() }
-            store[seed] = field
+            store[key] = field
             return field
         }
     }

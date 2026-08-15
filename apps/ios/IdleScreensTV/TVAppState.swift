@@ -101,6 +101,16 @@ final class TVAppState {
         tierOverride ?? detectedTier
     }
 
+    /// Tier to draw a ported classic saver at, or nil when this box should
+    /// stay on the thumb stream. Unlike the schema renderer, these savers
+    /// only stroke lines, so the pre-4K boxes (t2) get a thinner field at
+    /// 30fps rather than nothing. A watchdog downgrade drops them out.
+    var classicRenderTier: CapabilityTier? {
+        guard !watchdogDowngraded else { return nil }
+        let tier = hardwareTier
+        return tier == .t3 || tier == .t2 ? tier : nil
+    }
+
     // MARK: Lifecycle
 
     private var baseURL: URL
@@ -336,7 +346,9 @@ final class TVAppState {
             // with a native port render locally; the rest stay on thumbs.
             isClassicSpec = true
             classicSaverId = (try? JSONDecoder().decode(ClassicIdProbe.self, from: data))?.id
-            classicSeed = fallbackSeed ?? 0
+            // Seed from the channel id, not the publish epoch: the field
+            // survives re-publishes and matches the grid poster exactly.
+            classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
             specBackground = nil
             return

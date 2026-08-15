@@ -14,6 +14,10 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     let categorySort: Int?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
+    /// Saver id when the channel publishes a classic saver (`{"id":"warp"}`)
+    /// rather than a schema scene — those carry no layers, so `spec` is nil
+    /// and the poster comes from the native classic port instead.
+    let classicSaverId: String?
     /// The same spec as untouched JSON. `SpecSubset` is a lossy, decode-only
     /// view (custom decoders, no encoder), so re-publishing it would drop
     /// every field the renderer doesn't read. Mixing a scene onto another
@@ -26,6 +30,11 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
         case categoryId, categorySort
+    }
+
+    /// Minimal probe for classic saver documents: `{"id": "warp"}`.
+    private struct ClassicIdProbe: Decodable {
+        let id: String?
     }
 
     private struct SceneWrap: Decodable {
@@ -43,7 +52,8 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
 
     init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
          sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil,
-         categoryId: String? = nil, categorySort: Int? = nil) {
+         categoryId: String? = nil, categorySort: Int? = nil,
+         classicSaverId: String? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
@@ -53,6 +63,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.rawSpec = rawSpec
         self.categoryId = categoryId
         self.categorySort = categorySort
+        self.classicSaverId = classicSaverId
     }
 
     init(from decoder: Decoder) throws {
@@ -82,6 +93,16 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         } else {
             spec = (try? c.decodeIfPresent(SpecSubset.self, forKey: .resolvedSpec))
                 ?? scene?.spec
+        }
+        // A classic saver document is just `{"id": "warp"}` — no layers, so
+        // the schema decode above yields nil. Keep the saver id so the grid
+        // can poster it from the native port instead of a (often broken)
+        // server thumb.
+        if spec == nil,
+           let probe = try? c.decodeIfPresent(ClassicIdProbe.self, forKey: .resolvedSpec) {
+            classicSaverId = probe.id
+        } else {
+            classicSaverId = nil
         }
         // Same precedence for the verbatim copy, so mixing publishes exactly
         // what the viewer is showing.

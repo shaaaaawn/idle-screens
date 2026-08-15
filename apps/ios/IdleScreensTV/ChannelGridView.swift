@@ -54,6 +54,14 @@ struct ChannelGridView: View {
                 Group {
                     if let spec = focused.spec, app.effectiveTier == .t3 {
                         ScenePreviewView(spec: spec, fallbackSeed: focused.id)
+                    } else if let kind = ClassicSaverKind.supported(id: focused.classicSaverId),
+                              let tier = app.classicRenderTier {
+                        // Static frame: the billboard is blurred to 90pt, so
+                        // animating it would cost frames nobody can see.
+                        ClassicSaverView(kind: kind,
+                                         seed: ClassicSaverKind.seed(forChannel: focused.id),
+                                         tier: tier,
+                                         live: false)
                     } else {
                         ProceduralChannelArt(channelId: focused.id)
                     }
@@ -226,6 +234,17 @@ private struct ChannelCard: View {
                         // ever drops out (system layer eviction renders it
                         // transparent), designed art shows — never a black tile.
                         .background(ProceduralChannelArt(channelId: channel.id))
+                        .opacity((channel.sleeping ?? false) ? 0.35 : 1)
+                } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId),
+                          let tier = app.classicRenderTier {
+                    // Classic savers have no schema spec — poster them from
+                    // the native port (one static frame, same seed as the
+                    // fullscreen view) rather than the server thumb, which
+                    // for these channels is usually black.
+                    ClassicSaverView(kind: kind,
+                                     seed: ClassicSaverKind.seed(forChannel: channel.id),
+                                     tier: tier,
+                                     live: false)
                         .opacity((channel.sleeping ?? false) ? 0.35 : 1)
                 } else {
                     ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {

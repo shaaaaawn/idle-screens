@@ -32,8 +32,9 @@ struct ScreenSaverView: View {
                 // on canvas-capable hardware; the rest use the thumb stream,
                 // and on repeated thumb failure a designed ambient fallback.
                 if let kind = ClassicSaverKind.supported(id: app.classicSaverId),
-                   app.hardwareTier == .t3 {
-                    ClassicSaverView(kind: kind, seed: app.classicSeed)
+                   app.classicRenderTier != nil {
+                    ClassicSaverView(kind: kind, seed: app.classicSeed,
+                                     tier: app.classicRenderTier ?? .t3)
                 } else if app.thumbFailed {
                     // Never an error message: a seeded ambient scene we can
                     // always render internally, with an honest caption.
