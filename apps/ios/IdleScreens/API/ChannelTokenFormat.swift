@@ -49,6 +49,30 @@ enum ChannelTokenFormat {
 
     /// Why a token looks wrong, said before spending a network round trip on
     /// it. nil means "nothing obviously wrong" — not "verified".
+    /// A handoff link: `idlescreens://channel/<id>?token=<isk_…>`, or the
+    /// https equivalent. Returns nil unless BOTH halves are present and the
+    /// token is plausible — a link carrying only an id is just a viewer link
+    /// and must not be mistaken for a grant of control.
+    static func handoff(from url: URL) -> (channelId: String, token: String)? {
+        // A custom-scheme URL puts "channel" in the HOST, not the path
+        // (idlescreens://channel/lobby → host=channel, path=/lobby), so the
+        // https-shaped path scan misses it and the whole URL string would get
+        // sanitised into a nonsense id. Same trap as the pair-code URL.
+        let parts = url.pathComponents.filter { $0 != "/" }
+        let id: String?
+        if url.scheme == "idlescreens", url.host == "channel" {
+            id = parts.first.flatMap(sanitizeId)
+        } else {
+            id = channelId(from: url.absoluteString)
+        }
+        guard let id else { return nil }
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let raw = items.first(where: { $0.name == "token" })?.value else { return nil }
+        let token = normalizeToken(raw)
+        guard isPlausibleToken(token) else { return nil }
+        return (id, token)
+    }
+
     static func tokenProblem(_ raw: String) -> String? {
         let token = normalizeToken(raw)
         if token.isEmpty { return nil }
