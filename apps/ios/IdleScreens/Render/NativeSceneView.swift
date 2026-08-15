@@ -170,8 +170,15 @@ struct NativeSceneView: View {
             // Per-entity per-frame radial gradients are the renderer's most
             // expensive path — below t3, soft circles degrade to plain fills.
             if soft, tier == .t3 {
+                // Web-parity falloff (compile.ts drawEntity): bright core held
+                // to 35% of the radius, then fade — a plain linear fade reads
+                // dimmer and mushier than the web engine's glow.
                 ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
-                    Gradient(colors: [color, color.opacity(0)]),
+                    Gradient(stops: [
+                        .init(color: color, location: 0),
+                        .init(color: color.opacity(0.75), location: 0.35),
+                        .init(color: color.opacity(0), location: 1),
+                    ]),
                     center: point,
                     startRadius: 0,
                     endRadius: r

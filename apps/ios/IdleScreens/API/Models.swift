@@ -9,6 +9,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     let tags: [String]?
     let viewers: Int?
     let sleeping: Bool?
+    /// Editorial category (`/api/categories` catalog) and position within it.
+    let categoryId: String?
+    let categorySort: Int?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
     /// The same spec as untouched JSON. `SpecSubset` is a lossy, decode-only
@@ -22,6 +25,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
+        case categoryId, categorySort
     }
 
     private struct SceneWrap: Decodable {
@@ -38,7 +42,8 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     }
 
     init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
-         sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil) {
+         sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil,
+         categoryId: String? = nil, categorySort: Int? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
@@ -46,6 +51,8 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.sleeping = sleeping
         self.spec = spec
         self.rawSpec = rawSpec
+        self.categoryId = categoryId
+        self.categorySort = categorySort
     }
 
     init(from decoder: Decoder) throws {
@@ -58,6 +65,8 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         tags = try? c.decodeIfPresent([String].self, forKey: .tags)
         viewers = try? c.decodeIfPresent(Int.self, forKey: .viewers)
         sleeping = try? c.decodeIfPresent(Bool.self, forKey: .sleeping)
+        categoryId = try? c.decodeIfPresent(String.self, forKey: .categoryId)
+        categorySort = try? c.decodeIfPresent(Int.self, forKey: .categorySort)
         // Prefer the RESOLVED spec (base + all steering deltas applied) —
         // it's what the fullscreen viewer shows. The base `scene.spec` can be
         // a placeholder that renders nothing like the live channel, which
@@ -79,6 +88,18 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .resolvedSpec))
             ?? scene?.rawSpec
     }
+}
+
+/// An editorial category from `GET /api/categories` — server-curated shelf
+/// metadata (title, subtitle, order). Channel membership comes from each
+/// channel's `categoryId`, not from the embedded channel list here.
+struct ChannelCategory: Decodable, Identifiable, Equatable {
+    let id: String
+    let title: String?
+    let subtitle: String?
+    let sort: Int?
+
+    var displayTitle: String { title ?? id }
 }
 
 /// Read-only channel state from `GET /c/:channelId/state`.

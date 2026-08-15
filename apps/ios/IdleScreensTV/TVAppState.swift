@@ -23,10 +23,14 @@ final class TVAppState {
     var pairCode: PairCode?
     var isRequestingPairCode = false
     var pairError: String?
+    /// Wall-clock of the most recent switch push from a paired phone.
+    var phonePushAt: Date?
 
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
+    /// Editorial shelf catalog, server-ordered.
+    var categories: [ChannelCategory] = []
     var isLoadingGallery = false
     var galleryError: String?
 
@@ -125,6 +129,9 @@ final class TVAppState {
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
             channels = cached
         }
+        if categories.isEmpty, let cached = await gallery.cachedCategories() {
+            categories = cached
+        }
         do {
             channels = try await gallery.fetchChannels()
             galleryError = nil
@@ -132,6 +139,11 @@ final class TVAppState {
             // Keep showing cached content on refresh failure; only surface
             // the error when there is nothing to show at all.
             if channels.isEmpty { galleryError = error.localizedDescription }
+        }
+        // Shelves are enrichment: a failure here just means the grid falls
+        // back to id-derived shelf titles, never an error state.
+        if let fetched = try? await gallery.fetchCategories() {
+            categories = fetched
         }
     }
 
@@ -262,6 +274,10 @@ final class TVAppState {
         case .delta:
             break
         case .switchChannel(let channelId):
+            // Any switch push proves a paired phone is steering this TV —
+            // the pairing screen uses it as its "✓ Paired" cue (the phone
+            // sends a same-channel ack right after claiming).
+            phonePushAt = Date()
             if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
                 selectChannel(channelId)
             }

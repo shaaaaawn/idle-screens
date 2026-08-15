@@ -13,8 +13,35 @@ struct ChannelGridView: View {
     }
     private var hero: PublicChannel? { featured.first }
     private var featuredRail: [PublicChannel] { Array(featured.dropFirst()) }
+
+    /// Editorial shelves: server-curated categories in catalog order, each
+    /// holding its member channels in `categorySort` order. Categories the
+    /// catalog doesn't know (stale cache, local dev) still shelve under
+    /// their id, so channels never vanish.
+    private var shelves: [(category: ChannelCategory, channels: [PublicChannel])] {
+        let categorized = Dictionary(grouping: app.channels.filter {
+            $0.categoryId != nil && $0.tags?.contains("featured") != true
+        }, by: { $0.categoryId ?? "" })
+
+        var catalog = app.categories
+        let known = Set(catalog.map(\.id))
+        // Orphaned category ids get a bare entry after the curated ones.
+        for id in categorized.keys.sorted() where !known.contains(id) {
+            catalog.append(ChannelCategory(id: id, title: nil, subtitle: nil, sort: nil))
+        }
+
+        return catalog.compactMap { category in
+            guard let members = categorized[category.id], !members.isEmpty else { return nil }
+            let ordered = members.sorted {
+                ($0.categorySort ?? .max, $0.id) < ($1.categorySort ?? .max, $1.id)
+            }
+            return (category, ordered)
+        }
+    }
+
+    /// Uncategorized, unfeatured remainder — the browsing long tail.
     private var rest: [PublicChannel] {
-        app.channels.filter { $0.tags?.contains("featured") != true }
+        app.channels.filter { $0.tags?.contains("featured") != true && $0.categoryId == nil }
     }
 
     /// The focused channel drives an ambient billboard behind the grid —
@@ -95,8 +122,15 @@ struct ChannelGridView: View {
                                     }
                                 }
 
+                                ForEach(shelves, id: \.category.id) { shelf in
+                                    ChannelSection(title: shelf.category.displayTitle,
+                                                   subtitle: shelf.category.subtitle) {
+                                        CardGrid(channels: shelf.channels, columns: columns, focusBinding: $focusedChannelId)
+                                    }
+                                }
+
                                 if !rest.isEmpty {
-                                    ChannelSection(title: "channels") {
+                                    ChannelSection(title: shelves.isEmpty ? "channels" : "more channels") {
                                         CardGrid(channels: rest, columns: columns, focusBinding: $focusedChannelId)
                                     }
                                 }
@@ -130,13 +164,21 @@ struct ChannelGridView: View {
 
 private struct ChannelSection<Content: View>: View {
     let title: String
+    var subtitle: String? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Text(title)
-                .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(Color.textPrimary.opacity(0.92))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(Color.textPrimary.opacity(0.92))
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 24))
+                        .foregroundStyle(Color.textSecondary)
+                }
+            }
             content
         }
     }

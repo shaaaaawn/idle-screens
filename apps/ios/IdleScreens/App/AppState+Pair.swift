@@ -152,6 +152,16 @@ extension AppState {
             savePairedScreens()
             pairClaimError = nil
             pairPushError = nil
+            // Ack the pairing on the TV: a same-channel push is a no-op
+            // switch, but its arrival over the socket is the TV's cue to
+            // show its "✓ Paired" moment. Fire-and-forget — pairing already
+            // succeeded even if the TV isn't listening right now.
+            if let channelId = claimed.channelId, !channelId.isEmpty {
+                let token = claimed.pairToken
+                Task { [pairClient] in
+                    _ = try? await pairClient.push(pairToken: token, channelId: channelId)
+                }
+            }
             await refreshScreenStatuses()
             return true
         } catch {

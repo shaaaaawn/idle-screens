@@ -59,7 +59,29 @@ struct IdleScreensTVApp: App {
             .onChange(of: scenePhase) {
                 appState.scenePhaseChanged(active: scenePhase == .active)
             }
+            // Top Shelf deep links: idlescreens://channel/<id> from the home
+            // screen goes straight into that channel fullscreen.
+            .onOpenURL { url in
+                if let id = DeepLink.channelId(from: url) {
+                    appState.selectChannel(id)
+                }
+            }
         }
+    }
+}
+
+/// Parses app deep links. Canonical form is `idlescreens://channel/<id>`
+/// (what the Top Shelf provider emits); the bare `idlescreens://<id>`
+/// shorthand also resolves so hand-typed links behave.
+enum DeepLink {
+    static func channelId(from url: URL) -> String? {
+        guard url.scheme == "idlescreens" else { return nil }
+        let id: String? = switch url.host() {
+        case "channel": url.pathComponents.dropFirst().first
+        default: url.host()
+        }
+        guard let id, !id.isEmpty else { return nil }
+        return id
     }
 }
 
