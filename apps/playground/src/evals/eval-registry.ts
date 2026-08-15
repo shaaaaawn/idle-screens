@@ -13,7 +13,8 @@ import type { EvalHarness } from './types';
 export type EvalId =
   | 'style-authoring-v1'
   | 'mcp-comprehension-v1'
-  | 'style-authoring-holdout-v1';
+  | 'style-authoring-holdout-v1'
+  | 'preset-recipe-v1';
 
 export interface EvalDefinition {
   id: EvalId;
@@ -36,6 +37,24 @@ export interface EvalDefinition {
   /** Whether this eval's output may drive a public channel. */
   channelEligible: boolean;
   datasetLicense: 'CC-BY-4.0' | 'none';
+  /**
+   * Fixture axes, JSON-encoded on ONE line. A string, deliberately: the
+   * idle-mono planner reads this file with anchored regexes rather than a TS
+   * toolchain (parse-don't-execute), and a single-quoted one-line JSON string
+   * is the shape that contract can carry losslessly. Each axis:
+   *   { "key": string,          // param name a launcher passes
+   *     "label": string,        // picker label
+   *     "source": "artists" | "savers-steerable" | "inline",
+   *     "values"?: string[],    // when source is "inline"
+   *     "all"?: boolean }       // offer a full-matrix option
+   * A launcher renders one picker per axis and scopes the run prompt with the
+   * chosen values — no launcher code is specific to any one eval.
+   */
+  axes?: string;
+  /** Playbook the run must follow — a repo-relative doc/skill path. */
+  runner?: string;
+  /** What the run needs to touch: nothing, or a disposable local channel. */
+  runTarget?: 'none' | 'local-channel';
 }
 
 export const EVALS: readonly EvalDefinition[] = [
@@ -58,6 +77,9 @@ export const EVALS: readonly EvalDefinition[] = [
     },
     channelEligible: true,
     datasetLicense: 'CC-BY-4.0',
+    axes: '[{"key":"artist","label":"style","source":"artists","all":true}]',
+    runner: 'idle-screens/.claude/skills/artistic-style-schema-eval',
+    runTarget: 'none',
   },
   {
     id: 'style-authoring-holdout-v1',
@@ -78,6 +100,10 @@ export const EVALS: readonly EvalDefinition[] = [
     // is the one thing that destroys this eval.
     channelEligible: false,
     datasetLicense: 'none',
+    // No artist axis on purpose: the house styles are the held-out secret, so
+    // a launcher may only offer the full set, never name one.
+    runner: 'idle-screens/.claude/skills/artistic-style-schema-eval',
+    runTarget: 'none',
   },
   {
     id: 'mcp-comprehension-v1',
@@ -91,6 +117,29 @@ export const EVALS: readonly EvalDefinition[] = [
     // Its output is prose about a scene, not a scene.
     channelEligible: false,
     datasetLicense: 'none',
+    runner: 'idle-mono/.pi/skills/idle-steering/SKILL.md',
+    runTarget: 'local-channel',
+  },
+  {
+    id: 'preset-recipe-v1',
+    title: 'Preset recipes for steerable savers',
+    measures:
+      'Given only a saver’s paramSpace, can a model author a wardrobe of named presets that are valid, diverse, and use the space?',
+    harness: 'agent-loop',
+    // 14 steerable savers x 5 presets each. The fixture axis is the saver;
+    // the deliverable per fixture is a preset set, scored mechanically.
+    fixtures: 14,
+    // paramSpaces ship in this repo and the scorer is pure arithmetic, so
+    // there is nothing to contaminate: the eval measures whether a model can
+    // read a parameter contract and exercise it, not whether it has seen one.
+    visibility: 'public',
+    baseline: null,
+    // Winning presets become the saver's shelf — that is the showcase.
+    channelEligible: true,
+    datasetLicense: 'CC-BY-4.0',
+    axes: '[{"key":"saver","label":"saver","source":"savers-steerable","all":true}]',
+    runner: 'idle-screens/apps/playground/src/evals/preset-recipe/README.md',
+    runTarget: 'none',
   },
 ];
 
