@@ -32,6 +32,7 @@ import {
   type AnimationClip,
   type Material,
   type Object3D,
+  type SkinnedMesh,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -75,6 +76,39 @@ interface FishTemplate {
 
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
+// Eviction deliberately does NOT dispose the evicted template's GPU
+// resources: another live instance may still hold clones sharing its
+// geometry. The leak is bounded (>8 distinct URLs in one session, a few MB
+// each) and freed on context loss; refcounted disposal lands with fishMix,
+// where multi-URL sessions become normal.
+
+/**
+ * Dispose only GPU resources this tank created — coat/glow materials
+ * (tagged `mqOwned` by applyNpcMaterials), tank-built geometry (floor,
+ * fallback fish), and each clone's Skeleton boneTexture. Template-shared
+ * geometry and eyes/textured materials are never touched: SkeletonUtils.clone
+ * shares them with the cached template, and disposing them here corrupts
+ * every other clone of the same fish.
+ */
+function disposeOwned(root: Object3D): void {
+  root.traverse((o) => {
+    const skinned = o as Partial<SkinnedMesh>;
+    if (skinned.isSkinnedMesh && skinned.skeleton) skinned.skeleton.dispose();
+    const mesh = o as Partial<Mesh>;
+    if (mesh.geometry?.userData?.mqOwned) mesh.geometry.dispose();
+    const mats: Material[] = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+      ? [mesh.material]
+      : [];
+    for (const m of mats) {
+      if (!m.userData?.mqOwned) continue;
+      const tex = (m as Partial<MeshBasicMaterial>).map;
+      if (tex) tex.dispose();
+      m.dispose();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Fish instance — one per visible fish in the scene.
@@ -180,6 +214,8 @@ class TankInstance implements SaverInstance {
       new CircleGeometry(600, 32),
       new MeshBasicMaterial({ color: 0x0a1d33 }),
     );
+    floor.geometry.userData.mqOwned = true;
+    floor.material.userData.mqOwned = true;
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
@@ -226,16 +262,7 @@ class TankInstance implements SaverInstance {
       if (!f) continue;
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
-      f.group.traverse((o) => {
-        const mesh = o as Partial<Mesh>;
-        if (mesh.geometry) mesh.geometry.dispose();
-        const mats: Material[] = Array.isArray(mesh.material)
-          ? mesh.material
-          : mesh.material
-          ? [mesh.material]
-          : [];
-        for (const m of mats) m.dispose();
-      });
+      disposeOwned(f.group);
     }
     this.fish = [];
     this.activeFishUrl = url;
@@ -310,12 +337,15 @@ class TankInstance implements SaverInstance {
         .fork(0xc0a7 + index)
         .pick(MIAMI_VICE_COLORS);
       const mat = new MeshBasicMaterial({ color: new Color(coat) });
+      mat.userData.mqOwned = true;
       const body = new Mesh(new SphereGeometry(FISH_LENGTH / 2, 12, 8), mat);
+      body.geometry.userData.mqOwned = true;
       body.scale.set(1, 0.55, 0.4);
       const tailMesh = new Mesh(
         new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8),
         mat,
       );
+      tailMesh.geometry.userData.mqOwned = true;
       tailMesh.rotation.z = Math.PI / 2;
       tailMesh.position.x = -FISH_LENGTH * 0.62;
       group.add(body, tailMesh);
@@ -546,23 +576,16 @@ class TankInstance implements SaverInstance {
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();
+    }
+    // One ownership-aware pass over the whole scene (fish, floor): frees what
+    // this instance created, leaves template-shared resources for the cache.
+    // The context loss below reclaims this context's GPU side regardless.
+    disposeOwned(this.scene);
+    for (const f of this.fish) {
+      if (!f) continue;
       this.scene.remove(f.group);
     }
     this.fish = [];
-    this.scene.traverse((o) => {
-      const mesh = o as Partial<Mesh>;
-      if (mesh.geometry) mesh.geometry.dispose();
-      const mats: Material[] = Array.isArray(mesh.material)
-        ? mesh.material
-        : mesh.material
-        ? [mesh.material]
-        : [];
-      for (const m of mats) {
-        const tex = (m as Partial<MeshBasicMaterial>).map;
-        if (tex) tex.dispose();
-        m.dispose();
-      }
-    });
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();

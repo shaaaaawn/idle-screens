@@ -81,10 +81,14 @@ export function applyNpcMaterials(root: Object3D, rng: Rng): void {
         const glow = new MeshBasicMaterial({ color: 0x000000 });
         glow.color.set(rng.pick(BLOOM_COLORS));
         glow.name = m.name;
+        // Ours to dispose at fish teardown. Eyes/textured materials stay the
+        // template's — disposing those would corrupt every other clone.
+        glow.userData.mqOwned = true;
         return glow;
       }
       const body = new MeshBasicMaterial({ color: new Color(rng.pick(BODY_COATS)) });
       body.name = m.name;
+      body.userData.mqOwned = true;
       return body;
     });
     mesh.material = Array.isArray(mesh.material) ? replaced : replaced[0]!;
