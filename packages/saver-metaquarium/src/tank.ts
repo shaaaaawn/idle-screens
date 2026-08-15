@@ -41,7 +41,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrl, type FishEntry } from './ipfs';
+import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   applyNpcMaterials,
@@ -390,7 +390,10 @@ class TankInstance implements SaverInstance {
         const slotUrl = this.wantUrls[i]!;
         const tpl = await this.template(slotUrl);
         if (this.disposed || this.wantKey !== key) return;
-        if (!this.fish[i]) this.spawn(tpl, i, slotUrl);
+        if (!this.fish[i]) {
+          this.spawn(tpl, i, slotUrl);
+          if (!tpl) this.healLater(i, slotUrl, key);
+        }
       }
     };
     await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
@@ -403,9 +406,26 @@ class TankInstance implements SaverInstance {
     if (!p) {
       p = (async (): Promise<FishTemplate | null> => {
         try {
-          const res = await fetch(resolveIpfsUrl(url));
-          if (!res.ok) throw new Error(`fish glb ${res.status}`);
-          const buf = await res.arrayBuffer();
+          // Gateway ladder (MQ21): try each candidate with its own timeout so
+          // one flaky gateway degrades to the next instead of to a fallback
+          // blob. Non-ipfs URLs have a single candidate.
+          const buf = await (async (): Promise<ArrayBuffer> => {
+            let lastErr: unknown = new Error('no gateway candidates');
+            for (const candidate of resolveIpfsUrls(url)) {
+              const ctl = new AbortController();
+              const timer = setTimeout(() => ctl.abort(), 12_000);
+              try {
+                const res = await fetch(candidate, { signal: ctl.signal });
+                if (!res.ok) throw new Error(`fish glb ${res.status}`);
+                return await res.arrayBuffer();
+              } catch (e) {
+                lastErr = e;
+              } finally {
+                clearTimeout(timer);
+              }
+            }
+            throw lastErr;
+          })();
           const gltf = await new GLTFLoader().parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
@@ -495,6 +515,29 @@ class TankInstance implements SaverInstance {
       tail,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
+  }
+
+  /** One delayed second chance for a slot that spawned as a fallback blob:
+   *  the failed template self-evicted from the cache, so a later fetch can
+   *  succeed (gateway flakes are transient). Bounded to a single retry per
+   *  spawn, guarded by wantKey, and skipped after dispose. Population loading
+   *  was never pure in t (it is network), so the timer breaks nothing. */
+  private healLater(index: number, url: string, key: string): void {
+    setTimeout(() => {
+      void (async (): Promise<void> => {
+        if (this.disposed || this.wantKey !== key) return;
+        const tpl = await this.template(url);
+        if (!tpl || this.disposed || this.wantKey !== key) return;
+        const blob = this.fish[index];
+        if (!blob || blob.body) return; // real fish arrived meanwhile
+        blob.mixer?.stopAllAction();
+        this.scene.remove(blob.group);
+        disposeOwned(blob.group);
+        this.fish[index] = undefined;
+        this.spawn(tpl, index, url);
+        if (this.paused) this.renderStill();
+      })();
+    }, 15_000);
   }
 
   /** Fish actually spawned — the sparse array's holes are loads in flight. */
