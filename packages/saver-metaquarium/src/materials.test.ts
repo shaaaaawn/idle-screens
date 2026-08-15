@@ -113,3 +113,18 @@ describe('metaquarium material contract', () => {
     expect(mats[1]).toBeInstanceOf(MeshBasicMaterial);
   });
 });
+
+it('tags created coats mqOwned and leaves template materials untagged', () => {
+  const root = new Group();
+  const body = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial());
+  body.material.name = 'BODY-1';
+  const eyes = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial());
+  eyes.material.name = 'EYES-L';
+  root.add(body, eyes);
+  applyNpcMaterials(root, createRng(7));
+  // coat replaced and owned — safe to dispose at fish teardown
+  expect((body.material as MeshStandardMaterial).userData.mqOwned).toBe(true);
+  // eyes kept — template-shared, must never carry the owned tag
+  expect((eyes.material as MeshStandardMaterial).name).toBe('EYES-L');
+  expect((eyes.material as MeshStandardMaterial).userData.mqOwned).toBeUndefined();
+});

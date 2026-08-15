@@ -102,3 +102,32 @@ export function withDefaults(
 export function paramSpaceWith(overrides: MetaquariumOptions['params']): ParamSpace {
   return withDefaults(METAQUARIUM_PARAMS, overrides as Record<string, ParamValue> | undefined);
 }
+
+/**
+ * Defensive read of a tracked number param. The server validates nothing on
+ * the classic steering lane (any path, any value reaches the saver), and MCP
+ * harnesses with untyped `value` params stringify numbers — so "22" arrives
+ * where 22 was meant. Finite numbers pass; finite numeric strings coerce;
+ * anything else falls back to the def's default; the result clamps to the
+ * def's min/max. Zero-dep on purpose: hosts can reuse it to sanitize.
+ */
+export function coerceNum(
+  def: { default?: ParamValue; min?: number; max?: number } | undefined,
+  v: ParamValue | undefined,
+): number {
+  let n: number | null = null;
+  if (typeof v === 'number' && Number.isFinite(v)) n = v;
+  else if (typeof v === 'string' && v.trim() !== '') {
+    const parsed = Number(v);
+    if (Number.isFinite(parsed)) n = parsed;
+  }
+  if (n === null) {
+    const d = def?.default;
+    if (typeof d === 'number' && Number.isFinite(d)) n = d;
+    else if (typeof d === 'string' && d.trim() !== '' && Number.isFinite(Number(d))) n = Number(d);
+    else n = 0;
+  }
+  if (def?.min !== undefined && n < def.min) n = def.min;
+  if (def?.max !== undefined && n > def.max) n = def.max;
+  return n;
+}

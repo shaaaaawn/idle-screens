@@ -1,6 +1,7 @@
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
+  integrateParam,
   sampleTrack,
   type ControlTrack,
   type ParamSpace,
@@ -31,11 +32,12 @@ import {
   type AnimationClip,
   type Material,
   type Object3D,
+  type SkinnedMesh,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { resolveIpfsUrl } from './ipfs';
-import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
+import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   applyNpcMaterials,
   eyeNoseSign,
@@ -74,12 +76,50 @@ interface FishTemplate {
 
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
+// Eviction deliberately does NOT dispose the evicted template's GPU
+// resources: another live instance may still hold clones sharing its
+// geometry. The leak is bounded (>8 distinct URLs in one session, a few MB
+// each) and freed on context loss; refcounted disposal lands with fishMix,
+// where multi-URL sessions become normal.
+
+/**
+ * Dispose only GPU resources this tank created — coat/glow materials
+ * (tagged `mqOwned` by applyNpcMaterials), tank-built geometry (floor,
+ * fallback fish), and each clone's Skeleton boneTexture. Template-shared
+ * geometry and eyes/textured materials are never touched: SkeletonUtils.clone
+ * shares them with the cached template, and disposing them here corrupts
+ * every other clone of the same fish.
+ */
+function disposeOwned(root: Object3D): void {
+  root.traverse((o) => {
+    const skinned = o as Partial<SkinnedMesh>;
+    if (skinned.isSkinnedMesh && skinned.skeleton) skinned.skeleton.dispose();
+    const mesh = o as Partial<Mesh>;
+    if (mesh.geometry?.userData?.mqOwned) mesh.geometry.dispose();
+    const mats: Material[] = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+      ? [mesh.material]
+      : [];
+    for (const m of mats) {
+      if (!m.userData?.mqOwned) continue;
+      const tex = (m as Partial<MeshBasicMaterial>).map;
+      if (tex) tex.dispose();
+      m.dispose();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Fish instance — one per visible fish in the scene.
 // ---------------------------------------------------------------------------
 
 interface Fish {
+  /** Spawn slot. Visibility and phase math key off this — never off array
+   *  or arrival order, which is GLB-completion order and network-dependent.
+   *  (With one URL every load awaits the same cached promise, so the two
+   *  coincide; with mixed URLs they will not.) */
+  index: number;
   group: Group;
   plan: SwimPlan;
   body: Object3D | null;
@@ -108,7 +148,11 @@ class TankInstance implements SaverInstance {
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
-  private fish: Fish[] = [];
+  /** Sparse, indexed by spawn slot — holes are still-loading fish. */
+  private fish: Array<Fish | undefined> = [];
+  /** Slots requested so far (spawned or in flight). Never decreases except
+   *  across a swapFish teardown. */
+  private poolTarget = 0;
   private disposed = false;
 
   private w: number;
@@ -120,6 +164,11 @@ class TankInstance implements SaverInstance {
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
+  /** Does the track steer swimSpeed? Decided once per applyTrack. When it
+   *  does, distance comes from the closed-form integral of the speed curve
+   *  (speed changes glide); when it does not, the legacy constant-speed
+   *  formula is kept bit-for-bit. */
+  private speedTracked = false;
   private readonly thumbnail: boolean;
   private activeFishUrl = '';
 
@@ -168,6 +217,8 @@ class TankInstance implements SaverInstance {
       new CircleGeometry(600, 32),
       new MeshBasicMaterial({ color: 0x0a1d33 }),
     );
+    floor.geometry.userData.mqOwned = true;
+    floor.material.userData.mqOwned = true;
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
@@ -189,13 +240,33 @@ class TankInstance implements SaverInstance {
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
   }
 
-  private async populate(): Promise<void> {
+  /** Ceiling the pool may ever reach on this device. */
+  private poolCapNow(): number {
     const poolCap = this.thumbnail ? Math.min(6, MAX_FISH) : MAX_FISH;
-    const pool = Math.min(poolCap, this.quality.fishCap);
+    return Math.min(poolCap, this.quality.fishCap);
+  }
+
+  /** Initial population: exactly the fish the current fishCount asks for.
+   *  The pool then grows on demand when steered up (see grow) and never
+   *  shrinks — steering down just hides fish. */
+  private async populate(): Promise<void> {
     const fishUrl = this.activeFishUrl || this.str('fishUrl');
     this.activeFishUrl = fishUrl;
+    this.poolTarget = 0;
+    await this.grow(Math.max(1, Math.round(this.num('fishCount'))));
+  }
 
-    const jobs = Array.from({ length: pool }, (_, i) => i);
+  /** Spawn slots [poolTarget, min(to, cap)). Idempotent for to <= poolTarget;
+   *  concurrent calls cannot double-spawn a slot because poolTarget advances
+   *  synchronously before any await. */
+  private grow(to: number): Promise<void> {
+    const from = this.poolTarget;
+    const target = Math.min(to, this.poolCapNow());
+    if (target <= from || this.disposed) return Promise.resolve();
+    this.poolTarget = target;
+    const fishUrl = this.activeFishUrl;
+
+    const jobs = Array.from({ length: target - from }, (_, i) => from + i);
     let next = 0;
     const worker = async (): Promise<void> => {
       while (next < jobs.length && !this.disposed) {
@@ -205,24 +276,19 @@ class TankInstance implements SaverInstance {
         this.spawn(tpl, i);
       }
     };
-    await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
-    if (this.paused) this.renderStill();
+    return Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker)).then(
+      () => {
+        if (this.paused) this.renderStill();
+      },
+    );
   }
 
   private swapFish(url: string): void {
     for (const f of this.fish) {
+      if (!f) continue;
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
-      f.group.traverse((o) => {
-        const mesh = o as Partial<Mesh>;
-        if (mesh.geometry) mesh.geometry.dispose();
-        const mats: Material[] = Array.isArray(mesh.material)
-          ? mesh.material
-          : mesh.material
-          ? [mesh.material]
-          : [];
-        for (const m of mats) m.dispose();
-      });
+      disposeOwned(f.group);
     }
     this.fish = [];
     this.activeFishUrl = url;
@@ -297,12 +363,15 @@ class TankInstance implements SaverInstance {
         .fork(0xc0a7 + index)
         .pick(MIAMI_VICE_COLORS);
       const mat = new MeshBasicMaterial({ color: new Color(coat) });
+      mat.userData.mqOwned = true;
       const body = new Mesh(new SphereGeometry(FISH_LENGTH / 2, 12, 8), mat);
+      body.geometry.userData.mqOwned = true;
       body.scale.set(1, 0.55, 0.4);
       const tailMesh = new Mesh(
         new ConeGeometry(FISH_LENGTH * 0.22, FISH_LENGTH * 0.5, 8),
         mat,
       );
+      tailMesh.geometry.userData.mqOwned = true;
       tailMesh.rotation.z = Math.PI / 2;
       tailMesh.position.x = -FISH_LENGTH * 0.62;
       group.add(body, tailMesh);
@@ -312,7 +381,8 @@ class TankInstance implements SaverInstance {
     const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
     group.scale.multiplyScalar(baseScale);
     this.scene.add(group);
-    this.fish.push({
+    this.fish[index] = {
+      index,
       group,
       plan,
       body: bodyNode,
@@ -320,8 +390,15 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
-    });
-    this.ctxSaver.host.dataset.mqFish = String(this.fish.length);
+    };
+    this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
+  }
+
+  /** Fish actually spawned — the sparse array's holes are loads in flight. */
+  private loadedCount(): number {
+    let n = 0;
+    for (const f of this.fish) if (f) n++;
+    return n;
   }
 
   // ---- params / state ----
@@ -331,14 +408,33 @@ class TankInstance implements SaverInstance {
   }
 
   private num(key: string): number {
-    const v = this.params[key];
-    return typeof v === 'number' ? v : Number(this.space[key]?.default ?? 0);
+    // Clamped, string-coercing read — the classic steering lane is
+    // unvalidated server-side (MQ17), so hostile or stringified values reach
+    // us as-is. Note the swimSpeed distance integral (integrateParam) does
+    // not clamp; range enforcement at intake is MQ17's half of this fix.
+    return coerceNum(this.space[key], this.params[key]);
   }
 
   private setState(t: number): void {
     const tSec = t / 1000;
     this.applyParams(t);
     const speed = this.num('swimSpeed');
+    // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
+    // glide (MQ11 — multiplying the whole elapsed integral teleported every
+    // fish proportionally to elapsed time). Only UNSTEERED tracks keep the
+    // legacy closed form bit-for-bit; a steered track uses warped-time
+    // semantics throughout, where the speed-wobble cycle scales with speed
+    // (deliberate — the same way tail beat and clip phase already do, since
+    // both are distance-driven). Both paths are pure functions of (t, track).
+    // Bounds clamp the integrated curve to the declared range, matching the
+    // clamped num() reads — the classic lane is intake-unvalidated (MQ17).
+    const speedDef = this.space.swimSpeed;
+    const warpSec = this.speedTracked && this.track
+      ? integrateParam(this.space, this.track, 'swimSpeed', t, {
+          ...(speedDef?.min !== undefined ? { min: speedDef.min } : {}),
+          ...(speedDef?.max !== undefined ? { max: speedDef.max } : {}),
+        }) / 1000
+      : tSec * speed;
 
     const url = this.str('fishUrl');
     if (url && url !== this.activeFishUrl) this.swapFish(url);
@@ -363,23 +459,26 @@ class TankInstance implements SaverInstance {
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
-    // Fish
+    // Fish — steering up past the pool spawns the missing slots on demand.
     const visible = Math.min(
       Math.round(this.num('fishCount')),
       this.quality.fishCap,
     );
-    for (let i = 0; i < this.fish.length; i++) {
-      const f = this.fish[i]!;
-      f.group.visible = i < visible;
+    if (visible > this.poolTarget) void this.grow(visible);
+    for (const f of this.fish) {
+      if (!f) continue;
+      f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
 
-      const d = distanceAt(f.plan, tSec, speed);
+      const d = this.speedTracked
+        ? distanceAt(f.plan, warpSec, 1)
+        : distanceAt(f.plan, tSec, speed);
       const pose = swimPoseAtDistance(f.plan, d);
       f.group.position.set(pose.x, pose.y, pose.z);
       f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
 
-      const breathe = 1 + Math.sin(tSec * 2.1 + i) * 0.008;
+      const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe);
 
       if (f.mixer && f.clipDuration > 0) {
@@ -387,7 +486,8 @@ class TankInstance implements SaverInstance {
           (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
-        f.tail.rotation.y = Math.sin(tSec * speed * 6 + i) * 0.5;
+        // warpSec === tSec·speed when speed is constant — same phase as before.
+        f.tail.rotation.y = Math.sin(warpSec * 6 + f.index) * 0.5;
       }
     }
   }
@@ -486,6 +586,7 @@ class TankInstance implements SaverInstance {
 
   applyTrack(track: ControlTrack): void {
     this.track = track;
+    this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
     if (this.paused) this.renderStill();
   }
 
@@ -512,24 +613,18 @@ class TankInstance implements SaverInstance {
     this.disposed = true;
     this.stop();
     for (const f of this.fish) {
+      if (!f) continue;
       f.mixer?.stopAllAction();
+    }
+    // One ownership-aware pass over the whole scene (fish, floor): frees what
+    // this instance created, leaves template-shared resources for the cache.
+    // The context loss below reclaims this context's GPU side regardless.
+    disposeOwned(this.scene);
+    for (const f of this.fish) {
+      if (!f) continue;
       this.scene.remove(f.group);
     }
     this.fish = [];
-    this.scene.traverse((o) => {
-      const mesh = o as Partial<Mesh>;
-      if (mesh.geometry) mesh.geometry.dispose();
-      const mats: Material[] = Array.isArray(mesh.material)
-        ? mesh.material
-        : mesh.material
-        ? [mesh.material]
-        : [];
-      for (const m of mats) {
-        const tex = (m as Partial<MeshBasicMaterial>).map;
-        if (tex) tex.dispose();
-        m.dispose();
-      }
-    });
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
