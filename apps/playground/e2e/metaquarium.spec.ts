@@ -111,3 +111,56 @@ test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ 
   expect(contextErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * Mix variant: "257:2,100:1" against the local-asset catalog — three fish
+ * from two distinct GLB templates, no network. Steering-independence of the
+ * population is covered by unit tests; this proves the wired path end-to-end.
+ */
+test('MQ4: fishMix spawns the expanded population from mixed templates', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium-mix');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBe(3);
+
+  const mix = await page.evaluate(() => {
+    const surface = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLElement>('.surface');
+    return surface?.dataset.mqMix ?? '';
+  });
+  expect(mix).toBe('257:2,100:1');
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Atmosphere variant: motes active (dataset-verified), fog depth + floor
+ * steered — the Phase 2 params live at non-defaults.
+ */
+test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium-atmosphere');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(3);
+
+  const motes = await page.evaluate(() => {
+    const surface = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLElement>('.surface');
+    return Number(surface?.dataset.mqMotes ?? 0);
+  });
+  expect(motes).toBeGreaterThan(100); // 0.85 × tier cap
+  expect(pageErrors).toEqual([]);
+});

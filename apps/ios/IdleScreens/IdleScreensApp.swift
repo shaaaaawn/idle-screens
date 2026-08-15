@@ -10,6 +10,17 @@ struct IdleScreensApp: App {
             ContentView()
                 .environment(appState)
                 .onOpenURL { url in
+                    // A handoff link carries BOTH a channel and a token, so it
+                    // is checked first — a pair code never has a token, and
+                    // silently treating a grant of control as a pairing
+                    // attempt would drop the token on the floor.
+                    if let grant = ChannelTokenFormat.handoff(from: url) {
+                        Task {
+                            try? await appState.addExistingChannel(
+                                channelId: grant.channelId, token: grant.token)
+                        }
+                        return
+                    }
                     // Universal link https://idlescreens.com/pair/<code> or
                     // custom scheme idlescreens://pair/<code>.
                     if let code = AppState.pairCode(from: url) {

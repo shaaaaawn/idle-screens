@@ -860,6 +860,15 @@ class SequenceInstance implements SaverInstance {
   }
 
   resize(width: number, height: number, dpr?: number): void {
+    // Children are created lazily (first rAF tick, segment switches, morph
+    // finalization), so the new size must outlive the children that exist right
+    // now. Without this, a resize while a slot is empty is forgotten and the
+    // next child mounts at the stale mount-time size — a viewer that mounted
+    // in a hidden/unpainted tab (width 0) stays a 1×1 canvas forever, and a
+    // segment cut after any resize snaps back to the old dimensions.
+    this.childCtx.width = width;
+    this.childCtx.height = height;
+    if (dpr !== undefined) this.childCtx.dpr = dpr;
     for (const child of this.children) {
       child?.resize(width, height, dpr);
     }

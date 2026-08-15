@@ -211,6 +211,16 @@ final class CompiledSpriteScene: SKScene {
                 glyph: glyph, size: entity.size, color: entity.color))
             return node
 
+        case .textBlock(let text, let maxWidth, let fontSize, let lineHeight,
+                        let align, let color, _):
+            let fsPx = fontSize * dim
+            guard fsPx > 1 else { return nil }
+            let node = SKSpriteNode(texture: textBlockTexture(
+                text: text, maxWidth: maxWidth, fontSize: fontSize,
+                lineHeight: lineHeight, align: align, color: color, dim: dim))
+            node.anchorPoint = CGPoint(x: 0, y: 1)
+            return node
+
         case .unknown:
             return nil
         }
@@ -260,6 +270,40 @@ final class CompiledSpriteScene: SKScene {
                 cg.setLineWidth(lw)
                 cg.strokeEllipse(in: CGRect(x: lw / 2, y: lw / 2,
                                             width: d - lw, height: d - lw))
+            }
+        }
+    }
+
+    private func textBlockTexture(text: String, maxWidth: Double, fontSize: Double,
+                                      lineHeight: Double, align: String,
+                                      color: String, dim: CGFloat) -> SKTexture {
+        let fsPx = fontSize * dim
+        let lh = lineHeight * fsPx
+        let maxWPx = maxWidth * dim
+        let maxWEm = maxWPx / fsPx
+        let lines = breakTextBlock(text: text, maxWidthEm: maxWEm)
+        let totalH = max(1, CGFloat(lines.count) * lh)
+        let canvasW = ceil(max(1, maxWPx))
+        let canvasH = ceil(totalH)
+        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(align)|\(color)"
+        return texture(key: key) {
+            UIGraphicsImageRenderer(size: CGSize(width: canvasW, height: canvasH)).image { _ in
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: fsPx),
+                    .foregroundColor: UIColor(hexString: color),
+                ]
+                for (i, line) in lines.enumerated() {
+                    let y = CGFloat(i) * lh
+                    let ns = line.text as NSString
+                    let sz = ns.size(withAttributes: attrs)
+                    let x: CGFloat
+                    switch align {
+                    case "center": x = (maxWPx - sz.width) / 2
+                    case "right": x = maxWPx - sz.width
+                    default: x = 0
+                    }
+                    ns.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
+                }
             }
         }
     }

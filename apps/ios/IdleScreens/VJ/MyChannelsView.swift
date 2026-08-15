@@ -7,6 +7,7 @@ struct MyChannelsView: View {
     @State private var showingAdd = false
     @State private var createdToken: String?
     @State private var path: [ChannelCredential] = []
+    @State private var handoff: TokenHandoff?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -107,6 +108,9 @@ struct MyChannelsView: View {
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
             }
+            .sheet(item: $handoff) { item in
+                TokenHandoffSheet(handoff: item)
+            }
             // Remix stores its token server-side in the same call, so there's
             // nothing to reveal — only show the sheet for a real new token.
             .sheet(isPresented: Binding(
@@ -180,6 +184,17 @@ struct MyChannelsView: View {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 } label: {
                     Label("Copy steering token", systemImage: "key")
+                }
+                // Handing the token to someone else is DELEGATION, not backup —
+                // tokens already sync to your own devices via iCloud Keychain.
+                // Whoever holds this can publish to the channel, and there is no
+                // per-person revoke: the only undo is rotating the token, which
+                // cuts off every holder including you. Say that before sharing,
+                // not after.
+                Button {
+                    handoff = TokenHandoff(credential: credential, token: token)
+                } label: {
+                    Label("Give someone control…", systemImage: "person.badge.key")
                 }
             }
             ShareLink(item: app.gallery.viewerURL(for: credential.channelId)) {

@@ -59,3 +59,36 @@ final class ChannelTokenFormatTests: XCTestCase {
         XCTAssertNotNil(ChannelTokenFormat.tokenProblem("isk_"))
     }
 }
+
+// MARK: - Handoff links
+
+extension ChannelTokenFormatTests {
+    /// A handoff link grants control, so it must carry both halves. Treating a
+    /// plain viewer link as a grant would silently "adopt" a channel the user
+    /// has no token for — the exact listed-but-unsteerable state the token
+    /// work went out of its way to eliminate.
+    func testHandoffNeedsBothChannelAndToken() {
+        let url = URL(string: "idlescreens://channel/lobby?token=isk_abc123")!
+        let grant = ChannelTokenFormat.handoff(from: url)
+        XCTAssertEqual(grant?.channelId, "lobby")
+        XCTAssertEqual(grant?.token, "isk_abc123")
+    }
+
+    func testViewerLinkWithoutATokenIsNotAGrant() {
+        let url = URL(string: "https://idlescreens.com/channel/lobby")!
+        XCTAssertNil(ChannelTokenFormat.handoff(from: url))
+    }
+
+    /// A pair code is a different credential entirely; it must never be
+    /// mistaken for channel control.
+    func testPairLinkIsNotAHandoff() {
+        let url = URL(string: "idlescreens://pair/K7M2PW")!
+        XCTAssertNil(ChannelTokenFormat.handoff(from: url))
+    }
+
+    func testWrongTokenKindIsRejected() {
+        let url = URL(string: "idlescreens://channel/lobby?token=isp_screenpair")!
+        XCTAssertNil(ChannelTokenFormat.handoff(from: url),
+                     "a screen pairing token grants nothing on a channel")
+    }
+}
