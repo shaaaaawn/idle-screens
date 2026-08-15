@@ -26,6 +26,13 @@ export const METAQUARIUM_PARAMS = {
    *  is the IPFS hero fish so npm / channel hosts work without playground
    *  static assets; the playground overrides this to a local GLB. */
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
+  /** Mixed population DSL: comma-separated `id[:count]` of catalog token ids
+   *  or breed aliases — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
+   *  the expanded total clamps to the device tier's fish cap. Non-empty mix
+   *  OVERRIDES fishUrl and fishCount; empty string = single-breed mode.
+   *  Unknown ids/bad counts degrade (good tokens still parse); raw URLs are
+   *  not accepted here — use fishUrl for a custom single-breed GLB. */
+  fishMix: { type: 'string', default: '', ease: 'step' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -79,6 +86,10 @@ export const metaquariumManifest: SaverManifest = {
 /** Options for {@link createMetaquarium}-style variants: a distinct id/label and
  *  overridden param defaults (e.g. a farm-connected tank). */
 export interface MetaquariumOptions {
+  /** Override the fish catalog fishMix ids resolve against — the seam the
+   *  playground uses to point ids at bundled local GLBs (offline e2e), and
+   *  the future farm/pack extension point. */
+  catalog?: import('./ipfs').FishEntry[];
   id?: string;
   label?: string;
   params?: Partial<Record<keyof typeof METAQUARIUM_PARAMS, ParamValue>>;
@@ -131,3 +142,5 @@ export function coerceNum(
   if (def?.max !== undefined && n > def.max) n = def.max;
   return n;
 }
+
+export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';

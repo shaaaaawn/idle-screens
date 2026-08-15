@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { metaquarium, createMetaquarium } from '@idle-screens/saver-metaquarium';
+import { metaquarium, createMetaquarium, FISH_CATALOG } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -82,6 +82,14 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-school',
     label: 'Metaquarium (School)',
     params: { fishCount: 6 },
+  }),
+  // Mixed breeds against bundled GLBs: ids resolve through a local-asset
+  // catalog so the mix path is network-free (and e2e-deterministic).
+  createMetaquarium({
+    id: 'metaquarium-mix',
+    label: 'Metaquarium (Mix)',
+    params: { fishMix: '257:2,100:1' },
+    catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
   }),
 ];
 

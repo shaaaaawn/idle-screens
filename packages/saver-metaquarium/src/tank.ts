@@ -36,7 +36,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { resolveIpfsUrl } from './ipfs';
+import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrl, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   applyNpcMaterials,
@@ -120,6 +120,8 @@ interface Fish {
    *  (With one URL every load awaits the same cached promise, so the two
    *  coincide; with mixed URLs they will not.) */
   index: number;
+  /** Template URL this fish spawned from — reconcile's diff key. */
+  url: string;
   group: Group;
   plan: SwimPlan;
   body: Object3D | null;
@@ -150,9 +152,13 @@ class TankInstance implements SaverInstance {
   private readonly fogColor = new Color();
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
-  /** Slots requested so far (spawned or in flight). Never decreases except
-   *  across a swapFish teardown. */
-  private poolTarget = 0;
+  /** Desired per-slot template URLs — the single source of truth for the
+   *  population. reconcile() diffs fish against it; spawn workers re-check
+   *  wantKey after every await, so a stale load can never seat a fish. */
+  private wantUrls: string[] = [];
+  private wantKey = '';
+  private wantInputKey = '';
+  private mixMode = false;
   private disposed = false;
 
   private w: number;
@@ -170,12 +176,18 @@ class TankInstance implements SaverInstance {
    *  formula is kept bit-for-bit. */
   private speedTracked = false;
   private readonly thumbnail: boolean;
-  private activeFishUrl = '';
+  private readonly catalog: FishEntry[];
 
-  constructor(ctx: SaverContext, space: ParamSpace, quality: TankQuality) {
+  constructor(
+    ctx: SaverContext,
+    space: ParamSpace,
+    quality: TankQuality,
+    catalog: FishEntry[] = FISH_CATALOG,
+  ) {
     this.ctxSaver = ctx;
     this.space = space;
     this.quality = quality;
+    this.catalog = catalog;
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -226,7 +238,7 @@ class TankInstance implements SaverInstance {
     // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
     this.scene.add(new HemisphereLight(0xffffff, 0x4466aa, 1.5));
 
-    void this.populate();
+    this.reconcile();
 
     this.paused = ctx.reducedMotion;
     if (this.paused) this.renderStill();
@@ -246,53 +258,74 @@ class TankInstance implements SaverInstance {
     return Math.min(poolCap, this.quality.fishCap);
   }
 
-  /** Initial population: exactly the fish the current fishCount asks for.
-   *  The pool then grows on demand when steered up (see grow) and never
-   *  shrinks — steering down just hides fish. */
-  private async populate(): Promise<void> {
-    const fishUrl = this.activeFishUrl || this.str('fishUrl');
-    this.activeFishUrl = fishUrl;
-    this.poolTarget = 0;
-    await this.grow(Math.max(1, Math.round(this.num('fishCount'))));
+  /**
+   * One mechanism for every population change — initial mount, fishCount
+   * growth, fishUrl swap, and fishMix (mixed breeds in one tank): compute the
+   * desired per-slot URL list, tear down slots whose fish no longer match,
+   * and queue spawns for the holes. Cheap when nothing changed (one string
+   * compare per frame). Non-empty fishMix wins over fishUrl/fishCount; an
+   * unparseable mix degrades to single-breed mode rather than a blank tank.
+   */
+  private reconcile(): void {
+    const cap = this.poolCapNow();
+    const mixStr = this.str('fishMix').trim();
+    const url = this.str('fishUrl');
+    const n = Math.min(Math.max(1, Math.round(this.num('fishCount'))), cap);
+    const inputKey = `${mixStr}\u0000${url}\u0000${n}\u0000${cap}`;
+    if (inputKey === this.wantInputKey) return;
+    this.wantInputKey = inputKey;
+
+    let want: string[] = [];
+    this.mixMode = false;
+    if (mixStr !== '') {
+      want = expandFishMix(parseFishMix(mixStr, this.catalog).entries, cap);
+      this.mixMode = want.length > 0;
+    }
+    if (!this.mixMode) {
+      // Single-breed: the pool never shrinks while the url is stable
+      // (steering fishCount down just hides); a url change rebuilds at n.
+      const stable = this.wantUrls.length > 0 && this.wantUrls[0] === url;
+      const len = stable ? Math.max(n, Math.min(this.wantUrls.length, cap)) : n;
+      want = Array.from({ length: len }, () => url);
+    }
+    this.wantUrls = want;
+    this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
+    if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
+    else delete this.ctxSaver.host.dataset.mqMix;
+
+    const missing: number[] = [];
+    for (let i = 0; i < Math.max(this.fish.length, want.length); i++) {
+      const f = this.fish[i];
+      const wantUrl = want[i];
+      if (f && (wantUrl === undefined || f.url !== wantUrl)) {
+        f.mixer?.stopAllAction();
+        this.scene.remove(f.group);
+        disposeOwned(f.group);
+        this.fish[i] = undefined;
+      }
+      if (wantUrl !== undefined && !this.fish[i]) missing.push(i);
+    }
+    this.fish.length = Math.min(this.fish.length, want.length);
+    if (missing.length) void this.spawnMissing(missing);
+    this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
   }
 
-  /** Spawn slots [poolTarget, min(to, cap)). Idempotent for to <= poolTarget;
-   *  concurrent calls cannot double-spawn a slot because poolTarget advances
-   *  synchronously before any await. */
-  private grow(to: number): Promise<void> {
-    const from = this.poolTarget;
-    const target = Math.min(to, this.poolCapNow());
-    if (target <= from || this.disposed) return Promise.resolve();
-    this.poolTarget = target;
-    const fishUrl = this.activeFishUrl;
-
-    const jobs = Array.from({ length: target - from }, (_, i) => from + i);
+  /** Bounded-concurrency spawn of the queued slots. Guarded by wantKey: any
+   *  reconcile that changes the population invalidates in-flight loads. */
+  private async spawnMissing(slots: number[]): Promise<void> {
+    const key = this.wantKey;
     let next = 0;
     const worker = async (): Promise<void> => {
-      while (next < jobs.length && !this.disposed) {
-        const i = jobs[next++]!;
-        const tpl = await this.template(fishUrl);
-        if (this.disposed || this.activeFishUrl !== fishUrl) return;
-        this.spawn(tpl, i);
+      while (next < slots.length && !this.disposed && this.wantKey === key) {
+        const i = slots[next++]!;
+        const slotUrl = this.wantUrls[i]!;
+        const tpl = await this.template(slotUrl);
+        if (this.disposed || this.wantKey !== key) return;
+        if (!this.fish[i]) this.spawn(tpl, i, slotUrl);
       }
     };
-    return Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker)).then(
-      () => {
-        if (this.paused) this.renderStill();
-      },
-    );
-  }
-
-  private swapFish(url: string): void {
-    for (const f of this.fish) {
-      if (!f) continue;
-      f.mixer?.stopAllAction();
-      this.scene.remove(f.group);
-      disposeOwned(f.group);
-    }
-    this.fish = [];
-    this.activeFishUrl = url;
-    void this.populate();
+    await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
+    if (this.paused) this.renderStill();
   }
 
   private template(url: string): Promise<FishTemplate | null> {
@@ -337,7 +370,7 @@ class TankInstance implements SaverInstance {
     return p;
   }
 
-  private spawn(tpl: FishTemplate | null, index: number): void {
+  private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
     const plan = compileSwimPlan(rng.fork(index), BOUNDS);
     const group = new Group();
@@ -383,6 +416,7 @@ class TankInstance implements SaverInstance {
     this.scene.add(group);
     this.fish[index] = {
       index,
+      url,
       group,
       plan,
       body: bodyNode,
@@ -436,8 +470,7 @@ class TankInstance implements SaverInstance {
         }) / 1000
       : tSec * speed;
 
-    const url = this.str('fishUrl');
-    if (url && url !== this.activeFishUrl) this.swapFish(url);
+    this.reconcile();
 
     // Camera orbit
     const az = MathUtils.degToRad(
@@ -459,12 +492,12 @@ class TankInstance implements SaverInstance {
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
-    // Fish — steering up past the pool spawns the missing slots on demand.
-    const visible = Math.min(
-      Math.round(this.num('fishCount')),
-      this.quality.fishCap,
-    );
-    if (visible > this.poolTarget) void this.grow(visible);
+    // Fish. Mix mode: the DSL defines the population absolutely (fishCount
+    // is documented as ignored). Single mode: fishCount is the dial;
+    // reconcile has already queued any missing slots.
+    const visible = this.mixMode
+      ? this.wantUrls.length
+      : Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -629,6 +662,7 @@ class TankInstance implements SaverInstance {
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
+    delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
 }
@@ -641,9 +675,10 @@ export function mountTank(
   ctx: SaverContext,
   space: ParamSpace = METAQUARIUM_PARAMS,
   tier: CapabilityTier = 'standard',
+  catalog?: FishEntry[],
 ): SaverInstance {
   const resolved = withDefaults(space, ctx.params);
-  const inst = new TankInstance(ctx, resolved, qualityFor(tier));
+  const inst = new TankInstance(ctx, resolved, qualityFor(tier), catalog);
   ctx.host.dataset.mqBackend = 'webgl2';
   return inst;
 }
