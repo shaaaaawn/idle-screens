@@ -80,6 +80,11 @@ const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // ---------------------------------------------------------------------------
 
 interface Fish {
+  /** Spawn slot. Visibility and phase math key off this — never off array
+   *  or arrival order, which is GLB-completion order and network-dependent.
+   *  (With one URL every load awaits the same cached promise, so the two
+   *  coincide; with mixed URLs they will not.) */
+  index: number;
   group: Group;
   plan: SwimPlan;
   body: Object3D | null;
@@ -108,7 +113,8 @@ class TankInstance implements SaverInstance {
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
-  private fish: Fish[] = [];
+  /** Sparse, indexed by spawn slot — holes are still-loading fish. */
+  private fish: Array<Fish | undefined> = [];
   private disposed = false;
 
   private w: number;
@@ -211,6 +217,7 @@ class TankInstance implements SaverInstance {
 
   private swapFish(url: string): void {
     for (const f of this.fish) {
+      if (!f) continue;
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
       f.group.traverse((o) => {
@@ -312,7 +319,8 @@ class TankInstance implements SaverInstance {
     const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
     group.scale.multiplyScalar(baseScale);
     this.scene.add(group);
-    this.fish.push({
+    this.fish[index] = {
+      index,
       group,
       plan,
       body: bodyNode,
@@ -320,8 +328,15 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
-    });
-    this.ctxSaver.host.dataset.mqFish = String(this.fish.length);
+    };
+    this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
+  }
+
+  /** Fish actually spawned — the sparse array's holes are loads in flight. */
+  private loadedCount(): number {
+    let n = 0;
+    for (const f of this.fish) if (f) n++;
+    return n;
   }
 
   // ---- params / state ----
@@ -368,9 +383,9 @@ class TankInstance implements SaverInstance {
       Math.round(this.num('fishCount')),
       this.quality.fishCap,
     );
-    for (let i = 0; i < this.fish.length; i++) {
-      const f = this.fish[i]!;
-      f.group.visible = i < visible;
+    for (const f of this.fish) {
+      if (!f) continue;
+      f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
 
       const d = distanceAt(f.plan, tSec, speed);
@@ -379,7 +394,7 @@ class TankInstance implements SaverInstance {
       f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
 
-      const breathe = 1 + Math.sin(tSec * 2.1 + i) * 0.008;
+      const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe);
 
       if (f.mixer && f.clipDuration > 0) {
@@ -387,7 +402,7 @@ class TankInstance implements SaverInstance {
           (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
-        f.tail.rotation.y = Math.sin(tSec * speed * 6 + i) * 0.5;
+        f.tail.rotation.y = Math.sin(tSec * speed * 6 + f.index) * 0.5;
       }
     }
   }
@@ -512,6 +527,7 @@ class TankInstance implements SaverInstance {
     this.disposed = true;
     this.stop();
     for (const f of this.fish) {
+      if (!f) continue;
       f.mixer?.stopAllAction();
       this.scene.remove(f.group);
     }
