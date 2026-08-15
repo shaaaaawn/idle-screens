@@ -37,7 +37,7 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { resolveIpfsUrl } from './ipfs';
-import { METAQUARIUM_PARAMS, withDefaults } from './manifest';
+import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   applyNpcMaterials,
   eyeNoseSign,
@@ -408,8 +408,11 @@ class TankInstance implements SaverInstance {
   }
 
   private num(key: string): number {
-    const v = this.params[key];
-    return typeof v === 'number' ? v : Number(this.space[key]?.default ?? 0);
+    // Clamped, string-coercing read — the classic steering lane is
+    // unvalidated server-side (MQ17), so hostile or stringified values reach
+    // us as-is. Note the swimSpeed distance integral (integrateParam) does
+    // not clamp; range enforcement at intake is MQ17's half of this fix.
+    return coerceNum(this.space[key], this.params[key]);
   }
 
   private setState(t: number): void {
