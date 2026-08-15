@@ -20,7 +20,7 @@ export function createMetaquarium(opts: MetaquariumOptions = {}): SaverPlugin {
         import('./tank'),
         detectCapabilities(),
       ]);
-      return mountTank(ctx, space, computeTier(caps));
+      return mountTank(ctx, space, computeTier(caps), opts.catalog);
     },
   };
 }
