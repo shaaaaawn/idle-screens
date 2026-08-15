@@ -138,3 +138,29 @@ test('MQ4: fishMix spawns the expanded population from mixed templates', async (
   expect(mix).toBe('257:2,100:1');
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * Atmosphere variant: motes active (dataset-verified), fog depth + floor
+ * steered — the Phase 2 params live at non-defaults.
+ */
+test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium-atmosphere');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(3);
+
+  const motes = await page.evaluate(() => {
+    const surface = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLElement>('.surface');
+    return Number(surface?.dataset.mqMotes ?? 0);
+  });
+  expect(motes).toBeGreaterThan(100); // 0.85 × tier cap
+  expect(pageErrors).toEqual([]);
+});

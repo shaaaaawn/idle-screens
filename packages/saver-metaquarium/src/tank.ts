@@ -11,8 +11,11 @@ import {
   type SaverLayer,
 } from '@idle-screens/core';
 import {
+  AdditiveBlending,
   AnimationMixer,
   Box3,
+  BufferAttribute,
+  BufferGeometry,
   CircleGeometry,
   Color,
   ConeGeometry,
@@ -24,7 +27,9 @@ import {
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
+  Points,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -150,6 +155,9 @@ class TankInstance implements SaverInstance {
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
+  private readonly floorMat: MeshBasicMaterial;
+  private readonly motes: Points;
+  private readonly moteMat: ShaderMaterial;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
   /** Desired per-slot template URLs — the single source of truth for the
@@ -233,6 +241,63 @@ class TankInstance implements SaverInstance {
     floor.material.userData.mqOwned = true;
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
+    this.floorMat = floor.material;
+
+    // Plankton motes: seeded base positions, closed-form drift in the vertex
+    // shader (one uTime uniform — zero CPU per frame, pure in t). Draw range
+    // scales with moteDensity; the default 0 renders nothing.
+    const moteCap = this.quality.moteCap;
+    const moteRng = ctx.rng.fork(0x407e);
+    const pos = new Float32Array(moteCap * 3);
+    const ph = new Float32Array(moteCap * 3);
+    for (let i = 0; i < moteCap; i++) {
+      const a = moteRng.next() * Math.PI * 2;
+      const r = Math.sqrt(moteRng.next()) * BOUNDS.radius * 1.15;
+      pos[i * 3] = Math.cos(a) * r;
+      pos[i * 3 + 1] = BOUNDS.yMin + moteRng.next() * (BOUNDS.yMax - BOUNDS.yMin + 20);
+      pos[i * 3 + 2] = Math.sin(a) * r;
+      ph[i * 3] = moteRng.next() * Math.PI * 2;
+      ph[i * 3 + 1] = moteRng.next() * Math.PI * 2;
+      ph[i * 3 + 2] = moteRng.next() * Math.PI * 2;
+    }
+    const moteGeo = new BufferGeometry();
+    moteGeo.setAttribute('position', new BufferAttribute(pos, 3));
+    moteGeo.setAttribute('aPhase', new BufferAttribute(ph, 3));
+    moteGeo.userData.mqOwned = true;
+    this.moteMat = new ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: AdditiveBlending,
+      uniforms: { uTime: { value: 0 }, uColor: { value: new Color('#7fd6ff') } },
+      vertexShader: `
+        attribute vec3 aPhase;
+        uniform float uTime;
+        varying float vFade;
+        void main() {
+          vec3 p = position + vec3(
+            sin(uTime * 0.11 + aPhase.x) * 6.0,
+            sin(uTime * 0.07 + aPhase.y) * 4.0,
+            sin(uTime * 0.13 + aPhase.z) * 6.0);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(180.0 / max(1.0, -mv.z), 1.0, 4.0);
+          vFade = 0.35 + 0.3 * sin(uTime * 0.9 + aPhase.x * 7.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying float vFade;
+        void main() {
+          vec2 c = gl_PointCoord - 0.5;
+          float d = length(c);
+          if (d > 0.5) discard;
+          gl_FragColor = vec4(uColor, (1.0 - d * 2.0) * vFade * 0.5);
+        }`,
+    });
+    this.moteMat.userData.mqOwned = true;
+    this.motes = new Points(moteGeo, this.moteMat);
+    this.motes.frustumCulled = false;
+    this.motes.visible = false;
+    this.scene.add(this.motes);
 
     // Gentle hemisphere so MeshStandardMaterial eyes render their authored detail.
     // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
@@ -283,8 +348,12 @@ class TankInstance implements SaverInstance {
     }
     if (!this.mixMode) {
       // Single-breed: the pool never shrinks while the url is stable
-      // (steering fishCount down just hides); a url change rebuilds at n.
-      const stable = this.wantUrls.length > 0 && this.wantUrls[0] === url;
+      // (steering fishCount down just hides); a url change — or leaving mix
+      // mode, however the mix happened to start — rebuilds at n. Without the
+      // mode check, a mix whose first breed equals fishUrl would keep its
+      // slots on clear while any other mix would not (review, PR #72).
+      const wasSingle = this.wantKey === '' || this.wantKey.startsWith('one:');
+      const stable = wasSingle && this.wantUrls.length > 0 && this.wantUrls[0] === url;
       const len = stable ? Math.max(n, Math.min(this.wantUrls.length, cap)) : n;
       want = Array.from({ length: len }, () => url);
     }
@@ -492,6 +561,26 @@ class TankInstance implements SaverInstance {
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
 
+    // Atmosphere — every default reproduces the pre-atmosphere constants, so
+    // this block is provably invisible until steered.
+    const fog = this.scene.fog as Fog;
+    fog.near = this.num('fogNear');
+    fog.far = Math.max(this.num('fogFar'), fog.near + 20);
+    this.floorMat.color.set(
+      String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33'),
+    );
+    const density = this.num('moteDensity');
+    const active = Math.round(density * this.quality.moteCap);
+    this.motes.visible = active > 0;
+    if (active > 0) {
+      this.motes.geometry.setDrawRange(0, active);
+      this.moteMat.uniforms.uTime!.value = tSec;
+      (this.moteMat.uniforms.uColor!.value as Color).set(
+        String(this.params.moteColor ?? this.space.moteColor?.default ?? '#7fd6ff'),
+      );
+    }
+    this.ctxSaver.host.dataset.mqMotes = String(active);
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
@@ -663,6 +752,7 @@ class TankInstance implements SaverInstance {
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
+    delete this.ctxSaver.host.dataset.mqMotes;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
 }

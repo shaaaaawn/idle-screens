@@ -9,6 +9,7 @@ describe('metaquarium quality tiers', () => {
       antialias: true,
       fishCap: 24,
       pixelBudget: 1_800_000,
+      moteCap: 400,
     });
   });
 

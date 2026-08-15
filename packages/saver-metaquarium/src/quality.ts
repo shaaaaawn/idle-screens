@@ -5,16 +5,20 @@ export interface TankQuality {
   antialias: boolean;
   fishCap: number;
   pixelBudget: number;
+  /** Plankton motes at moteDensity=1 — scaled down by the param, zero cost
+   *  at the default 0. Vertex-shader driven, so the per-frame cost is GPU
+   *  vertex work only. */
+  moteCap: number;
 }
 
 export function qualityFor(tier: CapabilityTier): TankQuality {
   switch (tier) {
     case 'high':
-      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000 };
+      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400 };
     case 'standard':
-      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000 };
+      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250 };
     default:
-      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000 };
+      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120 };
   }
 }
 
