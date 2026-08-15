@@ -42,7 +42,7 @@ jobs:
         # inputs.skip_e2e is only set on workflow_call; push/PR leave it empty → run e2e.
         if: ${{ inputs.skip_e2e != true }}
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}-chromium
