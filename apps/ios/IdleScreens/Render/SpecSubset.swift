@@ -130,6 +130,39 @@ struct SpecSubset: Decodable, Equatable {
         var period: Double?
     }
 
+    struct CaretConfig: Decodable, Equatable, Sendable {
+        var blink: Double?
+        var color: String?
+    }
+
+    struct TextRevealSpec: Equatable, Sendable {
+        var progress: Double?
+        var mode: String?
+        var speed: Double?
+        var caret: CaretConfig?
+    }
+}
+
+extension SpecSubset.TextRevealSpec: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case progress, mode, speed, caret
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+        mode = try c.decodeIfPresent(String.self, forKey: .mode)
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed)
+        if let boolValue = try? c.decode(Bool.self, forKey: .caret) {
+            caret = boolValue ? SpecSubset.CaretConfig() : nil
+        } else {
+            caret = try c.decodeIfPresent(SpecSubset.CaretConfig.self, forKey: .caret)
+        }
+    }
+}
+
+extension SpecSubset {
+
     enum Sprite: Equatable {
         case circle(radius: (Double, Double), color: String, colors: [String], soft: Bool)
         /// `width` nil = unset; the renderer applies the units-aware default.
@@ -138,6 +171,9 @@ struct SpecSubset: Decodable, Equatable {
         case streak(length: (Double, Double), color: String, colors: [String], width: Double?)
         case emoji(glyphs: [String])
         case text(strings: [String], color: String)
+        case textBlock(text: String, maxWidth: Double, fontSize: Double,
+                       lineHeight: Double, align: String, color: String,
+                       reveal: SpecSubset.TextRevealSpec?)
         case unknown
 
         static func == (lhs: Self, rhs: Self) -> Bool {
@@ -154,6 +190,10 @@ struct SpecSubset: Decodable, Equatable {
                 return g1 == g2
             case let (.text(s1, c1), .text(s2, c2)):
                 return s1 == s2 && c1 == c2
+            case let (.textBlock(t1, mw1, fs1, lh1, a1, c1, r1),
+                      .textBlock(t2, mw2, fs2, lh2, a2, c2, r2)):
+                return t1 == t2 && mw1 == mw2 && fs1 == fs2 && lh1 == lh2
+                    && a1 == a2 && c1 == c2 && r1 == r2
             case (.unknown, .unknown):
                 return true
             default:
@@ -166,6 +206,7 @@ struct SpecSubset: Decodable, Equatable {
 extension SpecSubset.Sprite: Decodable {
     private enum CodingKeys: String, CodingKey {
         case kind, glyphs, strings, color, colors, radius, width, length, aspect, soft
+        case text, maxWidth, fontSize, lineHeight, align, reveal
     }
 
     init(from decoder: Decoder) throws {
@@ -208,6 +249,16 @@ extension SpecSubset.Sprite: Decodable {
             self = .text(
                 strings: try c.decodeIfPresent([String].self, forKey: .strings) ?? ["idle screens"],
                 color: color
+            )
+        case "textBlock":
+            self = .textBlock(
+                text: try c.decodeIfPresent(String.self, forKey: .text) ?? "",
+                maxWidth: try c.decodeIfPresent(Double.self, forKey: .maxWidth) ?? 0.8,
+                fontSize: try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 0.03,
+                lineHeight: try c.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.4,
+                align: try c.decodeIfPresent(String.self, forKey: .align) ?? "left",
+                color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#e6e8ef",
+                reveal: try c.decodeIfPresent(SpecSubset.TextRevealSpec.self, forKey: .reveal)
             )
         default:
             self = .unknown
@@ -418,6 +469,10 @@ extension SpecSubset.Layer {
                 // sub-pixel text in px specs.
                 let sr = Self.pair(self.size, default: (20, 40))
                 size = sr.0 + rng.next() * (sr.1 - sr.0)
+            case .textBlock(_, _, let fs, _, _, _, _):
+                // Web parity: textBlock size = fontSize (viewport fraction),
+                // NO rng draw. The fixed value keeps the stream stable.
+                size = fs
             case .unknown:
                 size = 0.01
             }
@@ -437,6 +492,7 @@ extension SpecSubset.Layer {
             case .rect(_, _, let c, let cs): palette = cs.isEmpty ? [c] : cs
             case .streak(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
             case .text(_, let c): palette = [c]
+            case .textBlock(_, _, _, _, _, let c, _): palette = [c]
             default: palette = ["#ffffff"]
             }
             let color = palette[min(palette.count - 1, Int(rng.next() * Double(palette.count)))]
