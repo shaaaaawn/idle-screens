@@ -1,9 +1,23 @@
-const IPFS_GATEWAY = 'https://dweb.link/ipfs/';
+/** Ordered gateway candidates. dweb.link stays primary (flaky but usually
+ *  fast); our own node at hermosaai.com is second — flip it to the front
+ *  once the tunnel is verified serving /ipfs/ (it timed out on the
+ *  2026-08-15 check); ipfs.io is the last resort. Each is tried in order
+ *  with a per-gateway timeout by the tank's template loader (MQ21). */
+export const IPFS_GATEWAYS = [
+  'https://dweb.link/ipfs/',
+  'https://hermosaai.com/ipfs/',
+  'https://ipfs.io/ipfs/',
+];
 
 export function resolveIpfsUrl(url: string): string {
-  if (!url.startsWith('ipfs://')) return url;
+  return resolveIpfsUrls(url)[0]!;
+}
+
+/** All gateway candidates for a URL — one entry for non-ipfs URLs. */
+export function resolveIpfsUrls(url: string): string[] {
+  if (!url.startsWith('ipfs://')) return [url];
   const stripped = url.slice('ipfs://'.length);
-  return `${IPFS_GATEWAY}${stripped}`;
+  return IPFS_GATEWAYS.map((g) => `${g}${stripped}`);
 }
 
 export interface FishEntry {
