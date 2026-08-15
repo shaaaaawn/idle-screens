@@ -98,3 +98,122 @@ export function defaultParams(space: ParamSpace): Record<string, ParamValue> {
   for (const [path, def] of Object.entries(space)) out[path] = def.default;
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// integrateParam — the closed-form integral of one tracked number param.
+// ---------------------------------------------------------------------------
+
+/** ∫₀ᵘ ease dx, for the eases easeFn defines. `step` holds 0 until u = 1 (the
+ *  value jumps at the keyframe), so its running integral is 0 on [0, 1). */
+function easeIntegral(e: Ease, u: number): number {
+  const x = u <= 0 ? 0 : u >= 1 ? 1 : u;
+  switch (e) {
+    case 'step':
+      return 0;
+    case 'smooth':
+      return x * x * x - (x * x * x * x) / 2; // ∫ 3x² − 2x³
+    case 'linear':
+    default:
+      return (x * x) / 2;
+  }
+}
+
+/** Keyframe value as the integral sees it: finite numbers pass, finite numeric
+ *  strings coerce (MCP harnesses stringify untyped values), anything else is
+ *  skipped as if the keyframe were absent. */
+function numericValue(v: ParamValue): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return v.trim() !== '' && Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function integrateDeltas(
+  dflt: number,
+  defaultEase: Ease,
+  deltas: Array<{ t: number; value: number; ease?: Ease; dur?: number }>,
+  t: number,
+): number {
+  let acc = 0;
+  let cursor = 0; // integrated up to here
+  let prevVal = dflt;
+  let prevT = -Infinity;
+  for (const k of deltas) {
+    // Identical rampStart rule to evalPath — including a `dur` that reaches
+    // back past the previous keyframe, where sampling starts mid-ease. The
+    // eased span is therefore integrated in the ramp's ORIGINAL coordinates
+    // (u measured from rampStart over D0), never renormalized to the span we
+    // happen to integrate.
+    const rampStart = k.dur != null ? k.t - k.dur : prevT === -Infinity ? k.t : prevT;
+    const D0 = k.t - rampStart;
+    const end = Math.min(t, k.t);
+    // Constant stretch at prevVal, up to wherever the ramp (or t) begins.
+    const constEnd = Math.min(Math.max(rampStart, cursor), end);
+    if (constEnd > cursor) acc += prevVal * (constEnd - cursor);
+    // Eased stretch: v(τ) = prevVal + (k.value − prevVal)·E((τ−rampStart)/D0).
+    if (D0 > 0 && end > constEnd) {
+      const ease = k.ease ?? defaultEase;
+      const ua = (constEnd - rampStart) / D0;
+      const ub = (end - rampStart) / D0;
+      acc +=
+        prevVal * (end - constEnd) +
+        (k.value - prevVal) * D0 * (easeIntegral(ease, ub) - easeIntegral(ease, ua));
+    }
+    if (t <= k.t) return acc;
+    cursor = k.t;
+    prevVal = k.value;
+    prevT = k.t;
+  }
+  return acc + prevVal * (t - cursor);
+}
+
+/**
+ * Closed-form ∫₀ᵗ v(τ) dτ of one number param's track curve — the exact curve
+ * `sampleTrack` emits for that path, integrated analytically segment by
+ * segment (constant spans, plus linear/smooth/step ramps with `dur` and
+ * previous-keyframe ramp starts handled identically to sampling).
+ *
+ * Why it exists: a saver that multiplies a rate by the *sampled* value scales
+ * its entire accumulated motion when the param changes — a live steer
+ * teleports everything proportionally to elapsed time. Integrating the curve
+ * instead makes rate changes glide, while staying a pure function of
+ * `(space, track, t)` — no accumulated state, so `renderFrame(t)` stays
+ * frame-addressable and scrubbing works.
+ *
+ * Units: `t` is track time in ms; the result is value·ms (divide by 1000 for
+ * value·seconds). Looping tracks integrate as
+ * `fullLoops · ∫₀ᵈᵘʳ + ∫₀ʳᵉᵐ`. Non-`number` params integrate their numeric
+ * default (or 0). Like `sampleTrack`, no min/max clamping is applied.
+ */
+export function integrateParam(
+  space: ParamSpace,
+  track: ControlTrack,
+  path: string,
+  t: number,
+): number {
+  const def = space[path];
+  if (!def) return 0;
+  const dflt = numericValue(def.default) ?? 0;
+  if (def.type !== 'number' || t <= 0) return dflt * Math.max(0, t);
+  const deltas: Array<{ t: number; value: number; ease?: Ease; dur?: number }> = [];
+  for (const d of track.deltas) {
+    if (d.path !== path) continue;
+    const value = numericValue(d.value);
+    if (value === null) continue;
+    const entry: { t: number; value: number; ease?: Ease; dur?: number } = { t: d.t, value };
+    if (d.ease !== undefined) entry.ease = d.ease;
+    if (d.dur !== undefined) entry.dur = d.dur;
+    deltas.push(entry);
+  }
+  deltas.sort((a, b) => a.t - b.t);
+  const defaultEase = def.ease ?? 'linear';
+  if (track.loop && track.duration && track.duration > 0) {
+    const loops = Math.floor(t / track.duration);
+    const rem = t - loops * track.duration;
+    const oneLoop = integrateDeltas(dflt, defaultEase, deltas, track.duration);
+    return loops * oneLoop + integrateDeltas(dflt, defaultEase, deltas, rem);
+  }
+  return integrateDeltas(dflt, defaultEase, deltas, t);
+}

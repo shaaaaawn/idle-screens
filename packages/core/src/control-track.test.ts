@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sampleTrack, defaultParams } from './control-track';
+import { sampleTrack, defaultParams, integrateParam } from './control-track';
 import type { ControlTrack, ParamSpace } from './types';
 
 const track = (deltas: ControlTrack['deltas'], extra: Partial<ControlTrack> = {}): ControlTrack => ({
@@ -134,5 +134,93 @@ describe('sampleTrack', () => {
     const out = sampleTrack(space, t, 500);
     expect(out.x).toBeCloseTo(5); // x sorted 0->1000, midpoint
     expect(out.y).toBe(4); // y held after its last delta at t=500
+  });
+});
+
+describe('integrateParam', () => {
+  const space = (ease: 'step' | 'linear' | 'smooth' = 'linear'): ParamSpace => ({
+    speed: { type: 'number', default: 1, min: 0.2, max: 3, ease },
+  });
+
+  /** Midpoint-rule numeric integral of the curve sampleTrack actually emits —
+   *  the oracle every closed-form case must match. */
+  const numeric = (sp: ParamSpace, t: ControlTrack, T: number, dt = 0.5): number => {
+    let acc = 0;
+    for (let tau = 0; tau < T; tau += dt) {
+      const v = sampleTrack(sp, t, Math.min(tau + dt / 2, T)).speed;
+      acc += (typeof v === 'number' ? v : 0) * Math.min(dt, T - tau);
+    }
+    return acc;
+  };
+
+  const cases: Array<[string, ParamSpace, ControlTrack, number]> = [
+    ['no deltas holds the default', space(), track([]), 4000],
+    ['single step delta', space(), track([{ t: 1000, path: 'speed', value: 2, ease: 'step' }]), 3000],
+    ['linear ramp from previous keyframe', space(), track([
+      { t: 500, path: 'speed', value: 2 },
+      { t: 2000, path: 'speed', value: 0.5 },
+    ]), 3000],
+    ['smooth ramp with dur', space('smooth'), track([
+      { t: 1500, path: 'speed', value: 3, dur: 800 },
+    ]), 2500],
+    ['dur overlapping the previous keyframe (mid-ease jump)', space(), track([
+      { t: 1000, path: 'speed', value: 2 },
+      { t: 1400, path: 'speed', value: 0.4, dur: 900 },
+    ]), 2200],
+    ['mixed eases across several keyframes', space(), track([
+      { t: 400, path: 'speed', value: 2, ease: 'smooth', dur: 400 },
+      { t: 1200, path: 'speed', value: 0.5, ease: 'step' },
+      { t: 2000, path: 'speed', value: 1.5, ease: 'linear' },
+    ]), 2600],
+  ];
+
+  for (const [name, sp, t, T] of cases) {
+    it(`matches numeric integration: ${name}`, () => {
+      const exact = integrateParam(sp, t, 'speed', T);
+      const approx = numeric(sp, t, T);
+      expect(exact).toBeCloseTo(approx, 0);
+      // and a mid-curve point, not just the endpoint
+      expect(integrateParam(sp, t, 'speed', T * 0.37)).toBeCloseTo(numeric(sp, t, T * 0.37), 0);
+    });
+  }
+
+  it('loop wrap: n full loops plus remainder', () => {
+    const t = track(
+      [{ t: 500, path: 'speed', value: 2, ease: 'step' }],
+      { duration: 1000, loop: true },
+    );
+    const one = integrateParam(space(), t, 'speed', 1000);
+    expect(one).toBeCloseTo(0.5 * 1000 * 1 + 0.5 * 1000 * 2, 5);
+    expect(integrateParam(space(), t, 'speed', 3250)).toBeCloseTo(3 * one + integrateParam(space(), t, 'speed', 250), 5);
+    expect(integrateParam(space(), t, 'speed', 3250)).toBeCloseTo(numeric(space(), t, 3250), 0);
+  });
+
+  it('is monotone non-decreasing for a non-negative curve', () => {
+    const t = track([
+      { t: 300, path: 'speed', value: 3, dur: 200 },
+      { t: 900, path: 'speed', value: 0.2, ease: 'smooth' },
+    ]);
+    let prev = 0;
+    for (let ms = 0; ms <= 2000; ms += 50) {
+      const v = integrateParam(space(), t, 'speed', ms);
+      expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = v;
+    }
+  });
+
+  it('coerces finite numeric strings and skips junk values', () => {
+    const clean = track([{ t: 1000, path: 'speed', value: 2.5, ease: 'step' }]);
+    const stringy = track([{ t: 1000, path: 'speed', value: '2.5', ease: 'step' }]);
+    const junk = track([{ t: 1000, path: 'speed', value: 'fast', ease: 'step' }]);
+    expect(integrateParam(space(), stringy, 'speed', 2000)).toBeCloseTo(
+      integrateParam(space(), clean, 'speed', 2000), 9);
+    // junk keyframe behaves as absent: the default integrates throughout
+    expect(integrateParam(space(), junk, 'speed', 2000)).toBeCloseTo(2000, 9);
+  });
+
+  it('non-number params integrate their numeric default (or zero)', () => {
+    const sp: ParamSpace = { label: { type: 'string', default: 'hi' } };
+    expect(integrateParam(sp, track([]), 'label', 1000)).toBe(0);
+    expect(integrateParam(sp, track([]), 'missing', 1000)).toBe(0);
   });
 });
