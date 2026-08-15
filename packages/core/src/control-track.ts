@@ -42,6 +42,20 @@ function lerpValue(type: string, a: ParamValue, b: ParamValue, p: number): Param
   return p >= 1 ? b : a; // bool / enum / string / step
 }
 
+/** A number-param keyframe value as both sampling and integration see it:
+ *  finite numbers pass, finite numeric strings coerce (MCP harnesses with
+ *  untyped `value` params stringify numbers), anything else is null — the
+ *  keyframe is treated as absent. Shared by evalPath and integrateParam so
+ *  the sampled curve and its integral can never disagree about a value. */
+function numericValue(v: ParamValue): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return v.trim() !== '' && Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function evalPath(
   dflt: ParamValue,
   type: string,
@@ -50,6 +64,19 @@ function evalPath(
   t: number,
 ): ParamValue {
   if (deltas.length === 0) return dflt;
+  // Number params: stringified keyframes coerce, junk keyframes are ignored
+  // (as if absent) — identical treatment to integrateParam, so the distance
+  // warp can never diverge from the curve the saver samples.
+  if (type === 'number') {
+    const cleaned: ParamDelta[] = [];
+    for (const k of deltas) {
+      const n = numericValue(k.value);
+      if (n === null) continue;
+      cleaned.push(n === k.value ? k : { ...k, value: n });
+    }
+    deltas = cleaned;
+    if (deltas.length === 0) return dflt;
+  }
   let prevVal = dflt;
   let prevT = -Infinity;
   for (const k of deltas) {
@@ -118,18 +145,6 @@ function easeIntegral(e: Ease, u: number): number {
   }
 }
 
-/** Keyframe value as the integral sees it: finite numbers pass, finite numeric
- *  strings coerce (MCP harnesses stringify untyped values), anything else is
- *  skipped as if the keyframe were absent. */
-function numericValue(v: ParamValue): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    return v.trim() !== '' && Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 function integrateDeltas(
   dflt: number,
   defaultEase: Ease,
@@ -192,16 +207,29 @@ export function integrateParam(
   track: ControlTrack,
   path: string,
   t: number,
+  bounds?: { min?: number; max?: number },
 ): number {
   const def = space[path];
   if (!def) return 0;
-  const dflt = numericValue(def.default) ?? 0;
+  // Endpoint clamping bounds the WHOLE curve because every ease is a
+  // monotone interpolation between keyframe values: if both endpoints are
+  // in range, every eased point between them is too. (A ramp aimed at an
+  // out-of-range value is compressed to the clamped endpoint rather than
+  // clipped mid-flight — in range, deterministic, and the curve an
+  // intake-validated track would have produced.)
+  const clamp = (n: number): number => {
+    if (bounds?.min !== undefined && n < bounds.min) return bounds.min;
+    if (bounds?.max !== undefined && n > bounds.max) return bounds.max;
+    return n;
+  };
+  const dflt = clamp(numericValue(def.default) ?? 0);
   if (def.type !== 'number' || t <= 0) return dflt * Math.max(0, t);
   const deltas: Array<{ t: number; value: number; ease?: Ease; dur?: number }> = [];
   for (const d of track.deltas) {
     if (d.path !== path) continue;
-    const value = numericValue(d.value);
-    if (value === null) continue;
+    const raw = numericValue(d.value);
+    if (raw === null) continue;
+    const value = clamp(raw);
     const entry: { t: number; value: number; ease?: Ease; dur?: number } = { t: d.t, value };
     if (d.ease !== undefined) entry.ease = d.ease;
     if (d.dur !== undefined) entry.dur = d.dur;

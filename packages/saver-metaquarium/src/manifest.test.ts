@@ -56,3 +56,8 @@ describe('coerceNum', () => {
     expect(coerceNum(undefined, undefined)).toBe(0);
   });
 });
+
+it('coerceNum coerces a numeric-string default before the zero fallback', () => {
+  expect(coerceNum({ default: '1.5', min: 0.2, max: 3 }, undefined)).toBe(1.5);
+  expect(coerceNum({ default: 'junk' }, undefined)).toBe(0);
+});

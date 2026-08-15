@@ -421,10 +421,19 @@ class TankInstance implements SaverInstance {
     const speed = this.num('swimSpeed');
     // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
     // glide (MQ11 — multiplying the whole elapsed integral teleported every
-    // fish proportionally to elapsed time). Constant speed keeps the legacy
-    // closed form exactly. Both are pure functions of (t, track).
+    // fish proportionally to elapsed time). Only UNSTEERED tracks keep the
+    // legacy closed form bit-for-bit; a steered track uses warped-time
+    // semantics throughout, where the speed-wobble cycle scales with speed
+    // (deliberate — the same way tail beat and clip phase already do, since
+    // both are distance-driven). Both paths are pure functions of (t, track).
+    // Bounds clamp the integrated curve to the declared range, matching the
+    // clamped num() reads — the classic lane is intake-unvalidated (MQ17).
+    const speedDef = this.space.swimSpeed;
     const warpSec = this.speedTracked && this.track
-      ? integrateParam(this.space, this.track, 'swimSpeed', t) / 1000
+      ? integrateParam(this.space, this.track, 'swimSpeed', t, {
+          ...(speedDef?.min !== undefined ? { min: speedDef.min } : {}),
+          ...(speedDef?.max !== undefined ? { max: speedDef.max } : {}),
+        }) / 1000
       : tSec * speed;
 
     const url = this.str('fishUrl');

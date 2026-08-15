@@ -123,7 +123,9 @@ export function coerceNum(
   }
   if (n === null) {
     const d = def?.default;
-    n = typeof d === 'number' && Number.isFinite(d) ? d : 0;
+    if (typeof d === 'number' && Number.isFinite(d)) n = d;
+    else if (typeof d === 'string' && d.trim() !== '' && Number.isFinite(Number(d))) n = Number(d);
+    else n = 0;
   }
   if (def?.min !== undefined && n < def.min) n = def.min;
   if (def?.max !== undefined && n > def.max) n = def.max;

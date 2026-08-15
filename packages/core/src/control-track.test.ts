@@ -224,3 +224,39 @@ describe('integrateParam', () => {
     expect(integrateParam(sp, track([]), 'missing', 1000)).toBe(0);
   });
 });
+
+describe('number-param string coercion (shared by sampling and integration)', () => {
+  const sp: ParamSpace = { speed: { type: 'number', default: 1, ease: 'linear' } };
+
+  it('sampleTrack coerces finite numeric-string keyframes for number params', () => {
+    const t = track([
+      { t: 1000, path: 'speed', value: '2' },
+      { t: 2000, path: 'speed', value: '4' },
+    ]);
+    expect(sampleTrack(sp, t, 1500).speed).toBeCloseTo(3); // lerps 2→4, not string-step
+    expect(sampleTrack(sp, t, 2500).speed).toBe(4);
+  });
+
+  it('sampleTrack ignores junk keyframes on number params', () => {
+    const t = track([
+      { t: 500, path: 'speed', value: 'fast' },
+      { t: 1000, path: 'speed', value: 2, ease: 'step' },
+    ]);
+    expect(sampleTrack(sp, t, 700).speed).toBe(1);  // junk did not step in
+    expect(sampleTrack(sp, t, 1200).speed).toBe(2);
+  });
+
+  it('integral of a stringified track equals the numeric-track integral', () => {
+    const clean = track([{ t: 1000, path: 'speed', value: 2 }, { t: 2000, path: 'speed', value: 4 }]);
+    const stringy = track([{ t: 1000, path: 'speed', value: '2' }, { t: 2000, path: 'speed', value: '4' }]);
+    expect(integrateParam(sp, stringy, 'speed', 2500)).toBeCloseTo(integrateParam(sp, clean, 'speed', 2500), 9);
+  });
+
+  it('bounds clamp keyframe values and the default before integrating', () => {
+    const t = track([{ t: 1000, path: 'speed', value: 999, ease: 'step' }]);
+    // unclamped: 1000·1 + 1000·999; clamped to max 3: 1000·1 + 1000·3
+    expect(integrateParam(sp, t, 'speed', 2000, { max: 3 })).toBeCloseTo(1000 + 3000, 5);
+    const spBadDefault: ParamSpace = { speed: { type: 'number', default: 99, ease: 'linear' } };
+    expect(integrateParam(spBadDefault, track([]), 'speed', 1000, { min: 0.2, max: 3 })).toBeCloseTo(3000, 5);
+  });
+});
