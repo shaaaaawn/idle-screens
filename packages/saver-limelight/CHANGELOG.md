@@ -1,5 +1,12 @@
 # @idle-screens/saver-limelight
 
+## 1.0.5
+
+### Patch Changes
+
+- Updated dependencies [1204859]
+  - @idle-screens/core@0.4.5
+
 ## 1.0.4
 
 ### Patch Changes
