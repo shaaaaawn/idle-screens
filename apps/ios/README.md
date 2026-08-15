@@ -33,6 +33,37 @@ xcodebuild -project IdleScreens.xcodeproj -scheme IdleScreens \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
+## Apple TV (`IdleScreensTV`)
+
+The same project builds an Apple TV app: a 10-foot channel gallery that renders
+scenes **natively** (no WebView) through a capability ladder — SwiftUI Canvas at
+60fps on A12+, a SpriteKit sprite renderer at 30fps down to the pre-4K boxes,
+then the thumbnail stream, then an analytic perception view.
+
+```bash
+xcodebuild -project IdleScreens.xcodeproj -scheme IdleScreensTV \
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' test
+```
+
+**Test it in the native Simulator app, driven by `xcrun simctl`.** IDE and agent
+"live simulator preview" integrations are iOS-only — they cannot attach to an
+Apple TV simulator, so screenshots and input have to go through `simctl`:
+
+```bash
+open -a Simulator
+UDID=$(xcrun simctl list devices booted | grep -m1 'Apple TV' | grep -oE '[0-9A-F-]{36}')
+xcrun simctl install "$UDID" "$APP"
+# Terminate and sleep before launching: --terminate-running-process races, and
+# a lost race screenshots the home screen and reads as a crash.
+xcrun simctl terminate "$UDID" com.hermosalabs.idlescreens; sleep 2
+xcrun simctl launch "$UDID" com.hermosalabs.idlescreens -channel lobby
+xcrun simctl io "$UDID" screenshot /tmp/shot.png    # output is in pixels, not points
+```
+
+Debug launch arguments jump straight to one surface instead of walking there
+with the remote: `-channel <id>`, `-classic <warp|rainstorm>`, `-poster <id>`,
+`-pair`, `-settings`, `-fallback`.
+
 ## Architecture
 
 - SwiftUI, iOS 17, Swift 6 with complete strict concurrency. Zero third-party
