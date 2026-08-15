@@ -187,6 +187,17 @@ actor MCPClient {
         ])
     }
 
+    /// Bring a past scene back on air by its `sceneId` from the history.
+    func recall(channelId: String, token: String, sceneId: Int) async throws {
+        try await callTool("recall", arguments: [
+            "channelId": .string(channelId),
+            "token": .string(token),
+            "sceneId": .int(sceneId),
+            "agent": .string("idle-screens-ios"),
+            "harness": .string("ios-app"),
+        ])
+    }
+
     /// Bring a saved preset back on air. The format is deterministic, so the
     /// recalled scene renders exactly as it did when it was saved.
     func recall(channelId: String, token: String, presetName: String) async throws {
