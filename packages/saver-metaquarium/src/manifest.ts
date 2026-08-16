@@ -26,8 +26,8 @@ export const METAQUARIUM_PARAMS = {
    *  is the IPFS hero fish so npm / channel hosts work without playground
    *  static assets; the playground overrides this to a local GLB. */
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
-  /** Mixed population DSL: comma-separated `id[:count]` of catalog token ids
-   *  or breed aliases — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
+  /** Mixed population DSL: comma-separated `id[:count]` of ANY minted token id (1-512)
+   *  or breed name — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
    *  the expanded total clamps to the device tier's fish cap. Non-empty mix
    *  OVERRIDES fishUrl and fishCount; empty string = single-breed mode.
    *  Unknown ids/bad counts degrade (good tokens still parse); raw URLs are
@@ -156,4 +156,5 @@ export function coerceNum(
   return n;
 }
 
+export * from './farm';
 export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';
