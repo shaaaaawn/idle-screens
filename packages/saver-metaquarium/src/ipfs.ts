@@ -39,6 +39,8 @@ export const FISH_CATALOG: FishEntry[] = [
 
 export const DEFAULT_FISH = FISH_CATALOG[0]!;
 
+import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
+
 export interface FishMixEntry {
   id: number;
   url: string;
@@ -78,11 +80,23 @@ export function parseFishMix(
       continue;
     }
     const key = (idRaw ?? '').trim().toLowerCase();
-    const fish = /^\d+$/.test(key)
+    let fish = /^\d+$/.test(key)
       ? catalog.find((f) => f.id === Number(key))
       : catalog.find((f) => f.breed.toLowerCase() === key);
+    // Any minted token, not just the curated catalog: the farm mapping is
+    // in-house (farm.ts), so `fishMix: "2,85,124,234"` resolves offline.
+    if (!fish && /^\d+$/.test(key)) {
+      const n = Number(key);
+      const url = fishAsset(n, '3d');
+      const breed = breedOf(n);
+      if (url && breed) fish = { id: n, name: `Fish ${n}`, breed, ipfs3d: url, localGlb: '' };
+    }
     if (!fish) {
-      problems.push(`"${key}": not a catalog id or breed (have ${catalog.map((f) => f.id).join(', ')})`);
+      problems.push(
+        /^\d+$/.test(key)
+          ? `"${key}": not a minted token id (1-${TOTAL_SUPPLY})`
+          : `"${key}": not a breed (${BREEDS.filter((b) => b.minted).map((b) => b.breed).join(', ')})`,
+      );
       continue;
     }
     let count = 1;

@@ -26,8 +26,8 @@ export const METAQUARIUM_PARAMS = {
    *  is the IPFS hero fish so npm / channel hosts work without playground
    *  static assets; the playground overrides this to a local GLB. */
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
-  /** Mixed population DSL: comma-separated `id[:count]` of catalog token ids
-   *  or breed aliases — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
+  /** Mixed population DSL: comma-separated `id[:count]` of ANY minted token id (1-512)
+   *  or breed name — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
    *  the expanded total clamps to the device tier's fish cap. Non-empty mix
    *  OVERRIDES fishUrl and fishCount; empty string = single-breed mode.
    *  Unknown ids/bad counts degrade (good tokens still parse); raw URLs are
@@ -46,6 +46,11 @@ export const METAQUARIUM_PARAMS = {
   moteColor: { type: 'color', default: '#7fd6ff', ease: 'smooth' },
   /** Floor disc color. Default is the original hardcoded navy. */
   floorColor: { type: 'color', default: '#0a1d33', ease: 'smooth' },
+  /** Where the Draco decoder lives, for the many Metaquarium models that are
+   *  Draco-compressed. Empty = the copy shipped beside this package (no CDN,
+   *  no network beyond your own host). Override when a host serves the
+   *  decoder from its own static path. */
+  dracoPath: { type: 'string', default: '', ease: 'step' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -156,4 +161,5 @@ export function coerceNum(
   return n;
 }
 
+export * from './farm';
 export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';
