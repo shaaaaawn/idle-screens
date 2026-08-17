@@ -164,3 +164,28 @@ test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }
   expect(motes).toBeGreaterThan(100); // 0.85 × tier cap
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * Draco: shark3.glb is KHR_draco_mesh_compression-REQUIRED (62KB vs the 2MB
+ * plain shark). Before the decoder shipped, this rendered fallback blobs with
+ * no error anywhere — so the assertion that matters is a clean mount plus a
+ * decoder actually fetched.
+ */
+test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const decoder: string[] = [];
+  page.on('response', (r) => { if (/draco_(decoder|wasm_wrapper)/.test(r.url())) decoder.push(String(r.status())); });
+
+  await page.goto('/?saver=metaquarium-draco');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 25_000 })
+    .toBeGreaterThanOrEqual(1);
+
+  expect(decoder.length).toBeGreaterThan(0);
+  expect(decoder.every((s) => s === '200')).toBe(true);
+  expect(pageErrors).toEqual([]);
+});

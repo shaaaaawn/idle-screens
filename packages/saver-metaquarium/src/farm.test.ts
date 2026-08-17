@@ -88,3 +88,27 @@ describe('fishMix over the whole collection', () => {
     expect(parseFishMix('257:2').entries[0]!.count).toBe(2);
   });
 });
+
+describe('draco detection', () => {
+  const glb = (json: object): ArrayBuffer => {
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+    const pad = (4 - (jsonBytes.length % 4)) % 4;
+    const len = 12 + 8 + jsonBytes.length + pad;
+    const buf = new ArrayBuffer(len);
+    const dv = new DataView(buf);
+    dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, len, true);
+    dv.setUint32(12, jsonBytes.length + pad, true); dv.setUint32(16, 0x4e4f534a, true);
+    new Uint8Array(buf, 20).set(jsonBytes);
+    return buf;
+  };
+  it('flags a GLB that requires Draco, and one that does not', async () => {
+    const { __needsDracoForTest } = await import('./tank-draco');
+    expect(__needsDracoForTest(glb({ extensionsRequired: ['KHR_draco_mesh_compression'] }))).toBe(true);
+    expect(__needsDracoForTest(glb({ asset: { version: '2.0' } }))).toBe(false);
+  });
+  it('never throws on junk input', async () => {
+    const { __needsDracoForTest } = await import('./tank-draco');
+    expect(__needsDracoForTest(new ArrayBuffer(0))).toBe(false);
+    expect(__needsDracoForTest(new TextEncoder().encode('not a glb at all').buffer)).toBe(false);
+  });
+});

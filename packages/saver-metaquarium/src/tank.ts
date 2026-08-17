@@ -39,8 +39,10 @@ import {
   type Object3D,
   type SkinnedMesh,
 } from 'three';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { needsDraco } from './tank-draco';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -77,6 +79,27 @@ interface FishTemplate {
   clip: AnimationClip | null;
   norm: number;
   yaw: number;
+}
+
+
+/** One decoder per page, created on first Draco model and reused — spinning up
+ *  a worker per fish would be absurd. Null until something needs it, so a tank
+ *  of uncompressed models never pays for it. */
+let DRACO: DRACOLoader | null = null;
+function dracoLoader(path: string): DRACOLoader {
+  if (!DRACO) {
+    DRACO = new DRACOLoader();
+    // Default: the copy tsup ships beside this module. Vite and friends
+    // rewrite `import.meta.url` asset URLs at build time; hosts that bundle
+    // differently override with the dracoPath param.
+    // Trailing slash is load-bearing — DRACOLoader concatenates the filename
+    // straight onto this, and a missing slash yields `…/dracodraco_decoder.wasm`,
+    // which a dev server answers with index.html and the decoder dies on
+    // "Unexpected token '<'".
+    const base = path || new URL('./draco/', import.meta.url).href;
+    DRACO.setDecoderPath(base.endsWith('/') ? base : `${base}/`);
+  }
+  return DRACO;
 }
 
 const TEMPLATE_CACHE_CAP = 8;
@@ -388,7 +411,7 @@ class TankInstance implements SaverInstance {
       while (next < slots.length && !this.disposed && this.wantKey === key) {
         const i = slots[next++]!;
         const slotUrl = this.wantUrls[i]!;
-        const tpl = await this.template(slotUrl);
+        const tpl = await this.template(slotUrl, this.str('dracoPath'));
         if (this.disposed || this.wantKey !== key) return;
         if (!this.fish[i]) {
           this.spawn(tpl, i, slotUrl);
@@ -400,7 +423,7 @@ class TankInstance implements SaverInstance {
     if (this.paused) this.renderStill();
   }
 
-  private template(url: string): Promise<FishTemplate | null> {
+  private template(url: string, dracoPath = ''): Promise<FishTemplate | null> {
     const key = url;
     let p = TEMPLATE_CACHE.get(key);
     if (!p) {
@@ -426,7 +449,9 @@ class TankInstance implements SaverInstance {
             }
             throw lastErr;
           })();
-          const gltf = await new GLTFLoader().parseAsync(buf, '');
+          const loader = new GLTFLoader();
+          if (needsDraco(buf)) loader.setDRACOLoader(dracoLoader(dracoPath));
+          const gltf = await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -526,7 +551,7 @@ class TankInstance implements SaverInstance {
     setTimeout(() => {
       void (async (): Promise<void> => {
         if (this.disposed || this.wantKey !== key) return;
-        const tpl = await this.template(url);
+        const tpl = await this.template(url, this.str('dracoPath'));
         if (!tpl || this.disposed || this.wantKey !== key) return;
         const blob = this.fish[index];
         if (!blob || blob.body) return; // real fish arrived meanwhile

@@ -46,6 +46,11 @@ export const METAQUARIUM_PARAMS = {
   moteColor: { type: 'color', default: '#7fd6ff', ease: 'smooth' },
   /** Floor disc color. Default is the original hardcoded navy. */
   floorColor: { type: 'color', default: '#0a1d33', ease: 'smooth' },
+  /** Where the Draco decoder lives, for the many Metaquarium models that are
+   *  Draco-compressed. Empty = the copy shipped beside this package (no CDN,
+   *  no network beyond your own host). Override when a host serves the
+   *  decoder from its own static path. */
+  dracoPath: { type: 'string', default: '', ease: 'step' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
