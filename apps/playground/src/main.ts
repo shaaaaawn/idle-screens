@@ -41,10 +41,22 @@ interface SaverGroup {
   savers: SaverPlugin[];
 }
 
+/**
+ * A public-dir asset URL that respects Vite's `base`.
+ *
+ * The Pages deploy serves this app under `/idle-screens/` (see `base` below),
+ * so a hardcoded `/assets/...` 404s in CI while working perfectly in local
+ * dev where base is `/`. That 404 is not confined to the tank either: the
+ * gallery mounts the grouped saver on EVERY page, so one missing asset failed
+ * every unrelated "no console errors" assertion in the suite — 20 tests,
+ * including all 17 worker ones.
+ */
+const asset = (p: string): string => `${import.meta.env.BASE_URL}${p.replace(/^\//, '')}`;
+
 /** Playground tanks never hit IPFS — gallery live-mounts the grouped default
  *  on every page, and a CORS/504 on dweb.link was failing unrelated e2e. */
-const LOCAL_FISH_URL = '/assets/metaquarium/fish-257-angelfish.glb';
-const LOCAL_CATALOG = FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f));
+const LOCAL_FISH_URL = asset('/assets/metaquarium/fish-257-angelfish.glb');
+const LOCAL_CATALOG = FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: asset(f.localGlb) } : f));
 const playgroundMetaquarium = createMetaquarium({
   params: { fishUrl: LOCAL_FISH_URL },
   catalog: LOCAL_CATALOG,
@@ -108,12 +120,12 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-draco',
     label: 'Metaquarium (Draco)',
     params: {
-      fishUrl: '/assets/metaquarium/shark3.glb',
+      fishUrl: asset('/assets/metaquarium/shark3.glb'),
       fishCount: 3,
       cameraDistance: 200,
       // Dev serves the workspace package from src/, where the decoder is not;
       // the playground keeps its own copy in public/ so this is hermetic.
-      dracoPath: '/draco/',
+      dracoPath: asset('/draco/'),
     },
   }),
   // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
