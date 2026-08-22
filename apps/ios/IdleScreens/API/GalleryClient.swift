@@ -38,6 +38,37 @@ actor GalleryClient {
         return channels
     }
 
+    /// `GET /api/categories` — editorial shelf catalog. Cached to disk like
+    /// the channel list so cold launches shelve instantly.
+    func fetchCategories() async throws -> [ChannelCategory] {
+        let url = baseURL.appendingPathComponent("api/categories")
+        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        guard (200...299).contains(http.statusCode) else {
+            throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let wrapped = try? JSONDecoder().decode(CategoriesResponse.self, from: data) else {
+            throw GalleryError.invalidResponse
+        }
+        try? data.write(to: categoriesCacheFileURL(), options: .atomic)
+        return wrapped.categories
+    }
+
+    /// Last successfully fetched category catalog, or nil if never fetched.
+    func cachedCategories() -> [ChannelCategory]? {
+        guard let data = try? Data(contentsOf: categoriesCacheFileURL()) else { return nil }
+        return (try? JSONDecoder().decode(CategoriesResponse.self, from: data))?.categories
+    }
+
+    private struct CategoriesResponse: Decodable {
+        let categories: [ChannelCategory]
+    }
+
+    private func categoriesCacheFileURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("categories-\(host).json")
+    }
+
     /// Last successfully fetched channel list, or nil if never fetched.
     /// The inline scene specs make cached content fully renderable offline.
     func cachedChannels() -> [PublicChannel]? {

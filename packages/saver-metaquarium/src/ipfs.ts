@@ -1,9 +1,23 @@
-const IPFS_GATEWAY = 'https://dweb.link/ipfs/';
+/** Ordered gateway candidates. dweb.link stays primary (flaky but usually
+ *  fast); our own node at hermosaai.com is second — flip it to the front
+ *  once the tunnel is verified serving /ipfs/ (it timed out on the
+ *  2026-08-15 check); ipfs.io is the last resort. Each is tried in order
+ *  with a per-gateway timeout by the tank's template loader (MQ21). */
+export const IPFS_GATEWAYS = [
+  'https://dweb.link/ipfs/',
+  'https://hermosaai.com/ipfs/',
+  'https://ipfs.io/ipfs/',
+];
 
 export function resolveIpfsUrl(url: string): string {
-  if (!url.startsWith('ipfs://')) return url;
+  return resolveIpfsUrls(url)[0]!;
+}
+
+/** All gateway candidates for a URL — one entry for non-ipfs URLs. */
+export function resolveIpfsUrls(url: string): string[] {
+  if (!url.startsWith('ipfs://')) return [url];
   const stripped = url.slice('ipfs://'.length);
-  return `${IPFS_GATEWAY}${stripped}`;
+  return IPFS_GATEWAYS.map((g) => `${g}${stripped}`);
 }
 
 export interface FishEntry {
@@ -25,6 +39,8 @@ export const FISH_CATALOG: FishEntry[] = [
 
 export const DEFAULT_FISH = FISH_CATALOG[0]!;
 
+import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
+
 export interface FishMixEntry {
   id: number;
   url: string;
@@ -39,10 +55,13 @@ export interface FishMixResult {
 /**
  * Parse the `fishMix` DSL: comma-separated `id[:count]` where `id` is a
  * catalog token id (`257`) or breed alias (`betafish`; picks the breed's
- * first entry). Counts are absolute; the tank clamps the expanded total to
- * its tier cap. Raw URLs are deliberately NOT accepted — `:` and `,` stay
- * unambiguous, the validation surface stays finite, and custom URLs remain
- * `fishUrl`'s job (single-breed mode).
+ * first entry). Against the default catalog, any minted id 1–512 also
+ * resolves via the in-house farm table. A caller-supplied catalog is a
+ * closed world — ids not in it are problems, not IPFS fallbacks. Counts
+ * are absolute; the tank clamps the expanded total to its tier cap. Raw
+ * URLs are deliberately NOT accepted — `:` and `,` stay unambiguous, the
+ * validation surface stays finite, and custom URLs remain `fishUrl`'s job
+ * (single-breed mode).
  *
  * Zero-dep and pure, so the Worker (via the manifest subpath), the
  * playground, and the tank all validate with the same code. Never throws:
@@ -64,11 +83,26 @@ export function parseFishMix(
       continue;
     }
     const key = (idRaw ?? '').trim().toLowerCase();
-    const fish = /^\d+$/.test(key)
+    let fish = /^\d+$/.test(key)
       ? catalog.find((f) => f.id === Number(key))
       : catalog.find((f) => f.breed.toLowerCase() === key);
+    // Farm fallback is only for the default catalog. A custom catalog is a
+    // closed world (playground offline e2e, a future pack) — leaking a minted
+    // id out to IPFS would silently undo that constraint.
+    if (!fish && catalog === FISH_CATALOG && /^\d+$/.test(key)) {
+      const n = Number(key);
+      const url = fishAsset(n, '3d');
+      const breed = breedOf(n);
+      if (url && breed) fish = { id: n, name: `Fish ${n}`, breed, ipfs3d: url, localGlb: '' };
+    }
     if (!fish) {
-      problems.push(`"${key}": not a catalog id or breed (have ${catalog.map((f) => f.id).join(', ')})`);
+      problems.push(
+        /^\d+$/.test(key)
+          ? catalog === FISH_CATALOG
+            ? `"${key}": not a minted token id (1-${TOTAL_SUPPLY})`
+            : `"${key}": not a catalog id`
+          : `"${key}": not a breed (${BREEDS.filter((b) => b.minted).map((b) => b.breed).join(', ')})`,
+      );
       continue;
     }
     let count = 1;

@@ -28,10 +28,14 @@ struct ScreenSaverView: View {
                     }
                 }
             } else if app.isClassicSpec {
-                // Classic savers (e.g. {"id":"warp"}) can't render natively and
-                // previewScene doesn't support them — the thumb stream is the
-                // only live view; on repeated thumb failure show a fallback note.
-                if app.thumbFailed {
+                // Classic savers with a native port render locally at 60fps
+                // on canvas-capable hardware; the rest use the thumb stream,
+                // and on repeated thumb failure a designed ambient fallback.
+                if let kind = ClassicSaverKind.supported(id: app.classicSaverId),
+                   app.classicRenderTier != nil {
+                    ClassicSaverView(kind: kind, seed: app.classicSeed,
+                                     tier: app.classicRenderTier ?? .t3)
+                } else if app.thumbFailed {
                     // Never an error message: a seeded ambient scene we can
                     // always render internally, with an honest caption.
                     FallbackSceneView(channelId: app.selectedChannelId ?? "")

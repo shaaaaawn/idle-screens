@@ -14,6 +14,8 @@
   <dict>
     <key>com.hermosalabs.idlescreens</key>
     <string>Idle Screens tvOS App Store</string>
+    <key>com.hermosalabs.idlescreens.topshelf</key>
+    <string>Idle Screens TopShelf App Store</string>
   </dict>
   <key>destination</key>
   <string>export</string>

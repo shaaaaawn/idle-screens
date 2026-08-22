@@ -7,7 +7,7 @@ declare global {
 }
 
 /** The saver host inside <idle-screen>'s shadow root. */
-async function surfaceDataset(page: Page): Promise<{ fish: number; backend: string }> {
+async function surfaceDataset(page: Page): Promise<{ fish: number; backend: string; draco: boolean }> {
   return page.evaluate(() => {
     const surface = document
       .querySelector('idle-screen')
@@ -15,6 +15,7 @@ async function surfaceDataset(page: Page): Promise<{ fish: number; backend: stri
     return {
       fish: Number(surface?.dataset.mqFish ?? 0),
       backend: surface?.dataset.mqBackend ?? '',
+      draco: surface?.dataset.mqDraco === '1',
     };
   });
 }
@@ -162,5 +163,29 @@ test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }
     return Number(surface?.dataset.mqMotes ?? 0);
   });
   expect(motes).toBeGreaterThan(100); // 0.85 × tier cap
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Draco: bundled shark3.glb is KHR_draco_mesh_compression-REQUIRED (62KB vs
+ * the 2MB plain shark). Before the decoder shipped, this rendered fallback
+ * blobs with no error anywhere — so the assertion that matters is a decoded
+ * mesh (`data-mq-draco`), not a network sniff of the worker-fetched wasm.
+ */
+test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium-draco');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 25_000 })
+    .toBeGreaterThanOrEqual(1);
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).draco, { timeout: 45_000 })
+    .toBe(true);
   expect(pageErrors).toEqual([]);
 });

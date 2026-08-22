@@ -23,10 +23,14 @@ final class TVAppState {
     var pairCode: PairCode?
     var isRequestingPairCode = false
     var pairError: String?
+    /// Wall-clock of the most recent switch push from a paired phone.
+    var phonePushAt: Date?
 
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
+    /// Editorial shelf catalog, server-ordered.
+    var categories: [ChannelCategory] = []
     var isLoadingGallery = false
     var galleryError: String?
 
@@ -42,6 +46,16 @@ final class TVAppState {
     /// True when the channel runs a non-schema spec (e.g. classic saver
     /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
     var isClassicSpec = false
+    /// Saver id of a classic (non-schema) spec — e.g. "warp". Drives the
+    /// native classic renderer when the saver has a port.
+    var classicSaverId: String?
+    /// Seed for the native classic renderer (channel epoch when present).
+    var classicSeed = 0
+
+    /// Minimal probe for classic saver documents: `{"id": "warp"}`.
+    private struct ClassicIdProbe: Decodable {
+        let id: String?
+    }
 
     // MARK: Capability tier
 
@@ -77,6 +91,24 @@ final class TVAppState {
             tier = CapabilityTier.lower(of: tier, learned)
         }
         return tier
+    }
+
+    /// Raw hardware capability, ignoring the per-channel adaptive ladder.
+    /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
+    /// thumb-stream and schema-scene verdicts, and a broken server thumb
+    /// must not veto a fully local renderer.
+    var hardwareTier: CapabilityTier {
+        tierOverride ?? detectedTier
+    }
+
+    /// Tier to draw a ported classic saver at, or nil when this box should
+    /// stay on the thumb stream. Unlike the schema renderer, these savers
+    /// only stroke lines, so the pre-4K boxes (t2) get a thinner field at
+    /// 30fps rather than nothing. A watchdog downgrade drops them out.
+    var classicRenderTier: CapabilityTier? {
+        guard !watchdogDowngraded else { return nil }
+        let tier = hardwareTier
+        return tier == .t3 || tier == .t2 ? tier : nil
     }
 
     // MARK: Lifecycle
@@ -125,6 +157,9 @@ final class TVAppState {
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
             channels = cached
         }
+        if categories.isEmpty, let cached = await gallery.cachedCategories() {
+            categories = cached
+        }
         do {
             channels = try await gallery.fetchChannels()
             galleryError = nil
@@ -132,6 +167,11 @@ final class TVAppState {
             // Keep showing cached content on refresh failure; only surface
             // the error when there is nothing to show at all.
             if channels.isEmpty { galleryError = error.localizedDescription }
+        }
+        // Shelves are enrichment: a failure here just means the grid falls
+        // back to id-derived shelf titles, never an error state.
+        if let fetched = try? await gallery.fetchCategories() {
+            categories = fetched
         }
     }
 
@@ -168,6 +208,7 @@ final class TVAppState {
         compiledScene = []
         specBackground = nil
         isClassicSpec = false
+        classicSaverId = nil
         thumbFailed = false
         watchdogDowngraded = false
         complexityCap = nil
@@ -262,6 +303,10 @@ final class TVAppState {
         case .delta:
             break
         case .switchChannel(let channelId):
+            // Any switch push proves a paired phone is steering this TV —
+            // the pairing screen uses it as its "✓ Paired" cue (the phone
+            // sends a same-channel ack right after claiming).
+            phonePushAt = Date()
             if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
                 selectChannel(channelId)
             }
@@ -297,15 +342,20 @@ final class TVAppState {
         }
         stopSequence()
         guard let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
-            // Not a schema spec (e.g. classic saver {"id":"warp"}) — no native
-            // render. Keep the raw JSON; ScreenSaverView routes to the thumb stream.
+            // Not a schema spec (e.g. classic saver {"id":"warp"}). Savers
+            // with a native port render locally; the rest stay on thumbs.
             isClassicSpec = true
+            classicSaverId = (try? JSONDecoder().decode(ClassicIdProbe.self, from: data))?.id
+            // Seed from the channel id, not the publish epoch: the field
+            // survives re-publishes and matches the grid poster exactly.
+            classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
             specBackground = nil
             return
         }
         // A valid schema spec clears the classic flag (re-publish scenario).
         isClassicSpec = false
+        classicSaverId = nil
         let seed = spec.seed ?? fallbackSeed ?? 0
         compiledScene = spec.compile(seed: seed)
         specBackground = spec.background

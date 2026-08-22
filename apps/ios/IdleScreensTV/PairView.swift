@@ -8,6 +8,8 @@ import CoreImage.CIFilterBuiltins
 /// that mints a fresh code automatically when the old one lapses.
 struct PairView: View {
     @Environment(TVAppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var paired = false
 
     var body: some View {
         ZStack {
@@ -47,7 +49,11 @@ struct PairView: View {
 
                 // Right: the QR card + code.
                 VStack(spacing: 32) {
-                    if let pair = app.pairCode {
+                    if paired {
+                        // The phone's post-claim ack push landed — pairing is
+                        // proven end-to-end, not just requested.
+                        PairedCard()
+                    } else if let pair = app.pairCode {
                         if let qr = Self.qrImage(for: pair.url) {
                             Image(uiImage: qr)
                                 .interpolation(.none)
@@ -88,6 +94,15 @@ struct PairView: View {
             .padding(.horizontal, 120)
         }
         .task { await app.requestPairCode() }
+        .onChange(of: app.phonePushAt) {
+            guard !paired else { return }
+            withAnimation(.easeInOut(duration: 0.35)) { paired = true }
+            // Linger long enough to be read from the couch, then bow out.
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                dismiss()
+            }
+        }
     }
 
     /// Render the pairing URL as a QR code — CoreImage only, no dependencies.
@@ -172,6 +187,39 @@ private struct ExpiryCountdown: View {
                     }
             }
         }
+    }
+}
+
+/// The success moment: the phone claimed the code and its ack push reached
+/// this TV over the socket — pairing proven end-to-end.
+private struct PairedCard: View {
+    @State private var appeared = false
+
+    var body: some View {
+        VStack(spacing: 26) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 96))
+                .foregroundStyle(Color.appAccent)
+                .symbolRenderingMode(.hierarchical)
+                .scaleEffect(appeared ? 1 : 0.6)
+                .animation(.spring(duration: 0.5, bounce: 0.4), value: appeared)
+            Text("Paired")
+                .font(.system(size: 44, weight: .bold))
+                .foregroundStyle(.white)
+            Text("Your iPhone has the wheel —\nswitch channels and VJ from the couch.")
+                .font(.system(size: 25))
+                .foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+        }
+        .frame(width: 496, height: 400)
+        .background(
+            RoundedRectangle(cornerRadius: 28)
+                .fill(.white.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 28)
+                    .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1))
+        )
+        .onAppear { appeared = true }
+        .transition(.opacity)
     }
 }
 

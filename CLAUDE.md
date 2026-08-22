@@ -70,6 +70,8 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 **Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. See `apps/linux/README.md` for Arch deps (`webkitgtk-6.0`, etc.), hypridle wiring, and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
 
+**Apple apps** (`apps/ios`): one XcodeGen project with an iPhone/iPad target (`IdleScreens`) and an Apple TV target (`IdleScreensTV`). Run `xcodegen generate` after adding any file, or the target silently omits it. **Test tvOS in the native Simulator app driven by `xcrun simctl`** (install / launch with debug args like `-channel <id>` / `io screenshot`) — IDE and agent "live simulator preview" integrations are iOS-only and cannot attach to an Apple TV simulator. See `apps/ios/README.md`.
+
 ## Architecture notes
 
 **The saver plugin contract.** A saver is a `SaverPlugin` with a `manifest` (id, label, passthrough flag, paramSpace) and a `mount(ctx: SaverContext): SaverInstance` function. `SaverContext` provides `host` (an HTMLElement to render into), `width`/`height`, a seeded `Rng` (NEVER use `Math.random()`), and optional `page` (for passthrough savers that eat the live page). `SaverInstance` returns `setPaused`, `resize`, and optionally `renderFrame(t, seed)` for deterministic frame-addressable rendering. See `.claude/skills/idle-screens-saver-plugin-authoring/` for the full contract.

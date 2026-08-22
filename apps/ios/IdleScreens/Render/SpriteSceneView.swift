@@ -242,9 +242,13 @@ final class CompiledSpriteScene: SKScene {
                 let cg = ctx.cgContext
                 let ui = UIColor(hexString: color)
                 if soft {
-                    let colors = [ui.cgColor, ui.withAlphaComponent(0).cgColor] as CFArray
+                    // Web-parity falloff (compile.ts): bright core to 35% of
+                    // the radius, then fade to transparent.
+                    let colors = [ui.cgColor,
+                                  ui.withAlphaComponent(0.75).cgColor,
+                                  ui.withAlphaComponent(0).cgColor] as CFArray
                     if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                          colors: colors, locations: [0, 1]) {
+                                          colors: colors, locations: [0, 0.35, 1]) {
                         cg.drawRadialGradient(
                             g, startCenter: CGPoint(x: d / 2, y: d / 2), startRadius: 0,
                             endCenter: CGPoint(x: d / 2, y: d / 2), endRadius: d / 2,

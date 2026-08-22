@@ -19,6 +19,12 @@ struct IdleScreensTVApp: App {
                     } else if ProcessInfo.processInfo.arguments.contains("-fallback") {
                         // Debug: the always-renderable ambient stand-in.
                         FallbackSceneView(channelId: "debug-preview")
+                    } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-classic"),
+                              ProcessInfo.processInfo.arguments.indices.contains(i + 1),
+                              let kind = ClassicSaverKind.supported(id: ProcessInfo.processInfo.arguments[i + 1]) {
+                        // Debug: render a native classic-saver port in isolation
+                        // (bisects renderer bugs from channel-routing bugs).
+                        ClassicSaverView(kind: kind, seed: 7)
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
                         // Debug: render one channel's poster tile in isolation
@@ -59,7 +65,29 @@ struct IdleScreensTVApp: App {
             .onChange(of: scenePhase) {
                 appState.scenePhaseChanged(active: scenePhase == .active)
             }
+            // Top Shelf deep links: idlescreens://channel/<id> from the home
+            // screen goes straight into that channel fullscreen.
+            .onOpenURL { url in
+                if let id = DeepLink.channelId(from: url) {
+                    appState.selectChannel(id)
+                }
+            }
         }
+    }
+}
+
+/// Parses app deep links. Canonical form is `idlescreens://channel/<id>`
+/// (what the Top Shelf provider emits); the bare `idlescreens://<id>`
+/// shorthand also resolves so hand-typed links behave.
+enum DeepLink {
+    static func channelId(from url: URL) -> String? {
+        guard url.scheme == "idlescreens" else { return nil }
+        let id: String? = switch url.host() {
+        case "channel": url.pathComponents.dropFirst().first
+        default: url.host()
+        }
+        guard let id, !id.isEmpty else { return nil }
+        return id
     }
 }
 

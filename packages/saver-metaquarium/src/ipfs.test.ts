@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix } from './ipfs';
+import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
@@ -65,11 +65,32 @@ describe('parseFishMix', () => {
     const r = parseFishMix('9:1', [{ id: 9, name: 'X', breed: 'x', ipfs3d: '/x.glb', localGlb: '' }]);
     expect(r.entries[0]!.url).toBe('/x.glb');
   });
+  it('does not farm-fallback ids missing from a custom catalog', () => {
+    const custom = [{ id: 9, name: 'X', breed: 'x', ipfs3d: '/x.glb', localGlb: '' }];
+    const r = parseFishMix('9:1,85:1', custom);
+    expect(r.entries.map((e) => e.url)).toEqual(['/x.glb']);
+    expect(r.problems[0]).toContain('not a catalog id');
+  });
 });
 
 describe('expandFishMix', () => {
   it('expands in DSL order and clamps to the cap', () => {
     const { entries } = parseFishMix('257:2,100:2');
     expect(expandFishMix(entries, 3).map((u) => /fish_(\d+)/.exec(u)![1])).toEqual(['257', '257', '100']);
+  });
+});
+
+describe('resolveIpfsUrls', () => {
+  it('returns every gateway candidate in order for ipfs:// urls', () => {
+    const urls = resolveIpfsUrls('ipfs://QmX/fish.glb');
+    expect(urls.length).toBe(IPFS_GATEWAYS.length);
+    expect(urls[0]).toBe(`${IPFS_GATEWAYS[0]}QmX/fish.glb`);
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+  it('passes non-ipfs urls through as a single candidate', () => {
+    expect(resolveIpfsUrls('/assets/fish.glb')).toEqual(['/assets/fish.glb']);
+  });
+  it('resolveIpfsUrl stays the first candidate (compat)', () => {
+    expect(resolveIpfsUrl('ipfs://QmX/f.glb')).toBe(resolveIpfsUrls('ipfs://QmX/f.glb')[0]);
   });
 });

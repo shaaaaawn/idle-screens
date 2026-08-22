@@ -55,7 +55,7 @@
     "three": "^0.185.0"
   },
   "peerDependencies": {
-    "@idle-screens/core": "workspace:*"
+    "@idle-screens/core": "workspace:^"
   },
   "devDependencies": {
     "@idle-screens/core": "workspace:*",
