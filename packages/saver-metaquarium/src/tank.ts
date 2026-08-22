@@ -39,8 +39,10 @@ import {
   type Object3D,
   type SkinnedMesh,
 } from 'three';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { needsDraco } from './tank-draco';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -77,6 +79,69 @@ interface FishTemplate {
   clip: AnimationClip | null;
   norm: number;
   yaw: number;
+  /** True when this template was decoded with Draco (not a fallback blob). */
+  draco: boolean;
+}
+
+
+/** One decoder per decoder path, created on first use and kept for the page.
+ *  Keyed by path so two tanks with different `dracoPath` values do not share
+ *  a loader (setDecoderPath is ignored after the first decode) and so a path
+ *  change never disposes a worker another tank is still parsing on. */
+const DRACO_BY_PATH = new Map<string, DRACOLoader>();
+function dracoDecoderPath(path: string): string {
+  const base = path || new URL('./draco/', import.meta.url).href;
+  // Trailing slash is load-bearing — DRACOLoader concatenates the filename
+  // straight onto this, and a missing slash yields `…/dracodraco_decoder.wasm`,
+  // which a dev server answers with index.html and the decoder dies on
+  // "Unexpected token '<'".
+  return base.endsWith('/') ? base : `${base}/`;
+}
+function dracoLoader(path: string): DRACOLoader {
+  const normalized = dracoDecoderPath(path);
+  let loader = DRACO_BY_PATH.get(normalized);
+  if (!loader) {
+    loader = new DRACOLoader();
+    // Default: the copy tsup ships beside this module. Vite and friends
+    // rewrite `import.meta.url` asset URLs at build time; hosts that bundle
+    // the package into a single chunk must copy dist/draco next to that
+    // chunk, or set the dracoPath param to a URL they actually serve.
+    loader.setDecoderPath(normalized);
+    // ONE decoder worker, not three.js's default pool of four.
+    //
+    // DRACOLoader spawns workers lazily up to its limit and never releases
+    // them, so a saver that decodes a handful of fish would leave four
+    // decoder workers alive for the life of the page. On a 2-core CI runner
+    // under software GL that starved every OTHER worker-based saver — the
+    // symptom was 17 unrelated worker e2e tests failing while everything
+    // passed locally on a machine with cores to spare. A tank decodes a few
+    // small models once and caches the templates; serial decoding is fine.
+    loader.setWorkerLimit(1);
+    DRACO_BY_PATH.set(normalized, loader);
+  }
+  return loader;
+}
+
+/** Tanks currently able to decode, per decoder path. The decoder outlives any
+ *  single tank (templates are cached page-wide) but must not outlive the LAST
+ *  one, or its worker leaks for the life of the page. */
+const DRACO_USERS = new Map<string, number>();
+
+function retainDraco(path: string): void {
+  const k = dracoDecoderPath(path);
+  DRACO_USERS.set(k, (DRACO_USERS.get(k) ?? 0) + 1);
+}
+
+/** Release one tank's claim; the last one out disposes the worker. Safe
+ *  against mid-parse teardown because a parse always happens between a
+ *  retain and its release. */
+function releaseDraco(path: string): void {
+  const k = dracoDecoderPath(path);
+  const n = (DRACO_USERS.get(k) ?? 0) - 1;
+  if (n > 0) { DRACO_USERS.set(k, n); return; }
+  DRACO_USERS.delete(k);
+  DRACO_BY_PATH.get(k)?.dispose();
+  DRACO_BY_PATH.delete(k);
 }
 
 const TEMPLATE_CACHE_CAP = 8;
@@ -185,6 +250,8 @@ class TankInstance implements SaverInstance {
   private speedTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
+  /** Decoder paths this tank retained, released on dispose. */
+  private readonly dracoPaths = new Set<string>();
 
   constructor(
     ctx: SaverContext,
@@ -388,7 +455,7 @@ class TankInstance implements SaverInstance {
       while (next < slots.length && !this.disposed && this.wantKey === key) {
         const i = slots[next++]!;
         const slotUrl = this.wantUrls[i]!;
-        const tpl = await this.template(slotUrl);
+        const tpl = await this.template(slotUrl, this.str('dracoPath'));
         if (this.disposed || this.wantKey !== key) return;
         if (!this.fish[i]) {
           this.spawn(tpl, i, slotUrl);
@@ -400,7 +467,7 @@ class TankInstance implements SaverInstance {
     if (this.paused) this.renderStill();
   }
 
-  private template(url: string): Promise<FishTemplate | null> {
+  private template(url: string, dracoPath = ''): Promise<FishTemplate | null> {
     const key = url;
     let p = TEMPLATE_CACHE.get(key);
     if (!p) {
@@ -426,7 +493,20 @@ class TankInstance implements SaverInstance {
             }
             throw lastErr;
           })();
-          const gltf = await new GLTFLoader().parseAsync(buf, '');
+          const loader = new GLTFLoader();
+          const draco = needsDraco(buf);
+          if (draco) {
+            // Retain ONCE per path per tank — the release side is one call per
+            // unique path at dispose, so retaining per model would leak the
+            // refcount and the worker would never be freed.
+            const key = dracoDecoderPath(dracoPath);
+            if (!this.dracoPaths.has(key)) {
+              this.dracoPaths.add(key);
+              retainDraco(dracoPath);
+            }
+            loader.setDRACOLoader(dracoLoader(dracoPath));
+          }
+          const gltf = await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -444,6 +524,7 @@ class TankInstance implements SaverInstance {
             clip: gltf.animations[0] ?? null,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
+            draco,
           };
         } catch {
           TEMPLATE_CACHE.delete(key);
@@ -515,6 +596,7 @@ class TankInstance implements SaverInstance {
       tail,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
+    if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
   }
 
   /** One delayed second chance for a slot that spawned as a fallback blob:
@@ -526,7 +608,7 @@ class TankInstance implements SaverInstance {
     setTimeout(() => {
       void (async (): Promise<void> => {
         if (this.disposed || this.wantKey !== key) return;
-        const tpl = await this.template(url);
+        const tpl = await this.template(url, this.str('dracoPath'));
         if (!tpl || this.disposed || this.wantKey !== key) return;
         const blob = this.fish[index];
         if (!blob || blob.body) return; // real fish arrived meanwhile
@@ -777,6 +859,8 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
+    for (const p of this.dracoPaths) releaseDraco(p);
+    this.dracoPaths.clear();
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();
@@ -796,6 +880,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
+    delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
 }

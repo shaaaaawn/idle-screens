@@ -8,6 +8,8 @@ export default tseslint.config(
       'coverage/**',
       '**/*.config.{js,ts,mjs,cjs}',
       'apps/**/e2e/**',
+      // Vendored three/emscripten decoder — not ours to lint.
+      'apps/playground/public/draco/**',
       '.claude/**', // agent worktrees carry their own checkout — never lint them
     ],
   },

@@ -8,8 +8,9 @@ export interface ParamsHandle {
 }
 
 const LOCAL_FISH: { label: string; url: string }[] = [
-  { label: '#257 Angelfish', url: '/assets/metaquarium/fish-257-angelfish.glb' },
-  { label: '#100 Betafish', url: '/assets/metaquarium/fish-100-betafish.glb' },
+  // Base-relative: the Pages deploy serves this app under /idle-screens/.
+  { label: '#257 Angelfish', url: `${import.meta.env.BASE_URL}assets/metaquarium/fish-257-angelfish.glb` },
+  { label: '#100 Betafish', url: `${import.meta.env.BASE_URL}assets/metaquarium/fish-100-betafish.glb` },
 ];
 
 const IPFS_FISH: { label: string; url: string }[] = [
