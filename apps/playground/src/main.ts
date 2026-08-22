@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { metaquarium, createMetaquarium, FISH_CATALOG } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium, FISH_CATALOG } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -41,13 +41,22 @@ interface SaverGroup {
   savers: SaverPlugin[];
 }
 
+/** Playground tanks never hit IPFS — gallery live-mounts the grouped default
+ *  on every page, and a CORS/504 on dweb.link was failing unrelated e2e. */
+const LOCAL_FISH_URL = '/assets/metaquarium/fish-257-angelfish.glb';
+const LOCAL_CATALOG = FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f));
+const playgroundMetaquarium = createMetaquarium({
+  params: { fishUrl: LOCAL_FISH_URL },
+  catalog: LOCAL_CATALOG,
+});
+
 const SAVER_GROUPS: SaverGroup[] = [
   { id: 'saver-black-hole', label: '@idle-screens/saver-black-hole', savers: [blackHole] },
   { id: 'saver-tide', label: '@idle-screens/saver-tide', savers: [tide] },
   { id: 'saver-limelight', label: '@idle-screens/saver-limelight', savers: [limelight] },
   { id: 'saver-slipstream', label: '@idle-screens/saver-slipstream', savers: [slipstream] },
   { id: 'saver-catwalk', label: '@idle-screens/saver-catwalk', savers: [catwalk] },
-  { id: 'saver-metaquarium', label: '@idle-screens/saver-metaquarium', savers: [metaquarium] },
+  { id: 'saver-metaquarium', label: '@idle-screens/saver-metaquarium', savers: [playgroundMetaquarium] },
   { id: 'savers-classic', label: '@idle-screens/savers-classic', savers: [...CLASSIC_SAVERS] },
   {
     id: 'schema',
@@ -81,7 +90,8 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-school',
     label: 'Metaquarium (School)',
-    params: { fishCount: 6 },
+    params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
+    catalog: LOCAL_CATALOG,
   }),
   // Mixed breeds against bundled GLBs: ids resolve through a local-asset
   // catalog so the mix path is network-free (and e2e-deterministic).
@@ -89,7 +99,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-mix',
     label: 'Metaquarium (Mix)',
     params: { fishMix: '257:2,100:1' },
-    catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
+    catalog: LOCAL_CATALOG,
   }),
   // Draco proof: bundled shark3 is KHR_draco_mesh_compression-required
   // (62KB vs the 2MB plain shark). Without a decoder this silently renders
@@ -120,7 +130,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       fogColor: '#02131f',
       floorColor: '#0d3a33',
     },
-    catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
+    catalog: LOCAL_CATALOG,
   }),
 ];
 // The full metaquarium example suite, one URL each (all e2e-covered):

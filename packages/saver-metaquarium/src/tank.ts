@@ -79,6 +79,8 @@ interface FishTemplate {
   clip: AnimationClip | null;
   norm: number;
   yaw: number;
+  /** True when this template was decoded with Draco (not a fallback blob). */
+  draco: boolean;
 }
 
 
@@ -458,7 +460,8 @@ class TankInstance implements SaverInstance {
             throw lastErr;
           })();
           const loader = new GLTFLoader();
-          if (needsDraco(buf)) loader.setDRACOLoader(dracoLoader(dracoPath));
+          const draco = needsDraco(buf);
+          if (draco) loader.setDRACOLoader(dracoLoader(dracoPath));
           const gltf = await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
@@ -477,6 +480,7 @@ class TankInstance implements SaverInstance {
             clip: gltf.animations[0] ?? null,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
+            draco,
           };
         } catch {
           TEMPLATE_CACHE.delete(key);
@@ -548,6 +552,7 @@ class TankInstance implements SaverInstance {
       tail,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
+    if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
   }
 
   /** One delayed second chance for a slot that spawned as a fallback blob:
@@ -829,6 +834,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
+    delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
 }

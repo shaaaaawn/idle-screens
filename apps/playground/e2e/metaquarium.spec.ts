@@ -7,7 +7,7 @@ declare global {
 }
 
 /** The saver host inside <idle-screen>'s shadow root. */
-async function surfaceDataset(page: Page): Promise<{ fish: number; backend: string }> {
+async function surfaceDataset(page: Page): Promise<{ fish: number; backend: string; draco: boolean }> {
   return page.evaluate(() => {
     const surface = document
       .querySelector('idle-screen')
@@ -15,6 +15,7 @@ async function surfaceDataset(page: Page): Promise<{ fish: number; backend: stri
     return {
       fish: Number(surface?.dataset.mqFish ?? 0),
       backend: surface?.dataset.mqBackend ?? '',
+      draco: surface?.dataset.mqDraco === '1',
     };
   });
 }
@@ -168,14 +169,12 @@ test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }
 /**
  * Draco: bundled shark3.glb is KHR_draco_mesh_compression-REQUIRED (62KB vs
  * the 2MB plain shark). Before the decoder shipped, this rendered fallback
- * blobs with no error anywhere — so the assertion that matters is a clean
- * mount plus a decoder actually fetched. Asset and decoder are both local.
+ * blobs with no error anywhere — so the assertion that matters is a decoded
+ * mesh (`data-mq-draco`), not a network sniff of the worker-fetched wasm.
  */
 test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
-  const decoder: string[] = [];
-  page.on('response', (r) => { if (/draco_(decoder|wasm_wrapper)/.test(r.url())) decoder.push(String(r.status())); });
 
   await page.goto('/?saver=metaquarium-draco');
   await page.waitForFunction(() => !!window.__idleScreens);
@@ -185,7 +184,8 @@ test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
     .poll(async () => (await surfaceDataset(page)).fish, { timeout: 25_000 })
     .toBeGreaterThanOrEqual(1);
 
-  expect(decoder.length).toBeGreaterThan(0);
-  expect(decoder.every((s) => s === '200')).toBe(true);
+  await expect
+    .poll(async () => (await surfaceDataset(page)).draco, { timeout: 15_000 })
+    .toBe(true);
   expect(pageErrors).toEqual([]);
 });
