@@ -1,5 +1,11 @@
 # @idle-screens/saver-tide
 
+## 1.0.6
+
+### Patch Changes
+
+- bc403ec: core `peerDependency` is now `workspace:^` so publishes emit a caret range instead of an exact pin. Mixed-version installs of sibling savers previously failed `npm ci` with ERESOLVE. (`saver-metaquarium` ships the same change in the gateway-resilience changeset.)
+
 ## 1.0.5
 
 ### Patch Changes
