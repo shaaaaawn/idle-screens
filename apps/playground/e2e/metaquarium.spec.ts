@@ -185,7 +185,7 @@ test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
     .toBeGreaterThanOrEqual(1);
 
   await expect
-    .poll(async () => (await surfaceDataset(page)).draco, { timeout: 15_000 })
+    .poll(async () => (await surfaceDataset(page)).draco, { timeout: 45_000 })
     .toBe(true);
   expect(pageErrors).toEqual([]);
 });

@@ -107,9 +107,41 @@ function dracoLoader(path: string): DRACOLoader {
     // the package into a single chunk must copy dist/draco next to that
     // chunk, or set the dracoPath param to a URL they actually serve.
     loader.setDecoderPath(normalized);
+    // ONE decoder worker, not three.js's default pool of four.
+    //
+    // DRACOLoader spawns workers lazily up to its limit and never releases
+    // them, so a saver that decodes a handful of fish would leave four
+    // decoder workers alive for the life of the page. On a 2-core CI runner
+    // under software GL that starved every OTHER worker-based saver — the
+    // symptom was 17 unrelated worker e2e tests failing while everything
+    // passed locally on a machine with cores to spare. A tank decodes a few
+    // small models once and caches the templates; serial decoding is fine.
+    loader.setWorkerLimit(1);
     DRACO_BY_PATH.set(normalized, loader);
   }
   return loader;
+}
+
+/** Tanks currently able to decode, per decoder path. The decoder outlives any
+ *  single tank (templates are cached page-wide) but must not outlive the LAST
+ *  one, or its worker leaks for the life of the page. */
+const DRACO_USERS = new Map<string, number>();
+
+function retainDraco(path: string): void {
+  const k = dracoDecoderPath(path);
+  DRACO_USERS.set(k, (DRACO_USERS.get(k) ?? 0) + 1);
+}
+
+/** Release one tank's claim; the last one out disposes the worker. Safe
+ *  against mid-parse teardown because a parse always happens between a
+ *  retain and its release. */
+function releaseDraco(path: string): void {
+  const k = dracoDecoderPath(path);
+  const n = (DRACO_USERS.get(k) ?? 0) - 1;
+  if (n > 0) { DRACO_USERS.set(k, n); return; }
+  DRACO_USERS.delete(k);
+  DRACO_BY_PATH.get(k)?.dispose();
+  DRACO_BY_PATH.delete(k);
 }
 
 const TEMPLATE_CACHE_CAP = 8;
@@ -218,6 +250,8 @@ class TankInstance implements SaverInstance {
   private speedTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
+  /** Decoder paths this tank retained, released on dispose. */
+  private readonly dracoPaths = new Set<string>();
 
   constructor(
     ctx: SaverContext,
@@ -461,7 +495,17 @@ class TankInstance implements SaverInstance {
           })();
           const loader = new GLTFLoader();
           const draco = needsDraco(buf);
-          if (draco) loader.setDRACOLoader(dracoLoader(dracoPath));
+          if (draco) {
+            // Retain ONCE per path per tank — the release side is one call per
+            // unique path at dispose, so retaining per model would leak the
+            // refcount and the worker would never be freed.
+            const key = dracoDecoderPath(dracoPath);
+            if (!this.dracoPaths.has(key)) {
+              this.dracoPaths.add(key);
+              retainDraco(dracoPath);
+            }
+            loader.setDRACOLoader(dracoLoader(dracoPath));
+          }
           const gltf = await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
@@ -815,6 +859,8 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
+    for (const p of this.dracoPaths) releaseDraco(p);
+    this.dracoPaths.clear();
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();

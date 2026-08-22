@@ -59,6 +59,11 @@ test('every saver mounts on sleep without errors', async ({ page }) => {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`);
   });
+  // "Failed to load resource: 404" names no URL, which makes a CI-only
+  // failure unfalsifiable from the log alone. Record what actually 404'd.
+  page.on('response', (r) => {
+    if (r.status() >= 400) errors.push(`http ${r.status()}: ${r.url()}`);
+  });
   for (const id of SAVER_IDS) {
     await page.goto(`/?saver=${id}`);
     await page.waitForFunction(() => !!window.__idleScreens);
