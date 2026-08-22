@@ -26,12 +26,13 @@ export const METAQUARIUM_PARAMS = {
    *  is the IPFS hero fish so npm / channel hosts work without playground
    *  static assets; the playground overrides this to a local GLB. */
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
-  /** Mixed population DSL: comma-separated `id[:count]` of ANY minted token id (1-512)
-   *  or breed name — e.g. "257:3,100:2,seaturtle:1". Counts are absolute;
-   *  the expanded total clamps to the device tier's fish cap. Non-empty mix
-   *  OVERRIDES fishUrl and fishCount; empty string = single-breed mode.
-   *  Unknown ids/bad counts degrade (good tokens still parse); raw URLs are
-   *  not accepted here — use fishUrl for a custom single-breed GLB. */
+  /** Mixed population DSL: comma-separated `id[:count]` of a minted token id
+   *  (1-512, default catalog) or breed name — e.g. "257:3,100:2,seaturtle:1".
+   *  A custom catalog is a closed world (no farm/IPFS fallback). Counts are
+   *  absolute; the expanded total clamps to the device tier's fish cap.
+   *  Non-empty mix OVERRIDES fishUrl and fishCount; empty string = single-
+   *  breed mode. Unknown ids/bad counts degrade (good tokens still parse);
+   *  raw URLs are not accepted here — use fishUrl for a custom single-breed GLB. */
   fishMix: { type: 'string', default: '', ease: 'step' },
   /** Fog start distance, world units. Default matches the tank's original
    *  hardcoded Fog(60, 500) — steering below pulls the murk close. */
