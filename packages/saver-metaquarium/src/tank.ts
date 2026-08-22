@@ -82,12 +82,11 @@ interface FishTemplate {
 }
 
 
-/** One decoder per page, created on first Draco model and reused — spinning up
- *  a worker per fish would be absurd. Null until something needs it, so a tank
- *  of uncompressed models never pays for it. Recreated when `dracoPath`
- *  changes: setDecoderPath is ignored after the first decode begins. */
-let DRACO: DRACOLoader | null = null;
-let DRACO_PATH: string | null = null;
+/** One decoder per decoder path, created on first use and kept for the page.
+ *  Keyed by path so two tanks with different `dracoPath` values do not share
+ *  a loader (setDecoderPath is ignored after the first decode) and so a path
+ *  change never disposes a worker another tank is still parsing on. */
+const DRACO_BY_PATH = new Map<string, DRACOLoader>();
 function dracoDecoderPath(path: string): string {
   const base = path || new URL('./draco/', import.meta.url).href;
   // Trailing slash is load-bearing — DRACOLoader concatenates the filename
@@ -98,21 +97,17 @@ function dracoDecoderPath(path: string): string {
 }
 function dracoLoader(path: string): DRACOLoader {
   const normalized = dracoDecoderPath(path);
-  if (DRACO && DRACO_PATH !== normalized) {
-    DRACO.dispose();
-    DRACO = null;
-    DRACO_PATH = null;
-  }
-  if (!DRACO) {
-    DRACO = new DRACOLoader();
+  let loader = DRACO_BY_PATH.get(normalized);
+  if (!loader) {
+    loader = new DRACOLoader();
     // Default: the copy tsup ships beside this module. Vite and friends
     // rewrite `import.meta.url` asset URLs at build time; hosts that bundle
     // the package into a single chunk must copy dist/draco next to that
     // chunk, or set the dracoPath param to a URL they actually serve.
-    DRACO.setDecoderPath(normalized);
-    DRACO_PATH = normalized;
+    loader.setDecoderPath(normalized);
+    DRACO_BY_PATH.set(normalized, loader);
   }
-  return DRACO;
+  return loader;
 }
 
 const TEMPLATE_CACHE_CAP = 8;
