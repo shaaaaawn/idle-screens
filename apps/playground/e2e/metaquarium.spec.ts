@@ -166,10 +166,10 @@ test('MQ5: atmosphere variant activates motes and mounts clean', async ({ page }
 });
 
 /**
- * Draco: shark3.glb is KHR_draco_mesh_compression-REQUIRED (62KB vs the 2MB
- * plain shark). Before the decoder shipped, this rendered fallback blobs with
- * no error anywhere — so the assertion that matters is a clean mount plus a
- * decoder actually fetched.
+ * Draco: bundled shark3.glb is KHR_draco_mesh_compression-REQUIRED (62KB vs
+ * the 2MB plain shark). Before the decoder shipped, this rendered fallback
+ * blobs with no error anywhere — so the assertion that matters is a clean
+ * mount plus a decoder actually fetched. Asset and decoder are both local.
  */
 test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
   const pageErrors: string[] = [];

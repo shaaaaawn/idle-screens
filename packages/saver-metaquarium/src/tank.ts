@@ -84,20 +84,33 @@ interface FishTemplate {
 
 /** One decoder per page, created on first Draco model and reused — spinning up
  *  a worker per fish would be absurd. Null until something needs it, so a tank
- *  of uncompressed models never pays for it. */
+ *  of uncompressed models never pays for it. Recreated when `dracoPath`
+ *  changes: setDecoderPath is ignored after the first decode begins. */
 let DRACO: DRACOLoader | null = null;
+let DRACO_PATH: string | null = null;
+function dracoDecoderPath(path: string): string {
+  const base = path || new URL('./draco/', import.meta.url).href;
+  // Trailing slash is load-bearing — DRACOLoader concatenates the filename
+  // straight onto this, and a missing slash yields `…/dracodraco_decoder.wasm`,
+  // which a dev server answers with index.html and the decoder dies on
+  // "Unexpected token '<'".
+  return base.endsWith('/') ? base : `${base}/`;
+}
 function dracoLoader(path: string): DRACOLoader {
+  const normalized = dracoDecoderPath(path);
+  if (DRACO && DRACO_PATH !== normalized) {
+    DRACO.dispose();
+    DRACO = null;
+    DRACO_PATH = null;
+  }
   if (!DRACO) {
     DRACO = new DRACOLoader();
     // Default: the copy tsup ships beside this module. Vite and friends
     // rewrite `import.meta.url` asset URLs at build time; hosts that bundle
-    // differently override with the dracoPath param.
-    // Trailing slash is load-bearing — DRACOLoader concatenates the filename
-    // straight onto this, and a missing slash yields `…/dracodraco_decoder.wasm`,
-    // which a dev server answers with index.html and the decoder dies on
-    // "Unexpected token '<'".
-    const base = path || new URL('./draco/', import.meta.url).href;
-    DRACO.setDecoderPath(base.endsWith('/') ? base : `${base}/`);
+    // the package into a single chunk must copy dist/draco next to that
+    // chunk, or set the dracoPath param to a URL they actually serve.
+    DRACO.setDecoderPath(normalized);
+    DRACO_PATH = normalized;
   }
   return DRACO;
 }

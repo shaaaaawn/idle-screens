@@ -91,15 +91,14 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: { fishMix: '257:2,100:1' },
     catalog: FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: f.localGlb } : f)),
   }),
-  // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
-  // params at non-default values so the pack is visible on mount.
-  // Draco proof: shark3 is KHR_draco_mesh_compression-required (62KB vs the
-  // 2MB plain shark). Without a decoder this silently renders fallback blobs.
+  // Draco proof: bundled shark3 is KHR_draco_mesh_compression-required
+  // (62KB vs the 2MB plain shark). Without a decoder this silently renders
+  // fallback blobs. Local GLB + /draco/ so MQ6 stays hermetic.
   createMetaquarium({
     id: 'metaquarium-draco',
     label: 'Metaquarium (Draco)',
     params: {
-      fishUrl: 'https://visit.metaquarium.xyz/assets/objects/npcs/shark3.glb',
+      fishUrl: '/assets/metaquarium/shark3.glb',
       fishCount: 3,
       cameraDistance: 200,
       // Dev serves the workspace package from src/, where the decoder is not;
@@ -107,6 +106,8 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       dracoPath: '/draco/',
     },
   }),
+  // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
+  // params at non-default values so the pack is visible on mount.
   createMetaquarium({
     id: 'metaquarium-atmosphere',
     label: 'Metaquarium (Atmosphere)',

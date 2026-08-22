@@ -65,6 +65,12 @@ describe('parseFishMix', () => {
     const r = parseFishMix('9:1', [{ id: 9, name: 'X', breed: 'x', ipfs3d: '/x.glb', localGlb: '' }]);
     expect(r.entries[0]!.url).toBe('/x.glb');
   });
+  it('does not farm-fallback ids missing from a custom catalog', () => {
+    const custom = [{ id: 9, name: 'X', breed: 'x', ipfs3d: '/x.glb', localGlb: '' }];
+    const r = parseFishMix('9:1,85:1', custom);
+    expect(r.entries.map((e) => e.url)).toEqual(['/x.glb']);
+    expect(r.problems[0]).toContain('not a catalog id');
+  });
 });
 
 describe('expandFishMix', () => {

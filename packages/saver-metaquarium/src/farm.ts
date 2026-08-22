@@ -23,6 +23,10 @@ export { ASSET_CIDS };
 
 export const TOTAL_SUPPLY = 512;
 
+export function isMintedId(id: number): boolean {
+  return Number.isInteger(id) && id >= 1 && id <= TOTAL_SUPPLY;
+}
+
 /** ERC-721, Ethereum mainnet. Metadata is per-token but collapses to the four
  *  directory CIDs in {@link BREEDS}, so `tokenURI` is never needed at runtime. */
 export const CONTRACT = '0x680cCc4fE7aa62172D20899Ab87C5304545431CB';
@@ -77,6 +81,7 @@ export const BREEDS: readonly BreedInfo[] = [
 
 /** Breed of a minted token, or null when the id is outside 1..512. */
 export function breedOf(id: number): Breed | null {
+  if (!isMintedId(id)) return null;
   for (const b of BREEDS) {
     if (b.range && id >= b.range[0] && id <= b.range[1]) return b.breed;
   }
@@ -144,10 +149,6 @@ const SUFFIX: Record<AssetKind, string> = {
   video: '_video.mp4',
 };
 
-export function isMintedId(id: number): boolean {
-  return Number.isInteger(id) && id >= 1 && id <= TOTAL_SUPPLY;
-}
-
 /** The asset directory CID for a token, or null when the id isn't minted. */
 export function assetCid(id: number): string | null {
   return isMintedId(id) ? (ASSET_CIDS[id - 1] ?? null) : null;
@@ -181,8 +182,7 @@ export function fishAssets(id: number): {
 /** Canonical metadata URL for a token — the range formula, no RPC. Useful for
  *  traits/description; never needed just to render. */
 export function fishMetadataUrl(id: number): string | null {
-  if (!isMintedId(id)) return null;
-  const b = BREEDS.find((x) => x.range && id >= x.range[0] && id <= x.range[1]);
+  const b = BREEDS.find((x) => x.breed === breedOf(id));
   return b?.metadataCid
     ? `ipfs://${b.metadataCid}/fish_${id}_of_the_metaquarium.json`
     : null;

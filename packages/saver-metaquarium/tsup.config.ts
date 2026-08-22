@@ -23,6 +23,10 @@ function copyDraco(): void {
   const from = join(dirname(loader), '..', 'libs', 'draco', 'gltf');
   mkdirSync('dist/draco', { recursive: true });
   cpSync(from, 'dist/draco', { recursive: true });
+  // Published next to dist/*.js so `new URL('./draco/', import.meta.url)`
+  // works when the host serves this package's files as-is. A bundler that
+  // inlines the tank chunk must copy these files into its own output (or
+  // the host sets the dracoPath param).
 }
 
 export default defineConfig({

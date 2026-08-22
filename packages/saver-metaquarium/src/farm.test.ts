@@ -31,6 +31,8 @@ describe('farm manifest', () => {
     expect(breedOf(497)).toBe('seaturtle');
     expect(breedOf(0)).toBeNull();
     expect(breedOf(513)).toBeNull();
+    expect(breedOf(100.5)).toBeNull();
+    expect(breedOf(256.5)).toBeNull();
   });
   it('carries the unminted breeds without ranges', () => {
     const un = BREEDS.filter((b) => !b.minted);
