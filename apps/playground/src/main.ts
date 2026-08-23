@@ -101,7 +101,10 @@ const SAVER_GROUPS: SaverGroup[] = [
 const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-school',
-    label: 'Metaquarium (School)',
+    // "Population", not "School": this variant predates swimStyle and only
+    // means six fish. `metaquarium-swim-school` is the formation one, and two
+    // entries a case-change apart was a trap for whoever read the list next.
+    label: 'Metaquarium (6 fish)',
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
@@ -151,7 +154,11 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
         // The breed models carry no clip, so without this they glide rigid.
         // It is opt-in by default; the studio is where you see it on.
         bodyWiggle: 0.35,
-        environment: 'reef', cameraDistance: 170, cameraElevation: 16,
+        environment: 'reef',
+        // The formation is ~70 units across once spacing is a body length;
+        // at 170 you are inside it and see three fish, not a shoal.
+        cameraDistance: sw === 'school' ? 250 : 170,
+        cameraElevation: 16,
       },
       catalog: LOCAL_CATALOG,
     }),

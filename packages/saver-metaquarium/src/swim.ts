@@ -34,9 +34,13 @@ export interface SwimStyleSpec {
   /** Ride one shared route in formation (the carrier school) instead of each
    *  fish owning a loop. */
   formation: boolean;
-  /** How much of its own loop a fish actually traverses. Below 1 the fish
-   *  works a patch of water instead of touring the tank — what makes hovering
-   *  read as hovering without any new path maths. */
+  /** How FAST a fish works its own loop, relative to how hard it is swimming.
+   *  Below 1 it stays in a patch of water instead of touring the tank — what
+   *  makes hovering read as hovering without any new path maths.
+   *
+   *  Not a leash: a hover fish still gets all the way round eventually (about
+   *  80 minutes). At any timescale anyone is watching it reads as staying
+   *  put, which is the effect being bought — but the loop is not fenced. */
   travel: number;
 }
 
@@ -111,10 +115,16 @@ export function fishVariation(index: number, variance: number): {
   };
 }
 
+/** Nose-to-tail length of a fish at scale 1, in tank units. Formation spacing
+ *  is quoted in these so the lattice cannot silently start interpenetrating
+ *  when the fish change size — a review measured 36% of fish-frames with a
+ *  neighbour inside one body length when the pitch was a bare number. */
+export const FISH_LENGTH = 18;
+
 /** Half-width the formation lattice is allowed to occupy, in tank units. The
  *  tank still clamps the final position — this keeps the shape sane, the
  *  clamp keeps it legal. */
-const FORMATION_HALF_WIDTH = 55;
+const FORMATION_HALF_WIDTH = 62;
 
 /**
  * Formation slot for the carrier school, in the carrier's local frame.
@@ -135,20 +145,50 @@ export function formationSlot(
   // inside `halfWidth`. At 24 fish a fixed 26-unit column pitch spread the
   // shoal wider than the tank, and the outer ranks swam through the glass.
   const span = Math.max(1, cols - 1);
-  const pitch = Math.min(26, (halfWidth * 2) / span);
-  const jit = Math.min(16, pitch * 0.6);
+  // Spacing is quoted in body lengths, and the jitter is a FRACTION of the
+  // pitch rather than a fixed number of units. Both matter: a bare 26/22 was
+  // narrower than a fish is long once jitter ate into it, so the shoal
+  // interpenetrated at every variance including 0.
+  const pitch = Math.min(FISH_LENGTH * 1.9, (halfWidth * 2) / span);
+  // Jitter is bounded so the CLOSEST possible pair still clears a body
+  // length: adjacent columns are `pitch` apart and jitter can close at most
+  // `jit`, so pitch - jit must stay above FISH_LENGTH. That is the whole
+  // reason the spacing is quoted in body lengths at all.
+  const jit = pitch * 0.35;
   return {
     side: (col - (cols - 1) / 2) * pitch + (fishHash(index, 4) - 0.5) * jit * j,
-    up: (fishHash(index, 5) - 0.5) * 20 * j,
-    back: row * 22 + fishHash(index, 6) * 12 * j,
+    up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * j,
+    back: row * FISH_LENGTH * 1.6 + fishHash(index, 6) * FISH_LENGTH * 0.4 * j,
   };
+}
+
+/**
+ * How far the formation reaches from its own centre, per axis. The tank uses
+ * it to pull the WHOLE shoal inside the glass by moving its centre, instead of
+ * squashing individual fish toward the middle — squashing is what turned a
+ * legal lattice back into a pile.
+ */
+export function formationExtent(count: number, variance: number): {
+  side: number; up: number; back: number;
+} {
+  let side = 0, up = 0, back = 0;
+  for (let i = 0; i < count; i += 1) {
+    const s = formationSlot(i, count, variance);
+    side = Math.max(side, Math.abs(s.side));
+    up = Math.max(up, Math.abs(s.up));
+    back = Math.max(back, Math.abs(s.back));
+  }
+  return { side, up, back };
 }
 
 /** Depth band as a fraction of the tank's vertical extent — the tank owns the
  *  actual bounds, this owns the intent. */
 export function bandRange(band: DepthBand): { lo: number; hi: number } | null {
   switch (band) {
-    case 'floor': return { lo: 0, hi: 0.3 };
+    // Tight, because 0..0.3 of a 57-unit volume is nearly two body lengths of
+    // headroom — measured on screen it read as hovering in the lower third
+    // rather than hugging anything.
+    case 'floor': return { lo: 0, hi: 0.14 };
     case 'ceiling': return { lo: 0.7, hi: 1 };
     case 'mid': return { lo: 0.3, hi: 0.7 };
     default: return null;

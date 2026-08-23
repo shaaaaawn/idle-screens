@@ -48,7 +48,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
-import { bandRange, fishVariation, formationSlot, swimStyleOf } from './swim';
+import {
+  bandRange, FISH_LENGTH, fishVariation, formationExtent, formationSlot, swimStyleOf,
+} from './swim';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -72,7 +74,6 @@ import {
 } from './quality';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
-const FISH_LENGTH = 18;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
 const GLB_CONCURRENCY = 3;
 
@@ -215,19 +216,20 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
  * its `spikey`), basin (a bowl that falls away from the camera — what makes
  * an abyss feel deep).
  */
-function buildTerrain(kind: FloorKind, rng: Rng, color: string): Mesh {
+/** Seabed height as a closed-form function of (x, z).
+ *
+ *  Returned rather than baked straight into vertices so the swim volume can be
+ *  clamped against the SAME expression the mesh is built from. A `dunes` or
+ *  `ridges` floor reaches +46, well above the bottom of the fish's depth band,
+ *  so without this a bottom-hugger swims through the hill it is hugging. */
+function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
   const R = 620;
-  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
-  geo.rotateX(-Math.PI / 2);
-  const pos = geo.attributes.position!;
   // Two seeded octaves — enough for a silhouette, cheap enough to build in a
   // frame. Phases come from the rng so two tanks are never the same hill.
   const a = rng.next() * Math.PI * 2;
   const b = rng.next() * Math.PI * 2;
   const c = rng.next() * Math.PI * 2;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
+  return (x, z) => {
     const d = Math.sqrt(x * x + z * z) / R;
     let h = 0;
     if (kind === 'dunes') {
@@ -238,7 +240,17 @@ function buildTerrain(kind: FloorKind, rng: Rng, color: string): Mesh {
       h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
-    pos.setY(i, h * Math.max(0, 1 - d * d));
+    return h * Math.max(0, 1 - d * d);
+  };
+}
+
+function buildTerrain(height: (x: number, z: number) => number, color: string): Mesh {
+  const R = 620;
+  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position!;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, height(pos.getX(i), pos.getZ(i)));
   }
   geo.computeVertexNormals();
   geo.userData.mqOwned = true;
@@ -393,6 +405,8 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
+  private floorHeightAt: ((x: number, z: number) => number) | null = null;
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
@@ -621,11 +635,16 @@ class TankInstance implements SaverInstance {
       : preset.floor;
     if (kind !== 'flat') {
       const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
-      const terrain = buildTerrain(kind, this.ctxSaver.rng.fork(0x7e88), floorHex);
+      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88));
+      const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
+      // World-space seabed, for the swim clamp. Same expression, same seed.
+      this.floorHeightAt = (x, z) => height(x, z) + terrain.position.y;
       group.add(terrain);
       this.terrainMat = terrain.material as MeshBasicMaterial;
     }
+    // A flat floor has no hills to avoid; clear any the previous room left.
+    if (kind === 'flat') this.floorHeightAt = null;
     this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
@@ -1019,31 +1038,71 @@ class TankInstance implements SaverInstance {
       const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
       const d = anchor + effort * style.travel;
 
+      // What drives the animation. For a free fish that is its own effort; for
+      // a fish in formation it is the carrier's, because the carrier is what
+      // is actually moving it. Beating to its own unused loop made a shoal
+      // whose tails were out of step with its travel — fish moonwalking.
+      let beat = effort;
       let pose;
       if (style.formation) {
         // Carrier school: ONE route, fish held in slots in its local frame, so
-        // the shoal turns as a body. Measured at 0.85 polarisation against
-        // boids' 0.87 — and it improves on independent loops, which collide
-        // 23-25% of fish-frames.
+        // the shoal turns as a body.
+        //
+        // Measured over 4 seeds x 600 frames at 8 fish, variance 0.6
+        // (src/swim.test.ts holds the spacing half of this as a gate):
+        //
+        //   loop    27.8% of fish-frames with a neighbour inside a body
+        //           length, closest approach 1.3u, polarisation 0.38
+        //   school  0.0%, closest approach 27.3u, polarisation 1.00
+        //
+        // The earlier 0.85-vs-boids'-0.87 figure in this comment described the
+        // spike's boids prototype, not this port, and the port's first draft
+        // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
+        // are what actually fixed it.
         const slot = formationSlot(f.index, visible, variance);
         // The carrier moves at the STYLE's speed, deliberately without the
         // per-fish multiplier: a formation whose members each chose their own
         // pace is not a formation. Per-fish speed still varies the tail beat
         // through `effort`, which is where it reads anyway.
-        const lead = (this.speedTracked
+        const lead = this.speedTracked
           ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
-          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul)) - slot.back;
+          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
+        beat = lead;
+        // ONE arc sample for the whole shoal, offset rigidly. Sampling each
+        // row at `lead - back` instead put the rows at different points on a
+        // curving spline, so they converged on the inside of every turn: a
+        // lattice with a body length of clearance measured 27% of fish-frames
+        // with a neighbour inside one, exactly as if there were no lattice.
         const c = swimPoseAtDistance(this.carrierPlan, lead);
-        const sx = c.fz, sz = -c.fx;
-        const sl = Math.hypot(sx, sz) || 1;
-        const fx2 = c.x + (sx / sl) * slot.side;
-        const fz2 = c.z + (sz / sl) * slot.side;
-        // A slot can hang a fish outside the tank when the carrier is on the
-        // outer part of its route, so pull the whole offset back inside the
-        // radius rather than letting the shoal clip through the wall.
-        const rad = Math.hypot(fx2, fz2);
-        const k = rad > BOUNDS.radius ? BOUNDS.radius / rad : 1;
-        pose = { ...c, x: fx2 * k, y: c.y + slot.up, z: fz2 * k };
+        const ext = formationExtent(visible, variance);
+        // Keep the shoal in the tank by moving its CENTRE, never by pulling
+        // individual fish toward the middle — that squashing was the other
+        // half of the pile.
+        const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
+        const cr = Math.hypot(c.x, c.z);
+        const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+        const hl = Math.hypot(c.fx, c.fz) || 1;
+        const fwdX = c.fx / hl, fwdZ = c.fz / hl;
+        // Right-hand normal in the ground plane.
+        const rx = fwdZ, rz = -fwdX;
+        const cy = Math.min(
+          BOUNDS.yMax - ext.up,
+          Math.max(BOUNDS.yMin + ext.up, c.y),
+        );
+        // A rigid body means every fish points EXACTLY the same way, which
+        // measures as polarisation 1.00 and looks like a formation flight.
+        // A few degrees of per-fish yaw, scaled by variance, buys back the
+        // look of animals without touching the spacing guarantee.
+        const yaw = Math.sin(varn.phase) * 0.12 * variance;
+        const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
+        pose = {
+          ...c,
+          x: c.x * cs + rx * slot.side - fwdX * slot.back,
+          y: cy + slot.up,
+          z: c.z * cs + rz * slot.side - fwdZ * slot.back,
+          fx: fwdX * cy2 - fwdZ * sy2,
+          fz: fwdX * sy2 + fwdZ * cy2,
+        };
       } else {
         pose = swimPoseAtDistance(f.plan, d);
       }
@@ -1062,6 +1121,14 @@ class TankInstance implements SaverInstance {
         const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
         const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
         y = Math.min(hi, Math.max(lo, y));
+      }
+      // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
+      // +46 while the floor band tops out at 23, so a bottom-hugger over a
+      // hill was inside it. Half a body length of clearance, and never above
+      // the tank's own ceiling.
+      if (this.floorHeightAt) {
+        const clear = this.floorHeightAt(pose.x, pose.z) + FISH_LENGTH * 0.5;
+        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
 
       // Inside a depth band a fish swims LEVEL. Without this its heading still
@@ -1085,12 +1152,12 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        f.body.rotation.y = f.baseYaw + Math.sin(effort * 0.06 + varn.phase) * 0.55 * wiggle;
+        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * wiggle;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((effort * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.

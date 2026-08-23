@@ -1,8 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Overridable so parallel checkouts (worktrees, agents) can run e2e without
-// colliding on 5177 — vite.config.ts reads the same variable.
-const PORT = Number(process.env.PLAYGROUND_PORT) || 5177;
+// E2E gets its OWN port, deliberately not the 5177 that `pnpm dev` uses.
+//
+// `reuseExistingServer` will happily adopt whatever is already listening, and
+// on a shared machine that is somebody's long-lived dev session from a
+// DIFFERENT checkout. A run then tests their working tree while reporting on
+// yours: a reviewer and I both spent an afternoon on an "MQ7 fails on base"
+// that was this, and it passes 3/3 against its own server.
+//
+// Overridable so parallel checkouts (worktrees, agents) can run e2e at once.
+const PORT = Number(process.env.PLAYGROUND_PORT) || 5188;
 
 export default defineConfig({
   testDir: './e2e',
@@ -35,6 +42,9 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: `http://localhost:${PORT}`,
+    // Pass the port through, or `pnpm dev` binds 5177 and the run waits on a
+    // URL nothing is serving.
+    env: { PLAYGROUND_PORT: String(PORT) },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

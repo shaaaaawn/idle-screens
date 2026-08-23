@@ -220,3 +220,19 @@ test('MQ7: void is a no-op and a named environment builds a room', async ({ page
 
   expect(pageErrors).toEqual([]);
 });
+
+test('MQ8: the formation branch mounts and holds its shoal in the tank', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  // MQ2 covers the six-fish population variant, which predates swimStyle and
+  // never reaches the carrier code. This is the only test that runs it.
+  await page.goto('/?saver=metaquarium-swim-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(6);
+
+  expect(pageErrors).toEqual([]);
+});

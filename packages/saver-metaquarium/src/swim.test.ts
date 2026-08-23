@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bandRange, fishHash, fishVariation, formationSlot, SWIM_STYLES,
+  bandRange, FISH_LENGTH, fishHash, fishVariation, formationSlot, SWIM_STYLES,
   SWIM_STYLE_NAMES, swimStyleOf,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
@@ -38,11 +38,29 @@ describe('swim styles', () => {
     expect(new Set(phases).size).toBe(phases.length);
     expect(fishVariation(3, 0).anchor).toBe(fishVariation(3, 1).anchor);
   });
-  it('a big cast still fits the tank it is swimming in', () => {
+  it('no two fish in a formation are inside one body length', () => {
+    // The enforceable version of "a school does not collide". A review
+    // measured 36% of fish-frames with a neighbour inside a body length when
+    // the lattice pitch was a bare number; this is the guard that stops that
+    // regressing, and it is the claim the changeset is allowed to make.
+    for (const count of [2, 4, 8, 12, 18, 24]) {
+      for (const variance of [0, 0.3, 0.6, 1]) {
+        const slots = Array.from({ length: count }, (_, i) => formationSlot(i, count, variance));
+        for (let i = 0; i < count; i += 1) {
+          for (let k = i + 1; k < count; k += 1) {
+            const a = slots[i]!; const b = slots[k]!;
+            const gap = Math.hypot(a.side - b.side, a.up - b.up, a.back - b.back);
+            expect(gap).toBeGreaterThanOrEqual(FISH_LENGTH);
+          }
+        }
+      }
+    }
+  });
+  it('a big cast still fits inside the tank radius', () => {
     for (const count of [4, 12, 24]) {
       for (let i = 0; i < count; i += 1) {
-        const s = formationSlot(i, count, 1);
-        expect(Math.abs(s.side)).toBeLessThanOrEqual(60);
+        // The tank clamps to radius 120; the lattice must not need most of it.
+        expect(Math.abs(formationSlot(i, count, 1).side)).toBeLessThanOrEqual(80);
       }
     }
   });
