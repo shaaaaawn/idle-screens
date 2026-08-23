@@ -232,8 +232,12 @@ export interface TextRevealSpec {
    * by `mode`. Steerable paint — glide it to animate typing or deleting.
    */
   progress?: number;
-  /** Reveal granularity: per-grapheme (default), per-word, or per-line. */
-  mode?: 'typewriter' | 'word' | 'line';
+  /**
+   * Reveal granularity: per-grapheme (default), per-word, per-line, or
+   * `glyphFade` — each glyph fades in over a staggered alpha ramp instead of
+   * appearing whole (the caption look). Still a pure function of `progress`.
+   */
+  mode?: 'typewriter' | 'word' | 'line' | 'glyphFade';
   /**
    * Self-typing rate in graphemes/second from scene start (media time). The
    * effective progress is `min(progress, speed·t/total)` — so a steered
@@ -246,6 +250,12 @@ export interface TextRevealSpec {
    * Blink is a square wave of `t` — deterministic like everything else.
    */
   caret?: boolean | { blink?: number; color?: string };
+  /**
+   * `glyphFade` only: each glyph's fade window as a fraction of progress
+   * (0 exclusive to 1, default 0.15). Small = soft typewriter; large = a
+   * wave of overlapping fades. Ignored by the other modes.
+   */
+  fade?: number;
 }
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */

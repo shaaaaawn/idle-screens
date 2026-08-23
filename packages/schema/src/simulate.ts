@@ -809,8 +809,9 @@ export function graphemeClusters(text: string): string[] {
 
 export interface TextRevealInput {
   progress?: number;
-  mode?: 'typewriter' | 'word' | 'line';
+  mode?: 'typewriter' | 'word' | 'line' | 'glyphFade';
   speed?: number;
+  fade?: number;
 }
 
 export interface RevealState {
@@ -823,6 +824,12 @@ export interface RevealState {
   /** Caret anchor: line index and the visible prefix on that line. */
   caretLine: number;
   caretPrefix: string;
+  /**
+   * `glyphFade` mode only: per-line per-grapheme alpha (0..1), indexed
+   * parallel to `graphemeClusters(lines[i].text)`. Alphas only decrease in
+   * reading order, so a renderer may stop at the first zero.
+   */
+  glyphAlphas?: number[][];
 }
 
 /**
@@ -843,6 +850,22 @@ export function revealState(lines: TextBlockLine[], reveal: TextRevealInput, tMs
   const mode = reveal.mode ?? 'typewriter';
   let fullLines = 0;
   let partialText = '';
+
+  // glyphFade: glyph g starts fading at (g/total)·(1−fade) and ramps to
+  // opaque over a `fade`-wide window of progress, so every glyph is 0 at
+  // progress 0 and 1 at progress 1. The frontier below (shared with
+  // typewriter) still anchors the caret. Pure paint, like everything here.
+  let glyphAlphas: number[][] | undefined;
+  if (mode === 'glyphFade') {
+    const f = Math.min(1, Math.max(0.01, reveal.fade ?? 0.15));
+    let g = 0;
+    glyphAlphas = lineClusters.map((clusters) =>
+      clusters.map(() => {
+        const start = totalGraphemes > 0 ? (g++ / totalGraphemes) * (1 - f) : 0;
+        return Math.max(0, Math.min(1, (progress - start) / f));
+      }),
+    );
+  }
 
   if (mode === 'line') {
     fullLines = Math.round(progress * lines.length);
@@ -888,5 +911,5 @@ export function revealState(lines: TextBlockLine[], reveal: TextRevealInput, tMs
     caretPrefix = '';
   }
 
-  return { progress, fullLines, partialText, caretLine, caretPrefix };
+  return { progress, fullLines, partialText, caretLine, caretPrefix, glyphAlphas };
 }
