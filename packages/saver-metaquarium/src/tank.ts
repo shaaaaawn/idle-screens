@@ -9,6 +9,7 @@ import {
   type SaverContext,
   type SaverInstance,
   type SaverLayer,
+  type Rng,
 } from '@idle-screens/core';
 import {
   AdditiveBlending,
@@ -45,7 +46,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
-import { affordableLayers, environmentOf, type EnvironmentPreset } from './environments';
+import { affordableLayers, environmentOf, type EnvironmentPreset, type FloorKind } from './environments';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -199,6 +200,53 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
   return { mesh, material: mat };
 }
 
+/**
+ * Terrain: the floor as a silhouette instead of a disc.
+ *
+ * Generated from the mount seed — never fetched — so determinism holds, the
+ * offline hosts work, and it costs no network. Built ONCE at mount and never
+ * touched per frame, which is why the cost model prices it at zero: it is
+ * geometry, not animation.
+ *
+ * The three shapes are the original aquarium's silhouettes read back as
+ * height functions: dunes (long soft swells), ridges (sharp parallel ranges,
+ * its `spikey`), basin (a bowl that falls away from the camera — what makes
+ * an abyss feel deep).
+ */
+function buildTerrain(kind: FloorKind, rng: Rng, color: string): Mesh {
+  const R = 620;
+  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position!;
+  // Two seeded octaves — enough for a silhouette, cheap enough to build in a
+  // frame. Phases come from the rng so two tanks are never the same hill.
+  const a = rng.next() * Math.PI * 2;
+  const b = rng.next() * Math.PI * 2;
+  const c = rng.next() * Math.PI * 2;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const d = Math.sqrt(x * x + z * z) / R;
+    let h = 0;
+    if (kind === 'dunes') {
+      h = Math.sin(x * 0.011 + a) * 26 + Math.cos(z * 0.009 + b) * 20;
+    } else if (kind === 'ridges') {
+      h = Math.abs(Math.sin(x * 0.02 + a)) * 54 - 18 + Math.sin(z * 0.006 + c) * 10;
+    } else if (kind === 'basin') {
+      h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
+    }
+    // Feather the rim to nothing so the terrain never shows a cut edge.
+    pos.setY(i, h * Math.max(0, 1 - d * d));
+  }
+  geo.computeVertexNormals();
+  geo.userData.mqOwned = true;
+  const mat = new MeshBasicMaterial({ color: new Color(color) });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // Eviction deliberately does NOT dispose the evicted template's GPU
@@ -283,6 +331,8 @@ class TankInstance implements SaverInstance {
   private room: Object3D | null = null;
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
+  private terrainMat: MeshBasicMaterial | null = null;
+  private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
   /** Desired per-slot template URLs — the single source of truth for the
@@ -369,6 +419,7 @@ class TankInstance implements SaverInstance {
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
     this.floorMat = floor.material;
+    this.floorDisc = floor;
 
     // Plankton motes: seeded base positions, closed-form drift in the vertex
     // shader (one uTime uniform — zero CPU per frame, pure in t). Draw range
@@ -464,16 +515,27 @@ class TankInstance implements SaverInstance {
       disposeOwned(this.room);
       this.room = null;
       this.waterMat = null;
+      this.terrainMat = null;
     }
     const preset: EnvironmentPreset = environmentOf(envName);
     const can = affordableLayers(this.quality.envBudget, preset);
     // The environment decides WHETHER there is a ceiling; waterY (-1 = auto)
     // only moves it. Turning it off is what `void` and `abyss` are for.
-    if (!can.water && !can.rays) {
-      this.ctxSaver.host.dataset.mqEnv = preset.name;
-      return;
-    }
+
     const group = new Group();
+    // Terrain replaces the disc rather than sitting on it, so `flat` stays
+    // byte-for-byte the original floor and every published scene is safe.
+    const kind: FloorKind = floorOverride === 'auto'
+      ? preset.floor
+      : (floorOverride as FloorKind);
+    if (kind !== 'flat') {
+      const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const terrain = buildTerrain(kind, this.ctxSaver.rng.fork(0x7e88), floorHex);
+      terrain.position.y = -2;
+      group.add(terrain);
+      this.terrainMat = terrain.material as MeshBasicMaterial;
+    }
+    this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
       const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
@@ -792,9 +854,11 @@ class TankInstance implements SaverInstance {
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
     fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    this.floorMat.color.set(
-      String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33'),
-    );
+    const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+    this.floorMat.color.set(floorHex);
+    // Terrain follows floorColor as well — the environment supplies the SHAPE,
+    // the author keeps the palette.
+    this.terrainMat?.color.set(floorHex);
     const density = this.num('moteDensity');
     const active = Math.round(density * this.quality.moteCap);
     this.motes.visible = active > 0;
