@@ -33,6 +33,7 @@ import {
   ShaderMaterial,
   DoubleSide,
   PlaneGeometry,
+  CylinderGeometry,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -247,6 +248,61 @@ function buildTerrain(kind: FloorKind, rng: Rng, color: string): Mesh {
   return mesh;
 }
 
+/**
+ * Light shafts: a few additive cones that drift closed-form.
+ *
+ * `y` may be NEGATIVE. The original's raysLightY swings +/-2000, and that sign
+ * is the whole difference between a sunlit surface and an abyssal glow coming
+ * up out of the dark — one of the few knobs in that settings file that changes
+ * what a place MEANS rather than how it looks.
+ *
+ * Rays are the only per-frame work in the room, which is why they are the
+ * layer the cost model drops first on a weak device.
+ */
+function buildRays(count: number, color: string, y: number, strength: number, rng: Rng): {
+  group: Group; material: ShaderMaterial;
+} {
+  const group = new Group();
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: DoubleSide,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    vertexShader: `
+      varying float vY;
+      void main() {
+        vY = uv.y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+      varying float vY;
+      void main() {
+        // Fade along the shaft and breathe slowly, so it reads as light in
+        // suspended matter rather than a solid cone.
+        float fade = smoothstep(0.0, 1.0, vY);
+        float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.16 * breathe);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const geo = new CylinderGeometry(6, 92, Math.abs(y) * 0.85, 10, 1, true);
+  geo.userData.mqOwned = true;
+  for (let i = 0; i < count; i++) {
+    const m = new Mesh(geo, mat);
+    const a = rng.next() * Math.PI * 2;
+    const r = 60 + rng.next() * 190;
+    m.position.set(Math.cos(a) * r, y * 0.45, Math.sin(a) * r);
+    // Shafts from below are inverted so the wide end still faces the light.
+    if (y < 0) m.rotation.z = Math.PI;
+    m.rotation.y = rng.next() * Math.PI;
+    m.frustumCulled = false;
+    group.add(m);
+  }
+  return { group, material: mat };
+}
+
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // Eviction deliberately does NOT dispose the evicted template's GPU
@@ -332,6 +388,7 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  private rayMat: ShaderMaterial | null = null;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
@@ -516,6 +573,7 @@ class TankInstance implements SaverInstance {
       this.room = null;
       this.waterMat = null;
       this.terrainMat = null;
+      this.rayMat = null;
     }
     const preset: EnvironmentPreset = environmentOf(envName);
     const can = affordableLayers(this.quality.envBudget, preset);
@@ -541,6 +599,17 @@ class TankInstance implements SaverInstance {
       const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
       group.add(mesh);
       this.waterMat = material;
+    }
+    if (can.rays && preset.rays) {
+      // -1 = follow the environment; 0 is a real author choice for "off".
+      const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
+      if (strength > 0) {
+        const { group: rg, material } = buildRays(
+          5, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+        );
+        group.add(rg);
+        this.rayMat = material;
+      }
     }
     this.room = group;
     this.scene.add(group);
@@ -875,6 +944,7 @@ class TankInstance implements SaverInstance {
     // everything else so it stays pure in t.
     this.buildRoom();
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
+    if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
