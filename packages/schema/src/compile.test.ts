@@ -22,6 +22,7 @@ function stub2dContext(): CanvasRenderingContext2D {
   return {
     fillRect: vi.fn(),
     fillText: vi.fn(),
+    measureText: vi.fn((s: string) => ({ width: s.length * 8 })),
     beginPath: vi.fn(),
     arc: vi.fn(),
     fill: vi.fn(),
@@ -426,6 +427,72 @@ describe('font size parsing is not a denial of service', () => {
       const inst = mountSync(compileSaver(spec));
       expect(() => inst.renderFrame?.(0, 1), `font "${font}" should compile`).not.toThrow();
       inst.dispose();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textBlock glyphFade drawing (G6)
+// ---------------------------------------------------------------------------
+
+describe('textBlock glyphFade drawing', () => {
+  function glyphFadeSpec(progress: number, reveal: Record<string, unknown> = {}): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'gf',
+      label: 'Glyph fade',
+      layers: [
+        {
+          count: 1,
+          sprite: {
+            kind: 'textBlock',
+            text: 'Hi there',
+            maxWidth: 0.9,
+            fontSize: 0.05,
+            reveal: { mode: 'glyphFade', progress, ...reveal },
+          },
+          motion: { type: 'static' },
+          position: { x: 0.05, y: 0.05 },
+        },
+      ],
+    } as SaverSpec;
+  }
+
+  /** Render one frame and record every fillText with the alpha it drew at. */
+  function renderAndCollect(spec: SaverSpec): Array<{ text: string; x: number; alpha: number }> {
+    const calls: Array<{ text: string; x: number; alpha: number }> = [];
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string, x: number) => {
+      calls.push({ text, x, alpha: (mockCtx as { globalAlpha: number }).globalAlpha });
+    });
+    const inst = mountSync(compileSaver(spec));
+    inst.renderFrame!(0, 42);
+    inst.dispose();
+    return calls;
+  }
+
+  it('draws nothing at progress 0 and every glyph opaque at progress 1', () => {
+    expect(renderAndCollect(glyphFadeSpec(0)).length).toBe(0);
+    const full = renderAndCollect(glyphFadeSpec(1));
+    expect(full.map((c) => c.text).join('')).toBe('Hi there');
+    expect(full.every((c) => c.alpha === 1)).toBe(true);
+  });
+
+  it('draws a partial reveal glyph-by-glyph with falling alpha', () => {
+    const calls = renderAndCollect(glyphFadeSpec(0.3, { fade: 0.5 }));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.length).toBeLessThan(8); // 'Hi there' = 8 graphemes
+    expect('Hi there'.startsWith(calls.map((c) => c.text).join(''))).toBe(true);
+    for (let i = 1; i < calls.length; i++) {
+      expect(calls[i]!.alpha).toBeLessThanOrEqual(calls[i - 1]!.alpha);
+    }
+  });
+
+  it('glyph positions come from prefix advances and never shift as alpha ramps', () => {
+    const some = renderAndCollect(glyphFadeSpec(0.4, { fade: 0.5 }));
+    const more = renderAndCollect(glyphFadeSpec(0.9, { fade: 0.5 }));
+    for (let i = 0; i < some.length; i++) {
+      expect(more[i]!.text).toBe(some[i]!.text);
+      expect(more[i]!.x).toBe(some[i]!.x);
     }
   });
 });

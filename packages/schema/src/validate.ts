@@ -22,7 +22,7 @@ const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'color
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
-const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret']);
+const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
 const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
@@ -443,8 +443,11 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         if (rv.progress !== undefined && (!isNum(rv.progress) || rv.progress < 0 || rv.progress > 1)) {
           err(`${path}.reveal.progress`, 'must be a number between 0 and 1');
         }
-        if (rv.mode !== undefined && !['typewriter', 'word', 'line'].includes(rv.mode as string)) {
-          err(`${path}.reveal.mode`, "must be 'typewriter' | 'word' | 'line'");
+        if (rv.mode !== undefined && !['typewriter', 'word', 'line', 'glyphFade'].includes(rv.mode as string)) {
+          err(`${path}.reveal.mode`, "must be 'typewriter' | 'word' | 'line' | 'glyphFade'");
+        }
+        if (rv.fade !== undefined && (!isNum(rv.fade) || rv.fade <= 0 || rv.fade > 1)) {
+          err(`${path}.reveal.fade`, 'must be between 0 (exclusive) and 1 (fraction of progress)');
         }
         if (rv.speed !== undefined && (!isNum(rv.speed) || rv.speed < 0 || rv.speed > LIMITS.maxRevealSpeed)) {
           err(`${path}.reveal.speed`, `must be between 0 and ${LIMITS.maxRevealSpeed} (graphemes/sec)`);
