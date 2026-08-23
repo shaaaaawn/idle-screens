@@ -1,17 +1,38 @@
 #!/bin/bash
 # Omarchy-compatible launcher — drop-in replacement for omarchy-launch-screensaver.
-# Respects screensaver-off toggle; exits if already running or hyprlock is up.
+# Respects the screensaver-off toggle; exits if already running or hyprlock is up.
+#
+# Works with both Omarchy generations:
+#   • Quickshell idle service (current) — reached via the
+#     ~/.local/bin/omarchy-launch-screensaver shim this repo also installs.
+#   • hypridle (older)                  — reached via a patched hypridle.conf.
+
+# Omarchy's Quickshell idle service tracks the screensaver by window class and
+# cancels the idle cycle — so the screen never locks — when it cannot see a
+# window of this class. Harmless on older, hypridle-based installs.
+app_id="org.omarchy.screensaver"
 
 if ! command -v idle-screens-wayland &>/dev/null; then
-  notify-send -u low "idle-screens" "idle-screens-wayland not installed"
+  notify-send -u low "idle-screens" "idle-screens-wayland not installed" 2>/dev/null
   exit 1
 fi
 
-pgrep -x idle-screens-wayland >/dev/null && exit 0
+# `force` is Omarchy's "start even if the toggle is off" argument. It is not an
+# idle-screens flag, so consume it here rather than passing it through to clap.
+force=""
+if [[ ${1:-} == "force" ]]; then
+  force=1
+  shift
+fi
+
+# NB: the kernel truncates a process name to 15 chars ("idle-screens-wa"), so
+# `pgrep -x idle-screens-wayland` silently NEVER matches. Match the command
+# line instead. The [i] bracket stops this script from matching itself.
+pgrep -f '[i]dle-screens-wayland' >/dev/null && exit 0
 pidof hyprlock >/dev/null && exit 0
 
-if command -v omarchy-toggle-enabled &>/dev/null; then
-  if omarchy-toggle-enabled screensaver-off && [[ ${1:-} != "force" ]]; then
+if [[ -z $force ]] && command -v omarchy-toggle-enabled &>/dev/null; then
+  if omarchy-toggle-enabled screensaver-off; then
     exit 1
   fi
 fi
@@ -19,4 +40,8 @@ fi
 # Silently quit Walker on overlay (matches omarchy-launch-screensaver).
 command -v walker &>/dev/null && walker -q 2>/dev/null || true
 
-exec idle-screens-wayland "$@"
+# An explicit --app-id from the caller wins over our Omarchy default.
+if [[ " $* " == *" --app-id "* ]]; then
+  exec idle-screens-wayland "$@"
+fi
+exec idle-screens-wayland --app-id "$app_id" "$@"

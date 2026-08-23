@@ -6,5 +6,5 @@
 hypridle.listener({
   timeout = 150,
   on_timeout = "pidof hyprlock || idle-screens-wayland",
-  on_resume = "pkill -TERM -x idle-screens-wayland",
+  on_resume = "pkill -TERM -f '[i]dle-screens-wayland'",
 })

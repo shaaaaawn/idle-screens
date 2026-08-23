@@ -1,0 +1,15 @@
+#!/bin/bash
+# Shim for current Omarchy, whose Quickshell idle service launches the
+# screensaver by running `omarchy-launch-screensaver` through `bash -lc`.
+# There is no config key for "which screensaver" and the packaged copy in
+# /usr/share/omarchy/bin/ must not be edited (omarchy update overwrites it),
+# so this shadows the command on PATH instead: a login shell puts
+# ~/.local/bin ahead of /usr/share/omarchy/bin.
+#
+# Installed to ~/.local/bin/omarchy-launch-screensaver by install-omarchy.sh.
+# Delete that file to fall back to Omarchy's stock TTE screensaver.
+#
+# Channel/mode/brightness come from ~/.config/idle-screens/config.toml — this
+# passes no overrides so that file stays the single source of truth.
+
+exec omarchy-idle-screens "$@"

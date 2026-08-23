@@ -25,6 +25,6 @@ mkdir -p "$autostart_dir"
 cp packaging/omarchy/idle-screens-tray.desktop "$autostart_dir/"
 
 echo "Done. Optional next steps:"
-echo "  • Omarchy hypridle: ./packaging/omarchy/install-hypridle.sh"
+echo "  • Omarchy (either version): ./packaging/omarchy/install-omarchy.sh"
 echo "  • Tray (if not autostarted): idle-screens-wayland tray"
 echo "  • Test overlay: idle-screens-wayland"

@@ -49,6 +49,14 @@ pub struct Cli {
     #[arg(long)]
     pub web_root: Option<std::path::PathBuf>,
 
+    /// Wayland app-id / window class to report (default:
+    /// "com.idlescreens.wayland"). Set this when a desktop's idle service
+    /// tracks the screensaver by window class — Omarchy's Quickshell idle
+    /// service watches for "org.omarchy.screensaver" and cancels the idle
+    /// cycle (so the screen never locks) when it sees no such window.
+    #[arg(long)]
+    pub app_id: Option<String>,
+
     /// Reserved: not yet implemented (currently a no-op, only logs a warning).
     /// Would hold a Wayland idle inhibitor while showing — WARNING: on
     /// Hyprland that pauses ALL hypridle listeners (lock, DPMS, suspend).
@@ -102,6 +110,10 @@ impl Cli {
         if let Some(v) = &self.web_root {
             args.push("--web-root".into());
             args.push(v.clone().into_os_string());
+        }
+        if let Some(v) = &self.app_id {
+            args.push("--app-id".into());
+            args.push(v.into());
         }
         if let Some(v) = &self.config {
             args.push("--config".into());
