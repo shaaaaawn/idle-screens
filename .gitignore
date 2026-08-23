@@ -25,6 +25,12 @@ apps/mac/.secrets/
 # Never commit npm auth
 .npmrc
 
+# Local-link marker from idle-mono/scripts/link-schema.sh. The live file
+# belongs in idle-server/node_modules/@idle-screens/schema/ (already ignored
+# via node_modules/). Ignore the name anywhere so a stray under packages/
+# never shows up as untracked.
+.linked-from-local
+
 
 .mcp.json
 .env
