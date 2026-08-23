@@ -4,11 +4,11 @@
 # Omarchy ships two different idle mechanisms depending on version, and the
 # wiring differs for each. Rather than guess, install whichever apply:
 #
-#   Quickshell idle service (current)  -> shadow `omarchy-launch-screensaver`
-#       with a shim in ~/.local/bin. The service runs the command through
-#       `bash -lc`, and a login shell puts ~/.local/bin ahead of
-#       /usr/share/omarchy/bin, so the shim wins. The packaged copy in
-#       /usr/share/omarchy/ is never touched (omarchy update would revert it).
+#   Quickshell idle service (current)  -> clone the first-party omarchy.idle
+#       plugin and point its screensaver command at our launcher. PATH
+#       shadowing does NOT work here: Omarchy appends ~/.local/bin "so system
+#       binaries keep precedence", so the packaged omarchy-launch-screensaver
+#       always wins. See install-omarchy-plugin.sh for the trade-off.
 #
 #   hypridle (older)                   -> patch ~/.config/hypr/hypridle.conf.
 #
@@ -24,12 +24,10 @@ fi
 
 ./install.sh
 
-local_bin="$HOME/.local/bin"
-shim="$local_bin/omarchy-launch-screensaver"
 quickshell=0
 hypridle=0
 
-if [ -d /usr/share/omarchy/shell ] || command -v omarchy-shell &>/dev/null; then
+if command -v omarchy-plugin-clone &>/dev/null; then
   quickshell=1
 fi
 if [ -f "$HOME/.config/hypr/hypridle.conf" ]; then
@@ -37,20 +35,7 @@ if [ -f "$HOME/.config/hypr/hypridle.conf" ]; then
 fi
 
 if [ "$quickshell" = 1 ]; then
-  mkdir -p "$local_bin"
-  install -Dm755 packaging/omarchy/omarchy-launch-screensaver "$shim"
-  echo "Installed screensaver shim -> $shim"
-
-  # The shim only works if it actually wins PATH lookup in a login shell,
-  # which is how the idle service invokes it. Verify rather than assume.
-  resolved="$(bash -lc 'command -v omarchy-launch-screensaver' 2>/dev/null || true)"
-  if [ "$resolved" != "$shim" ]; then
-    echo ""
-    echo "WARNING: in a login shell 'omarchy-launch-screensaver' resolves to:"
-    echo "    ${resolved:-<not found>}"
-    echo "  ...not the shim. Omarchy will keep using its stock screensaver."
-    echo "  Put $local_bin ahead of /usr/share/omarchy/bin on PATH, then re-run."
-  fi
+  ./packaging/omarchy/install-omarchy-plugin.sh
 fi
 
 if [ "$hypridle" = 1 ]; then
@@ -65,8 +50,8 @@ fi
 
 echo ""
 echo "Omarchy integration complete."
-[ "$quickshell" = 1 ] && echo "  • Quickshell idle service launches idle-screens via the shim"
+[ "$quickshell" = 1 ] && echo "  • cloned idle plugin launches idle-screens"
 [ "$hypridle" = 1 ] && echo "  • hypridle listener launches omarchy-idle-screens"
 echo "  • tray autostarts on login (disable in ~/.config/autostart/)"
 echo "  • config: ~/.config/idle-screens/config.toml  (mode / channel live here)"
-echo "  • revert: rm -f $shim"
+echo "  • revert: omarchy plugin remove <user>.idle && omarchy plugin enable omarchy.idle"

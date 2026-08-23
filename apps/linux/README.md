@@ -139,22 +139,37 @@ session.
 
 | Omarchy | Idle mechanism | How idle-screens hooks in |
 | --- | --- | --- |
-| Current | Quickshell idle service (`omarchy-shell`) | Shim at `~/.local/bin/omarchy-launch-screensaver` |
+| 4.x (current) | Quickshell idle service (`omarchy-shell`) | Cloned `omarchy.idle` plugin |
 | Older | `hypridle` | Patched `~/.config/hypr/hypridle.conf` |
 
-**Current Omarchy.** The idle service runs `omarchy-launch-screensaver`, with
-no config key for *which* screensaver, and the packaged copy under
-`/usr/share/omarchy/` must not be edited (`omarchy update` reverts it). So the
-installer shadows the command on `PATH`: the service invokes it through
-`bash -lc`, and a login shell puts `~/.local/bin` ahead of
-`/usr/share/omarchy/bin`. The installer verifies that resolution and warns if
-your `PATH` defeats it.
+**Current Omarchy.** The idle service runs `omarchy-launch-screensaver` and
+offers no config key for *which* screensaver to run.
 
-That idle service also tracks the screensaver by **window class**, and cancels
-the whole idle cycle — so the screen never locks — if it cannot see a window of
-class `org.omarchy.screensaver`. `omarchy-idle-screens` therefore launches with
+PATH shadowing does **not** work here, despite looking like the obvious fix.
+Omarchy's `default/bash/env-bootstrap` deliberately *appends* `~/.local/bin`
+— "appended so system binaries keep precedence" — so a shim there can never
+beat the packaged `omarchy-launch-screensaver`. Editing the packaged plugin is
+also out, since `omarchy update` reverts it.
+
+The supported override is `omarchy plugin clone`, which copies a first-party
+plugin into `~/.config/omarchy/plugins/<user>.<id>` and switches the shell to
+it. `install-omarchy-plugin.sh` clones `omarchy.idle` and repoints its
+screensaver command at `omarchy-idle-screens`.
+
+> **Trade-off:** the clone is a fork. It stops receiving upstream fixes to the
+> idle service until you re-clone it. Revert with
+> `omarchy plugin remove <user>.idle && omarchy plugin enable omarchy.idle`.
+
+That service also tracks the screensaver by **window class**, and cancels the
+idle cycle — so the screen never locks — if it cannot see a window of class
+`org.omarchy.screensaver`. `omarchy-idle-screens` therefore launches with
 `--app-id org.omarchy.screensaver`. Set `app_id` in `config.toml` (or pass
 `--app-id`) to override.
+
+`omarchy-idle-screens` also prefers the `idle-screens-wayland` sitting next to
+it over whatever `PATH` resolves, for the same precedence reason: a stale
+`/usr/bin` copy would otherwise shadow a user-prefix install, and an older
+binary rejects `--app-id` outright, so the saver would never start.
 
 **Older Omarchy.** `install-hypridle.sh` points the screensaver listener at
 `omarchy-idle-screens` and adds an `on-resume` kill. Manual snippet:
@@ -163,8 +178,6 @@ class `org.omarchy.screensaver`. `omarchy-idle-screens` therefore launches with
 Both paths also install the tray autostart entry and seed
 `~/.config/idle-screens/config.toml`, which is the single source of truth for
 mode/channel — the launcher passes no overrides.
-
-Revert at any time with `rm -f ~/.local/bin/omarchy-launch-screensaver`.
 
 > **Dismissal commands:** use `pkill -f '[i]dle-screens-wayland'`, not
 > `pkill -x idle-screens-wayland`. The kernel truncates a process name to 15
