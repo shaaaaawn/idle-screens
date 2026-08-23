@@ -9,6 +9,7 @@ import {
   type SaverContext,
   type SaverInstance,
   type SaverLayer,
+  type Rng,
 } from '@idle-screens/core';
 import {
   AdditiveBlending,
@@ -30,6 +31,9 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  DoubleSide,
+  PlaneGeometry,
+  CylinderGeometry,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -43,6 +47,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
+import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -144,6 +149,160 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.delete(k);
 }
 
+/**
+ * The water ceiling: one translucent plane above the fish, rippling in the
+ * vertex shader off a single `uTime` uniform.
+ *
+ * Closed-form on purpose — the displacement is `sin(ωt + φ)` of the vertex's
+ * own position, so the surface is a pure function of t like everything else
+ * in this saver, and scrubbing to any frame reproduces it exactly. One draw
+ * call, no per-frame CPU work.
+ */
+function buildWaterCeiling(y: number, color: string, opacity: number): {
+  mesh: Mesh; material: ShaderMaterial;
+} {
+  const geo = new PlaneGeometry(1400, 1400, 48, 48);
+  geo.rotateX(-Math.PI / 2);
+  geo.userData.mqOwned = true;
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new Color(color) },
+      uOpacity: { value: opacity },
+    },
+    vertexShader: `
+      uniform float uTime;
+      varying float vRipple;
+      void main() {
+        vec3 p = position;
+        float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
+        p.y += r * 6.0;
+        vRipple = r;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vRipple;
+      void main() {
+        // Caustic-ish banding: the ripple itself modulates brightness, so the
+        // surface reads as moving water rather than a tinted sheet of glass.
+        float band = 0.65 + 0.35 * vRipple;
+        gl_FragColor = vec4(uColor * band, uOpacity * band);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.position.y = y;
+  mesh.frustumCulled = false;
+  return { mesh, material: mat };
+}
+
+/**
+ * Terrain: the floor as a silhouette instead of a disc.
+ *
+ * Generated from the mount seed — never fetched — so determinism holds, the
+ * offline hosts work, and it costs no network. Built ONCE at mount and never
+ * touched per frame, which is why the cost model prices it at zero: it is
+ * geometry, not animation.
+ *
+ * The three shapes are the original aquarium's silhouettes read back as
+ * height functions: dunes (long soft swells), ridges (sharp parallel ranges,
+ * its `spikey`), basin (a bowl that falls away from the camera — what makes
+ * an abyss feel deep).
+ */
+function buildTerrain(kind: FloorKind, rng: Rng, color: string): Mesh {
+  const R = 620;
+  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position!;
+  // Two seeded octaves — enough for a silhouette, cheap enough to build in a
+  // frame. Phases come from the rng so two tanks are never the same hill.
+  const a = rng.next() * Math.PI * 2;
+  const b = rng.next() * Math.PI * 2;
+  const c = rng.next() * Math.PI * 2;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const d = Math.sqrt(x * x + z * z) / R;
+    let h = 0;
+    if (kind === 'dunes') {
+      h = Math.sin(x * 0.011 + a) * 26 + Math.cos(z * 0.009 + b) * 20;
+    } else if (kind === 'ridges') {
+      h = Math.abs(Math.sin(x * 0.02 + a)) * 54 - 18 + Math.sin(z * 0.006 + c) * 10;
+    } else if (kind === 'basin') {
+      h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
+    }
+    // Feather the rim to nothing so the terrain never shows a cut edge.
+    pos.setY(i, h * Math.max(0, 1 - d * d));
+  }
+  geo.computeVertexNormals();
+  geo.userData.mqOwned = true;
+  const mat = new MeshBasicMaterial({ color: new Color(color) });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/**
+ * Light shafts: a few additive cones that drift closed-form.
+ *
+ * `y` may be NEGATIVE. The original's raysLightY swings +/-2000, and that sign
+ * is the whole difference between a sunlit surface and an abyssal glow coming
+ * up out of the dark — one of the few knobs in that settings file that changes
+ * what a place MEANS rather than how it looks.
+ *
+ * Rays are the only per-frame work in the room, which is why they are the
+ * layer the cost model drops first on a weak device.
+ */
+function buildRays(count: number, color: string, y: number, strength: number, rng: Rng): {
+  group: Group; material: ShaderMaterial;
+} {
+  const group = new Group();
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: DoubleSide,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    vertexShader: `
+      varying float vY;
+      void main() {
+        vY = uv.y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+      varying float vY;
+      void main() {
+        // Fade along the shaft and breathe slowly, so it reads as light in
+        // suspended matter rather than a solid cone.
+        float fade = smoothstep(0.0, 1.0, vY);
+        float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.16 * breathe);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const geo = new CylinderGeometry(6, 92, Math.abs(y) * 0.85, 10, 1, true);
+  geo.userData.mqOwned = true;
+  for (let i = 0; i < count; i++) {
+    const m = new Mesh(geo, mat);
+    const a = rng.next() * Math.PI * 2;
+    const r = 60 + rng.next() * 190;
+    m.position.set(Math.cos(a) * r, y * 0.45, Math.sin(a) * r);
+    // Shafts from below are inverted so the wide end still faces the light.
+    if (y < 0) m.rotation.z = Math.PI;
+    m.rotation.y = rng.next() * Math.PI;
+    m.frustumCulled = false;
+    group.add(m);
+  }
+  return { group, material: mat };
+}
+
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // Eviction deliberately does NOT dispose the evicted template's GPU
@@ -223,6 +382,17 @@ class TankInstance implements SaverInstance {
   private readonly floorMat: MeshBasicMaterial;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
+  /** The room. Rebuilt only when the environment inputs change — never per
+   *  frame — so a static tank costs nothing beyond its draw calls. */
+  private room: Object3D | null = null;
+  private roomKey = '';
+  private waterMat: ShaderMaterial | null = null;
+  private terrainMat: MeshBasicMaterial | null = null;
+  private rayMat: ShaderMaterial | null = null;
+  private ceiling: Mesh | null = null;
+  private presetWaterY = 0;
+  private presetRayStrength = 0;
+  private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
   /** Desired per-slot template URLs — the single source of truth for the
@@ -309,6 +479,7 @@ class TankInstance implements SaverInstance {
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
     this.floorMat = floor.material;
+    this.floorDisc = floor;
 
     // Plankton motes: seeded base positions, closed-form drift in the vertex
     // shader (one uTime uniform — zero CPU per frame, pure in t). Draw range
@@ -382,6 +553,95 @@ class TankInstance implements SaverInstance {
   private str(key: string): string {
     const v = this.params[key];
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
+  }
+
+  /** Cheap per-frame room params: move the ceiling, set the shaft strength.
+   *  No allocation, no teardown — this is what the structure key protects. */
+  private applyRoomParams(waterY: number, rayStrength: number): void {
+    if (this.ceiling) this.ceiling.position.y = waterY >= 0 ? waterY : this.presetWaterY;
+    if (this.rayMat) {
+      const s = rayStrength >= 0 ? rayStrength : this.presetRayStrength;
+      this.rayMat.uniforms.uStrength!.value = s;
+      this.rayMat.visible = s > 0;
+    }
+  }
+
+  /**
+   * Build (or rebuild) the room for the current environment params.
+   *
+   * Keyed like reconcile(): one string compare per frame, real work only when
+   * the author actually changes something.
+   */
+  private buildRoom(): void {
+    const envName = this.str('environment');
+    const floorOverride = this.str('floorKind');
+    const waterY = this.num('waterY');
+    const rayStrength = this.num('rayStrength');
+    // STRUCTURE key only. waterY and rayStrength move a mesh and set a
+    // uniform — rebuilding a 5,000-vertex terrain because someone nudged the
+    // ceiling would throw away the whole point of building it once.
+    const key = `${envName}|${floorOverride}|${this.quality.envBudget}`;
+    if (key === this.roomKey) {
+      this.applyRoomParams(waterY, rayStrength);
+      return;
+    }
+    this.roomKey = key;
+
+    if (this.room) {
+      this.scene.remove(this.room);
+      disposeOwned(this.room);
+      this.room = null;
+      this.waterMat = null;
+      this.terrainMat = null;
+      this.rayMat = null;
+      this.ceiling = null;
+    }
+    const preset: EnvironmentPreset = environmentOf(envName);
+    const can = affordableLayers(this.quality.envBudget, preset);
+    // The environment decides WHETHER there is a ceiling; waterY (-1 = auto)
+    // only moves it. Turning it off is what `void` and `abyss` are for.
+
+    const group = new Group();
+    // Terrain replaces the disc rather than sitting on it, so `flat` stays
+    // byte-for-byte the original floor and every published scene is safe.
+    // The classic steering lane validates nothing, so an unknown floorKind
+    // must fall back rather than cast — otherwise a typo hides the disc AND
+    // builds a zero-height plane, i.e. an invisible floor.
+    const kind: FloorKind = FLOOR_KINDS.includes(floorOverride as FloorKind)
+      ? (floorOverride as FloorKind)
+      : preset.floor;
+    if (kind !== 'flat') {
+      const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const terrain = buildTerrain(kind, this.ctxSaver.rng.fork(0x7e88), floorHex);
+      terrain.position.y = -2;
+      group.add(terrain);
+      this.terrainMat = terrain.material as MeshBasicMaterial;
+    }
+    this.floorDisc.visible = kind === 'flat';
+    if (can.water && preset.water) {
+      const y = waterY >= 0 ? waterY : preset.water.y;
+      const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
+      group.add(mesh);
+      this.waterMat = material;
+      this.ceiling = mesh;
+      this.presetWaterY = preset.water.y;
+    }
+    if (can.rayCount > 0 && preset.rays) {
+      // -1 = follow the environment; 0 is a real author choice for "off".
+      const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
+      if (strength > 0) {
+        const { group: rg, material } = buildRays(
+          can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+        );
+        group.add(rg);
+        this.rayMat = material;
+        this.presetRayStrength = preset.rays.strength;
+      }
+    }
+    this.room = group;
+    this.scene.add(group);
+    this.applyRoomParams(waterY, rayStrength);
+    this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
   /** Ceiling the pool may ever reach on this device. */
@@ -691,9 +951,11 @@ class TankInstance implements SaverInstance {
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
     fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    this.floorMat.color.set(
-      String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33'),
-    );
+    const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+    this.floorMat.color.set(floorHex);
+    // Terrain follows floorColor as well — the environment supplies the SHAPE,
+    // the author keeps the palette.
+    this.terrainMat?.color.set(floorHex);
     const density = this.num('moteDensity');
     const active = Math.round(density * this.quality.moteCap);
     this.motes.visible = active > 0;
@@ -705,6 +967,12 @@ class TankInstance implements SaverInstance {
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
+
+    // The room: rebuilt only on change, then driven by the same clock as
+    // everything else so it stays pure in t.
+    this.buildRoom();
+    if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
+    if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
@@ -880,6 +1148,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
+    delete this.ctxSaver.host.dataset.mqEnv;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
