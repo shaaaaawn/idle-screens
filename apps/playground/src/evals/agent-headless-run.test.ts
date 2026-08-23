@@ -21,8 +21,8 @@
  * The key is read from the process environment only — never written into any
  * artifact (trajectories record model names, never credentials).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runAgentBatch, trainingJsonl, sftJsonl, repairJsonl } from './agent-run';
@@ -118,7 +118,9 @@ describe('headless style-authoring-v1 agent run', () => {
       });
       const artistId = ARTIST_ID || (targetScreens[0]?.artistId ?? 'unknown');
 
-      const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13); // YYYYMMDDTHHMM
+      // Seconds, not minutes: two same-model/same-artist runs inside one
+      // minute must not overwrite each other's runId directory.
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15); // YYYYMMDDTHHMMSS
       const shortModel = MODEL.split('/').pop() ?? MODEL;
       const runId = `run-${stamp}-${shortModel}-${artistId}`;
 
@@ -178,7 +180,14 @@ describe('headless style-authoring-v1 agent run', () => {
       };
 
       // <mono>/datasets/evals/<evalId>/<runId>/ — five levels up from src/evals.
-      const outDir = join(__dirname, '../../../../../datasets/evals', run.evalId, runId);
+      // Fail loudly when the mono isn't there: mkdirSync(recursive) would
+      // happily create a stray datasets/ tree outside any repo and the run
+      // would "succeed" while writing artifacts where nothing finds them.
+      const monoRoot = resolve(__dirname, '../../../../..');
+      if (!existsSync(join(monoRoot, 'idle-server'))) {
+        throw new Error(`idle-mono root not found at ${monoRoot} — run from a mono checkout`);
+      }
+      const outDir = join(monoRoot, 'datasets/evals', run.evalId, runId);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(join(outDir, 'run.json'), `${JSON.stringify(run, null, 2)}\n`);
       writeFileSync(join(outDir, 'training.jsonl'), `${trainingJsonl(run)}\n`);
