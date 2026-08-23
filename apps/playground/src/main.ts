@@ -101,7 +101,10 @@ const SAVER_GROUPS: SaverGroup[] = [
 const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-school',
-    label: 'Metaquarium (School)',
+    // "Population", not "School": this variant predates swimStyle and only
+    // means six fish. `metaquarium-swim-school` is the formation one, and two
+    // entries a case-change apart was a trap for whoever read the list next.
+    label: 'Metaquarium (6 fish)',
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
@@ -137,6 +140,26 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       id: `metaquarium-env-${env}`,
       label: `Metaquarium (${env})`,
       params: { environment: env, fishCount: 4, fishUrl: LOCAL_FISH_URL, moteDensity: 0.4, cameraElevation: 18 },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
+  // Swim styles, one variant each: ?saver=metaquarium-swim-<style>.
+  // Variance is turned up so the uniqueness dial is visible at a glance.
+  ...(['school', 'drift', 'hover', 'patrol', 'bottom', 'surface'] as const).map((sw) =>
+    createMetaquarium({
+      id: `metaquarium-swim-${sw}`,
+      label: `Metaquarium (${sw})`,
+      params: {
+        swimStyle: sw, swimVariance: 0.6, fishCount: 8, fishUrl: LOCAL_FISH_URL,
+        // The breed models carry no clip, so without this they glide rigid.
+        // It is opt-in by default; the studio is where you see it on.
+        bodyWiggle: 0.35,
+        environment: 'reef',
+        // The formation is ~70 units across once spacing is a body length;
+        // at 170 you are inside it and see three fish, not a shoal.
+        cameraDistance: sw === 'school' ? 250 : 170,
+        cameraElevation: 16,
+      },
       catalog: LOCAL_CATALOG,
     }),
   ),
