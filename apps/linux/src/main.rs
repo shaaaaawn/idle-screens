@@ -68,7 +68,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let app = gtk::Application::new(
-        Some("com.idlescreens.wayland"),
+        Some(settings.app_id.as_str()),
         gtk::gio::ApplicationFlags::NON_UNIQUE,
     );
 

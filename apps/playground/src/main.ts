@@ -101,7 +101,10 @@ const SAVER_GROUPS: SaverGroup[] = [
 const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-school',
-    label: 'Metaquarium (School)',
+    // "Population", not "School": this variant predates swimStyle and only
+    // means six fish. `metaquarium-swim-school` is the formation one, and two
+    // entries a case-change apart was a trap for whoever read the list next.
+    label: 'Metaquarium (6 fish)',
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
@@ -130,6 +133,36 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
   // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
   // params at non-default values so the pack is visible on mount.
+  // The environment spec's rooms, one variant each so every place is one URL
+  // away in the studio: ?saver=metaquarium-env-<name>.
+  ...(['abyss', 'reef', 'kelp', 'ice', 'vent', 'lagoon', 'universe'] as const).map((env) =>
+    createMetaquarium({
+      id: `metaquarium-env-${env}`,
+      label: `Metaquarium (${env})`,
+      params: { environment: env, fishCount: 4, fishUrl: LOCAL_FISH_URL, moteDensity: 0.4, cameraElevation: 18 },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
+  // Swim styles, one variant each: ?saver=metaquarium-swim-<style>.
+  // Variance is turned up so the uniqueness dial is visible at a glance.
+  ...(['school', 'drift', 'hover', 'patrol', 'bottom', 'surface'] as const).map((sw) =>
+    createMetaquarium({
+      id: `metaquarium-swim-${sw}`,
+      label: `Metaquarium (${sw})`,
+      params: {
+        swimStyle: sw, swimVariance: 0.6, fishCount: 8, fishUrl: LOCAL_FISH_URL,
+        // The breed models carry no clip, so without this they glide rigid.
+        // It is opt-in by default; the studio is where you see it on.
+        bodyWiggle: 0.35,
+        environment: 'reef',
+        // The formation is ~70 units across once spacing is a body length;
+        // at 170 you are inside it and see three fish, not a shoal.
+        cameraDistance: sw === 'school' ? 250 : 170,
+        cameraElevation: 16,
+      },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
   createMetaquarium({
     id: 'metaquarium-atmosphere',
     label: 'Metaquarium (Atmosphere)',
@@ -391,7 +424,16 @@ function frameMode(): void {
     seed,
     reducedMotion: true,
   };
-  void Promise.resolve(blackHole.mount(ctx)).then((inst: SaverInstance) => {
+  // `?spec=<url-encoded SaverSpec JSON>` renders an arbitrary declarative spec
+  // instead of the black hole: frame-addressable, real-browser-canvas pixel
+  // verification for schema features (textBlock reveal, sequences, …) without
+  // a live channel. Invalid JSON/spec throws — the frame never becomes ready.
+  const specJson = params.get('spec');
+  const mountTarget: Promise<SaverInstance> = specJson
+    ? Promise.resolve(compileSaver(JSON.parse(specJson)).mount(ctx))
+    : Promise.resolve(blackHole.mount(ctx));
+
+  void mountTarget.then((inst: SaverInstance) => {
     if (params.get('track') === 'demo') inst.applyTrack?.(demoTrack);
     inst.renderFrame?.(frame, seed);
     window.__frameReady = true;

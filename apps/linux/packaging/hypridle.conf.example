@@ -8,5 +8,5 @@
 listener {
     timeout = 150
     on-timeout = pidof hyprlock || idle-screens-wayland
-    on-resume = pkill -TERM -x idle-screens-wayland
+    on-resume = pkill -TERM -f '[i]dle-screens-wayland'
 }

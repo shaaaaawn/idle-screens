@@ -9,6 +9,7 @@ import {
   type SaverContext,
   type SaverInstance,
   type SaverLayer,
+  type Rng,
 } from '@idle-screens/core';
 import {
   AdditiveBlending,
@@ -30,6 +31,9 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  DoubleSide,
+  PlaneGeometry,
+  CylinderGeometry,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -43,6 +47,10 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
+import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
+import {
+  bandRange, FISH_LENGTH, fishVariation, formationExtent, formationSlot, swimStyleOf,
+} from './swim';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -66,7 +74,6 @@ import {
 } from './quality';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
-const FISH_LENGTH = 18;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
 const GLB_CONCURRENCY = 3;
 
@@ -144,6 +151,171 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.delete(k);
 }
 
+/**
+ * The water ceiling: one translucent plane above the fish, rippling in the
+ * vertex shader off a single `uTime` uniform.
+ *
+ * Closed-form on purpose — the displacement is `sin(ωt + φ)` of the vertex's
+ * own position, so the surface is a pure function of t like everything else
+ * in this saver, and scrubbing to any frame reproduces it exactly. One draw
+ * call, no per-frame CPU work.
+ */
+function buildWaterCeiling(y: number, color: string, opacity: number): {
+  mesh: Mesh; material: ShaderMaterial;
+} {
+  const geo = new PlaneGeometry(1400, 1400, 48, 48);
+  geo.rotateX(-Math.PI / 2);
+  geo.userData.mqOwned = true;
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new Color(color) },
+      uOpacity: { value: opacity },
+    },
+    vertexShader: `
+      uniform float uTime;
+      varying float vRipple;
+      void main() {
+        vec3 p = position;
+        float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
+        p.y += r * 6.0;
+        vRipple = r;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vRipple;
+      void main() {
+        // Caustic-ish banding: the ripple itself modulates brightness, so the
+        // surface reads as moving water rather than a tinted sheet of glass.
+        float band = 0.65 + 0.35 * vRipple;
+        gl_FragColor = vec4(uColor * band, uOpacity * band);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.position.y = y;
+  mesh.frustumCulled = false;
+  return { mesh, material: mat };
+}
+
+/**
+ * Terrain: the floor as a silhouette instead of a disc.
+ *
+ * Generated from the mount seed — never fetched — so determinism holds, the
+ * offline hosts work, and it costs no network. Built ONCE at mount and never
+ * touched per frame, which is why the cost model prices it at zero: it is
+ * geometry, not animation.
+ *
+ * The three shapes are the original aquarium's silhouettes read back as
+ * height functions: dunes (long soft swells), ridges (sharp parallel ranges,
+ * its `spikey`), basin (a bowl that falls away from the camera — what makes
+ * an abyss feel deep).
+ */
+/** Seabed height as a closed-form function of (x, z).
+ *
+ *  Returned rather than baked straight into vertices so the swim volume can be
+ *  clamped against the SAME expression the mesh is built from. A `dunes` or
+ *  `ridges` floor reaches +46, well above the bottom of the fish's depth band,
+ *  so without this a bottom-hugger swims through the hill it is hugging. */
+function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
+  const R = 620;
+  // Two seeded octaves — enough for a silhouette, cheap enough to build in a
+  // frame. Phases come from the rng so two tanks are never the same hill.
+  const a = rng.next() * Math.PI * 2;
+  const b = rng.next() * Math.PI * 2;
+  const c = rng.next() * Math.PI * 2;
+  return (x, z) => {
+    const d = Math.sqrt(x * x + z * z) / R;
+    let h = 0;
+    if (kind === 'dunes') {
+      h = Math.sin(x * 0.011 + a) * 26 + Math.cos(z * 0.009 + b) * 20;
+    } else if (kind === 'ridges') {
+      h = Math.abs(Math.sin(x * 0.02 + a)) * 54 - 18 + Math.sin(z * 0.006 + c) * 10;
+    } else if (kind === 'basin') {
+      h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
+    }
+    // Feather the rim to nothing so the terrain never shows a cut edge.
+    return h * Math.max(0, 1 - d * d);
+  };
+}
+
+function buildTerrain(height: (x: number, z: number) => number, color: string): Mesh {
+  const R = 620;
+  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position!;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, height(pos.getX(i), pos.getZ(i)));
+  }
+  geo.computeVertexNormals();
+  geo.userData.mqOwned = true;
+  const mat = new MeshBasicMaterial({ color: new Color(color) });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/**
+ * Light shafts: a few additive cones that drift closed-form.
+ *
+ * `y` may be NEGATIVE. The original's raysLightY swings +/-2000, and that sign
+ * is the whole difference between a sunlit surface and an abyssal glow coming
+ * up out of the dark — one of the few knobs in that settings file that changes
+ * what a place MEANS rather than how it looks.
+ *
+ * Rays are the only per-frame work in the room, which is why they are the
+ * layer the cost model drops first on a weak device.
+ */
+function buildRays(count: number, color: string, y: number, strength: number, rng: Rng): {
+  group: Group; material: ShaderMaterial;
+} {
+  const group = new Group();
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: DoubleSide,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    vertexShader: `
+      varying float vY;
+      void main() {
+        vY = uv.y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+      varying float vY;
+      void main() {
+        // Fade along the shaft and breathe slowly, so it reads as light in
+        // suspended matter rather than a solid cone.
+        float fade = smoothstep(0.0, 1.0, vY);
+        float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.16 * breathe);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const geo = new CylinderGeometry(6, 92, Math.abs(y) * 0.85, 10, 1, true);
+  geo.userData.mqOwned = true;
+  for (let i = 0; i < count; i++) {
+    const m = new Mesh(geo, mat);
+    const a = rng.next() * Math.PI * 2;
+    const r = 60 + rng.next() * 190;
+    m.position.set(Math.cos(a) * r, y * 0.45, Math.sin(a) * r);
+    // Shafts from below are inverted so the wide end still faces the light.
+    if (y < 0) m.rotation.z = Math.PI;
+    m.rotation.y = rng.next() * Math.PI;
+    m.frustumCulled = false;
+    group.add(m);
+  }
+  return { group, material: mat };
+}
+
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // Eviction deliberately does NOT dispose the evicted template's GPU
@@ -196,6 +368,10 @@ interface Fish {
   plan: SwimPlan;
   body: Object3D | null;
   baseScale: number;
+  /** The model's own forward yaw from its template. Body wiggle oscillates
+   *  AROUND it — writing rotation.y absolutely would spin every fish to face
+   *  whatever the wiggle happened to be. */
+  baseYaw: number;
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
@@ -223,6 +399,19 @@ class TankInstance implements SaverInstance {
   private readonly floorMat: MeshBasicMaterial;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
+  /** The room. Rebuilt only when the environment inputs change — never per
+   *  frame — so a static tank costs nothing beyond its draw calls. */
+  private room: Object3D | null = null;
+  private roomKey = '';
+  private waterMat: ShaderMaterial | null = null;
+  private terrainMat: MeshBasicMaterial | null = null;
+  /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
+  private floorHeightAt: ((x: number, z: number) => number) | null = null;
+  private rayMat: ShaderMaterial | null = null;
+  private ceiling: Mesh | null = null;
+  private presetWaterY = 0;
+  private presetRayStrength = 0;
+  private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
   /** Desired per-slot template URLs — the single source of truth for the
@@ -250,6 +439,9 @@ class TankInstance implements SaverInstance {
   private speedTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
+  /** One shared route for formation styles, compiled at mount so switching
+   *  into `school` never respawns a fish. */
+  private readonly carrierPlan: SwimPlan;
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -263,6 +455,7 @@ class TankInstance implements SaverInstance {
     this.space = space;
     this.quality = quality;
     this.catalog = catalog;
+    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS);
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -309,6 +502,7 @@ class TankInstance implements SaverInstance {
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
     this.floorMat = floor.material;
+    this.floorDisc = floor;
 
     // Plankton motes: seeded base positions, closed-form drift in the vertex
     // shader (one uTime uniform — zero CPU per frame, pure in t). Draw range
@@ -382,6 +576,100 @@ class TankInstance implements SaverInstance {
   private str(key: string): string {
     const v = this.params[key];
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
+  }
+
+  /** Cheap per-frame room params: move the ceiling, set the shaft strength.
+   *  No allocation, no teardown — this is what the structure key protects. */
+  private applyRoomParams(waterY: number, rayStrength: number): void {
+    if (this.ceiling) this.ceiling.position.y = waterY >= 0 ? waterY : this.presetWaterY;
+    if (this.rayMat) {
+      const s = rayStrength >= 0 ? rayStrength : this.presetRayStrength;
+      this.rayMat.uniforms.uStrength!.value = s;
+      this.rayMat.visible = s > 0;
+    }
+  }
+
+  /**
+   * Build (or rebuild) the room for the current environment params.
+   *
+   * Keyed like reconcile(): one string compare per frame, real work only when
+   * the author actually changes something.
+   */
+  private buildRoom(): void {
+    const envName = this.str('environment');
+    const floorOverride = this.str('floorKind');
+    const waterY = this.num('waterY');
+    const rayStrength = this.num('rayStrength');
+    // STRUCTURE key only. waterY and rayStrength move a mesh and set a
+    // uniform — rebuilding a 5,000-vertex terrain because someone nudged the
+    // ceiling would throw away the whole point of building it once.
+    const key = `${envName}|${floorOverride}|${this.quality.envBudget}`;
+    if (key === this.roomKey) {
+      this.applyRoomParams(waterY, rayStrength);
+      return;
+    }
+    this.roomKey = key;
+
+    if (this.room) {
+      this.scene.remove(this.room);
+      disposeOwned(this.room);
+      this.room = null;
+      this.waterMat = null;
+      this.terrainMat = null;
+      this.rayMat = null;
+      this.ceiling = null;
+    }
+    const preset: EnvironmentPreset = environmentOf(envName);
+    const can = affordableLayers(this.quality.envBudget, preset);
+    // The environment decides WHETHER there is a ceiling; waterY (-1 = auto)
+    // only moves it. Turning it off is what `void` and `abyss` are for.
+
+    const group = new Group();
+    // Terrain replaces the disc rather than sitting on it, so `flat` stays
+    // byte-for-byte the original floor and every published scene is safe.
+    // The classic steering lane validates nothing, so an unknown floorKind
+    // must fall back rather than cast — otherwise a typo hides the disc AND
+    // builds a zero-height plane, i.e. an invisible floor.
+    const kind: FloorKind = FLOOR_KINDS.includes(floorOverride as FloorKind)
+      ? (floorOverride as FloorKind)
+      : preset.floor;
+    if (kind !== 'flat') {
+      const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88));
+      const terrain = buildTerrain(height, floorHex);
+      terrain.position.y = -2;
+      // World-space seabed, for the swim clamp. Same expression, same seed.
+      this.floorHeightAt = (x, z) => height(x, z) + terrain.position.y;
+      group.add(terrain);
+      this.terrainMat = terrain.material as MeshBasicMaterial;
+    }
+    // A flat floor has no hills to avoid; clear any the previous room left.
+    if (kind === 'flat') this.floorHeightAt = null;
+    this.floorDisc.visible = kind === 'flat';
+    if (can.water && preset.water) {
+      const y = waterY >= 0 ? waterY : preset.water.y;
+      const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
+      group.add(mesh);
+      this.waterMat = material;
+      this.ceiling = mesh;
+      this.presetWaterY = preset.water.y;
+    }
+    if (can.rayCount > 0 && preset.rays) {
+      // -1 = follow the environment; 0 is a real author choice for "off".
+      const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
+      if (strength > 0) {
+        const { group: rg, material } = buildRays(
+          can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+        );
+        group.add(rg);
+        this.rayMat = material;
+        this.presetRayStrength = preset.rays.strength;
+      }
+    }
+    this.room = group;
+    this.scene.add(group);
+    this.applyRoomParams(waterY, rayStrength);
+    this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
   /** Ceiling the pool may ever reach on this device. */
@@ -587,6 +875,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
+      baseYaw: tpl ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -691,9 +980,11 @@ class TankInstance implements SaverInstance {
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
     fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    this.floorMat.color.set(
-      String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33'),
-    );
+    const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+    this.floorMat.color.set(floorHex);
+    // Terrain follows floorColor as well — the environment supplies the SHAPE,
+    // the author keeps the palette.
+    this.terrainMat?.color.set(floorHex);
     const density = this.num('moteDensity');
     const active = Math.round(density * this.quality.moteCap);
     this.motes.visible = active > 0;
@@ -706,31 +997,171 @@ class TankInstance implements SaverInstance {
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
 
+    // The room: rebuilt only on change, then driven by the same clock as
+    // everything else so it stays pure in t.
+    this.buildRoom();
+    if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
+    if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
+
+    const style = swimStyleOf(this.str('swimStyle'));
+    const variance = this.num('swimVariance');
+    const wiggle = this.num('bodyWiggle');
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
     const visible = this.mixMode
       ? this.wantUrls.length
       : Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
+    // Once per frame, not once per fish: the extent walks every slot, so
+    // computing it inside the loop made the formation O(n^2) every frame for
+    // a value that is identical across the shoal.
+    const extent = style.formation ? formationExtent(visible, variance) : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
 
-      const d = this.speedTracked
-        ? distanceAt(f.plan, warpSec, 1)
-        : distanceAt(f.plan, tSec, speed);
-      const pose = swimPoseAtDistance(f.plan, d);
-      f.group.position.set(pose.x, pose.y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
+      // Style + per-fish variation. Both are pure functions of (index, t), so
+      // a scene stays frame-addressable no matter how varied it looks.
+      const varn = fishVariation(f.index, variance);
+      const styleSpeed = style.speedMul * varn.speedMul;
+      // `effort` is how hard the fish is working; `d` is where that puts it.
+      // They differ for styles that hold station: a hovering fish still beats
+      // its tail, so animation must not scale with travel or it looks stuffed.
+      //
+      // Speed goes in distanceAt's THIRD argument, never folded into time.
+      // distanceAt scales the whole integral (cruise + wobble) by that
+      // argument; multiplying TIME instead compresses the wobble's phase, so a
+      // scene with swimSpeed != 1 and no speed track would have silently
+      // changed trajectory — breaking `loop`'s no-op promise for exactly the
+      // scenes least likely to be looking.
+      const effort = this.speedTracked
+        ? distanceAt(f.plan, warpSec, styleSpeed)
+        : distanceAt(f.plan, tSec, speed * styleSpeed);
+      const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
+      const d = anchor + effort * style.travel;
+
+      // What drives the animation. For a free fish that is its own effort; for
+      // a fish in formation it is the carrier's, because the carrier is what
+      // is actually moving it. Beating to its own unused loop made a shoal
+      // whose tails were out of step with its travel — fish moonwalking.
+      let beat = effort;
+      let pose;
+      if (style.formation) {
+        // Carrier school: ONE route, fish held in slots in its local frame, so
+        // the shoal turns as a body.
+        //
+        // Measured over 4 seeds x 600 frames at 8 fish, variance 0.6
+        // (src/swim.test.ts holds the spacing half of this as a gate):
+        //
+        //   loop    27.8% of fish-frames with a neighbour inside a body
+        //           length, closest approach 1.3u, polarisation 0.38
+        //   school  0.0%, closest approach 27.3u, polarisation 1.00
+        //
+        // The earlier 0.85-vs-boids'-0.87 figure in this comment described the
+        // spike's boids prototype, not this port, and the port's first draft
+        // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
+        // are what actually fixed it.
+        const slot = formationSlot(f.index, visible, variance);
+        // The carrier moves at the STYLE's speed, deliberately without the
+        // per-fish multiplier: a formation whose members each chose their own
+        // pace is not a formation. Per-fish speed still varies the tail beat
+        // through `effort`, which is where it reads anyway.
+        const lead = this.speedTracked
+          ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
+          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
+        beat = lead;
+        // ONE arc sample for the whole shoal, offset rigidly. Sampling each
+        // row at `lead - back` instead put the rows at different points on a
+        // curving spline, so they converged on the inside of every turn: a
+        // lattice with a body length of clearance measured 27% of fish-frames
+        // with a neighbour inside one, exactly as if there were no lattice.
+        const c = swimPoseAtDistance(this.carrierPlan, lead);
+        const ext = extent ?? formationExtent(visible, variance);
+        // Keep the shoal in the tank by moving its CENTRE, never by pulling
+        // individual fish toward the middle — that squashing was the other
+        // half of the pile.
+        const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
+        const cr = Math.hypot(c.x, c.z);
+        const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+        const hl = Math.hypot(c.fx, c.fz) || 1;
+        const fwdX = c.fx / hl, fwdZ = c.fz / hl;
+        // Right-hand normal in the ground plane.
+        const rx = fwdZ, rz = -fwdX;
+        const cy = Math.min(
+          BOUNDS.yMax - ext.up,
+          Math.max(BOUNDS.yMin + ext.up, c.y),
+        );
+        // A rigid body means every fish points EXACTLY the same way, which
+        // measures as polarisation 1.00 and looks like a formation flight.
+        // A few degrees of per-fish yaw, scaled by variance, buys back the
+        // look of animals without touching the spacing guarantee.
+        const yaw = Math.sin(varn.phase) * 0.12 * variance;
+        const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
+        pose = {
+          ...c,
+          x: c.x * cs + rx * slot.side - fwdX * slot.back,
+          y: cy + slot.up,
+          z: c.z * cs + rz * slot.side - fwdZ * slot.back,
+          fx: fwdX * cy2 - fwdZ * sy2,
+          fz: fwdX * sy2 + fwdZ * cy2,
+        };
+      } else {
+        pose = swimPoseAtDistance(f.plan, d);
+      }
+
+      // Depth band, then bob. Clamping BEFORE the bob keeps a bottom-hugger
+      // from being lifted out of its band by its own motion.
+      let y = pose.y;
+      if (style.bobAmp > 0) {
+        y += Math.sin(tSec * style.bobHz * Math.PI * 2 + varn.phase) * style.bobAmp;
+      }
+      // Clamp AFTER the bob. Clamping first let a fish bob straight back out
+      // of the band it was just put in — a bottom-hugger that leaves the floor
+      // is not band-limited, it is just a fish.
+      const band = bandRange(style.band);
+      if (band) {
+        const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
+        const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        y = Math.min(hi, Math.max(lo, y));
+      }
+      // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
+      // +46 while the floor band tops out at 23, so a bottom-hugger over a
+      // hill was inside it. Half a body length of clearance, and never above
+      // the tank's own ceiling.
+      if (this.floorHeightAt) {
+        const clear = this.floorHeightAt(pose.x, pose.z) + FISH_LENGTH * 0.5;
+        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
+      }
+
+      // Inside a depth band a fish swims LEVEL. Without this its heading still
+      // points along the unclamped spline, so a bottom-hugger noses down into
+      // a floor it can never reach and a skimmer climbs at an invisible lid.
+      // Level, not merely flatter: a fraction of the spline's climb still reads
+      // as a fish nosing into a floor it cannot reach.
+      const fy = band ? 0 : pose.fy;
+      f.group.position.set(pose.x, y, pose.z);
+      f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
-      f.group.scale.setScalar(f.baseScale * breathe);
+      f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+
+      // Most of the breed library carries NO animation clip, so those fish
+      // translated along their spline completely rigidly — gliding cardboard.
+      // A distance-driven yaw on the body fixes the whole library at once and
+      // costs one sin per fish. Clipped models skip it: their clip is better.
+      if (f.body && !f.mixer) {
+        // Write every frame, scaled by wiggle. Skipping the write at 0 left the
+        // last offset latched, so turning the dial down stopped the motion but
+        // never returned the fish to its own heading.
+        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * wiggle;
+      }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
@@ -880,6 +1311,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
+    delete this.ctxSaver.host.dataset.mqEnv;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }

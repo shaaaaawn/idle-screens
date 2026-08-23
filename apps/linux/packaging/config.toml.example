@@ -23,6 +23,12 @@ channel = "ballet"
 # Fullscreen overlay that ignores mouse/keyboard for exit (see hypridle-kiosk.conf.example)
 #kiosk = false
 
+# Wayland app-id / window class to report (default "com.idlescreens.wayland").
+# Omarchy's Quickshell idle service tracks the screensaver by window class and
+# cancels the idle cycle — so the screen never locks — when it sees no window
+# of class "org.omarchy.screensaver". omarchy-idle-screens sets this for you.
+#app_id = "org.omarchy.screensaver"
+
 [webkit]
 # "auto" disables WebKit's DMA-BUF renderer on the NVIDIA proprietary driver
 # (known flicker); "always" / "never" force it.

@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::cli::Cli;
 
+pub const DEFAULT_APP_ID: &str = "com.idlescreens.wayland";
 pub const DEFAULT_UPDATE_BASE: &str = "https://idlescreens.com/mac/";
 pub const CHANNEL_BASE: &str = "https://idlescreens.com/channel/";
 
@@ -21,6 +22,7 @@ struct FileConfig {
     inhibit: Option<bool>,
     fade_ms: Option<u64>,
     kiosk: Option<bool>,
+    app_id: Option<String>,
     #[serde(default)]
     webkit: WebkitConfig,
     #[serde(default)]
@@ -73,6 +75,7 @@ pub struct Settings {
     pub dmabuf: DmabufPolicy,
     pub update_on_launch: bool,
     pub update_base_url: String,
+    pub app_id: String,
 }
 
 impl Settings {
@@ -155,6 +158,11 @@ impl Settings {
             seed: cli.seed,
             dmabuf,
             update_on_launch: !cli.no_update_check && check_enabled,
+            app_id: cli
+                .app_id
+                .clone()
+                .or_else(|| file.app_id.clone().filter(|s| !s.is_empty()))
+                .unwrap_or_else(|| DEFAULT_APP_ID.to_string()),
             update_base_url: with_trailing_slash(
                 file.update
                     .base_url
@@ -207,6 +215,33 @@ mod tests {
 
     fn cli(args: &[&str]) -> Cli {
         Cli::parse_from(std::iter::once("idle-screens-wayland").chain(args.iter().copied()))
+    }
+
+    /// The Omarchy launcher passes `--app-id org.omarchy.screensaver` because
+    /// the Quickshell idle service cancels the idle cycle (and so never locks)
+    /// when it cannot see a window of that class. A user's config file may set
+    /// it too, and an explicit flag has to win over both.
+    #[test]
+    fn app_id_defaults_and_is_overridable() {
+        let default = Settings::merge(&cli(&[]), FileConfig::default());
+        assert_eq!(default.app_id, DEFAULT_APP_ID);
+
+        let from_file = || FileConfig {
+            app_id: Some("org.omarchy.screensaver".into()),
+            ..Default::default()
+        };
+        let s = Settings::merge(&cli(&[]), from_file());
+        assert_eq!(s.app_id, "org.omarchy.screensaver");
+
+        let s = Settings::merge(&cli(&["--app-id", "com.example.flag"]), from_file());
+        assert_eq!(s.app_id, "com.example.flag");
+
+        // An empty string in the file is treated as unset, not as an app-id.
+        let blank = FileConfig {
+            app_id: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(Settings::merge(&cli(&[]), blank).app_id, DEFAULT_APP_ID);
     }
 
     #[test]

@@ -7,13 +7,14 @@ declare global {
 }
 
 /** The saver host inside <idle-screen>'s shadow root. */
-async function surfaceDataset(page: Page): Promise<{ fish: number; backend: string; draco: boolean }> {
+async function surfaceDataset(page: Page): Promise<{ fish: number; env: string; backend: string; draco: boolean }> {
   return page.evaluate(() => {
     const surface = document
       .querySelector('idle-screen')
       ?.shadowRoot?.querySelector<HTMLElement>('.surface');
     return {
       fish: Number(surface?.dataset.mqFish ?? 0),
+      env: surface?.dataset.mqEnv ?? '',
       backend: surface?.dataset.mqBackend ?? '',
       draco: surface?.dataset.mqDraco === '1',
     };
@@ -187,5 +188,55 @@ test('MQ6: a Draco-compressed model decodes and mounts', async ({ page }) => {
   await expect
     .poll(async () => (await surfaceDataset(page)).draco, { timeout: 45_000 })
     .toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Environments: `void` must render exactly the pre-environment scene (no room
+ * objects at all), and a named environment must actually build one. The
+ * dataset hook is the honest signal — a ceiling that silently failed to build
+ * would still leave fish on screen and look fine in a screenshot.
+ */
+test('MQ7: void is a no-op and a named environment builds a room', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).env, { timeout: 20_000 })
+    .toBe('void');
+
+  await page.goto('/?saver=metaquarium-env-reef');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).env, { timeout: 20_000 })
+    .toBe('reef');
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(1);
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('MQ8: the formation branch mounts and populates without errors', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  // MQ2 covers the six-fish population variant, which predates swimStyle and
+  // never reaches the carrier code. This is the only test that RUNS the
+  // carrier path at all — it proves the branch mounts and spawns, not that
+  // the formation holds. The geometry (no two fish inside a body length,
+  // extent bounds every slot) is asserted in swim.test.ts, where the maths is
+  // reachable without a GPU.
+  await page.goto('/?saver=metaquarium-swim-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(6);
+
   expect(pageErrors).toEqual([]);
 });

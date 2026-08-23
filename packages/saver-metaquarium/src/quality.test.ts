@@ -10,6 +10,7 @@ describe('metaquarium quality tiers', () => {
       fishCap: 24,
       pixelBudget: 1_800_000,
       moteCap: 400,
+      envBudget: 3,
     });
   });
 

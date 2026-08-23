@@ -185,6 +185,7 @@ mod tests {
             dmabuf: DmabufPolicy::Auto,
             update_on_launch: false,
             update_base_url: String::new(),
+            app_id: crate::config::DEFAULT_APP_ID.to_string(),
         }
     }
 

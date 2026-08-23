@@ -127,22 +127,64 @@ makepkg -si   # using packaging/PKGBUILD
 
 ### Omarchy integration
 
-After installing the binary:
-
 ```bash
-# From an extracted release tarball:
+# From an extracted release tarball — detects your Omarchy and wires it up:
 ./packaging/omarchy/install-omarchy.sh
-
-# Or step by step:
-./install.sh
-./packaging/omarchy/install-hypridle.sh   # patches ~/.config/hypr/hypridle.conf
 ```
 
-This replaces `omarchy-launch-screensaver` with `omarchy-idle-screens` (TTE
-terminal saver → WebKit overlay), adds `on-resume = pkill -TERM -x idle-screens-wayland`,
-installs the tray autostart entry, and seeds `~/.config/idle-screens/config.toml`.
+Omarchy has shipped **two** different idle mechanisms, and the wiring differs.
+The installer detects which is present and supports both; they are safe to
+install together, since each is inert when it is not the one driving the
+session.
 
-Manual hypridle snippet: `packaging/omarchy/hypridle.listener.snippet`
+| Omarchy | Idle mechanism | How idle-screens hooks in |
+| --- | --- | --- |
+| 4.x (current) | Quickshell idle service (`omarchy-shell`) | Cloned `omarchy.idle` plugin |
+| Older | `hypridle` | Patched `~/.config/hypr/hypridle.conf` |
+
+**Current Omarchy.** The idle service runs `omarchy-launch-screensaver` and
+offers no config key for *which* screensaver to run.
+
+PATH shadowing does **not** work here, despite looking like the obvious fix.
+Omarchy's `default/bash/env-bootstrap` deliberately *appends* `~/.local/bin`
+— "appended so system binaries keep precedence" — so a shim there can never
+beat the packaged `omarchy-launch-screensaver`. Editing the packaged plugin is
+also out, since `omarchy update` reverts it.
+
+The supported override is `omarchy plugin clone`, which copies a first-party
+plugin into `~/.config/omarchy/plugins/<user>.<id>` and switches the shell to
+it. `install-omarchy-plugin.sh` clones `omarchy.idle` and repoints its
+screensaver command at `omarchy-idle-screens`.
+
+> **Trade-off:** the clone is a fork. It stops receiving upstream fixes to the
+> idle service until you re-clone it. Revert with
+> `omarchy plugin remove <user>.idle && omarchy plugin enable omarchy.idle`.
+
+That service also tracks the screensaver by **window class**, and cancels the
+idle cycle — so the screen never locks — if it cannot see a window of class
+`org.omarchy.screensaver`. `omarchy-idle-screens` therefore launches with
+`--app-id org.omarchy.screensaver`. Set `app_id` in `config.toml` (or pass
+`--app-id`) to override.
+
+`omarchy-idle-screens` also prefers the `idle-screens-wayland` sitting next to
+it over whatever `PATH` resolves, for the same precedence reason: a stale
+`/usr/bin` copy would otherwise shadow a user-prefix install, and an older
+binary rejects `--app-id` outright, so the saver would never start.
+
+**Older Omarchy.** `install-hypridle.sh` points the screensaver listener at
+`omarchy-idle-screens` and adds an `on-resume` kill. Manual snippet:
+`packaging/omarchy/hypridle.listener.snippet`.
+
+Both paths also install the tray autostart entry and seed
+`~/.config/idle-screens/config.toml`, which is the single source of truth for
+mode/channel — the launcher passes no overrides.
+
+> **Dismissal commands:** use `pkill -f '[i]dle-screens-wayland'`, not
+> `pkill -x idle-screens-wayland`. The kernel truncates a process name to 15
+> characters (`idle-screens-wa`), so the `-x` form silently never matches and
+> the saver is never dismissed. The `[i]` bracket keeps `pkill`'s own shell
+> from matching itself. `pidof idle-screens-wayland` is fine — it resolves
+> through the executable path.
 
 ### System tray
 
@@ -153,7 +195,8 @@ idle-screens-wayland tray          # StatusNotifier icon (Waybar tray)
 Menu: show saver, kiosk mode, check updates, open config, quit tray.
 Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by `install.sh`).
 
-Hypridle still handles idle-triggered launch; the tray is for manual control.
+Idle-triggered launch is handled by the Quickshell idle service or hypridle
+(whichever your Omarchy uses); the tray is for manual control.
 
 ### Wire hypridle (non-Omarchy)
 
@@ -164,7 +207,7 @@ for hyprlang, or `packaging/hypridle.lua.example` for Lua config):
 listener {
     timeout = 150
     on-timeout = pidof hyprlock || idle-screens-wayland
-    on-resume = pkill -TERM -x idle-screens-wayland
+    on-resume = pkill -TERM -f '[i]dle-screens-wayland'
 }
 ```
 
@@ -196,7 +239,7 @@ listener {
 Exit manually when needed:
 
 ```bash
-pkill -TERM -x idle-screens-wayland
+pkill -TERM -f '[i]dle-screens-wayland'
 ```
 
 Or bind a Hyprland shortcut to that command. `--windowed` dev mode also ignores
