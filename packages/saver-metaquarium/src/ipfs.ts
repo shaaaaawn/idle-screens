@@ -58,7 +58,9 @@ export interface FishMixResult {
  * first entry). Against the default catalog, any minted id 1–512 also
  * resolves via the in-house farm table. A caller-supplied catalog is a
  * closed world — ids not in it are problems, not IPFS fallbacks. Counts
- * are absolute; the tank clamps the expanded total to its tier cap. Raw
+ * are absolute; a count above 24 clamps to 24 (recorded as a problem so a
+ * validator can mention it), and the tank clamps the expanded total to its
+ * tier cap. Raw
  * URLs are deliberately NOT accepted — `:` and `,` stay unambiguous, the
  * validation surface stays finite, and custom URLs remain `fishUrl`'s job
  * (single-breed mode).
@@ -108,11 +110,18 @@ export function parseFishMix(
     let count = 1;
     if (countRaw !== undefined) {
       const n = Number(countRaw.trim());
-      if (!Number.isInteger(n) || n < 1 || n > 24) {
+      if (!Number.isInteger(n) || n < 1) {
         problems.push(`"${token}": count must be an integer 1-24`);
         continue;
       }
-      count = n;
+      if (n > 24) {
+        // Oversized is clear intent ("lots of these"), so clamp instead of
+        // dropping the token — but still record it, so a validator can say so.
+        problems.push(`"${token}": count clamped to 24`);
+        count = 24;
+      } else {
+        count = n;
+      }
     }
     entries.push({ id: fish.id, url: fish.ipfs3d, count });
   }

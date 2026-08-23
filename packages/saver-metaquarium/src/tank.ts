@@ -420,6 +420,9 @@ class TankInstance implements SaverInstance {
   private wantUrls: string[] = [];
   private wantKey = '';
   private wantInputKey = '';
+  /** Last fishMix string whose parse problems were warned — once per mix,
+   *  not per reconcile, or steering any other param would repeat it. */
+  private warnedMix = '';
   private mixMode = false;
   private disposed = false;
 
@@ -698,7 +701,13 @@ class TankInstance implements SaverInstance {
     let want: string[] = [];
     this.mixMode = false;
     if (mixStr !== '') {
-      want = expandFishMix(parseFishMix(mixStr, this.catalog).entries, cap);
+      const parsed = parseFishMix(mixStr, this.catalog);
+      if (parsed.problems.length > 0 && mixStr !== this.warnedMix) {
+        this.warnedMix = mixStr;
+        const fallback = parsed.entries.length === 0 ? ' — falling back to fishUrl/fishCount' : '';
+        console.warn(`[metaquarium] fishMix "${mixStr}": ${parsed.problems.join('; ')}${fallback}`);
+      }
+      want = expandFishMix(parsed.entries, cap);
       this.mixMode = want.length > 0;
     }
     if (!this.mixMode) {
