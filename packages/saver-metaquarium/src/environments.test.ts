@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  affordableLayers, ENVIRONMENTS, ENVIRONMENT_NAMES, environmentOf, LAYER_COST,
+  affordableLayers, ENVIRONMENTS, ENVIRONMENT_NAMES, environmentOf, FLOOR_KINDS,
+  LAYER_COST, RAY_COUNT,
 } from './environments';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { qualityFor } from './quality';
@@ -44,23 +45,52 @@ describe('environments', () => {
 
 describe('layer budget', () => {
   it('drops rays before the ceiling as the budget shrinks', () => {
-    const reef = environmentOf('reef');
-    expect(affordableLayers(3, reef)).toEqual({ floor: true, water: true, rays: true });
-    expect(affordableLayers(2, reef)).toEqual({ floor: true, water: true, rays: false });
-    expect(affordableLayers(1, reef)).toEqual({ floor: true, water: true, rays: false });
-    expect(affordableLayers(0, reef)).toEqual({ floor: true, water: false, rays: false });
+    const reef = environmentOf('reef');   // has BOTH layers
+    expect(affordableLayers(3, reef)).toEqual({ floor: true, water: true, rayCount: RAY_COUNT.full });
+    expect(affordableLayers(2, reef)).toEqual({ floor: true, water: true, rayCount: RAY_COUNT.reduced });
+    expect(affordableLayers(1, reef)).toEqual({ floor: true, water: true, rayCount: 0 });
+    expect(affordableLayers(0, reef)).toEqual({ floor: true, water: false, rayCount: 0 });
   });
   it('never invents a layer the preset does not have', () => {
     const abyss = environmentOf('abyss');   // no ceiling
     expect(affordableLayers(99, abyss).water).toBe(false);
-    expect(affordableLayers(99, abyss).rays).toBe(true);
-    expect(affordableLayers(99, environmentOf('void'))).toEqual({ floor: true, water: false, rays: false });
+    expect(affordableLayers(99, environmentOf('void')))
+      .toEqual({ floor: true, water: false, rayCount: 0 });
   });
-  it('every tier can afford the ceiling; only high affords rays too', () => {
+  it('a rays-only place keeps its glow on the weakest tier', () => {
+    // abyss/vent/universe ARE their glow — losing it leaves bare terrain on
+    // exactly the devices that most need a recognisable scene.
+    for (const name of ['abyss', 'vent', 'universe'] as const) {
+      const p = environmentOf(name);
+      expect(p.water).toBeNull();
+      expect(affordableLayers(qualityFor('basic').envBudget, p).rayCount)
+        .toBeGreaterThan(0);
+      expect(affordableLayers(qualityFor('high').envBudget, p).rayCount)
+        .toBe(RAY_COUNT.full);
+    }
+  });
+  it('every tier can afford the ceiling where one exists', () => {
     const reef = environmentOf('reef');
-    expect(affordableLayers(qualityFor('high').envBudget, reef).rays).toBe(true);
+    expect(affordableLayers(qualityFor('high').envBudget, reef).rayCount).toBe(RAY_COUNT.full);
     expect(affordableLayers(qualityFor('standard').envBudget, reef).water).toBe(true);
     expect(affordableLayers(qualityFor('basic').envBudget, reef).water).toBe(true);
     expect(LAYER_COST.floor).toBe(0);
+  });
+});
+
+describe('sentinel params cannot pretend to interpolate', () => {
+  it('waterY and rayStrength step, because -1 is a sentinel', () => {
+    // A smooth ramp from -1 would pass through negatives that read as "auto",
+    // so the control would jump instead of glide.
+    expect(METAQUARIUM_PARAMS.waterY.ease).toBe('step');
+    expect(METAQUARIUM_PARAMS.rayStrength.ease).toBe('step');
+  });
+});
+
+describe('floor kinds', () => {
+  it('the runtime guard matches every kind the presets use', () => {
+    for (const e of ENVIRONMENTS) expect(FLOOR_KINDS).toContain(e.floor);
+    expect([...(METAQUARIUM_PARAMS.floorKind.options ?? [])].sort())
+      .toEqual(['auto', ...FLOOR_KINDS].sort());
   });
 });

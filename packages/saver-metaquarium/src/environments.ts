@@ -22,6 +22,10 @@ export type EnvironmentName =
  *  from the mount seed — never fetched, so determinism and offline both hold. */
 export type FloorKind = 'flat' | 'dunes' | 'ridges' | 'basin';
 
+/** Runtime guard for the same set — the steering lane is unvalidated, so a
+ *  bad value must fall back rather than build an invisible floor. */
+export const FLOOR_KINDS: readonly FloorKind[] = ['flat', 'dunes', 'ridges', 'basin'];
+
 /** A translucent plane ABOVE the fish. The single strongest identity cue in
  *  the original: it is what makes a scene read as *under* something. */
 export interface WaterCeiling {
@@ -97,15 +101,29 @@ export function environmentOf(name: string): EnvironmentPreset {
  */
 export const LAYER_COST = { floor: 0, water: 1, rays: 2 } as const;
 
-/** Layers are added in priority order until the budget runs out, so a weak
- *  device loses rays before it loses the ceiling — the cue that carries most
- *  of the read. */
+/** Shafts at full and at reduced count. A rays-only place keeps its identity
+ *  on a weak device by running fewer shafts rather than none. */
+export const RAY_COUNT = { full: 5, reduced: 2 } as const;
+
+/**
+ * Layers in priority order until the budget runs out: a device that can only
+ * afford one thing keeps the ceiling, the cue that carries most of the read.
+ *
+ * But `abyss`, `vent` and `universe` have NO ceiling — their whole identity is
+ * the glow — so spending ceiling-first would silently leave them as bare
+ * terrain on exactly the devices that most need a recognisable scene. When
+ * nothing higher-priority claims the budget, rays run at a reduced shaft count
+ * instead of not at all.
+ */
 export function affordableLayers(budget: number, preset: EnvironmentPreset): {
-  floor: boolean; water: boolean; rays: boolean;
+  floor: boolean; water: boolean; rayCount: number;
 } {
   let left = budget;
   const water = preset.water !== null && left >= LAYER_COST.water;
   if (water) left -= LAYER_COST.water;
-  const rays = preset.rays !== null && left >= LAYER_COST.rays;
-  return { floor: true, water, rays };
+  let rayCount = 0;
+  if (preset.rays !== null && left > 0) {
+    rayCount = left >= LAYER_COST.rays ? RAY_COUNT.full : RAY_COUNT.reduced;
+  }
+  return { floor: true, water, rayCount };
 }

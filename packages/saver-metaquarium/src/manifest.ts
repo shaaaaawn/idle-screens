@@ -61,10 +61,16 @@ export const METAQUARIUM_PARAMS = {
   environment: { type: 'enum', default: 'void', options: [...ENVIRONMENT_NAMES], ease: 'step' },
   /** Override the environment's terrain. `auto` follows the environment. */
   floorKind: { type: 'enum', default: 'auto', options: ['auto', 'flat', 'dunes', 'ridges', 'basin'], ease: 'step' },
-  /** Water-ceiling height. -1 = follow the environment; fish swim to y=72. */
-  waterY: { type: 'number', default: -1, min: -1, max: 220, ease: 'smooth' },
-  /** Light-shaft strength. -1 = follow the environment, 0 = off. */
-  rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'smooth' },
+  /** Water-ceiling height. -1 = follow the environment; fish swim to y=72.
+   *  STEP, not smooth: -1 is a sentinel, so a ramp from -1 to a real height
+   *  passes through negatives that read as "auto" — the ceiling would jump
+   *  rather than glide. A value you cannot interpolate through must not
+   *  advertise that it can. */
+  waterY: { type: 'number', default: -1, min: -1, max: 220, ease: 'step' },
+  /** Light-shaft strength. -1 = follow the environment, 0 = off. Step for the
+   *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
+   *  snapped off. */
+  rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish

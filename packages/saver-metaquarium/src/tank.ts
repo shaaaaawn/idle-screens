@@ -47,7 +47,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
-import { affordableLayers, environmentOf, type EnvironmentPreset, type FloorKind } from './environments';
+import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -389,6 +389,9 @@ class TankInstance implements SaverInstance {
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
   private rayMat: ShaderMaterial | null = null;
+  private ceiling: Mesh | null = null;
+  private presetWaterY = 0;
+  private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
@@ -552,6 +555,17 @@ class TankInstance implements SaverInstance {
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
   }
 
+  /** Cheap per-frame room params: move the ceiling, set the shaft strength.
+   *  No allocation, no teardown — this is what the structure key protects. */
+  private applyRoomParams(waterY: number, rayStrength: number): void {
+    if (this.ceiling) this.ceiling.position.y = waterY >= 0 ? waterY : this.presetWaterY;
+    if (this.rayMat) {
+      const s = rayStrength >= 0 ? rayStrength : this.presetRayStrength;
+      this.rayMat.uniforms.uStrength!.value = s;
+      this.rayMat.visible = s > 0;
+    }
+  }
+
   /**
    * Build (or rebuild) the room for the current environment params.
    *
@@ -563,8 +577,14 @@ class TankInstance implements SaverInstance {
     const floorOverride = this.str('floorKind');
     const waterY = this.num('waterY');
     const rayStrength = this.num('rayStrength');
-    const key = `${envName}|${floorOverride}|${waterY}|${rayStrength}|${this.quality.envBudget}`;
-    if (key === this.roomKey) return;
+    // STRUCTURE key only. waterY and rayStrength move a mesh and set a
+    // uniform — rebuilding a 5,000-vertex terrain because someone nudged the
+    // ceiling would throw away the whole point of building it once.
+    const key = `${envName}|${floorOverride}|${this.quality.envBudget}`;
+    if (key === this.roomKey) {
+      this.applyRoomParams(waterY, rayStrength);
+      return;
+    }
     this.roomKey = key;
 
     if (this.room) {
@@ -574,6 +594,7 @@ class TankInstance implements SaverInstance {
       this.waterMat = null;
       this.terrainMat = null;
       this.rayMat = null;
+      this.ceiling = null;
     }
     const preset: EnvironmentPreset = environmentOf(envName);
     const can = affordableLayers(this.quality.envBudget, preset);
@@ -583,9 +604,12 @@ class TankInstance implements SaverInstance {
     const group = new Group();
     // Terrain replaces the disc rather than sitting on it, so `flat` stays
     // byte-for-byte the original floor and every published scene is safe.
-    const kind: FloorKind = floorOverride === 'auto'
-      ? preset.floor
-      : (floorOverride as FloorKind);
+    // The classic steering lane validates nothing, so an unknown floorKind
+    // must fall back rather than cast — otherwise a typo hides the disc AND
+    // builds a zero-height plane, i.e. an invisible floor.
+    const kind: FloorKind = FLOOR_KINDS.includes(floorOverride as FloorKind)
+      ? (floorOverride as FloorKind)
+      : preset.floor;
     if (kind !== 'flat') {
       const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
       const terrain = buildTerrain(kind, this.ctxSaver.rng.fork(0x7e88), floorHex);
@@ -599,20 +623,24 @@ class TankInstance implements SaverInstance {
       const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
       group.add(mesh);
       this.waterMat = material;
+      this.ceiling = mesh;
+      this.presetWaterY = preset.water.y;
     }
-    if (can.rays && preset.rays) {
+    if (can.rayCount > 0 && preset.rays) {
       // -1 = follow the environment; 0 is a real author choice for "off".
       const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
       if (strength > 0) {
         const { group: rg, material } = buildRays(
-          5, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+          can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
         );
         group.add(rg);
         this.rayMat = material;
+        this.presetRayStrength = preset.rays.strength;
       }
     }
     this.room = group;
     this.scene.add(group);
+    this.applyRoomParams(waterY, rayStrength);
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
