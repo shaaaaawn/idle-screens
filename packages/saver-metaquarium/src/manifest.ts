@@ -1,5 +1,6 @@
 import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
 import { ENVIRONMENT_NAMES } from './environments';
+import { SWIM_STYLE_NAMES } from './swim';
 
 /**
  * Zero-dependency manifest module (type-only imports). The channel server
@@ -71,6 +72,19 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** How the fish move. `loop` is exactly the pre-style behaviour, so the
+   *  default changes nothing. A small named set on purpose: a silhouette of
+   *  movement you can name is one you can choose from. */
+  swimStyle: { type: 'enum', default: 'loop', options: [...SWIM_STYLE_NAMES], ease: 'step' },
+  /** Per-fish spread: 0 a uniform shoal, 1 every fish visibly its own animal
+   *  (±40% speed, ±25% size, own phase). The uniqueness dial — one number
+   *  instead of per-fish values nobody wants to author. */
+  swimVariance: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Procedural body yaw for models that carry NO animation clip — most of
+   *  the breed library. Distance-driven like the tail beat, so it speeds up
+   *  with the fish and stays frame-addressable. Clipped models ignore it:
+   *  their own clip is the better animation. */
+  bodyWiggle: { type: 'number', default: 0.35, min: 0, max: 1, ease: 'smooth' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -185,3 +199,4 @@ export * from './farm';
 export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';
 
 export * from './environments';
+export * from './swim';

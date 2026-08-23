@@ -140,6 +140,19 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       catalog: LOCAL_CATALOG,
     }),
   ),
+  // Swim styles, one variant each: ?saver=metaquarium-swim-<style>.
+  // Variance is turned up so the uniqueness dial is visible at a glance.
+  ...(['school', 'drift', 'hover', 'patrol', 'bottom', 'surface'] as const).map((sw) =>
+    createMetaquarium({
+      id: `metaquarium-swim-${sw}`,
+      label: `Metaquarium (${sw})`,
+      params: {
+        swimStyle: sw, swimVariance: 0.6, fishCount: 8, fishUrl: LOCAL_FISH_URL,
+        environment: 'reef', cameraDistance: 170, cameraElevation: 16,
+      },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
   createMetaquarium({
     id: 'metaquarium-atmosphere',
     label: 'Metaquarium (Atmosphere)',

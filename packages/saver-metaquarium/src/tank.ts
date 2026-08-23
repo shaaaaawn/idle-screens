@@ -48,6 +48,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
+import { bandRange, fishVariation, formationSlot, swimStyleOf } from './swim';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -355,6 +356,10 @@ interface Fish {
   plan: SwimPlan;
   body: Object3D | null;
   baseScale: number;
+  /** The model's own forward yaw from its template. Body wiggle oscillates
+   *  AROUND it — writing rotation.y absolutely would spin every fish to face
+   *  whatever the wiggle happened to be. */
+  baseYaw: number;
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
@@ -420,6 +425,9 @@ class TankInstance implements SaverInstance {
   private speedTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
+  /** One shared route for formation styles, compiled at mount so switching
+   *  into `school` never respawns a fish. */
+  private readonly carrierPlan: SwimPlan;
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -433,6 +441,7 @@ class TankInstance implements SaverInstance {
     this.space = space;
     this.quality = quality;
     this.catalog = catalog;
+    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS);
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -847,6 +856,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
+      baseYaw: tpl ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -974,6 +984,10 @@ class TankInstance implements SaverInstance {
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
+    const style = swimStyleOf(this.str('swimStyle'));
+    const variance = this.num('swimVariance');
+    const wiggle = this.num('bodyWiggle');
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
@@ -985,16 +999,56 @@ class TankInstance implements SaverInstance {
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
 
-      const d = this.speedTracked
-        ? distanceAt(f.plan, warpSec, 1)
-        : distanceAt(f.plan, tSec, speed);
-      const pose = swimPoseAtDistance(f.plan, d);
-      f.group.position.set(pose.x, pose.y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, pose.y + pose.fy, pose.z + pose.fz);
+      // Style + per-fish variation. Both are pure functions of (index, t), so
+      // a scene stays frame-addressable no matter how varied it looks.
+      const varn = fishVariation(f.index, variance);
+      const styleSpeed = style.speedMul * varn.speedMul;
+      const base = this.speedTracked ? warpSec : tSec * speed;
+      const d = distanceAt(f.plan, base * styleSpeed, 1) * style.travel;
+
+      let pose;
+      if (style.formation) {
+        // Carrier school: ONE route, fish held in slots in its local frame, so
+        // the shoal turns as a body. Measured at 0.85 polarisation against
+        // boids' 0.87 — and it improves on independent loops, which collide
+        // 23-25% of fish-frames.
+        const slot = formationSlot(f.index, visible, variance);
+        const lead = distanceAt(this.carrierPlan, base * style.speedMul, 1) - slot.back;
+        const c = swimPoseAtDistance(this.carrierPlan, lead);
+        const sx = c.fz, sz = -c.fx;
+        const sl = Math.hypot(sx, sz) || 1;
+        pose = { ...c, x: c.x + (sx / sl) * slot.side, y: c.y + slot.up, z: c.z + (sz / sl) * slot.side };
+      } else {
+        pose = swimPoseAtDistance(f.plan, d);
+      }
+
+      // Depth band, then bob. Clamping BEFORE the bob keeps a bottom-hugger
+      // from being lifted out of its band by its own motion.
+      let y = pose.y;
+      const band = bandRange(style.band);
+      if (band) {
+        const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
+        const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        y = Math.min(hi, Math.max(lo, y));
+      }
+      if (style.bobAmp > 0) {
+        y += Math.sin(tSec * style.bobHz * Math.PI * 2 + varn.phase) * style.bobAmp;
+      }
+
+      f.group.position.set(pose.x, y, pose.z);
+      f.group.lookAt(pose.x + pose.fx, y + pose.fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
-      f.group.scale.setScalar(f.baseScale * breathe);
+      f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+
+      // Most of the breed library carries NO animation clip, so those fish
+      // translated along their spline completely rigidly — gliding cardboard.
+      // A distance-driven yaw on the body fixes the whole library at once and
+      // costs one sin per fish. Clipped models skip it: their clip is better.
+      if (f.body && !f.mixer && wiggle > 0) {
+        f.body.rotation.y = f.baseYaw + Math.sin(d * 0.06 + varn.phase) * 0.55 * wiggle;
+      }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
