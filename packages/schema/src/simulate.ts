@@ -857,6 +857,10 @@ export function revealState(lines: TextBlockLine[], reveal: TextRevealInput, tMs
   // typewriter) still anchors the caret. Pure paint, like everything here.
   let glyphAlphas: number[][] | undefined;
   if (mode === 'glyphFade') {
+    // The 0.01 floor is defensive only — validation already enforces the
+    // public contract fade ∈ (0, 1] (FORMAT.md). It exists so direct callers
+    // that skip validateSpec can't make the divide below infinite, not to
+    // remap legal values: anything ≥ 0.01 passes through untouched.
     const f = Math.min(1, Math.max(0.01, reveal.fade ?? 0.15));
     let g = 0;
     glyphAlphas = lineClusters.map((clusters) =>
