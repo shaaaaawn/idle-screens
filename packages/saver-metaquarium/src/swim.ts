@@ -42,7 +42,9 @@ export interface SwimStyleSpec {
 
 /**
  * The catalogue. `loop` is exactly the pre-style behaviour, so the default
- * changes nothing and every published scene renders as before.
+ * changes nothing and every published scene renders as before. That holds for
+ * every param in this file's orbit, `bodyWiggle` included: each one defaults
+ * to the old look and has to be asked for.
  *
  * Deliberately small. Each entry is a silhouette of movement a viewer can
  * name — patrol, hover, drift — because a set you can name is a set you can
@@ -77,10 +79,16 @@ export function fishHash(index: number, salt: number): number {
 }
 
 /**
- * Per-fish spread. `variance` 0 means a uniform shoal (and is the default, so
- * existing scenes are untouched); 1 means every fish is visibly its own
+ * Per-fish spread. `variance` 0 means a uniform shoal in the things an author
+ * is asking about — size and pace; 1 means every fish is visibly its own
  * animal. This is the "expandable uniqueness" dial: one number an author
  * turns up, rather than per-fish values nobody wants to write.
+ *
+ * Two fields deliberately IGNORE `variance` — `phase` and `anchor`. Both are
+ * desynchronisation, not flavour: a shoal that bobs and beats its tail in
+ * perfect unison reads as one animation played N times, and a station-keeping
+ * style with a shared anchor knots every fish into the same corner. Turning
+ * variance to 0 should give you a uniform population, not a chorus line.
  */
 export function fishVariation(index: number, variance: number): {
   speedMul: number; scaleMul: number; phase: number; anchor: number;
@@ -91,6 +99,8 @@ export function fishVariation(index: number, variance: number): {
     // population, not so much that one fish looks broken.
     speedMul: 1 + (fishHash(index, 1) - 0.5) * 0.8 * v,
     scaleMul: 1 + (fishHash(index, 2) - 0.5) * 0.5 * v,
+    // Independent of `variance` — see the note above; synchronised bobbing is
+    // a machine, not a shoal.
     phase: fishHash(index, 3) * Math.PI * 2,
     // Where along its own route a fish holds station, 0..1. Styles that only
     // work a patch of water (hover, drift) start every fish at distance 0
@@ -101,6 +111,11 @@ export function fishVariation(index: number, variance: number): {
   };
 }
 
+/** Half-width the formation lattice is allowed to occupy, in tank units. The
+ *  tank still clamps the final position — this keeps the shape sane, the
+ *  clamp keeps it legal. */
+const FORMATION_HALF_WIDTH = 55;
+
 /**
  * Formation slot for the carrier school, in the carrier's local frame.
  *
@@ -109,15 +124,21 @@ export function fishVariation(index: number, variance: number): {
  * wearing a costume. A lattice always terminates, and the jitter keeps it
  * from looking like a parade ground.
  */
-export function formationSlot(index: number, count: number, variance: number): {
-  side: number; up: number; back: number;
-} {
+export function formationSlot(
+  index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
+): { side: number; up: number; back: number } {
   const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
   const col = index % cols;
   const row = Math.floor(index / cols);
   const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
+  // Spacing shrinks as the cast grows so the formation's own width stays
+  // inside `halfWidth`. At 24 fish a fixed 26-unit column pitch spread the
+  // shoal wider than the tank, and the outer ranks swam through the glass.
+  const span = Math.max(1, cols - 1);
+  const pitch = Math.min(26, (halfWidth * 2) / span);
+  const jit = Math.min(16, pitch * 0.6);
   return {
-    side: (col - (cols - 1) / 2) * 26 + (fishHash(index, 4) - 0.5) * 16 * j,
+    side: (col - (cols - 1) / 2) * pitch + (fishHash(index, 4) - 0.5) * jit * j,
     up: (fishHash(index, 5) - 0.5) * 20 * j,
     back: row * 22 + fishHash(index, 6) * 12 * j,
   };

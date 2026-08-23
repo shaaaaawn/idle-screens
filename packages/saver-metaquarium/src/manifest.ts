@@ -83,8 +83,14 @@ export const METAQUARIUM_PARAMS = {
   /** Procedural body yaw for models that carry NO animation clip — most of
    *  the breed library. Distance-driven like the tail beat, so it speeds up
    *  with the fish and stays frame-addressable. Clipped models ignore it:
-   *  their own clip is the better animation. */
-  bodyWiggle: { type: 'number', default: 0.35, min: 0, max: 1, ease: 'smooth' },
+   *  their own clip is the better animation.
+   *
+   *  Defaults to 0, off, even though a rigidly gliding fish is the worse
+   *  look. Every param this saver has added defaults to the previous
+   *  behaviour, and a scene already on someone's wall should not start moving
+   *  differently because a dependency was bumped. 0.3–0.4 is the recommended
+   *  value for a clip-less cast — the studio swim variants all set it. */
+  bodyWiggle: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish

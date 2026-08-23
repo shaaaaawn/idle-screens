@@ -148,6 +148,9 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       label: `Metaquarium (${sw})`,
       params: {
         swimStyle: sw, swimVariance: 0.6, fishCount: 8, fishUrl: LOCAL_FISH_URL,
+        // The breed models carry no clip, so without this they glide rigid.
+        // It is opt-in by default; the studio is where you see it on.
+        bodyWiggle: 0.35,
         environment: 'reef', cameraDistance: 170, cameraElevation: 16,
       },
       catalog: LOCAL_CATALOG,

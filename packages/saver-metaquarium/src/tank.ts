@@ -1003,11 +1003,19 @@ class TankInstance implements SaverInstance {
       // a scene stays frame-addressable no matter how varied it looks.
       const varn = fishVariation(f.index, variance);
       const styleSpeed = style.speedMul * varn.speedMul;
-      const base = this.speedTracked ? warpSec : tSec * speed;
       // `effort` is how hard the fish is working; `d` is where that puts it.
       // They differ for styles that hold station: a hovering fish still beats
       // its tail, so animation must not scale with travel or it looks stuffed.
-      const effort = distanceAt(f.plan, base * styleSpeed, 1);
+      //
+      // Speed goes in distanceAt's THIRD argument, never folded into time.
+      // distanceAt scales the whole integral (cruise + wobble) by that
+      // argument; multiplying TIME instead compresses the wobble's phase, so a
+      // scene with swimSpeed != 1 and no speed track would have silently
+      // changed trajectory — breaking `loop`'s no-op promise for exactly the
+      // scenes least likely to be looking.
+      const effort = this.speedTracked
+        ? distanceAt(f.plan, warpSec, styleSpeed)
+        : distanceAt(f.plan, tSec, speed * styleSpeed);
       const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
       const d = anchor + effort * style.travel;
 
@@ -1018,11 +1026,24 @@ class TankInstance implements SaverInstance {
         // boids' 0.87 — and it improves on independent loops, which collide
         // 23-25% of fish-frames.
         const slot = formationSlot(f.index, visible, variance);
-        const lead = distanceAt(this.carrierPlan, base * style.speedMul, 1) - slot.back;
+        // The carrier moves at the STYLE's speed, deliberately without the
+        // per-fish multiplier: a formation whose members each chose their own
+        // pace is not a formation. Per-fish speed still varies the tail beat
+        // through `effort`, which is where it reads anyway.
+        const lead = (this.speedTracked
+          ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
+          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul)) - slot.back;
         const c = swimPoseAtDistance(this.carrierPlan, lead);
         const sx = c.fz, sz = -c.fx;
         const sl = Math.hypot(sx, sz) || 1;
-        pose = { ...c, x: c.x + (sx / sl) * slot.side, y: c.y + slot.up, z: c.z + (sz / sl) * slot.side };
+        const fx2 = c.x + (sx / sl) * slot.side;
+        const fz2 = c.z + (sz / sl) * slot.side;
+        // A slot can hang a fish outside the tank when the carrier is on the
+        // outer part of its route, so pull the whole offset back inside the
+        // radius rather than letting the shoal clip through the wall.
+        const rad = Math.hypot(fx2, fz2);
+        const k = rad > BOUNDS.radius ? BOUNDS.radius / rad : 1;
+        pose = { ...c, x: fx2 * k, y: c.y + slot.up, z: fz2 * k };
       } else {
         pose = swimPoseAtDistance(f.plan, d);
       }
@@ -1030,20 +1051,25 @@ class TankInstance implements SaverInstance {
       // Depth band, then bob. Clamping BEFORE the bob keeps a bottom-hugger
       // from being lifted out of its band by its own motion.
       let y = pose.y;
+      if (style.bobAmp > 0) {
+        y += Math.sin(tSec * style.bobHz * Math.PI * 2 + varn.phase) * style.bobAmp;
+      }
+      // Clamp AFTER the bob. Clamping first let a fish bob straight back out
+      // of the band it was just put in — a bottom-hugger that leaves the floor
+      // is not band-limited, it is just a fish.
       const band = bandRange(style.band);
       if (band) {
         const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
         const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
         y = Math.min(hi, Math.max(lo, y));
       }
-      if (style.bobAmp > 0) {
-        y += Math.sin(tSec * style.bobHz * Math.PI * 2 + varn.phase) * style.bobAmp;
-      }
 
       // Inside a depth band a fish swims LEVEL. Without this its heading still
       // points along the unclamped spline, so a bottom-hugger noses down into
       // a floor it can never reach and a skimmer climbs at an invisible lid.
-      const fy = band ? pose.fy * 0.15 : pose.fy;
+      // Level, not merely flatter: a fraction of the spline's climb still reads
+      // as a fish nosing into a floor it cannot reach.
+      const fy = band ? 0 : pose.fy;
       f.group.position.set(pose.x, y, pose.z);
       f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
@@ -1055,7 +1081,10 @@ class TankInstance implements SaverInstance {
       // translated along their spline completely rigidly — gliding cardboard.
       // A distance-driven yaw on the body fixes the whole library at once and
       // costs one sin per fish. Clipped models skip it: their clip is better.
-      if (f.body && !f.mixer && wiggle > 0) {
+      if (f.body && !f.mixer) {
+        // Write every frame, scaled by wiggle. Skipping the write at 0 left the
+        // last offset latched, so turning the dial down stopped the motion but
+        // never returned the fish to its own heading.
         f.body.rotation.y = f.baseYaw + Math.sin(effort * 0.06 + varn.phase) * 0.55 * wiggle;
       }
 

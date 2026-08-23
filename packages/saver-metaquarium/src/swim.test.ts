@@ -10,11 +10,41 @@ describe('swim styles', () => {
     const l = swimStyleOf('loop');
     expect(l).toMatchObject({ speedMul: 1, band: 'free', bobAmp: 0, formation: false, travel: 1 });
     expect(METAQUARIUM_PARAMS.swimStyle.default).toBe('loop');
+    // Every param added alongside the styles defaults to the OLD look. A
+    // scene already on a wall must not change because a dependency moved.
+    expect(METAQUARIUM_PARAMS.swimVariance.default).toBe(0);
+    expect(METAQUARIUM_PARAMS.bodyWiggle.default).toBe(0);
   });
-  it('the enum and the catalogue cannot drift apart', () => {
+  it('the published style list is what we say it is', () => {
+    // Spelled out, not derived. The manifest builds its options FROM
+    // SWIM_STYLE_NAMES, so comparing the two only proves assignment works.
+    // A literal is the only thing here that fails when someone renames a
+    // style out from under the scenes already published with it.
+    expect([...SWIM_STYLE_NAMES].sort()).toEqual(
+      ['bottom', 'drift', 'hover', 'loop', 'patrol', 'school', 'surface'],
+    );
     expect([...(METAQUARIUM_PARAMS.swimStyle.options ?? [])].sort())
       .toEqual([...SWIM_STYLE_NAMES].sort());
     for (const n of SWIM_STYLE_NAMES) expect(swimStyleOf(n).name).toBe(n);
+  });
+  it('variance 0 is a uniform population, not a synchronised one', () => {
+    for (const i of [0, 1, 7, 23]) {
+      const v = fishVariation(i, 0);
+      expect(v.speedMul).toBe(1);
+      expect(v.scaleMul).toBe(1);
+    }
+    // ...but phase and anchor still spread, deliberately: see fishVariation.
+    const phases = [0, 1, 2, 3, 4, 5].map((i) => fishVariation(i, 0).phase);
+    expect(new Set(phases).size).toBe(phases.length);
+    expect(fishVariation(3, 0).anchor).toBe(fishVariation(3, 1).anchor);
+  });
+  it('a big cast still fits the tank it is swimming in', () => {
+    for (const count of [4, 12, 24]) {
+      for (let i = 0; i < count; i += 1) {
+        const s = formationSlot(i, count, 1);
+        expect(Math.abs(s.side)).toBeLessThanOrEqual(60);
+      }
+    }
   });
   it('unknown styles fall back to loop rather than throwing', () => {
     // The classic steering lane validates nothing, so this WILL be hit.
