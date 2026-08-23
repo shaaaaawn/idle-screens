@@ -9,16 +9,20 @@ export interface TankQuality {
    *  at the default 0. Vertex-shader driven, so the per-frame cost is GPU
    *  vertex work only. */
   moteCap: number;
+  /** Budget for environment layers (see environments.ts LAYER_COST): the
+   *  ceiling costs 1, rays 2, terrain is free. A weak device keeps the
+   *  ceiling and loses the rays. */
+  envBudget: number;
 }
 
 export function qualityFor(tier: CapabilityTier): TankQuality {
   switch (tier) {
     case 'high':
-      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400 };
+      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400, envBudget: 3 };
     case 'standard':
-      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250 };
+      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250, envBudget: 2 };
     default:
-      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120 };
+      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120, envBudget: 1 };
   }
 }
 
