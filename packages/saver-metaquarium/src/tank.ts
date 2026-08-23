@@ -64,6 +64,7 @@ import {
   distanceAt,
   swimPoseAtDistance,
   type SwimPlan,
+  type SwimPose,
   type TankBounds,
 } from './plan';
 import {
@@ -672,6 +673,68 @@ class TankInstance implements SaverInstance {
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
+  /**
+   * The carrier's frame for this instant — position, heading basis, and the
+   * inward pull that keeps the shoal in the glass. Once per frame, shared by
+   * every fish in the formation.
+   *
+   * Heading comes from a CHORD across the spline, not the tangent at a point.
+   * A rigid formation turns as a body, so a fish 60 units off-centre travels
+   * the carrier's angular velocity times its offset: on the tight corners of
+   * a seeded loop the tangent swings fast enough to fling the outer ranks at
+   * 112 units/s, against a cruise of 8. That is a whip, not a shoal, and it
+   * is the one thing that looks unmistakably like a bug. Averaging the
+   * heading over a body-length chord costs one extra spline sample per frame
+   * and keeps the turn inside what a fish could actually swim.
+   */
+  private carrierFrame(
+    ext: { side: number; up: number; back: number },
+    style: { speedMul: number },
+    tSec: number,
+    warpSec: number,
+    speed: number,
+  ): {
+    lead: number; pose: SwimPose; x: number; y: number; z: number;
+    fwdX: number; fwdZ: number; rx: number; rz: number;
+  } {
+    // The carrier moves at the STYLE's speed, deliberately without any
+    // per-fish multiplier: a formation whose members each chose their own pace
+    // is not a formation.
+    const lead = this.speedTracked
+      ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
+      : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
+    const c = swimPoseAtDistance(this.carrierPlan, lead);
+    const chord = FISH_LENGTH * 2.5;
+    const a = swimPoseAtDistance(this.carrierPlan, lead + chord);
+    const b = swimPoseAtDistance(this.carrierPlan, lead - chord);
+    let fwdX = a.x - b.x, fwdZ = a.z - b.z;
+    let hl = Math.hypot(fwdX, fwdZ);
+    if (hl < 1e-3) {
+      // Degenerate chord (a hairpin doubling back on itself) — fall back to
+      // the tangent rather than dividing by nothing.
+      fwdX = c.fx; fwdZ = c.fz; hl = Math.hypot(fwdX, fwdZ) || 1;
+    }
+    fwdX /= hl; fwdZ /= hl;
+    // Keep the shoal in the tank by moving its CENTRE, never by pulling
+    // individual fish toward the middle — that squashing turned a legal
+    // lattice back into a pile.
+    const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
+    const cr = Math.hypot(c.x, c.z);
+    const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    return {
+      lead,
+      pose: c,
+      x: c.x * cs,
+      y: Math.min(BOUNDS.yMax - ext.up, Math.max(BOUNDS.yMin + ext.up, c.y)),
+      z: c.z * cs,
+      fwdX,
+      fwdZ,
+      // Right-hand normal in the ground plane.
+      rx: fwdZ,
+      rz: -fwdX,
+    };
+  }
+
   /** Ceiling the pool may ever reach on this device. */
   private poolCapNow(): number {
     const poolCap = this.thumbnail ? Math.min(6, MAX_FISH) : MAX_FISH;
@@ -871,6 +934,12 @@ class TankInstance implements SaverInstance {
 
     const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
     group.scale.multiplyScalar(baseScale);
+    // Hidden until setState has placed it. A group joins the scene at the
+    // ORIGIN, so a fish that finished loading after this frame's setState was
+    // drawn at the centre of the tank and then jumped to its spline on the
+    // next one — a 60-unit dart, once per fish, as the scene came up. That is
+    // the "fish start out faster than they swim" everyone sees at mount.
+    group.visible = false;
     this.scene.add(group);
     this.fish[index] = {
       index,
@@ -1017,6 +1086,7 @@ class TankInstance implements SaverInstance {
     // computing it inside the loop made the formation O(n^2) every frame for
     // a value that is identical across the shoal.
     const extent = style.formation ? formationExtent(visible, variance) : null;
+    const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -1064,35 +1134,10 @@ class TankInstance implements SaverInstance {
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
         const slot = formationSlot(f.index, visible, variance);
-        // The carrier moves at the STYLE's speed, deliberately without the
-        // per-fish multiplier: a formation whose members each chose their own
-        // pace is not a formation. Per-fish speed still varies the tail beat
-        // through `effort`, which is where it reads anyway.
-        const lead = this.speedTracked
-          ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
-          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
-        beat = lead;
-        // ONE arc sample for the whole shoal, offset rigidly. Sampling each
-        // row at `lead - back` instead put the rows at different points on a
-        // curving spline, so they converged on the inside of every turn: a
-        // lattice with a body length of clearance measured 27% of fish-frames
-        // with a neighbour inside one, exactly as if there were no lattice.
-        const c = swimPoseAtDistance(this.carrierPlan, lead);
-        const ext = extent ?? formationExtent(visible, variance);
-        // Keep the shoal in the tank by moving its CENTRE, never by pulling
-        // individual fish toward the middle — that squashing was the other
-        // half of the pile.
-        const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
-        const cr = Math.hypot(c.x, c.z);
-        const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
-        const hl = Math.hypot(c.fx, c.fz) || 1;
-        const fwdX = c.fx / hl, fwdZ = c.fz / hl;
-        // Right-hand normal in the ground plane.
-        const rx = fwdZ, rz = -fwdX;
-        const cy = Math.min(
-          BOUNDS.yMax - ext.up,
-          Math.max(BOUNDS.yMin + ext.up, c.y),
+        const cf = carrier ?? this.carrierFrame(
+          extent ?? formationExtent(visible, variance), style, tSec, warpSec, speed,
         );
+        beat = cf.lead;
         // A rigid body means every fish points EXACTLY the same way, which
         // measures as polarisation 1.00 and looks like a formation flight.
         // A few degrees of per-fish yaw, scaled by variance, buys back the
@@ -1100,12 +1145,12 @@ class TankInstance implements SaverInstance {
         const yaw = Math.sin(varn.phase) * 0.12 * variance;
         const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
         pose = {
-          ...c,
-          x: c.x * cs + rx * slot.side - fwdX * slot.back,
-          y: cy + slot.up,
-          z: c.z * cs + rz * slot.side - fwdZ * slot.back,
-          fx: fwdX * cy2 - fwdZ * sy2,
-          fz: fwdX * sy2 + fwdZ * cy2,
+          ...cf.pose,
+          x: cf.x + cf.rx * slot.side - cf.fwdX * slot.back,
+          y: cf.y + slot.up,
+          z: cf.z + cf.rz * slot.side - cf.fwdZ * slot.back,
+          fx: cf.fwdX * cy2 - cf.fwdZ * sy2,
+          fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
       } else {
         pose = swimPoseAtDistance(f.plan, d);
