@@ -130,6 +130,16 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
   // Atmosphere pack on full: motes, near murk, teal floor — the Phase 2
   // params at non-default values so the pack is visible on mount.
+  // The environment spec's rooms, one variant each so every place is one URL
+  // away in the studio: ?saver=metaquarium-env-<name>.
+  ...(['abyss', 'reef', 'kelp', 'ice', 'vent', 'lagoon', 'universe'] as const).map((env) =>
+    createMetaquarium({
+      id: `metaquarium-env-${env}`,
+      label: `Metaquarium (${env})`,
+      params: { environment: env, fishCount: 4, fishUrl: LOCAL_FISH_URL, moteDensity: 0.4, cameraElevation: 18 },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
   createMetaquarium({
     id: 'metaquarium-atmosphere',
     label: 'Metaquarium (Atmosphere)',

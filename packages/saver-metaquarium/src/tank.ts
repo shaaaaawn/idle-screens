@@ -30,6 +30,8 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  DoubleSide,
+  PlaneGeometry,
   SphereGeometry,
   SRGBColorSpace,
   Vector3,
@@ -43,6 +45,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
+import { affordableLayers, environmentOf, type EnvironmentPreset } from './environments';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -144,6 +147,58 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.delete(k);
 }
 
+/**
+ * The water ceiling: one translucent plane above the fish, rippling in the
+ * vertex shader off a single `uTime` uniform.
+ *
+ * Closed-form on purpose — the displacement is `sin(ωt + φ)` of the vertex's
+ * own position, so the surface is a pure function of t like everything else
+ * in this saver, and scrubbing to any frame reproduces it exactly. One draw
+ * call, no per-frame CPU work.
+ */
+function buildWaterCeiling(y: number, color: string, opacity: number): {
+  mesh: Mesh; material: ShaderMaterial;
+} {
+  const geo = new PlaneGeometry(1400, 1400, 48, 48);
+  geo.rotateX(-Math.PI / 2);
+  geo.userData.mqOwned = true;
+  const mat = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new Color(color) },
+      uOpacity: { value: opacity },
+    },
+    vertexShader: `
+      uniform float uTime;
+      varying float vRipple;
+      void main() {
+        vec3 p = position;
+        float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
+        p.y += r * 6.0;
+        vRipple = r;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vRipple;
+      void main() {
+        // Caustic-ish banding: the ripple itself modulates brightness, so the
+        // surface reads as moving water rather than a tinted sheet of glass.
+        float band = 0.65 + 0.35 * vRipple;
+        gl_FragColor = vec4(uColor * band, uOpacity * band);
+      }`,
+  });
+  mat.userData.mqOwned = true;
+  const mesh = new Mesh(geo, mat);
+  mesh.position.y = y;
+  mesh.frustumCulled = false;
+  return { mesh, material: mat };
+}
+
 const TEMPLATE_CACHE_CAP = 8;
 const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // Eviction deliberately does NOT dispose the evicted template's GPU
@@ -223,6 +278,11 @@ class TankInstance implements SaverInstance {
   private readonly floorMat: MeshBasicMaterial;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
+  /** The room. Rebuilt only when the environment inputs change — never per
+   *  frame — so a static tank costs nothing beyond its draw calls. */
+  private room: Object3D | null = null;
+  private roomKey = '';
+  private waterMat: ShaderMaterial | null = null;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
   private fish: Array<Fish | undefined> = [];
   /** Desired per-slot template URLs — the single source of truth for the
@@ -382,6 +442,47 @@ class TankInstance implements SaverInstance {
   private str(key: string): string {
     const v = this.params[key];
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
+  }
+
+  /**
+   * Build (or rebuild) the room for the current environment params.
+   *
+   * Keyed like reconcile(): one string compare per frame, real work only when
+   * the author actually changes something.
+   */
+  private buildRoom(): void {
+    const envName = this.str('environment');
+    const floorOverride = this.str('floorKind');
+    const waterY = this.num('waterY');
+    const rayStrength = this.num('rayStrength');
+    const key = `${envName}|${floorOverride}|${waterY}|${rayStrength}|${this.quality.envBudget}`;
+    if (key === this.roomKey) return;
+    this.roomKey = key;
+
+    if (this.room) {
+      this.scene.remove(this.room);
+      disposeOwned(this.room);
+      this.room = null;
+      this.waterMat = null;
+    }
+    const preset: EnvironmentPreset = environmentOf(envName);
+    const can = affordableLayers(this.quality.envBudget, preset);
+    // The environment decides WHETHER there is a ceiling; waterY (-1 = auto)
+    // only moves it. Turning it off is what `void` and `abyss` are for.
+    if (!can.water && !can.rays) {
+      this.ctxSaver.host.dataset.mqEnv = preset.name;
+      return;
+    }
+    const group = new Group();
+    if (can.water && preset.water) {
+      const y = waterY >= 0 ? waterY : preset.water.y;
+      const { mesh, material } = buildWaterCeiling(y, preset.water.color, preset.water.opacity);
+      group.add(mesh);
+      this.waterMat = material;
+    }
+    this.room = group;
+    this.scene.add(group);
+    this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
   /** Ceiling the pool may ever reach on this device. */
@@ -706,6 +807,11 @@ class TankInstance implements SaverInstance {
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
 
+    // The room: rebuilt only on change, then driven by the same clock as
+    // everything else so it stays pure in t.
+    this.buildRoom();
+    if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
@@ -880,6 +986,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqFish;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
+    delete this.ctxSaver.host.dataset.mqEnv;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
