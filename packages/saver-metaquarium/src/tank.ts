@@ -1013,6 +1013,10 @@ class TankInstance implements SaverInstance {
     const visible = this.mixMode
       ? this.wantUrls.length
       : Math.min(Math.round(this.num('fishCount')), this.quality.fishCap);
+    // Once per frame, not once per fish: the extent walks every slot, so
+    // computing it inside the loop made the formation O(n^2) every frame for
+    // a value that is identical across the shoal.
+    const extent = style.formation ? formationExtent(visible, variance) : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -1074,7 +1078,7 @@ class TankInstance implements SaverInstance {
         // lattice with a body length of clearance measured 27% of fish-frames
         // with a neighbour inside one, exactly as if there were no lattice.
         const c = swimPoseAtDistance(this.carrierPlan, lead);
-        const ext = formationExtent(visible, variance);
+        const ext = extent ?? formationExtent(visible, variance);
         // Keep the shoal in the tank by moving its CENTRE, never by pulling
         // individual fish toward the middle — that squashing was the other
         // half of the pile.

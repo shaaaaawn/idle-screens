@@ -221,12 +221,16 @@ test('MQ7: void is a no-op and a named environment builds a room', async ({ page
   expect(pageErrors).toEqual([]);
 });
 
-test('MQ8: the formation branch mounts and holds its shoal in the tank', async ({ page }) => {
+test('MQ8: the formation branch mounts and populates without errors', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
   // MQ2 covers the six-fish population variant, which predates swimStyle and
-  // never reaches the carrier code. This is the only test that runs it.
+  // never reaches the carrier code. This is the only test that RUNS the
+  // carrier path at all — it proves the branch mounts and spawns, not that
+  // the formation holds. The geometry (no two fish inside a body length,
+  // extent bounds every slot) is asserted in swim.test.ts, where the maths is
+  // reachable without a GPU.
   await page.goto('/?saver=metaquarium-swim-school');
   await page.waitForFunction(() => !!window.__idleScreens);
   await page.evaluate(() => window.__idleScreens!.sleep());
