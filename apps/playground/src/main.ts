@@ -424,7 +424,16 @@ function frameMode(): void {
     seed,
     reducedMotion: true,
   };
-  void Promise.resolve(blackHole.mount(ctx)).then((inst: SaverInstance) => {
+  // `?spec=<url-encoded SaverSpec JSON>` renders an arbitrary declarative spec
+  // instead of the black hole: frame-addressable, real-browser-canvas pixel
+  // verification for schema features (textBlock reveal, sequences, …) without
+  // a live channel. Invalid JSON/spec throws — the frame never becomes ready.
+  const specJson = params.get('spec');
+  const mountTarget: Promise<SaverInstance> = specJson
+    ? Promise.resolve(compileSaver(JSON.parse(specJson)).mount(ctx))
+    : Promise.resolve(blackHole.mount(ctx));
+
+  void mountTarget.then((inst: SaverInstance) => {
     if (params.get('track') === 'demo') inst.applyTrack?.(demoTrack);
     inst.renderFrame?.(frame, seed);
     window.__frameReady = true;
