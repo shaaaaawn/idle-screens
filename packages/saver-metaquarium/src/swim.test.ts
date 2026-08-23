@@ -92,3 +92,26 @@ describe('depth bands', () => {
     expect(bandRange('mid')!.hi).toBeLessThanOrEqual(bandRange('ceiling')!.lo);
   });
 });
+
+describe('station-keeping styles must not knot up', () => {
+  it('every fish anchors at a different point on its route', () => {
+    // hover/drift traverse a fraction of the loop, so without a per-fish
+    // anchor they all sit at distance 0 and pile into one corner — the exact
+    // failure the first on-screen check caught.
+    const anchors = new Set<string>();
+    for (let i = 0; i < 24; i++) anchors.add(fishVariation(i, 0).anchor.toFixed(4));
+    expect(anchors.size).toBe(24);
+  });
+  it('anchors spread across the whole loop, not just the start', () => {
+    const xs = Array.from({ length: 24 }, (_, i) => fishVariation(i, 0).anchor);
+    expect(Math.min(...xs)).toBeLessThan(0.25);
+    expect(Math.max(...xs)).toBeGreaterThan(0.75);
+    for (const a of xs) {
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThan(1);
+    }
+  });
+  it('anchoring does not depend on variance — spreading is correctness', () => {
+    expect(fishVariation(9, 0).anchor).toBe(fishVariation(9, 1).anchor);
+  });
+});

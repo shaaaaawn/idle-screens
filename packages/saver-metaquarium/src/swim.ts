@@ -83,7 +83,7 @@ export function fishHash(index: number, salt: number): number {
  * turns up, rather than per-fish values nobody wants to write.
  */
 export function fishVariation(index: number, variance: number): {
-  speedMul: number; scaleMul: number; phase: number;
+  speedMul: number; scaleMul: number; phase: number; anchor: number;
 } {
   const v = Math.max(0, Math.min(1, variance));
   return {
@@ -92,6 +92,12 @@ export function fishVariation(index: number, variance: number): {
     speedMul: 1 + (fishHash(index, 1) - 0.5) * 0.8 * v,
     scaleMul: 1 + (fishHash(index, 2) - 0.5) * 0.5 * v,
     phase: fishHash(index, 3) * Math.PI * 2,
+    // Where along its own route a fish holds station, 0..1. Styles that only
+    // work a patch of water (hover, drift) start every fish at distance 0
+    // without this, so the whole shoal knots up in one corner — which is
+    // exactly what it did the first time I looked at `hover` on screen.
+    // Independent of `variance`: spreading is correctness, not flavour.
+    anchor: fishHash(index, 7),
   };
 }
 

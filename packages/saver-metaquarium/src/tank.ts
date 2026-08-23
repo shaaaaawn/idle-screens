@@ -1004,7 +1004,12 @@ class TankInstance implements SaverInstance {
       const varn = fishVariation(f.index, variance);
       const styleSpeed = style.speedMul * varn.speedMul;
       const base = this.speedTracked ? warpSec : tSec * speed;
-      const d = distanceAt(f.plan, base * styleSpeed, 1) * style.travel;
+      // `effort` is how hard the fish is working; `d` is where that puts it.
+      // They differ for styles that hold station: a hovering fish still beats
+      // its tail, so animation must not scale with travel or it looks stuffed.
+      const effort = distanceAt(f.plan, base * styleSpeed, 1);
+      const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
+      const d = anchor + effort * style.travel;
 
       let pose;
       if (style.formation) {
@@ -1035,8 +1040,12 @@ class TankInstance implements SaverInstance {
         y += Math.sin(tSec * style.bobHz * Math.PI * 2 + varn.phase) * style.bobAmp;
       }
 
+      // Inside a depth band a fish swims LEVEL. Without this its heading still
+      // points along the unclamped spline, so a bottom-hugger noses down into
+      // a floor it can never reach and a skimmer climbs at an invisible lid.
+      const fy = band ? pose.fy * 0.15 : pose.fy;
       f.group.position.set(pose.x, y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, y + pose.fy, pose.z + pose.fz);
+      f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -1047,12 +1056,12 @@ class TankInstance implements SaverInstance {
       // A distance-driven yaw on the body fixes the whole library at once and
       // costs one sin per fish. Clipped models skip it: their clip is better.
       if (f.body && !f.mixer && wiggle > 0) {
-        f.body.rotation.y = f.baseYaw + Math.sin(d * 0.06 + varn.phase) * 0.55 * wiggle;
+        f.body.rotation.y = f.baseYaw + Math.sin(effort * 0.06 + varn.phase) * 0.55 * wiggle;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((d * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          (((effort * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
