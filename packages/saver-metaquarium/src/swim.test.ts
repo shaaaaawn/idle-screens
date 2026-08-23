@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bandRange, FISH_LENGTH, fishHash, fishVariation, formationSlot, SWIM_STYLES,
+  bandRange, FISH_LENGTH, fishHash, fishVariation, formationExtent, formationSlot, SWIM_STYLES,
   SWIM_STYLE_NAMES, swimStyleOf,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
@@ -55,6 +55,24 @@ describe('swim styles', () => {
         }
       }
     }
+  });
+  it('the formation extent bounds every slot it describes', () => {
+    // The tank keeps the shoal in the glass by moving its CENTRE inward by
+    // this much. If the extent under-reports, fish go through the wall; if it
+    // over-reports, the shoal never reaches the outside of the tank.
+    for (const count of [1, 8, 24]) {
+      for (const variance of [0, 0.6, 1]) {
+        const ext = formationExtent(count, variance);
+        for (let i = 0; i < count; i += 1) {
+          const s = formationSlot(i, count, variance);
+          expect(Math.abs(s.side)).toBeLessThanOrEqual(ext.side);
+          expect(Math.abs(s.up)).toBeLessThanOrEqual(ext.up);
+          expect(Math.abs(s.back)).toBeLessThanOrEqual(ext.back);
+        }
+      }
+    }
+    // Wider cast, wider shoal — the extent has to track the count.
+    expect(formationExtent(24, 0.6).side).toBeGreaterThan(formationExtent(4, 0.6).side);
   });
   it('a big cast still fits inside the tank radius', () => {
     for (const count of [4, 12, 24]) {
