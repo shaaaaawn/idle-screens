@@ -134,13 +134,75 @@ const FORMATION_HALF_WIDTH = 62;
  * wearing a costume. A lattice always terminates, and the jitter keeps it
  * from looking like a parade ground.
  */
+/**
+ * How a school holds together. Every shape is a slot function in the
+ * carrier's local frame (side, up, back) under one law: no two slots inside
+ * one body length — enforced by test across every shape, count, and
+ * variance. The carrier and the rigid-body transform don't change; a shape
+ * is a different seating chart, not a different engine.
+ *
+ * - `phalanx` — the jittered lattice (default; the original school)
+ * - `line`    — single file, nose to tail, gentle seeded weave
+ * - `ring`    — a carousel around the carrier, the ring swimming as one
+ * - `wedge`   — the migratory V, ranks widening behind the point
+ * - `ball`    — a bait-ball: Fibonacci-shell seats on a sphere
+ */
+export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball';
+export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball'];
+
 export function formationSlot(
   index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
+  shape: FormationShape = 'phalanx',
 ): { side: number; up: number; back: number } {
+  const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
+  if (shape === 'line') {
+    // Nose to tail with a seeded weave bounded well under half a body
+    // length, so the file cannot fold onto itself.
+    return {
+      side: (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.4 * j,
+      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
+      back: index * FISH_LENGTH * 1.7,
+    };
+  }
+  if (shape === 'ring') {
+    // Evenly seated carousel; radius grows with the cast so seats keep a
+    // body length of arc between them.
+    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const a = (index / Math.max(1, count)) * Math.PI * 2;
+    return {
+      side: Math.cos(a) * r,
+      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      back: Math.sin(a) * r,
+    };
+  }
+  if (shape === 'wedge') {
+    // The migratory V: rank 0 is the point, each rank seats two, wings
+    // sweep back and out.
+    const rank = (index + 1) >> 1;
+    const wing = index === 0 ? 0 : index % 2 === 1 ? -1 : 1;
+    return {
+      side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
+      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
+      back: rank * FISH_LENGTH * 1.35,
+    };
+  }
+  if (shape === 'ball') {
+    // Fibonacci-sphere seats: the classic even shell. Radius grows with the
+    // cast so nearest seats stay a body length apart.
+    const r = FISH_LENGTH * (1.1 + 0.34 * Math.sqrt(count));
+    const g = (1 + Math.sqrt(5)) / 2;
+    const u = count <= 1 ? 0 : index / (count - 1);
+    const incl = Math.acos(1 - 2 * u);
+    const az = (2 * Math.PI * index) / (g * g);
+    return {
+      side: r * Math.sin(incl) * Math.cos(az),
+      up: r * Math.cos(incl) * 0.8,
+      back: r * Math.sin(incl) * Math.sin(az),
+    };
+  }
   const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
   const col = index % cols;
   const row = Math.floor(index / cols);
-  const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
   // Spacing shrinks as the cast grows so the formation's own width stays
   // inside `halfWidth`. At 24 fish a fixed 26-unit column pitch spread the
   // shoal wider than the tank, and the outer ranks swam through the glass.
@@ -168,12 +230,12 @@ export function formationSlot(
  * squashing individual fish toward the middle — squashing is what turned a
  * legal lattice back into a pile.
  */
-export function formationExtent(count: number, variance: number): {
-  side: number; up: number; back: number;
-} {
+export function formationExtent(
+  count: number, variance: number, shape: FormationShape = 'phalanx',
+): { side: number; up: number; back: number } {
   let side = 0, up = 0, back = 0;
   for (let i = 0; i < count; i += 1) {
-    const s = formationSlot(i, count, variance);
+    const s = formationSlot(i, count, variance, undefined, shape);
     side = Math.max(side, Math.abs(s.side));
     up = Math.max(up, Math.abs(s.up));
     back = Math.max(back, Math.abs(s.back));

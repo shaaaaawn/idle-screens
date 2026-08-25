@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bandRange, FISH_LENGTH, fishHash, fishVariation, formationExtent, formationSlot, SWIM_STYLES,
+  bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot, SWIM_STYLES,
   SWIM_STYLE_NAMES, swimStyleOf,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
@@ -37,6 +37,42 @@ describe('swim styles', () => {
     const phases = [0, 1, 2, 3, 4, 5].map((i) => fishVariation(i, 0).phase);
     expect(new Set(phases).size).toBe(phases.length);
     expect(fishVariation(3, 0).anchor).toBe(fishVariation(3, 1).anchor);
+  });
+  it('every formation shape seats every cast with clear water between all pairs', () => {
+    // The one law every seating chart obeys, whatever its geometry.
+    for (const shape of FORMATION_SHAPES) {
+      for (const count of [2, 8, 16, 24]) {
+        for (const variance of [0, 1]) {
+          const slots = Array.from({ length: count }, (_, i) =>
+            formationSlot(i, count, variance, undefined, shape));
+          for (let i = 0; i < count; i += 1) {
+            for (let k = i + 1; k < count; k += 1) {
+              const a = slots[i]!; const b = slots[k]!;
+              const gap = Math.hypot(a.side - b.side, a.up - b.up, a.back - b.back);
+              expect(gap, `${shape} ${count} v${variance} pair ${i},${k}`)
+                .toBeGreaterThanOrEqual(FISH_LENGTH);
+            }
+          }
+        }
+      }
+    }
+  });
+  it('the extent bounds every slot for every shape', () => {
+    for (const shape of FORMATION_SHAPES) {
+      const ext = formationExtent(16, 0.8, shape);
+      for (let i = 0; i < 16; i += 1) {
+        const s2 = formationSlot(i, 16, 0.8, undefined, shape);
+        expect(Math.abs(s2.side)).toBeLessThanOrEqual(ext.side);
+        expect(Math.abs(s2.up)).toBeLessThanOrEqual(ext.up);
+        expect(Math.abs(s2.back)).toBeLessThanOrEqual(ext.back);
+      }
+    }
+  });
+  it('shapes are visibly different seating charts', () => {
+    const sig = (shape: (typeof FORMATION_SHAPES)[number]) =>
+      Array.from({ length: 6 }, (_, i) => formationSlot(i, 6, 0, undefined, shape))
+        .map((s2) => `${Math.round(s2.side)},${Math.round(s2.up)},${Math.round(s2.back)}`).join('|');
+    expect(new Set(FORMATION_SHAPES.map(sig)).size).toBe(FORMATION_SHAPES.length);
   });
   it('no two fish in a formation are inside one body length', () => {
     // The enforceable version of "a school does not collide". A review

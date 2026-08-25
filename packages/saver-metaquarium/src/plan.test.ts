@@ -112,7 +112,7 @@ describe('path shapes', () => {
   });
 
   it('shapes are genuinely different itineraries, not renamed wander', () => {
-    const at = (shape) => {
+    const at = (shape: (typeof PATH_SHAPES)[number]) => {
       const plan = compileSwimPlan(createRng(11), BOUNDS, shape);
       const p = swimPoseAtDistance(plan, plan.totalLength * 0.37);
       return [p.x, p.y, p.z].map((v) => Math.round(v));
@@ -122,7 +122,7 @@ describe('path shapes', () => {
   });
 
   it('helix tours the water column; canyon stays low; orbit holds its lane', () => {
-    const span = (shape) => {
+    const span = (shape: (typeof PATH_SHAPES)[number]) => {
       const plan = compileSwimPlan(createRng(7), BOUNDS, shape);
       let lo = Infinity, hi = -Infinity;
       for (let d = 0; d <= plan.totalLength; d += plan.totalLength / 96) {

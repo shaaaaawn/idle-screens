@@ -1,6 +1,6 @@
 import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
 import { ENVIRONMENT_NAMES } from './environments';
-import { SWIM_STYLE_NAMES } from './swim';
+import { FORMATION_SHAPES, SWIM_STYLE_NAMES } from './swim';
 import { PATH_SHAPES } from './plan';
 
 /**
@@ -82,6 +82,11 @@ export const METAQUARIUM_PARAMS = {
    *  the middle, `helix` tours the water column, `canyon` sweeps low — same
    *  spline engine, different itinerary. */
   pathShape: { type: 'enum', default: 'wander', options: [...PATH_SHAPES], ease: 'step' },
+  /** How a `school` holds together: the original lattice, single file, a
+   *  carousel ring, the migratory V, or a bait-ball. Ignored by every
+   *  non-formation style; the same no-pair-inside-a-body-length law holds
+   *  for all of them. */
+  formationShape: { type: 'enum', default: 'phalanx', options: [...FORMATION_SHAPES], ease: 'step' },
   /** Per-fish spread: 0 a uniform shoal, 1 every fish visibly its own animal
    *  (±40% speed, ±25% size, own phase). The uniqueness dial — one number
    *  instead of per-fish values nobody wants to author. */

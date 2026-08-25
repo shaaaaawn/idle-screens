@@ -49,7 +49,8 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, formationExtent, formationSlot, swimStyleOf,
+  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
+  formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
@@ -1127,7 +1128,11 @@ class TankInstance implements SaverInstance {
     // Once per frame, not once per fish: the extent walks every slot, so
     // computing it inside the loop made the formation O(n^2) every frame for
     // a value that is identical across the shoal.
-    const extent = style.formation ? formationExtent(visible, variance) : null;
+    const fshapeRaw = this.str('formationShape');
+    const fshape = (FORMATION_SHAPES as readonly string[]).includes(fshapeRaw)
+      ? (fshapeRaw as FormationShape)
+      : 'phalanx';
+    const extent = style.formation ? formationExtent(visible, variance, fshape) : null;
     const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
     for (const f of this.fish) {
       if (!f) continue;
@@ -1181,9 +1186,9 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(f.index, visible, variance);
+        const slot = formationSlot(f.index, visible, variance, undefined, fshape);
         const cf = carrier ?? this.carrierFrame(
-          extent ?? formationExtent(visible, variance), style, tSec, warpSec, speed,
+          extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
         );
         beat = cf.lead;
         // A rigid body means every fish points EXACTLY the same way, which
