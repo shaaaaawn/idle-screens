@@ -240,17 +240,41 @@ export function addGlowHalos(root: Object3D, rng: Rng): number {
     if (isGlow(mesh.material)) glowMeshes.push(mesh);
   });
   const parts = glowMeshes.slice(0, HALO_PART_CAP);
+  if (parts.length === 0) return 0;
+  // Push is quoted against the WHOLE MODEL, never the part. Crystal-finned
+  // breeds carry a glow part LARGER than their body (seahorse: 27.7 vs 15.3
+  // half-diagonal), and part-proportional shells turned those into a
+  // displaced ghost of the entire fish — the "shadow" a viewer reported from
+  // the wall. Against the model, the rim stays a rim: ~1.5% and 3.5% of the
+  // fish, well under one voxel, so the cube-normal face separation is
+  // subpixel too.
+  let modelR = 0;
+  for (const mesh of parts) {
+    mesh.geometry.computeBoundingSphere();
+    modelR = Math.max(modelR, mesh.geometry.boundingSphere?.radius ?? 1);
+  }
+  root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (mesh.isMesh && mesh.geometry) {
+      mesh.geometry.computeBoundingSphere();
+      modelR = Math.max(modelR, mesh.geometry.boundingSphere?.radius ?? 0);
+    }
+  });
   const shells: readonly (readonly [number, number])[] =
-    parts.length <= 3 ? [[0.045, 0.34], [0.11, 0.16]] : [[0.07, 0.3]];
+    parts.length <= 3 ? [[0.015, 0.3], [0.035, 0.14]] : [[0.025, 0.26]];
   let added = 0;
   for (const mesh of parts) {
     const stored = (mesh.material as Material).userData.mqGlowColor as number | undefined;
     const color = stored !== undefined ? new Color(stored) : glowColorOf(mesh.material as Material, rng);
-    mesh.geometry.computeBoundingSphere();
-    const radius = mesh.geometry.boundingSphere?.radius ?? 1;
-    for (const [k, opacity] of shells) {
+    const partR = mesh.geometry.boundingSphere?.radius ?? 1;
+    // A glow part that IS most of the silhouette gets one faint veil, not a
+    // bright double — its shell already traces the whole fish.
+    const large = partR > modelR * 0.55;
+    const partShells = large ? [shells[0]!] : shells;
+    const dim = large ? 0.55 : 1;
+    for (const [k, opacity] of partShells) {
       const halo = mesh.clone();
-      halo.material = haloMaterial(color, radius * k, opacity);
+      halo.material = haloMaterial(color, modelR * k, opacity * dim);
       halo.userData.mqHalo = true;
       halo.renderOrder = 2;
       mesh.parent?.add(halo);

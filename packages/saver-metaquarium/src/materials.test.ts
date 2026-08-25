@@ -192,10 +192,11 @@ it('tags created coats mqOwned and leaves template materials untagged', () => {
 
 describe('glow halos — selective bloom without a composer', () => {
   function glowFish(): { root: Group; glow: Mesh } {
-    const geo = new SphereGeometry(1, 4, 4);
-    const glow = new Mesh(geo, new MeshStandardMaterial({ name: 'GLOW-fin' }));
+    // A small fin on a big body — the ordinary case. The whole-silhouette
+    // glow (crystal breeds) is covered by its own test below.
+    const glow = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ name: 'GLOW-fin' }));
     glow.material.name = 'GLOW-fin';
-    const body = new Mesh(geo, new MeshStandardMaterial({ name: 'PrimaryColor' }));
+    const body = new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' }));
     body.material.name = 'PrimaryColor';
     const root = new Group();
     root.add(glow, body);
@@ -218,6 +219,23 @@ describe('glow halos — selective bloom without a composer', () => {
       expect(m.fog).toBe(false);
       expect(m.userData.mqOwned).toBe(true);
     }
+  });
+
+  it('a whole-silhouette glow part gets ONE faint veil, not a bright double', () => {
+    // The seahorse's crystal fin is LARGER than its body; part-proportional
+    // shells turned it into a displaced ghost of the entire fish on the wall.
+    const glow = new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'GLOW-Crystal1' }));
+    glow.material.name = 'GLOW-Crystal1';
+    const body = new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' }));
+    body.material.name = 'PrimaryColor';
+    const root = new Group();
+    root.add(glow, body);
+    applyNpcMaterials(root, createRng(7).fork(1));
+    expect(addGlowHalos(root, createRng(7).fork(1))).toBe(1);
+    root.traverse((n) => {
+      const h = n as Mesh;
+      if (h.userData.mqHalo) expect((h.material as MeshBasicMaterial).opacity).toBeLessThan(0.2);
+    });
   });
 
   it('shell color matches the core glow color exactly', () => {
@@ -270,7 +288,7 @@ describe('glow halos — selective bloom without a composer', () => {
     addGlowHalos(root, createRng(7).fork(1));
     const second = addGlowHalos(root, createRng(7).fork(1));
     // The already-added shells wear glow-named materials but are tagged.
-    expect(second).toBe(2); // re-halos the core part only, not the shells
+    expect(second).toBe(2); // re-halos the small core part only, not the shells
     const geo = new SphereGeometry(1, 4, 4);
     const multi = new Mesh(geo, [
       new MeshStandardMaterial({ name: 'GLOW-a' }),
