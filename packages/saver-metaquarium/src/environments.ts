@@ -50,34 +50,52 @@ export interface EnvironmentPreset {
   water: WaterCeiling | null;
   floor: FloorKind;
   rays: Rays | null;
+  /** Terrain rng salt — two rooms sharing a floor kind must not share a hill. */
+  seedSalt: number;
+  /** Room palette, applied ONLY where the author left the matching param at
+   *  its manifest default. An authored color always wins over the room's. */
+  palette?: { fog: string; floor: string; mote: string };
 }
 
 /**
  * The catalogue. `void` is EXACTLY today's scene — no ceiling, flat floor, no
- * rays — so the default is a no-op and every already-published scene renders
- * unchanged. That is the whole reason the enum is safe to ship first.
+ * rays, no palette — so the default is a no-op and every already-published
+ * scene renders unchanged. That is the whole reason the enum was safe to ship.
  *
- * Deliberately NOT set here: fog, floor colour, motes. Those are already
- * steerable params, and an environment that quietly overrode them would make
- * "did the author choose this, or did the preset?" unanswerable. An
- * environment supplies the ROOM; the palette stays the author's.
+ * Palettes: a QA pass measured `vent`, `universe`, and `kelp` rendering
+ * byte-identical (0.000 pixel difference vent↔universe) because they share
+ * `ridges`, one terrain seed, and no palette — the original "the palette
+ * stays the author's" rule left three of eight rooms indistinguishable.
+ * The repaired rule: a preset palette applies ONLY where the author left
+ * that param untouched, so "did the author choose this?" stays answerable —
+ * an authored fogColor always wins over the room's.
+ *
+ * `seedSalt` forks the terrain rng per environment, so two `ridges` rooms
+ * are different hills, not one heightfield wearing two names.
  */
 export const ENVIRONMENTS: readonly EnvironmentPreset[] = [
-  { name: 'void', label: 'Void', water: null, floor: 'flat', rays: null },
-  { name: 'abyss', label: 'Abyss', water: null, floor: 'basin',
-    rays: { strength: 0.35, color: '#0e4a6e', y: -620 } },
+  { name: 'void', label: 'Void', water: null, floor: 'flat', rays: null, seedSalt: 0 },
+  { name: 'abyss', label: 'Abyss', water: null, floor: 'basin', seedSalt: 0x0a1,
+    rays: { strength: 0.35, color: '#0e4a6e', y: -620 },
+    palette: { fog: '#02030a', floor: '#05070f', mote: '#4fd4a8' } },
   { name: 'reef', label: 'Reef', water: { y: 150, color: '#2ad4ff', opacity: 0.18 },
-    floor: 'dunes', rays: { strength: 0.5, color: '#bfefff', y: 900 } },
+    floor: 'dunes', rays: { strength: 0.5, color: '#bfefff', y: 900 }, seedSalt: 0x0a2,
+    palette: { fog: '#0a3d5c', floor: '#123c50', mote: '#bfe8ff' } },
   { name: 'kelp', label: 'Kelp forest', water: { y: 170, color: '#1e6f5c', opacity: 0.2 },
-    floor: 'ridges', rays: { strength: 0.4, color: '#9ef5d0', y: 820 } },
+    floor: 'ridges', rays: { strength: 0.4, color: '#9ef5d0', y: 820 }, seedSalt: 0x0a3,
+    palette: { fog: '#07271e', floor: '#0c2f22', mote: '#a5f2c6' } },
   { name: 'ice', label: 'Under ice', water: { y: 132, color: '#cfefff', opacity: 0.32 },
-    floor: 'flat', rays: { strength: 0.6, color: '#eaf8ff', y: 1000 } },
-  { name: 'vent', label: 'Hydrothermal vent', water: null, floor: 'ridges',
-    rays: { strength: 0.45, color: '#ff7a3c', y: -520 } },
+    floor: 'flat', rays: { strength: 0.6, color: '#eaf8ff', y: 1000 }, seedSalt: 0x0a4,
+    palette: { fog: '#12283c', floor: '#1b3d59', mote: '#d8f2ff' } },
+  { name: 'vent', label: 'Hydrothermal vent', water: null, floor: 'ridges', seedSalt: 0x0a5,
+    rays: { strength: 0.45, color: '#ff7a3c', y: -520 },
+    palette: { fog: '#170502', floor: '#4a1a0a', mote: '#ff8a3c' } },
   { name: 'lagoon', label: 'Lagoon', water: { y: 118, color: '#7ff3d0', opacity: 0.22 },
-    floor: 'dunes', rays: { strength: 0.55, color: '#fff3b0', y: 950 } },
-  { name: 'universe', label: 'Universe', water: null, floor: 'ridges',
-    rays: { strength: 0.3, color: '#c39bff', y: 1200 } },
+    floor: 'dunes', rays: { strength: 0.55, color: '#fff3b0', y: 950 }, seedSalt: 0x0a6,
+    palette: { fog: '#0d453f', floor: '#6e4457', mote: '#eafff4' } },
+  { name: 'universe', label: 'Universe', water: null, floor: 'ridges', seedSalt: 0x0a7,
+    rays: { strength: 0.3, color: '#c39bff', y: 1200 },
+    palette: { fog: '#0d0618', floor: '#171030', mote: '#cfa8ff' } },
 ];
 
 export const ENVIRONMENT_NAMES: readonly EnvironmentName[] =

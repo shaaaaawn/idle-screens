@@ -94,3 +94,22 @@ describe('floor kinds', () => {
       .toEqual(['auto', ...FLOOR_KINDS].sort());
   });
 });
+
+describe('environment identity (QA pass 1, D1)', () => {
+  it('every named environment is a distinct place — palette and terrain seed', () => {
+    // vent vs universe measured at 0.000 pixel difference before this: same
+    // floor kind, same terrain seed, no palette. Never again.
+    const named = ENVIRONMENTS.filter((e) => e.name !== 'void');
+    for (const e of named) {
+      expect(e.palette, e.name).toBeDefined();
+      expect(e.seedSalt, e.name).toBeGreaterThan(0);
+    }
+    const fogs = named.map((e) => e.palette!.fog);
+    expect(new Set(fogs).size).toBe(named.length);
+    const salts = ENVIRONMENTS.map((e) => e.seedSalt);
+    expect(new Set(salts).size).toBe(ENVIRONMENTS.length);
+  });
+  it('void carries no palette — the author keeps the blank canvas', () => {
+    expect(environmentOf('void').palette).toBeUndefined();
+  });
+});
