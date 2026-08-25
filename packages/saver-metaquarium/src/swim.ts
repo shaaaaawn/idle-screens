@@ -196,13 +196,17 @@ export function formationSlot(
     const within = index % VSIZE;
     const rank = (within + 1) >> 1;
     const wing = within === 0 ? 0 : within % 2 === 1 ? -1 : 1;
+    // Wings droop behind the point (single-layer only — stacked Vs need the
+    // vertical room for their layers). Without it a side-on wedge is a flat
+    // washing-line of fish at one height; with it the V reads in 3D.
+    const droop = layers === 1 ? rank * FISH_LENGTH * 0.24 : 0;
     return {
       side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
       // 1.5 body lengths per layer with a small jitter: adjacent layers seat
       // the same rank directly above each other, so pitch minus worst-case
       // jitter closure must clear one body length.
       up: (layer - (layers - 1) / 2) * FISH_LENGTH * 1.5
-        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.2 * j,
+        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.2 * j - droop,
       back: (rank - 2) * FISH_LENGTH * 1.35,
     };
   }

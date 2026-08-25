@@ -259,8 +259,25 @@ function buildTerrain(height: (x: number, z: number) => number, color: string): 
     pos.setY(i, height(pos.getX(i), pos.getZ(i)));
   }
   geo.computeVertexNormals();
+  // Shading is BAKED as a grayscale vertex-color lambert term — an unlit
+  // heightfield has no relief (a QA pass measured flat→dunes at 2.6/255 mean
+  // pixel difference: hills nobody can see). Baking keeps the zero-per-frame
+  // cost and leaves material.color as the pure tint, so floorColor steering
+  // multiplies through unchanged.
+  const normal = geo.attributes.normal!;
+  const shadeArr = new Float32Array(pos.count * 3);
+  // Fixed low sun from the north-west — direction is aesthetic, not physical.
+  const lx = -0.45, ly = 0.78, lz = -0.43;
+  for (let i = 0; i < pos.count; i++) {
+    const lambert = Math.max(0, normal.getX(i) * lx + normal.getY(i) * ly + normal.getZ(i) * lz);
+    const v = 0.45 + 0.55 * lambert;
+    shadeArr[i * 3] = v;
+    shadeArr[i * 3 + 1] = v;
+    shadeArr[i * 3 + 2] = v;
+  }
+  geo.setAttribute('color', new BufferAttribute(shadeArr, 3));
   geo.userData.mqOwned = true;
-  const mat = new MeshBasicMaterial({ color: new Color(color) });
+  const mat = new MeshBasicMaterial({ color: new Color(color), vertexColors: true });
   mat.userData.mqOwned = true;
   const mesh = new Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -300,22 +317,31 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone.
-        float fade = smoothstep(0.0, 1.0, vY);
+        float fade = smoothstep(0.0, 0.3, vY) * (1.0 - smoothstep(0.72, 1.0, vY));
         float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.16 * breathe);
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.34 * breathe);
       }`,
   });
   mat.userData.mqOwned = true;
-  const geo = new CylinderGeometry(6, 92, Math.abs(y) * 0.85, 10, 1, true);
+  // The shaft spans the TANK (y 0..150), whatever the light's own distance.
+  // The old geometry spanned the SOURCE — height |y|·0.85 centred at y·0.45 —
+  // which for vent's y=-520 put every shaft at y -455..-13, entirely under
+  // the seabed, and for from-above sources put the bright end hundreds of
+  // units past the ceiling. A QA pass measured rayStrength 0→1 at a 0.07/255
+  // pixel difference: the dial did nothing. The fade now peaks IN the fish
+  // band and closes at both ends so shafts still read as light, not walls.
+  const geo = new CylinderGeometry(9, 64, 150, 10, 1, true);
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
     const a = rng.next() * Math.PI * 2;
-    const r = 60 + rng.next() * 190;
-    m.position.set(Math.cos(a) * r, y * 0.45, Math.sin(a) * r);
+    const r = 45 + rng.next() * 130;
+    m.position.set(Math.cos(a) * r, 72, Math.sin(a) * r);
     // Shafts from below are inverted so the wide end still faces the light.
     if (y < 0) m.rotation.z = Math.PI;
     m.rotation.y = rng.next() * Math.PI;
+    // A slight lean per shaft — parallel columns read as architecture.
+    m.rotation.x = (rng.next() - 0.5) * 0.18;
     m.frustumCulled = false;
     group.add(m);
   }
@@ -421,6 +447,9 @@ class TankInstance implements SaverInstance {
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
+  /** The active room's palette — consulted only where the author left the
+   *  matching param at its manifest default. */
+  private roomPalette: { fog: string; floor: string; mote: string } | null = null;
   private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
@@ -655,8 +684,8 @@ class TankInstance implements SaverInstance {
       ? (floorOverride as FloorKind)
       : preset.floor;
     if (kind !== 'flat') {
-      const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
-      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88));
+      const floorHex = String(this.params.floorColor ?? preset.palette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
@@ -676,20 +705,23 @@ class TankInstance implements SaverInstance {
       this.presetWaterY = preset.water.y;
     }
     if (can.rayCount > 0 && preset.rays) {
-      // -1 = follow the environment; 0 is a real author choice for "off".
+      // Built even at strength 0: a QA pass found that publishing with
+      // rayStrength 0 left rayMat null forever, so later steering hit a dead
+      // `if (this.rayMat)` and the dial did nothing until the whole room was
+      // rebuilt. Strength is a uniform; existence is the room's business.
       const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
-      if (strength > 0) {
-        const { group: rg, material } = buildRays(
-          can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
-        );
-        group.add(rg);
-        this.rayMat = material;
-        this.presetRayStrength = preset.rays.strength;
-      }
+      const { group: rg, material } = buildRays(
+        can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+      );
+      material.visible = strength > 0;
+      group.add(rg);
+      this.rayMat = material;
+      this.presetRayStrength = preset.rays.strength;
     }
     this.room = group;
     this.scene.add(group);
     this.applyRoomParams(waterY, rayStrength);
+    this.roomPalette = preset.palette ?? null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
@@ -1068,7 +1100,7 @@ class TankInstance implements SaverInstance {
 
     // Fog color
     const fogHex = String(
-      this.params.fogColor ?? this.space.fogColor?.default ?? '#030009',
+      this.params.fogColor ?? this.roomPalette?.fog ?? this.space.fogColor?.default ?? '#030009',
     );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
@@ -1078,7 +1110,7 @@ class TankInstance implements SaverInstance {
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
     fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+    const floorHex = String(this.params.floorColor ?? this.roomPalette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
     this.floorMat.color.set(floorHex);
     // Terrain follows floorColor as well — the environment supplies the SHAPE,
     // the author keeps the palette.
@@ -1090,7 +1122,7 @@ class TankInstance implements SaverInstance {
       this.motes.geometry.setDrawRange(0, active);
       this.moteMat.uniforms.uTime!.value = tSec;
       (this.moteMat.uniforms.uColor!.value as Color).set(
-        String(this.params.moteColor ?? this.space.moteColor?.default ?? '#7fd6ff'),
+        String(this.params.moteColor ?? this.roomPalette?.mote ?? this.space.moteColor?.default ?? '#7fd6ff'),
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
