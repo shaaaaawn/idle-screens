@@ -2,7 +2,8 @@
 
 ## Repository layout
 
-pnpm workspace monorepo. Ten publishable packages + four apps:
+pnpm workspace monorepo. Eleven publishable packages + four apps (`ls packages/`
+is the truth if this count drifts):
 
 ```
 packages/
@@ -17,19 +18,21 @@ packages/
                                                          obstacles in an analytic flow field
   saver-catwalk/    @idle-screens/saver-catwalk      -- passthrough cat saver: a seeded-itinerary
                                                          cat parkours across the page's blocks
+  saver-metaquarium/ @idle-screens/saver-metaquarium  -- three.js aquarium: GLB fish, environments,
+                                                         fishMix schools, steerable camera
   savers-classic/    @idle-screens/savers-classic     -- 17 classic savers (toasters, DVD, warp, etc.)
   schema/            @idle-screens/schema             -- declarative saver format (depends on core)
   validator/         @idle-screens/validator           -- WCAG flash + perf gates (standalone, zero deps)
   capabilities/      @idle-screens/capabilities       -- device tier + eligibility (standalone, zero deps)
 apps/
-  playground/        Vite dev workbench (imports all 10; dev-only, not published)
+  playground/        Vite dev workbench (imports every package; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
   ios/               Native iOS client + VJ remote (Swift, XcodeGen, not published to npm)
   linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
 docs/                Design docs (specs, research)
 ```
 
-**Dependency graph:** `core` is the foundation. `saver-black-hole`, `saver-tide`, `saver-limelight`, `saver-slipstream`, `saver-catwalk`, `savers-classic`, and `schema` depend on `core`. `validator` and `capabilities` have zero dependencies and can be used independently.
+**Dependency graph:** `core` is the foundation. `saver-black-hole`, `saver-tide`, `saver-limelight`, `saver-slipstream`, `saver-catwalk`, `saver-metaquarium`, `savers-classic`, and `schema` depend on `core` (`saver-metaquarium` also uses `capabilities` and `three`). `validator` and `capabilities` have zero dependencies and can be used independently.
 
 ## Commands (run from repo root)
 
@@ -99,7 +102,7 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 ## Releasing (changesets)
 
-Changesets version and publish **only the ten npm packages** in `packages/`. They
+Changesets version and publish **only the npm packages** in `packages/`. They
 do not gate CI, the playground, or the Mac app.
 
 ### When to add a changeset
@@ -276,6 +279,6 @@ The Angular site at `~/code/shawn-site` consumes `@idle-screens/core`, `@idle-sc
 ## npm publishing
 
 - npm org: `idle-screens` (on npmjs.com). npm username: `shawnfx`.
-- All 6 packages are published at `0.1.0` with `publishConfig: { "access": "public" }`.
+- All packages publish with `publishConfig: { "access": "public" }`.
 - Scoped packages require the npm org to exist or publish returns 404.
 - Granular access token with "Bypass 2FA" is required for CI publishing (classic automation tokens fail with 403).

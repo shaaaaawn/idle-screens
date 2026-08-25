@@ -185,7 +185,16 @@ function textBlockRevealFraction(
   const unitScale = Math.min(w, h);
   const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
   const lines = breakTextBlock(s.text, maxWEm);
-  return revealState(lines, s.reveal, t).progress;
+  const rs = revealState(lines, s.reveal, t);
+  if (rs.glyphAlphas) {
+    // glyphFade paints partial-alpha glyphs, so the ink fraction is the mean
+    // glyph alpha, not the frontier progress.
+    let sum = 0;
+    let n = 0;
+    for (const line of rs.glyphAlphas) for (const a of line) { sum += a; n++; }
+    return n > 0 ? sum / n : 1;
+  }
+  return rs.progress;
 }
 
 // ---------------------------------------------------------------------------

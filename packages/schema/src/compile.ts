@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -404,11 +404,36 @@ class SpecInstance implements SaverInstance {
       ctx.textBaseline = 'top';
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
-      for (let li = 0; li < fullLines; li++) {
-        ctx.fillText(lines[li]!.text, xOff, li * lh);
-      }
-      if (rs && rs.partialText.length > 0) {
-        ctx.fillText(rs.partialText, xOff, fullLines * lh);
+      if (rs?.glyphAlphas) {
+        // glyphFade: every glyph draws individually at its full-line prefix
+        // advance. measureText is paint-only (the caret's trick) — positions
+        // come from the platform's real glyph widths, never the em table, and
+        // depend only on the fixed prefix, so glyphs never shift as they fade.
+        ctx.textAlign = 'left';
+        const baseAlpha = ctx.globalAlpha;
+        for (let li = 0; li < lines.length; li++) {
+          const alphas = rs.glyphAlphas[li] ?? [];
+          if (alphas.length > 0 && alphas[0]! <= 0) break;
+          const clusters = graphemeClusters(lines[li]!.text);
+          const lw = ctx.measureText(lines[li]!.text).width;
+          const x0 = align === 'center' ? (maxWPx - lw) / 2 : align === 'right' ? maxWPx - lw : 0;
+          let prefix = '';
+          for (let gi = 0; gi < clusters.length; gi++) {
+            const a = alphas[gi] ?? 0;
+            if (a <= 0) break; // alphas only fall in reading order
+            ctx.globalAlpha = baseAlpha * a;
+            ctx.fillText(clusters[gi]!, x0 + ctx.measureText(prefix).width, li * lh);
+            prefix += clusters[gi]!;
+          }
+        }
+        ctx.globalAlpha = baseAlpha;
+      } else {
+        for (let li = 0; li < fullLines; li++) {
+          ctx.fillText(lines[li]!.text, xOff, li * lh);
+        }
+        if (rs && rs.partialText.length > 0) {
+          ctx.fillText(rs.partialText, xOff, fullLines * lh);
+        }
       }
       if (rs && reveal!.caret) {
         const cfg = reveal!.caret === true ? {} : reveal!.caret;

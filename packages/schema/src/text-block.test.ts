@@ -342,3 +342,104 @@ describe('reveal in perceive', () => {
     expect(sum(lit)).toBeGreaterThan(sum(dark));
   });
 });
+
+// ---------------------------------------------------------------------------
+// glyphFade — staggered per-glyph alpha (G6)
+// ---------------------------------------------------------------------------
+
+describe('revealState glyphFade', () => {
+  const lines = breakTextBlock('Hello world\nsecond line', 100);
+  const clusterCounts = lines.map((l) => graphemeClusters(l.text).length);
+
+  it('returns per-line alphas parallel to the grapheme clusters', () => {
+    const st = revealState(lines, { mode: 'glyphFade', progress: 0.5 }, 0);
+    expect(st.glyphAlphas!.map((a) => a.length)).toEqual(clusterCounts);
+  });
+
+  it('other modes return no alphas', () => {
+    expect(revealState(lines, { progress: 0.5 }, 0).glyphAlphas).toBeUndefined();
+  });
+
+  it('progress 0 is fully transparent, progress 1 fully opaque', () => {
+    const at0 = revealState(lines, { mode: 'glyphFade', progress: 0 }, 0);
+    expect(at0.glyphAlphas!.flat().every((a) => a === 0)).toBe(true);
+    const at1 = revealState(lines, { mode: 'glyphFade', progress: 1 }, 0);
+    expect(at1.glyphAlphas!.flat().every((a) => a === 1)).toBe(true);
+  });
+
+  it('alphas fall in reading order and rise monotonically with progress', () => {
+    let prev: number[] | null = null;
+    for (let p = 0; p <= 1.001; p += 0.05) {
+      const flat = revealState(lines, { mode: 'glyphFade', progress: p }, 0).glyphAlphas!.flat();
+      for (let i = 1; i < flat.length; i++) expect(flat[i]!).toBeLessThanOrEqual(flat[i - 1]!);
+      if (prev) for (let i = 0; i < flat.length; i++) expect(flat[i]!).toBeGreaterThanOrEqual(prev[i]!);
+      prev = flat;
+    }
+  });
+
+  it('a wider fade window keeps more glyphs mid-fade', () => {
+    const partials = (fade: number) =>
+      revealState(lines, { mode: 'glyphFade', progress: 0.5, fade }, 0)
+        .glyphAlphas!.flat().filter((a) => a > 0 && a < 1).length;
+    expect(partials(0.8)).toBeGreaterThan(partials(0.05));
+  });
+
+  it('assigns one alpha per grapheme cluster, not per code unit', () => {
+    const emojiLines = breakTextBlock('👨‍👩‍👧😀', 100);
+    const st = revealState(emojiLines, { mode: 'glyphFade', progress: 0.5 }, 0);
+    expect(st.glyphAlphas![0]!.length).toBe(2);
+  });
+
+  it('keeps the typewriter frontier for the caret', () => {
+    const total = clusterCounts.reduce((a, b) => a + b, 0);
+    const st = revealState(lines, { mode: 'glyphFade', progress: 4 / total }, 0);
+    expect(st.caretPrefix).toBe('Hell');
+  });
+
+  it('speed still drives progress in glyphFade mode', () => {
+    const timed = revealState(lines, { mode: 'glyphFade', speed: 10 }, 500);
+    expect(timed.glyphAlphas!.flat().some((a) => a > 0)).toBe(true);
+    expect(timed.glyphAlphas!.flat().some((a) => a === 0)).toBe(true);
+  });
+});
+
+describe('glyphFade validation and steering', () => {
+  it('accepts glyphFade with a fade window', () => {
+    const res = validateSpec(textBlockSpec({ reveal: { mode: 'glyphFade', progress: 0.5, fade: 0.3 } }));
+    expect(res.valid).toBe(true);
+  });
+
+  it('rejects fade outside (0, 1]', () => {
+    for (const fade of [0, -0.1, 1.5]) {
+      const res = validateSpec(textBlockSpec({ reveal: { mode: 'glyphFade', fade } }));
+      expect(res.valid).toBe(false);
+      expect(res.errors.some((e) => e.path.includes('reveal.fade'))).toBe(true);
+    }
+  });
+
+  it('fade is paint and steerable', () => {
+    const spec = textBlockSpec({ reveal: { mode: 'glyphFade', fade: 0.1 } });
+    expect(structuralSignature(spec)).toBe(structuralSignature(textBlockSpec()));
+    const out = applyDeltasToSpec(spec, [{ t: 0, path: 'layers.0.sprite.reveal.fade', value: 0.4 }]);
+    expect((out.layers[0]!.sprite as { reveal?: { fade?: number } }).reveal?.fade).toBe(0.4);
+  });
+});
+
+describe('glyphFade in perceive', () => {
+  it('revealed reports the mean glyph alpha', () => {
+    const at = (progress: number) =>
+      textSprites(textBlockSpec({ reveal: { mode: 'glyphFade', progress } }))[0]!.revealed!;
+    expect(at(0)).toBe(0);
+    expect(at(1)).toBe(1);
+    const mid = at(0.5);
+    expect(mid).toBeGreaterThan(0.3);
+    expect(mid).toBeLessThan(0.7);
+  });
+
+  it('luminance grows with glyphFade progress', () => {
+    const dim = luminanceGrid(textBlockSpec({ reveal: { mode: 'glyphFade', progress: 0.2 } }));
+    const lit = luminanceGrid(textBlockSpec({ reveal: { mode: 'glyphFade', progress: 0.9 } }));
+    const sum = (g: LuminanceGrid) => g.cells.reduce((a: number, b: number) => a + b, 0);
+    expect(sum(lit)).toBeGreaterThan(sum(dim));
+  });
+});

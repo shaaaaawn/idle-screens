@@ -51,7 +51,7 @@ function validPreset(space, params) {
     } else if (p.type === 'bool') {
       if (typeof v !== 'boolean') return false;
     } else if (p.type === 'enum') {
-      if (!p.values?.includes(v)) return false;
+      if (!p.options?.includes(v)) return false;
     }
   }
   return true;

@@ -180,7 +180,14 @@ with distance, removing pop-in at the cutoff.
   frontier per grapheme (`typewriter`, default), per `word`, or per `line`.
   `speed` (graphemes/sec, max 120) makes the block type itself from scene
   start: effective progress is `min(progress, speed·t/total)`, so a steered
-  `progress` can still hold or delete a self-typing block. `caret` draws a
+  `progress` can still hold or delete a self-typing block. A fourth mode,
+  `glyphFade`, fades each glyph in over a staggered alpha ramp instead of
+  popping it whole (the caption look); `fade` (0–1 exclusive of 0, default
+  0.15, `glyphFade` only) is each glyph's fade window as a fraction of
+  progress — small reads as a soft typewriter, large as a wave of
+  overlapping fades. Still a pure function of `progress`, so it glides and
+  deletes exactly like the other modes. Native clients render `glyphFade`
+  as `typewriter` until they gain per-glyph alpha. `caret` draws a
   blinking caret at the frontier (`true`, or `{ "blink": 1.2, "color": "#fff" }`;
   blink is in full cycles/sec, capped at 3 for flash safety, and is a square
   wave of `t` like every other animation). With `align: "center"`/`"right"`

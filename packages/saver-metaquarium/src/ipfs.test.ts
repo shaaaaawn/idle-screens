@@ -58,6 +58,11 @@ describe('parseFishMix', () => {
     expect(r.entries.map((e) => e.id)).toEqual([257]);
     expect(r.problems).toHaveLength(4);
   });
+  it('clamps oversized counts to 24 instead of dropping the token', () => {
+    const r = parseFishMix('seahorse:30');
+    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[457, 24]]);
+    expect(r.problems).toEqual(['"seahorse:30": count clamped to 24']);
+  });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });
   });
