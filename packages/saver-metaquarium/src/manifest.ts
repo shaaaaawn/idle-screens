@@ -202,7 +202,7 @@ export function coerceNum(
 }
 
 export * from './farm';
-export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG } from './ipfs';
+export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
 
 export * from './environments';
 export * from './swim';
