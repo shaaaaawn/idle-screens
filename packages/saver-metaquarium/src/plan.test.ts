@@ -7,6 +7,7 @@ import {
   swimPoseAtDistance,
   type SwimPlan,
   type TankBounds,
+  PATH_SHAPES,
 } from './plan';
 
 const BOUNDS: TankBounds = { radius: 46, yMin: 26, yMax: 54 };
@@ -90,5 +91,58 @@ describe('swim plan', () => {
     const pose = swimPoseAtDistance(plan, 0.5);
     expect(Number.isFinite(pose.x)).toBe(true);
     expect(Number.isFinite(pose.fx)).toBe(true);
+  });
+});
+
+describe('path shapes', () => {
+  const BOUNDS = { radius: 120, yMin: 15, yMax: 72 };
+
+  it('every shape compiles a closed, arc-parameterized, in-bounds loop', () => {
+    for (const shape of PATH_SHAPES) {
+      const plan = compileSwimPlan(createRng(11), BOUNDS, shape);
+      expect(plan.totalLength).toBeGreaterThan(100);
+      // Sample the whole loop: inside the cylinder, inside the water column.
+      // The slack is Catmull-Rom overshoot between waypoints, nothing more:
+      // 3% of radius and 3 world units of depth. A generator that actually
+      // leaves the tank fails this.
+      for (let d = 0; d <= plan.totalLength; d += plan.totalLength / 64) {
+        const pose = swimPoseAtDistance(plan, d);
+        expect(Math.hypot(pose.x, pose.z)).toBeLessThanOrEqual(BOUNDS.radius * 1.03);
+        expect(pose.y).toBeGreaterThanOrEqual(BOUNDS.yMin - 3);
+        expect(pose.y).toBeLessThanOrEqual(BOUNDS.yMax + 3);
+      }
+    }
+  });
+
+  it('shapes are genuinely different itineraries, not renamed wander', () => {
+    const at = (shape: (typeof PATH_SHAPES)[number]) => {
+      const plan = compileSwimPlan(createRng(11), BOUNDS, shape);
+      const p = swimPoseAtDistance(plan, plan.totalLength * 0.37);
+      return [p.x, p.y, p.z].map((v) => Math.round(v));
+    };
+    const seen = new Set(PATH_SHAPES.map((s2) => at(s2).join(',')));
+    expect(seen.size).toBe(PATH_SHAPES.length);
+  });
+
+  it('helix tours the water column; canyon stays low; orbit holds its lane', () => {
+    const span = (shape: (typeof PATH_SHAPES)[number]) => {
+      const plan = compileSwimPlan(createRng(7), BOUNDS, shape);
+      let lo = Infinity, hi = -Infinity;
+      for (let d = 0; d <= plan.totalLength; d += plan.totalLength / 96) {
+        const y = swimPoseAtDistance(plan, d).y;
+        lo = Math.min(lo, y); hi = Math.max(hi, y);
+      }
+      return hi - lo;
+    };
+    expect(span('helix')).toBeGreaterThan(35);   // most of the 57-unit column
+    expect(span('canyon')).toBeLessThan(16);     // a low ribbon
+    expect(span('orbit')).toBeLessThan(18);      // one lane, gentle breathing
+  });
+
+  it('default shape is wander and reproduces the pre-shape plan exactly', () => {
+    const a = compileSwimPlan(createRng(5), BOUNDS);
+    const b = compileSwimPlan(createRng(5), BOUNDS, 'wander');
+    expect(a.totalLength).toBe(b.totalLength);
+    expect(a.points).toEqual(b.points);
   });
 });

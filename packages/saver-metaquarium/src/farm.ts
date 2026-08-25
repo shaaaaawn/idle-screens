@@ -69,14 +69,19 @@ export const BREEDS: readonly BreedInfo[] = [
     metadataCid: 'Qme8G5eXaAkk1dzVr5VDt8sgauVez9kmxxDNaYbSQLyggx', model: 'sea-horse' },
   { breed: 'seaturtle', minted: true, range: [497, 512], count: 16,
     metadataCid: 'QmZTntNpvwxe8Mii7s1XTpTrbaci4ZgYUXs9sEbsBodtaF', model: 'sea-turtle' },
-  { breed: 'blowfish',   minted: false, count: 0, model: 'blow-fish' },
-  { breed: 'hackerfish', minted: false, count: 0, model: 'hacker-fish' },
-  { breed: 'glowfish',   minted: false, count: 0, model: 'glow-fish' },
-  { breed: 'babyfish',   minted: false, count: 0, model: 'baby-fish' },
-  { breed: 'shark',      minted: false, count: 0, model: 'shark' },
-  { breed: 'crab',       minted: false, count: 0, model: 'crab' },
+  // Unminted: `model` names the CURRENT basename in the original aquarium's
+  // NPC set (versioned there; these are the ones its entity classes load,
+  // except glow-fish, where the app loads the 503 KB glow-fish5 while an
+  // identical-material 30 KB Draco glow-fish4 sits beside it — we take the
+  // small one). All are clip-less and unrigged, so they swim on `bodyWiggle`.
+  { breed: 'blowfish',   minted: false, count: 0, model: 'blow-fish4' },
+  { breed: 'hackerfish', minted: false, count: 0, model: 'hacker-fish3' },
+  { breed: 'glowfish',   minted: false, count: 0, model: 'glow-fish4' },
+  { breed: 'babyfish',   minted: false, count: 0, model: 'baby-fish2' },
+  { breed: 'shark',      minted: false, count: 0, model: 'shark3' },
+  { breed: 'crab',       minted: false, count: 0, model: 'crab3' },
   { breed: 'jellyfish',  minted: false, count: 0, model: 'jellyfish' },
-  { breed: 'dori',       minted: false, count: 0, model: 'dori' },
+  { breed: 'dori',       minted: false, count: 0, model: 'dori3' },
 ];
 
 /** Breed of a minted token, or null when the id is outside 1..512. */

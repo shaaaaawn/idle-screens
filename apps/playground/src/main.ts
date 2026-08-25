@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { createMetaquarium, FISH_CATALOG } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium, FISH_CATALOG, NPC_CATALOG } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -56,7 +56,11 @@ const asset = (p: string): string => `${import.meta.env.BASE_URL}${p.replace(/^\
 /** Playground tanks never hit IPFS — gallery live-mounts the grouped default
  *  on every page, and a CORS/504 on dweb.link was failing unrelated e2e. */
 const LOCAL_FISH_URL = asset('/assets/metaquarium/fish-257-angelfish.glb');
-const LOCAL_CATALOG = FISH_CATALOG.map((f) => (f.localGlb ? { ...f, ipfs3d: asset(f.localGlb) } : f));
+// Minted samples plus the whole NPC set — every localGlb rebased through
+// asset() so the CI base path ('/idle-screens/') keeps working.
+const LOCAL_CATALOG = [...FISH_CATALOG, ...NPC_CATALOG].map((f) =>
+  f.localGlb ? { ...f, ipfs3d: asset(f.localGlb) } : f,
+);
 const playgroundMetaquarium = createMetaquarium({
   params: { fishUrl: LOCAL_FISH_URL },
   catalog: LOCAL_CATALOG,
@@ -106,6 +110,55 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     // entries a case-change apart was a trap for whoever read the list next.
     label: 'Metaquarium (6 fish)',
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
+    catalog: LOCAL_CATALOG,
+  }),
+  // Choreography showcases: pathShape x formationShape x maneuver.
+  // ?saver=metaquarium-choreo-<name>.
+  createMetaquarium({
+    id: 'metaquarium-choreo-ball',
+    label: 'Metaquarium (bait-ball)',
+    params: {
+      fishMix: '257:12', swimStyle: 'school', formationShape: 'ball', pathShape: 'orbit',
+      maneuver: 'dart', maneuverRate: 0.6, maneuverIntensity: 0.8,
+      swimVariance: 0.5, bodyWiggle: 0.35, fishUrl: LOCAL_FISH_URL,
+      environment: 'abyss', cameraDistance: 260, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-choreo-line',
+    label: 'Metaquarium (single file)',
+    params: {
+      fishMix: '100:8', swimStyle: 'school', formationShape: 'line', pathShape: 'eight',
+      swimVariance: 0.6, bodyWiggle: 0.35,
+      environment: 'kelp', cameraDistance: 280, cameraElevation: 22,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-choreo-wedge',
+    label: 'Metaquarium (wedge helix)',
+    params: {
+      // Bundled betafish, not turtles: the studio catalog is network-free
+      // and 497 has no local GLB — offline it would fall back to blobs.
+      fishMix: '100:7', swimStyle: 'school', formationShape: 'wedge', pathShape: 'helix',
+      swimVariance: 0.4, bodyWiggle: 0.3,
+      environment: 'ice', cameraDistance: 300, cameraElevation: 18,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  // The unminted NPC set, whole cast: clip-less models on bodyWiggle, seeded
+  // two-tone coats, glow halos on fins/claws. ?saver=metaquarium-npc.
+  createMetaquarium({
+    id: 'metaquarium-npc',
+    label: 'Metaquarium (NPC breeds)',
+    params: {
+      fishMix: 'blowfish:1,hackerfish:1,glowfish:1,babyfish:1,shark:1,crab:1,jellyfish:1,dori:1',
+      // Every NPC model but the jellyfish is Draco-compressed.
+      dracoPath: asset('/draco/'),
+      swimVariance: 0.6, bodyWiggle: 0.35,
+      environment: 'lagoon', cameraDistance: 150, cameraElevation: 12,
+    },
     catalog: LOCAL_CATALOG,
   }),
   // Mixed breeds against bundled GLBs: ids resolve through a local-asset

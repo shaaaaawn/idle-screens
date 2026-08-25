@@ -49,11 +49,14 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, formationExtent, formationSlot, swimStyleOf,
+  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
+  formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
+import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
+  addGlowHalos,
   applyNpcMaterials,
   eyeNoseSign,
   forceOpaque,
@@ -61,9 +64,12 @@ import {
 } from './materials';
 import {
   compileSwimPlan,
+  PATH_SHAPES,
+  type PathShape,
   distanceAt,
   swimPoseAtDistance,
   type SwimPlan,
+  type SwimPose,
   type TankBounds,
 } from './plan';
 import {
@@ -345,8 +351,13 @@ function disposeOwned(root: Object3D): void {
       : [];
     for (const m of mats) {
       if (!m.userData?.mqOwned) continue;
+      // A texture is disposed only when IT is owned, not because its material
+      // is: the metallic-atlas path creates an owned material wearing the
+      // TEMPLATE'S shared texture, and freeing that map here would corrupt
+      // every other clone of the same cached fish. No path creates owned
+      // textures today, so this line waits for one that does.
       const tex = (m as Partial<MeshBasicMaterial>).map;
-      if (tex) tex.dispose();
+      if (tex?.userData?.mqOwned) tex.dispose();
       m.dispose();
     }
   });
@@ -444,7 +455,11 @@ class TankInstance implements SaverInstance {
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
-  private readonly carrierPlan: SwimPlan;
+  private carrierPlan: SwimPlan;
+  /** Shape every live plan was compiled on — setState recompiles when the
+   *  steered value moves. Plans are cheap (one arc table); rebuilding them
+   *  beats respawning fish, which would drop GLBs mid-scene. */
+  private pathShape: PathShape = 'wander';
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -458,7 +473,7 @@ class TankInstance implements SaverInstance {
     this.space = space;
     this.quality = quality;
     this.catalog = catalog;
-    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS);
+    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS, this.pathShape);
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -544,7 +559,10 @@ class TankInstance implements SaverInstance {
             sin(uTime * 0.13 + aPhase.z) * 6.0);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(180.0 / max(1.0, -mv.z), 1.0, 4.0);
+          // 520/z with a 1.5..7 clamp: ~2.6px at a 200-unit camera, ~6px in
+          // macro. The old 180/z capped at 4 rendered ONE dim pixel at wall
+          // distances — moteDensity 1 was invisible from any normal camera.
+          gl_PointSize = clamp(520.0 / max(1.0, -mv.z), 1.5, 7.0);
           vFade = 0.35 + 0.3 * sin(uTime * 0.9 + aPhase.x * 7.0);
         }`,
       fragmentShader: `
@@ -554,7 +572,7 @@ class TankInstance implements SaverInstance {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c);
           if (d > 0.5) discard;
-          gl_FragColor = vec4(uColor, (1.0 - d * 2.0) * vFade * 0.5);
+          gl_FragColor = vec4(uColor, (1.0 - d * 2.0) * vFade * 0.8);
         }`,
     });
     this.moteMat.userData.mqOwned = true;
@@ -673,6 +691,68 @@ class TankInstance implements SaverInstance {
     this.scene.add(group);
     this.applyRoomParams(waterY, rayStrength);
     this.ctxSaver.host.dataset.mqEnv = preset.name;
+  }
+
+  /**
+   * The carrier's frame for this instant — position, heading basis, and the
+   * inward pull that keeps the shoal in the glass. Once per frame, shared by
+   * every fish in the formation.
+   *
+   * Heading comes from a CHORD across the spline, not the tangent at a point.
+   * A rigid formation turns as a body, so a fish 60 units off-centre travels
+   * the carrier's angular velocity times its offset: on the tight corners of
+   * a seeded loop the tangent swings fast enough to fling the outer ranks at
+   * 112 units/s, against a cruise of 8. That is a whip, not a shoal, and it
+   * is the one thing that looks unmistakably like a bug. Averaging the
+   * heading over a body-length chord costs one extra spline sample per frame
+   * and keeps the turn inside what a fish could actually swim.
+   */
+  private carrierFrame(
+    ext: { side: number; up: number; back: number; reach: number },
+    style: { speedMul: number },
+    tSec: number,
+    warpSec: number,
+    speed: number,
+  ): {
+    lead: number; pose: SwimPose; x: number; y: number; z: number;
+    fwdX: number; fwdZ: number; rx: number; rz: number;
+  } {
+    // The carrier moves at the STYLE's speed, deliberately without any
+    // per-fish multiplier: a formation whose members each chose their own pace
+    // is not a formation.
+    const lead = this.speedTracked
+      ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
+      : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
+    const c = swimPoseAtDistance(this.carrierPlan, lead);
+    const chord = FISH_LENGTH * 2.5;
+    const a = swimPoseAtDistance(this.carrierPlan, lead + chord);
+    const b = swimPoseAtDistance(this.carrierPlan, lead - chord);
+    let fwdX = a.x - b.x, fwdZ = a.z - b.z;
+    let hl = Math.hypot(fwdX, fwdZ);
+    if (hl < 1e-3) {
+      // Degenerate chord (a hairpin doubling back on itself) — fall back to
+      // the tangent rather than dividing by nothing.
+      fwdX = c.fx; fwdZ = c.fz; hl = Math.hypot(fwdX, fwdZ) || 1;
+    }
+    fwdX /= hl; fwdZ /= hl;
+    // Keep the shoal in the tank by moving its CENTRE, never by pulling
+    // individual fish toward the middle — that squashing turned a legal
+    // lattice back into a pile.
+    const maxR = Math.max(0, BOUNDS.radius - ext.reach);
+    const cr = Math.hypot(c.x, c.z);
+    const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    return {
+      lead,
+      pose: c,
+      x: c.x * cs,
+      y: Math.min(BOUNDS.yMax - ext.up, Math.max(BOUNDS.yMin + ext.up, c.y)),
+      z: c.z * cs,
+      fwdX,
+      fwdZ,
+      // Right-hand normal in the ground plane.
+      rx: fwdZ,
+      rz: -fwdX,
+    };
   }
 
   /** Ceiling the pool may ever reach on this device. */
@@ -839,7 +919,7 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape);
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
@@ -849,6 +929,9 @@ class TankInstance implements SaverInstance {
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      // Selective bloom on the GLOW parts — same fork, so a fish's halo color
+      // agrees with the coat pass when both fall through to the seeded pick.
+      addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
@@ -880,6 +963,12 @@ class TankInstance implements SaverInstance {
 
     const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
     group.scale.multiplyScalar(baseScale);
+    // Hidden until setState has placed it. A group joins the scene at the
+    // ORIGIN, so a fish that finished loading after this frame's setState was
+    // drawn at the centre of the tank and then jumped to its spline on the
+    // next one — a 60-unit dart, once per fish, as the scene came up. That is
+    // the "fish start out faster than they swim" everyone sees at mount.
+    group.visible = false;
     this.scene.add(group);
     this.fish[index] = {
       index,
@@ -1016,6 +1105,25 @@ class TankInstance implements SaverInstance {
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
 
+    const spec = maneuverSpecOf(this.str('maneuver'));
+    const mnvRate = this.num('maneuverRate');
+    const mnvIntensity = this.num('maneuverIntensity');
+
+    // Path shape: recompile plans in place when steered. Same forks as spawn,
+    // so a shape round-trip lands every fish back on its exact original loop.
+    const shapeRaw = this.str('pathShape');
+    const shape = (PATH_SHAPES as readonly string[]).includes(shapeRaw)
+      ? (shapeRaw as PathShape)
+      : 'wander';
+    if (shape !== this.pathShape) {
+      this.pathShape = shape;
+      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape);
+      const rng = this.ctxSaver.rng.fork(0x715);
+      for (const f of this.fish) {
+        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape);
+      }
+    }
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
@@ -1025,7 +1133,12 @@ class TankInstance implements SaverInstance {
     // Once per frame, not once per fish: the extent walks every slot, so
     // computing it inside the loop made the formation O(n^2) every frame for
     // a value that is identical across the shoal.
-    const extent = style.formation ? formationExtent(visible, variance) : null;
+    const fshapeRaw = this.str('formationShape');
+    const fshape = (FORMATION_SHAPES as readonly string[]).includes(fshapeRaw)
+      ? (fshapeRaw as FormationShape)
+      : 'phalanx';
+    const extent = style.formation ? formationExtent(visible, variance, fshape) : null;
+    const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -1048,8 +1161,17 @@ class TankInstance implements SaverInstance {
       const effort = this.speedTracked
         ? distanceAt(f.plan, warpSec, styleSpeed)
         : distanceAt(f.plan, tSec, speed * styleSpeed);
-      const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
-      const d = anchor + effort * style.travel;
+      // Every style spreads its cast along the loop, not only the
+      // station-keepers. Without this, patrol/bottom/surface all mounted as
+      // one knot dead-centre (every compiled spline starts near azimuth 0)
+      // and took minutes to disperse — watched happen three times in a row
+      // on a live channel. `loop` alone stays anchorless: it promises to be
+      // exactly the pre-style behaviour, frame for frame.
+      const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
+      // Maneuvers displace, never re-rate: `along` moves the fish on its own
+      // path, the kick is added to the pose after banding. Both closed-form.
+      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity);
+      const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what
@@ -1072,36 +1194,15 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(f.index, visible, variance);
-        // The carrier moves at the STYLE's speed, deliberately without the
-        // per-fish multiplier: a formation whose members each chose their own
-        // pace is not a formation. Per-fish speed still varies the tail beat
-        // through `effort`, which is where it reads anyway.
-        const lead = this.speedTracked
-          ? distanceAt(this.carrierPlan, warpSec, style.speedMul)
-          : distanceAt(this.carrierPlan, tSec, speed * style.speedMul);
-        beat = lead;
-        // ONE arc sample for the whole shoal, offset rigidly. Sampling each
-        // row at `lead - back` instead put the rows at different points on a
-        // curving spline, so they converged on the inside of every turn: a
-        // lattice with a body length of clearance measured 27% of fish-frames
-        // with a neighbour inside one, exactly as if there were no lattice.
-        const c = swimPoseAtDistance(this.carrierPlan, lead);
-        const ext = extent ?? formationExtent(visible, variance);
-        // Keep the shoal in the tank by moving its CENTRE, never by pulling
-        // individual fish toward the middle — that squashing was the other
-        // half of the pile.
-        const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
-        const cr = Math.hypot(c.x, c.z);
-        const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
-        const hl = Math.hypot(c.fx, c.fz) || 1;
-        const fwdX = c.fx / hl, fwdZ = c.fz / hl;
-        // Right-hand normal in the ground plane.
-        const rx = fwdZ, rz = -fwdX;
-        const cy = Math.min(
-          BOUNDS.yMax - ext.up,
-          Math.max(BOUNDS.yMin + ext.up, c.y),
+        const slot = formationSlot(f.index, visible, variance, undefined, fshape);
+        // A seated fish darts AHEAD of its slot and settles back — the
+        // closing displacement, because the permanent one would walk it out
+        // of the school forever.
+        const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
+        const cf = carrier ?? this.carrierFrame(
+          extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
         );
+        beat = cf.lead;
         // A rigid body means every fish points EXACTLY the same way, which
         // measures as polarisation 1.00 and looks like a formation flight.
         // A few degrees of per-fish yaw, scaled by variance, buys back the
@@ -1109,12 +1210,12 @@ class TankInstance implements SaverInstance {
         const yaw = Math.sin(varn.phase) * 0.12 * variance;
         const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
         pose = {
-          ...c,
-          x: c.x * cs + rx * slot.side - fwdX * slot.back,
-          y: cy + slot.up,
-          z: c.z * cs + rz * slot.side - fwdZ * slot.back,
-          fx: fwdX * cy2 - fwdZ * sy2,
-          fz: fwdX * sy2 + fwdZ * cy2,
+          ...cf.pose,
+          x: cf.x + cf.rx * slot.side - cf.fwdX * seatBack,
+          y: cf.y + slot.up,
+          z: cf.z + cf.rz * slot.side - cf.fwdZ * seatBack,
+          fx: cf.fwdX * cy2 - cf.fwdZ * sy2,
+          fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
       } else {
         pose = swimPoseAtDistance(f.plan, d);
@@ -1131,18 +1232,25 @@ class TankInstance implements SaverInstance {
       // is not band-limited, it is just a fish.
       const band = bandRange(style.band);
       if (band) {
-        const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
-        const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        let lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
+        let hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        // A surface skimmer skims the WATER, not the top of the abstract swim
+        // volume. Env water planes sit at 118-170 while yMax is 72, so
+        // "surface" turtles cruised mid-frame far below the ceiling they were
+        // named for. Ride just under the actual plane, capped so a steered
+        // waterY of 220 cannot fly the cast out of every camera's frame.
+        if (style.band === 'ceiling' && this.ceiling) {
+          const wparam = this.num('waterY');
+          const wy = wparam >= 0 ? wparam : this.presetWaterY;
+          const ceilY = Math.min(wy - FISH_LENGTH * 0.8, BOUNDS.yMax + 60);
+          if (ceilY > hi) {
+            lo = ceilY - (hi - lo);
+            hi = ceilY;
+          }
+        }
         y = Math.min(hi, Math.max(lo, y));
       }
-      // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
-      // +46 while the floor band tops out at 23, so a bottom-hugger over a
-      // hill was inside it. Half a body length of clearance, and never above
-      // the tank's own ceiling.
-      if (this.floorHeightAt) {
-        const clear = this.floorHeightAt(pose.x, pose.z) + FISH_LENGTH * 0.5;
-        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
-      }
+
 
       // Inside a depth band a fish swims LEVEL. Without this its heading still
       // points along the unclamped spline, so a bottom-hugger noses down into
@@ -1150,8 +1258,32 @@ class TankInstance implements SaverInstance {
       // Level, not merely flatter: a fraction of the spline's climb still reads
       // as a fish nosing into a floor it cannot reach.
       const fy = band ? 0 : pose.fy;
-      f.group.position.set(pose.x, y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
+      let px = pose.x, pz = pose.z;
+      if (mnv.side !== 0 || mnv.up !== 0) {
+        // Kick along the fish's right-hand normal, closing back to zero by
+        // the event's end — the fish leaves its line and comes home to it.
+        const hl2 = Math.hypot(pose.fx, pose.fz) || 1;
+        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
+        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
+        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+        // A startle must not kick a fish through the glass.
+        const kr = Math.hypot(px, pz);
+        if (kr > BOUNDS.radius) {
+          px *= BOUNDS.radius / kr;
+          pz *= BOUNDS.radius / kr;
+        }
+      }
+      // The seabed clamps LAST and samples the DISPLACED position: `dunes`
+      // and `ridges` rise to +46, and both the floor band and a grazing
+      // nose-down kick can otherwise put a fish inside the hill it is
+      // feeding over. Half a body length of clearance, never above the
+      // tank's own ceiling.
+      if (this.floorHeightAt) {
+        const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
+        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
+      }
+      f.group.position.set(px, y, pz);
+      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -1165,7 +1297,8 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * wiggle;
+        const w = Math.min(1.6, wiggle + mnv.flurry * 0.6);
+        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {

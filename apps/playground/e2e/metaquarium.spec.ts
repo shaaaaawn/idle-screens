@@ -240,3 +240,20 @@ test('MQ8: the formation branch mounts and populates without errors', async ({ p
 
   expect(pageErrors).toEqual([]);
 });
+
+test('MQ9: the whole unminted NPC cast mounts — all eight breeds, no errors', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  // Draco + WebP in one scene: six of the eight are Draco-compressed and the
+  // jellyfish atlas is WebP - this is the test that catches a decoder or
+  // extension regression across the NPC pipeline.
+  await page.goto('/?saver=metaquarium-npc');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(8);
+
+  expect(pageErrors).toEqual([]);
+});
