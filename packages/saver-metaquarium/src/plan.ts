@@ -75,14 +75,99 @@ function splineAt(points: SwimPlan['points'], g: number): [number, number, numbe
 }
 
 /**
- * Compile a seeded itinerary through the tank volume. Waypoints alternate
- * around the ring (angle jitter, radius breathing, depth changes) so the
- * loop reads as purposeful wandering, never a circle.
+ * The shape a fish's loop is drawn on. Every shape emits WAYPOINTS and feeds
+ * the same Catmull-Rom + arc-length machinery, so `distanceAt`, anchors,
+ * effort, and every downstream consumer work unchanged — a shape is a
+ * different itinerary, not a different engine.
+ *
+ * - `wander` — the original: alternating inner/outer ring, purposeful roaming
+ * - `orbit`  — steady carousel laps at a seeded radius and depth
+ * - `eight`  — a lissajous figure-eight crossing the tank's middle
+ * - `helix`  — climbing-then-diving spiral column, the water-column tour
+ * - `canyon` — long low sweeps hugging one axis, back and forth near the floor
  */
-export function compileSwimPlan(rng: Rng, bounds: TankBounds): SwimPlan {
-  const n = 16 + rng.int(0, 4);
+export type PathShape = 'wander' | 'orbit' | 'eight' | 'helix' | 'canyon';
+export const PATH_SHAPES: readonly PathShape[] = ['wander', 'orbit', 'eight', 'helix', 'canyon'];
+
+function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds): SwimPlan['points'] {
   const points: SwimPlan['points'] = [];
   const ySpan = bounds.yMax - bounds.yMin;
+  if (shape === 'orbit') {
+    // A near-circle with gentle radius/height breathing — reads as a patrol
+    // lap, not a mechanical ring.
+    const n = 14 + rng.int(0, 4);
+    const r0 = bounds.radius * rng.range(0.45, 0.8);
+    const y0 = bounds.yMin + ySpan * rng.range(0.25, 0.75);
+    const dir = rng.next() < 0.5 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const a = dir * (i / n) * Math.PI * 2;
+      const r = r0 * (1 + rng.range(-0.08, 0.08));
+      points.push([Math.cos(a) * r, y0 + ySpan * rng.range(-0.08, 0.08), Math.sin(a) * r]);
+    }
+    return points;
+  }
+  if (shape === 'eight') {
+    // Lissajous 1:2 — one crossing at the centre, the whole tank traversed.
+    const n = 20 + rng.int(0, 4);
+    const rx = bounds.radius * rng.range(0.6, 0.85);
+    const rz = bounds.radius * rng.range(0.35, 0.55);
+    const y0 = bounds.yMin + ySpan * rng.range(0.3, 0.7);
+    const phase = rng.range(0, Math.PI * 2);
+    for (let i = 0; i < n; i++) {
+      const u = (i / n) * Math.PI * 2;
+      points.push([
+        Math.sin(u + phase) * rx,
+        y0 + Math.sin(u * 2 + phase) * ySpan * 0.12,
+        Math.sin(u * 2 + phase * 2) * rz,
+      ]);
+    }
+    return points;
+  }
+  if (shape === 'helix') {
+    // Two turns climbing, two diving — the closed loop tours the whole
+    // water column and comes home.
+    const n = 24;
+    const r0 = bounds.radius * rng.range(0.35, 0.6);
+    const phase = rng.range(0, Math.PI * 2);
+    for (let i = 0; i < n; i++) {
+      const u = i / n;
+      const a = phase + u * Math.PI * 4;
+      // Triangle wave 0→1→0 over the loop keeps it closed.
+      const climb = 1 - Math.abs(1 - 2 * u);
+      points.push([
+        Math.cos(a) * r0,
+        bounds.yMin + ySpan * (0.1 + climb * 0.8),
+        Math.sin(a) * r0,
+      ]);
+    }
+    return points;
+  }
+  if (shape === 'canyon') {
+    // Long low sweeps along one seeded axis: far end, turn, come back a
+    // little offset — a flat ribbon near the floor.
+    const n = 16;
+    const axis = rng.range(0, Math.PI);
+    const ax = Math.cos(axis), az = Math.sin(axis);
+    const y0 = bounds.yMin + ySpan * rng.range(0.08, 0.28);
+    const len = bounds.radius * 0.85;
+    // ONE seeded ribbon width — per-point redraws made the edges jagged
+    // instead of a clean sweep; the y jitter below stays per-point, that one
+    // IS the organic part.
+    const width = bounds.radius * rng.range(0.12, 0.3);
+    for (let i = 0; i < n; i++) {
+      const u = (i / n) * Math.PI * 2;
+      const along = Math.sin(u) * len;
+      const across = Math.cos(u) * width;
+      points.push([
+        ax * along - az * across,
+        y0 + ySpan * rng.range(0, 0.08),
+        az * along + ax * across,
+      ]);
+    }
+    return points;
+  }
+  // wander — the original body, verbatim.
+  const n = 16 + rng.int(0, 4);
   for (let i = 0; i < n; i++) {
     const baseAngle = (i / n) * Math.PI * 2;
     const angle = baseAngle + rng.range(-0.25, 0.25);
@@ -93,6 +178,18 @@ export function compileSwimPlan(rng: Rng, bounds: TankBounds): SwimPlan {
     const y = bounds.yMin + ySpan * rng.range(0.2, 0.8);
     points.push([Math.cos(angle) * radius, y, Math.sin(angle) * radius]);
   }
+  return points;
+}
+
+/**
+ * Compile a seeded itinerary through the tank volume. The default `wander`
+ * waypoints alternate around the ring (angle jitter, radius breathing, depth
+ * changes) so the loop reads as purposeful wandering, never a circle; other
+ * shapes swap the waypoints and keep everything else.
+ */
+export function compileSwimPlan(rng: Rng, bounds: TankBounds, shape: PathShape = 'wander'): SwimPlan {
+  const points = shapeWaypoints(shape, rng, bounds);
+  const n = points.length;
 
   // Arc-length table over the closed loop.
   const arc = new Float32Array(ARC_SAMPLES + 1);

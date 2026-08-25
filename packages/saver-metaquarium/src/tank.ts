@@ -49,8 +49,10 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, formationExtent, formationSlot, swimStyleOf,
+  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
+  formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
+import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -62,6 +64,8 @@ import {
 } from './materials';
 import {
   compileSwimPlan,
+  PATH_SHAPES,
+  type PathShape,
   distanceAt,
   swimPoseAtDistance,
   type SwimPlan,
@@ -451,7 +455,11 @@ class TankInstance implements SaverInstance {
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
-  private readonly carrierPlan: SwimPlan;
+  private carrierPlan: SwimPlan;
+  /** Shape every live plan was compiled on — setState recompiles when the
+   *  steered value moves. Plans are cheap (one arc table); rebuilding them
+   *  beats respawning fish, which would drop GLBs mid-scene. */
+  private pathShape: PathShape = 'wander';
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -465,7 +473,7 @@ class TankInstance implements SaverInstance {
     this.space = space;
     this.quality = quality;
     this.catalog = catalog;
-    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS);
+    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS, this.pathShape);
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -700,7 +708,7 @@ class TankInstance implements SaverInstance {
    * and keeps the turn inside what a fish could actually swim.
    */
   private carrierFrame(
-    ext: { side: number; up: number; back: number },
+    ext: { side: number; up: number; back: number; reach: number },
     style: { speedMul: number },
     tSec: number,
     warpSec: number,
@@ -730,7 +738,7 @@ class TankInstance implements SaverInstance {
     // Keep the shoal in the tank by moving its CENTRE, never by pulling
     // individual fish toward the middle — that squashing turned a legal
     // lattice back into a pile.
-    const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
+    const maxR = Math.max(0, BOUNDS.radius - ext.reach);
     const cr = Math.hypot(c.x, c.z);
     const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
     return {
@@ -911,7 +919,7 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape);
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
@@ -1097,6 +1105,25 @@ class TankInstance implements SaverInstance {
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
 
+    const spec = maneuverSpecOf(this.str('maneuver'));
+    const mnvRate = this.num('maneuverRate');
+    const mnvIntensity = this.num('maneuverIntensity');
+
+    // Path shape: recompile plans in place when steered. Same forks as spawn,
+    // so a shape round-trip lands every fish back on its exact original loop.
+    const shapeRaw = this.str('pathShape');
+    const shape = (PATH_SHAPES as readonly string[]).includes(shapeRaw)
+      ? (shapeRaw as PathShape)
+      : 'wander';
+    if (shape !== this.pathShape) {
+      this.pathShape = shape;
+      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape);
+      const rng = this.ctxSaver.rng.fork(0x715);
+      for (const f of this.fish) {
+        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape);
+      }
+    }
+
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
     // reconcile has already queued any missing slots.
@@ -1106,7 +1133,11 @@ class TankInstance implements SaverInstance {
     // Once per frame, not once per fish: the extent walks every slot, so
     // computing it inside the loop made the formation O(n^2) every frame for
     // a value that is identical across the shoal.
-    const extent = style.formation ? formationExtent(visible, variance) : null;
+    const fshapeRaw = this.str('formationShape');
+    const fshape = (FORMATION_SHAPES as readonly string[]).includes(fshapeRaw)
+      ? (fshapeRaw as FormationShape)
+      : 'phalanx';
+    const extent = style.formation ? formationExtent(visible, variance, fshape) : null;
     const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
     for (const f of this.fish) {
       if (!f) continue;
@@ -1137,7 +1168,10 @@ class TankInstance implements SaverInstance {
       // on a live channel. `loop` alone stays anchorless: it promises to be
       // exactly the pre-style behaviour, frame for frame.
       const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
-      const d = anchor + effort * style.travel;
+      // Maneuvers displace, never re-rate: `along` moves the fish on its own
+      // path, the kick is added to the pose after banding. Both closed-form.
+      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity);
+      const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what
@@ -1160,9 +1194,13 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(f.index, visible, variance);
+        const slot = formationSlot(f.index, visible, variance, undefined, fshape);
+        // A seated fish darts AHEAD of its slot and settles back — the
+        // closing displacement, because the permanent one would walk it out
+        // of the school forever.
+        const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
         const cf = carrier ?? this.carrierFrame(
-          extent ?? formationExtent(visible, variance), style, tSec, warpSec, speed,
+          extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
         );
         beat = cf.lead;
         // A rigid body means every fish points EXACTLY the same way, which
@@ -1173,9 +1211,9 @@ class TankInstance implements SaverInstance {
         const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
         pose = {
           ...cf.pose,
-          x: cf.x + cf.rx * slot.side - cf.fwdX * slot.back,
+          x: cf.x + cf.rx * slot.side - cf.fwdX * seatBack,
           y: cf.y + slot.up,
-          z: cf.z + cf.rz * slot.side - cf.fwdZ * slot.back,
+          z: cf.z + cf.rz * slot.side - cf.fwdZ * seatBack,
           fx: cf.fwdX * cy2 - cf.fwdZ * sy2,
           fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
@@ -1212,14 +1250,7 @@ class TankInstance implements SaverInstance {
         }
         y = Math.min(hi, Math.max(lo, y));
       }
-      // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
-      // +46 while the floor band tops out at 23, so a bottom-hugger over a
-      // hill was inside it. Half a body length of clearance, and never above
-      // the tank's own ceiling.
-      if (this.floorHeightAt) {
-        const clear = this.floorHeightAt(pose.x, pose.z) + FISH_LENGTH * 0.5;
-        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
-      }
+
 
       // Inside a depth band a fish swims LEVEL. Without this its heading still
       // points along the unclamped spline, so a bottom-hugger noses down into
@@ -1227,8 +1258,32 @@ class TankInstance implements SaverInstance {
       // Level, not merely flatter: a fraction of the spline's climb still reads
       // as a fish nosing into a floor it cannot reach.
       const fy = band ? 0 : pose.fy;
-      f.group.position.set(pose.x, y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
+      let px = pose.x, pz = pose.z;
+      if (mnv.side !== 0 || mnv.up !== 0) {
+        // Kick along the fish's right-hand normal, closing back to zero by
+        // the event's end — the fish leaves its line and comes home to it.
+        const hl2 = Math.hypot(pose.fx, pose.fz) || 1;
+        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
+        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
+        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+        // A startle must not kick a fish through the glass.
+        const kr = Math.hypot(px, pz);
+        if (kr > BOUNDS.radius) {
+          px *= BOUNDS.radius / kr;
+          pz *= BOUNDS.radius / kr;
+        }
+      }
+      // The seabed clamps LAST and samples the DISPLACED position: `dunes`
+      // and `ridges` rise to +46, and both the floor band and a grazing
+      // nose-down kick can otherwise put a fish inside the hill it is
+      // feeding over. Half a body length of clearance, never above the
+      // tank's own ceiling.
+      if (this.floorHeightAt) {
+        const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
+        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
+      }
+      f.group.position.set(px, y, pz);
+      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -1242,7 +1297,8 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * wiggle;
+        const w = Math.min(1.6, wiggle + mnv.flurry * 0.6);
+        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {
