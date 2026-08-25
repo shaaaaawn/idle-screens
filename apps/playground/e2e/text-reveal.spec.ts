@@ -156,3 +156,80 @@ test('the same spec and frame reproduce identical pixels', async ({ page }) => {
   const b = await renderSpec(page, spec, 1200);
   expect(a.dataURL).toBe(b.dataURL);
 });
+
+/**
+ * glyphFade — the one mode that paints PARTIAL alpha rather than a hard
+ * frontier, so the frontier-subset tests above don't cover it.
+ *
+ * Two things about this draw path shape the assertions below:
+ *
+ *  - It draws one `fillText` per grapheme at that grapheme's full-line
+ *    `measureText` prefix advance, so it does NOT get the kerning a single
+ *    whole-line `fillText` applies. A finished glyphFade block is therefore
+ *    ink-equivalent to a plain block but NOT pixel-identical (~2% of lit
+ *    pixels differ) — bands, not `dataURL` identity, are the honest test.
+ *  - The capture threshold (>40 on #05050a) means a glyph only registers as
+ *    ink once its alpha clears ≈0.16, so progress samples are spaced wide
+ *    enough to move real glyph count, not to probe the dead zone.
+ */
+const glyphFade = (progress: number, fade?: number): Record<string, unknown> => ({
+  mode: 'glyphFade',
+  progress,
+  ...(fade === undefined ? {} : { fade }),
+});
+
+test('glyphFade paints nothing at 0 and the whole block at 1', async ({ page }) => {
+  const hidden = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0)));
+  expect(hidden.ink, 'every glyph alpha is 0 at progress 0').toBe(0);
+
+  const full = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(1)));
+  const plain = await renderSpec(page, textBlockSpec(LONG_TEXT));
+  expect(plain.ink).toBeGreaterThan(500);
+  // Same glyphs, same places, all opaque — only kerning separates them.
+  expect(full.ink / plain.ink).toBeGreaterThan(0.97);
+  expect(full.ink / plain.ink).toBeLessThan(1.03);
+});
+
+test('glyphFade ink grows monotonically with progress', async ({ page }) => {
+  const inks: number[] = [];
+  for (const p of [0.1, 0.25, 0.5, 0.75, 1]) {
+    inks.push((await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(p)))).ink);
+  }
+  expect(inks[0]).toBeGreaterThan(0);
+  for (let i = 1; i < inks.length; i++) {
+    expect(inks[i], `ink at sample ${i} must exceed sample ${i - 1}`).toBeGreaterThan(inks[i - 1]!);
+  }
+});
+
+test('glyphs fade in place — mid-fade ink is a subset of the finished block', async ({ page }) => {
+  // The glyphFade analogue of the reflow test: because each glyph draws at a
+  // prefix advance that depends only on the (fixed) prefix, ramping alpha can
+  // only brighten a pixel, never move it. If positions were derived from
+  // anything alpha-dependent, lit pixels would migrate and this would fail.
+  const half = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5)));
+  const full = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(1)));
+  const mHalf = decodeMask(half.mask);
+  const mFull = decodeMask(full.mask);
+  let moved = 0;
+  for (let i = 0; i < half.width * half.height; i++) {
+    if (isLit(mHalf, i) && !isLit(mFull, i)) moved++;
+  }
+  expect(moved, 'ink lit mid-fade must still be lit when the block finishes').toBeLessThan(8);
+});
+
+test('a wider fade window paints more of the block at the same progress', async ({ page }) => {
+  // `fade` is the steerable knob: it widens each glyph's ramp, so at a fixed
+  // progress more glyphs are already above the ink threshold.
+  const narrow = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5, 0.05)));
+  const mid = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5, 0.15)));
+  const wide = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5, 0.6)));
+  expect(mid.ink).toBeGreaterThan(narrow.ink);
+  expect(wide.ink).toBeGreaterThan(mid.ink);
+});
+
+test('the glyphFade draw path is frame-reproducible', async ({ page }) => {
+  const spec = textBlockSpec(LONG_TEXT, { ...glyphFade(0.4), caret: { blink: 1 } });
+  const a = await renderSpec(page, spec, 900);
+  const b = await renderSpec(page, spec, 900);
+  expect(a.dataURL).toBe(b.dataURL);
+});
