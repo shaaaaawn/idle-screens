@@ -52,6 +52,7 @@ import {
   bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
   formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
+import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -1104,6 +1105,10 @@ class TankInstance implements SaverInstance {
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
 
+    const spec = maneuverSpecOf(this.str('maneuver'));
+    const mnvRate = this.num('maneuverRate');
+    const mnvIntensity = this.num('maneuverIntensity');
+
     // Path shape: recompile plans in place when steered. Same forks as spawn,
     // so a shape round-trip lands every fish back on its exact original loop.
     const shapeRaw = this.str('pathShape');
@@ -1163,7 +1168,10 @@ class TankInstance implements SaverInstance {
       // on a live channel. `loop` alone stays anchorless: it promises to be
       // exactly the pre-style behaviour, frame for frame.
       const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
-      const d = anchor + effort * style.travel;
+      // Maneuvers displace, never re-rate: `along` moves the fish on its own
+      // path, the kick is added to the pose after banding. Both closed-form.
+      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity);
+      const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what
@@ -1253,8 +1261,17 @@ class TankInstance implements SaverInstance {
       // Level, not merely flatter: a fraction of the spline's climb still reads
       // as a fish nosing into a floor it cannot reach.
       const fy = band ? 0 : pose.fy;
-      f.group.position.set(pose.x, y, pose.z);
-      f.group.lookAt(pose.x + pose.fx, y + fy, pose.z + pose.fz);
+      let px = pose.x, pz = pose.z;
+      if (mnv.side !== 0 || mnv.up !== 0) {
+        // Kick along the fish's right-hand normal, closing back to zero by
+        // the event's end — the fish leaves its line and comes home to it.
+        const hl2 = Math.hypot(pose.fx, pose.fz) || 1;
+        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
+        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
+        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+      }
+      f.group.position.set(px, y, pz);
+      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
       f.group.rotateZ(pose.roll);
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -1268,7 +1285,8 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * wiggle;
+        const w = Math.min(1.6, wiggle + mnv.flurry * 0.6);
+        f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {

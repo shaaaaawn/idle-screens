@@ -2,6 +2,7 @@ import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
 import { ENVIRONMENT_NAMES } from './environments';
 import { FORMATION_SHAPES, SWIM_STYLE_NAMES } from './swim';
 import { PATH_SHAPES } from './plan';
+import { MANEUVERS } from './maneuver';
 
 /**
  * Zero-dependency manifest module (type-only imports). The channel server
@@ -91,6 +92,16 @@ export const METAQUARIUM_PARAMS = {
    *  (±40% speed, ±25% size, own phase). The uniqueness dial — one number
    *  instead of per-fish values nobody wants to author. */
   swimVariance: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Named event layered over the swim style — the thing that turns uniform
+   *  cruising into behaviour a viewer recognizes. Each fish runs its own
+   *  seeded schedule of the chosen event; displacement-based, so frames stay
+   *  addressable. `none` (default) changes nothing. */
+  maneuver: { type: 'enum', default: 'none', options: [...MANEUVERS], ease: 'step' },
+  /** How often events fire: 0 never, 1 the maneuver's own tempo (roughly
+   *  every 14-20s per fish, desynchronised). */
+  maneuverRate: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+  /** How hard: scales the surge, the kick, and the tail flurry together. */
+  maneuverIntensity: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'smooth' },
   /** Procedural body yaw for models that carry NO animation clip — most of
    *  the breed library. Distance-driven like the tail beat, so it speeds up
    *  with the fish and stays frame-addressable. Clipped models ignore it:

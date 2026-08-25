@@ -112,6 +112,39 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
+  // Choreography showcases: pathShape x formationShape x maneuver.
+  // ?saver=metaquarium-choreo-<name>.
+  createMetaquarium({
+    id: 'metaquarium-choreo-ball',
+    label: 'Metaquarium (bait-ball)',
+    params: {
+      fishMix: '257:12', swimStyle: 'school', formationShape: 'ball', pathShape: 'orbit',
+      maneuver: 'dart', maneuverRate: 0.6, maneuverIntensity: 0.8,
+      swimVariance: 0.5, bodyWiggle: 0.35, fishUrl: LOCAL_FISH_URL,
+      environment: 'abyss', cameraDistance: 260, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-choreo-line',
+    label: 'Metaquarium (single file)',
+    params: {
+      fishMix: '100:8', swimStyle: 'school', formationShape: 'line', pathShape: 'eight',
+      swimVariance: 0.6, bodyWiggle: 0.35,
+      environment: 'kelp', cameraDistance: 280, cameraElevation: 22,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-choreo-wedge',
+    label: 'Metaquarium (wedge helix)',
+    params: {
+      fishMix: '497:7', swimStyle: 'school', formationShape: 'wedge', pathShape: 'helix',
+      swimVariance: 0.4, bodyWiggle: 0.3,
+      environment: 'ice', cameraDistance: 300, cameraElevation: 18,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
   // The unminted NPC set, whole cast: clip-less models on bodyWiggle, seeded
   // two-tone coats, glow halos on fins/claws. ?saver=metaquarium-npc.
   createMetaquarium({
