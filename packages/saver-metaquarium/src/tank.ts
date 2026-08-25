@@ -708,7 +708,7 @@ class TankInstance implements SaverInstance {
    * and keeps the turn inside what a fish could actually swim.
    */
   private carrierFrame(
-    ext: { side: number; up: number; back: number },
+    ext: { side: number; up: number; back: number; reach: number },
     style: { speedMul: number },
     tSec: number,
     warpSec: number,
@@ -738,7 +738,7 @@ class TankInstance implements SaverInstance {
     // Keep the shoal in the tank by moving its CENTRE, never by pulling
     // individual fish toward the middle — that squashing turned a legal
     // lattice back into a pile.
-    const maxR = Math.max(0, BOUNDS.radius - Math.hypot(ext.side, ext.back));
+    const maxR = Math.max(0, BOUNDS.radius - ext.reach);
     const cr = Math.hypot(c.x, c.z);
     const cs = cr > maxR && cr > 0 ? maxR / cr : 1;
     return {
@@ -1195,6 +1195,10 @@ class TankInstance implements SaverInstance {
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
         const slot = formationSlot(f.index, visible, variance, undefined, fshape);
+        // A seated fish darts AHEAD of its slot and settles back — the
+        // closing displacement, because the permanent one would walk it out
+        // of the school forever.
+        const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
         const cf = carrier ?? this.carrierFrame(
           extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
         );
@@ -1207,9 +1211,9 @@ class TankInstance implements SaverInstance {
         const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
         pose = {
           ...cf.pose,
-          x: cf.x + cf.rx * slot.side - cf.fwdX * slot.back,
+          x: cf.x + cf.rx * slot.side - cf.fwdX * seatBack,
           y: cf.y + slot.up,
-          z: cf.z + cf.rz * slot.side - cf.fwdZ * slot.back,
+          z: cf.z + cf.rz * slot.side - cf.fwdZ * seatBack,
           fx: cf.fwdX * cy2 - cf.fwdZ * sy2,
           fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
@@ -1246,14 +1250,7 @@ class TankInstance implements SaverInstance {
         }
         y = Math.min(hi, Math.max(lo, y));
       }
-      // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
-      // +46 while the floor band tops out at 23, so a bottom-hugger over a
-      // hill was inside it. Half a body length of clearance, and never above
-      // the tank's own ceiling.
-      if (this.floorHeightAt) {
-        const clear = this.floorHeightAt(pose.x, pose.z) + FISH_LENGTH * 0.5;
-        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
-      }
+
 
       // Inside a depth band a fish swims LEVEL. Without this its heading still
       // points along the unclamped spline, so a bottom-hugger noses down into
@@ -1269,6 +1266,21 @@ class TankInstance implements SaverInstance {
         px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
         pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
         y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+        // A startle must not kick a fish through the glass.
+        const kr = Math.hypot(px, pz);
+        if (kr > BOUNDS.radius) {
+          px *= BOUNDS.radius / kr;
+          pz *= BOUNDS.radius / kr;
+        }
+      }
+      // The seabed clamps LAST and samples the DISPLACED position: `dunes`
+      // and `ridges` rise to +46, and both the floor band and a grazing
+      // nose-down kick can otherwise put a fish inside the hill it is
+      // feeding over. Half a body length of clearance, never above the
+      // tank's own ceiling.
+      if (this.floorHeightAt) {
+        const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
+        if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
       f.group.position.set(px, y, pz);
       f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);

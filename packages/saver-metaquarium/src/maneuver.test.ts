@@ -6,12 +6,15 @@ describe('maneuvers — the compiled performance', () => {
     expect(maneuverSpecOf('none')).toBeNull();
     expect(maneuverSpecOf('breakdance')).toBeNull();
     const spec = maneuverSpecOf('dart');
+    // Prototype-chain names must not resolve to ghost specs of undefineds.
+    expect(maneuverSpecOf('toString')).toBeNull();
+    expect(maneuverSpecOf('constructor')).toBeNull();
     for (const st of [
       maneuverAt(null, 3, 100, 1, 1),
       maneuverAt(spec, 3, 100, 0, 1),
       maneuverAt(spec, 3, 100, 1, 0),
     ]) {
-      expect(st).toEqual({ along: 0, side: 0, up: 0, flurry: 0 });
+      expect(st).toEqual({ along: 0, alongBump: 0, side: 0, up: 0, flurry: 0 });
     }
   });
 
@@ -36,10 +39,12 @@ describe('maneuvers — the compiled performance', () => {
     }
     expect(maxSide).toBeGreaterThan(0.1); // events actually fire
     expect(alongAt(interval * 6)).toBeGreaterThanOrEqual(spec.advance * 4); // ~6 events done
-    // Far from any event boundary the kick is closed.
+    // Far from any event boundary the kick is closed — and so is the seat
+    // displacement, which is what lets a formation fish come home.
     const quiet = maneuverAt(spec, 2, interval * 3 + spec.dur + 2, 1, 1);
     expect(Math.abs(quiet.side)).toBeLessThan(1e-9);
     expect(Math.abs(quiet.up)).toBeLessThan(1e-9);
+    expect(Math.abs(quiet.alongBump)).toBeLessThan(1e-9);
   });
 
   it('every fish runs its own schedule — no synchronized flinching', () => {
@@ -56,6 +61,13 @@ describe('maneuvers — the compiled performance', () => {
     const g = maneuverSpecOf('graze')!;
     const t = g.interval * 4;
     expect(maneuverAt(g, 1, t, 1, 1).along).toBeLessThan(0);
+    // "Noses down" is an assertion, not a caption: somewhere in each period
+    // the vertical kick must actually be negative.
+    let minUp = 0;
+    for (let tt = 0; tt < g.interval * 3; tt += 0.2) {
+      minUp = Math.min(minUp, maneuverAt(g, 1, tt, 1, 1).up);
+    }
+    expect(minUp).toBeLessThan(-0.05);
     const far = 400;
     const z = maneuverAt(maneuverSpecOf('zoomies'), 1, far, 1, 1).along;
     const d = maneuverAt(maneuverSpecOf('dart'), 1, far, 1, 1).along;

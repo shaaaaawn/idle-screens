@@ -58,7 +58,9 @@ const SPECS: Record<Exclude<Maneuver, 'none'>, ManeuverSpec> = {
 };
 
 export function maneuverSpecOf(name: string): ManeuverSpec | null {
-  return name !== 'none' && name in SPECS ? SPECS[name as Exclude<Maneuver, 'none'>] : null;
+  // Own-properties only: `in` walks the prototype chain, so 'toString' would
+  // come back as a "spec" of undefineds and NaN every position after it.
+  return Object.hasOwn(SPECS, name) ? SPECS[name as Exclude<Maneuver, 'none'>] : null;
 }
 
 /** Smoothstep: the cumulative shape of one surge — slow off the mark, flat
@@ -84,8 +86,14 @@ function surges(u: number, bursts: number): number {
 }
 
 export interface ManeuverState {
-  /** Advance along the fish's own path, body lengths (may be negative). */
+  /** Advance along the fish's own path, body lengths (may be negative).
+   *  Accumulates permanently — for FREE fish, whose loop absorbs it. */
   along: number;
+  /** The CLOSING version: surges to the event's advance and settles back to
+   *  zero. For fish holding a formation seat — a dart ahead of your slot you
+   *  return from, because a permanent advance would walk you out of the
+   *  school forever. */
+  alongBump: number;
   /** Signed lateral offset, body lengths, along the fish's right-hand normal. */
   side: number;
   /** Vertical offset, body lengths. */
@@ -94,7 +102,7 @@ export interface ManeuverState {
   flurry: number;
 }
 
-const IDLE: ManeuverState = { along: 0, side: 0, up: 0, flurry: 0 };
+const IDLE: ManeuverState = { along: 0, alongBump: 0, side: 0, up: 0, flurry: 0 };
 
 /**
  * Fish `i`'s maneuver displacement at second `tSec` — pure in every argument,
@@ -120,6 +128,7 @@ export function maneuverAt(
   // Events before the neighbourhood are all complete: count them in closed
   // form. Event k starts at (k + hash)·interval and lasts dur ≤ interval, so
   // every k ≤ k0 - 2 has finished.
+  let alongBump = 0;
   const done = Math.max(0, k0 - 1);
   // Intensity scales HISTORY too — the same rule every steerable here obeys
   // (swimSpeed rescales the whole trajectory): the closed-form world has one
@@ -137,9 +146,10 @@ export function maneuverAt(
     const sign = fishHash(index, 23 + k) < 0.5 ? -1 : 1;
     const env = bump(u) * intensity;
     along += spec.advance * surges(u, spec.bursts) * intensity;
+    alongBump += spec.advance * bump(u) * intensity;
     side += sign * spec.kick * env;
     up += spec.lift * spec.kick * env;
     flurry += spec.flurry * env;
   }
-  return { along, side, up, flurry };
+  return { along, alongBump, side, up, flurry };
 }

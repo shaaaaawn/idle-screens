@@ -157,11 +157,21 @@ export function formationSlot(
   const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
   if (shape === 'line') {
     // Nose to tail with a seeded weave bounded well under half a body
-    // length, so the file cannot fold onto itself.
+    // length, so the file cannot fold onto itself. A file caps at six —
+    // geometry, not taste: 24 fish at 1.7 body lengths would be a 700-unit
+    // procession in a 120-radius tank. Extra fish open parallel files a
+    // clear lane apart, and each file is CENTRED so the extent walk keeps
+    // the whole school inside the glass.
+    const FILE = 6;
+    const files = Math.ceil(Math.max(1, count) / FILE);
+    const col = Math.floor(index / FILE);
+    const within = index % FILE;
+    const fileLen = Math.min(FILE, count - col * FILE);
     return {
-      side: (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.4 * j,
+      side: (col - (files - 1) / 2) * FISH_LENGTH * 1.6
+        + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.4 * j,
       up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
-      back: index * FISH_LENGTH * 1.7,
+      back: (within - (fileLen - 1) / 2) * FISH_LENGTH * 1.7,
     };
   }
   if (shape === 'ring') {
@@ -177,13 +187,23 @@ export function formationSlot(
   }
   if (shape === 'wedge') {
     // The migratory V: rank 0 is the point, each rank seats two, wings
-    // sweep back and out.
-    const rank = (index + 1) >> 1;
-    const wing = index === 0 ? 0 : index % 2 === 1 ? -1 : 1;
+    // sweep back and out. One V holds nine; bigger casts stack Vs
+    // vertically a clear layer apart (the water column is the axis with
+    // room), each V centred fore-aft so the extent stays honest.
+    const VSIZE = 9;
+    const layers = Math.ceil(Math.max(1, count) / VSIZE);
+    const layer = Math.floor(index / VSIZE);
+    const within = index % VSIZE;
+    const rank = (within + 1) >> 1;
+    const wing = within === 0 ? 0 : within % 2 === 1 ? -1 : 1;
     return {
       side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
-      back: rank * FISH_LENGTH * 1.35,
+      // 1.5 body lengths per layer with a small jitter: adjacent layers seat
+      // the same rank directly above each other, so pitch minus worst-case
+      // jitter closure must clear one body length.
+      up: (layer - (layers - 1) / 2) * FISH_LENGTH * 1.5
+        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.2 * j,
+      back: (rank - 2) * FISH_LENGTH * 1.35,
     };
   }
   if (shape === 'ball') {
@@ -196,7 +216,10 @@ export function formationSlot(
     const az = (2 * Math.PI * index) / (g * g);
     return {
       side: r * Math.sin(incl) * Math.cos(az),
-      up: r * Math.cos(incl) * 0.8,
+      // Vertically squashed, hard-capped at 28: the water column is 57 units
+      // and the carrier's y-clamp needs the shell's top inside it whatever
+      // the cast size makes of the radius.
+      up: Math.cos(incl) * Math.min(r * 0.62, 28),
       back: r * Math.sin(incl) * Math.sin(az),
     };
   }
@@ -217,10 +240,14 @@ export function formationSlot(
   // `jit`, so pitch - jit must stay above FISH_LENGTH. That is the whole
   // reason the spacing is quoted in body lengths at all.
   const jit = pitch * 0.35;
+  const rows = Math.ceil(Math.max(1, count) / cols);
   return {
     side: (col - (cols - 1) / 2) * pitch + (fishHash(index, 4) - 0.5) * jit * j,
     up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * j,
-    back: row * FISH_LENGTH * 1.6 + fishHash(index, 6) * FISH_LENGTH * 0.4 * j,
+    // Centred fore-aft like every other shape — a 24-fish lattice trailing
+    // its whole depth behind the carrier pushed the extent past what the
+    // centre-clamp could absorb.
+    back: (row - (rows - 1) / 2) * FISH_LENGTH * 1.6 + fishHash(index, 6) * FISH_LENGTH * 0.4 * j,
   };
 }
 
@@ -232,15 +259,19 @@ export function formationSlot(
  */
 export function formationExtent(
   count: number, variance: number, shape: FormationShape = 'phalanx',
-): { side: number; up: number; back: number } {
-  let side = 0, up = 0, back = 0;
+): { side: number; up: number; back: number; reach: number } {
+  let side = 0, up = 0, back = 0, reach = 0;
   for (let i = 0; i < count; i += 1) {
     const s = formationSlot(i, count, variance, undefined, shape);
     side = Math.max(side, Math.abs(s.side));
     up = Math.max(up, Math.abs(s.up));
     back = Math.max(back, Math.abs(s.back));
+    // True planar reach per SEAT — hypot of the axis maxima overstates a
+    // ring by √2 (its side and back maxima never co-occur), and that
+    // overstatement pinned big rings to the tank centre.
+    reach = Math.max(reach, Math.hypot(s.side, s.back));
   }
-  return { side, up, back };
+  return { side, up, back, reach };
 }
 
 /** Depth band as a fraction of the tank's vertical extent — the tank owns the

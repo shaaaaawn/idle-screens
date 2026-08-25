@@ -57,6 +57,25 @@ describe('swim styles', () => {
       }
     }
   });
+  it('every shape at every cast still FITS the tank', () => {
+    // The finding that forced line/wedge to wrap: a 24-fish single file at
+    // 1.7 body lengths is a 700-unit procession in a 120-radius tank. The
+    // carrier clamp needs headroom left over, so the seating chart's planar
+    // reach must stay well inside the glass.
+    for (const shape of FORMATION_SHAPES) {
+      for (const count of [8, 16, 24]) {
+        let reach = 0;
+        let up = 0;
+        for (let i = 0; i < count; i += 1) {
+          const s2 = formationSlot(i, count, 1, undefined, shape);
+          reach = Math.max(reach, Math.hypot(s2.side, s2.back));
+          up = Math.max(up, Math.abs(s2.up));
+        }
+        expect(reach, `${shape} ${count}`).toBeLessThan(115);
+        expect(up, `${shape} ${count} up`).toBeLessThan(29); // fits the water column
+      }
+    }
+  });
   it('the extent bounds every slot for every shape', () => {
     for (const shape of FORMATION_SHAPES) {
       const ext = formationExtent(16, 0.8, shape);
@@ -181,7 +200,8 @@ describe('formation', () => {
         const s = formationSlot(i, count, 1);
         expect(Number.isFinite(s.side)).toBe(true);
         expect(Number.isFinite(s.up)).toBe(true);
-        expect(s.back).toBeGreaterThanOrEqual(0);
+        // Seating charts centre fore-aft, so back is signed now.
+        expect(Number.isFinite(s.back)).toBe(true);
       }
     }
   });

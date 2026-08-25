@@ -139,7 +139,9 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-choreo-wedge',
     label: 'Metaquarium (wedge helix)',
     params: {
-      fishMix: '497:7', swimStyle: 'school', formationShape: 'wedge', pathShape: 'helix',
+      // Bundled betafish, not turtles: the studio catalog is network-free
+      // and 497 has no local GLB — offline it would fall back to blobs.
+      fishMix: '100:7', swimStyle: 'school', formationShape: 'wedge', pathShape: 'helix',
       swimVariance: 0.4, bodyWiggle: 0.3,
       environment: 'ice', cameraDistance: 300, cameraElevation: 18,
     },

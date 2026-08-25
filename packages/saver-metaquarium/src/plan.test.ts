@@ -102,11 +102,14 @@ describe('path shapes', () => {
       const plan = compileSwimPlan(createRng(11), BOUNDS, shape);
       expect(plan.totalLength).toBeGreaterThan(100);
       // Sample the whole loop: inside the cylinder, inside the water column.
+      // The slack is Catmull-Rom overshoot between waypoints, nothing more:
+      // 3% of radius and 3 world units of depth. A generator that actually
+      // leaves the tank fails this.
       for (let d = 0; d <= plan.totalLength; d += plan.totalLength / 64) {
         const pose = swimPoseAtDistance(plan, d);
-        expect(Math.hypot(pose.x, pose.z)).toBeLessThanOrEqual(BOUNDS.radius * 1.05);
-        expect(pose.y).toBeGreaterThanOrEqual(BOUNDS.yMin - 6);
-        expect(pose.y).toBeLessThanOrEqual(BOUNDS.yMax + 6);
+        expect(Math.hypot(pose.x, pose.z)).toBeLessThanOrEqual(BOUNDS.radius * 1.03);
+        expect(pose.y).toBeGreaterThanOrEqual(BOUNDS.yMin - 3);
+        expect(pose.y).toBeLessThanOrEqual(BOUNDS.yMax + 3);
       }
     }
   });

@@ -150,10 +150,14 @@ function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds): SwimPla
     const ax = Math.cos(axis), az = Math.sin(axis);
     const y0 = bounds.yMin + ySpan * rng.range(0.08, 0.28);
     const len = bounds.radius * 0.85;
+    // ONE seeded ribbon width — per-point redraws made the edges jagged
+    // instead of a clean sweep; the y jitter below stays per-point, that one
+    // IS the organic part.
+    const width = bounds.radius * rng.range(0.12, 0.3);
     for (let i = 0; i < n; i++) {
       const u = (i / n) * Math.PI * 2;
       const along = Math.sin(u) * len;
-      const across = Math.cos(u) * bounds.radius * rng.range(0.12, 0.3);
+      const across = Math.cos(u) * width;
       points.push([
         ax * along - az * across,
         y0 + ySpan * rng.range(0, 0.08),
