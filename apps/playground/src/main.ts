@@ -112,6 +112,18 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
+  // Glow QA: the crystal-finned breeds whose whole-silhouette GLOW parts
+  // ghosted on the wall (2026-08-25). Close camera on purpose — this is the
+  // zoom the report came from. Network-fetch (farm ids), studio-only.
+  createMetaquarium({
+    id: 'metaquarium-glow',
+    label: 'Metaquarium (glow check)',
+    params: {
+      fishMix: '457:3,497:2,258:1', swimStyle: 'hover', swimVariance: 0.5, bodyWiggle: 0.3,
+      environment: 'lagoon', cameraDistance: 110, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
   // Choreography showcases: pathShape x formationShape x maneuver.
   // ?saver=metaquarium-choreo-<name>.
   createMetaquarium({
