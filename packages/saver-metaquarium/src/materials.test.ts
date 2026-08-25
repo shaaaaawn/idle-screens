@@ -231,6 +231,39 @@ describe('glow halos — selective bloom without a composer', () => {
     });
   });
 
+  it('metallic atlases become unlit basics wearing the same texture', () => {
+    // glTF's DEFAULT metallicFactor is 1.0 and a pure metal under a
+    // hemisphere light renders BLACK — the jellyfish shipped that way.
+    const geo = new SphereGeometry(1, 4, 4);
+    const tex = new Texture();
+    const metal = new MeshStandardMaterial({ name: 'jelly', map: tex, metalness: 1 });
+    const soft = new MeshStandardMaterial({ name: 'atlas', map: tex, metalness: 0 });
+    const a = new Mesh(geo, metal);
+    const b = new Mesh(geo, soft);
+    const root = new Group();
+    root.add(a, b);
+    applyNpcMaterials(root, createRng(3));
+    const ra = a.material as unknown as MeshBasicMaterial;
+    expect(ra).toBeInstanceOf(MeshBasicMaterial);
+    expect(ra.map).toBe(tex); // same texture, unlit
+    expect(ra.userData.mqOwned).toBe(true);
+    expect(b.material).toBe(soft); // non-metal atlas untouched
+  });
+
+  it('the halo shader pushes along normals via one shared program key', () => {
+    const { root } = glowFish();
+    applyNpcMaterials(root, createRng(7).fork(1));
+    addGlowHalos(root, createRng(7).fork(1));
+    const halos: Mesh[] = [];
+    root.traverse((n) => { if ((n as Mesh).userData.mqHalo) halos.push(n as Mesh); });
+    const mat = halos[0]!.material as MeshBasicMaterial;
+    const shader = { uniforms: {} as Record<string, { value: number }>, vertexShader: 'void main() {\n#include <begin_vertex>\n}' };
+    mat.onBeforeCompile!(shader as never, null as never);
+    expect(shader.uniforms.uHaloPush!.value).toBeGreaterThan(0);
+    expect(shader.vertexShader).toContain('transformed += normal * uHaloPush;');
+    expect(mat.customProgramCacheKey!()).toBe('mq-glow-halo');
+  });
+
   it('is idempotent-safe: halos never halo halos, and multi-material meshes are skipped', () => {
     const { root } = glowFish();
     applyNpcMaterials(root, createRng(7).fork(1));
