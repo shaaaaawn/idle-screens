@@ -54,6 +54,7 @@ import {
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
+  addGlowHalos,
   applyNpcMaterials,
   eyeNoseSign,
   forceOpaque,
@@ -912,6 +913,9 @@ class TankInstance implements SaverInstance {
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      // Selective bloom on the GLOW parts — same fork, so a fish's halo color
+      // agrees with the coat pass when both fall through to the seeded pick.
+      addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
