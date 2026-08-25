@@ -98,8 +98,9 @@ export const METAQUARIUM_PARAMS = {
    *  addressable. `none` (default) changes nothing. */
   maneuver: { type: 'enum', default: 'none', options: [...MANEUVERS], ease: 'step' },
   /** How often events fire: 0 never, 1 the maneuver's own tempo (roughly
-   *  every 14-20s per fish, desynchronised). */
-  maneuverRate: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+   *  every 14-20s per fish, desynchronised), above 1 faster — 3 packs events
+   *  nearly back to back. Values <=1 mean exactly what they always did. */
+  maneuverRate: { type: 'number', default: 0.5, min: 0, max: 3, ease: 'smooth' },
   /** How hard: scales the surge, the kick, and the tail flurry together. */
   maneuverIntensity: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'smooth' },
   /** Procedural body yaw for models that carry NO animation clip — most of

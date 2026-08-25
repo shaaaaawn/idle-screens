@@ -58,7 +58,10 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'loop', label: 'Loop', speedMul: 1, band: 'free', bobAmp: 0, bobHz: 0, formation: false, travel: 1 },
   { name: 'school', label: 'School', speedMul: 1, band: 'free', bobAmp: 1.5, bobHz: 0.5, formation: true, travel: 1 },
   { name: 'drift', label: 'Drift', speedMul: 0.35, band: 'mid', bobAmp: 5, bobHz: 0.13, formation: false, travel: 0.6 },
-  { name: 'hover', label: 'Hover', speedMul: 0.2, band: 'free', bobAmp: 7, bobHz: 0.3, formation: false, travel: 0.12 },
+  // speedMul 0.55, not 0.2: QA measured hover at swimSpeed 0.5 pinned to a
+  // fixed screen x for 8+ seconds — frozen, not station-keeping. The two
+  // multiplied slowdowns (speedMul x travel) were the freeze.
+  { name: 'hover', label: 'Hover', speedMul: 0.55, band: 'free', bobAmp: 7, bobHz: 0.3, formation: false, travel: 0.12 },
   { name: 'patrol', label: 'Patrol', speedMul: 0.55, band: 'mid', bobAmp: 1, bobHz: 0.09, formation: false, travel: 1 },
   { name: 'bottom', label: 'Bottom-hugger', speedMul: 0.7, band: 'floor', bobAmp: 2, bobHz: 0.4, formation: false, travel: 1 },
   { name: 'surface', label: 'Surface-skimmer', speedMul: 0.9, band: 'ceiling', bobAmp: 3, bobHz: 0.55, formation: false, travel: 1 },
