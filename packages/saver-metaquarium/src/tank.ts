@@ -239,11 +239,18 @@ function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => n
     const d = Math.sqrt(x * x + z * z) / R;
     let h = 0;
     if (kind === 'dunes') {
-      h = Math.sin(x * 0.011 + a) * 26 + Math.cos(z * 0.009 + b) * 20;
+      // Wavelengths sized to the VISIBLE footprint. The originals (0.011 →
+      // 571-unit swells) put less than one swell in frame at any camera, so
+      // a QA A/B showed dunes rendering as a smooth tilt while ridges (whose
+      // |sin| halves its period) showed real relief. 2-3 swells in frame now.
+      h = Math.sin(x * 0.028 + a) * 24 + Math.cos(z * 0.023 + b) * 18
+        + Math.sin((x + z) * 0.011 + b) * 6;
     } else if (kind === 'ridges') {
       h = Math.abs(Math.sin(x * 0.02 + a)) * 54 - 18 + Math.sin(z * 0.006 + c) * 10;
     } else if (kind === 'basin') {
-      h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
+      // The bowl stays, but a shorter ripple gives the near floor a surface —
+      // d² alone is near-constant inside the tank radius.
+      h = d * d * 150 - 60 + Math.sin(x * 0.024 + a) * 7 + Math.cos(z * 0.02 + c) * 5;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
     return h * Math.max(0, 1 - d * d);
@@ -319,7 +326,10 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
         // suspended matter rather than a solid cone.
         float fade = smoothstep(0.0, 0.3, vY) * (1.0 - smoothstep(0.72, 1.0, vY));
         float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.34 * breathe);
+        // 0.13, not more: with the shaft finally IN frame, alpha is the whole
+        // dial — 0.34 turned ice's near-white shafts into pyramids that
+        // dwarfed the fish. Faint is what light through water looks like.
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.13 * breathe);
       }`,
   });
   mat.userData.mqOwned = true;
@@ -330,7 +340,7 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
   // units past the ceiling. A QA pass measured rayStrength 0→1 at a 0.07/255
   // pixel difference: the dial did nothing. The fade now peaks IN the fish
   // band and closes at both ends so shafts still read as light, not walls.
-  const geo = new CylinderGeometry(9, 64, 150, 10, 1, true);
+  const geo = new CylinderGeometry(7, 42, 150, 10, 1, true);
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
