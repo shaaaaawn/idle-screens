@@ -1,6 +1,7 @@
 import type { ParamSpace, ParamValue, SaverManifest } from '@idle-screens/core';
 import { ENVIRONMENT_NAMES } from './environments';
 import { SWIM_STYLE_NAMES } from './swim';
+import { PATH_SHAPES } from './plan';
 
 /**
  * Zero-dependency manifest module (type-only imports). The channel server
@@ -76,6 +77,11 @@ export const METAQUARIUM_PARAMS = {
    *  default changes nothing. A small named set on purpose: a silhouette of
    *  movement you can name is one you can choose from. */
   swimStyle: { type: 'enum', default: 'loop', options: [...SWIM_STYLE_NAMES], ease: 'step' },
+  /** The shape a fish's loop is drawn on. `wander` is the original roaming
+   *  itinerary, so the default changes nothing. `orbit` laps, `eight` crosses
+   *  the middle, `helix` tours the water column, `canyon` sweeps low — same
+   *  spline engine, different itinerary. */
+  pathShape: { type: 'enum', default: 'wander', options: [...PATH_SHAPES], ease: 'step' },
   /** Per-fish spread: 0 a uniform shoal, 1 every fish visibly its own animal
    *  (±40% speed, ±25% size, own phase). The uniqueness dial — one number
    *  instead of per-fish values nobody wants to author. */

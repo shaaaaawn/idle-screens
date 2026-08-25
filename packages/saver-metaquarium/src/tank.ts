@@ -62,6 +62,8 @@ import {
 } from './materials';
 import {
   compileSwimPlan,
+  PATH_SHAPES,
+  type PathShape,
   distanceAt,
   swimPoseAtDistance,
   type SwimPlan,
@@ -451,7 +453,11 @@ class TankInstance implements SaverInstance {
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
-  private readonly carrierPlan: SwimPlan;
+  private carrierPlan: SwimPlan;
+  /** Shape every live plan was compiled on — setState recompiles when the
+   *  steered value moves. Plans are cheap (one arc table); rebuilding them
+   *  beats respawning fish, which would drop GLBs mid-scene. */
+  private pathShape: PathShape = 'wander';
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -465,7 +471,7 @@ class TankInstance implements SaverInstance {
     this.space = space;
     this.quality = quality;
     this.catalog = catalog;
-    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS);
+    this.carrierPlan = compileSwimPlan(ctx.rng.fork(0x5c1), BOUNDS, this.pathShape);
     this.thumbnail = ctx.dpr < 0.5;
     this.params = defaultParams(space);
     this.w = ctx.width;
@@ -911,7 +917,7 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape);
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
@@ -1096,6 +1102,21 @@ class TankInstance implements SaverInstance {
     const style = swimStyleOf(this.str('swimStyle'));
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
+
+    // Path shape: recompile plans in place when steered. Same forks as spawn,
+    // so a shape round-trip lands every fish back on its exact original loop.
+    const shapeRaw = this.str('pathShape');
+    const shape = (PATH_SHAPES as readonly string[]).includes(shapeRaw)
+      ? (shapeRaw as PathShape)
+      : 'wander';
+    if (shape !== this.pathShape) {
+      this.pathShape = shape;
+      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape);
+      const rng = this.ctxSaver.rng.fork(0x715);
+      for (const f of this.fish) {
+        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape);
+      }
+    }
 
     // Fish. Mix mode: the DSL defines the population absolutely (fishCount
     // is documented as ignored). Single mode: fishCount is the dial;
