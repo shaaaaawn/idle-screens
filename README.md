@@ -7,6 +7,7 @@
 [![saver-limelight](https://img.shields.io/npm/v/@idle-screens/saver-limelight?label=saver-limelight)](https://www.npmjs.com/package/@idle-screens/saver-limelight)
 [![saver-slipstream](https://img.shields.io/npm/v/@idle-screens/saver-slipstream?label=saver-slipstream)](https://www.npmjs.com/package/@idle-screens/saver-slipstream)
 [![saver-catwalk](https://img.shields.io/npm/v/@idle-screens/saver-catwalk?label=saver-catwalk)](https://www.npmjs.com/package/@idle-screens/saver-catwalk)
+[![saver-metaquarium](https://img.shields.io/npm/v/@idle-screens/saver-metaquarium?label=saver-metaquarium)](https://www.npmjs.com/package/@idle-screens/saver-metaquarium)
 [![savers-classic](https://img.shields.io/npm/v/@idle-screens/savers-classic?label=savers-classic)](https://www.npmjs.com/package/@idle-screens/savers-classic)
 [![schema](https://img.shields.io/npm/v/@idle-screens/schema?label=schema)](https://www.npmjs.com/package/@idle-screens/schema)
 [![validator](https://img.shields.io/npm/v/@idle-screens/validator?label=validator)](https://www.npmjs.com/package/@idle-screens/validator)
@@ -50,22 +51,23 @@ control signals do.
    | saver format |                        | savers          |
    +--------------+                        +-----------------+
 
-   +----------------------+  +-----------------+
-   | @idle-screens/       |  | @idle-screens/  |
-   | validator            |  | capabilities    |
-   | WCAG flash + perf    |  | device tier +   |
-   | gates                |  | eligibility     |
-   +----------------------+  +-----------------+
-        (standalone)             (standalone)
+   +----------------------+  +-----------------+  +------------------+
+   | @idle-screens/       |  | @idle-screens/  |  | @idle-screens/   |
+   | validator            |  | capabilities    |  | saver-metaquarium|
+   | WCAG flash + perf    |  | device tier +   |  | three.js fish    |
+   | gates                |  | eligibility     |  | tank (core+caps) |
+   +----------------------+  +-----------------+  +------------------+
+        (standalone)             (standalone)        (the 3D saver)
 
    +-------------------------------------------------------+
    |                    playground                         |
-   |  Vite workbench (imports all 10, dev only)            |
+   |  Vite workbench (imports every package, dev only)     |
    +-------------------------------------------------------+
 ```
 
 **core** is the foundation. The plugin packages (`saver-black-hole`, `saver-tide`,
-`saver-limelight`, `saver-slipstream`, `saver-catwalk`, `savers-classic`, `schema`) depend on it
+`saver-limelight`, `saver-slipstream`, `saver-catwalk`, `saver-metaquarium`,
+`savers-classic`, `schema`) depend on it
 for types and the `SaverPlugin` contract. **validator** and **capabilities** are
 standalone with zero dependencies, so they can be used independently. The
 **playground** app imports everything for development and testing.
@@ -80,6 +82,7 @@ standalone with zero dependencies, so they can be used independently. The
 | [`@idle-screens/saver-limelight`](packages/saver-limelight) | Passthrough stage-light saver: page blocks gain height, cast silhouettes, and occlude each other under a roaming key light. |
 | [`@idle-screens/saver-slipstream`](packages/saver-slipstream) | Passthrough wind saver: page blocks are obstacles in an analytic potential-flow field; streamlines part around content and blocks lean with local wind. |
 | [`@idle-screens/saver-catwalk`](packages/saver-catwalk) | Passthrough cat screensaver: a silhouette cat parkours across the live page's own blocks — perches dip and spring under its weight, it naps on the warm ones. |
+| [`@idle-screens/saver-metaquarium`](packages/saver-metaquarium) | three.js aquarium: skinned GLB fish from the Metaquarium farm swim seeded spline paths through a fogged tank, with environments (rooms), mixed-breed schools (`fishMix`), swim styles, and a steerable camera. The screen is a tank. |
 | [`@idle-screens/savers-classic`](packages/savers-classic) | 17 classic savers (toasters, DVD, warp, fish, rain, globe, mystify, spotlight, and more) ported to framework-agnostic saver plugins. |
 | [`@idle-screens/validator`](packages/validator) | Photosensitivity (WCAG 2.3.1 flash) + performance validation. Feed it luminance samples and frame times, get a pass/fail safety verdict. |
 | [`@idle-screens/capabilities`](packages/capabilities) | Device and capability detection + saver eligibility tiering. Pure decide (Node-testable) + a thin browser detector. |
