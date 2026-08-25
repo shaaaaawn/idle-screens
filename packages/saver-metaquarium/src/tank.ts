@@ -1212,7 +1212,16 @@ class TankInstance implements SaverInstance {
       const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
       // Maneuvers displace, never re-rate: `along` moves the fish on its own
       // path, the kick is added to the pose after banding. Both closed-form.
-      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity);
+      // Contagious events (startle) propagate through a formation as a wave:
+      // seat distance from a per-schedule epicentre becomes a start delay, so
+      // the flinch crosses the lattice at ~90 units/s instead of every fish
+      // twitching on its own private clock. Free fish keep their own schedule.
+      let seatDelay: number | null = null;
+      if (spec?.contagious && style.formation) {
+        const slot0 = formationSlot(f.index, visible, variance, undefined, fshape);
+        seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
+      }
+      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
       const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
 
       // What drives the animation. For a free fish that is its own effort; for
@@ -1299,15 +1308,25 @@ class TankInstance implements SaverInstance {
       // a floor it can never reach and a skimmer climbs at an invisible lid.
       // Level, not merely flatter: a fraction of the spline's climb still reads
       // as a fish nosing into a floor it cannot reach.
-      const fy = band ? 0 : pose.fy;
+      // Maneuver pitch applies AFTER the band level-lock, deliberately: the
+      // level rule zeroes exactly the styles (bottom, drift) a grazer lives
+      // in, and grazing IS a posture — nose-down over the substrate is the
+      // one maneuver shape a still image can name.
+      const fy = (band ? 0 : pose.fy)
+        + (mnv.pitch !== 0 ? Math.tan(mnv.pitch) * (Math.hypot(pose.fx, pose.fz) || 1) : 0);
       let px = pose.x, pz = pose.z;
       if (mnv.side !== 0 || mnv.up !== 0) {
         // Kick along the fish's right-hand normal, closing back to zero by
         // the event's end — the fish leaves its line and comes home to it.
+        // In a formation the kick is scaled UP: QA measured startle's 2.8
+        // body lengths as 1.5 phalanx column pitches — the scattered fish
+        // landed on roughly another seat and read as mis-seated. 1.8x clears
+        // the lattice.
+        const kickScale = style.formation ? 1.8 : 1;
         const hl2 = Math.hypot(pose.fx, pose.fz) || 1;
-        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
-        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
-        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH * kickScale;
+        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH * kickScale;
+        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH * kickScale));
         // A startle must not kick a fish through the glass.
         const kr = Math.hypot(px, pz);
         if (kr > BOUNDS.radius) {
