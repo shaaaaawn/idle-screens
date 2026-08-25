@@ -158,7 +158,22 @@ export function applyNpcMaterials(root: Object3D, rng: Rng): void {
         glow.userData.mqOwned = true;
         return glow;
       }
-      if ((m as Partial<MeshBasicMaterial>).map) return m;
+      const map = (m as Partial<MeshBasicMaterial>).map;
+      if (map) {
+        // The metal trap: glTF's DEFAULT metallicFactor is 1.0, and a pure
+        // metal under our hemisphere light (no environment map) renders
+        // BLACK — the jellyfish shipped that way. Unlit-basic the atlas so
+        // the texture reads at full brightness; non-metal atlases keep their
+        // authored material untouched.
+        const metalness = (m as Partial<import('three').MeshStandardMaterial>).metalness ?? 0;
+        if (metalness >= 0.5) {
+          const atlas = new MeshBasicMaterial({ map });
+          atlas.name = m.name;
+          atlas.userData.mqOwned = true;
+          return atlas;
+        }
+        return m;
+      }
       const coat = /primary/i.test(m.name)
         ? coatA
         : /secondary/i.test(m.name)

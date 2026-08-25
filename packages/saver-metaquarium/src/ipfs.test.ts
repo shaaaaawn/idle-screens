@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix } from './ipfs';
+import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
@@ -97,5 +97,32 @@ describe('resolveIpfsUrls', () => {
   });
   it('resolveIpfsUrl stays the first candidate (compat)', () => {
     expect(resolveIpfsUrl('ipfs://QmX/f.glb')).toBe(resolveIpfsUrls('ipfs://QmX/f.glb')[0]);
+  });
+});
+
+describe('NPC breeds (unminted set)', () => {
+  it('covers all eight designed breeds with synthetic ids above the supply', () => {
+    expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(
+      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark'],
+    );
+    for (const f of NPC_CATALOG) {
+      expect(f.id).toBeGreaterThan(512); // never collides with a minted token
+      expect(f.localGlb).toMatch(/^\/assets\/metaquarium\//);
+      expect(f.ipfs3d).toBe(''); // no pin yet — hosts map localGlb in
+    }
+  });
+  it('a mapped catalog resolves NPC breeds; an unmapped one says not hosted', () => {
+    const mapped = NPC_CATALOG.map((f) => ({ ...f, ipfs3d: `http://x${f.localGlb}` }));
+    const ok = parseFishMix('shark:2,jellyfish:1', mapped);
+    expect(ok.problems).toEqual([]);
+    expect(ok.entries.map((e) => e.count)).toEqual([2, 1]);
+    const un = parseFishMix('shark:1', NPC_CATALOG);
+    expect(un.entries).toEqual([]);
+    expect(un.problems[0]).toContain('not hosted here');
+  });
+  it('the breed error names what the ACTIVE catalog offers', () => {
+    const r = parseFishMix('unicorn:1', NPC_CATALOG.map((f) => ({ ...f, ipfs3d: 'x' })));
+    expect(r.problems[0]).toContain('shark');
+    expect(r.problems[0]).toContain('jellyfish');
   });
 });

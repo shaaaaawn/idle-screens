@@ -83,9 +83,9 @@ describe('metaquarium material contract', () => {
     const root = new Group();
     root.add(prim1, prim2, sec);
     applyNpcMaterials(root, createRng(7).fork(2));
-    const a = (prim1.material as MeshBasicMaterial).color.getHex();
-    const b = (prim2.material as MeshBasicMaterial).color.getHex();
-    const c = (sec.material as MeshBasicMaterial).color.getHex();
+    const a = (prim1.material as unknown as MeshBasicMaterial).color.getHex();
+    const b = (prim2.material as unknown as MeshBasicMaterial).color.getHex();
+    const c = (sec.material as unknown as MeshBasicMaterial).color.getHex();
     expect(a).toBe(b); // every primary part shares the coat
     expect(c).not.toBe(a); // secondary is guaranteed distinct
   });
@@ -123,8 +123,8 @@ describe('metaquarium material contract', () => {
     const root = new Group();
     root.add(pupil, dark);
     applyNpcMaterials(root, createRng(7).fork(1));
-    expect((pupil.material as MeshBasicMaterial).color.getHex()).toBe(0x000000);
-    expect((dark.material as MeshBasicMaterial).color.getHex()).toBe(0x000000);
+    expect((pupil.material as unknown as MeshBasicMaterial).color.getHex()).toBe(0x000000);
+    expect((dark.material as unknown as MeshBasicMaterial).color.getHex()).toBe(0x000000);
   });
 
   it('forceOpaque solidifies alpha-blend materials', () => {

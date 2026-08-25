@@ -39,6 +39,29 @@ export const FISH_CATALOG: FishEntry[] = [
 
 export const DEFAULT_FISH = FISH_CATALOG[0]!;
 
+/**
+ * The unminted breeds — the original aquarium's NPC set, brought in as
+ * catalog entries with synthetic ids above the 512 supply. No token, no
+ * IPFS pin yet (`ipfs3d` empty), so they resolve only where a host serves
+ * the bundled GLBs (`localGlb`) — the playground/studio today. Pinning them
+ * and filling `ipfs3d` is what makes them wall-ready; until then the DSL
+ * reports them as unhosted rather than spawning a dead URL.
+ *
+ * All are clip-less and unrigged — they swim on `bodyWiggle`. Their
+ * materials use the NPC naming (PrimaryColor, SecondaryColor, EYES-, GLOW-),
+ * so every instance gets the seeded two-tone coat and glow halos.
+ */
+export const NPC_CATALOG: FishEntry[] = [
+  { id: 601, name: 'Blowfish', breed: 'blowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-blowfish.glb' },
+  { id: 602, name: 'Hackerfish', breed: 'hackerfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-hackerfish.glb' },
+  { id: 603, name: 'Glowfish', breed: 'glowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-glowfish.glb' },
+  { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-babyfish.glb' },
+  { id: 605, name: 'Shark', breed: 'shark', ipfs3d: '', localGlb: '/assets/metaquarium/shark3.glb' },
+  { id: 606, name: 'Crab', breed: 'crab', ipfs3d: '', localGlb: '/assets/metaquarium/npc-crab.glb' },
+  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-jellyfish.glb' },
+  { id: 608, name: 'Dori', breed: 'dori', ipfs3d: '', localGlb: '/assets/metaquarium/npc-dori.glb' },
+];
+
 import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
 
 export interface FishMixEntry {
@@ -98,13 +121,25 @@ export function parseFishMix(
       if (url && breed) fish = { id: n, name: `Fish ${n}`, breed, ipfs3d: url, localGlb: '' };
     }
     if (!fish) {
+      // Name what THIS catalog offers, not a hardcoded minted list — a studio
+      // catalog carries the NPC breeds too, and the message should say so.
+      const breeds = [...new Set(catalog.map((f) => f.breed))].join(', ');
       problems.push(
         /^\d+$/.test(key)
           ? catalog === FISH_CATALOG
             ? `"${key}": not a minted token id (1-${TOTAL_SUPPLY})`
             : `"${key}": not a catalog id`
-          : `"${key}": not a breed (${BREEDS.filter((b) => b.minted).map((b) => b.breed).join(', ')})`,
+          : `"${key}": not a breed (${breeds})`,
       );
+      continue;
+    }
+    // ipfs3d stays the ONE spawnable URL. NPC entries ship with it empty —
+    // a host that serves the bundled GLBs maps localGlb into it (the
+    // playground's asset() rebase); anywhere else the honest answer is
+    // "not hosted here", never a root-relative path that 404s on the wall.
+    const url = fish.ipfs3d;
+    if (!url) {
+      problems.push(`"${key}": model not hosted here (catalog carries no URL for it)`);
       continue;
     }
     let count = 1;
@@ -123,7 +158,7 @@ export function parseFishMix(
         count = n;
       }
     }
-    entries.push({ id: fish.id, url: fish.ipfs3d, count });
+    entries.push({ id: fish.id, url, count });
   }
   return { entries, problems };
 }
