@@ -546,7 +546,10 @@ class TankInstance implements SaverInstance {
             sin(uTime * 0.13 + aPhase.z) * 6.0);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(180.0 / max(1.0, -mv.z), 1.0, 4.0);
+          // 520/z with a 1.5..7 clamp: ~2.6px at a 200-unit camera, ~6px in
+          // macro. The old 180/z capped at 4 rendered ONE dim pixel at wall
+          // distances — moteDensity 1 was invisible from any normal camera.
+          gl_PointSize = clamp(520.0 / max(1.0, -mv.z), 1.5, 7.0);
           vFade = 0.35 + 0.3 * sin(uTime * 0.9 + aPhase.x * 7.0);
         }`,
       fragmentShader: `
@@ -556,7 +559,7 @@ class TankInstance implements SaverInstance {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c);
           if (d > 0.5) discard;
-          gl_FragColor = vec4(uColor, (1.0 - d * 2.0) * vFade * 0.5);
+          gl_FragColor = vec4(uColor, (1.0 - d * 2.0) * vFade * 0.8);
         }`,
     });
     this.moteMat.userData.mqOwned = true;
@@ -1122,7 +1125,13 @@ class TankInstance implements SaverInstance {
       const effort = this.speedTracked
         ? distanceAt(f.plan, warpSec, styleSpeed)
         : distanceAt(f.plan, tSec, speed * styleSpeed);
-      const anchor = style.travel < 1 ? varn.anchor * f.plan.totalLength : 0;
+      // Every style spreads its cast along the loop, not only the
+      // station-keepers. Without this, patrol/bottom/surface all mounted as
+      // one knot dead-centre (every compiled spline starts near azimuth 0)
+      // and took minutes to disperse — watched happen three times in a row
+      // on a live channel. `loop` alone stays anchorless: it promises to be
+      // exactly the pre-style behaviour, frame for frame.
+      const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
       const d = anchor + effort * style.travel;
 
       // What drives the animation. For a free fish that is its own effort; for
@@ -1180,8 +1189,22 @@ class TankInstance implements SaverInstance {
       // is not band-limited, it is just a fish.
       const band = bandRange(style.band);
       if (band) {
-        const lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
-        const hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        let lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
+        let hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
+        // A surface skimmer skims the WATER, not the top of the abstract swim
+        // volume. Env water planes sit at 118-170 while yMax is 72, so
+        // "surface" turtles cruised mid-frame far below the ceiling they were
+        // named for. Ride just under the actual plane, capped so a steered
+        // waterY of 220 cannot fly the cast out of every camera's frame.
+        if (style.band === 'ceiling' && this.ceiling) {
+          const wparam = this.num('waterY');
+          const wy = wparam >= 0 ? wparam : this.presetWaterY;
+          const ceilY = Math.min(wy - FISH_LENGTH * 0.8, BOUNDS.yMax + 60);
+          if (ceilY > hi) {
+            lo = ceilY - (hi - lo);
+            hi = ceilY;
+          }
+        }
         y = Math.min(hi, Math.max(lo, y));
       }
       // Then the seabed, which outranks the band: `dunes` and `ridges` rise to
