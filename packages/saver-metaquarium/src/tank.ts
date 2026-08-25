@@ -347,8 +347,13 @@ function disposeOwned(root: Object3D): void {
       : [];
     for (const m of mats) {
       if (!m.userData?.mqOwned) continue;
+      // A texture is disposed only when IT is owned, not because its material
+      // is: the metallic-atlas path creates an owned material wearing the
+      // TEMPLATE'S shared texture, and freeing that map here would corrupt
+      // every other clone of the same cached fish. No path creates owned
+      // textures today, so this line waits for one that does.
       const tex = (m as Partial<MeshBasicMaterial>).map;
-      if (tex) tex.dispose();
+      if (tex?.userData?.mqOwned) tex.dispose();
       m.dispose();
     }
   });
