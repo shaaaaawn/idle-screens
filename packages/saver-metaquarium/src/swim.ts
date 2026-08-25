@@ -196,17 +196,21 @@ export function formationSlot(
     const within = index % VSIZE;
     const rank = (within + 1) >> 1;
     const wing = within === 0 ? 0 : within % 2 === 1 ? -1 : 1;
-    // Wings droop behind the point (single-layer only — stacked Vs need the
-    // vertical room for their layers). Without it a side-on wedge is a flat
-    // washing-line of fish at one height; with it the V reads in 3D.
-    const droop = layers === 1 ? rank * FISH_LENGTH * 0.24 : 0;
+    // Wings droop behind the point at EVERY layer count — a QA pass showed
+    // stacked Vs reading as two unrelated flat rows without it. The droop is
+    // CENTRED on the mean rank so it never grows the vertical extent: the
+    // point rides high, the wings low, the average unmoved. Same offset at
+    // the same rank in every layer, so inter-layer spacing is untouched.
+    const droop = (rank - 2) * FISH_LENGTH * (layers === 1 ? 0.24 : 0.12);
+    // Multi-layer pitch drops to 1.2 body lengths (same-rank vertical gap
+    // 21.6 minus worst-case jitter closure still clears one body length) so
+    // three stacked Vs plus droop fit the water column.
+    const pitch = layers === 1 ? 1.5 : 1.2;
+    const jit = layers === 1 ? 0.2 : 0.15;
     return {
       side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
-      // 1.5 body lengths per layer with a small jitter: adjacent layers seat
-      // the same rank directly above each other, so pitch minus worst-case
-      // jitter closure must clear one body length.
-      up: (layer - (layers - 1) / 2) * FISH_LENGTH * 1.5
-        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.2 * j - droop,
+      up: (layer - (layers - 1) / 2) * FISH_LENGTH * pitch
+        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * jit * j - droop,
       back: (rank - 2) * FISH_LENGTH * 1.35,
     };
   }
