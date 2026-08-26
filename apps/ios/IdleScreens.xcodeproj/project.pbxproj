@@ -56,6 +56,7 @@
 		7A47F321D6901C9BC1260706 /* AppState+Pair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 193F27EA5CA4F1DF5743170E /* AppState+Pair.swift */; };
 		7B69F636BC80E106DFB08467 /* ClassicSaverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */; };
 		7C0F2B7CD88A66A026151AC6 /* ChannelPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D31BF09CB14E15E96FF8AF3 /* ChannelPager.swift */; };
+		7E0812589AAE254D67248DF4 /* AquariumFieldTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C8CF7BAE45EAB80E2DAE2F /* AquariumFieldTests.swift */; };
 		7EEF7298E422281920E9E145 /* ComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7837B2C4483DFA183A8676 /* ComposerSheet.swift */; };
 		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
 		824BB1E0792FC2EF21044663 /* IdleScreensTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */; };
@@ -63,6 +64,7 @@
 		88B2B6D27BAB0AD99141A1FF /* ChannelViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 587CE90600E8DD15D12B773C /* ChannelViewerView.swift */; };
 		89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB1826693F09BA9A26F848A /* AppState+VJ.swift */; };
 		8A3354029A46651E796874CB /* RenderBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2226F884FD690065486D008D /* RenderBudgetTests.swift */; };
+		8B45A16FDC0B0827927E9D01 /* AquariumField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E10925C4120BAB0BA07888 /* AquariumField.swift */; };
 		8C79AFFEA230CACF8155DA4D /* ChannelHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC039696D750E04AA5F7FDC7 /* ChannelHistory.swift */; };
 		8CD27D5B46DC98A5A22B9303 /* SequenceSubsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84E690026189020F4B72497F /* SequenceSubsetTests.swift */; };
 		8D299D989B033D3506072932 /* ChannelHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC039696D750E04AA5F7FDC7 /* ChannelHistory.swift */; };
@@ -98,6 +100,7 @@
 		D6191C6E8FB10818A14C2C3B /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
 		D6F231D14703E2A6127A2CD7 /* TVAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C853969A894483598A446E19 /* TVAppState.swift */; };
 		DAF53EE2FBE295964F3FD6C7 /* ChannelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAB9A024E1DD1E74FF1607B8 /* ChannelSession.swift */; };
+		DCD1BEC449A2A8D13CB856CC /* AquariumField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E10925C4120BAB0BA07888 /* AquariumField.swift */; };
 		DF8A7035A12B4E95BFF21BD8 /* PreviewBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EA16DECCBE319A1BBDEC0E /* PreviewBudget.swift */; };
 		E0B44B30A86B89BAE7187B4B /* PairClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9290BC579DBCC0BF2ED620D /* PairClient.swift */; };
 		E15E2D79437A5F96E7A145B0 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
@@ -189,6 +192,7 @@
 		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
 		4D31BF09CB14E15E96FF8AF3 /* ChannelPager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPager.swift; sourceTree = "<group>"; };
 		509A862BA7882BBAF02B5774 /* FallbackSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackSceneView.swift; sourceTree = "<group>"; };
+		54E10925C4120BAB0BA07888 /* AquariumField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AquariumField.swift; sourceTree = "<group>"; };
 		5828A2F4795C7D4E960B4563 /* SequenceSubset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SequenceSubset.swift; sourceTree = "<group>"; };
 		587CE90600E8DD15D12B773C /* ChannelViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelViewerView.swift; sourceTree = "<group>"; };
 		5A1A9CB25DCED3A1D90BE51F /* TokenHandoffSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenHandoffSheet.swift; sourceTree = "<group>"; };
@@ -244,6 +248,7 @@
 		D440AF4157E3C3F831612A2E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D9A29F0D73C5256B5C84FF0C /* ChannelGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelGridView.swift; sourceTree = "<group>"; };
 		DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryShelfTests.swift; sourceTree = "<group>"; };
+		E5C8CF7BAE45EAB80E2DAE2F /* AquariumFieldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AquariumFieldTests.swift; sourceTree = "<group>"; };
 		EA0BCADF9C61254DBB05CA24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroChannelCard.swift; sourceTree = "<group>"; };
 		F6339510B5B7C996B622F160 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -257,6 +262,7 @@
 		0BA9639EEE63D5270E4D5873 /* Render */ = {
 			isa = PBXGroup;
 			children = (
+				54E10925C4120BAB0BA07888 /* AquariumField.swift */,
 				B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */,
 				7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */,
 				509A862BA7882BBAF02B5774 /* FallbackSceneView.swift */,
@@ -344,6 +350,7 @@
 		720F70AA42835AAAB3ADCB77 /* IdleScreensTVTests */ = {
 			isa = PBXGroup;
 			children = (
+				E5C8CF7BAE45EAB80E2DAE2F /* AquariumFieldTests.swift */,
 				414EED19151EF752ABADB644 /* CapabilityTierTests.swift */,
 				DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */,
 				1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */,
@@ -629,6 +636,7 @@
 				7A47F321D6901C9BC1260706 /* AppState+Pair.swift in Sources */,
 				89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */,
 				A35D22B41699F53D6F62A43B /* AppState.swift in Sources */,
+				DCD1BEC449A2A8D13CB856CC /* AquariumField.swift in Sources */,
 				14EBCFE042D04972421EAF69 /* CapabilityTier.swift in Sources */,
 				E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */,
 				99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */,
@@ -678,6 +686,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8B45A16FDC0B0827927E9D01 /* AquariumField.swift in Sources */,
 				BBBD4937EAC130CDC9A4E739 /* CapabilityTier.swift in Sources */,
 				1AC66F3C1B9943FD6A3B0873 /* ChannelCredential.swift in Sources */,
 				187089A01CE17AF038149D95 /* ChannelGridView.swift in Sources */,
@@ -721,6 +730,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7E0812589AAE254D67248DF4 /* AquariumFieldTests.swift in Sources */,
 				C4184B1F397DC4CD4B42440F /* CapabilityTierTests.swift in Sources */,
 				638257243A24B750EBBCB208 /* CategoryShelfTests.swift in Sources */,
 				6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */,
