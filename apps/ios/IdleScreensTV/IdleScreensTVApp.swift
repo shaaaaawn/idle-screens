@@ -91,24 +91,43 @@ enum DeepLink {
     }
 }
 
-/// Debug-only isolated poster tile (`-poster <channelId>`).
+/// Debug-only card gallery (`-poster <channelId>`): the real `ChannelCard`,
+/// one focused and one not, so a design pass can inspect the poster, the
+/// caption ramp and the focus treatment without walking the remote there.
 private struct PosterDebugView: View {
     let channelId: String
     @Environment(TVAppState.self) private var app
+    @FocusState private var focused: String?
 
     var body: some View {
         ZStack {
             Color.appBackground.ignoresSafeArea()
-            if let channel = app.channels.first(where: { $0.id == channelId }),
-               let spec = channel.spec {
-                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
-                    .frame(width: 960, height: 540)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            } else {
+            if app.channels.isEmpty {
                 ProgressView()
+            } else {
+                HStack(alignment: .top, spacing: TV.columnGap) {
+                    ForEach(cards) { channel in
+                        ChannelCard(channel: channel, focusBinding: $focused)
+                            .frame(width: 500)
+                    }
+                }
+                .padding(TV.gutter)
             }
         }
-        .task { if app.channels.isEmpty { await app.loadGallery() } }
+        .task {
+            if app.channels.isEmpty { await app.loadGallery() }
+            // Park focus on the first card so focused and unfocused
+            // captions are both on screen in one capture.
+            focused = cards.first?.id
+        }
+    }
+
+    /// The requested channel first, then whatever follows it in the gallery.
+    private var cards: [PublicChannel] {
+        guard let i = app.channels.firstIndex(where: { $0.id == channelId }) else {
+            return Array(app.channels.prefix(3))
+        }
+        return Array(app.channels[i...].prefix(3))
     }
 }
 
@@ -155,7 +174,7 @@ private struct BootSplashView: View {
                     .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true),
                                value: glow)
                 Text("idle screens")
-                    .font(.system(size: 64, weight: .bold))
+                    .font(.tvDisplay)
                     .foregroundStyle(Color.textPrimary)
             }
         }

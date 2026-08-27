@@ -26,11 +26,11 @@ struct PairView: View {
                 VStack(alignment: .leading, spacing: 36) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("PAIR YOUR IPHONE")
-                            .font(.system(size: 24, weight: .semibold))
+                            .font(.tvKicker)
                             .kerning(2.2)
                             .foregroundStyle(Color.appAccent)
                         Text("Steer this TV\nfrom your phone")
-                            .font(.system(size: 58, weight: .bold))
+                            .font(.tvScreenTitle)
                             .foregroundStyle(.white)
                     }
 
@@ -41,8 +41,8 @@ struct PairView: View {
                     }
 
                     Text("Pairing lets your phone switch channels and VJ scenes on this TV. The code works once.")
-                        .font(.system(size: 25))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.tvBody)
+                        .foregroundStyle(.white.opacity(0.55))
                         .frame(maxWidth: 620, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -128,12 +128,12 @@ private struct PairStep: View {
     var body: some View {
         HStack(spacing: 18) {
             Text("\(number)")
-                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(.black)
                 .frame(width: 44, height: 44)
                 .background(Circle().fill(Color.appAccent))
             Text(text)
-                .font(.system(size: 29))
+                .font(.tvBody)
                 .foregroundStyle(.white.opacity(0.85))
         }
     }
@@ -147,7 +147,7 @@ private struct CodeTiles: View {
         HStack(spacing: 14) {
             ForEach(Array(code.enumerated()), id: \.offset) { _, char in
                 Text(String(char))
-                    .font(.system(size: 52, weight: .bold, design: .monospaced))
+                    .font(.system(.title2, design: .monospaced, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 72, height: 92)
                     .background(
@@ -173,12 +173,12 @@ private struct ExpiryCountdown: View {
             let remaining = Double(expiresAt) / 1000 - context.date.timeIntervalSince1970
             if remaining > 0 {
                 Text("new code in \(Int(remaining) / 60):\(String(format: "%02d", Int(remaining) % 60))")
-                    .font(.system(size: 25))
+                    .font(.tvMeta)
                     .foregroundStyle(.white.opacity(0.45))
                     .monospacedDigit()
             } else {
                 Text("refreshing code…")
-                    .font(.system(size: 25))
+                    .font(.tvMeta)
                     .foregroundStyle(.white.opacity(0.45))
                     .onAppear {
                         guard !fired else { return }
@@ -204,20 +204,15 @@ private struct PairedCard: View {
                 .scaleEffect(appeared ? 1 : 0.6)
                 .animation(.spring(duration: 0.5, bounce: 0.4), value: appeared)
             Text("Paired")
-                .font(.system(size: 44, weight: .bold))
+                .font(.tvScreenTitle)
                 .foregroundStyle(.white)
             Text("Your iPhone has the wheel —\nswitch channels and VJ from the couch.")
-                .font(.system(size: 25))
+                .font(.tvBody)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
         .frame(width: 496, height: 400)
-        .background(
-            RoundedRectangle(cornerRadius: 28)
-                .fill(.white.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 28)
-                    .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1))
-        )
+        .glassBadge(tint: Color.appAccent, shape: RoundedRectangle(cornerRadius: TV.panelRadius))
         .onAppear { appeared = true }
         .transition(.opacity)
     }
@@ -240,22 +235,17 @@ private struct StatusCard: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
             Text(title)
-                .font(.system(size: 31, weight: .semibold))
+                .font(.tvShelfTitle)
                 .foregroundStyle(.white)
             if let detail {
                 Text(detail)
-                    .font(.system(size: 23))
+                    .font(.tvMeta)
                     .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
             }
         }
         .frame(width: 496, height: 400)
-        .background(
-            RoundedRectangle(cornerRadius: 28)
-                .fill(.white.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 28)
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 1))
-        )
+        .glassPanel(shape: RoundedRectangle(cornerRadius: TV.panelRadius))
     }
 }

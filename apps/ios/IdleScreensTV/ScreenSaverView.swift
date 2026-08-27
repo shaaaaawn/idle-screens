@@ -20,11 +20,11 @@ struct ScreenSaverView: View {
                     Color.black.ignoresSafeArea()
                     VStack(spacing: 16) {
                         Image(systemName: "moon.zzz")
-                            .font(.system(size: 40))
+                            .font(.system(.title2))
+                            .foregroundStyle(Color.textSecondary.opacity(0.55))
+                        Text("This channel is sleeping")
+                            .font(.tvBody)
                             .foregroundStyle(Color.textSecondary.opacity(0.5))
-                        Text("channel is sleeping")
-                            .font(.system(size: 26))
-                            .foregroundStyle(Color.textSecondary.opacity(0.4))
                     }
                 }
             } else if app.isClassicSpec {
@@ -91,7 +91,7 @@ struct ScreenSaverView: View {
 
             if let overlay = app.overlayText {
                 Text(overlay)
-                    .font(.system(size: 72, weight: .semibold))
+                    .font(.system(.largeTitle, weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.8), radius: 16)
                     .padding(48)
@@ -124,35 +124,34 @@ struct ScreenSaverView: View {
     private var channelChrome: some View {
         VStack {
             Spacer()
-            HStack(alignment: .lastTextBaseline) {
-                VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 32) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(channelLabel)
-                        .font(.system(size: 44, weight: .semibold))
+                        .font(.tvScreenTitle)
                         .foregroundStyle(.white)
+                        .lineLimit(1)
                     if let viewers = app.viewers, viewers > 0 {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             Circle().fill(Color.appAccent).frame(width: 10, height: 10)
                             Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
                         }
-                        .font(.system(size: 25))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.tvMeta)
+                        .foregroundStyle(.white.opacity(0.75))
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 Label("Press Back to browse", systemImage: "chevron.backward")
-                    .font(.system(size: 25))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(.tvMeta)
+                    .foregroundStyle(.white.opacity(0.75))
             }
-            .padding(.horizontal, 90)
-            .padding(.bottom, 60)
-            .background(
-                LinearGradient(colors: [.clear, .black.opacity(0.7)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 280),
-                alignment: .bottom
-            )
+            .padding(.horizontal, 40)
+            .padding(.vertical, 28)
+            // Glass reads the artwork moving underneath it instead of
+            // stamping a black gradient over the thing you came to watch.
+            .glassPanel(shape: RoundedRectangle(cornerRadius: TV.panelRadius))
+            .padding(.horizontal, TV.gutter)
+            .padding(.bottom, TV.gutter)
         }
-        .ignoresSafeArea()
     }
 
     private var channelLabel: String {
@@ -185,11 +184,11 @@ private struct NotBroadcastingView: View {
                 .ignoresSafeArea()
             VStack(spacing: 18) {
                 Text(label)
-                    .font(.system(size: 54, weight: .semibold))
+                    .font(.tvScreenTitle)
                     .foregroundStyle(.white)
                 Text("This channel isn't broadcasting visuals right now")
-                    .font(.system(size: 27))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(.tvBody)
+                    .foregroundStyle(.white.opacity(0.65))
             }
             .shadow(color: .black.opacity(0.6), radius: 20)
         }

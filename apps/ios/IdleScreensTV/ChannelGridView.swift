@@ -6,7 +6,7 @@ struct ChannelGridView: View {
     @Environment(TVAppState.self) private var app
     @FocusState private var focusedChannelId: String?
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: TV.columnGap), count: 3)
 
     private var featured: [PublicChannel] {
         app.channels.filter { $0.tags?.contains("featured") == true }
@@ -87,23 +87,23 @@ struct ChannelGridView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("idle screens")
-                            .font(.system(size: 56, weight: .bold))
+                            .font(.tvDisplay)
                             .foregroundStyle(Color.textPrimary)
                         Text("ambient channels · \(app.channels.count) live")
-                            .font(.callout)
+                            .font(.tvSubtitle)
                             .foregroundStyle(Color.textSecondary)
                     }
                     Spacer()
                     // Settings lives in the top tab bar — no header chrome,
                     // so the grid is the only focus surface on this screen.
                 }
-                .padding(.horizontal, 80)
-                .padding(.top, 40)
-                .padding(.bottom, 40)
+                .padding(.horizontal, TV.gutter)
+                .padding(.top, TV.headerTop)
+                .padding(.bottom, TV.sectionGap / 2)
 
                 GeometryReader { geo in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 64) {
+                        VStack(alignment: .leading, spacing: TV.sectionGap) {
                             if app.channels.isEmpty, !app.isLoadingGallery {
                                 ContentUnavailableView(
                                     "No channels",
@@ -125,7 +125,7 @@ struct ChannelGridView: View {
                                 }
 
                                 if !featuredRail.isEmpty {
-                                    ChannelSection(title: "featured") {
+                                    ChannelSection(title: "Featured") {
                                         CardGrid(channels: featuredRail, columns: columns, focusBinding: $focusedChannelId)
                                     }
                                 }
@@ -133,21 +133,25 @@ struct ChannelGridView: View {
                                 ForEach(shelves, id: \.category.id) { shelf in
                                     ChannelSection(title: shelf.category.displayTitle,
                                                    subtitle: shelf.category.subtitle) {
-                                        CardGrid(channels: shelf.channels, columns: columns, focusBinding: $focusedChannelId)
+                                        CardGrid(channels: shelf.channels, columns: columns,
+                                                 focusBinding: $focusedChannelId,
+                                                 showsKicker: false)
                                     }
                                 }
 
                                 if !rest.isEmpty {
-                                    ChannelSection(title: shelves.isEmpty ? "channels" : "more channels") {
+                                    ChannelSection(title: shelves.isEmpty ? "Channels" : "More channels") {
                                         CardGrid(channels: rest, columns: columns, focusBinding: $focusedChannelId)
                                     }
                                 }
                             }
 
                         }
-                        .padding(.horizontal, 80)
-                        .padding(.bottom, 80)
+                        .padding(.horizontal, TV.gutter)
+                        .padding(.bottom, TV.gutter)
                     }
+                    .modifier(DefaultChannelFocus(id: hero?.id ?? featuredRail.first?.id,
+                                                  binding: $focusedChannelId))
                 }
             }
             .background(focusBackdrop)
@@ -176,14 +180,14 @@ private struct ChannelSection<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: TV.headerGap) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(Color.textPrimary.opacity(0.92))
+                    .font(.tvShelfTitle)
+                    .foregroundStyle(Color.textPrimary)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 24))
+                        .font(.tvSubtitle)
                         .foregroundStyle(Color.textSecondary)
                 }
             }
@@ -192,23 +196,37 @@ private struct ChannelSection<Content: View>: View {
     }
 }
 
+/// `defaultFocus` takes a non-optional value, but the hero only exists once
+/// channels load — so apply it when there is something to focus and leave the
+/// view untouched until then.
+private struct DefaultChannelFocus: ViewModifier {
+    let id: String?
+    var binding: FocusState<String?>.Binding
+
+    func body(content: Content) -> some View {
+        if let id {
+            content.defaultFocus(binding, id)
+        } else {
+            content
+        }
+    }
+}
+
 private struct CardGrid: View {
-    @Environment(TVAppState.self) private var app
     let channels: [PublicChannel]
     let columns: [GridItem]
     /// Reported upward so the focused card can drive the grid's billboard.
     var focusBinding: FocusState<String?>.Binding
+    /// False inside a category shelf: the header already names the category,
+    /// so a per-card kicker just prints it twelve more times.
+    var showsKicker: Bool = true
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 48) {
+        LazyVGrid(columns: columns, spacing: TV.rowGap) {
             ForEach(channels) { channel in
-                Button {
-                    app.selectChannel(channel.id)
-                } label: {
-                    ChannelCard(channel: channel)
-                }
-                .buttonStyle(.card)
-                .focused(focusBinding, equals: channel.id)
+                ChannelCard(channel: channel,
+                            focusBinding: focusBinding,
+                            showsKicker: showsKicker)
             }
         }
     }
@@ -216,75 +234,141 @@ private struct CardGrid: View {
 
 // MARK: - Card
 
-private struct ChannelCard: View {
+/// A poster button with its caption BELOW it, deliberately outside the
+/// button. `.card` paints its own chrome behind whatever it wraps, so a
+/// label containing the text drew a slab of it across the poster's bottom
+/// edge — the single worst artifact on the grid. Keeping the button to the
+/// artwork also means focus lifts the poster alone, which is the Apple TV
+/// lockup: image moves, text stays put.
+struct ChannelCard: View {
+    @Environment(TVAppState.self) private var app
+    let channel: PublicChannel
+    var focusBinding: FocusState<String?>.Binding
+    var showsKicker: Bool = true
+
+    private var isFocused: Bool { focusBinding.wrappedValue == channel.id }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TV.captionGap) {
+            Button {
+                app.selectChannel(channel.id)
+            } label: {
+                ChannelPoster(channel: channel)
+            }
+            .buttonStyle(.card)
+            .focused(focusBinding, equals: channel.id)
+            .accessibilityLabel(accessibilityLabel)
+
+            caption
+        }
+    }
+
+    /// Title block. The focused card's caption comes up to full strength and
+    /// the rest sit back — the row reads as one selection, not twelve equal
+    /// labels competing at 10 feet.
+    private var caption: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let kicker {
+                Text(kicker)
+                    .font(.tvKicker)
+                    .kerning(1.6)
+                    .foregroundStyle(Color.textSecondary)
+                    .lineLimit(1)
+            }
+            Text(channel.displayLabel)
+                .font(.tvCardTitle)
+                .foregroundStyle(Color.textPrimary.opacity(isFocused ? 1 : 0.72))
+                .lineLimit(1)
+            status
+        }
+        .animation(TV.focusAnimation, value: isFocused)
+        // The caption belongs to the poster above it; VoiceOver reads the
+        // button's label instead of these three fragments.
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var status: some View {
+        if channel.sleeping ?? false {
+            Label("sleeping", systemImage: "moon.zzz.fill")
+                .font(.tvMeta)
+                .foregroundStyle(Color.textSecondary.opacity(0.8))
+        } else if let viewers = channel.viewers, viewers > 0 {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.appAccent)
+                    .frame(width: 10, height: 10)
+                Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
+            }
+            .font(.tvMeta)
+            .foregroundStyle(Color.textSecondary)
+        } else {
+            // Hold the line's height so titles across a row stay aligned
+            // whether or not anyone is watching.
+            Text(" ").font(.tvMeta)
+        }
+    }
+
+    private var kicker: String? {
+        guard showsKicker,
+              let tags = channel.tags?.filter({ $0 != "featured" }), !tags.isEmpty else { return nil }
+        return tags.prefix(2).joined(separator: " · ").uppercased()
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [channel.displayLabel]
+        if channel.sleeping ?? false {
+            parts.append("sleeping")
+        } else if let viewers = channel.viewers, viewers > 0 {
+            parts.append(viewers == 1 ? "1 watching" : "\(viewers) watching")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The artwork alone — everything the focus engine lifts, and nothing else.
+struct ChannelPoster: View {
     @Environment(TVAppState.self) private var app
     let channel: PublicChannel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Fixed 16:9 poster. Priority: live native scene (the product
-            // promise; canvas-capable t3 hardware only, rendered on a virtual
-            // 1080p canvas so it's an exact miniature of fullscreen) → web
-            // thumb → deterministic generative art.
-            Group {
-                if let spec = channel.spec,
-                   app.effectiveTier == .t3 || app.effectiveTier == .t2 {
-                    ScenePreviewView(spec: spec, fallbackSeed: channel.id, live: false)
-                        // Belt-and-suspenders: if the preview's canvas layer
-                        // ever drops out (system layer eviction renders it
-                        // transparent), designed art shows — never a black tile.
-                        .background(ProceduralChannelArt(channelId: channel.id))
-                        .opacity((channel.sleeping ?? false) ? 0.35 : 1)
-                } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId),
-                          let tier = app.classicRenderTier {
-                    // Classic savers have no schema spec — poster them from
-                    // the native port (one static frame, same seed as the
-                    // fullscreen view) rather than the server thumb, which
-                    // for these channels is usually black.
-                    ClassicSaverView(kind: kind,
-                                     seed: ClassicSaverKind.seed(forChannel: channel.id),
-                                     tier: tier,
-                                     live: false)
-                        .opacity((channel.sleeping ?? false) ? 0.35 : 1)
-                } else {
-                    ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
-                        ProceduralChannelArt(channelId: channel.id)
-                    }
+        ZStack {
+            // Priority: live native scene (the product promise; rendered on a
+            // virtual 1080p canvas so it's an exact miniature of fullscreen)
+            // → native classic port → web thumb → deterministic art.
+            if let spec = channel.spec,
+               app.effectiveTier == .t3 || app.effectiveTier == .t2 {
+                ScenePreviewView(spec: spec, fallbackSeed: channel.id, live: false)
+                    // Belt-and-suspenders: if the preview's canvas layer ever
+                    // drops out (system layer eviction renders it
+                    // transparent), designed art shows — never a black tile.
+                    .background(ProceduralChannelArt(channelId: channel.id))
+            } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId),
+                      let tier = app.classicRenderTier {
+                // Classic savers have no schema spec — poster them from the
+                // native port (one static frame, same seed as the fullscreen
+                // view) rather than the server thumb, which is usually black.
+                ClassicSaverView(kind: kind,
+                                 seed: ClassicSaverKind.seed(forChannel: channel.id),
+                                 tier: tier,
+                                 live: false)
+            } else {
+                ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
+                    ProceduralChannelArt(channelId: channel.id)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 16))
 
-            VStack(alignment: .leading, spacing: 5) {
-                // Editorial kicker — category in caps above the title,
-                // the Apple TV+ lockup grammar.
-                if let tags = channel.tags?.filter({ $0 != "featured" }), !tags.isEmpty {
-                    Text(tags.prefix(2).joined(separator: " · ").uppercased())
-                        .font(.system(size: 20, weight: .semibold))
-                        .kerning(1.8)
-                        .foregroundStyle(Color.textTertiary)
-                        .lineLimit(1)
-                }
-                Text(channel.displayLabel)
-                    .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(1)
-                HStack(spacing: 10) {
-                    if channel.sleeping ?? false {
-                        Label("sleeping", systemImage: "moon.zzz.fill")
-                            .foregroundStyle(Color.textTertiary)
-                    } else if let viewers = channel.viewers, viewers > 0 {
-                        HStack(spacing: 8) {
-                            Circle().fill(Color.appAccent).frame(width: 9, height: 9)
-                            Text(viewers == 1 ? "1 watching" : "\(viewers) watching")
-                        }
-                        .foregroundStyle(Color.textSecondary)
-                    }
-                }
-                .font(.system(size: 23))
+            if channel.sleeping ?? false {
+                // Sleeping is a state worth seeing at a glance, so say it on
+                // the artwork rather than only in the caption below.
+                Color.black.opacity(0.55)
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(.title3))
+                    .foregroundStyle(.white.opacity(0.85))
             }
         }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: TV.cardRadius))
     }
 }
