@@ -498,12 +498,49 @@ export class IdleScreenElement extends HostBase {
 
     let disposed = false;
 
+    // Capture round-trips are correlated by id: nothing stops a second call
+    // before the first answers, and an uncorrelated FIFO would hand caller A
+    // caller B's frame. Answers ride the same message listener the proxy
+    // installs below; a 2s timeout keeps a dead worker from parking a caller
+    // forever (resolving null matches the contract: "nothing to show yet").
+    let captureSeq = 0;
+    const pendingCaptures = new Map<number, (bitmap: ImageBitmap | null) => void>();
+    const onCaptured = (e: MessageEvent<WorkerOutbound>): void => {
+      if (e.data.type !== 'captured') return;
+      const settle = pendingCaptures.get(e.data.id);
+      if (settle) {
+        pendingCaptures.delete(e.data.id);
+        settle(e.data.bitmap);
+      }
+    };
+    worker.addEventListener('message', onCaptured);
+
     const proxy: SaverInstance = {
       setPaused: (p) => worker.postMessage({ type: 'pause', paused: p } satisfies WorkerInbound),
       resize: (w, h, newDpr) => worker.postMessage({ type: 'resize', width: w, height: h, dpr: newDpr ?? dpr } satisfies WorkerInbound),
       applyTrack: (track) => worker.postMessage({ type: 'track', track } satisfies WorkerInbound),
+      capture: () =>
+        new Promise<ImageBitmap | null>((resolve) => {
+          if (disposed) {
+            resolve(null);
+            return;
+          }
+          const id = ++captureSeq;
+          const timer = setTimeout(() => {
+            pendingCaptures.delete(id);
+            resolve(null);
+          }, 2000);
+          pendingCaptures.set(id, (bitmap) => {
+            clearTimeout(timer);
+            resolve(bitmap);
+          });
+          worker.postMessage({ type: 'capture', id } satisfies WorkerInbound);
+        }),
       dispose: () => {
         disposed = true;
+        worker.removeEventListener('message', onCaptured);
+        for (const settle of pendingCaptures.values()) settle(null);
+        pendingCaptures.clear();
         this.cleanupWorkerHandlers?.();
         this.cleanupWorkerHandlers = null;
         worker.postMessage({ type: 'dispose' } satisfies WorkerInbound);
