@@ -1477,6 +1477,25 @@ class TankInstance implements SaverInstance {
     this.renderScene();
   }
 
+  /**
+   * Snapshot the current frame (SaverInstance.capture). Renders fresh and
+   * reads in the SAME task: a WebGL buffer without preserveDrawingBuffer is
+   * cleared once the frame is presented, so any read from outside the render
+   * tick sees black — which also makes this work in a hidden tab, where rAF
+   * never fires and there is no render tick to race at all.
+   */
+  async capture(): Promise<ImageBitmap | null> {
+    if (this.disposed || this.renderer.getContext()?.isContextLost?.()) return null;
+    this.renderStill();
+    try {
+      // createImageBitmap snapshots the source at CALL time; the await only
+      // covers the decode. Called here, pre-present, the buffer is intact.
+      return await createImageBitmap(this.canvas);
+    } catch {
+      return null;
+    }
+  }
+
   composition(): SaverLayer[] {
     return [
       {
