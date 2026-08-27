@@ -47,20 +47,47 @@ describe('DEFAULT_FISH', () => {
 });
 
 describe('parseFishMix', () => {
-  it('parses ids, breed aliases, and counts', () => {
+  it('parses ids, breed aliases, and counts — counts cast DISTINCT fish', () => {
+    // The uniqueness rule: a minted fish is an individual. `257:2` is two
+    // different angelfish (257 and its nearest unused neighbour), silently.
     const r = parseFishMix('257:2, betafish, seaturtle:1');
     expect(r.problems).toEqual([]);
-    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[257, 2], [100, 1], [497, 1]]);
+    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[257, 1], [258, 1], [1, 1], [497, 1]]);
     expect(r.entries[0]!.url).toContain('fish_257');
+  });
+
+  it('no minted fish appears twice, whatever the author writes', () => {
+    for (const mix of ['257,257', '257:3,258:3', 'angelfish:8,300:4', 'seaturtle:16,497:4']) {
+      const ids = parseFishMix(mix).entries.map((e) => e.id);
+      expect(new Set(ids).size, mix).toBe(ids.length);
+    }
+  });
+
+  it('a named id already cast gets a swims-instead advisory; school extras do not', () => {
+    const dup = parseFishMix('257,257');
+    expect(dup.entries.map((e) => e.id)).toEqual([257, 258]);
+    expect(dup.problems).toEqual(['fish 257 already cast — fish 258 swims instead']);
+    const school = parseFishMix('300:6');
+    expect(school.entries).toHaveLength(6);
+    expect(school.problems).toEqual([]); // reassignment IS the count's meaning
+  });
+
+  it('breed exhaustion clamps with a problem instead of duplicating', () => {
+    // Sea turtles are 497-512: sixteen individuals exist, so a 16 + 4 ask
+    // runs dry at 16 total.
+    const r = parseFishMix('seaturtle:16, 497:4');
+    expect(r.entries).toHaveLength(16);
+    expect(r.problems.some((p) => p.includes('distinct seaturtle left'))).toBe(true);
   });
   it('degrades on bad tokens instead of failing the mix', () => {
     const r = parseFishMix('257:2, nope:1, 100:0, 258:x, 259:1:9');
-    expect(r.entries.map((e) => e.id)).toEqual([257]);
+    expect(r.entries.map((e) => e.id)).toEqual([257, 258]);
     expect(r.problems).toHaveLength(4);
   });
   it('clamps oversized counts to 24 instead of dropping the token', () => {
     const r = parseFishMix('seahorse:30');
-    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[457, 24]]);
+    expect(r.entries).toHaveLength(24);
+    expect(new Set(r.entries.map((e) => e.id)).size).toBe(24); // 24 distinct seahorses
     expect(r.problems).toEqual(['"seahorse:30": count clamped to 24']);
   });
   it('empty string parses to an empty mix', () => {
@@ -80,8 +107,9 @@ describe('parseFishMix', () => {
 
 describe('expandFishMix', () => {
   it('expands in DSL order and clamps to the cap', () => {
+    // Distinct ids now, still DSL-ordered; the cap trims the tail.
     const { entries } = parseFishMix('257:2,100:2');
-    expect(expandFishMix(entries, 3).map((u) => /fish_(\d+)/.exec(u)![1])).toEqual(['257', '257', '100']);
+    expect(expandFishMix(entries, 3).map((u) => /fish_(\d+)/.exec(u)![1])).toEqual(['257', '258', '100']);
   });
 });
 

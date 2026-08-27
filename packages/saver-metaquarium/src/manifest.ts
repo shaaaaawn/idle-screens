@@ -32,7 +32,10 @@ export const METAQUARIUM_PARAMS = {
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
   /** Mixed population DSL: comma-separated `id[:count]` of a minted token id
    *  (1-512, default catalog) or breed name — e.g. "257:3,100:2,seaturtle:1".
-   *  A custom catalog is a closed world (no farm/IPFS fallback). Counts are
+   *  A minted fish is an INDIVIDUAL: no id appears twice in a scene, and a
+   *  count casts that many DISTINCT fish of the breed ("300:12" is twelve
+   *  different angelfish). A custom catalog is a closed world (no farm/IPFS
+   *  fallback, no uniqueness — NPC entries are species). Counts are
    *  absolute; the expanded total clamps to the device tier's fish cap.
    *  Non-empty mix OVERRIDES fishUrl and fishCount; empty string = single-
    *  breed mode. Unknown ids/bad counts degrade (good tokens still parse);

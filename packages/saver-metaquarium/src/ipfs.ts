@@ -63,6 +63,7 @@ export const NPC_CATALOG: FishEntry[] = [
 ];
 
 import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
+import type { Breed } from './farm';
 
 export interface FishMixEntry {
   id: number;
@@ -93,12 +94,38 @@ export interface FishMixResult {
  * bad tokens land in `problems` and good ones still parse, so one typo
  * degrades a mix instead of blanking the tank.
  */
+/**
+ * THE UNIQUENESS RULE (default catalog only): a minted fish is an INDIVIDUAL,
+ * so no token id appears twice in one scene. Counts still mean "how many
+ * fish" — `300:12` casts twelve DISTINCT angelfish (300 and its nearest
+ * unused neighbours in the breed range), and `betafish:5` five distinct
+ * betafish spread across the range. Reassignments are recorded in `problems`
+ * so publish advisories can say what happened; a breed with no ids left
+ * clamps with a problem. Custom catalogs are exempt — a closed world is its
+ * curator's business, and NPC entries are SPECIES, not individuals.
+ */
 export function parseFishMix(
   mix: string,
   catalog: FishEntry[] = FISH_CATALOG,
 ): FishMixResult {
   const entries: FishMixEntry[] = [];
   const problems: string[] = [];
+  const unique = catalog === FISH_CATALOG;
+  const used = new Set<number>();
+
+  /** Nearest unused minted id of `breed`, spreading outward from `want`. */
+  const allocate = (breed: Breed, want: number): number | null => {
+    const b = BREEDS.find((x) => x.breed === breed);
+    if (!b?.range) return null;
+    const [lo, hi] = b.range;
+    if (!used.has(want) && want >= lo && want <= hi) { used.add(want); return want; }
+    for (let d = 1; d <= hi - lo; d += 1) {
+      for (const cand of [want + d, want - d]) {
+        if (cand >= lo && cand <= hi && !used.has(cand)) { used.add(cand); return cand; }
+      }
+    }
+    return null;
+  };
   for (const rawToken of mix.split(',')) {
     const token = rawToken.trim();
     if (token === '') continue;
@@ -158,7 +185,43 @@ export function parseFishMix(
         count = n;
       }
     }
-    entries.push({ id: fish.id, url, count });
+    // Minted individuals are unique per scene; everything else (custom
+    // catalogs, NPC species) keeps plain count semantics.
+    if (!unique || fish.id > TOTAL_SUPPLY) {
+      entries.push({ id: fish.id, url, count });
+      continue;
+    }
+    const breed = breedOf(fish.id);
+    if (!breed) {
+      entries.push({ id: fish.id, url, count });
+      continue;
+    }
+    // Breed aliases spread across the whole range for variety; numeric ids
+    // start the spread at the id the author asked for.
+    const isAlias = !/^\d+$/.test(key);
+    const b = BREEDS.find((x) => x.breed === breed);
+    for (let i = 0; i < count; i += 1) {
+      const want = isAlias && b?.range
+        ? b.range[0] + Math.floor(((b.range[1] - b.range[0]) * i) / Math.max(1, count))
+        : fish.id;
+      const got = allocate(breed, want);
+      if (got === null) {
+        problems.push(`"${token}": only ${i} distinct ${breed} left — a minted fish appears once per scene`);
+        break;
+      }
+      // Advisory only when the id the author NAMED was already taken by an
+      // earlier token — the extras of an `id:count` school reassign silently,
+      // that being the whole meaning of the count under uniqueness.
+      if (!isAlias && i === 0 && got !== fish.id) {
+        problems.push(`fish ${fish.id} already cast — fish ${got} swims instead`);
+      }
+      const gotUrl = fishAsset(got, '3d');
+      if (!gotUrl) {
+        problems.push(`fish ${got}: no asset URL`);
+        continue;
+      }
+      entries.push({ id: got, url: gotUrl, count: 1 });
+    }
   }
   return { entries, problems };
 }
