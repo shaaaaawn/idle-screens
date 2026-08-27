@@ -34,7 +34,8 @@ struct ScreenSaverView: View {
                 if let kind = ClassicSaverKind.supported(id: app.classicSaverId),
                    app.classicRenderTier != nil {
                     ClassicSaverView(kind: kind, seed: app.classicSeed,
-                                     tier: app.classicRenderTier ?? .t3)
+                                     tier: app.classicRenderTier ?? .t3,
+                                     params: app.classicParams)
                 } else if app.thumbFailed {
                     // Never an error message: a seeded ambient scene we can
                     // always render internally, with an honest caption.
