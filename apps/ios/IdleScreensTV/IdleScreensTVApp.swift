@@ -24,7 +24,14 @@ struct IdleScreensTVApp: App {
                               let kind = ClassicSaverKind.supported(id: ProcessInfo.processInfo.arguments[i + 1]) {
                         // Debug: render a native classic-saver port in isolation
                         // (bisects renderer bugs from channel-routing bugs).
-                        ClassicSaverView(kind: kind, seed: 7)
+                        // -env / -mix exercise the aquarium's interpreters.
+                        ClassicSaverView(kind: kind, seed: 7, params: {
+                            var p: [String: String] = [:]
+                            let args = ProcessInfo.processInfo.arguments
+                            if let e = args.firstIndex(of: "-env"), args.indices.contains(e + 1) { p["environment"] = args[e + 1] }
+                            if let m = args.firstIndex(of: "-mix"), args.indices.contains(m + 1) { p["fishMix"] = args[m + 1] }
+                            return p
+                        }())
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
                         // Debug: render one channel's poster tile in isolation

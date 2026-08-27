@@ -49,6 +49,9 @@ final class TVAppState {
     /// Saver id of a classic (non-schema) spec — e.g. "warp". Drives the
     /// native classic renderer when the saver has a port.
     var classicSaverId: String?
+    /// Steered params from the channel scene's control track (classic scenes
+    /// only) — the native aquarium interprets `environment` and `fishMix`.
+    var classicParams: [String: String] = [:]
     /// Seed for the native classic renderer (channel epoch when present).
     var classicSeed = 0
 
@@ -281,6 +284,10 @@ final class TVAppState {
         case .snapshot(let snapshot):
             sleeping = snapshot.sleeping ?? sleeping
             viewers = snapshot.viewers
+            // The scene object carries the control track; resolvedSpec is the
+            // bare saver ref. Harvest steered params BEFORE routing so a
+            // classic scene's environment/fishMix reach the native renderer.
+            classicParams = Self.trackParams(from: snapshot.scene)
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: snapshot.epoch)
             }
@@ -325,6 +332,28 @@ final class TVAppState {
         } catch {
             pairError = error.localizedDescription
         }
+    }
+
+    /// Flatten a classic scene's track into last-write-wins string params.
+    /// Only t=0 "set" deltas matter here — the TV interprets the scene's
+    /// standing state, not its glide timing.
+    static func trackParams(from scene: JSONValue?) -> [String: String] {
+        guard case .object(let obj)? = scene,
+              case .object(let track)? = obj["track"],
+              case .array(let deltas)? = track["deltas"] else { return [:] }
+        var out: [String: String] = [:]
+        for delta in deltas {
+            guard case .object(let d) = delta,
+                  case .string(let path)? = d["path"] else { continue }
+            switch d["value"] {
+            case .string(let v): out[path] = v
+            case .int(let v): out[path] = String(v)
+            case .double(let v): out[path] = v == v.rounded() ? String(Int(v)) : String(v)
+            case .bool(let v): out[path] = String(v)
+            default: break
+            }
+        }
+        return out
     }
 
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {
