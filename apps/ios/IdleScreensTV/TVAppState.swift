@@ -37,6 +37,13 @@ final class TVAppState {
     // MARK: Channel / scene
 
     var selectedChannelId: String?
+    /// Which surface opened the current channel. Two tabs can each push the
+    /// fullscreen player, so the binding has to name one — without this both
+    /// stacks present the same destination and backing out lands you on a
+    /// screen you never chose.
+    var presentingSurface: ChannelSurface = .grid
+
+    enum ChannelSurface { case grid, search }
     var sleeping = false
     var viewers: Int?
     var overlayText: String?
@@ -202,7 +209,8 @@ final class TVAppState {
 
     // MARK: WS lifecycle
 
-    func selectChannel(_ channelId: String) {
+    func selectChannel(_ channelId: String, from surface: ChannelSurface = .grid) {
+        presentingSurface = surface
         selectedChannelId = channelId
         sleeping = false
         viewers = nil
@@ -315,7 +323,7 @@ final class TVAppState {
             // sends a same-channel ack right after claiming).
             phonePushAt = Date()
             if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
-                selectChannel(channelId)
+                selectChannel(channelId, from: .grid)
             }
         }
     }

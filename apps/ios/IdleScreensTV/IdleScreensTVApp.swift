@@ -16,6 +16,16 @@ struct IdleScreensTVApp: App {
                         PairView()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings") {
                         SettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-search") {
+                        // Debug: the search surface, optionally pre-filled with
+                        // `-q <query>` — screenshotting results otherwise means
+                        // spelling them out on the on-screen keyboard.
+                        SearchView(initialQuery: {
+                            let args = ProcessInfo.processInfo.arguments
+                            guard let i = args.firstIndex(of: "-q"),
+                                  args.indices.contains(i + 1) else { return "" }
+                            return args[i + 1]
+                        }())
                     } else if ProcessInfo.processInfo.arguments.contains("-fallback") {
                         // Debug: the always-renderable ambient stand-in.
                         FallbackSceneView(channelId: "debug-preview")
@@ -145,21 +155,28 @@ private struct MainTabView: View {
     @Environment(TVAppState.self) private var app
     @State private var selection: Tab = .channels
 
-    enum Tab: Hashable { case channels, settings }
+    enum Tab: Hashable { case channels, search, settings }
 
     var body: some View {
         TabView(selection: $selection) {
             ChannelGridView()
                 .tabItem { Label("Channels", systemImage: "tv") }
                 .tag(Tab.channels)
+            SearchView()
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(Tab.search)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
-        // A paired phone can push a channel while Settings is up — jump to
-        // the Channels tab so the saver is actually visible.
+        // A paired phone can push a channel while another tab is up — jump to
+        // the gallery so the saver is actually visible. Only for pushes: a
+        // channel opened from Search stays in Search, or backing out would
+        // land somewhere the viewer never chose.
         .onChange(of: app.selectedChannelId) {
-            if app.selectedChannelId != nil { selection = .channels }
+            if app.selectedChannelId != nil, app.presentingSurface == .grid {
+                selection = .channels
+            }
         }
     }
 }

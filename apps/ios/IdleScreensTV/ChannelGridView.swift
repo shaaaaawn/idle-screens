@@ -1,47 +1,18 @@
 import SwiftUI
 
-/// 10-foot gallery: cinematic hero for the first featured channel,
-/// "featured" and "channels" sections of 16:9 cards below the fold.
+/// 10-foot gallery: a cinematic hero, then the editorial shelves — the same
+/// running order the web home page uses (see HomeSections).
 struct ChannelGridView: View {
     @Environment(TVAppState.self) private var app
     @FocusState private var focusedChannelId: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: TV.columnGap), count: 3)
 
-    private var featured: [PublicChannel] {
-        app.channels.filter { $0.tags?.contains("featured") == true }
-    }
-    private var hero: PublicChannel? { featured.first }
-    private var featuredRail: [PublicChannel] { Array(featured.dropFirst()) }
-
-    /// Editorial shelves: server-curated categories in catalog order, each
-    /// holding its member channels in `categorySort` order. Categories the
-    /// catalog doesn't know (stale cache, local dev) still shelve under
-    /// their id, so channels never vanish.
-    private var shelves: [(category: ChannelCategory, channels: [PublicChannel])] {
-        let categorized = Dictionary(grouping: app.channels.filter {
-            $0.categoryId != nil && $0.tags?.contains("featured") != true
-        }, by: { $0.categoryId ?? "" })
-
-        var catalog = app.categories
-        let known = Set(catalog.map(\.id))
-        // Orphaned category ids get a bare entry after the curated ones.
-        for id in categorized.keys.sorted() where !known.contains(id) {
-            catalog.append(ChannelCategory(id: id, title: nil, subtitle: nil, sort: nil))
-        }
-
-        return catalog.compactMap { category in
-            guard let members = categorized[category.id], !members.isEmpty else { return nil }
-            let ordered = members.sorted {
-                ($0.categorySort ?? .max, $0.id) < ($1.categorySort ?? .max, $1.id)
-            }
-            return (category, ordered)
-        }
-    }
-
-    /// Uncategorized, unfeatured remainder — the browsing long tail.
-    private var rest: [PublicChannel] {
-        app.channels.filter { $0.tags?.contains("featured") != true && $0.categoryId == nil }
+    /// The home screen's running order, shared with the web gallery.
+    /// See HomeSections — the grouping and sort rules live there so the two
+    /// surfaces cannot drift apart.
+    private var layout: HomeSections.Layout {
+        HomeSections.layout(channels: app.channels, categories: app.categories)
     }
 
     /// The focused channel drives an ambient billboard behind the grid —
@@ -111,7 +82,8 @@ struct ChannelGridView: View {
                                     description: Text(app.galleryError ?? "")
                                 )
                             } else {
-                                if let hero {
+                                let layout = layout
+                                if let hero = layout.hero {
                                     Button {
                                         app.selectChannel(hero.id)
                                     } label: {
@@ -124,24 +96,12 @@ struct ChannelGridView: View {
                                     .focused($focusedChannelId, equals: hero.id)
                                 }
 
-                                if !featuredRail.isEmpty {
-                                    ChannelSection(title: "Featured") {
-                                        CardGrid(channels: featuredRail, columns: columns, focusBinding: $focusedChannelId)
-                                    }
-                                }
-
-                                ForEach(shelves, id: \.category.id) { shelf in
-                                    ChannelSection(title: shelf.category.displayTitle,
-                                                   subtitle: shelf.category.subtitle) {
-                                        CardGrid(channels: shelf.channels, columns: columns,
+                                ForEach(layout.sections) { section in
+                                    ChannelSection(title: section.title,
+                                                   subtitle: section.subtitle) {
+                                        CardGrid(channels: section.channels, columns: columns,
                                                  focusBinding: $focusedChannelId,
-                                                 showsKicker: false)
-                                    }
-                                }
-
-                                if !rest.isEmpty {
-                                    ChannelSection(title: shelves.isEmpty ? "Channels" : "More channels") {
-                                        CardGrid(channels: rest, columns: columns, focusBinding: $focusedChannelId)
+                                                 hiddenTags: section.ownedTags)
                                     }
                                 }
                             }
@@ -150,13 +110,13 @@ struct ChannelGridView: View {
                         .padding(.horizontal, TV.gutter)
                         .padding(.bottom, TV.gutter)
                     }
-                    .modifier(DefaultChannelFocus(id: hero?.id ?? featuredRail.first?.id,
+                    .modifier(DefaultChannelFocus(id: layout.hero?.id ?? layout.sections.first?.channels.first?.id,
                                                   binding: $focusedChannelId))
                 }
             }
             .background(focusBackdrop)
             .navigationDestination(isPresented: Binding(
-                get: { app.selectedChannelId != nil },
+                get: { app.selectedChannelId != nil && app.presentingSurface == .grid },
                 set: { if !$0 { app.exitChannel() } }
             )) {
                 ScreenSaverView()
@@ -217,16 +177,16 @@ private struct CardGrid: View {
     let columns: [GridItem]
     /// Reported upward so the focused card can drive the grid's billboard.
     var focusBinding: FocusState<String?>.Binding
-    /// False inside a category shelf: the header already names the category,
-    /// so a per-card kicker just prints it twelve more times.
-    var showsKicker: Bool = true
+    /// Tags the surrounding shelf already says out loud — a "featured" chip
+    /// under a heading that reads Featured is a word repeated four times.
+    var hiddenTags: Set<String> = []
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: TV.rowGap) {
             ForEach(channels) { channel in
                 ChannelCard(channel: channel,
                             focusBinding: focusBinding,
-                            showsKicker: showsKicker)
+                            hiddenTags: hiddenTags)
             }
         }
     }
@@ -244,14 +204,16 @@ struct ChannelCard: View {
     @Environment(TVAppState.self) private var app
     let channel: PublicChannel
     var focusBinding: FocusState<String?>.Binding
-    var showsKicker: Bool = true
+    var hiddenTags: Set<String> = []
+    /// Which surface is pushing the player, so backing out returns here.
+    var surface: TVAppState.ChannelSurface = .grid
 
     private var isFocused: Bool { focusBinding.wrappedValue == channel.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TV.captionGap) {
             Button {
-                app.selectChannel(channel.id)
+                app.selectChannel(channel.id, from: surface)
             } label: {
                 ChannelPoster(channel: channel)
             }
@@ -309,8 +271,8 @@ struct ChannelCard: View {
     }
 
     private var kicker: String? {
-        guard showsKicker,
-              let tags = channel.tags?.filter({ $0 != "featured" }), !tags.isEmpty else { return nil }
+        let hidden = hiddenTags.union(["featured"])
+        guard let tags = channel.tags?.filter({ !hidden.contains($0) }), !tags.isEmpty else { return nil }
         return tags.prefix(2).joined(separator: " · ").uppercased()
     }
 

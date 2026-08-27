@@ -12,6 +12,17 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     /// Editorial category (`/api/categories` catalog) and position within it.
     let categoryId: String?
     let categorySort: Int?
+    /// The scene's own name ("Warp Tunnel", "Constellation") — what a viewer
+    /// sees on screen, and so what they search for. Distinct from `label`,
+    /// which names the channel that happens to be showing it.
+    let saverLabel: String?
+    /// Epoch ms the channel was minted. The seeded demo channels carry 0,
+    /// which is what keeps them out of a "Latest" shelf without naming them.
+    let createdAt: Int?
+    /// Epoch ms of the last steer — the home page's recency sort key. It is
+    /// deliberately NOT `createdAt`: this one moves whenever anyone touches a
+    /// channel, so ordering "Latest" by it would just re-list the busiest.
+    let lastEventAt: Int?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
     /// Saver id when the channel publishes a classic saver (`{"id":"warp"}`)
@@ -29,7 +40,11 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
-        case categoryId, categorySort
+        case categoryId, categorySort, createdAt, lastEvent, saver
+    }
+
+    private struct LastEvent: Decodable {
+        let at: Int?
     }
 
     /// Minimal probe for classic saver documents: `{"id": "warp"}`.
@@ -53,7 +68,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
          sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil,
          categoryId: String? = nil, categorySort: Int? = nil,
-         classicSaverId: String? = nil) {
+         classicSaverId: String? = nil,
+         createdAt: Int? = nil, lastEventAt: Int? = nil,
+         saverLabel: String? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
@@ -64,6 +81,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.categoryId = categoryId
         self.categorySort = categorySort
         self.classicSaverId = classicSaverId
+        self.createdAt = createdAt
+        self.lastEventAt = lastEventAt
+        self.saverLabel = saverLabel
     }
 
     init(from decoder: Decoder) throws {
@@ -78,6 +98,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         sleeping = try? c.decodeIfPresent(Bool.self, forKey: .sleeping)
         categoryId = try? c.decodeIfPresent(String.self, forKey: .categoryId)
         categorySort = try? c.decodeIfPresent(Int.self, forKey: .categorySort)
+        saverLabel = try? c.decodeIfPresent(String.self, forKey: .saver)
+        createdAt = try? c.decodeIfPresent(Int.self, forKey: .createdAt)
+        lastEventAt = (try? c.decodeIfPresent(LastEvent.self, forKey: .lastEvent))??.at
         // Prefer the RESOLVED spec (base + all steering deltas applied) —
         // it's what the fullscreen viewer shows. The base `scene.spec` can be
         // a placeholder that renders nothing like the live channel, which
@@ -112,15 +135,39 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
 }
 
 /// An editorial category from `GET /api/categories` — server-curated shelf
-/// metadata (title, subtitle, order). Channel membership comes from each
-/// channel's `categoryId`, not from the embedded channel list here.
+/// metadata (title, subtitle, order) plus the ids it contains.
 struct ChannelCategory: Decodable, Identifiable, Equatable {
     let id: String
     let title: String?
     let subtitle: String?
     let sort: Int?
+    /// Ids of the channels the catalog places on this shelf. The web home
+    /// page groups on this rather than on each channel's `categoryId`, so
+    /// the two surfaces agree even when one field lags the other.
+    let channelIds: [String]
 
     var displayTitle: String { title ?? id }
+
+    private enum CodingKeys: String, CodingKey { case id, title, subtitle, sort, channels }
+    private struct Member: Decodable { let id: String? }
+
+    init(id: String, title: String?, subtitle: String?, sort: Int?, channelIds: [String] = []) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.sort = sort
+        self.channelIds = channelIds
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try? c.decodeIfPresent(String.self, forKey: .title)
+        subtitle = try? c.decodeIfPresent(String.self, forKey: .subtitle)
+        sort = try? c.decodeIfPresent(Int.self, forKey: .sort)
+        channelIds = ((try? c.decodeIfPresent([Member].self, forKey: .channels)) ?? [])?
+            .compactMap(\.id) ?? []
+    }
 }
 
 /// Read-only channel state from `GET /c/:channelId/state`.
