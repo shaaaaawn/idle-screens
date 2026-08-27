@@ -13,6 +13,7 @@ import SwiftUI
 enum ClassicSaverKind: String, CaseIterable, Sendable {
     case warp
     case rainstorm
+    case metaquarium
 
     static func supported(id: String?) -> ClassicSaverKind? {
         id.flatMap(ClassicSaverKind.init(rawValue:))
@@ -76,6 +77,12 @@ struct ClassicSaverView: View {
         case .rainstorm:
             RainField.shared(seed: seed32, scale: RainField.scale(for: tier))
                 .draw(in: &ctx, size: size, t: t)
+        case .metaquarium:
+            // The 2D tank: the collection's own transparent-icon art swimming
+            // an After Dark aquarium. The 3D tank needs WebGL the TV lacks;
+            // this is the scaled-down native answer.
+            AquariumField.shared(seed: seed32, tier: tier)
+                .draw(in: &ctx, size: size, t: t, tier: tier)
         }
     }
 }

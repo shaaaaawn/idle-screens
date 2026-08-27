@@ -8,7 +8,7 @@ final class ClassicSaverTests: XCTestCase {
     func testSupportedIds() {
         XCTAssertEqual(ClassicSaverKind.supported(id: "warp"), .warp)
         XCTAssertEqual(ClassicSaverKind.supported(id: "rainstorm"), .rainstorm)
-        XCTAssertNil(ClassicSaverKind.supported(id: "metaquarium"), "unported savers stay on thumbs")
+        XCTAssertEqual(ClassicSaverKind.supported(id: "metaquarium"), .metaquarium, "the 2D tank is a native port now")
         XCTAssertNil(ClassicSaverKind.supported(id: nil))
     }
 
