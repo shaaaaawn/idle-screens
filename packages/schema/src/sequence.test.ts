@@ -735,3 +735,76 @@ describe('SequenceInstance — morph segue', () => {
     // If this doesn't crash and the chain root logic works, seeds are deterministic
   });
 });
+
+// ---------------------------------------------------------------------------
+// Discrete advance — the two gaps a deck needs closed.
+//
+// These tests pin *current* behaviour, not desired behaviour. Both are
+// characterization tests: they exist so the gap is a fact in CI rather than a
+// claim in a doc, and so whoever implements input-driven advance has a red
+// test to turn green. See idle-mono docs/timeline-and-presentations.md
+// (registry #3 presentations, #43 input advance).
+// ---------------------------------------------------------------------------
+
+/** SequenceInstance keeps the resolved segment in a private field. */
+function activeIndexOf(inst: SaverInstance): number {
+  return (inst as unknown as { activeIndex: number }).activeIndex;
+}
+
+describe('SequenceInstance — sequence.segment steering is not sticky', () => {
+  it('applyTrack switches the active segment', () => {
+    const inst = mountSync(compileSequence(seq()));
+    inst.renderFrame!(1000, 1);
+    expect(activeIndexOf(inst)).toBe(0);
+
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'sequence.segment', value: 2, ease: 'step' }] });
+    expect(activeIndexOf(inst)).toBe(2);
+    inst.dispose();
+  });
+
+  it('but the next frame reverts it to whatever the wall clock says', () => {
+    const inst = mountSync(compileSequence(seq()));
+    inst.renderFrame!(1000, 1);
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'sequence.segment', value: 2, ease: 'step' }] });
+    expect(activeIndexOf(inst)).toBe(2);
+
+    // One rAF tick later. renderFrame derives the segment from resolveSegment(T)
+    // alone — applyTrack moved neither the clock (baseT) nor a steer offset, so
+    // the steered segment survives exactly one frame (~16 ms on a live viewer).
+    inst.renderFrame!(1016, 1);
+    expect(activeIndexOf(inst)).toBe(0);
+    inst.dispose();
+  });
+});
+
+describe('resolveSegment — advance is validated but inert', () => {
+  it("advance: 'input' does not hold the segment past its duration", () => {
+    const s = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, advance: 'input' },
+        { key: 'b', scene: SCENE, duration: 3000 },
+      ],
+    });
+    expect(validateSequence(s).valid).toBe(true);
+
+    // Wanted (a deck): hold on 'a' until an input event arrives.
+    // Actual: the timer advances regardless — `advance` reaches no runtime.
+    expect(resolveSegment(s, 6000).index).toBe(1);
+  });
+
+  it("advance: 'input' on the final durationless segment is indistinguishable from omitting it", () => {
+    const withAdvance = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 },
+        { key: 'b', scene: SCENE, advance: 'input' },
+      ],
+    });
+    const without = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 },
+        { key: 'b', scene: SCENE },
+      ],
+    });
+    expect(resolveSegment(withAdvance, 9000)).toEqual(resolveSegment(without, 9000));
+  });
+});
