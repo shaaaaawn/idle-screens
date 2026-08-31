@@ -63,7 +63,7 @@ export interface ConformanceAgreement {
   centroidDistance: number | null;
   /** pixel coverage / analytic coverage. 1 is perfect; this is a calibration reading. */
   coverageRatio: number;
-  /** Mean |analytic - pixel| over all cells, 0..1. */
+  /** Mean |deviation-from-background delta| over all cells, 0..1. */
   meanAbsCellDelta: number;
 }
 
@@ -163,7 +163,10 @@ export async function specConformance(
 ): Promise<SpecConformance> {
   const width = opts.width ?? 640;
   const height = opts.height ?? 400;
-  const seed = opts.seed ?? spec.seed ?? 42;
+  // Match SpecInstance: `((seed >>> 0) || 1)`. Seed 0 is falsy after >>> 0 and
+  // the renderer remaps it to 1; the analytic path does not. Forwarding 0 as-is
+  // would compare two different scenes and look like a conformance failure.
+  const seed = ((opts.seed ?? spec.seed ?? 42) >>> 0) || 1;
   const t = opts.t ?? 5000;
 
   const frame = await perceiveSaverFrame(compileSaver(spec), { width, height, seed, t, includeGrid: true });
@@ -183,7 +186,7 @@ export async function specConformance(
         coverageRatio: 0,
         meanAbsCellDelta: 0,
       },
-      braille: { analytic: '', pixel: '' },
+      braille: { analytic: renderBrailleMap(analytic), pixel: '' },
       unsupported: frame.reason ?? 'no readable canvas',
     };
   }

@@ -232,7 +232,9 @@ test('radial streaks keep their starburst in both renderings', async ({ page }) 
  * additive glow — `GLOW_SPREAD` was set by intuition and has never been checked
  * against a canvas. These bands record the current calibration so a change to
  * those constants shows up as a deliberate edit here rather than a silent shift
- * in what every agent is told about its scene.
+ * in what every agent is told about its scene. Sampled at both seeds the
+ * structural test uses (42 and 7) — a seed-dependent coverage drift would
+ * otherwise slip through here.
  */
 test('coverage calibration stays where it was measured', async ({ page }) => {
   await ready(page);
@@ -243,20 +245,24 @@ test('coverage calibration stays where it was measured', async ({ page }) => {
     ['additive glow', ADDITIVE_GLOW, 0.15, 0.45],
   ];
   for (const [name, spec, lo, hi] of bands) {
-    const c = await run(page, spec);
-    expect(c.agreement.coverageRatio, `${name} coverage ratio`).toBeGreaterThan(lo);
-    expect(c.agreement.coverageRatio, `${name} coverage ratio`).toBeLessThan(hi);
+    for (const seed of [42, 7]) {
+      const c = await run(page, spec, seed);
+      expect(c.agreement.coverageRatio, `${name} @ seed ${seed} coverage ratio`).toBeGreaterThan(lo);
+      expect(c.agreement.coverageRatio, `${name} @ seed ${seed} coverage ratio`).toBeLessThan(hi);
+    }
   }
 });
 
 /**
- * Persistence: a documented divergence, asserted by DIRECTION rather than excluded.
+ * Persistence: a documented divergence, asserted by what actually holds.
  *
- * `ghosting` composites previous frames, so the canvas carries strictly more ink
- * than the single instant the analytic model computes. The useful invariant is
- * not "they agree" — they must not — but "the canvas gets brighter, the model
- * does not gain ink, and the composition still lines up". A future model that
- * accounts for persistence moves the ratio toward 1 and this stays honest.
+ * Both paths add ghost ink — the canvas composites previous frames, and
+ * `luminanceGrid` splat-passes decaying past-frame taps when `ghosting > 0`.
+ * The useful invariant is not "they agree on coverage" (the canvas still
+ * accumulates more than the model's tap set) but "the canvas gets brighter
+ * and the composition still lines up". A coverage-ratio direction here would
+ * rest on how much more the canvas smears than the taps, which moves when
+ * ghost calibration is refined.
  */
 test('ghosting brightens the canvas beyond the model, without moving the composition', async ({ page }) => {
   await ready(page);
@@ -264,10 +270,6 @@ test('ghosting brightens the canvas beyond the model, without moving the composi
   const ghosted = await run(page, { ...SOFT_DISCS, id: 'conf-ghost', ghosting: 0.85 });
 
   expect(ghosted.pixel.meanLuminance).toBeGreaterThan(plain.pixel.meanLuminance);
-  // Persistence reaches the analytic reading only as a dominance nudge (#10),
-  // never as extra ink, so the ratio moves in a knowable direction.
-  expect(ghosted.agreement.coverageRatio).toBeGreaterThan(plain.agreement.coverageRatio);
-  // ...and it is still the same scene.
   expect(ghosted.agreement.cellCorrelation).toBeGreaterThan(0.8);
 });
 
