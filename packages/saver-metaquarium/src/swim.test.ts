@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot, SWIM_STYLES,
-  SWIM_STYLE_NAMES, swimStyleOf,
+  anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot,
+  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
 
@@ -235,5 +235,50 @@ describe('station-keeping styles must not knot up', () => {
   });
   it('anchoring does not depend on variance — spreading is correctness', () => {
     expect(fishVariation(9, 0).anchor).toBe(fishVariation(9, 1).anchor);
+  });
+});
+
+describe('anchorFraction — the rule the tank actually applies', () => {
+  // The tests above prove the HASH spreads. They passed while the tank was
+  // still knotting patrol/bottom/surface into one clump at mount, because the
+  // bug was in the tank's USE of the hash: the offset applied only when
+  // `travel < 1`. These assert the rule itself, which is what the tank calls.
+  const CAST = 24;
+  const spread = (name: string, variance: number): number[] =>
+    Array.from({ length: CAST }, (_, i) => anchorFraction(swimStyleOf(name), i, variance));
+
+  it('loop is anchorless — its no-op promise reaches frame 0', () => {
+    expect(spread('loop', 0.6).every((a) => a === 0)).toBe(true);
+  });
+
+  it('EVERY other style spreads, full-travel ones included', () => {
+    // The regression gate. patrol/bottom/surface/school all carry travel = 1,
+    // so a `travel < 1` condition silently exempts them — and they are exactly
+    // the styles that were seen knotting on a live channel.
+    for (const name of SWIM_STYLE_NAMES) {
+      if (name === 'loop') continue;
+      const xs = spread(name, 0.6);
+      expect(new Set(xs.map((a) => a.toFixed(4))).size, name).toBe(CAST);
+      // Reaching both ends means the cast starts strung round the whole
+      // route, not bunched near the spline's azimuth-0 origin.
+      expect(Math.min(...xs), name).toBeLessThan(0.25);
+      expect(Math.max(...xs), name).toBeGreaterThan(0.75);
+      // No quarter of the route left empty — a cast can hit both extremes and
+      // still be two clumps.
+      const quarters = new Set(xs.map((a) => Math.floor(a * 4)));
+      expect(quarters.size, name).toBe(4);
+    }
+  });
+
+  it('at least one full-travel style exists to be gated', () => {
+    // Guards the gate above against becoming vacuous if the catalogue's
+    // travel values are ever retuned.
+    const full = SWIM_STYLES.filter((s) => s.travel === 1 && s.name !== 'loop');
+    expect(full.length).toBeGreaterThan(0);
+  });
+
+  it('spreads at variance 0 too — it is correctness, not flavour', () => {
+    expect(new Set(spread('patrol', 0).map((a) => a.toFixed(4))).size).toBe(CAST);
+    expect(spread('patrol', 0)).toEqual(spread('patrol', 1));
   });
 });

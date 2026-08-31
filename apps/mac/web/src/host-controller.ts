@@ -58,7 +58,7 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
   let current = -1;
   let generation = 0;
 
-  const mountSaver = async (index: number, fade = true): Promise<void> => {
+  const mountSaver = async (index: number, fade = true, remaining = savers.length - 1): Promise<void> => {
     const gen = ++generation;
     const doFade = fade && !reduceMotion && instance !== null;
     if (doFade) {
@@ -84,7 +84,19 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
         reducedMotion: reduceMotion,
       });
     } catch (err) {
-      if (gen === generation) host.style.opacity = '1';
+      if (gen !== generation) return;
+      host.style.opacity = '1';
+      // Move on rather than sit on a black screen. Every saver here used to be
+      // canvas2d and could not really fail; the tank needs WebGL2, so on a host
+      // without it a throw would leave the wrapper blank until the cycle timer
+      // came round — ten minutes of nothing, which reads as a broken app.
+      //
+      // `remaining` counts down across the chain so a machine that can run
+      // none of them stops instead of recursing forever.
+      if (remaining > 0) {
+        console.warn(`saver ${plugin.manifest.id} failed to mount, skipping`, err);
+        return mountSaver(current + 1, false, remaining - 1);
+      }
       throw err;
     }
     if (gen !== generation) {

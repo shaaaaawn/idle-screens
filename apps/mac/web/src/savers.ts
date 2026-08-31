@@ -7,6 +7,7 @@
  * are excluded — in the wrapper the page is nothing but the saver itself.
  */
 import type { SaverPlugin } from '@idle-screens/core';
+import { createMetaquarium } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import {
   compileSaver,
@@ -29,6 +30,23 @@ import {
 
 export const SAVERS: SaverPlugin[] = [
   ...CLASSIC_SAVERS.filter((s) => !s.manifest.passthrough),
+  // The tank. It is not in CLASSIC_SAVERS (its own package, so the barrel
+  // stays three.js-free), which is the whole reason the native hosts silently
+  // had no aquarium while the web did. Listed explicitly so that cannot
+  // recur quietly.
+  //
+  // Two things it does that no other saver here does: it needs WebGL2, and it
+  // streams its fish over the network. Neither is fatal — the host skips a
+  // saver that fails to mount, and a fish that will not load falls back to a
+  // procedural body rather than an empty tank.
+  //
+  // `dracoPath` is not optional here the way it is in Vite. The package's
+  // default resolves its decoder through `import.meta.url`, and this bundle is
+  // an IIFE (WKWebView refuses module scripts over file://) where esbuild
+  // cannot fill that in — it warns and emits a URL that resolves nowhere. So
+  // point it at the copy build.mjs stages beside the bundle, relative to
+  // index.html.
+  createMetaquarium({ params: { dracoPath: 'assets/draco/' } }),
   compileSaver(SNOWFALL_SPEC),
   compileSaver(LANTERNS_SPEC),
   compileSaver(SAKURA_SPEC),
