@@ -224,12 +224,38 @@ the result — pass or fail — is in the compositor table.
 
 ---
 
-### B5. Alpine / musl: decide in or out
-**Priority: low. Effort: M. Blocked by: B1.**
+### B5. Alpine / musl: publish an artifact, or document source-build only
+**Priority: low. Effort: S. Blocked by: nothing.**
 
-Alpine edge has all three libraries, but it is musl, and our release binaries
-are glibc. Supporting it means a musl target and a separate artifact. Cheap to
-determine (does it build?), and worth an explicit yes/no rather than silence.
+Rewritten after measuring — the assumption behind the original ticket was wrong.
+**The crate builds fine on musl** with Alpine's own `rust` package (1.97.0), in
+2m42s, with all three pkg-config modules present. No cross-toolchain, no
+vendoring. So "can Alpine work" is answered: yes, from source, today.
+
+What is left is narrower: decide whether to publish a third, musl release
+artifact next to the two glibc ones, or to document Alpine as source-build only.
+
+---
+
+### B7. Our shell scripts assume bash; minimal images have none
+**Priority: medium. Effort: XS. Blocked by: nothing.**
+
+Found on Alpine, but it is not an Alpine issue. Every script we ship starts
+`#!/usr/bin/env bash`, and a bare Alpine (or any busybox image) fails at the
+first line with:
+
+```
+env: can't execute 'bash': No such file or directory
+```
+
+Everything passes after `apk add bash`. Two things to do, neither large:
+
+- Name bash as a dependency in the README and in `distro.sh`'s hints.
+- Add an `alpine` arm to `idle_install_hint`
+  (`gtk4.0-dev webkit2gtk-6.0-dev gtk4-layer-shell-dev bash`).
+
+Rewriting the scripts as POSIX sh is **not** proposed: the test suite relies on
+bash arrays and `[[ ]]`, and bash is one package away everywhere it is missing.
 
 ---
 
@@ -258,4 +284,4 @@ while A2 is pending), B1 (make Tier 2 claims true).
 **Then:** A4 (theme following — the differentiator worth doing properly, not
 quickly), B4 (Plasma), A7, B2.
 
-**Later / optional:** A5, B5.
+**Later / optional:** A5, B5. B7 is XS and can ride along with any docs pass.

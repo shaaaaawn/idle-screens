@@ -42,7 +42,7 @@ GNOME by default.
 | **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ **builds + tests (L2)** |
-| **Alpine edge** | `gtk4.0-dev` | `webkit2gtk-6.0-dev` | `gtk4-layer-shell` | ✅ all present |
+| **Alpine edge** (musl) | 4.22.4 | 2.48.1 | 1.3.0 | ✅ **builds (L2)**, needs `bash` |
 | **Ubuntu 24.04 LTS** | 4.14.5 | 2.52.6 | **ABSENT** | ⚠️ one package short |
 | **Debian bookworm** | **4.8.3** | 2.50.6 | **ABSENT** | ❌ two blockers |
 
@@ -92,9 +92,8 @@ unless the user also switches session.
 **Tier 1 — supported, gated in CI.** Arch (x86_64) and Debian trixie (x86_64 +
 aarch64). Already true. Anything that breaks these blocks a PR.
 
-**Tier 2 — smoke test before claiming support.** Alpine edge clears Gate 1 on
-measurement but is musl, and has not yet been built (see B5 in the ticket
-drafts).
+**Tier 2 — smoke test before claiming support.** Nothing is left here: all four
+have now been built (§5.1–5.4).
 
 **Fedora, openSUSE Tumbleweed and Ubuntu 26.04 have all now been built** — each
 compiles, passes all 26 unit tests, and passes the swayidle installer suite
@@ -199,6 +198,44 @@ Detected as the `debian` family via `ID_LIKE`, which is the intended behaviour �
 Ubuntu needs no arm of its own. Note this says nothing about Ubuntu *Desktop*,
 which is GNOME and cannot show the overlay; it means Ubuntu 26.04 running a
 wlroots or Plasma session works.
+
+### 5.4 Alpine edge / musl L2 result (2026-08-31)
+
+The surprise of the sweep, in both directions.
+
+```
+rustc:       1.97.0 (Alpine Linux Rust 1.97.0-r0)   # from apk, above our 1.92 floor
+pkg-config:  gtk4 4.22.4 · webkitgtk-6.0 2.48.1 · gtk4-layer-shell-0 1.3.0
+cargo build: Finished `release` profile [optimized] in 2m 42s
+swayidle:    23 passed, 0 failed          (after `apk add bash`)
+```
+
+**musl is not a blocker.** The crate compiles against musl with Alpine's own
+`rust` package — no cross-toolchain, no vendoring, no patches. That was not the
+expected result and it makes Alpine a real option rather than a curiosity.
+
+**Our shell scripts are the blocker instead, and only just.** Alpine ships no
+`bash`, and every script we have starts `#!/usr/bin/env bash`, so the first run
+produced:
+
+```
+env: can't execute 'bash': No such file or directory
+```
+
+That is one `apk add bash` away, and everything passes afterwards. Worth
+recording as a general note rather than an Alpine one: **we depend on bash**,
+which is fine on every desktop distro and a real assumption on minimal or
+container images.
+
+Two smaller notes: `idle_distro_family` correctly returns `alpine`, and
+`idle_install_hint` has no `alpine` arm so it falls to the generic
+module-name fallback — which works, and is exactly the degradation the seam was
+designed for. Adding a real arm (`gtk4.0-dev webkit2gtk-6.0-dev
+gtk4-layer-shell-dev bash`) is a nicety.
+
+The open question for Alpine is therefore **not** "can it build" — it can — but
+whether we publish a musl *release artifact* alongside the two glibc ones.
+Source builds already work today.
 
 ---
 
