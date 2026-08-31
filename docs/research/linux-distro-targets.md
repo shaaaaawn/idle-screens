@@ -39,7 +39,7 @@ GNOME by default.
 | --- | --- | --- | --- | --- |
 | **Debian trixie** | 4.18.6 | 2.52.6 | 1.0.4 | ✅ built in CI, both arches |
 | **Arch** | current | current | current | ✅ built in CI |
-| **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ all present |
+| **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ module confirmed |
 | **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ all present |
 | **Alpine edge** | `gtk4.0-dev` | `webkit2gtk-6.0-dev` | `gtk4-layer-shell` | ✅ all present |
@@ -92,10 +92,14 @@ unless the user also switches session.
 **Tier 1 — supported, gated in CI.** Arch (x86_64) and Debian trixie (x86_64 +
 aarch64). Already true. Anything that breaks these blocks a PR.
 
-**Tier 2 — smoke test before claiming support.** Fedora, openSUSE Tumbleweed,
-Ubuntu 26.04, Alpine edge. All clear Gate 1 on measurement; none has ever been
-built or run. A container build is cheap and would let us name them in the
-README with a straight face.
+**Tier 2 — smoke test before claiming support.** openSUSE Tumbleweed,
+Ubuntu 26.04, Alpine edge clear Gate 1 on measurement but have never been built.
+
+**Fedora has now been built** (see §5.1) and is a Tier 1 candidate on Gate 1: it
+compiles, its tests pass, and — usefully — it exercised the `fedora` arm of
+`distro.sh`, which until then was guesswork marked `# untested`. The package
+names in that hint are correct. What Fedora still lacks is an L3 run, which for
+Fedora means one of the Sway/Hyprland spins rather than Workstation.
 
 **Tier 3 — known-blocked, documented.** Debian bookworm and Ubuntu 24.04 LTS.
 Both deserve a one-line README entry saying *why*, since "it doesn't work" plus
@@ -128,8 +132,29 @@ the compositor advertises `zwlr_layer_shell_v1` / `ext_idle_notifier_v1`
 (`wayland-info | grep -iE 'layer_shell|idle'`). **Only L3 tests Gate 2**, and no
 amount of container work substitutes for it.
 
-Honest current state: **L1 for the table in §2, L2 for Debian trixie and Arch,
-L3 for Omarchy only.** The Pi is L2, not L3, and the README now says so.
+Honest current state: **L1 for the table in §2, L2 for Debian trixie, Arch and
+Fedora, L3 for Omarchy only.** The Pi is L2, not L3, and the README now says so.
+
+### 5.1 Fedora L2 result (2026-08-31)
+
+Run against `feat/linux-multi-distro-aarch64` in a `fedora:latest` container
+(arm64, on Apple silicon):
+
+```
+check-deps:     All native build dependencies present (fedora).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 1m 58s
+cargo test:     26 passed; 0 failed
+```
+
+Three things this proves beyond "Fedora compiles":
+
+- `distro.sh`'s `fedora` package list — previously a guess, marked `# untested`
+  — is correct, and `idle_distro_family` classifies Fedora properly.
+- The pkg-config-probe design holds on a distro nothing was written for:
+  `check-deps.sh` needed no Fedora-specific change.
+- The swayidle installer passes on a **third** package manager and a third awk,
+  after Debian (mawk) and Arch (gawk).
 
 Cheapest real win: extend L2 to Tier 2 as a manually-triggered CI job
 (`workflow_dispatch`), so it does not slow every PR but can be run before a
