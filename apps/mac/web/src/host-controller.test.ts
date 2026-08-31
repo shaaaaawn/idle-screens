@@ -7,6 +7,13 @@ import {
   saverIndex,
 } from './host-controller';
 
+const broken = (id: string): SaverPlugin => ({
+  manifest: { id, label: id },
+  mount: () => {
+    throw new Error(`${id} needs a GPU this box does not have`);
+  },
+});
+
 const plugin = (id: string): SaverPlugin => ({
   manifest: { id, label: id },
   mount: (ctx) => {
@@ -119,6 +126,92 @@ describe('createMacHostController', () => {
     bridge.prev();
     await vi.waitFor(() => expect(controller.currentId()).toBe('gamma'));
     expect(controller.currentIndex()).toBe(2);
+  });
+
+  it('skips a saver that cannot mount instead of leaving a black screen', async () => {
+    // The tank is the first saver here that can genuinely fail — it needs
+    // WebGL2. Without this the wrapper sat blank until the next cycle tick.
+    const host = document.createElement('div');
+    const hints: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = createMacHostController({
+      host,
+      savers: [plugin('alpha'), broken('tank'), plugin('gamma')],
+      baseSeed: 0,
+      reduceMotion: true,
+      showHint: (label) => hints.push(label),
+      sleep: async () => {},
+    });
+
+    await controller.mountSaver(1);
+
+    expect(controller.currentId()).toBe('gamma');
+    expect(hints).toEqual(['gamma']);
+    expect(host.style.opacity).toBe('1');
+    warn.mockRestore();
+  });
+
+  it('gives up rather than recursing when nothing can mount', async () => {
+    const host = document.createElement('div');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = createMacHostController({
+      host,
+      savers: [broken('a'), broken('b'), broken('c')],
+      baseSeed: 0,
+      reduceMotion: true,
+      sleep: async () => {},
+    });
+
+    await expect(controller.mountSaver(0)).rejects.toThrow(/GPU/);
+    // Each saver tried exactly once: two skip-warns, then the give-up warn.
+    expect(warn).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
+  });
+
+  it('does not silently replace an explicit pin that cannot mount', async () => {
+    // ?saver=tank (or a menu pick) is a choice. Skipping to the next saver
+    // would leave the user stuck on the wrong one — pinning also disables
+    // the cycle, so they would never rotate off it.
+    const host = document.createElement('div');
+    const hints: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = createMacHostController({
+      host,
+      savers: [plugin('alpha'), broken('tank'), plugin('gamma')],
+      baseSeed: 0,
+      reduceMotion: true,
+      showHint: (label) => hints.push(label),
+      sleep: async () => {},
+    });
+
+    await expect(controller.mountSaver(1, false, { skipOnFail: false })).rejects.toThrow(/GPU/);
+    expect(controller.currentId()).toBe('tank');
+    expect(controller.getInstance()).toBeNull();
+    expect(hints).toEqual(["tank couldn't start"]);
+    expect(host.style.opacity).toBe('1');
+    warn.mockRestore();
+  });
+
+  it('bridge setSaver does not skip past a saver that fails to mount', async () => {
+    const host = document.createElement('div');
+    const hints: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = createMacHostController({
+      host,
+      savers: [plugin('alpha'), broken('tank'), plugin('gamma')],
+      baseSeed: 0,
+      reduceMotion: true,
+      showHint: (label) => hints.push(label),
+      sleep: async () => {},
+    });
+    await controller.mountSaver(0);
+    const bridge = controller.createBridge(vi.fn());
+
+    bridge.setSaver('tank');
+    await vi.waitFor(() => expect(hints.at(-1)).toBe("tank couldn't start"));
+    expect(controller.currentId()).toBe('tank');
+    expect(controller.getInstance()).toBeNull();
+    warn.mockRestore();
   });
 
   it('bridge setSaver ignores unknown ids', async () => {

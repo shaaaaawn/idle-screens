@@ -118,6 +118,30 @@ export function fishVariation(index: number, variance: number): {
   };
 }
 
+/**
+ * Where a fish starts on its own route, as a fraction of the route's length.
+ *
+ * The rule lives here rather than inline in the tank because it is the whole
+ * of a bug that shipped once already: the offset used to apply only when
+ * `travel < 1`, so every full-travel style (patrol, bottom, surface) mounted
+ * as one knot dead-centre — every compiled spline's `points[0]` sits near
+ * azimuth 0, so an unspread cast starts stacked. It took minutes of screen
+ * time to disperse, and was watched happening three times in a row on a live
+ * channel before anyone read the condition.
+ *
+ * `loop` is the one exception, and not for looks: it promises to be exactly
+ * the pre-style behaviour frame for frame, so it may not touch frame 0.
+ *
+ * Formation styles pass through here too even though the carrier's rigid
+ * transform ignores the result — cheaper to keep one rule than to encode
+ * "except when a branch downstream discards it", which is the kind of caveat
+ * that stops being true and nobody notices.
+ */
+export function anchorFraction(style: SwimStyleSpec, index: number, variance: number): number {
+  if (style.name === 'loop') return 0;
+  return fishVariation(index, variance).anchor;
+}
+
 /** Nose-to-tail length of a fish at scale 1, in tank units. Formation spacing
  *  is quoted in these so the lattice cannot silently start interpenetrating
  *  when the fish change size — a review measured 36% of fish-frames with a

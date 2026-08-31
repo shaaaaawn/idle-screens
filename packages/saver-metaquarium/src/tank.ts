@@ -49,8 +49,8 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
-  formationSlot, swimStyleOf, type FormationShape,
+  anchorFraction, bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES,
+  formationExtent, formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
@@ -1204,12 +1204,10 @@ class TankInstance implements SaverInstance {
         ? distanceAt(f.plan, warpSec, styleSpeed)
         : distanceAt(f.plan, tSec, speed * styleSpeed);
       // Every style spreads its cast along the loop, not only the
-      // station-keepers. Without this, patrol/bottom/surface all mounted as
-      // one knot dead-centre (every compiled spline starts near azimuth 0)
-      // and took minutes to disperse — watched happen three times in a row
-      // on a live channel. `loop` alone stays anchorless: it promises to be
-      // exactly the pre-style behaviour, frame for frame.
-      const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
+      // station-keepers; `loop` alone stays anchorless. The rule and the bug
+      // that earned it live in swim.ts's `anchorFraction`, where a test can
+      // reach them.
+      const anchor = anchorFraction(style, f.index, variance) * f.plan.totalLength;
       // Maneuvers displace, never re-rate: `along` moves the fish on its own
       // path, the kick is added to the pose after banding. Both closed-form.
       // Contagious events (startle) propagate through a formation as a wave:
