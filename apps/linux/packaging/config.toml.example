@@ -20,7 +20,12 @@ channel = "ballet"
 #inhibit = false
 # Fade-in duration in milliseconds (fade-out is half)
 #fade_ms = 900
-# Fullscreen overlay that ignores mouse/keyboard for exit (see hypridle-kiosk.conf.example)
+# Fullscreen overlay that ignores mouse/keyboard for exit — the appliance /
+# signage shape (a Pi on a wall, a lobby display). Two things dismiss the saver:
+# this app's idle watcher AND your idle daemon's resume hook; kiosk needs both
+# off. See packaging/hypridle-kiosk.conf.example (Hyprland) or the kiosk block in
+# packaging/swayidle/swayidle.snippet (sway/labwc/wayfire/Raspberry Pi OS).
+# Exit with: pkill -TERM -f '[i]dle-screens-wayland'
 #kiosk = false
 
 # Wayland app-id / window class to report (default "com.idlescreens.wayland").
@@ -30,8 +35,14 @@ channel = "ballet"
 #app_id = "org.omarchy.screensaver"
 
 [webkit]
-# "auto" disables WebKit's DMA-BUF renderer on the NVIDIA proprietary driver
-# (known flicker); "always" / "never" force it.
+# "auto" disables WebKit's DMA-BUF renderer where it is known to misbehave: the
+# NVIDIA proprietary driver (flicker/blank) and Broadcom V3D on Raspberry Pi.
+# "always" / "never" force it either way.
+#
+# Raspberry Pi: "auto" turns the renderer OFF. If your Pi actually renders more
+# smoothly with it on — worth measuring, since software compositing a fullscreen
+# animated WebView is not cheap either — set "never" here. The launch log names
+# which branch fired.
 disable_dmabuf = "auto"
 
 [update]
