@@ -1,5 +1,0 @@
----
-'@idle-screens/saver-metaquarium': minor
----
-
-Maneuvers have shapes now, not just distances. A QA pass proved every maneuver reduced to "a fish moved further than the others" in stills. Now: `graze` pitches nose-down over the substrate (a pitch term applied after the band level-lock, which had zeroed exactly the styles grazers live in) and sinks 3x deeper; `startle` is contagious in formations — one shared event propagating through the lattice as a wave at seat-distance delays, with the kick scaled 1.8x so scattered fish clear the seating instead of landing on another seat; `zoomies` gets a real dwell between its three surges (the seams were zero-width velocity minima — invisible); `hover` un-freezes (speedMul 0.2→0.55; two multiplied slowdowns had pinned fish to a fixed screen position); the permanent advance is scaled per fish so histories genuinely diverge; and `maneuverRate` extends to 3 — above 1 shortens the interval, breaking the 14-20s legibility ceiling the old cap baked in. Values ≤1 mean exactly what they always did.
