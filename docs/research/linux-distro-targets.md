@@ -41,7 +41,7 @@ GNOME by default.
 | **Arch** | current | current | current | ✅ built in CI |
 | **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
-| **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ all present |
+| **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **Alpine edge** | `gtk4.0-dev` | `webkit2gtk-6.0-dev` | `gtk4-layer-shell` | ✅ all present |
 | **Ubuntu 24.04 LTS** | 4.14.5 | 2.52.6 | **ABSENT** | ⚠️ one package short |
 | **Debian bookworm** | **4.8.3** | 2.50.6 | **ABSENT** | ❌ two blockers |
@@ -92,14 +92,17 @@ unless the user also switches session.
 **Tier 1 — supported, gated in CI.** Arch (x86_64) and Debian trixie (x86_64 +
 aarch64). Already true. Anything that breaks these blocks a PR.
 
-**Tier 2 — smoke test before claiming support.** openSUSE Tumbleweed,
-Ubuntu 26.04, Alpine edge clear Gate 1 on measurement but have never been built.
+**Tier 2 — smoke test before claiming support.** Alpine edge clears Gate 1 on
+measurement but is musl, and has not yet been built (see B5 in the ticket
+drafts).
 
-**Fedora has now been built** (see §5.1) and is a Tier 1 candidate on Gate 1: it
+**Fedora, openSUSE Tumbleweed and Ubuntu 26.04 have all now been built** — each
+compiles, passes all 26 unit tests, and passes the swayidle installer suite
+23/23 (§5.1–5.3). On Gate 1 they are Tier 1 candidates and is a Tier 1 candidate on Gate 1: it
 compiles, its tests pass, and — usefully — it exercised the `fedora` arm of
 `distro.sh`, which until then was guesswork marked `# untested`. The package
-names in that hint are correct. What Fedora still lacks is an L3 run, which for
-Fedora means one of the Sway/Hyprland spins rather than Workstation.
+names in that hint are correct. What all three still lack is an L3 run — which for Fedora and Ubuntu means a
+Sway/Hyprland session rather than the GNOME default they ship.
 
 **Tier 3 — known-blocked, documented.** Debian bookworm and Ubuntu 24.04 LTS.
 Both deserve a one-line README entry saying *why*, since "it doesn't work" plus
@@ -180,6 +183,22 @@ is a convenience, not a requirement.
 Cheapest real win: extend L2 to Tier 2 as a manually-triggered CI job
 (`workflow_dispatch`), so it does not slow every PR but can be run before a
 release. Fedora, openSUSE, Ubuntu and Alpine all publish official images.
+
+---
+
+### 5.3 Ubuntu 26.04 L2 result (2026-08-31)
+
+```
+check-deps:     All native build dependencies present (debian).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 1m 04s
+cargo test:     26 passed; 0 failed
+```
+
+Detected as the `debian` family via `ID_LIKE`, which is the intended behaviour —
+Ubuntu needs no arm of its own. Note this says nothing about Ubuntu *Desktop*,
+which is GNOME and cannot show the overlay; it means Ubuntu 26.04 running a
+wlroots or Plasma session works.
 
 ---
 
