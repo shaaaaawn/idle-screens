@@ -56,8 +56,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Must be decided before GTK/WebKit initialize.
-    if platform::should_disable_dmabuf(&settings) {
-        log::info!("disabling WebKit DMA-BUF renderer");
+    if let Some(reason) = platform::dmabuf_disable_reason(&settings) {
+        log::info!("disabling WebKit DMA-BUF renderer ({reason})");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     if settings.inhibit {
