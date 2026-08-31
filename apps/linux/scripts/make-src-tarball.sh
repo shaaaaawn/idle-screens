@@ -17,7 +17,9 @@ mkdir -p dist
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 mkdir "$staging/$name"
-cp -R Cargo.toml Cargo.lock rustfmt.toml src packaging webroot "$staging/$name/"
+# build.rs is mandatory, not optional: about.rs reads IDLE_BUILD_KIND /
+# IDLE_GIT_COMMIT / IDLE_BUILD_DATE via env!(), which only build.rs defines.
+cp -R Cargo.toml Cargo.lock rustfmt.toml build.rs src packaging webroot "$staging/$name/"
 cp ../../LICENSE "$staging/$name/LICENSE" 2>/dev/null || true
 tar -czf "$out" -C "$staging" "$name"
 shasum -a 256 "$out" 2>/dev/null || sha256sum "$out"
