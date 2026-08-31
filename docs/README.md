@@ -21,3 +21,5 @@ Original thinking docs that motivated the project. Preserved for context and ref
 - **[implementation-guide.md](research/implementation-guide.md)** -- saver implementation patterns and guidelines.
 - **[screensaver-ideas.md](research/screensaver-ideas.md)** -- brainstorming list for new saver concepts.
 - **[aval-findings.md](research/aval-findings.md)** -- AVAL audit findings and build-in-public notes.
+- **[omarchy-plugin-spec.md](research/omarchy-plugin-spec.md)** -- Omarchy's plugin system read from source: why we still fork the idle plugin, the 3s screensaver-window deadline, and the ranked options for stopping.
+- **[linux-distro-targets.md](research/linux-distro-targets.md)** -- which distros clear the two gates (libraries, layer-shell compositor), measured per distro, plus what "smoke test" should mean at each level.
