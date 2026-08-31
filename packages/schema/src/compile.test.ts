@@ -475,6 +475,21 @@ describe('textBlock glyphFade drawing', () => {
     const full = renderAndCollect(glyphFadeSpec(1));
     expect(full.map((c) => c.text).join('')).toBe('Hi there');
     expect(full.every((c) => c.alpha === 1)).toBe(true);
+    // Fully revealed, the whole line is ONE draw call — identical to the
+    // no-reveal path, so ligatures and kerning match it exactly (#97).
+    expect(full.length).toBe(1);
+  });
+
+  it('batches the opaque prefix into one fillText and fades only the tail', () => {
+    // fade 0.5 at progress 0.9: glyphs 0–6 have saturated (alpha 1), glyph 7
+    // is still fading — so exactly two draws: the batched run, then the tail
+    // glyph positioned at the run's advance (mock measureText: 8px/char).
+    const calls = renderAndCollect(glyphFadeSpec(0.9, { fade: 0.5 }));
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatchObject({ text: 'Hi ther', alpha: 1 });
+    expect(calls[1]!.text).toBe('e');
+    expect(calls[1]!.alpha).toBeLessThan(1);
+    expect(calls[1]!.x - calls[0]!.x).toBe('Hi ther'.length * 8);
   });
 
   it('draws a partial reveal glyph-by-glyph with falling alpha', () => {
@@ -488,8 +503,13 @@ describe('textBlock glyphFade drawing', () => {
   });
 
   it('glyph positions come from prefix advances and never shift as alpha ramps', () => {
-    const some = renderAndCollect(glyphFadeSpec(0.4, { fade: 0.5 }));
-    const more = renderAndCollect(glyphFadeSpec(0.9, { fade: 0.5 }));
+    // Index-wise call comparison is only valid while no glyph has saturated —
+    // once one hits alpha 1 it joins the batched prefix draw (#97). fade 0.5:
+    // at 0.25 and 0.45 every drawn glyph is still mid-fade, so both renders
+    // are pure per-glyph and positions must be bit-identical.
+    const some = renderAndCollect(glyphFadeSpec(0.25, { fade: 0.5 }));
+    const more = renderAndCollect(glyphFadeSpec(0.45, { fade: 0.5 }));
+    expect(some.length).toBeGreaterThan(0);
     for (let i = 0; i < some.length; i++) {
       expect(more[i]!.text).toBe(some[i]!.text);
       expect(more[i]!.x).toBe(some[i]!.x);

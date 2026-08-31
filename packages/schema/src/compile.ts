@@ -405,10 +405,15 @@ class SpecInstance implements SaverInstance {
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
       if (rs?.glyphAlphas) {
-        // glyphFade: every glyph draws individually at its full-line prefix
-        // advance. measureText is paint-only (the caret's trick) — positions
-        // come from the platform's real glyph widths, never the em table, and
-        // depend only on the fixed prefix, so glyphs never shift as they fade.
+        // glyphFade: the contiguous fully-opaque leading run draws as ONE
+        // fillText — a single draw forms ligatures and pair kerning exactly
+        // like the un-revealed path (pixel parity once fully revealed), and it
+        // drops the O(n²) per-frame prefix re-measure for glyphs that have
+        // finished fading. Only the fading tail draws glyph-by-glyph, each at
+        // its full-line prefix advance. measureText is paint-only (the caret's
+        // trick) — positions come from the platform's real glyph widths, never
+        // the em table, and depend only on the fixed prefix, so glyphs never
+        // shift as they fade.
         ctx.textAlign = 'left';
         const baseAlpha = ctx.globalAlpha;
         for (let li = 0; li < lines.length; li++) {
@@ -417,8 +422,15 @@ class SpecInstance implements SaverInstance {
           const clusters = graphemeClusters(lines[li]!.text);
           const lw = ctx.measureText(lines[li]!.text).width;
           const x0 = align === 'center' ? (maxWPx - lw) / 2 : align === 'right' ? maxWPx - lw : 0;
+          let opaque = 0;
+          while (opaque < clusters.length && (alphas[opaque] ?? 0) >= 1) opaque++;
           let prefix = '';
-          for (let gi = 0; gi < clusters.length; gi++) {
+          if (opaque > 0) {
+            prefix = clusters.slice(0, opaque).join('');
+            ctx.globalAlpha = baseAlpha;
+            ctx.fillText(prefix, x0, li * lh);
+          }
+          for (let gi = opaque; gi < clusters.length; gi++) {
             const a = alphas[gi] ?? 0;
             if (a <= 0) break; // alphas only fall in reading order
             ctx.globalAlpha = baseAlpha * a;
