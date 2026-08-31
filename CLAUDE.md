@@ -28,7 +28,8 @@ apps/
   playground/        Vite dev workbench (imports every package; dev-only, not published)
   mac/               Native macOS menu-bar app (Swift, not published to npm)
   ios/               Native iOS client + VJ remote (Swift, XcodeGen, not published to npm)
-  linux/             Native Wayland/Hyprland overlay (Rust + WebKitGTK 6; on develop, not npm)
+  linux/             Native Wayland layer-shell overlay (Rust + WebKitGTK 6; wlroots/KDE
+                     compositors, x86_64 + aarch64; on develop, not npm)
 docs/                Design docs (specs, research)
 ```
 
@@ -71,7 +72,9 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 (or let preflight’s linux fmt step do it when `cargo` is on PATH).
 
-**Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. See `apps/linux/README.md` for Arch deps (`webkitgtk-6.0`, etc.), hypridle wiring, and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
+**Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. `check-deps.sh` probes pkg-config modules, so it works on any distro and prints the right apt/pacman line. Runs on **wlroots-family compositors and KDE Plasma Wayland — not GNOME/Mutter or X11**, which have no wlr-layer-shell; the app says so and exits rather than aborting. Targets x86_64 and aarch64 (Raspberry Pi OS Trixie/labwc). See `apps/linux/README.md` for the dependency table, idle-daemon wiring (hypridle / swayidle / Quickshell), and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
+
+You cannot build this on macOS, but you do not need a Linux box either — a `debian:trixie` container reproduces the CI leg exactly, and on Apple silicon that container is arm64, so it *is* the Raspberry Pi target. `make app linux build` off-Linux prints the one-liner. `./scripts/test-swayidle-install.sh` covers the session-config rewriting with no swayidle, display or Wayland needed, so run it anywhere before touching `packaging/swayidle/`.
 
 **Apple apps** (`apps/ios`): one XcodeGen project with an iPhone/iPad target (`IdleScreens`) and an Apple TV target (`IdleScreensTV`). Run `xcodegen generate` after adding any file, or the target silently omits it. **Test tvOS in the native Simulator app driven by `xcrun simctl`** (install / launch with debug args like `-channel <id>` / `io screenshot`) — IDE and agent "live simulator preview" integrations are iOS-only and cannot attach to an Apple TV simulator. See `apps/ios/README.md`.
 
@@ -95,8 +98,8 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 - **Release** (`.github/workflows/release.yml`): on push to `main` (and `workflow_dispatch` retry). Slim CI (no e2e) → `changesets/action` opens "chore: version packages" → **auto-merges** that PR → **publishes in the same run**. Prefer **npm Trusted Publishing (OIDC)** (`id-token: write`, npm ≥ 11.5.1). Optional secrets: `NPM_TOKEN` (legacy fallback until every package has a Trusted Publisher), `RELEASE_GITHUB_TOKEN` (PAT/app so the version merge can also re-trigger Pages/CI; without it, same-run publish still works), `IDLE_SERVER_DISPATCH_TOKEN` (PAT with `repo` on private idle-server — fires Consume after publish).
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
-- **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test in an Arch container. Triggers on `apps/linux/**` changes on `main` and `develop`.
-- **Linux release** (`.github/workflows/linux-release.yml`): tag `linux-v*` → release tarball + GitHub Release.
+- **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test across three legs — Arch x86_64, Debian trixie x86_64, Debian trixie aarch64 (native arm runner). Triggers on `apps/linux/**` changes on `main` and `develop`.
+- **Linux release** (`.github/workflows/linux-release.yml`): tag `linux-v*` → x86_64 **and** aarch64 tarballs + GitHub Release. Built on Debian trixie, not Arch: a binary's glibc floor is its build base, and trixie's runs on Arch while the reverse does not.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
 

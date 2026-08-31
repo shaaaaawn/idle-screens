@@ -1,6 +1,11 @@
 # `apps/linux/` — idle-screens for Omarchy/Hyprland: plan & spec
 
-Status: **implemented (initial cut in `apps/linux/`, pending on-device verification)**. Companion to
+Status: **historical — describes the initial Omarchy-only cut.** The
+implementation has since moved on (tray, phone pairing, tokio, multi-distro
+packaging, aarch64), and this document has NOT been kept in step: the dependency
+table, the file tree, and the "no tray/menu UI" scope line are all now wrong.
+**`apps/linux/README.md` is the source of truth**; read this only for the
+original design rationale. Companion to
 [linux-app-plan.md](linux-app-plan.md) (research + options analysis). This doc is
 the buildable spec for Option B at the agreed scope.
 
