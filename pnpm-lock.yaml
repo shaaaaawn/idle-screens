@@ -59,6 +59,9 @@ importers:
       '@idle-screens/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@idle-screens/saver-metaquarium':
+        specifier: workspace:*
+        version: link:../../../packages/saver-metaquarium
       '@idle-screens/savers-classic':
         specifier: workspace:*
         version: link:../../../packages/savers-classic

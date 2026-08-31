@@ -16,6 +16,16 @@ struct IdleScreensTVApp: App {
                         PairView()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings") {
                         SettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-search") {
+                        // Debug: the search surface, optionally pre-filled with
+                        // `-q <query>` — screenshotting results otherwise means
+                        // spelling them out on the on-screen keyboard.
+                        SearchView(initialQuery: {
+                            let args = ProcessInfo.processInfo.arguments
+                            guard let i = args.firstIndex(of: "-q"),
+                                  args.indices.contains(i + 1) else { return "" }
+                            return args[i + 1]
+                        }())
                     } else if ProcessInfo.processInfo.arguments.contains("-fallback") {
                         // Debug: the always-renderable ambient stand-in.
                         FallbackSceneView(channelId: "debug-preview")
@@ -24,7 +34,14 @@ struct IdleScreensTVApp: App {
                               let kind = ClassicSaverKind.supported(id: ProcessInfo.processInfo.arguments[i + 1]) {
                         // Debug: render a native classic-saver port in isolation
                         // (bisects renderer bugs from channel-routing bugs).
-                        ClassicSaverView(kind: kind, seed: 7)
+                        // -env / -mix exercise the aquarium's interpreters.
+                        ClassicSaverView(kind: kind, seed: 7, params: {
+                            var p: [String: String] = [:]
+                            let args = ProcessInfo.processInfo.arguments
+                            if let e = args.firstIndex(of: "-env"), args.indices.contains(e + 1) { p["environment"] = args[e + 1] }
+                            if let m = args.firstIndex(of: "-mix"), args.indices.contains(m + 1) { p["fishMix"] = args[m + 1] }
+                            return p
+                        }())
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-poster"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1) {
                         // Debug: render one channel's poster tile in isolation
@@ -91,24 +108,43 @@ enum DeepLink {
     }
 }
 
-/// Debug-only isolated poster tile (`-poster <channelId>`).
+/// Debug-only card gallery (`-poster <channelId>`): the real `ChannelCard`,
+/// one focused and one not, so a design pass can inspect the poster, the
+/// caption ramp and the focus treatment without walking the remote there.
 private struct PosterDebugView: View {
     let channelId: String
     @Environment(TVAppState.self) private var app
+    @FocusState private var focused: String?
 
     var body: some View {
         ZStack {
             Color.appBackground.ignoresSafeArea()
-            if let channel = app.channels.first(where: { $0.id == channelId }),
-               let spec = channel.spec {
-                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
-                    .frame(width: 960, height: 540)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            } else {
+            if app.channels.isEmpty {
                 ProgressView()
+            } else {
+                HStack(alignment: .top, spacing: TV.columnGap) {
+                    ForEach(cards) { channel in
+                        ChannelCard(channel: channel, focusBinding: $focused)
+                            .frame(width: 500)
+                    }
+                }
+                .padding(TV.gutter)
             }
         }
-        .task { if app.channels.isEmpty { await app.loadGallery() } }
+        .task {
+            if app.channels.isEmpty { await app.loadGallery() }
+            // Park focus on the first card so focused and unfocused
+            // captions are both on screen in one capture.
+            focused = cards.first?.id
+        }
+    }
+
+    /// The requested channel first, then whatever follows it in the gallery.
+    private var cards: [PublicChannel] {
+        guard let i = app.channels.firstIndex(where: { $0.id == channelId }) else {
+            return Array(app.channels.prefix(3))
+        }
+        return Array(app.channels[i...].prefix(3))
     }
 }
 
@@ -119,21 +155,28 @@ private struct MainTabView: View {
     @Environment(TVAppState.self) private var app
     @State private var selection: Tab = .channels
 
-    enum Tab: Hashable { case channels, settings }
+    enum Tab: Hashable { case channels, search, settings }
 
     var body: some View {
         TabView(selection: $selection) {
             ChannelGridView()
                 .tabItem { Label("Channels", systemImage: "tv") }
                 .tag(Tab.channels)
+            SearchView()
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(Tab.search)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
-        // A paired phone can push a channel while Settings is up — jump to
-        // the Channels tab so the saver is actually visible.
+        // A paired phone can push a channel while another tab is up — jump to
+        // the gallery so the saver is actually visible. Only for pushes: a
+        // channel opened from Search stays in Search, or backing out would
+        // land somewhere the viewer never chose.
         .onChange(of: app.selectedChannelId) {
-            if app.selectedChannelId != nil { selection = .channels }
+            if app.selectedChannelId != nil, app.presentingSurface == .grid {
+                selection = .channels
+            }
         }
     }
 }
@@ -155,7 +198,7 @@ private struct BootSplashView: View {
                     .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true),
                                value: glow)
                 Text("idle screens")
-                    .font(.system(size: 64, weight: .bold))
+                    .font(.tvDisplay)
                     .foregroundStyle(Color.textPrimary)
             }
         }

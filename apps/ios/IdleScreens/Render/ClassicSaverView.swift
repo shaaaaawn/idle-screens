@@ -13,6 +13,7 @@ import SwiftUI
 enum ClassicSaverKind: String, CaseIterable, Sendable {
     case warp
     case rainstorm
+    case metaquarium
 
     static func supported(id: String?) -> ClassicSaverKind? {
         id.flatMap(ClassicSaverKind.init(rawValue:))
@@ -42,6 +43,9 @@ struct ClassicSaverView: View {
     let seed: Int
     var tier: CapabilityTier = .t3
     var live: Bool = true
+    /// Steered scene params (classic track) — the aquarium reads
+    /// `environment` and `fishMix`; the line-field savers ignore them.
+    var params: [String: String] = [:]
 
     /// Poster frame time: far enough in that the field looks populated
     /// rather than caught mid-spawn.
@@ -76,6 +80,16 @@ struct ClassicSaverView: View {
         case .rainstorm:
             RainField.shared(seed: seed32, scale: RainField.scale(for: tier))
                 .draw(in: &ctx, size: size, t: t)
+        case .metaquarium:
+            // The 2D tank: the collection's own transparent-icon art swimming
+            // an After Dark aquarium. The 3D tank needs WebGL the TV lacks;
+            // this is the scaled-down native answer. The scene's environment
+            // and fishMix are interpreted, so a vent channel reads ember and
+            // the cast follows the mix.
+            AquariumField.shared(seed: seed32, tier: tier,
+                                 environment: params["environment"],
+                                 fishMix: params["fishMix"])
+                .draw(in: &ctx, size: size, t: t, tier: tier)
         }
     }
 }

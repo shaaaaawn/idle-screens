@@ -32,7 +32,10 @@ export const METAQUARIUM_PARAMS = {
   fishUrl: { type: 'string', default: 'ipfs://QmaHbEQAP6k2zopJHJBzyaK62zNX5yH8yASDjkaG4DY9Dp/fish_257_of_the_metaquarium_3d.glb' },
   /** Mixed population DSL: comma-separated `id[:count]` of a minted token id
    *  (1-512, default catalog) or breed name — e.g. "257:3,100:2,seaturtle:1".
-   *  A custom catalog is a closed world (no farm/IPFS fallback). Counts are
+   *  A minted fish is an INDIVIDUAL: no id appears twice in a scene, and a
+   *  count casts that many DISTINCT fish of the breed ("300:12" is twelve
+   *  different angelfish). A custom catalog is a closed world (no farm/IPFS
+   *  fallback, no uniqueness — NPC entries are species). Counts are
    *  absolute; the expanded total clamps to the device tier's fish cap.
    *  Non-empty mix OVERRIDES fishUrl and fishCount; empty string = single-
    *  breed mode. Unknown ids/bad counts degrade (good tokens still parse);
@@ -98,8 +101,9 @@ export const METAQUARIUM_PARAMS = {
    *  addressable. `none` (default) changes nothing. */
   maneuver: { type: 'enum', default: 'none', options: [...MANEUVERS], ease: 'step' },
   /** How often events fire: 0 never, 1 the maneuver's own tempo (roughly
-   *  every 14-20s per fish, desynchronised). */
-  maneuverRate: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+   *  every 14-20s per fish, desynchronised), above 1 faster — 3 packs events
+   *  nearly back to back. Values <=1 mean exactly what they always did. */
+  maneuverRate: { type: 'number', default: 0.5, min: 0, max: 3, ease: 'smooth' },
   /** How hard: scales the surge, the kick, and the tail flurry together. */
   maneuverIntensity: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'smooth' },
   /** Procedural body yaw for models that carry NO animation clip — most of

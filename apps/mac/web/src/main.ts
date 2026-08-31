@@ -117,5 +117,5 @@ window.addEventListener('keydown', (e) => {
 });
 
 const start = pinned ? Math.max(0, saverIndex(pinned, ALL_SAVERS)) : Math.floor(Math.random() * ALL_SAVERS.length);
-void controller.mountSaver(start);
+void controller.mountSaver(start, true, { skipOnFail: !pinned }).catch(() => {});
 startCycle();

@@ -14,6 +14,19 @@ extension View {
         }
     }
 
+    /// A tinted glass badge — brand color carried by the material rather than
+    /// painted flat, so it belongs to the artwork under it instead of sitting
+    /// on top as a sticker. Tint goes through `glassEffect`'s own API, not the
+    /// app-wide `.tint()` that bleeds into every control on iOS 26.
+    @ViewBuilder
+    func glassBadge<S: InsettableShape>(tint: Color, shape: S) -> some View {
+        if #available(iOS 26, tvOS 26, *) {
+            glassEffect(.regular.tint(tint.opacity(0.55)), in: shape)
+        } else {
+            background(tint.opacity(0.9), in: shape)
+        }
+    }
+
     /// Non-interactive glass for surfaces that only present — cards, panels,
     /// sheets. `interactive()` costs a touch-responsive sample pass, so it is
     /// reserved for things that actually respond to a finger.

@@ -58,7 +58,10 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'loop', label: 'Loop', speedMul: 1, band: 'free', bobAmp: 0, bobHz: 0, formation: false, travel: 1 },
   { name: 'school', label: 'School', speedMul: 1, band: 'free', bobAmp: 1.5, bobHz: 0.5, formation: true, travel: 1 },
   { name: 'drift', label: 'Drift', speedMul: 0.35, band: 'mid', bobAmp: 5, bobHz: 0.13, formation: false, travel: 0.6 },
-  { name: 'hover', label: 'Hover', speedMul: 0.2, band: 'free', bobAmp: 7, bobHz: 0.3, formation: false, travel: 0.12 },
+  // speedMul 0.55, not 0.2: QA measured hover at swimSpeed 0.5 pinned to a
+  // fixed screen x for 8+ seconds — frozen, not station-keeping. The two
+  // multiplied slowdowns (speedMul x travel) were the freeze.
+  { name: 'hover', label: 'Hover', speedMul: 0.55, band: 'free', bobAmp: 7, bobHz: 0.3, formation: false, travel: 0.12 },
   { name: 'patrol', label: 'Patrol', speedMul: 0.55, band: 'mid', bobAmp: 1, bobHz: 0.09, formation: false, travel: 1 },
   { name: 'bottom', label: 'Bottom-hugger', speedMul: 0.7, band: 'floor', bobAmp: 2, bobHz: 0.4, formation: false, travel: 1 },
   { name: 'surface', label: 'Surface-skimmer', speedMul: 0.9, band: 'ceiling', bobAmp: 3, bobHz: 0.55, formation: false, travel: 1 },
@@ -113,6 +116,30 @@ export function fishVariation(index: number, variance: number): {
     // Independent of `variance`: spreading is correctness, not flavour.
     anchor: fishHash(index, 7),
   };
+}
+
+/**
+ * Where a fish starts on its own route, as a fraction of the route's length.
+ *
+ * The rule lives here rather than inline in the tank because it is the whole
+ * of a bug that shipped once already: the offset used to apply only when
+ * `travel < 1`, so every full-travel style (patrol, bottom, surface) mounted
+ * as one knot dead-centre — every compiled spline's `points[0]` sits near
+ * azimuth 0, so an unspread cast starts stacked. It took minutes of screen
+ * time to disperse, and was watched happening three times in a row on a live
+ * channel before anyone read the condition.
+ *
+ * `loop` is the one exception, and not for looks: it promises to be exactly
+ * the pre-style behaviour frame for frame, so it may not touch frame 0.
+ *
+ * Formation styles pass through here too even though the carrier's rigid
+ * transform ignores the result — cheaper to keep one rule than to encode
+ * "except when a branch downstream discards it", which is the kind of caveat
+ * that stops being true and nobody notices.
+ */
+export function anchorFraction(style: SwimStyleSpec, index: number, variance: number): number {
+  if (style.name === 'loop') return 0;
+  return fishVariation(index, variance).anchor;
 }
 
 /** Nose-to-tail length of a fish at scale 1, in tank units. Formation spacing
@@ -196,13 +223,21 @@ export function formationSlot(
     const within = index % VSIZE;
     const rank = (within + 1) >> 1;
     const wing = within === 0 ? 0 : within % 2 === 1 ? -1 : 1;
+    // Wings droop behind the point at EVERY layer count — a QA pass showed
+    // stacked Vs reading as two unrelated flat rows without it. The droop is
+    // CENTRED on the mean rank so it never grows the vertical extent: the
+    // point rides high, the wings low, the average unmoved. Same offset at
+    // the same rank in every layer, so inter-layer spacing is untouched.
+    const droop = (rank - 2) * FISH_LENGTH * (layers === 1 ? 0.24 : 0.12);
+    // Multi-layer pitch drops to 1.2 body lengths (same-rank vertical gap
+    // 21.6 minus worst-case jitter closure still clears one body length) so
+    // three stacked Vs plus droop fit the water column.
+    const pitch = layers === 1 ? 1.5 : 1.2;
+    const jit = layers === 1 ? 0.2 : 0.15;
     return {
       side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
-      // 1.5 body lengths per layer with a small jitter: adjacent layers seat
-      // the same rank directly above each other, so pitch minus worst-case
-      // jitter closure must clear one body length.
-      up: (layer - (layers - 1) / 2) * FISH_LENGTH * 1.5
-        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.2 * j,
+      up: (layer - (layers - 1) / 2) * FISH_LENGTH * pitch
+        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * jit * j - droop,
       back: (rank - 2) * FISH_LENGTH * 1.35,
     };
   }

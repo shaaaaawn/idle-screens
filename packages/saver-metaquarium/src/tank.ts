@@ -49,8 +49,8 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
-  formationSlot, swimStyleOf, type FormationShape,
+  anchorFraction, bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES,
+  formationExtent, formationSlot, swimStyleOf, type FormationShape,
 } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
@@ -239,11 +239,18 @@ function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => n
     const d = Math.sqrt(x * x + z * z) / R;
     let h = 0;
     if (kind === 'dunes') {
-      h = Math.sin(x * 0.011 + a) * 26 + Math.cos(z * 0.009 + b) * 20;
+      // Wavelengths sized to the VISIBLE footprint. The originals (0.011 →
+      // 571-unit swells) put less than one swell in frame at any camera, so
+      // a QA A/B showed dunes rendering as a smooth tilt while ridges (whose
+      // |sin| halves its period) showed real relief. 2-3 swells in frame now.
+      h = Math.sin(x * 0.028 + a) * 24 + Math.cos(z * 0.023 + b) * 18
+        + Math.sin((x + z) * 0.011 + b) * 6;
     } else if (kind === 'ridges') {
       h = Math.abs(Math.sin(x * 0.02 + a)) * 54 - 18 + Math.sin(z * 0.006 + c) * 10;
     } else if (kind === 'basin') {
-      h = d * d * 150 - 60 + Math.sin(x * 0.008 + a) * 8;
+      // The bowl stays, but a shorter ripple gives the near floor a surface —
+      // d² alone is near-constant inside the tank radius.
+      h = d * d * 150 - 60 + Math.sin(x * 0.024 + a) * 7 + Math.cos(z * 0.02 + c) * 5;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
     return h * Math.max(0, 1 - d * d);
@@ -259,8 +266,25 @@ function buildTerrain(height: (x: number, z: number) => number, color: string): 
     pos.setY(i, height(pos.getX(i), pos.getZ(i)));
   }
   geo.computeVertexNormals();
+  // Shading is BAKED as a grayscale vertex-color lambert term — an unlit
+  // heightfield has no relief (a QA pass measured flat→dunes at 2.6/255 mean
+  // pixel difference: hills nobody can see). Baking keeps the zero-per-frame
+  // cost and leaves material.color as the pure tint, so floorColor steering
+  // multiplies through unchanged.
+  const normal = geo.attributes.normal!;
+  const shadeArr = new Float32Array(pos.count * 3);
+  // Fixed low sun from the north-west — direction is aesthetic, not physical.
+  const lx = -0.45, ly = 0.78, lz = -0.43;
+  for (let i = 0; i < pos.count; i++) {
+    const lambert = Math.max(0, normal.getX(i) * lx + normal.getY(i) * ly + normal.getZ(i) * lz);
+    const v = 0.45 + 0.55 * lambert;
+    shadeArr[i * 3] = v;
+    shadeArr[i * 3 + 1] = v;
+    shadeArr[i * 3 + 2] = v;
+  }
+  geo.setAttribute('color', new BufferAttribute(shadeArr, 3));
   geo.userData.mqOwned = true;
-  const mat = new MeshBasicMaterial({ color: new Color(color) });
+  const mat = new MeshBasicMaterial({ color: new Color(color), vertexColors: true });
   mat.userData.mqOwned = true;
   const mesh = new Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -300,22 +324,34 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone.
-        float fade = smoothstep(0.0, 1.0, vY);
+        float fade = smoothstep(0.0, 0.3, vY) * (1.0 - smoothstep(0.72, 1.0, vY));
         float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.16 * breathe);
+        // 0.13, not more: with the shaft finally IN frame, alpha is the whole
+        // dial — 0.34 turned ice's near-white shafts into pyramids that
+        // dwarfed the fish. Faint is what light through water looks like.
+        gl_FragColor = vec4(uColor, fade * uStrength * 0.13 * breathe);
       }`,
   });
   mat.userData.mqOwned = true;
-  const geo = new CylinderGeometry(6, 92, Math.abs(y) * 0.85, 10, 1, true);
+  // The shaft spans the TANK (y 0..150), whatever the light's own distance.
+  // The old geometry spanned the SOURCE — height |y|·0.85 centred at y·0.45 —
+  // which for vent's y=-520 put every shaft at y -455..-13, entirely under
+  // the seabed, and for from-above sources put the bright end hundreds of
+  // units past the ceiling. A QA pass measured rayStrength 0→1 at a 0.07/255
+  // pixel difference: the dial did nothing. The fade now peaks IN the fish
+  // band and closes at both ends so shafts still read as light, not walls.
+  const geo = new CylinderGeometry(7, 42, 150, 10, 1, true);
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
     const a = rng.next() * Math.PI * 2;
-    const r = 60 + rng.next() * 190;
-    m.position.set(Math.cos(a) * r, y * 0.45, Math.sin(a) * r);
+    const r = 45 + rng.next() * 130;
+    m.position.set(Math.cos(a) * r, 72, Math.sin(a) * r);
     // Shafts from below are inverted so the wide end still faces the light.
     if (y < 0) m.rotation.z = Math.PI;
     m.rotation.y = rng.next() * Math.PI;
+    // A slight lean per shaft — parallel columns read as architecture.
+    m.rotation.x = (rng.next() - 0.5) * 0.18;
     m.frustumCulled = false;
     group.add(m);
   }
@@ -421,6 +457,9 @@ class TankInstance implements SaverInstance {
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
+  /** The active room's palette — consulted only where the author left the
+   *  matching param at its manifest default. */
+  private roomPalette: { fog: string; floor: string; mote: string } | null = null;
   private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
@@ -655,8 +694,8 @@ class TankInstance implements SaverInstance {
       ? (floorOverride as FloorKind)
       : preset.floor;
     if (kind !== 'flat') {
-      const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
-      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88));
+      const floorHex = String(this.params.floorColor ?? preset.palette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
@@ -676,20 +715,23 @@ class TankInstance implements SaverInstance {
       this.presetWaterY = preset.water.y;
     }
     if (can.rayCount > 0 && preset.rays) {
-      // -1 = follow the environment; 0 is a real author choice for "off".
+      // Built even at strength 0: a QA pass found that publishing with
+      // rayStrength 0 left rayMat null forever, so later steering hit a dead
+      // `if (this.rayMat)` and the dial did nothing until the whole room was
+      // rebuilt. Strength is a uniform; existence is the room's business.
       const strength = rayStrength >= 0 ? rayStrength : preset.rays.strength;
-      if (strength > 0) {
-        const { group: rg, material } = buildRays(
-          can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
-        );
-        group.add(rg);
-        this.rayMat = material;
-        this.presetRayStrength = preset.rays.strength;
-      }
+      const { group: rg, material } = buildRays(
+        can.rayCount, preset.rays.color, preset.rays.y, strength, this.ctxSaver.rng.fork(0x8a1),
+      );
+      material.visible = strength > 0;
+      group.add(rg);
+      this.rayMat = material;
+      this.presetRayStrength = preset.rays.strength;
     }
     this.room = group;
     this.scene.add(group);
     this.applyRoomParams(waterY, rayStrength);
+    this.roomPalette = preset.palette ?? null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
@@ -1068,7 +1110,7 @@ class TankInstance implements SaverInstance {
 
     // Fog color
     const fogHex = String(
-      this.params.fogColor ?? this.space.fogColor?.default ?? '#030009',
+      this.params.fogColor ?? this.roomPalette?.fog ?? this.space.fogColor?.default ?? '#030009',
     );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
@@ -1078,7 +1120,7 @@ class TankInstance implements SaverInstance {
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
     fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    const floorHex = String(this.params.floorColor ?? this.space.floorColor?.default ?? '#0a1d33');
+    const floorHex = String(this.params.floorColor ?? this.roomPalette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
     this.floorMat.color.set(floorHex);
     // Terrain follows floorColor as well — the environment supplies the SHAPE,
     // the author keeps the palette.
@@ -1090,7 +1132,7 @@ class TankInstance implements SaverInstance {
       this.motes.geometry.setDrawRange(0, active);
       this.moteMat.uniforms.uTime!.value = tSec;
       (this.moteMat.uniforms.uColor!.value as Color).set(
-        String(this.params.moteColor ?? this.space.moteColor?.default ?? '#7fd6ff'),
+        String(this.params.moteColor ?? this.roomPalette?.mote ?? this.space.moteColor?.default ?? '#7fd6ff'),
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
@@ -1162,15 +1204,22 @@ class TankInstance implements SaverInstance {
         ? distanceAt(f.plan, warpSec, styleSpeed)
         : distanceAt(f.plan, tSec, speed * styleSpeed);
       // Every style spreads its cast along the loop, not only the
-      // station-keepers. Without this, patrol/bottom/surface all mounted as
-      // one knot dead-centre (every compiled spline starts near azimuth 0)
-      // and took minutes to disperse — watched happen three times in a row
-      // on a live channel. `loop` alone stays anchorless: it promises to be
-      // exactly the pre-style behaviour, frame for frame.
-      const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
+      // station-keepers; `loop` alone stays anchorless. The rule and the bug
+      // that earned it live in swim.ts's `anchorFraction`, where a test can
+      // reach them.
+      const anchor = anchorFraction(style, f.index, variance) * f.plan.totalLength;
       // Maneuvers displace, never re-rate: `along` moves the fish on its own
       // path, the kick is added to the pose after banding. Both closed-form.
-      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity);
+      // Contagious events (startle) propagate through a formation as a wave:
+      // seat distance from a per-schedule epicentre becomes a start delay, so
+      // the flinch crosses the lattice at ~90 units/s instead of every fish
+      // twitching on its own private clock. Free fish keep their own schedule.
+      let seatDelay: number | null = null;
+      if (spec?.contagious && style.formation) {
+        const slot0 = formationSlot(f.index, visible, variance, undefined, fshape);
+        seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
+      }
+      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
       const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
 
       // What drives the animation. For a free fish that is its own effort; for
@@ -1257,15 +1306,25 @@ class TankInstance implements SaverInstance {
       // a floor it can never reach and a skimmer climbs at an invisible lid.
       // Level, not merely flatter: a fraction of the spline's climb still reads
       // as a fish nosing into a floor it cannot reach.
-      const fy = band ? 0 : pose.fy;
+      // Maneuver pitch applies AFTER the band level-lock, deliberately: the
+      // level rule zeroes exactly the styles (bottom, drift) a grazer lives
+      // in, and grazing IS a posture — nose-down over the substrate is the
+      // one maneuver shape a still image can name.
+      const fy = (band ? 0 : pose.fy)
+        + (mnv.pitch !== 0 ? Math.tan(mnv.pitch) * (Math.hypot(pose.fx, pose.fz) || 1) : 0);
       let px = pose.x, pz = pose.z;
       if (mnv.side !== 0 || mnv.up !== 0) {
         // Kick along the fish's right-hand normal, closing back to zero by
         // the event's end — the fish leaves its line and comes home to it.
+        // In a formation the kick is scaled UP: QA measured startle's 2.8
+        // body lengths as 1.5 phalanx column pitches — the scattered fish
+        // landed on roughly another seat and read as mis-seated. 1.8x clears
+        // the lattice.
+        const kickScale = style.formation ? 1.8 : 1;
         const hl2 = Math.hypot(pose.fx, pose.fz) || 1;
-        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH;
-        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH;
-        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH));
+        px += (pose.fz / hl2) * mnv.side * FISH_LENGTH * kickScale;
+        pz += (-pose.fx / hl2) * mnv.side * FISH_LENGTH * kickScale;
+        y = Math.min(BOUNDS.yMax + 60, Math.max(BOUNDS.yMin, y + mnv.up * FISH_LENGTH * kickScale));
         // A startle must not kick a fish through the glass.
         const kr = Math.hypot(px, pz);
         if (kr > BOUNDS.radius) {
@@ -1414,6 +1473,25 @@ class TankInstance implements SaverInstance {
     this.t = t;
     this.setState(t);
     this.renderScene();
+  }
+
+  /**
+   * Snapshot the current frame (SaverInstance.capture). Renders fresh and
+   * reads in the SAME task: a WebGL buffer without preserveDrawingBuffer is
+   * cleared once the frame is presented, so any read from outside the render
+   * tick sees black — which also makes this work in a hidden tab, where rAF
+   * never fires and there is no render tick to race at all.
+   */
+  async capture(): Promise<ImageBitmap | null> {
+    if (this.disposed || this.renderer.getContext()?.isContextLost?.()) return null;
+    this.renderStill();
+    try {
+      // createImageBitmap snapshots the source at CALL time; the await only
+      // covers the decode. Called here, pre-present, the buffer is intact.
+      return await createImageBitmap(this.canvas);
+    } catch {
+      return null;
+    }
   }
 
   composition(): SaverLayer[] {

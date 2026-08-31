@@ -108,6 +108,13 @@ export interface SaverInstance {
   /** Deterministic, frame-addressable render: draw the state at logical time `t`
    *  (ms) for `seed`. Pure w.r.t. (program, seed, applied track, t). Optional. */
   renderFrame?(t: number, seed: number): void;
+  /** Snapshot the CURRENT frame as an ImageBitmap, rendering one on demand if
+   *  the loop is throttled (hidden tab). Exists because page JS cannot read
+   *  this frame from outside: a worker-transferred canvas is opaque to the
+   *  main thread, and a non-preserveDrawingBuffer WebGL canvas reads black
+   *  outside the render tick. Resolve null for "nothing to show yet".
+   *  Optional. */
+  capture?(): Promise<ImageBitmap | null>;
   /** Steer parameters over time. Optional. */
   applyTrack?(track: ControlTrack): void;
   /** Seek logical animation time (ms) for workbench preview. Optional. */

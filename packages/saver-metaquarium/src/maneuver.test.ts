@@ -14,7 +14,7 @@ describe('maneuvers — the compiled performance', () => {
       maneuverAt(spec, 3, 100, 0, 1),
       maneuverAt(spec, 3, 100, 1, 0),
     ]) {
-      expect(st).toEqual({ along: 0, alongBump: 0, side: 0, up: 0, flurry: 0 });
+      expect(st).toEqual({ along: 0, alongBump: 0, side: 0, up: 0, flurry: 0, pitch: 0 });
     }
   });
 
@@ -74,6 +74,46 @@ describe('maneuvers — the compiled performance', () => {
     expect(z).toBeGreaterThan(d);
   });
 
+  it('graze pitches nose-down mid-event; dart never pitches', () => {
+    const g = maneuverSpecOf('graze')!;
+    let minPitch = 0;
+    for (let t = 0; t < g.interval * 3; t += 0.2) {
+      minPitch = Math.min(minPitch, maneuverAt(g, 1, t, 1, 1).pitch);
+    }
+    expect(minPitch).toBeLessThan(-0.3);
+    const d = maneuverSpecOf('dart')!;
+    for (let t = 0; t < d.interval * 2; t += 0.5) {
+      expect(maneuverAt(d, 1, t, 1, 1).pitch).toBe(0);
+    }
+  });
+  it('the startle wave: seated fish share the event, offset by seat distance', () => {
+    const sp = maneuverSpecOf('startle')!;
+    // With seat delays, near and far seats fire the SAME event k at times
+    // differing by exactly their delay difference.
+    const probe = (delay: number) => {
+      for (let t = 0; t < sp.interval * 2; t += 0.05) {
+        if (maneuverAt(sp, 3, t, 1, 1, delay).side !== 0) return t;
+      }
+      return -1;
+    };
+    const near = probe(0);
+    const far = probe(1.2);
+    expect(near).toBeGreaterThanOrEqual(0);
+    expect(far).toBeGreaterThanOrEqual(0);
+    expect(far - near).toBeCloseTo(1.2, 1);
+    // Free fish (null delay) keep their own schedules — no chorus line.
+    const t0 = 30;
+    const sides = Array.from({ length: 8 }, (_, i) => maneuverAt(sp, i, t0, 1, 1).side);
+    const active = sides.filter((x) => Math.abs(x) > 0.05).length;
+    expect(active).toBeLessThan(8);
+  });
+  it('rate above 1 shortens the interval; at or below 1 nothing changed', () => {
+    const d = maneuverSpecOf('dart')!;
+    // Same instant, higher rate → more completed events accumulated.
+    const a1 = maneuverAt(d, 2, 200, 1, 1).along;
+    const a3 = maneuverAt(d, 2, 200, 3, 1).along;
+    expect(a3).toBeGreaterThan(a1 * 1.5);
+  });
   it('the catalogue is what we say it is', () => {
     expect([...MANEUVERS]).toEqual(['none', 'dart', 'startle', 'graze', 'curious', 'zoomies']);
     for (const m of MANEUVERS) {

@@ -112,6 +112,19 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: { fishCount: 6, fishUrl: LOCAL_FISH_URL },
     catalog: LOCAL_CATALOG,
   }),
+  // Maneuver QA: grazers nose-down over dunes — the posture pass 3 proved
+  // impossible before the pitch term. ?saver=metaquarium-graze.
+  createMetaquarium({
+    id: 'metaquarium-graze',
+    label: 'Metaquarium (grazers)',
+    params: {
+      fishMix: '100:6', swimStyle: 'bottom', maneuver: 'graze',
+      maneuverRate: 1.6, maneuverIntensity: 1,
+      swimVariance: 0.5, bodyWiggle: 0.4, environment: 'reef',
+      cameraDistance: 140, cameraElevation: 18, swimSpeed: 0.7,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
   // Glow QA: the crystal-finned breeds whose whole-silhouette GLOW parts
   // ghosted on the wall (2026-08-25). Close camera on purpose — this is the
   // zoom the report came from. Network-fetch (farm ids), studio-only.
