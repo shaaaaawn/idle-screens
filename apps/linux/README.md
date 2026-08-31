@@ -105,7 +105,35 @@ extract, and run:
 ./install.sh
 ```
 
-Set `PREFIX=/usr` to install system-wide (default is `/usr/local`).
+Installs to `~/.local` by default — **no sudo**. Set `PREFIX=/usr` (or
+`/usr/local`) for a system-wide install; the installer only escalates when the
+prefix is not writable.
+
+To remove an install (shipped in the same tarball):
+
+```bash
+./uninstall.sh          # remove from PREFIX (default ~/.local)
+./uninstall.sh --all    # also sweep /usr/local and /usr
+./uninstall.sh --purge  # also drop config, device id, and update cache
+```
+
+A plain uninstall keeps `~/.config/idle-screens` and the per-machine device id,
+so reinstalling does not re-pair the machine.
+
+**Bundle lookup.** The binary searches for the web bundle in this order, taking
+the first that contains `index.html` + `assets/main.js`:
+
+1. `$IDLE_SCREENS_WEB` (runtime override, used by `dev-run.sh`)
+2. the `IDLE_SCREENS_WEB_DIR` build-time override
+3. `~/.local/share/idle-screens/web` (user-local install)
+4. `/usr/local/share/idle-screens/web`
+5. `/usr/share/idle-screens/web` (packaged install)
+
+A user-local install therefore wins over a leftover system one. Before this
+order existed, `/usr/share` was the only default while `install.sh` honored
+`PREFIX` for the bundle — so a rootless install put the bundle where the binary
+never looked and silently rendered whichever stale bundle a previous system
+install had left behind.
 
 ### Option B — manual (from source)
 
