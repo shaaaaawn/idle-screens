@@ -40,7 +40,7 @@ GNOME by default.
 | **Debian trixie** | 4.18.6 | 2.52.6 | 1.0.4 | ✅ built in CI, both arches |
 | **Arch** | current | current | current | ✅ built in CI |
 | **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
-| **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ module confirmed |
+| **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ all present |
 | **Alpine edge** | `gtk4.0-dev` | `webkit2gtk-6.0-dev` | `gtk4-layer-shell` | ✅ all present |
 | **Ubuntu 24.04 LTS** | 4.14.5 | 2.52.6 | **ABSENT** | ⚠️ one package short |
@@ -155,6 +155,27 @@ Three things this proves beyond "Fedora compiles":
   `check-deps.sh` needed no Fedora-specific change.
 - The swayidle installer passes on a **third** package manager and a third awk,
   after Debian (mawk) and Arch (gawk).
+
+### 5.2 openSUSE Tumbleweed L2 result (2026-08-31)
+
+```
+check-deps:     All native build dependencies present (suse).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 59.99s
+cargo test:     26 passed; 0 failed
+```
+
+The interesting part is the `(suse)` label. `distro.sh` has **no** openSUSE
+package list — `idle_install_hint` falls through to the generic arm that just
+prints the pkg-config module names. The build still worked, because detection
+never depended on the distro map. That is the seam's central claim
+("detection is distro-independent; only the remediation hint is distro-mapped")
+holding on a distro nothing was written for, and it is the second time it has
+held — Fedora was the first, with a hint that existed but was guesswork.
+
+Worth adding a real `suse` hint now that we know the package names
+(`gtk4-devel`, `webkitgtk4-devel`, `gtk4-layer-shell-devel`), but note that it
+is a convenience, not a requirement.
 
 Cheapest real win: extend L2 to Tier 2 as a manually-triggered CI job
 (`workflow_dispatch`), so it does not slow every PR but can be run before a
