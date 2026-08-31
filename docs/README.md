@@ -23,3 +23,4 @@ Original thinking docs that motivated the project. Preserved for context and ref
 - **[aval-findings.md](research/aval-findings.md)** -- AVAL audit findings and build-in-public notes.
 - **[omarchy-plugin-spec.md](research/omarchy-plugin-spec.md)** -- Omarchy's plugin system read from source: why we still fork the idle plugin, the 3s screensaver-window deadline, and the ranked options for stopping.
 - **[linux-distro-targets.md](research/linux-distro-targets.md)** -- which distros clear the two gates (libraries, layer-shell compositor), measured per distro, plus what "smoke test" should mean at each level.
+- **[tickets-omarchy-and-distros.md](research/tickets-omarchy-and-distros.md)** -- ready-to-file ticket drafts from the two docs above: outbound (first-class Omarchy support) and inbound (distro reach).

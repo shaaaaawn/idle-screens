@@ -145,6 +145,48 @@ That is a much better debugging tool than we currently advertise.
 
 ---
 
+## 3a. The hook system — found late, and it changes the answer
+
+Omarchy ships a general hook mechanism that the plugin manual does not mention,
+and it turns out to matter more to us than the plugin spec does.
+
+`~/.config/omarchy/hooks/<name>.d/` holds executable scripts. `omarchy-hook
+<name> [args…]` runs the single file `hooks/<name>` and then every file in
+`hooks/<name>.d/`, passing arguments through. Installing one is a supported CLI
+call, not file surgery:
+
+```bash
+omarchy hook install <type> <file>    # -> ~/.config/omarchy/hooks/<type>.d/
+```
+
+Hook types present in `config/omarchy/hooks/`:
+
+| Hook | Fires | What it is worth to us |
+| --- | --- | --- |
+| `theme-set.d` | on theme switch | **re-theme the saver to the active Omarchy theme** |
+| `post-update.d` | after `omarchy update` | **re-apply our clone patch — a self-healing fork** |
+| `post-boot.d` | after boot | ensure tray / pairing socket is up |
+| `battery-low.d` | on low battery | could suspend the saver on a laptop |
+| `font-set.d`, `pre-refresh-pacman.d` | — | not relevant |
+
+Two consequences:
+
+**The fork's biggest problem is operationally fixable today.** "The clone stops
+receiving upstream fixes" is bad mostly because it degrades *silently* after an
+`omarchy update`. A `post-update.d` hook that re-clones and re-patches converts
+that from silent rot into self-repair — without waiting on §4A.
+
+**Theme following is the strongest integration available to us, and it needs no
+plugin and no fork.** Each of Omarchy's 22 themes carries a `colors.toml` of
+named colours (`accent`, `background`, `foreground`, `red`, `green`, `blue`, …
+plus `mode = "dark"|"light"`). Our scenes are palette-driven SaverSpec JSON and
+our channels are steerable live. A `theme-set.d` hook that maps `colors.toml`
+onto a scene palette gives "change your Omarchy theme, your screensaver
+follows" — which nothing else in this space does, and which is a far better
+argument for adoption than any packaging improvement.
+
+---
+
 ## 4. The options, ranked
 
 ### A. Upstream a config key — highest leverage, kills the fork
@@ -237,8 +279,18 @@ than a footnote.
 
 ## 7. Recommendation
 
-Do **B** now (publish the plugin repo — pure upside, uses the platform's own
-distribution), ask **A** immediately (small, generalises, and is the only option
-that actually deletes the fork), keep **D** working meanwhile, and hold **C** in
-reserve. Land the §5 documentation fixes independently of all four — they are
-correct today regardless of how the plugin question resolves.
+Publish the plugin repo (**B**) — pure upside, and it uses the platform's own
+distribution and update path. Ask about the config key (**A**) immediately, since
+it has the longest lead time, generalises past us, and is the only option that
+truly deletes the fork. Keep **D** working meanwhile, made non-rotting by a
+`post-update.d` hook (§3a), and hold **C** in reserve.
+
+Then treat **theme following** (§3a) as the headline feature rather than a nicety.
+The packaging work makes us installable; the theme hook is why an Omarchy user
+would choose us. It needs neither a plugin nor a fork, so it is not gated on any
+of A–D.
+
+Land the §5 documentation fixes independently of all of it — they are correct
+today regardless of how the plugin question resolves.
+
+Ticket drafts for all of the above: [tickets-omarchy-and-distros.md](tickets-omarchy-and-distros.md).
