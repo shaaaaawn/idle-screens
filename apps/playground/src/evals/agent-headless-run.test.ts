@@ -27,61 +27,24 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runAgentBatch, trainingJsonl, sftJsonl, repairJsonl } from './agent-run';
 import type { ChatTransport } from './agent-loop';
-import type { ChatRequest, ChatResponse, ChatServed } from './openrouter';
+import { chatCompletionWith } from './openrouter';
 import { getCatalog, getArtist, BENCHMARK_INTENTS } from './catalog';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = process.env.EVAL_MODEL || 'moonshotai/kimi-k3';
 const TRIALS = Math.max(1, Number(process.env.EVAL_TRIALS) || 3);
 const SCREEN_ID = process.env.EVAL_SCREEN || 'monet--benchmark--calm-horizon';
 const ARTIST_ID = process.env.EVAL_ARTIST || '';
 
-/** chatCompletion() from openrouter.ts, minus the browser key store. */
+/**
+ * The SAME transport panel runs use — openrouter.ts with the key passed in
+ * from the process environment instead of the browser key store (#98). This
+ * file used to carry a full copy of chatCompletion(), which drifted silently
+ * whenever the browser version grew a field.
+ */
 function makeTransport(key: string): ChatTransport {
-  return async (req: ChatRequest): Promise<ChatResponse> => {
-    const res = await fetch(CHAT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: req.model,
-        messages: req.messages,
-        ...(req.tools?.length ? { tools: req.tools } : {}),
-      }),
-      signal: req.signal ?? null,
-    });
-    if (!res.ok) throw new Error(`OpenRouter chat: HTTP ${res.status}`);
-    const body = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null; tool_calls?: ChatResponse['toolCalls'] } }>;
-      model?: string;
-      id?: string;
-      provider?: string;
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    };
-    const msg = body.choices?.[0]?.message;
-    const served: ChatServed = {
-      ...(body.model ? { model: body.model } : {}),
-      ...(body.provider ? { provider: body.provider } : {}),
-      ...(body.id ? { generationId: body.id } : {}),
-      ...(body.usage
-        ? {
-            usage: {
-              ...(body.usage.prompt_tokens != null ? { promptTokens: body.usage.prompt_tokens } : {}),
-              ...(body.usage.completion_tokens != null
-                ? { completionTokens: body.usage.completion_tokens }
-                : {}),
-              ...(body.usage.total_tokens != null ? { totalTokens: body.usage.total_tokens } : {}),
-            },
-          }
-        : {}),
-    };
-    return {
-      content: msg?.content ?? null,
-      toolCalls: msg?.tool_calls ?? [],
-      ...(Object.keys(served).length ? { served } : {}),
-    };
-  };
+  return (req) => chatCompletionWith(key, req);
 }
 
 const median = (xs: number[]): number => {
