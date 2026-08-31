@@ -363,6 +363,19 @@ worker compile-hook does not dispatch sequences).
 `applyTrack`. The `SequenceInstance` intercepts this path before delegation.
 Remaining deltas are forwarded to the active child's `applyTrack`.
 
+> **The segment steer is not sticky (v1).** `applyTrack` moves the active
+> segment, but `renderFrame` re-derives the segment from the wall clock alone,
+> so on a live viewer the steer is overwritten by the next animation frame
+> (~16 ms). Steering a sequence's *paint* params works normally; steering
+> `sequence.segment` does not hold. Pinned by
+> `sequence.test.ts` → "sequence.segment steering is not sticky".
+
+**`advance`** (`'auto' | 'input' | 'either'`) is validated but has no runtime
+driver in v1: every segment advances on its timer regardless of the value, and
+a durationless final segment holds because it has no duration, not because it
+is waiting for input. Treat the field as a forward declaration. Pinned by
+`sequence.test.ts` → "advance is validated but inert".
+
 **Seed:** `seq.seed` is forwarded to children that lack a scene-level seed
 (offset by segment index for independence). Children with their own seed are
 unaffected.
