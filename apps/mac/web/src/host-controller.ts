@@ -20,7 +20,7 @@ export interface MacHostBridge {
 }
 
 export interface MacHostController {
-  mountSaver(index: number, fade?: boolean): Promise<void>;
+  mountSaver(index: number, fade?: boolean, opts?: { skipOnFail?: boolean }): Promise<void>;
   setPaused(paused: boolean): void;
   resize(): void;
   currentId(): string;
@@ -58,7 +58,13 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
   let current = -1;
   let generation = 0;
 
-  const mountSaver = async (index: number, fade = true, remaining = savers.length - 1): Promise<void> => {
+  const mountSaver = async (
+    index: number,
+    fade = true,
+    opts?: { skipOnFail?: boolean; remaining?: number },
+  ): Promise<void> => {
+    const skipOnFail = opts?.skipOnFail ?? true;
+    const remaining = opts?.remaining ?? savers.length - 1;
     const gen = ++generation;
     const doFade = fade && !reduceMotion && instance !== null;
     if (doFade) {
@@ -91,12 +97,17 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
       // without it a throw would leave the wrapper blank until the cycle timer
       // came round — ten minutes of nothing, which reads as a broken app.
       //
-      // `remaining` counts down across the chain so a machine that can run
-      // none of them stops instead of recursing forever.
-      if (remaining > 0) {
+      // Skip only on the cycle path. A pin (`?saver=`) or a menu pick is an
+      // explicit choice: swapping in a different saver and leaving the user
+      // stuck on it (pinning also disables the cycle) is worse than a toast
+      // on a blank host. `remaining` still bounds the cycle chain so a
+      // machine that can run none of them stops instead of recursing forever.
+      if (skipOnFail && remaining > 0) {
         console.warn(`saver ${plugin.manifest.id} failed to mount, skipping`, err);
-        return mountSaver(current + 1, false, remaining - 1);
+        return mountSaver(current + 1, false, { skipOnFail: true, remaining: remaining - 1 });
       }
+      console.warn(`saver ${plugin.manifest.id} failed to mount`, err);
+      showHint(`${plugin.manifest.label} couldn't start`);
       throw err;
     }
     if (gen !== generation) {
@@ -132,7 +143,9 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
         savers: savers.map((s) => s.manifest.id),
         setSaver(id) {
           const i = saverIndex(id, savers);
-          if (i >= 0) void mountSaver(i);
+          // Explicit pick: do not silently swap in the next saver. The
+          // rejection is already logged + hinted inside mountSaver.
+          if (i >= 0) void mountSaver(i, true, { skipOnFail: false }).catch(() => {});
         },
         next() {
           void mountSaver(current + 1);

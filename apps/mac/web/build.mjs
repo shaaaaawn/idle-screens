@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 mkdirSync('dist/assets', { recursive: true });
 
@@ -33,11 +34,22 @@ cpSync('index.html', 'dist/index.html');
 // (see the dracoPath note in src/savers.ts), so the decoder has to sit at a
 // path we choose and serve ourselves. Fetched only when a fish actually turns
 // out to be Draco-compressed, so it costs disk, not startup.
-cpSync(
+//
+// tsup `clean: true` wipes dist/draco until that package's onSuccess recopies
+// it, so a mac-web-only build against a clean tree used to die on a bare
+// ENOENT. Say what to run instead of throwing Node's generic "no such file".
+const dracoSrc = [
   new URL('../../../packages/saver-metaquarium/dist/draco/', import.meta.url),
-  'dist/assets/draco',
-  { recursive: true },
-);
+  new URL('../node_modules/@idle-screens/saver-metaquarium/dist/draco/', import.meta.url),
+].find((u) => existsSync(fileURLToPath(u)));
+if (!dracoSrc) {
+  throw new Error(
+    'mac-web: Draco decoder missing. Build the saver package first:\n' +
+      '  pnpm --filter @idle-screens/saver-metaquarium build\n' +
+      '(or `pnpm build` at the repo root). dist/draco is written by that package\'s tsup onSuccess.',
+  );
+}
+cpSync(dracoSrc, 'dist/assets/draco', { recursive: true });
 console.log('mac-web built to dist/');
 
 await import('./gen-catalog.mjs');

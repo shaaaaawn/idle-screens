@@ -36,9 +36,10 @@ export const SAVERS: SaverPlugin[] = [
   // recur quietly.
   //
   // Two things it does that no other saver here does: it needs WebGL2, and it
-  // streams its fish over the network. Neither is fatal — the host skips a
-  // saver that fails to mount, and a fish that will not load falls back to a
-  // procedural body rather than an empty tank.
+  // streams its fish over the network. Neither is fatal on the cycle path —
+  // the host skips a saver that fails to mount. A pin or a menu pick is an
+  // explicit choice and is not silently replaced. A fish that will not load
+  // falls back to a procedural body rather than an empty tank.
   //
   // `dracoPath` is not optional here the way it is in Vite. The package's
   // default resolves its decoder through `import.meta.url`, and this bundle is
