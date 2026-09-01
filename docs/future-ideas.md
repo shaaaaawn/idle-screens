@@ -27,7 +27,7 @@
 | B2  | Richer links (falloff + mode) | **Shipped (v1 ceiling, 2026-07-21)** | `links.falloff` + `mode: nearest \| chain \| random` in `types.ts` |
 | B3  | Weighted color palettes       | **Shipped (v1 ceiling, 2026-07-21)** | `sprite.colorWeights[]` on circle/ring/streak/rect          |
 | C2  | Render-stat confirmation      | Open         | Catch empty/invisible without eyes — **validated again in round 3; also unlocks live A/B diff** |
-| F2  | ASCII luminance map           | **Shipped, superseded (2.4.0)** | Landed as a braille map (`perceive.ts`, 8× the resolution) plus `renderDensityMap` for the ASCII form |
+| F2  | ASCII luminance map           | **Shipped, superseded (2.3.0 / 2.4.0)** | Landed as a braille map (`perceive.ts`, 8× the resolution) in 2.3.0, plus `renderDensityMap` for the ASCII form in 2.4.0 |
 | G1  | Calibrate additive-glow in perceive | **Shipped (2.4.0)** — first-pass constant | Halo modeled; `GLOW_SPREAD=2.4` still needs playground calibration |
 | G2  | Geometry-aware dominance      | **Shipped (2.4.0)** | Line-salience boost for rings/streaks/links in `dominanceRanking` |
 | G3  | `spin` as `[min, max]` range  | **Shipped (2.4.0)** | Full chain; scalar streams byte-identical (determinism suite) |
@@ -260,5 +260,7 @@ G1–G4 shipped in schema 2.4.0 and are no longer on this list; what's left:
 3. **G1 follow-up: calibrate `GLOW_SPREAD` against the playground** — the halo
    is modeled, but the constant is still a first-pass guess
 4. **Link contrast + extreme-alpha** — the two remaining `adviseSpec` gaps
-5. **Server dedupe** — idle-server still carries its own `steerablePaths` /
-   `resolveSpecPath` (`screen-channel.ts:165,338`) instead of the schema's
+5. **Server dedupe** — idle-server carried its own `steerablePaths` /
+   `resolveSpecPath` in `screen-channel.ts` instead of importing the schema's;
+   shipped on branch `spec/server-dedupe-steerable-paths` 2026-08-31, awaiting
+   merge.
