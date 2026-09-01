@@ -1,3 +1,5 @@
+> Deprecated: imported into the canonical [Saver Idea Registry](../saver-ideas.md). Keep this file as source history; update lifecycle state in the registry.
+
 # Screensaver Research & Implementation Guide
 
 This document compiles historical and modern screensaver concepts that could be adapted into web-based idle screens. It breaks down the implementation feasibility, legal/copyright considerations, technical approaches (WebGL vs. Canvas vs. CSS), and references existing open-source GitHub repositories.
