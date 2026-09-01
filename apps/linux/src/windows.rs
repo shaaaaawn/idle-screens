@@ -98,8 +98,15 @@ fn create_for_monitor(state: &Rc<AppState>, monitor: &gdk::Monitor) {
         }
         // Cover panels/bars too.
         win.set_exclusive_zone(-1);
-        // Never grab the keyboard: input should wake the session, not feed us.
-        win.set_keyboard_mode(KeyboardMode::None);
+        // Normally never grab the keyboard: input should wake the session, not
+        // feed us. Kiosk is the exception -- it deliberately has no
+        // exit-on-input watcher, so Escape is the only way out and the surface
+        // has to actually receive it. SIGTERM still works either way.
+        win.set_keyboard_mode(if state.settings.kiosk {
+            KeyboardMode::Exclusive
+        } else {
+            KeyboardMode::None
+        });
         win.set_monitor(Some(monitor));
     }
 

@@ -36,8 +36,9 @@ pub struct Cli {
     #[arg(long)]
     pub windowed: bool,
 
-    /// Fullscreen overlay that ignores mouse/keyboard for exit (kiosk / demo).
-    /// Pair with a hypridle listener that omits on-resume — see packaging/hypridle-kiosk.conf.example.
+    /// Fullscreen overlay that ignores mouse movement for exit (kiosk / demo);
+    /// press Escape to dismiss it. Pair with a hypridle listener that omits
+    /// on-resume — see packaging/hypridle-kiosk.conf.example.
     #[arg(long)]
     pub kiosk: bool,
 
