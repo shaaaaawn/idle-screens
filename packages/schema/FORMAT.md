@@ -304,6 +304,111 @@ an event, where the same ring pulsing forever reads as wallpaper. Long
 drift a little, settle, fade" is one layer). `clock` is the other half: two
 layers on the same clock are a duet, not a coincidence. The shipped `pings`
 example is the whole idea in two layers.
+## Scale — what the numbers actually look like
+
+Every dimensional value is a fraction of `min(width, height)`. On a 1920×1080
+display that divisor is **1080**, so `0.01` is 10.8 px there and the same
+fraction of the short side on a phone or a 4K wall. Nothing below is a rule —
+they are measured landmarks, because the most common authoring failure is not
+a bad idea, it is an idea rendered two orders of magnitude too small or too
+large to see. Figures are `perceiveScene` coverage at 1920×1080 with 40 opaque
+white entities on black.
+
+### `circle.radius` (a **radius**, so a dot is twice this wide)
+
+| radius | px radius @1080p | px across | coverage (40) | reads as |
+|---|---|---|---|---|
+| `0.0005` | 0.5 | 1 | 0.9 % | star grain — texture, never the subject |
+| `0.002` | 2.2 | 4 | 1.0 % | dust, embers, distant snow |
+| `0.005` | 5.4 | 11 | 1.6 % | a distinct dot; graph node, firefly |
+| `0.02` | 21.6 | 43 | 6.2 % | a clear disc — bokeh, a planet |
+| `0.05` | 54 | 108 | 21 % | a focal object; a handful is a composition |
+| `0.1` | 108 | 216 | 52 % | dominant form — sun, moon, one per scene |
+| `0.2` | 216 | 432 | 88 % | 40 % of the short side; only as a soft glow plate |
+
+The shipped examples live almost entirely in `0.0003 – 0.007` for fields and
+`0.03 – 0.3` for single large forms — the middle of that gap is rarely where a
+scene wants to be. Within one scene, the parallax layers of `lanterns` and
+`constellation` step by roughly 2 × per layer; steps much smaller than that
+read as one layer with a wide size range rather than as depth.
+
+The bottom two rungs are texture, not content, and `adviseSpec` says so: a
+`0.002` field stops raising `sparse-scene` at around 80 entities, while a
+`0.0005` field still raises it at 300 — a star grain that fine cannot carry a
+scene at any count under the 400 cap, and needs a brighter layer above it.
+
+### `size` (emoji), `fontSize` (textBlock), `size` (text sprites)
+
+`0.02` ≈ 22 px, `0.035` ≈ 38 px, `0.05` ≈ 54 px, `0.1` ≈ 108 px at 1080p.
+Emoji fields in the examples sit at `0.011 – 0.078`; body text at `fontSize:
+0.05` is comfortable across a room, and below `0.02` a wall display cannot be
+read at all. A `text` sprite whose `font` string carries an explicit px size
+(`"bold 14px monospace"`) opts out of scaling entirely and will be unreadable
+on a 4K panel.
+
+### `speed` (viewport fractions per second)
+
+| speed | px/s @1080p | crosses the short side | crosses a 16:9 width |
+|---|---|---|---|
+| `0.001` | 1.1 | 17 min | 30 min |
+| `0.005` | 5.4 | 3.3 min | 5.9 min |
+| `0.02` | 21.6 | 50 s | 89 s |
+| `0.06` | 65 | 17 s | 30 s |
+| `0.15` | 162 | 7 s | 12 s |
+
+An ambient scene meant to live on a wall for hours wants its background layers
+under `0.005` — anything faster resolves as traffic rather than atmosphere.
+Above `0.06` a layer reads as an event (rain, warp, a passing comet). Speeds
+are ranges and each entity draws its own, so a `[0.002, 0.008]` layer already
+carries internal parallax.
+
+### `links.maxDist`
+
+Link density is governed by `maxDist` relative to the mean spacing between
+entities, `sqrt(w·h / count) / min(w, h)` — for 40 entities at 1920×1080 that
+is `0.21` (228 px), for 100 it is `0.13` (144 px). Measured against `k: 3`:
+
+| `maxDist` | edges drawn (of `k·count`) | graph |
+|---|---|---|
+| 0.5 × spacing | ~10 % | mostly isolated nodes |
+| 1.0 × spacing | ~40 % | a constellation with a few loners |
+| 1.5 × spacing | ~60 % | one connected component, no isolates |
+| 2.0 × spacing | ~60 % | no further gain — `k` is the binding cap |
+
+Past ~1.5 × spacing, raising `maxDist` costs distance tests and buys nothing;
+raise `k` instead. `describeScene` reports `linksDrawn` / `linksExpected` and
+`isolatedNodes`, so this is checkable per spec rather than guessed.
+
+### Recipes
+
+**Parallax depth.** Three or four layers where size, speed, and alpha all rise
+together — never one of them alone. A working ladder: `radius [0.0005, 0.0013]`
+/ `speed [0.0005, 0.002]` / `alpha [0.35, 1]` far, `radius [0.0014, 0.0028]` /
+`speed [0.006, 0.013]` mid, `radius [0.0032, 0.006]` / `speed [0.015, 0.026]`
+near. Correlating all three cues is what sells the depth; scaling size alone
+reads as a size distribution, not distance.
+
+**Glow stacking.** `soft: true` + `blend: "lighter"` + `alpha` around 0.5–0.9,
+with `pulse: { amp: 0.2, period: 3000 }` for breathing. A soft orb's falloff
+means its *visible* extent is smaller than its nominal radius: at equal alpha,
+a soft additive orb needs about **1.33 × the radius** of a hard disc to occupy
+the same measured coverage. Size soft layers up accordingly, or they land dimmer
+than intended. Glow reads only against a dark plate — over a pale background use
+`"screen"`.
+
+**Graph web.** `count 40–100`, `radius [0.002, 0.005]`, a slow `drift`
+(`speed [0.002, 0.007]`) so the topology keeps re-forming, and
+`links: { k: 3, maxDist: ≈1.2 × spacing, alpha: 0.15, width: 0.0005 }`. Link
+alpha wants to be much lower than the nodes' — at 0.15 the web is a suggestion,
+at 0.5 it is a diagram. Add `falloff: true` to fade edges toward the cutoff
+instead of popping them.
+
+**Focal pin.** One `count: 1` layer with `motion: { type: "static" }` and an
+explicit `position`, `radius` in the `0.05 – 0.15` band, over a field of
+`0.002`-scale entities. The size ratio between the two is what makes it read as
+a subject rather than the largest member of the crowd — an order of magnitude
+or more, which is the gap the ladder above shows between the field rungs and
+the focal ones.
 
 ## Determinism contract
 
