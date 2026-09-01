@@ -10,14 +10,28 @@ if [[ "${1:-}" == "--release" ]]; then CONFIG=release; fi
 echo "==> Building web bundle"
 (cd web && node build.mjs)
 
-echo "==> Building Swift ($CONFIG)"
-if [[ "$CONFIG" == "release" ]]; then
+# Release builds are universal (arm64 + x86_64) so one DMG runs on Apple silicon
+# and Intel alike; a plain `swift build` only produces the host architecture, so
+# a release cut on an Apple-silicon runner would silently exclude every Intel
+# Mac. Dev builds stay host-only — the second slice doubles compile time and
+# buys nothing locally. Override with UNIVERSAL=0 (or =1 to force it on).
+UNIVERSAL="${UNIVERSAL:-$([[ "$CONFIG" == release ]] && echo 1 || echo 0)}"
+
+label="$CONFIG"; [[ "$UNIVERSAL" == "1" ]] && label="$label, universal"
+echo "==> Building Swift ($label)"
+if [[ "$CONFIG" == "release" && "$UNIVERSAL" == "1" ]]; then
+  swift build -c release --arch arm64 --arch x86_64
+  # A multi-arch build lands somewhere else entirely, not .build/release/.
+  BIN=".build/apple/Products/Release/IdleScreens"
+elif [[ "$CONFIG" == "release" ]]; then
   swift build -c release
+  BIN=".build/release/IdleScreens"
 else
   swift build
+  BIN=".build/debug/IdleScreens"
 fi
 
-BIN=".build/$CONFIG/IdleScreens"
+[[ -f "$BIN" ]] || { echo "swift build produced no binary at $BIN" >&2; exit 1; }
 APP="dist/IdleScreens.app"
 
 echo "==> Assembling $APP"
@@ -40,4 +54,4 @@ EOF
 # Ad-hoc sign so TCC/AppKit treat it as a proper app bundle.
 codesign --force --sign - "$APP"
 
-echo "==> Done: $APP"
+echo "==> Done: $APP ($(lipo -archs "$APP/Contents/MacOS/IdleScreens" 2>/dev/null || echo "unknown arch"))"

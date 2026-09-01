@@ -15,6 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Mirrors linux-release.yml. tag-release.sh defaults the version from
+      # Info.plist, but it accepts an override and nothing stops a hand-rolled
+      # `git tag mac-v9.9.9` — which would publish a DMG whose Info.plist says
+      # something else, with no error anywhere.
+      - name: Validate tag against Info.plist
+        id: ver
+        run: |
+          plist_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' apps/mac/Info.plist)"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            tag_version="${GITHUB_REF_NAME#mac-v}"
+            if [[ "$tag_version" != "$plist_version" ]]; then
+              echo "::error::tag mac-v$tag_version does not match apps/mac/Info.plist version $plist_version — bump Info.plist before tagging"
+              exit 1
+            fi
+            echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$plist_version" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -63,8 +82,28 @@ jobs:
           NOTARY_PROFILE: idle-notary
         run: ./scripts/notarize.sh
 
+      # The DMG is the artifact users get; confirm it is actually universal
+      # before publishing rather than after an Intel user reports it will not
+      # open.
+      - name: Verify the shipped binary is universal
+        working-directory: apps/mac
+        run: |
+          hdiutil attach dist/IdleScreens.dmg -mountpoint /tmp/dmg -nobrowse -quiet
+          archs=$(lipo -archs /tmp/dmg/IdleScreens.app/Contents/MacOS/IdleScreens)
+          hdiutil detach /tmp/dmg -quiet
+          echo "architectures: $archs"
+          for want in arm64 x86_64; do
+            case " $archs " in *" $want "*) ;;
+              *) echo "::error::DMG binary is missing $want (got: $archs)"; exit 1 ;;
+            esac
+          done
+
       - name: Publish DMG to release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('mac-v{0}', steps.ver.outputs.version) }}
+          name: idle-screens ${{ steps.ver.outputs.version }} (macOS)
+          draft: ${{ github.ref_type != 'tag' }}
           files: apps/mac/dist/IdleScreens.dmg
           fail_on_unmatched_files: true
+          generate_release_notes: true
