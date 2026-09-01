@@ -78,6 +78,18 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// A CLI carrying only `--config`, for re-resolving settings from a file.
+    /// The tray does this whenever its menu opens, so edits made in an editor
+    /// show up without restarting it.
+    pub fn for_config(path: std::path::PathBuf) -> Self {
+        use clap::Parser;
+        Self::parse_from([
+            std::ffi::OsString::from("idle-screens-wayland"),
+            std::ffi::OsString::from("--config"),
+            path.into_os_string(),
+        ])
+    }
+
     /// Overrides that should carry through to a saver process the tray
     /// spawns, so `idle-screens-wayland --channel foo tray` keeps applying
     /// `--channel foo` to every "Show saver now" launch, not just the tray

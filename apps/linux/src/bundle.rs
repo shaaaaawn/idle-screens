@@ -115,6 +115,47 @@ fn cache_is_valid(cache: &Path, shipped: &Path) -> bool {
     }
 }
 
+/// One entry from the bundle's `savers.json`, for the tray's saver picker.
+#[derive(Clone)]
+pub struct SaverEntry {
+    pub id: String,
+    pub label: String,
+}
+
+/// Savers the resolved bundle ships. Empty when the catalog is missing or
+/// unreadable -- the tray just shows no picker rather than failing to start.
+pub fn saver_list(settings: &Settings) -> Vec<SaverEntry> {
+    let path = resolve_web_root(settings).join("savers.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        log::warn!("no saver catalog at {}", path.display());
+        return Vec::new();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("unreadable saver catalog {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    parsed
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item.get("id")?.as_str()?.to_string();
+                    let label = item
+                        .get("label")
+                        .and_then(|l| l.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
+                    Some(SaverEntry { id, label })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn saver_count(path: &Path) -> Option<usize> {
     let text = std::fs::read_to_string(path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;

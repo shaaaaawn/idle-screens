@@ -78,12 +78,16 @@ pub struct Settings {
     pub app_id: String,
 }
 
+/// The config file a run reads: `--config` if given, else the default path.
+pub fn config_path(cli: &Cli) -> PathBuf {
+    cli.config
+        .clone()
+        .unwrap_or_else(|| config_dir().join("config.toml"))
+}
+
 impl Settings {
     pub fn load(cli: &Cli) -> anyhow::Result<Self> {
-        let path = cli
-            .config
-            .clone()
-            .unwrap_or_else(|| config_dir().join("config.toml"));
+        let path = config_path(cli);
         let file: FileConfig = match std::fs::read_to_string(&path) {
             Ok(text) => {
                 toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?
