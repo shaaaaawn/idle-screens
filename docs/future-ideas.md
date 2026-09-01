@@ -1,6 +1,6 @@
 # Future Ideas — schema, core & MCP improvements
 
-> **Status:** Updated 2026-07-23. Research backlog, not a commitment.
+> **Status:** Updated 2026-08-31. Research backlog, not a commitment.
 > Each idea lists the **problem**, a **proposal**, **where it lives in code**,
 > and **open questions**.
 >
@@ -24,10 +24,10 @@
 | F1  | `describeScene` scene dump    | **Done**     | `describeScene()` in `packages/schema/src/describe.ts` — multi-t snapshots |
 | F3  | `critiqueScene` heuristics    | **Done**     | `adviseSpec` now covers link-starvation, uniform-motion, off-center |
 | A1  | _Weights_ channel tuning      | **Actionable** | No code change — re-publish with adjusted spec            |
-| B2  | Richer links (falloff + mode) | Open         | Fidelity upgrade for graph pieces                           |
-| B3  | Weighted color palettes       | Open         | Low priority polish                                         |
+| B2  | Richer links (falloff + mode) | **Shipped (v1 ceiling, 2026-07-21)** | `links.falloff` + `mode: nearest \| chain \| random` in `types.ts` |
+| B3  | Weighted color palettes       | **Shipped (v1 ceiling, 2026-07-21)** | `sprite.colorWeights[]` on circle/ring/streak/rect          |
 | C2  | Render-stat confirmation      | Open         | Catch empty/invisible without eyes — **validated again in round 3; also unlocks live A/B diff** |
-| F2  | ASCII luminance map           | Open         | Perceivable image for text models                           |
+| F2  | ASCII luminance map           | **Shipped, superseded (2.4.0)** | Landed as a braille map (`perceive.ts`, 8× the resolution) plus `renderDensityMap` for the ASCII form |
 | G1  | Calibrate additive-glow in perceive | **Shipped (2.4.0)** — first-pass constant | Halo modeled; `GLOW_SPREAD=2.4` still needs playground calibration |
 | G2  | Geometry-aware dominance      | **Shipped (2.4.0)** | Line-salience boost for rings/streaks/links in `dominanceRanking` |
 | G3  | `spin` as `[min, max]` range  | **Shipped (2.4.0)** | Full chain; scalar streams byte-identical (determinism suite) |
@@ -241,8 +241,10 @@ Design doc (mono-level, with the full gate-by-gate analysis):
 
 `adviseSpec` covers: invisible-layer, sparse-scene, dense-scene, text-heavy,
 link-starvation, uniform-motion, off-center, and trail-on-static. **Remaining:**
-- Contrast vs background luminance (partially covered by invisible-layer for
-  circles, not for text or links)
+- Link contrast vs the background plate — `low-contrast-layer` runs for every
+  non-emoji sprite kind (text and textBlock included) but never inspects
+  `links.color`, so a Mystify-style scene whose links *are* the picture can
+  paint them into the plate and pass every check
 - Extreme alpha range warning
 
 ---
@@ -257,5 +259,6 @@ G1–G4 shipped in schema 2.4.0 and are no longer on this list; what's left:
    invalidate stored specs the way 2.3.0's `units` default did
 3. **G1 follow-up: calibrate `GLOW_SPREAD` against the playground** — the halo
    is modeled, but the constant is still a first-pass guess
-4. **B2 richer links** — falloff + random mode for graph visualizations
-5. **B3, F2** — polish
+4. **Link contrast + extreme-alpha** — the two remaining `adviseSpec` gaps
+5. **Server dedupe** — idle-server still carries its own `steerablePaths` /
+   `resolveSpecPath` (`screen-channel.ts:165,338`) instead of the schema's

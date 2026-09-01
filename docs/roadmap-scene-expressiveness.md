@@ -145,10 +145,18 @@ for the MCP `previewScene` to return. Key insight: because v1 positions are
 pure functions of (seed, t), the "picture" needs no renderer — perception is
 deterministic, Node-safe, and testable.
 
+**Status update 2026-08-31 — size ladder (13) landed.** `FORMAT.md` gained a
+"Scale — what the numbers actually look like" section: measured ladders for
+`radius`, text/emoji size, `speed` (with crossing times), and `links.maxDist`
+relative to mean entity spacing, plus the four named recipes (parallax depth,
+glow stacking, graph web, focal pin). Every figure is a `perceiveScene` /
+`describeScene` measurement at 1920×1080, not an estimate. `SCHEMA_REFERENCE`
+in idle-server needs the same section (mono-sweep detector 2).
+
 Remaining from the
 lists above: depth-as-a-knob (7 — superseded by warp for true depth),
-glow generalization (9), render-stats (11), size ladder
-docs (13), server dedupe (14), fractal sprite (22). v1 is now considered
+glow generalization (9), render-stats (11), server dedupe (14),
+fractal sprite (22). v1 is now considered
 feature-complete for its family; further primitives belong in a v2
 simulation schema (see `docs/v2-simulation-schema-notes.md`).
 
