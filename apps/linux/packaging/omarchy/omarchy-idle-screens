@@ -3,8 +3,10 @@
 # Respects the screensaver-off toggle; exits if already running or hyprlock is up.
 #
 # Works with both Omarchy generations:
-#   • Quickshell idle service (current) — reached via the
-#     ~/.local/bin/omarchy-launch-screensaver shim this repo also installs.
+#   • Quickshell idle service (current) — reached via the cloned idle plugin
+#     (install-omarchy-plugin.sh repoints its screensaver command at this
+#     launcher). Not via a PATH shim: Omarchy appends ~/.local/bin, so a
+#     shim named omarchy-launch-screensaver would never win.
 #   • hypridle (older)                  — reached via a patched hypridle.conf.
 
 # Omarchy's Quickshell idle service tracks the screensaver by window class and

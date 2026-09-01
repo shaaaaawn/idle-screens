@@ -4,9 +4,11 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use ksni::{MenuItem, Tray, TrayMethods};
 
+#[derive(Clone)]
 struct IdleScreensTray {
     kiosk: bool,
     /// CLI overrides (--channel, --saver, --config, ...) the tray itself was
@@ -185,13 +187,53 @@ pub fn run(kiosk_default: bool, forwarded_args: Vec<OsString>) -> anyhow::Result
         .build()?;
 
     rt.block_on(async {
-        let _handle = tray
-            .spawn()
-            .await
-            .map_err(|e| anyhow::anyhow!("tray: {e}"))?;
+        let _handle = spawn_with_retry(tray).await?;
         log::info!("tray ready (Waybar / SNI host required)");
         std::future::pending::<()>().await;
         #[allow(unreachable_code)]
         Ok::<(), anyhow::Error>(())
     })
+}
+
+/// How long to keep waiting for a StatusNotifierWatcher to appear.
+const REGISTER_DEADLINE: Duration = Duration::from_secs(300);
+/// Backoff bounds between registration attempts.
+const RETRY_START: Duration = Duration::from_millis(250);
+const RETRY_MAX: Duration = Duration::from_secs(15);
+
+/// Register with the SNI host, retrying while the bus name is missing.
+///
+/// On login the tray is started by XDG autostart, which under uwsm/systemd
+/// races the bar that owns `org.kde.StatusNotifierWatcher` — Quickshell on
+/// Omarchy. A single attempt loses that race and the process exits 1
+/// ("The name is not activatable"), so the tray silently never appears.
+async fn spawn_with_retry(tray: IdleScreensTray) -> anyhow::Result<ksni::Handle<IdleScreensTray>> {
+    let deadline = Instant::now() + REGISTER_DEADLINE;
+    let mut backoff = RETRY_START;
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        // ksni consumes the tray on spawn, so hand it a clone per attempt.
+        match tray.clone().spawn().await {
+            Ok(handle) => {
+                if attempt > 1 {
+                    log::info!("tray registered after {attempt} attempts");
+                }
+                return Ok(handle);
+            }
+            Err(e) if Instant::now() < deadline => {
+                if attempt == 1 {
+                    log::info!("no StatusNotifierWatcher yet ({e}); waiting for a bar to start");
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(RETRY_MAX);
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "tray: failed to register after {attempt} attempts over {}s: {e}",
+                    REGISTER_DEADLINE.as_secs()
+                ));
+            }
+        }
+    }
 }

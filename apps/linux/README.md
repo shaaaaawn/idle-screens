@@ -221,7 +221,20 @@ idle-screens-wayland tray          # StatusNotifier icon (Waybar tray)
 ```
 
 Menu: show saver, kiosk mode, check updates, open config, quit tray.
-Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by `install.sh`).
+Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by
+`install.sh`, which writes an **absolute** `Exec=` path). Two things make the
+tray survive login on Omarchy, both learned the hard way:
+
+- systemd's `xdg-autostart-generator` resolves `Exec=` when it generates the
+  unit, early enough that `~/.local/bin` is not reliably on its PATH. A bare
+  `Exec=idle-screens-wayland` yields *no unit at all*, or binds to a stale
+  `/usr/bin` copy.
+- The tray retries registration for up to 5 minutes. Under uwsm the autostart
+  unit races the bar that owns `org.kde.StatusNotifierWatcher` (Quickshell on
+  Omarchy); a single attempt loses that race and exits 1 with
+  "The name is not activatable", so the tray silently never appears.
+
+Check it with `systemctl --user status 'app-idle\x2dscreens\x2dtray@autostart.service'`.
 
 Idle-triggered launch is handled by the Quickshell idle service or hypridle
 (whichever your Omarchy uses); the tray is for manual control.

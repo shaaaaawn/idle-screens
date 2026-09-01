@@ -17,12 +17,33 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-if [ ! -f idle-screens-wayland ]; then
-  echo "Run from an extracted release tarball root (needs idle-screens-wayland binary)." >&2
+# Two entry points: an extracted release tarball (binary sitting right here, so
+# install it first), or an already-installed copy -- the packaged scripts land
+# in /usr/share/idle-screens/omarchy/, where there is no tarball to install
+# from and the binary is already on PATH. Only the wiring below applies then.
+if [ -f idle-screens-wayland ]; then
+  ./install.sh
+elif command -v idle-screens-wayland &>/dev/null; then
+  echo "Using the installed idle-screens-wayland ($(command -v idle-screens-wayland)); wiring only."
+else
+  echo "No idle-screens-wayland found: run this from an extracted release tarball," >&2
+  echo "or install the package first (pacman -S idle-screens-wayland)." >&2
   exit 1
 fi
 
-./install.sh
+# Per-user tray autostart -- a package cannot write to $HOME, so do it here.
+autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+tray_desktop=""
+for candidate in \
+  packaging/omarchy/idle-screens-tray.desktop \
+  /usr/share/applications/idle-screens-tray.desktop \
+  "$HOME/.local/share/applications/idle-screens-tray.desktop"; do
+  [ -f "$candidate" ] && { tray_desktop="$candidate"; break; }
+done
+if [ -n "$tray_desktop" ]; then
+  mkdir -p "$autostart_dir"
+  cp "$tray_desktop" "$autostart_dir/"
+fi
 
 quickshell=0
 hypridle=0
