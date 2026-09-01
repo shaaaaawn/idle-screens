@@ -46,32 +46,32 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 | `hokusai-great-wave` | Hokusai — The Great Wave, deconstructed | nature-atmosphere | spec | triaged |
 | `hilma-af-klint-ten-largest` | Hilma af Klint — The Ten Largest | geometric-op-art | spec | shipped |
 | `nostalghia-candle` | Tarkovsky — Nostalghia's candle | minimal-ambient | spec | shipped |
-| `deep-sea-bioluminescence` | Deep-sea bioluminescence | nature-atmosphere | spec | triaged |
+| `deep-sea-bioluminescence` | Deep-sea bioluminescence | nature-atmosphere | spec | shipped |
 | `mondrian-broadway-boogie-woogie` | Mondrian — Broadway Boogie Woogie | geometric-op-art | spec | triaged |
 | `turner-fighting-temeraire` | Turner — The Fighting Temeraire | nature-atmosphere | spec | triaged |
-| `kusama-infinity-nets` | Kusama — Infinity Nets | geometric-op-art | spec | triaged |
+| `kusama-infinity-nets` | Kusama — Infinity Nets | geometric-op-art | spec | shipped |
 | `okeeffe-flower-at-night` | O'Keeffe — a flower at night | fine-art-homage | spec | triaged |
 | `voyager-pale-blue-dot` | Voyager — the Pale Blue Dot | minimal-ambient | spec | triaged |
 | `gpgpu-particle-flow` | GPGPU Particle Flow | flow-particle | native | candidate |
 | `webgl-water-caustics` | WebGL Water Caustics | organic-simulation | native | candidate |
 | `css-doodle-grid-art` | CSS Doodle Grid Art | geometric-op-art | spec | candidate |
 | `css-3d-wireframes` | CSS 3D Wireframes | geometric-op-art | native | candidate |
-| `phosphor-terminal` | Phosphor Terminal | data-typographic | spec | candidate |
-| `apple-ii-television` | Apple II Television | canonical-retro | native | candidate |
+| `phosphor-terminal` | Phosphor Terminal | data-typographic | spec | triaged |
+| `apple-ii-television` | Apple II Television | canonical-retro | spec-blocked: crt-scanline-color-bleed-overlay | triaged |
 | `arabesque-shell` | Arabesque & Shell | geometric-op-art | native | candidate |
-| `three-d-maze` | 3D Maze | canonical-retro | native | candidate |
-| `johnny-castaway-inspired` | Story-driven Castaway | canonical-retro | native | candidate |
-| `bad-dog-mowin-man` | Desktop Mischief Vignettes | canonical-retro | native | candidate |
+| `three-d-maze` | 3D Maze | canonical-retro | native | triaged |
+| `johnny-castaway-inspired` | Story-driven Castaway | canonical-retro | native | triaged |
+| `bad-dog-mowin-man` | Desktop Mischief Vignettes | canonical-retro | native | triaged |
 | `ps2-glass-towers` | Fogbound Glass Towers | minimal-ambient | native | candidate |
 | `gamecube-glass-cube` | Glass Cube Menu Idle | minimal-ambient | native | candidate |
 | `xbox-alien-orb` | Industrial Alien Orb | minimal-ambient | native | candidate |
-| `arcade-attract-mode` | Original Arcade Attract Mode | canonical-retro | native | candidate |
+| `arcade-attract-mode` | Original Arcade Attract Mode | canonical-retro | native | triaged |
 | `boids-flocking-birds` | Boids / Flocking Birds | organic-simulation | native | candidate |
 | `conway-game-of-life` | Conway's Game of Life | organic-simulation | native | candidate |
 | `fractal-flames` | Fractal Flames | flow-particle | native | candidate |
 | `milkdrop-ambient` | MilkDrop-inspired Ambient Visualizer | flow-particle | native | candidate |
 | `falling-sand` | Falling Sand | organic-simulation | native | candidate |
-| `three-d-flower-box` | 3D Flower Box | canonical-retro | native | candidate |
+| `three-d-flower-box` | 3D Flower Box | canonical-retro | native | triaged |
 
 ## Entries
 
@@ -119,6 +119,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:92-97` (second non-vision authoring session, round 3: "Midnight Zone" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
 
 ### mondrian-broadway-boogie-woogie
 - title: Mondrian — Broadway Boogie Woogie
@@ -146,6 +147,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:92-97` (second non-vision authoring session, round 3: "Infinity Net" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
 
 ### okeeffe-flower-at-night
 - title: O'Keeffe — a flower at night
@@ -209,15 +211,17 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 candidate — imported from screensaver research; deterministic corpus required
+  - 2026-08-31 triaged — route: spec confirmed; `sprite.kind: "text"` + `trail`/`ghosting` gives the typing-and-decay mechanic that is this idea's whole identity (FORMAT.md `## layers[]`, `## Determinism contract`) — no live network needed, corpus is fixed at author time. Soft scanlines are a nice-to-have finish, not core to the brief, so they don't block the route.
 
 ### apple-ii-television
 - title: Apple II Television
 - brief: A clean-room boot-like text sequence glows through color bleed, scanlines, and cheap-television distortion. Original text and graphics evoke the era without ROMs or proprietary assets.
 - source: `docs/research/screensaver-ideas.md#2-linux--x11-xscreensaver`
 - bucket: canonical-retro
-- route: native
+- route: spec-blocked: crt-scanline-color-bleed-overlay
 - status:
   - 2026-08-31 candidate — imported from screensaver research; clean-room assets required
+  - 2026-08-31 triaged — route corrected native → spec-blocked; the boot-text typing itself is already `spec` (textBlock `reveal: {mode: "typewriter"}`, shipped G6 per `docs/future-ideas.md`), but this brief's identity is centered on the CRT distortion — color bleed, scanlines, cheap-TV warp — and FORMAT.md has no screen-space post-process/overlay concept (background is solid/gradient+band+drift only). Naming the missing feature: a screen-space scanline/color-bleed overlay filter, for the spec-feature-pipeline backlog.
 
 ### arabesque-shell
 - title: Arabesque & Shell
@@ -236,6 +240,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: native
 - status:
   - 2026-08-31 candidate — imported from screensaver research; clean-room textures required
+  - 2026-08-31 triaged — route: native confirmed; a first-person camera crawling 3D brick-and-fog geometry has no analogue in FORMAT.md, whose motion vocabulary is 2D-sprite-plane (`drift`/`rise`/`bounce`/`orbit`/`wander`/`warp`/`path`) with only pseudo-depth via `warp`'s z-scaling — a true walked 3D corridor needs a mesh-and-camera `SaverPlugin` like `saver-metaquarium`.
 
 ### johnny-castaway-inspired
 - title: Story-driven Castaway
@@ -245,6 +250,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: native
 - status:
   - 2026-08-31 candidate — imported as a non-interactive clean-room ambient adaptation
+  - 2026-08-31 triaged — route: native confirmed; a recognizable character performing distinct scripted vignettes needs custom illustrated/animated character art and a branching state machine, neither of which today's primitive sprite kinds (emoji/text/circle/ring/streak/rect/textBlock) can express — this is a code `SaverPlugin`, not a declarative spec.
 
 ### bad-dog-mowin-man
 - title: Desktop Mischief Vignettes
@@ -254,6 +260,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: native
 - status:
   - 2026-08-31 candidate — imported from screensaver research; original assets required
+  - 2026-08-31 triaged — route: native confirmed; same gap as Story-driven Castaway — original character sprite animation and chore/state scripting are outside the declarative sprite-field vocabulary.
 
 ### ps2-glass-towers
 - title: Fogbound Glass Towers
@@ -290,6 +297,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: native
 - status:
   - 2026-08-31 candidate — imported as an original non-interactive adaptation
+  - 2026-08-31 triaged — route: native confirmed; distinct pixel-art/low-poly vignettes with cinematic camera pans need custom art assets and scripted camera choreography beyond sprite layers and the fixed motion types in FORMAT.md.
 
 ### boids-flocking-birds
 - title: Boids / Flocking Birds
@@ -344,3 +352,4 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: native
 - status:
   - 2026-08-31 candidate — imported from screensaver research; preliminary native route
+  - 2026-08-31 triaged — route: native confirmed; morph-target interpolation between distinct 3D solids (cube/sphere/star) has no representation in FORMAT.md's 2D sprite-plus-motion model.
