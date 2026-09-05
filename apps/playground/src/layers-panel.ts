@@ -248,7 +248,7 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
       if (s.aspect) {
         container.append(makeField('Aspect', rangeInput([...s.aspect], { step: 0.1, min: 0.1 }, (v) => { (layer.sprite as typeof s).aspect = v; })));
       }
-      container.append(makeField('Feather', numInput(s.feather ?? 0, { step: 0.05, min: 0 }, (v) => { (layer.sprite as typeof s).feather = v > 0 ? Math.min(1, v) : undefined; })));
+      container.append(makeField('Feather', numInput(s.feather ?? 0, { step: 0.05, min: 0, max: 1 }, (v) => { (layer.sprite as typeof s).feather = v > 0 ? Math.min(1, v) : undefined; })));
     } else if (s.kind === 'polygon') {
       container.append(
         makeField('Color', colorField(s.color, (v) => { (layer.sprite as typeof s).color = v; })),
@@ -256,7 +256,7 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
         makeField('Soft', checkField(s.soft ?? false, (v) => { (layer.sprite as typeof s).soft = v || undefined; })),
       );
       if (!s.points) {
-        container.append(makeField('Sides', numInput(s.sides ?? 6, { step: 1, min: 3 }, (v) => { (layer.sprite as typeof s).sides = Math.max(3, Math.min(12, Math.round(v))); })));
+        container.append(makeField('Sides', numInput(s.sides ?? 6, { step: 1, min: 3, max: 12 }, (v) => { (layer.sprite as typeof s).sides = Math.max(3, Math.min(12, Math.round(v))); })));
       }
     } else if (s.kind === 'stroke') {
       container.append(

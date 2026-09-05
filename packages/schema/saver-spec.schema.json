@@ -767,6 +767,7 @@
             "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
             "colorWeights": { "$ref": "#/definitions/colorWeights" }
           },
+          "not": { "required": ["sides", "points"] },
           "description": "Regular or custom polygon (rotates with spin) \u2014 a facet, a triangle, a plane, a mosaic tile."
         },
         {

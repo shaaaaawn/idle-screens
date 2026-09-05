@@ -80,7 +80,8 @@ Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
 `min ≤ max`; `colorWeights` length must match `colors`; `emit.life ≤
 emit.every`; a `clock`ed layer's `pulse`/`grow`/`cycle` period must satisfy
-`period / rate ≥ 1000`; orbit layer-parents
+`period / rate ≥ 1000`; a `polygon` takes `sides` or `points`, not both (the
+JSON Schema enforces this one too); orbit layer-parents
 must exist, have `count: 1`, and not themselves orbit a layer.
 
 ## Structure

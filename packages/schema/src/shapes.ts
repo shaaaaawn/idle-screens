@@ -38,7 +38,12 @@ export function polygonPoints(s: PolygonSprite, radius: number): Array<{ x: numb
   return out;
 }
 
-/** Signed-area magnitude of a polygon (shoelace), px². */
+/**
+ * Signed-area magnitude of a polygon (shoelace), px². Exact for simple
+ * polygons; a self-intersecting outline (a bow-tie) has lobes of opposite
+ * winding that cancel here while the canvas's nonzero fill paints both, so
+ * perception under-reports such glyphs. Author facets as simple polygons.
+ */
 export function polygonArea(pts: Array<{ x: number; y: number }>): number {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
