@@ -50,10 +50,10 @@ import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
   anchorFraction, bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES,
-  formationExtent, formationSlot, swimStyleOf, type FormationShape,
+  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec,
 } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
-import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
@@ -468,6 +468,8 @@ class TankInstance implements SaverInstance {
    *  population. reconcile() diffs fish against it; spawn workers re-check
    *  wantKey after every await, so a stale load can never seat a fish. */
   private wantUrls: string[] = [];
+  /** Per-slot style from `@style` tokens (MQ30); null = the scene's swimStyle. */
+  private wantStyles: Array<SwimStyleSpec | null> = [];
   private wantKey = '';
   private wantInputKey = '';
   /** Last fishMix string whose parse problems were warned — once per mix,
@@ -821,6 +823,7 @@ class TankInstance implements SaverInstance {
     this.wantInputKey = inputKey;
 
     let want: string[] = [];
+    let styles: Array<SwimStyleSpec | null> = [];
     this.mixMode = false;
     if (mixStr !== '') {
       const parsed = parseFishMix(mixStr, this.catalog);
@@ -829,7 +832,9 @@ class TankInstance implements SaverInstance {
         const fallback = parsed.entries.length === 0 ? ' — falling back to fishUrl/fishCount' : '';
         console.warn(`[metaquarium] fishMix "${mixStr}": ${parsed.problems.join('; ')}${fallback}`);
       }
-      want = expandFishMix(parsed.entries, cap);
+      const slots = expandFishMixSlots(parsed.entries, cap);
+      want = slots.map((sl) => sl.url);
+      styles = slots.map((sl) => (sl.style ? swimStyleOf(sl.style) : null));
       this.mixMode = want.length > 0;
     }
     if (!this.mixMode) {
@@ -844,6 +849,7 @@ class TankInstance implements SaverInstance {
       want = Array.from({ length: len }, () => url);
     }
     this.wantUrls = want;
+    this.wantStyles = this.mixMode ? styles : [];
     this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
     if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
     else delete this.ctxSaver.host.dataset.mqMix;
@@ -1143,7 +1149,7 @@ class TankInstance implements SaverInstance {
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
-    const style = swimStyleOf(this.str('swimStyle'));
+    const sceneStyle = swimStyleOf(this.str('swimStyle'));
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
 
@@ -1179,12 +1185,25 @@ class TankInstance implements SaverInstance {
     const fshape = (FORMATION_SHAPES as readonly string[]).includes(fshapeRaw)
       ? (fshapeRaw as FormationShape)
       : 'phalanx';
-    const extent = style.formation ? formationExtent(visible, variance, fshape) : null;
-    const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
+    // Effective style per slot: a token's `@style` wins, else the scene's.
+    // Formation seats are handed out over the SUBSET of fish whose effective
+    // style forms — a `@school` trio inside a hovering tank is a school of
+    // three, seated 0..2, not three fish holding seats in a school of eight.
+    const styleAt = (i: number): SwimStyleSpec => this.wantStyles[i] ?? sceneStyle;
+    const formationSeat = new Map<number, number>();
+    for (let i = 0; i < visible; i++) {
+      if (styleAt(i).formation) formationSeat.set(i, formationSeat.size);
+    }
+    const fcount = formationSeat.size;
+    const formationStyle = fcount > 0 ? styleAt(formationSeat.keys().next().value as number) : null;
+    const extent = fcount > 0 ? formationExtent(fcount, variance, fshape) : null;
+    const carrier = extent && formationStyle ? this.carrierFrame(extent, formationStyle, tSec, warpSec, speed) : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
+      const style = styleAt(f.index);
+      const seat = formationSeat.get(f.index) ?? f.index;
 
       // Style + per-fish variation. Both are pure functions of (index, t), so
       // a scene stays frame-addressable no matter how varied it looks.
@@ -1216,7 +1235,7 @@ class TankInstance implements SaverInstance {
       // twitching on its own private clock. Free fish keep their own schedule.
       let seatDelay: number | null = null;
       if (spec?.contagious && style.formation) {
-        const slot0 = formationSlot(f.index, visible, variance, undefined, fshape);
+        const slot0 = formationSlot(seat, fcount, variance, undefined, fshape);
         seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
       }
       const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
@@ -1243,13 +1262,13 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(f.index, visible, variance, undefined, fshape);
+        const slot = formationSlot(seat, fcount, variance, undefined, fshape);
         // A seated fish darts AHEAD of its slot and settles back — the
         // closing displacement, because the permanent one would walk it out
         // of the school forever.
         const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
         const cf = carrier ?? this.carrierFrame(
-          extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
+          extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
         beat = cf.lead;
         // A rigid body means every fish points EXACTLY the same way, which

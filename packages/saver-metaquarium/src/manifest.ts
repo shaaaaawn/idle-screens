@@ -37,7 +37,10 @@ export const METAQUARIUM_PARAMS = {
    *  different angelfish). A custom catalog is a closed world (no farm/IPFS
    *  fallback, no uniqueness — NPC entries are species). Counts are
    *  absolute; the expanded total clamps to the device tier's fish cap.
-   *  Non-empty mix OVERRIDES fishUrl and fishCount; empty string = single-
+   *  A token may carry its own swim style — `id[:count]@style`, e.g.
+   *  "457:3@hover,257:6@school,497:1@surface" — so one tank holds several
+   *  behaviours; untagged tokens follow `swimStyle`. Non-empty mix
+   *  OVERRIDES fishUrl and fishCount; empty string = single-
    *  breed mode. Unknown ids/bad counts degrade (good tokens still parse);
    *  raw URLs are not accepted here — use fishUrl for a custom single-breed GLB. */
   fishMix: { type: 'string', default: '', ease: 'step' },
@@ -228,7 +231,7 @@ export function coerceNum(
 }
 
 export * from './farm';
-export { parseFishMix, expandFishMix, type FishMixEntry, type FishMixResult, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
+export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, type FishMixResult, type FishSlot, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
 
 export * from './environments';
 export * from './swim';

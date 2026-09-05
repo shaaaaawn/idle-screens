@@ -58,7 +58,7 @@ frame loop (rAF or renderFrame(t)):
 | swimSpeed | number | 1 | Swim time-scale multiplier |
 | fogColor | color | #030009 | Atmosphere / background |
 | fishUrl | string | ipfs://…/fish_257_….glb | GLB model URL, single-breed mode (playground can override to a local asset) |
-| fishMix | string | "" | Mixed population DSL: `id[:count]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`). Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | "" | Mixed population DSL: `id[:count][@style]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"` — per-token swim style; untagged tokens follow `swimStyle`). Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | fogNear | number | 60 | Fog start distance (the old hardcoded Fog near) |
 | fogFar | number | 500 | Fog full-opacity distance; tank enforces > near + 20 |
 | moteDensity | number | 0 | Plankton motes, 0–1 of the tier budget (400/250/120). 0 = off |
