@@ -291,7 +291,7 @@ export function adviseSpec(
       const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
       if (smaller <= 0) continue;
       const share = (ix * iy) / smaller;
-      if (share < 0.1) continue;
+      if (share <= 0.1) continue;
       pairFlagged.add(pair);
       const [first, second] = a.li < b.li ? [a, b] : [b, a];
       warnings.push({
@@ -331,7 +331,7 @@ function textBoxAt(
   w: number,
   h: number,
 ): Box {
-  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+  const m = s.font ? /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/.exec(s.font) : null;
   const fontScale = spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
   const fh = m ? Number(m[1]) * fontScale : e.size;
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
