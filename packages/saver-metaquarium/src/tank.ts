@@ -50,7 +50,7 @@ import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
-  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway } from './swim';
+  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
@@ -511,6 +511,8 @@ class TankInstance implements SaverInstance {
   /** What the last rendered frame looked like, in numbers — `inspect()`. */
   private lastFish: InspectFish[] = [];
   private lastFrameT = 0;
+  /** `inspect()` answers null until a frame has actually been rendered. */
+  private rendered = false;
   private wantKey = '';
   private wantInputKey = '';
   /** Last fishMix string whose parse problems were warned — once per mix,
@@ -1256,9 +1258,15 @@ class TankInstance implements SaverInstance {
     const formationStyle = fcount > 0 ? styleAt(formationSeat.keys().next().value as number) : null;
     const extent0 = fcount > 0 ? formationExtent(fcount, variance, fshape) : null;
     // Breathing scales seats AND extent together, so the carrier's inward
-    // pull still measures the shoal it is actually keeping in the glass.
+    // pull still measures the shoal it is actually keeping in the glass —
+    // and only as far as the glass allows (fitBreath: a full breath on a
+    // tall ring or stacked wedge would otherwise push seats out of the
+    // water column, because the carrier moves the centre, not the fish).
+    const breath = extent0
+      ? fitBreath(extent0, lattice, { yRange: BOUNDS.yMax - BOUNDS.yMin, radius: BOUNDS.radius })
+      : lattice;
     const extent = extent0
-      ? { side: extent0.side * lattice, up: extent0.up * lattice, back: extent0.back * lattice, reach: extent0.reach * lattice }
+      ? { side: extent0.side * breath, up: extent0.up * breath, back: extent0.back * breath, reach: extent0.reach * breath }
       : null;
     const carrier = extent && formationStyle ? this.carrierFrame(extent, formationStyle, tSec, warpSec, speed) : null;
     // Relationships (MQ31), resolved in SLOT order: a bonded fish rides the
@@ -1355,9 +1363,9 @@ class TankInstance implements SaverInstance {
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
         const slot = formationSlot(seat, fcount, variance, undefined, fshape);
-        slot.side *= lattice;
-        slot.up *= lattice;
-        slot.back *= lattice;
+        slot.side *= breath;
+        slot.up *= breath;
+        slot.back *= breath;
         // A seated fish darts AHEAD of its slot and settles back — the
         // closing displacement, because the permanent one would walk it out
         // of the school forever.
@@ -1427,8 +1435,15 @@ class TankInstance implements SaverInstance {
           if (seek > 0 && pools.length > 0) {
             const pool = pools[Math.floor(fishHash(f.index, 53) * pools.length) % pools.length]!;
             const k = seek * 0.7 * (0.5 + 0.5 * fishHash(f.index, 59));
-            pullX = (pool[0] - pose.x) * k;
-            pullZ = (pool[1] - pose.z) * k;
+            // A shaft can stand at the glass or beyond it (rooms place their
+            // lights, the tank does not); the pull is toward it, never past
+            // the radius.
+            const tx = (pool[0] - pose.x) * k;
+            const tz = (pool[1] - pose.z) * k;
+            const tr = Math.hypot(pose.x + tx, pose.z + tz);
+            const ts = tr > BOUNDS.radius ? BOUNDS.radius / tr : 1;
+            pullX = (pose.x + tx) * ts - pose.x;
+            pullZ = (pose.z + tz) * ts - pose.z;
           }
           const me: LeaderFrame = { plan: f.plan, style, d, effort, phase: varn.phase, pullX, pullZ };
           let oy = 0;
@@ -1575,6 +1590,7 @@ class TankInstance implements SaverInstance {
     }
     this.lastFish = report;
     this.lastFrameT = t;
+    this.rendered = true;
   }
 
   /**
@@ -1583,7 +1599,9 @@ class TankInstance implements SaverInstance {
    * meaning. Reads the last rendered frame; never simulates. Small on
    * purpose: 24 fish × a dozen fields.
    */
-  inspect(): Record<string, unknown> {
+  inspect(): Record<string, unknown> | null {
+    // "Nothing yet" is null by contract — not an empty tank at t=0.
+    if (!this.rendered) return null;
     const fish = this.lastFish;
     const byStyle: Record<string, number> = {};
     for (const f of fish) byStyle[f.style] = (byStyle[f.style] ?? 0) + 1;

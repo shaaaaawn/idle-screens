@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
-  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf,
+  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf, fitBreath,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
 
@@ -161,8 +161,21 @@ describe('relationships, auto styles, breathing, sway', () => {
     expect(swimStyleOf('chase').bond).toBe('chase');
     for (const n of ['loop', 'school', 'drift', 'hover', 'patrol', 'bottom', 'surface']) {
       expect(swimStyleOf(n).bond ?? 'none').toBe('none');
-      expect(swimStyleOf(n).formation || swimStyleOf(n).travel >= 0).toBe(true);
+      // Exactly one older style forms; a style that silently became a
+      // formation (or school stopped being one) must fail here.
+      expect(swimStyleOf(n).formation).toBe(n === 'school');
     }
+  });
+  it('fitBreath caps a breath that would push seats out of the glass', () => {
+    const bounds = { yRange: 57, radius: 120 };
+    // A ring's vertical reach is capped at 24: ×1.22 = 29.3 > 28.5 half-column.
+    const fit = fitBreath({ up: 24, reach: 50 }, 1.22, bounds, 0);
+    expect(fit).toBeCloseTo(28.5 / 24, 5);
+    expect(24 * fit).toBeLessThanOrEqual(bounds.yRange / 2);
+    // A shoal that fits breathes the full amount.
+    expect(fitBreath({ up: 10, reach: 30 }, 1.22, bounds, 0)).toBe(1.22);
+    // Never below 1: a shoal already at the limit holds, it does not shrink.
+    expect(fitBreath({ up: 40, reach: 30 }, 1.22, bounds, 0)).toBe(1);
   });
   it('auto covers every minted breed and every NPC breed, and loops for strangers', () => {
     for (const b of ['betafish', 'angelfish', 'seahorse', 'seaturtle',

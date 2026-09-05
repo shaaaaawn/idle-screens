@@ -613,6 +613,17 @@ export class IdleScreenElement extends HostBase {
           this.cleanupWorkerHandlers = () => {
             worker.removeEventListener('error', onCrash);
             worker.removeEventListener('messageerror', onCrash);
+            // disposeInstance() caches the Worker for reuse WITHOUT calling
+            // proxy.dispose(), so the capture/inspect listeners and any
+            // in-flight requests must be cleared here too — or every remount
+            // stacks another listener on the cached Worker and a pending
+            // inspect settles from a later mount's answer.
+            worker.removeEventListener('message', onCaptured);
+            worker.removeEventListener('message', onInspected);
+            for (const settle of pendingCaptures.values()) settle(null);
+            pendingCaptures.clear();
+            for (const settle of pendingInspects.values()) settle(null);
+            pendingInspects.clear();
           };
 
           resolve(proxy);

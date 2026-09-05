@@ -383,6 +383,28 @@ export function formationExtent(
   return { side, up, back, reach };
 }
 
+/**
+ * The largest breath a formation can take and still fit the glass. Breathing
+ * scales seats and extent together, and the carrier keeps the shoal inside
+ * by moving its CENTRE — which only works while the extent fits: a ring's
+ * vertical reach is capped at 24 units, and at a full breath (×1.22) that is
+ * 29.3 against a 57-unit water column, so the carrier's y-clamp inverted and
+ * the top and bottom seats left the tank (review, MQ34). Cap the breath so
+ * the breathed extent (plus a margin for per-seat jitter) never exceeds what
+ * the carrier can keep inside.
+ */
+export function fitBreath(
+  extent: { up: number; reach: number },
+  lattice: number,
+  bounds: { yRange: number; radius: number },
+  margin = FISH_LENGTH * 0.5,
+): number {
+  let fit = lattice;
+  if (extent.up > 0) fit = Math.min(fit, Math.max(1, (bounds.yRange / 2 - margin) / extent.up));
+  if (extent.reach > 0) fit = Math.min(fit, Math.max(1, (bounds.radius - margin) / extent.reach));
+  return fit;
+}
+
 /** Depth band as a fraction of the tank's vertical extent — the tank owns the
  *  actual bounds, this owns the intent. */
 export function bandRange(band: DepthBand): { lo: number; hi: number } | null {

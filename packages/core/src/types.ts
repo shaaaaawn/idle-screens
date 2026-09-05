@@ -120,7 +120,7 @@ export interface SaverInstance {
    *  flight. Plain JSON, small (a few KB), synchronous — read from the last
    *  rendered frame, never a fresh simulation. The analytic perception a
    *  non-vision agent gets for a saver that has no declarative spec.
-   *  Resolve null for "nothing yet". Optional. */
+   *  Return null for "nothing yet". Optional. */
   inspect?(): Record<string, unknown> | null;
   /** Steer parameters over time. Optional. */
   applyTrack?(track: ControlTrack): void;
