@@ -106,6 +106,20 @@ describe('parseFishMix', () => {
     expect(r.problems).toHaveLength(1);
     expect(r.problems[0]).toContain('unknown style "zoom"');
   });
+  it('preserves @ inside custom aliases and parses only a trailing style suffix', () => {
+    const catalog = [{ id: 9, name: 'Night reef', breed: 'reef@night', ipfs3d: '/reef.glb', localGlb: '' }];
+    const unstyled = parseFishMix('reef@night:2', catalog);
+    expect(unstyled.problems).toEqual([]);
+    expect(unstyled.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2 }]);
+
+    const styled = parseFishMix('reef@night:2@hover', catalog);
+    expect(styled.problems).toEqual([]);
+    expect(styled.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2, style: 'hover' }]);
+
+    const typo = parseFishMix('reef@night:2@zoom', catalog);
+    expect(typo.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2 }]);
+    expect(typo.problems[0]).toContain('unknown style "zoom"');
+  });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });
   });

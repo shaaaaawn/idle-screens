@@ -124,6 +124,27 @@ export function parseFishMix(
   const unique = catalog === FISH_CATALOG;
   const used = new Set<number>();
 
+  /** Whether `core` is already a complete, valid unstyled token. Custom
+   *  catalog aliases historically allowed `@`, so an unrecognised trailing
+   *  word is style syntax only when the prefix resolves and the whole token
+   *  does not. */
+  const resolvesAsToken = (core: string): boolean => {
+    const [idRaw, countRaw, ...extra] = core.split(':');
+    if (extra.length > 0) return false;
+    if (countRaw !== undefined) {
+      const count = Number(countRaw.trim());
+      if (!Number.isInteger(count) || count < 1) return false;
+    }
+    const key = (idRaw ?? '').trim().toLowerCase();
+    if (/^\d+$/.test(key)) {
+      if (catalog.some((fish) => fish.id === Number(key))) return true;
+      return catalog === FISH_CATALOG
+        && fishAsset(Number(key), '3d') !== null
+        && breedOf(Number(key)) !== null;
+    }
+    return catalog.some((fish) => fish.breed.toLowerCase() === key);
+  };
+
   /** Nearest unused minted id of `breed`, spreading outward from `want`. */
   const allocate = (breed: Breed, want: number): number | null => {
     const b = BREEDS.find((x) => x.breed === breed);
@@ -145,13 +166,17 @@ export function parseFishMix(
     // on the scene's style — degrade the tag, never drop the fish.
     let style: SwimStyle | undefined;
     let core = token;
-    const at = token.indexOf('@');
+    const at = token.lastIndexOf('@');
     if (at >= 0) {
       const styleRaw = token.slice(at + 1).trim().toLowerCase();
-      core = token.slice(0, at).trim();
+      const styledCore = token.slice(0, at).trim();
       if ((SWIM_STYLE_NAMES as readonly string[]).includes(styleRaw)) {
+        core = styledCore;
         style = styleRaw as SwimStyle;
-      } else {
+      } else if (resolvesAsToken(styledCore) && !resolvesAsToken(token)) {
+        // Preserve a complete alias such as `reef@night`; only diagnose a
+        // misspelled suffix when removing it exposes a real id/alias.
+        core = styledCore;
         problems.push(`"${token}": unknown style "${styleRaw}" (${SWIM_STYLE_NAMES.join(', ')}) — swimming with the scene's swimStyle`);
       }
     }
