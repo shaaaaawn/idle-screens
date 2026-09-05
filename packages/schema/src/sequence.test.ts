@@ -877,7 +877,10 @@ describe("resolveSegment — advance: 'input' holds until released", () => {
     // Released (the presenter clicked past b): the timeline wraps, and on
     // the new lap b is armed again.
     expect(resolveSegment(s, 9000, { releasedBelow: 2 })).toEqual({ index: 0, localT: 1000, startT: 0 });
-    expect(resolveSegment(s, 8000 + 5000 + 3500, { releasedBelow: 2 })).toMatchObject({ index: 1, held: true });
+    // Lap 3 (T ≥ 2×totalTimed): modulo, not one-lap subtract. 17000 % 8000 = 1000.
+    expect(resolveSegment(s, 17000, { releasedBelow: 2 })).toEqual({ index: 0, localT: 1000, startT: 0 });
+    // Fresh lap re-arms holds. 8500 is 500 ms into lap 2, still before b's hold.
+    expect(resolveSegment(s, 8500, { releasedBelow: 0 })).toMatchObject({ index: 1, held: true, localT: 3500 });
   });
 
   it("advance: 'input' on the final durationless segment changes nothing — it already holds", () => {

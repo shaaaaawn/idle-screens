@@ -87,11 +87,11 @@ export function resolveSegment(seq: IdleSequence, T: number, opts: ResolveOption
   if (first) return first;
 
   if (loop && totalTimed > 0) {
-    // A fresh lap, with every hold armed again. With no holds the laps repeat
-    // freely (modulo); with a hold, lap 1 is as far as an unreleased clock can
-    // get — the first armed hold catches it, and a release resets the offset.
-    const hasHold = segments.some((seg) => seg.duration != null && seg.advance === 'input');
-    const wrapped = walk(hasHold ? t0 - totalTimed : t0 % totalTimed, 0);
+    // A fresh lap, with every hold armed again. Always modulo: subtracting
+    // one lap (`t0 - totalTimed`) leaves later laps (T ≥ 2×totalTimed) still
+    // past the end of the loop, so a released clock lands on the last hold
+    // with a growing localT instead of wrapping.
+    const wrapped = walk(t0 % totalTimed, 0);
     if (wrapped) return wrapped;
   }
 
