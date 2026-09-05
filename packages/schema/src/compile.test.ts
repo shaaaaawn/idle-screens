@@ -554,6 +554,26 @@ describe('shape glyphs draw (#46)', () => {
     expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
   });
 
+  it('feathered rect paints outside-in: the full-size fill faintest first, the core at full alpha last', () => {
+    const seen: Array<{ w: number; a: number }> = [];
+    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number, h: number) => void }).fillRect = (_x, _y, w) => {
+      seen.push({ w, a: (mockCtx as unknown as { globalAlpha: number }).globalAlpha });
+    };
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'f', label: 'F', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], color: '#fff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const fills = seen.slice(1); // drop the background
+    expect(fills).toHaveLength(6);
+    expect(fills[0]!.w).toBeCloseTo(60, 9); // full size first …
+    expect(fills[0]!.a).toBeCloseTo(1 / 6, 9); // … at the faintest alpha
+    expect(fills[5]!.w).toBeCloseTo(60 * (1 - 0.5 * 5 / 6), 9); // the core last …
+    expect(fills[5]!.a).toBeCloseTo(1, 9); // … at full alpha
+    for (let i = 1; i < 6; i++) expect(fills[i]!.w).toBeLessThan(fills[i - 1]!.w);
+    inst.dispose();
+  });
+
   it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
     render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
     const hard = calls(mockCtx.fillRect);

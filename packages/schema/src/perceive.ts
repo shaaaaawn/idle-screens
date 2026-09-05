@@ -355,16 +355,28 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         const ca = Math.cos(angle);
         const sa = Math.sin(angle);
         const lw = strokeWidthPx(s, scale);
-        for (let i = 0; i < pts.length; i++) {
-          const q = pts[i]!;
+        const stampAt = (q: { x: number; y: number }, u: number): void => {
           const x = p.x + q.x * ca - q.y * sa;
           const y = p.y + q.x * sa + q.y * ca;
           const c = Math.floor(x / cellW);
           const r = Math.floor(y / cellH);
-          if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
-          const taper = s.taper ? strokeTaper(i / (pts.length - 1)) : 1;
-          const wgt = Math.min(1, (lw * taper) / cellH);
-          compose(r * cols + c, lum, a * wgt, layer.blend);
+          if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+          const taper = s.taper ? strokeTaper(u) : 1;
+          compose(r * cols + c, lum, a * Math.min(1, (lw * taper) / cellH), layer.blend);
+        };
+        // Rasterize each segment at half-cell steps so a long stroke leaves a
+        // continuous line of ink, not a dotted one.
+        const step = Math.min(cellW, cellH) / 2;
+        stampAt(pts[0]!, 0);
+        for (let i = 1; i < pts.length; i++) {
+          const q0 = pts[i - 1]!;
+          const q1 = pts[i]!;
+          const segLen = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+          const sub = Math.max(1, Math.ceil(segLen / step));
+          for (let k = 1; k <= sub; k++) {
+            const f = k / sub;
+            stampAt({ x: q0.x + (q1.x - q0.x) * f, y: q0.y + (q1.y - q0.y) * f }, (i - 1 + f) / (pts.length - 1));
+          }
         }
         continue;
       }

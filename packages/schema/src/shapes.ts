@@ -21,7 +21,7 @@ export function isShapedSprite(s: SpriteSpec): s is ShapedSprite {
 }
 
 export const DEFAULT_POLYGON_SIDES = 6;
-/** Samples along a stroke path — enough that a smooth curve reads as a curve. */
+/** Minimum samples along a stroke path; grows with the control-point count (6 per segment). */
 export const STROKE_SAMPLES = 24;
 
 /** Polygon vertices centred on (0,0), unrotated, circumradius `radius` px. Regular n-gons point up. */
@@ -74,12 +74,15 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, u: number): 
  * clamped ends; `'linear'` samples the polyline. Two control points give a
  * straight segment either way.
  */
-export function strokeSamples(s: StrokeSprite, halfSize: number, n = STROKE_SAMPLES): Array<{ x: number; y: number }> {
+export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Array<{ x: number; y: number }> {
   const pts = s.points.map(([x, y]) => ({ x: x * halfSize, y: y * halfSize }));
   const m = pts.length;
   if (m < 2) return pts;
   const smooth = s.curve !== 'linear' && m >= 3;
   const segs = m - 1;
+  // Enough samples that every spline segment gets interior points — a
+  // 24-point stroke must not collapse to its control polyline.
+  n = n ?? Math.max(STROKE_SAMPLES, segs * 6 + 1);
   const at = (k: number): { x: number; y: number } => pts[Math.max(0, Math.min(m - 1, k))]!;
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < n; i++) {

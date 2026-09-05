@@ -358,16 +358,19 @@ class SpecInstance implements SaverInstance {
       ctx.fillStyle = resolvedColor;
       const feather = sprite.feather ?? 0;
       if (feather > 0) {
-        // Soft edge: nested fills from the outside in whose composited alpha
-        // ramps linearly across the feathered band (see featherAlphas).
+        // Soft edge: nested fills from the OUTSIDE IN — the full-size rect
+        // first at the faintest alpha, the core last at full — so the
+        // composited alpha ramps linearly across the feathered band (see
+        // featherAlphas). Only `lighter` sums alphas; `screen` still
+        // composites source-over, so it takes the source-over schedule.
         const base = ctx.globalAlpha;
-        const additive = built.layer.blend === 'lighter' || built.layer.blend === 'screen';
+        const additive = built.layer.blend === 'lighter';
         const alphas = featherAlphas(FEATHER_STEPS, additive);
-        for (let k = 1; k <= FEATHER_STEPS; k++) {
-          const f = 1 - feather * (1 - k / FEATHER_STEPS); // 1 - feather + ... → core at (1 - feather)
+        for (let j = 1; j <= FEATHER_STEPS; j++) {
+          const f = 1 - (feather * (j - 1)) / FEATHER_STEPS; // j=1 full size … j=K the core
           const fw = sz * f;
           const fh = rh * f;
-          ctx.globalAlpha = base * alphas[k - 1]!;
+          ctx.globalAlpha = base * alphas[j - 1]!;
           ctx.fillRect(-fw / 2, -fh / 2, fw, fh);
         }
         ctx.globalAlpha = base;

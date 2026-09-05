@@ -369,6 +369,12 @@ describe('validateSpec — shape glyphs (#46)', () => {
     expect(paths(withSprite({ kind: 'rect', width: [4, 8], color: '#fff', feather: 1.5 }))).toContain('layers[0].sprite.feather');
   });
 
+  it('rejects holes in a sparse points array', () => {
+    const sparse: Array<[number, number]> = [];
+    sparse[0] = [-1, 0]; sparse[2] = [1, 0]; // index 1 is a hole
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: sparse, color: '#fff' }))).toContain('layers[0].sprite.points[1]');
+  });
+
   it('polygon and stroke take a palette like every shaped sprite', () => {
     expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', colors: ['#fff', '#f00'], colorWeights: [3, 1] })).valid).toBe(true);
     expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', colors: ['#fff'], colorWeights: [1, 2] }))).toContain('layers[0].sprite.colorWeights');

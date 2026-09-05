@@ -737,11 +737,12 @@ function validateShapePoints(points: unknown, path: string, min: number, err: (p
   if (!Array.isArray(points) || points.length < min || points.length > LIMITS.maxShapePoints) {
     return err(path, `must be ${min}..${LIMITS.maxShapePoints} [x, y] pairs in unit coordinates (-1..1)`);
   }
-  points.forEach((pt, i) => {
+  for (let i = 0; i < points.length; i++) {
+    const pt: unknown = points[i]; // by index, so a sparse array's holes are rejected too
     if (!Array.isArray(pt) || pt.length !== 2 || !isNum(pt[0]) || !isNum(pt[1]) || Math.abs(pt[0]) > 1 || Math.abs(pt[1]) > 1) {
       err(`${path}[${i}]`, 'must be an [x, y] pair with each coordinate in -1..1');
     }
-  });
+  }
 }
 
 function validateEase(ease: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {

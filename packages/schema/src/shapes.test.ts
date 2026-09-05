@@ -56,6 +56,15 @@ describe('stroke geometry', () => {
     }
   });
 
+  it('a 24-point smooth stroke still gets interior samples per segment (it is a curve, not its control polyline)', () => {
+    const pts = Array.from({ length: 24 }, (_, i) => [-1 + (2 * i) / 23, i % 2 ? 0.5 : -0.5] as [number, number]);
+    const samples = strokeSamples(S({ points: pts }), 100);
+    expect(samples.length).toBeGreaterThanOrEqual(23 * 6 + 1);
+    // Midway between two alternating control points the spline overshoots the straight chord.
+    const mid = samples[3]!; // inside the first segment
+    expect(Math.abs(mid.y)).toBeLessThan(50);
+  });
+
   it('taper is thin at both ends, full in the middle, and never zero', () => {
     expect(strokeTaper(0)).toBeCloseTo(0.15, 9);
     expect(strokeTaper(0.5)).toBeCloseTo(1, 9);
@@ -96,9 +105,13 @@ describe('shape glyphs in the entity model and perception', () => {
     expect(dodeca).toBeLessThanOrEqual(disc + 1e-9);
   });
 
-  it('a stroke leaves ink along its path and a feathered rect weighs less than a hard one', () => {
+  it('a stroke leaves a continuous line of ink along its path, and a feathered rect weighs less than a hard one', () => {
     const stroke = luminanceGrid(base([{ count: 1, sprite: { kind: 'stroke', length: [400, 400], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 6 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }]));
     expect(stroke.coverage).toBeGreaterThan(0);
+    // A straight 1600 px stroke across an 80-column grid must light ~every column it crosses, not 24 dots.
+    const long = luminanceGrid(base([{ count: 1, sprite: { kind: 'stroke', length: [1600, 1600], points: [[-1, 0], [1, 0]], color: '#fff', width: 40 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }]));
+    const litCells = long.coverage * long.cols * long.rows;
+    expect(litCells).toBeGreaterThanOrEqual(60);
     const area = (sprite: LayerSpec['sprite']) => dominanceRanking(base([{ count: 1, sprite, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }]))[0]!.factors.area;
     expect(area({ kind: 'rect', width: [200, 200], color: '#fff', feather: 0.8 })).toBeLessThan(area({ kind: 'rect', width: [200, 200], color: '#fff' }));
   });
