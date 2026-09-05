@@ -727,6 +727,12 @@
             "color": {
               "$ref": "#/definitions/hexColor"
             },
+            "feather": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Soft edge: the fraction of the half-size that fades out toward the border (Rothko's block at 0.5\u20130.8). Default 0 = hard."
+            },
             "colors": {
               "type": "array",
               "minItems": 1,
@@ -740,6 +746,52 @@
             }
           },
           "description": "Axis-aligned rectangle (rotates with spin) \u2014 Mondrian blocks, confetti, city lights."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "radius", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "polygon" },
+            "radius": { "$ref": "#/definitions/positiveRange", "description": "Circumradius range (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "sides": { "type": "integer", "minimum": 3, "maximum": 12, "description": "Regular n-gon, point up. Default 6. Not with points." },
+            "points": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 24,
+              "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 } },
+              "description": "Custom vertices in unit coordinates (-1..1), scaled by the radius. Not with sides."
+            },
+            "soft": { "type": "boolean", "description": "Feather the fill from the centre, like a soft circle." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "Regular or custom polygon (rotates with spin) \u2014 a facet, a triangle, a plane, a mosaic tile."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "length", "points", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "stroke" },
+            "length": { "$ref": "#/definitions/positiveRange", "description": "Bounding size range of the mark (px or viewport-units); the unit box is scaled to it." },
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 24,
+              "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 } },
+              "description": "Path control points in unit coordinates (-1..1)."
+            },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 0.002 viewport-units / 2 px." },
+            "curve": { "enum": ["smooth", "linear"], "description": "Catmull-Rom spline through the points (default) or a polyline." },
+            "taper": { "type": "boolean", "description": "Thin the mark to almost nothing at both ends \u2014 a brush stroke rather than a line." },
+            "orient": { "type": "boolean", "description": "Turn the path's +x along the entity's heading (like streak)." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "A freehand mark: a path stroked with round joins, optionally tapered and heading-oriented. Rotates with spin."
         },
         {
           "type": "object",

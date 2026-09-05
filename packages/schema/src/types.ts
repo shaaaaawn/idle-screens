@@ -237,9 +237,40 @@ export type SpriteSpec =
   /**
    * Axis-aligned rectangle (rotates with `spin`). `width` is the horizontal size
    * range; `aspect` the height/width ratio range (default [1,1] = squares).
+   * `feather` (0..1) softens the edges: that fraction of the half-size fades
+   * out toward the border — Rothko's soft-edged block at 0.5–0.8.
    * Mondrian blocks, confetti, city lights.
    */
-  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; colors?: string[]; colorWeights?: number[] }
+  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; feather?: number; colors?: string[]; colorWeights?: number[] }
+  /**
+   * Regular or custom polygon. `sides` (3..12, default 6) draws a regular
+   * n-gon of the seeded `radius` (circumradius), point up; `points` (3..24
+   * unit coordinates in −1..1, scaled by the radius) draws any facet — a
+   * Picasso shard, a Kandinsky triangle, a Mondrian plane. `soft` feathers
+   * the fill from the centre like a soft circle. Rotates with `spin`.
+   */
+  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; soft?: boolean; colors?: string[]; colorWeights?: number[] }
+  /**
+   * A freehand mark: a path through `points` (2..24 unit coordinates in
+   * −1..1, scaled by the seeded `length`) stroked `width` wide with round
+   * joins. `curve: 'smooth'` (default) runs a Catmull-Rom spline through the
+   * points, `'linear'` a polyline. `taper` thins the mark to almost nothing at
+   * both ends — a brush stroke rather than a line. `orient` turns the path's
+   * +x along the entity's heading (like `streak`). Rotates with `spin`. Van
+   * Gogh's stroke, Hokusai's contour, O'Keeffe's petal, Basquiat's scrawl.
+   */
+  | {
+      kind: 'stroke';
+      length: [number, number];
+      points: Array<[number, number]>;
+      color: string;
+      width?: number;
+      curve?: 'smooth' | 'linear';
+      taper?: boolean;
+      orient?: boolean;
+      colors?: string[];
+      colorWeights?: number[];
+    }
   /**
    * Multi-line text block with deterministic line-breaking. Unlike `text` (one
    * string drawn as a single fillText call), `textBlock` wraps `text` within
@@ -429,6 +460,9 @@ export const LIMITS = {
   minClockedPeriod: 1000, // ms — a `clock`ed layer breathes in unison, so 1 Hz not 2
   minClockRate: 0.1,
   maxClockRate: 4,
+  minPolygonSides: 3,
+  maxPolygonSides: 12,
+  maxShapePoints: 24, // polygon.points / stroke.points
   minEaseTau: 100, // ms
   maxEaseTau: 120000, // ms
 } as const;

@@ -58,11 +58,11 @@ export function adviseSpec(
       });
     }
 
-    if (layer.sprite.kind === 'streak' && layer.motion.type === 'static') {
+    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: 'streak sprites orient along the motion heading — static entities have none and will render at angle 0',
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none and will render at angle 0`,
       });
     }
 

@@ -339,3 +339,38 @@ describe('validateSpec — time structure (#47)', () => {
     expect((onBounce.warnings ?? []).some((w) => w.path === 'layers[0].motion.ease' && w.code === 'unknown-property')).toBe(true);
   });
 });
+
+describe('validateSpec — shape glyphs (#46)', () => {
+  const withSprite = (sprite: SaverSpec['layers'][number]['sprite']): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite, motion: { type: 'static' } }],
+  });
+
+  it('accepts regular and custom polygons, strokes, and a feathered rect', () => {
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 3 })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -1], [1, 1]], soft: true })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [0, -0.5], [1, 0]], color: '#fff', width: 2, taper: true, orient: true })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'rect', width: [4, 8], color: '#fff', feather: 0.6 })).valid).toBe(true);
+  });
+
+  it('polygon: sides 3..12, sides xor points, points in the unit box', () => {
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 2 }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 13 }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 4, points: [[-1, 1], [0, -1], [1, 1]] }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -1]] }))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -2], [1, 1]] }))).toContain('layers[0].sprite.points[1]');
+  });
+
+  it('stroke: points required (2..24), width > 0, curve enum; feather 0..1 on rect', () => {
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], color: '#fff' } as never))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[0, 0]], color: '#fff' }))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', width: 0 }))).toContain('layers[0].sprite.width');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', curve: 'bezier' as never }))).toContain('layers[0].sprite.curve');
+    expect(paths(withSprite({ kind: 'rect', width: [4, 8], color: '#fff', feather: 1.5 }))).toContain('layers[0].sprite.feather');
+  });
+
+  it('polygon and stroke take a palette like every shaped sprite', () => {
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', colors: ['#fff', '#f00'], colorWeights: [3, 1] })).valid).toBe(true);
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', colors: ['#fff'], colorWeights: [1, 2] }))).toContain('layers[0].sprite.colorWeights');
+  });
+});

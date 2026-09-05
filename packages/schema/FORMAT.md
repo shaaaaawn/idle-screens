@@ -34,7 +34,8 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
 `textBlock.reveal` — animated typing/deleting via one steerable paint param;
 `emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
-(2026-09-05 — time structure).
+(2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
+(2026-09-05 — shape glyphs).
 
 ## Safety invariants
 
@@ -164,8 +165,25 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "streak", "length": [0.01, 0.03], "color": "#cfd8ff", "width": 0.002 }` —
   a line oriented along the entity's analytic heading with a faded tail
   (rain that reads as rain, shooting stars, warp stars)
-- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
-  rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
+- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347", "feather": 0.6 }` —
+  rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
+  `feather` 0..1 softens the edges — that fraction of the half-size fades out
+  toward the border (Rothko's block at 0.5–0.8)
+- `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
+  regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
+  6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
+  coordinates in −1..1 scaled by the radius — for any facet (a Picasso shard,
+  a Kandinsky triangle, a Mondrian plane). `soft` feathers the fill from the
+  centre. Rotates with `spin`. `points` are paint, so two polygons with the
+  same point count `morph` into each other
+- `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
+  a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
+  unit box spans the seeded `length`, stroked `width` wide with round joins.
+  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
+  `taper` thins the mark to almost nothing at both ends (a brush stroke rather
+  than a line); `orient: true` turns the path's +x along the entity's heading,
+  like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
+  O'Keeffe's petal, Basquiat's scrawl
 - `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
@@ -205,9 +223,9 @@ with distance, removing pop-in at the cutoff.
   glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
   back to 1.
 
-`circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
-per-entity palette pick) and `colorWeights: [...]` (relative weights, same
-length — "mostly cool tones, occasional ember").
+`circle`, `ring`, `streak`, `rect`, `polygon` and `stroke` all accept
+`colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
+(relative weights, same length — "mostly cool tones, occasional ember").
 
 ### `motion` (one of)
 

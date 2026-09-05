@@ -29,6 +29,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     stroke: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
+    closePath: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
     translate: vi.fn(),
@@ -46,6 +47,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     textBaseline: 'middle',
     lineWidth: 1,
     lineCap: 'butt',
+    lineJoin: 'miter',
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -514,5 +516,49 @@ describe('textBlock glyphFade drawing', () => {
       expect(more[i]!.text).toBe(some[i]!.text);
       expect(more[i]!.x).toBe(some[i]!.x);
     }
+  });
+});
+
+describe('shape glyphs draw (#46)', () => {
+  const scene = (sprite: SaverSpec['layers'][number]['sprite'], blend?: 'lighter'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'shapes',
+    label: 'Shapes',
+    units: 'px',
+    layers: [{ count: 2, sprite, motion: { type: 'drift', speed: [10, 20] }, spin: 30, ...(blend ? { blend } : {}) }],
+  });
+  const calls = (fn: unknown): number => (fn as { mock: { calls: unknown[] } }).mock.calls.length;
+  // A reduced-motion mount paints one frame; renderFrame paints a second — so
+  // every per-frame count below is doubled.
+  const FRAMES = 2;
+  const render = (spec: SaverSpec): void => {
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    inst.renderFrame!(1234, 42);
+    inst.dispose();
+  };
+
+  it('polygon: one closed path per entity, a radial gradient only when soft', () => {
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', sides: 5 }));
+    expect(calls(mockCtx.closePath)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.fill)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.createRadialGradient)).toBe(0);
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', points: [[-1, 1], [0, -1], [1, 1]], soft: true }));
+    expect(calls(mockCtx.createRadialGradient)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('stroke: a single stroked path, or one segment per sample when tapered', () => {
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3 }));
+    const plain = calls(mockCtx.stroke);
+    expect(plain).toBe(FRAMES * 2);
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3, taper: true, orient: true }));
+    expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
+  });
+
+  it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
+    const hard = calls(mockCtx.fillRect);
+    expect(hard).toBe(FRAMES * (1 + 2)); // background + two entities per frame
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff', feather: 0.5 }, 'lighter'));
+    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
   });
 });

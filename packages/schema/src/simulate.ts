@@ -1,6 +1,7 @@
 import type { Rng } from '@idle-screens/core';
 import type { CycleSpec, LayerSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
+import { isShapedSprite } from './shapes';
 
 /** Near plane for warp motion. z lives in [WARP_NEAR, 1]; screen scale is 1/z. */
 export const WARP_NEAR = 0.08;
@@ -172,12 +173,8 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   const [smin, smax] = layer.size ?? [20, 40];
   const variants = spriteVariants(layer.sprite);
   const sprite = layer.sprite;
-  const spriteColors = (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect')
-    ? sprite.colors
-    : undefined;
-  const colorWeights = (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect')
-    ? sprite.colorWeights
-    : undefined;
+  const spriteColors = isShapedSprite(sprite) ? sprite.colors : undefined;
+  const colorWeights = isShapedSprite(sprite) ? sprite.colorWeights : undefined;
   const colorsLen = spriteColors?.length ?? 0;
   const cycle: CycleSpec | undefined = (sprite.kind === 'emoji' || sprite.kind === 'text') ? sprite.cycle : undefined;
 
@@ -225,9 +222,9 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     const size =
       sprite.kind === 'textBlock'
         ? sprite.fontSize * scale
-        : sprite.kind === 'circle' || sprite.kind === 'ring'
+        : sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'polygon'
           ? rng.range(sprite.radius[0], sprite.radius[1]) * 2 * scale
-          : sprite.kind === 'streak'
+          : sprite.kind === 'streak' || sprite.kind === 'stroke'
             ? rng.range(sprite.length[0], sprite.length[1]) * scale
             : sprite.kind === 'rect'
               ? rng.range(sprite.width[0], sprite.width[1]) * scale

@@ -19,6 +19,7 @@ import {
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
 import { resolveSegment, segmentStart } from './sequence';
+import { FEATHER_STEPS, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -266,7 +267,7 @@ class SpecInstance implements SaverInstance {
     const headAlpha = alphaAt(e, t) * lifeA;
     const headSize = sizeAt(e, t);
     const sprite = built.layer.sprite;
-    const resolvedColor = sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect'
+    const resolvedColor = isShapedSprite(sprite)
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
       : sprite.kind === 'text' || sprite.kind === 'textBlock' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
@@ -355,7 +356,79 @@ class SpecInstance implements SaverInstance {
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
       ctx.fillStyle = resolvedColor;
-      ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
+      const feather = sprite.feather ?? 0;
+      if (feather > 0) {
+        // Soft edge: nested fills from the outside in whose composited alpha
+        // ramps linearly across the feathered band (see featherAlphas).
+        const base = ctx.globalAlpha;
+        const additive = built.layer.blend === 'lighter' || built.layer.blend === 'screen';
+        const alphas = featherAlphas(FEATHER_STEPS, additive);
+        for (let k = 1; k <= FEATHER_STEPS; k++) {
+          const f = 1 - feather * (1 - k / FEATHER_STEPS); // 1 - feather + ... → core at (1 - feather)
+          const fw = sz * f;
+          const fh = rh * f;
+          ctx.globalAlpha = base * alphas[k - 1]!;
+          ctx.fillRect(-fw / 2, -fh / 2, fw, fh);
+        }
+        ctx.globalAlpha = base;
+      } else {
+        ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
+      }
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'polygon') {
+      const r = sz / 2;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const pts = polygonPoints(sprite, r);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      if (sprite.soft) {
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        g.addColorStop(0, resolvedColor);
+        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
+        g.addColorStop(1, hexToRgba(resolvedColor, 0));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = resolvedColor;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pts[0]!.x, pts[0]!.y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'stroke') {
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const pts = strokeSamples(sprite, sz / 2);
+      const lw = strokeWidthPx(sprite, unitScale);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      let angle = rot;
+      if (sprite.orient) angle += headingAt(e, t, this.w, this.h) ?? 0;
+      if (angle) ctx.rotate(angle);
+      ctx.strokeStyle = resolvedColor;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (sprite.taper) {
+        // A brush mark: each sampled segment at its own width.
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineWidth = Math.max(0.5, lw * strokeTaper((i - 0.5) / (pts.length - 1)));
+          ctx.beginPath();
+          ctx.moveTo(pts[i - 1]!.x, pts[i - 1]!.y);
+          ctx.lineTo(pts[i]!.x, pts[i]!.y);
+          ctx.stroke();
+        }
+      } else {
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        ctx.moveTo(pts[0]!.x, pts[0]!.y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+        ctx.stroke();
+      }
       ctx.restore();
       return;
     }
@@ -558,7 +631,7 @@ class SpecInstance implements SaverInstance {
       let resolvedColor = links.color;
       if (!resolvedColor) {
         const sprite = built.layer.sprite;
-        if (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect') {
+        if (isShapedSprite(sprite)) {
           resolvedColor = sprite.colors?.[ei.colorIndex] ?? sprite.color;
         } else resolvedColor = '#e6e8ef';
       }

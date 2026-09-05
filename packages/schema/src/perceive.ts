@@ -16,6 +16,7 @@
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
+import { pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -25,6 +26,7 @@ import {
   linkEdges,
   positionAt,
   revealState,
+  rotationAt,
   sizeAt,
   type Entity,
 } from './simulate';
@@ -345,6 +347,27 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const sz = sizeAt(e, tPass);
       const s = layer.sprite;
 
+      if (s.kind === 'stroke') {
+        // Stamp along the sampled path, rotated like the renderer does.
+        const pts = strokeSamples(s, sz / 2);
+        let angle = rotationAt(e, tPass);
+        if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
+        const ca = Math.cos(angle);
+        const sa = Math.sin(angle);
+        const lw = strokeWidthPx(s, scale);
+        for (let i = 0; i < pts.length; i++) {
+          const q = pts[i]!;
+          const x = p.x + q.x * ca - q.y * sa;
+          const y = p.y + q.x * sa + q.y * ca;
+          const c = Math.floor(x / cellW);
+          const r = Math.floor(y / cellH);
+          if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+          const taper = s.taper ? strokeTaper(i / (pts.length - 1)) : 1;
+          const wgt = Math.min(1, (lw * taper) / cellH);
+          compose(r * cols + c, lum, a * wgt, layer.blend);
+        }
+        continue;
+      }
       if (s.kind === 'streak') {
         // Stamp along the segment from tail to head.
         const heading = headingAt(e, tPass, w, h) ?? 0;
@@ -379,8 +402,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         halfX = box.halfX;
         halfY = box.halfY;
       }
-      const circular = s.kind === 'circle' || s.kind === 'ring';
-      const soft = s.kind === 'circle' && !!s.soft;
+      const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
+      const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
+      // A polygon fills only part of its disc; a feathered rect only part of
+      // its box. Scale the splat weight rather than trace the outline.
+      const shapeWeight = s.kind === 'polygon'
+        ? polygonFill(s, sz / 2)
+        : s.kind === 'rect' && s.feather
+          ? (1 - s.feather / 2) * (1 - s.feather / 2)
+          : 1;
       const additive = layer.blend === 'lighter' || layer.blend === 'screen';
       // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
       // falloff outside the solid core, so coverage tracks what the audience
@@ -419,9 +449,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
             } else {
               wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             }
-            compose(r * cols + c, lum, a * wgt, layer.blend);
+            compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else {
-            compose(r * cols + c, lum, a * inkWeight, layer.blend);
+            compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
         }
       }
@@ -716,7 +746,13 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
       else if (s.kind === 'rect') {
         const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
-        entArea = sz * h2;
+        const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
+        entArea = sz * h2 * f;
+      }
+      else if (s.kind === 'polygon') entArea = polygonArea(polygonPoints(s, sz / 2));
+      else if (s.kind === 'stroke') {
+        const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
+        entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 });

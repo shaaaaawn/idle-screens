@@ -18,7 +18,9 @@ const KNOWN_LAYER = new Set([
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
-const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
+const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
+const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
@@ -472,6 +474,32 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.aspect !== undefined && (!isRange(sprite.aspect) || sprite.aspect[0] <= 0)) {
       err(`${path}.aspect`, 'must be a [min,max] range of positive height/width ratios');
     }
+    if (sprite.feather !== undefined && (!isNum(sprite.feather) || sprite.feather < 0 || sprite.feather > 1)) {
+      err(`${path}.feather`, 'must be 0..1 (fraction of the half-size that fades out)');
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'polygon') {
+    knownSet = KNOWN_POLYGON;
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px (circumradius)');
+    if (sprite.sides !== undefined && sprite.points !== undefined) {
+      err(`${path}.sides`, 'use sides (a regular polygon) or points (a custom one), not both');
+    }
+    if (sprite.sides !== undefined && (!isNum(sprite.sides) || !Number.isInteger(sprite.sides) || sprite.sides < LIMITS.minPolygonSides || sprite.sides > LIMITS.maxPolygonSides)) {
+      err(`${path}.sides`, `must be an integer ${LIMITS.minPolygonSides}..${LIMITS.maxPolygonSides}`);
+    }
+    if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
+    if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'stroke') {
+    knownSet = KNOWN_STROKE;
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px (the mark\'s bounding size)');
+    validateShapePoints(sprite.points, `${path}.points`, 2, err);
+    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
+    if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
+    if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -531,7 +559,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       }
     }
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | polygon | stroke | textBlock');
     return;
   }
 
@@ -702,6 +730,18 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   for (const k of unknownKeys(motion, knownSet)) {
     warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
   }
+}
+
+/** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
+function validateShapePoints(points: unknown, path: string, min: number, err: (p: string, m: string) => void): void {
+  if (!Array.isArray(points) || points.length < min || points.length > LIMITS.maxShapePoints) {
+    return err(path, `must be ${min}..${LIMITS.maxShapePoints} [x, y] pairs in unit coordinates (-1..1)`);
+  }
+  points.forEach((pt, i) => {
+    if (!Array.isArray(pt) || pt.length !== 2 || !isNum(pt[0]) || !isNum(pt[1]) || Math.abs(pt[0]) > 1 || Math.abs(pt[1]) > 1) {
+      err(`${path}[${i}]`, 'must be an [x, y] pair with each coordinate in -1..1');
+    }
+  });
 }
 
 function validateEase(ease: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
