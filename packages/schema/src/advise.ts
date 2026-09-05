@@ -1,8 +1,8 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
-import { LIMITS, type IdleSequence, type SaverSpec, type SpecWarning } from './types';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
 
 /**
  * Minimum RGB-space colour distance (see `colourSeparation`) between a layer
@@ -235,7 +235,136 @@ export function adviseSpec(
     }
   }
 
+  // Spatial text: the one layout bug an author without eyes makes most and
+  // cannot detect — a caption that runs off the frame, a title painted over a
+  // body. Only static text is judged (moving text has no fixed box). Boxes use
+  // the character-class width table the textBlock line-breaker uses, so the
+  // estimate is the renderer's own idea of the text, not a separate guess.
+  const textBoxes: TextBoxAt[] = [];
+  for (let li = 0; li < spec.layers.length; li++) {
+    const layer = spec.layers[li]!;
+    const s = layer.sprite;
+    if (layer.motion.type !== 'static') continue;
+    if (s.kind !== 'text' && s.kind !== 'textBlock') continue;
+    const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
+    for (const e of allEntities[li]!) {
+      const p = positionAt(e, 0, w, h);
+      const box = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      textBoxes.push({ li, label, ...box });
+    }
+  }
+
+  // Off-screen: any edge past the viewport by more than 1% of that dimension
+  // (the width table is approximate; a hairline overhang is not a finding).
+  const tolX = w * 0.01;
+  const tolY = h * 0.01;
+  const offFlagged = new Set<number>();
+  for (const b of textBoxes) {
+    if (offFlagged.has(b.li)) continue;
+    const edges: string[] = [];
+    if (b.x0 < -tolX) edges.push(`left edge by ~${Math.round(-b.x0)}px`);
+    if (b.x1 > w + tolX) edges.push(`right edge by ~${Math.round(b.x1 - w)}px`);
+    if (b.y0 < -tolY) edges.push(`top edge by ~${Math.round(-b.y0)}px`);
+    if (b.y1 > h + tolY) edges.push(`bottom edge by ~${Math.round(b.y1 - h)}px`);
+    if (edges.length === 0) continue;
+    offFlagged.add(b.li);
+    warnings.push({
+      path: `layers[${b.li}]`,
+      code: 'text-off-screen',
+      message: `${b.label} text runs off the ${edges.join(' and the ')} at ${w}×${h} — move position, or shrink fontSize / maxWidth`,
+    });
+  }
+
+  // Overlap: two different static text layers whose boxes share more than 10%
+  // of the smaller box. Reported once per layer pair, on the earlier layer.
+  const pairFlagged = new Set<string>();
+  for (let i = 0; i < textBoxes.length; i++) {
+    for (let j = i + 1; j < textBoxes.length; j++) {
+      const a = textBoxes[i]!;
+      const b = textBoxes[j]!;
+      if (a.li === b.li) continue;
+      const pair = `${Math.min(a.li, b.li)}:${Math.max(a.li, b.li)}`;
+      if (pairFlagged.has(pair)) continue;
+      const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+      const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (ix <= 0 || iy <= 0) continue;
+      const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+      if (smaller <= 0) continue;
+      const share = (ix * iy) / smaller;
+      if (share < 0.1) continue;
+      pairFlagged.add(pair);
+      const [first, second] = a.li < b.li ? [a, b] : [b, a];
+      warnings.push({
+        path: `layers[${first.li}]`,
+        code: 'text-overlap',
+        message: `${first.label} and ${second.label} text boxes overlap (~${Math.round(share * 100)}% of the smaller one) — they will paint over each other; move one or shrink it`,
+      });
+    }
+  }
+
   return warnings;
+}
+
+interface TextBoxAt {
+  li: number;
+  label: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+type Box = Pick<TextBoxAt, 'x0' | 'y0' | 'x1' | 'y1'>;
+
+/**
+ * Box of one `text` entity, mirroring the renderer: a `font` with a px size is
+ * used verbatim (scaled by the same viewport/reference ratio the renderer
+ * applies), otherwise the seeded per-entity size; `align`/`baseline` move the
+ * anchor; `maxWidth` is a hard cap because `fillText(text, x, y, maxWidth)`
+ * squeezes the glyphs to fit.
+ */
+function textBoxAt(
+  s: Extract<LayerSpec['sprite'], { kind: 'text' }>,
+  e: Entity,
+  p: { x: number; y: number },
+  spec: SaverSpec,
+  w: number,
+  h: number,
+): Box {
+  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+  const fontScale = spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
+  const fh = m ? Number(m[1]) * fontScale : e.size;
+  const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
+  let fw = textWidthEm(str) * fh;
+  if (s.maxWidth) fw = Math.min(fw, s.maxWidth * (spec.units === 'px' ? 1 : Math.min(w, h)));
+  const align = s.align ?? 'center';
+  const baseline = s.baseline ?? 'middle';
+  const x0 = align === 'left' ? p.x : align === 'right' ? p.x - fw : p.x - fw / 2;
+  const y0 = baseline === 'top' ? p.y : baseline === 'bottom' ? p.y - fh : p.y - fh / 2;
+  return { x0, y0, x1: x0 + fw, y1: y0 + fh };
+}
+
+/**
+ * Box of a `textBlock`, mirroring the renderer: `position` is the block's
+ * top-left, lines break with `breakTextBlock`, `align` moves the painted lines
+ * inside the `maxWidth` box (not the box itself).
+ */
+function textBlockBoxAt(
+  s: Extract<LayerSpec['sprite'], { kind: 'textBlock' }>,
+  p: { x: number; y: number },
+  w: number,
+  h: number,
+): Box {
+  const unit = Math.min(w, h);
+  const fsPx = s.fontSize * unit;
+  const lh = (s.lineHeight ?? 1.4) * fsPx;
+  const maxWPx = s.maxWidth * unit;
+  const lines = breakTextBlock(s.text, maxWPx / fsPx);
+  const maxLineW = lines.reduce((mx, l) => Math.max(mx, l.widthEm), 0) * fsPx;
+  const totalH = lines.length * lh;
+  const align = s.align ?? 'left';
+  const x0 = align === 'center' ? p.x + (maxWPx - maxLineW) / 2 : align === 'right' ? p.x + maxWPx - maxLineW : p.x;
+  return { x0, y0: p.y, x1: x0 + maxLineW, y1: p.y + totalH };
 }
 
 /**

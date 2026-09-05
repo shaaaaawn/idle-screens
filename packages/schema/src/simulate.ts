@@ -693,7 +693,8 @@ function charWidthEm(ch: string): number {
   return 0.55;
 }
 
-function textWidthEm(str: string): number {
+/** Em-width of a string under the same character-class table `breakTextBlock` uses. */
+export function textWidthEm(str: string): number {
   let w = 0;
   for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!);
   return w;
