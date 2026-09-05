@@ -68,6 +68,17 @@ describe('score-run: grade a directory of agent-authored specs', () => {
     const runId = basename(RUN_DIR);
 
     if (process.env.EVAL_FIXTURES) {
+      // A run directory is one trial. Re-initialising one that already holds
+      // authored specs would let the next scoring pass blend them into a
+      // "fresh" trial — refuse, rather than silently delete an agent's work.
+      const existing = existsSync(join(RUN_DIR, 'specs'))
+        ? readdirSync(join(RUN_DIR, 'specs')).filter((f) => f.endsWith('.json')) : [];
+      if (existing.length) {
+        throw new Error(
+          `${RUN_DIR}/specs already holds ${existing.length} authored spec(s) — a run directory is one trial. ` +
+          'Score it as-is (drop EVAL_FIXTURES), or start the next trial in a fresh run directory.',
+        );
+      }
       const fixtures = {
         evalId: SUITE,
         runId,
