@@ -13,7 +13,7 @@ const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntens
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life',
+  'layout', 'life', 'emit', 'clock',
 ]);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
@@ -24,12 +24,12 @@ const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseli
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
-const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
-const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
+const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
+const KNOWN_RISE = new Set(['type', 'speed', 'sway', 'ease']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
 const KNOWN_STATIC = new Set(['type']);
 const KNOWN_ORBIT = new Set(['type', 'speed', 'radius', 'center']);
-const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence']);
+const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence', 'ease']);
 const KNOWN_WARP = new Set(['type', 'speed', 'center']);
 const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
@@ -356,6 +356,63 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     }
   }
 
+  if (layer.emit !== undefined) {
+    if (!isObj(layer.emit)) err(`${path}.emit`, 'must be an object { every, life, jitter?, grow? }');
+    else {
+      const em = layer.emit;
+      if (!isNum(em.every) || em.every < LIMITS.minEmitEvery || em.every > LIMITS.maxEmitEvery) {
+        err(`${path}.emit.every`, `must be ${LIMITS.minEmitEvery}..${LIMITS.maxEmitEvery} ms (at most one event per second per entity)`);
+      }
+      if (!isNum(em.life) || em.life < LIMITS.minEmitLife) {
+        err(`${path}.emit.life`, `must be >= ${LIMITS.minEmitLife} ms (an event is a smooth envelope, never a cut)`);
+      } else if (isNum(em.every) && em.life > em.every) {
+        err(`${path}.emit.life`, 'must be <= emit.every (the visible window cannot outlast its period)');
+      }
+      if (em.jitter !== undefined && (!isNum(em.jitter) || em.jitter < 0 || em.jitter > 1)) {
+        err(`${path}.emit.jitter`, 'must be 0..1 (0 = evenly staggered, 1 = seeded offsets)');
+      }
+      if (em.grow !== undefined) {
+        if (!Array.isArray(em.grow) || em.grow.length !== 2 || !isNum(em.grow[0]) || !isNum(em.grow[1])) {
+          err(`${path}.emit.grow`, 'must be [from, to] size multipliers');
+        } else if (em.grow[0] < 0 || em.grow[1] < 0 || em.grow[0] > LIMITS.maxEmitGrow || em.grow[1] > LIMITS.maxEmitGrow) {
+          err(`${path}.emit.grow`, `each multiplier must be 0..${LIMITS.maxEmitGrow}`);
+        }
+      }
+      for (const k of unknownKeys(em, new Set(['every', 'life', 'jitter', 'grow']))) {
+        warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (layer.clock !== undefined) {
+    if (!isObj(layer.clock)) err(`${path}.clock`, 'must be an object { phase?, rate? }');
+    else {
+      const ck = layer.clock;
+      if (ck.phase !== undefined && (!isNum(ck.phase) || ck.phase < 0 || ck.phase > 1)) {
+        err(`${path}.clock.phase`, 'must be 0..1 (turns)');
+      }
+      const rate = ck.rate === undefined ? 1 : ck.rate;
+      if (!isNum(rate) || rate < LIMITS.minClockRate || rate > LIMITS.maxClockRate) {
+        err(`${path}.clock.rate`, `must be ${LIMITS.minClockRate}..${LIMITS.maxClockRate}`);
+      } else {
+        // A clocked layer pulses in unison — every entity at once — so the
+        // per-entity-phase defence is gone and the period floor doubles.
+        const floor = LIMITS.minClockedPeriod * rate;
+        if (isObj(layer.pulse) && isNum(layer.pulse.period) && layer.pulse.period < floor) {
+          err(`${path}.pulse.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod} — the whole layer breathes in unison)`);
+        }
+        if (isObj(layer.grow) && isNum(layer.grow.period) && layer.grow.period < floor) {
+          err(`${path}.grow.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+        const sp = layer.sprite;
+        if (isObj(sp) && isObj(sp.cycle) && isNum(sp.cycle.period) && sp.cycle.period < floor) {
+          err(`${path}.sprite.cycle.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+      }
+      for (const k of unknownKeys(ck, new Set(['phase', 'rate']))) {
+        warn(`${path}.clock.${k}`, 'unknown-property', `unknown clock property '${k}' — will be ignored`);
+      }
+    }
+  }
   validateSprite(layer.sprite, `${path}.sprite`, err, warn);
   validateMotion(layer.motion, `${path}.motion`, err, warn, spec);
 }
@@ -528,6 +585,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     if (motion.bidirectional !== undefined && typeof motion.bidirectional !== 'boolean') err(`${path}.bidirectional`, 'must be a boolean');
     if (motion.bob !== undefined && !isNum(motion.bob)) err(`${path}.bob`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 10–200 px/sec`);
     }
@@ -535,6 +593,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     knownSet = KNOWN_RISE;
     speedOk(motion.speed, `${path}.speed`);
     if (motion.sway !== undefined && !isNum(motion.sway)) err(`${path}.sway`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 5–80 px/sec`);
     }
@@ -586,6 +645,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     }
   } else if (motion.type === 'wander') {
     knownSet = KNOWN_WANDER;
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     speedOk(motion.speed, `${path}.speed`);
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     const meanderCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
@@ -636,6 +696,18 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
 
   for (const k of unknownKeys(motion, knownSet)) {
     warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
+  }
+}
+
+function validateEase(ease: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (ease === undefined) return;
+  if (!isObj(ease)) return err(path, "must be an object { type: 'settle' | 'buoyant', tau }");
+  if (ease.type !== 'settle' && ease.type !== 'buoyant') err(`${path}.type`, "must be 'settle' | 'buoyant'");
+  if (!isNum(ease.tau) || ease.tau < LIMITS.minEaseTau || ease.tau > LIMITS.maxEaseTau) {
+    err(`${path}.tau`, `must be ${LIMITS.minEaseTau}..${LIMITS.maxEaseTau} ms`);
+  }
+  for (const k of unknownKeys(ease, new Set(['type', 'tau']))) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown ease property '${k}' — will be ignored`);
   }
 }
 

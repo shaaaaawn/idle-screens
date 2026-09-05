@@ -32,7 +32,9 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
 (2026-07-21 — "the v1 ceiling");
 `textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
-`textBlock.reveal` — animated typing/deleting via one steerable paint param.
+`textBlock.reveal` — animated typing/deleting via one steerable paint param;
+`emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
+(2026-09-05 — time structure).
 
 ## Safety invariants
 
@@ -48,7 +50,10 @@ These hold **by construction** — no spec can violate them:
    so a layer will generally not pulse in unison (edge case: if spawn positions
    alias the wavelength, phases may coincide). `ghosting` only *smooths* luminance
    changes (it composites frames over a faded copy of the last), never sharpens
-   them.
+   them. `clock` deliberately removes the per-entity phase, so the validator
+   floors a clocked layer's periods at 1000 ms (1 Hz) instead — a layer in
+   unison breathes, it never flashes. `emit` events are floored at one per
+   second per entity and always ride a smooth envelope, never a cut.
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
    depth-units/sec; orbit at 180 deg/sec; path laps at ≥ 2 s).
 4. **Work is bounded.** ≤ 36 layers, ≤ 400 entities per layer, ≤ 800 total,
@@ -131,6 +136,8 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
+| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time), 1 seeds the offsets; `grow: [from, to]` scales size across the window — expansion rather than travel |
+| `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.field", …)` |
 | `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
 
@@ -227,6 +234,24 @@ length — "mostly cool tones, occasional ember").
   entities sharing the path; each entity gets a seeded phase along it
 
 All speeds are ranges; each entity draws its own value (seeded).
+
+`drift`, `rise` and `wander` also accept **`ease`** — closed-form velocity
+shaping, no integration state:
+`{ "ease": { "type": "settle", "tau": 2500 } }` starts at the entity's speed
+and decelerates to rest with time constant `tau` ms (it travels `speed × tau`
+and stops — a mark flung and coming to rest); `"buoyant"` starts at rest and
+approaches the speed over `tau` (a bubble reaching terminal velocity). With
+`emit`, the eased travel restarts from the spawn point on every event.
+
+**Time structure, composed.** `emit` is how a scene does *almost nothing,
+almost never*: one ring every twelve seconds that expands and fades
+(`emit: { every: 12000, life: 5000, jitter: 0, grow: [0.15, 2.4] }`) reads as
+an event, where the same ring pulsing forever reads as wallpaper. Long
+`every`, low `count`, `jitter: 0` for a metronome, `1` for weather; pair with
+`ease: settle` so a mark is flung and comes to rest before it fades ("expand,
+drift a little, settle, fade" is one layer). `clock` is the other half: two
+layers on the same clock are a duet, not a coincidence. The shipped `pings`
+example is the whole idea in two layers.
 
 ## Determinism contract
 

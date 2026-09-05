@@ -433,6 +433,57 @@
           },
           "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
         },
+        "emit": {
+          "type": "object",
+          "required": ["every", "life"],
+          "additionalProperties": false,
+          "properties": {
+            "every": {
+              "type": "number",
+              "minimum": 1000,
+              "maximum": 600000,
+              "description": "Event period in ms per entity (floor 1000: at most one event per second per entity)."
+            },
+            "life": {
+              "type": "number",
+              "minimum": 500,
+              "description": "Visible window per event in ms (floor 500; must be <= every). Fades in over the first quarter, out over the rest."
+            },
+            "jitter": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "0 = entities evenly staggered across the period (one event at a time); 1 (default) = seeded per-entity offsets."
+            },
+            "grow": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 8 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[from, to] size multipliers across the window \u2014 expansion rather than travel."
+            }
+          },
+          "description": "Sparse events: each entity appears, expands and fades in place for `life` ms every `every` ms, dark in between. The one-ping primitive; a pure function of t."
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Shared phase in turns (0..1). Default 0."
+            },
+            "rate": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 4,
+              "description": "Time multiplier for pulse/grow/cycle. Default 1. Their periods must satisfy period / rate >= 1000 ms."
+            }
+          },
+          "description": "Phase-lock: replaces the seeded per-entity phases of pulse, grow and cycle with one shared phase so layers can breathe in step."
+        },
         "life": {
           "type": "object",
           "additionalProperties": false,
@@ -795,6 +846,16 @@
               "type": "boolean",
               "description": "Randomly flip horizontal direction per entity (fish)."
             },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
+            },
             "bob": {
               "type": "number",
               "description": "Vertical wobble amplitude in px."
@@ -814,6 +875,16 @@
             },
             "speed": {
               "$ref": "#/definitions/speedRange"
+            },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
             },
             "sway": {
               "type": "number",
@@ -941,6 +1012,16 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "description": "Harmonic amplitude (px or viewport-units). Default ~0.05 viewport-units. How far paths curve away from the base line."
+            },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
             },
             "coherence": {
               "type": "number",

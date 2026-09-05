@@ -284,3 +284,41 @@ describe('validateSpec warnings', () => {
     expect(validateSpec(base()).warnings).toEqual([]);
   });
 });
+
+describe('validateSpec — time structure (#47)', () => {
+  const withLayer = (layer: Partial<SaverSpec['layers'][number]>): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite: { kind: 'ring', radius: [4, 8], color: '#4fb3a8' }, motion: { type: 'static' }, ...layer }],
+  });
+
+  it('accepts a well-formed emit / clock / ease', () => {
+    expect(validateSpec(withLayer({ emit: { every: 12000, life: 5000, jitter: 0, grow: [0.2, 2] } })).valid).toBe(true);
+    expect(validateSpec(withLayer({ pulse: { amp: 0.2, period: 2000 }, clock: { phase: 0.5, rate: 2 } })).valid).toBe(true);
+    expect(validateSpec(withLayer({ motion: { type: 'rise', speed: [10, 20], ease: { type: 'settle', tau: 1500 } } })).valid).toBe(true);
+  });
+
+  it('floors emit.every at 1000 ms and emit.life at 500 ms, and life may not exceed every', () => {
+    expect(paths(withLayer({ emit: { every: 500, life: 500 } }))).toContain('layers[0].emit.every');
+    expect(paths(withLayer({ emit: { every: 5000, life: 200 } }))).toContain('layers[0].emit.life');
+    expect(paths(withLayer({ emit: { every: 2000, life: 3000 } }))).toContain('layers[0].emit.life');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, jitter: 2 } }))).toContain('layers[0].emit.jitter');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, grow: [0, 99] } }))).toContain('layers[0].emit.grow');
+  });
+
+  it('a clocked layer needs period / rate >= 1000 ms — the whole layer breathes in unison', () => {
+    expect(paths(withLayer({ pulse: { amp: 0.2, period: 800 }, clock: {} }))).toContain('layers[0].pulse.period');
+    expect(paths(withLayer({ pulse: { amp: 0.2, period: 1500 }, clock: { rate: 2 } }))).toContain('layers[0].pulse.period');
+    expect(paths(withLayer({ grow: { amp: 0.2, period: 900 }, clock: {} }))).toContain('layers[0].grow.period');
+    expect(validateSpec(withLayer({ pulse: { amp: 0.2, period: 800 } })).valid).toBe(true); // unclocked: 500 floor still applies
+    expect(paths(withLayer({ clock: { phase: 1.5 } }))).toContain('layers[0].clock.phase');
+    expect(paths(withLayer({ clock: { rate: 9 } }))).toContain('layers[0].clock.rate');
+  });
+
+  it('ease needs a known type and a bounded tau, and is a motion property of drift / rise / wander only', () => {
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'bounce', tau: 500 } as never } }))).toContain('layers[0].motion.ease.type');
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'settle', tau: 10 } } }))).toContain('layers[0].motion.ease.tau');
+    const onBounce = validateSpec(withLayer({ motion: { type: 'bounce', speed: [10, 20], ease: { type: 'settle', tau: 500 } } as never }));
+    expect(onBounce.valid).toBe(true);
+    expect((onBounce.warnings ?? []).some((w) => w.path === 'layers[0].motion.ease' && w.code === 'unknown-property')).toBe(true);
+  });
+});

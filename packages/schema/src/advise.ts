@@ -132,7 +132,15 @@ export function adviseSpec(
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }
-      totalCoverage += (pixArea * e.alpha) / (w * h);
+      // Sparse-event layers are lit only for `life` of every `every` ms, at a
+      // mean envelope of ~½, and at a mean grown size — judge their coverage
+      // by that duty, not by whichever instant we happen to sample.
+      let duty = 1;
+      if (layer.emit) {
+        const g = layer.emit.grow ? (layer.emit.grow[0] + layer.emit.grow[1]) / 2 : 1;
+        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g * g;
+      }
+      totalCoverage += (pixArea * e.alpha * duty) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {

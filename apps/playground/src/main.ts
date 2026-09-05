@@ -33,7 +33,7 @@ import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
 import { STAGES, mountStage, mirrorPage, type MountedStage } from './stages';
 import { wirePerceptionHarness } from './frame-perception';
 
-const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle', 'haiku']);
+const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle', 'haiku', 'pings']);
 
 interface SaverGroup {
   id: string;

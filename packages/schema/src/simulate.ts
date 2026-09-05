@@ -54,6 +54,14 @@ export interface Entity {
   wander?: { own: WanderOsc; shared: WanderOsc; coherence: number; margin: number };
   /** Depth-axis params. Only set for warp motion. */
   warp?: { ux: number; uy: number; z0: number; vz: number; cx: number; cy: number };
+  /** Sparse-event window. Only set when `layer.emit` is declared. `phase` ms offset. */
+  emit?: { every: number; life: number; phase: number; growFrom: number; growTo: number };
+  /** Shared-clock time multiplier for pulse/grow/cycle. Only set when `layer.clock` is declared. */
+  clockRate?: number;
+  /** Shared cycle phase (radians). Only set when `layer.clock` is declared. */
+  cyclePhase?: number;
+  /** Velocity easing. Only set when the motion declares `ease`. */
+  ease?: { type: 'settle' | 'buoyant'; tau: number };
   /** Spline params (pts in px, shared per layer). Only set for path motion. */
   path?: {
     pts: Array<{ x: number; y: number }>;
@@ -99,6 +107,31 @@ function drawOsc(rng: Rng, amp: number): WanderOsc {
     osc.phy.push(rng.range(0, Math.PI * 2));
   }
   return osc;
+}
+
+/**
+ * Per-entity sparse-event parameters. One seeded draw, guarded by `emit`'s
+ * presence. `jitter` blends an even stagger (entity i at i/n of the period —
+ * a metronome) with the seeded offset.
+ */
+function emitParams(
+  emit: NonNullable<LayerSpec['emit']>,
+  i: number,
+  n: number,
+  rng: Rng,
+): NonNullable<Entity['emit']> {
+  const every = emit.every;
+  const jitter = Math.max(0, Math.min(1, emit.jitter ?? 1));
+  const seeded = rng.range(0, every);
+  const even = (i / Math.max(1, n)) * every;
+  const phase = ((even * (1 - jitter) + seeded * jitter) % every + every) % every;
+  return {
+    every,
+    life: Math.min(emit.life, every),
+    phase,
+    growFrom: emit.grow?.[0] ?? 1,
+    growTo: emit.grow?.[1] ?? 1,
+  };
 }
 
 /** Weighted index pick from a single uniform draw. Weights are validated positive. */
@@ -156,6 +189,8 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   if (mSpec.type === 'path') {
     pathPts = mSpec.points.map((p) => ({ x: p.x * w, y: p.y * h }));
   }
+  const ease = (mSpec.type === 'drift' || mSpec.type === 'rise' || mSpec.type === 'wander') ? mSpec.ease : undefined;
+  const clockPhase = layer.clock ? ((layer.clock.phase ?? 0) % 1) * Math.PI * 2 : 0;
 
   // Grid layout geometry (pure — no draws).
   const layout = layer.layout;
@@ -349,16 +384,37 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
             },
           }
         : {}),
+      // Time-structure fields (2026-09): ease draws nothing; emit's one draw
+      // per entity happens in a pass AFTER this loop (see below).
+      ...(ease ? { ease: { type: ease.type, tau: ease.tau } } : {}),
     });
 
+    if (layer.clock) {
+      // Phase-lock: the seeded pulse/grow phases were drawn above (stream
+      // stays put); the shared phase replaces them here. Cycle gets its own
+      // field — `phase` also drives bob/sway/orbit, which must stay per-entity.
+      const ent = out[out.length - 1]!;
+      ent.pulsePhase = clockPhase;
+      ent.growPhase = clockPhase;
+      ent.cyclePhase = clockPhase;
+      ent.clockRate = layer.clock.rate ?? 1;
+    }
     if (layer.pulse?.wave) {
       // Position-derived phase: sin(ωt + phase) becomes a traveling wave along
       // `angle`. Patched AFTER the push so the seeded pulsePhase draw stays in its
       // historical stream position (toggling wave must not shift other draws).
+      // A clock's phase offsets the wave rather than flattening it.
       const wl = Math.max(1e-6, layer.pulse.wave.wavelength * scale);
       const ang = ((layer.pulse.wave.angle ?? 0) * Math.PI) / 180;
-      out[out.length - 1]!.pulsePhase = -((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
+      out[out.length - 1]!.pulsePhase = clockPhase - ((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
     }
+  }
+  if (layer.emit) {
+    // Emit offsets are drawn in a second pass so that toggling `emit` on a
+    // layer never rearranges it: every placement/size/phase draw above is
+    // identical with or without emit, and a spec without emit consumes no
+    // extra draws at all (stream compat).
+    for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length, rng);
   }
   return out;
 }
@@ -369,15 +425,65 @@ function warpZ(e: Entity, t: number): number {
   return wrap(wp.z0 - wp.vz * (t / 1000), WARP_NEAR, 1);
 }
 
+function smoothstep(x: number): number {
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return c * c * (3 - 2 * c);
+}
+
+/** Fraction of an emit window spent fading in; the rest fades out. */
+const EMIT_ATTACK = 0.25;
+
+/**
+ * Where entity `e` sits in its current emit window at time `t`: 0..1 across
+ * the visible `life` ms, or null while dark (or when the layer has no `emit`).
+ * Pure — the window index is `floor((t - phase) / every)`, no state.
+ */
+export function emitWindow(e: Entity, t: number): number | null {
+  const em = e.emit;
+  if (!em) return null;
+  const local = (((t - em.phase) % em.every) + em.every) % em.every;
+  return local < em.life ? local / em.life : null;
+}
+
+/** Alpha envelope across an emit window: fast smooth attack, slow smooth decay. */
+export function emitEnvelope(u: number): number {
+  if (u < 0 || u >= 1) return 0;
+  return u < EMIT_ATTACK ? smoothstep(u / EMIT_ATTACK) : 1 - smoothstep((u - EMIT_ATTACK) / (1 - EMIT_ATTACK));
+}
+
+/** Scene time as the layer's clock sees it (pulse/grow/cycle only). */
+function clockTime(e: Entity, t: number): number {
+  return e.clockRate ? t * e.clockRate : t;
+}
+
+/**
+ * Seconds of travel at time `t` for the velocity-integral motions. Identity
+ * without `ease`. `settle`: τ(1 − e^(−t/τ)) — decelerates to rest having
+ * travelled speed·τ. `buoyant`: t − τ(1 − e^(−t/τ)) — from rest to terminal
+ * speed. With `emit`, t is window-local so every event restarts the travel.
+ */
+function motionSeconds(e: Entity, t: number): number {
+  if (!e.ease) return t / 1000;
+  let tl = t;
+  if (e.emit) tl = (((t - e.emit.phase) % e.emit.every) + e.emit.every) % e.emit.every;
+  const tau = e.ease.tau;
+  const k = 1 - Math.exp(-tl / tau);
+  return (e.ease.type === 'settle' ? tau * k : tl - tau * k) / 1000;
+}
+
 /** Analytic opacity of an entity at logical time `t` (ms). Pure, clamped to 0..1. */
 export function alphaAt(e: Entity, t: number): number {
   let a = e.alpha;
-  if (e.pulseAmp) a = e.alpha + e.pulseAmp * Math.sin((t * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
+  if (e.pulseAmp) a = e.alpha + e.pulseAmp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
   if (e.motion === 'warp') {
     // Fade in over the first 20% of depth after respawning at the far plane,
     // masking the wrap pop-in.
     const z = warpZ(e, t);
     a *= Math.max(0, Math.min(1, (1 - z) / 0.2));
+  }
+  if (e.emit) {
+    const u = emitWindow(e, t);
+    a = u === null ? 0 : a * emitEnvelope(u);
   }
   return a < 0 ? 0 : a > 1 ? 1 : a;
 }
@@ -385,8 +491,12 @@ export function alphaAt(e: Entity, t: number): number {
 /** Analytic size multiplier at time `t` (ms). Pure, clamped to > 0. */
 export function sizeAt(e: Entity, t: number): number {
   let s = e.size;
-  if (e.growAmp) s = e.size * (1 + e.growAmp * Math.sin((t * 2 * Math.PI) / e.growPeriod + e.growPhase));
+  if (e.growAmp) s = e.size * (1 + e.growAmp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.growPeriod + e.growPhase));
   if (e.motion === 'warp') s *= Math.min(1 / warpZ(e, t), WARP_MAX_SCALE);
+  if (e.emit && (e.emit.growFrom !== 1 || e.emit.growTo !== 1)) {
+    const u = emitWindow(e, t);
+    if (u !== null) s *= e.emit.growFrom + (e.emit.growTo - e.emit.growFrom) * u;
+  }
   return s > 0 ? s : 0.1;
 }
 
@@ -487,7 +597,7 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
     const pos = pathPosition(e, t);
     return { x: pos.x, y: pos.y, flip: false };
   }
-  const dt = t / 1000;
+  const dt = motionSeconds(e, t);
   const m = e.size;
   if (e.motion === 'bounce') {
     return {
@@ -553,7 +663,7 @@ export function headingAt(e: Entity, t: number, w: number, h: number): number | 
 /** Time-varying sprite index for text/emoji cycling. Returns static index when cyclePeriod is 0. */
 export function spriteIndexAt(e: Entity, t: number, variants: number): number {
   if (!e.cyclePeriod || variants <= 1) return e.spriteIndex;
-  return Math.floor(t / e.cyclePeriod + e.phase / (2 * Math.PI)) % variants;
+  return Math.floor(clockTime(e, t) / e.cyclePeriod + (e.cyclePhase ?? e.phase) / (2 * Math.PI)) % variants;
 }
 
 /** An inter-entity link edge with its (wrap-aware) distance, for falloff alpha. */

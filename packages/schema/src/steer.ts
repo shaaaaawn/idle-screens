@@ -167,6 +167,8 @@ export function structuralSignature(spec: SaverSpec): string {
         l.spin,
         l.grow,
         l.layout,
+        l.emit,
+        l.clock,
         l.sprite.kind,
         // Dimensional draws baked into entities: radius (circle/ring), length
         // (streak), width+aspect (rect), palette pick (all shaped sprites).

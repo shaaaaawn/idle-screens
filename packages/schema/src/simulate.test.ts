@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { alphaAt, buildEntities, linkPairs, positionAt, spriteIndexAt, spriteVariants } from './simulate';
+import { alphaAt, buildEntities, emitEnvelope, emitWindow, linkPairs, positionAt, sizeAt, spriteIndexAt, spriteVariants } from './simulate';
 import type { LayerSpec } from './types';
 
 const W = 800;
@@ -260,5 +260,155 @@ describe('positionAt (pure, analytic, wrapping)', () => {
       expect(p.y).toBeGreaterThanOrEqual(ball.size / 2 - 1e-6);
       expect(p.y).toBeLessThanOrEqual(H - ball.size / 2 + 1e-6);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Time structure (#47): emit, clock, ease
+// ---------------------------------------------------------------------------
+
+describe('emit — sparse events', () => {
+  const ring = (emit: LayerSpec['emit'], extra: Partial<LayerSpec> = {}): LayerSpec => ({
+    count: 4,
+    sprite: { kind: 'ring', radius: [10, 10], color: '#4fb3a8' },
+    motion: { type: 'static' },
+    emit,
+    ...extra,
+  });
+
+  it('is dark outside its window, lit inside, and the envelope is a pure hump', () => {
+    const [e] = buildEntities(ring({ every: 10000, life: 4000 }), createRng(1), W, H);
+    let lit = 0;
+    let dark = 0;
+    for (let t = 0; t < 10000; t += 100) {
+      const u = emitWindow(e!, t);
+      if (u === null) { dark++; expect(alphaAt(e!, t)).toBe(0); } else { lit++; expect(u).toBeGreaterThanOrEqual(0); expect(u).toBeLessThan(1); }
+    }
+    expect(lit).toBe(40); // 4000 of every 10000 ms
+    expect(dark).toBe(60);
+    expect(emitEnvelope(0)).toBe(0);
+    expect(emitEnvelope(0.25)).toBe(1);
+    expect(emitEnvelope(0.999)).toBeLessThan(0.01);
+    expect(emitEnvelope(0.5)).toBeGreaterThan(emitEnvelope(0.9));
+    // Periodic: one full period later is the same frame.
+    expect(alphaAt(e!, 1234)).toBeCloseTo(alphaAt(e!, 11234), 12);
+  });
+
+  it('jitter 0 staggers the entities evenly across the period — one event at a time', () => {
+    const ents = buildEntities(ring({ every: 12000, life: 3000, jitter: 0 }), createRng(1), W, H);
+    const phases = ents.map((e) => e.emit!.phase).sort((a, b) => a - b);
+    expect(phases).toEqual([0, 3000, 6000, 9000]);
+    // At any instant at most one entity is lit.
+    for (let t = 0; t < 12000; t += 50) {
+      const litNow = ents.filter((e) => emitWindow(e, t) !== null).length;
+      expect(litNow).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('jitter 1 seeds the offsets; the draw is guarded so undeclared specs keep their stream', () => {
+    const jittered = buildEntities(ring({ every: 12000, life: 3000 }), createRng(1), W, H);
+    const phases = jittered.map((e) => e.emit!.phase);
+    expect(new Set(phases.map((p) => Math.round(p))).size).toBeGreaterThan(1);
+    for (const p of phases) { expect(p).toBeGreaterThanOrEqual(0); expect(p).toBeLessThan(12000); }
+    // Placement is identical with and without emit (emit draws last).
+    const plain = buildEntities(ring(undefined), createRng(1), W, H);
+    expect(jittered.map((e) => [e.x0, e.y0, e.size])).toEqual(plain.map((e) => [e.x0, e.y0, e.size]));
+  });
+
+  it('grow scales size from grow[0] to grow[1] across the window', () => {
+    const [e] = buildEntities(ring({ every: 10000, life: 4000, jitter: 0, grow: [0.5, 2] }), createRng(1), W, H);
+    expect(sizeAt(e!, 0)).toBeCloseTo(e!.size * 0.5, 9);
+    expect(sizeAt(e!, 2000)).toBeCloseTo(e!.size * 1.25, 9);
+    expect(sizeAt(e!, 3999.9)).toBeCloseTo(e!.size * 2, 2);
+  });
+
+  it('life is clamped to every', () => {
+    const [e] = buildEntities(ring({ every: 1000, life: 5000 }), createRng(1), W, H);
+    expect(e!.emit!.life).toBe(1000);
+  });
+});
+
+describe('clock — phase-lock', () => {
+  const pulsing = (extra: Partial<LayerSpec>): LayerSpec => ({
+    count: 6,
+    sprite: { kind: 'circle', radius: [4, 8], color: '#fff' },
+    motion: { type: 'static' },
+    alpha: [0.5, 0.5],
+    pulse: { amp: 0.3, period: 2000 },
+    grow: { amp: 0.2, period: 2000 },
+    ...extra,
+  });
+
+  it('locks every entity of the layer to one phase, and two layers to each other', () => {
+    const a = buildEntities(pulsing({ clock: { phase: 0.25 } }), createRng(1), W, H);
+    const b = buildEntities(pulsing({ clock: { phase: 0.25 } }), createRng(99), W, H);
+    for (const e of [...a, ...b]) {
+      expect(e.pulsePhase).toBeCloseTo(Math.PI / 2, 12);
+      expect(e.growPhase).toBeCloseTo(Math.PI / 2, 12);
+    }
+    expect(alphaAt(a[0]!, 777) - a[0]!.alpha).toBeCloseTo(alphaAt(b[3]!, 777) - b[3]!.alpha, 12);
+  });
+
+  it('draws nothing — placement is identical with and without a clock', () => {
+    const plain = buildEntities(pulsing({}), createRng(1), W, H);
+    const clocked = buildEntities(pulsing({ clock: { phase: 0.5, rate: 2 } }), createRng(1), W, H);
+    expect(clocked.map((e) => [e.x0, e.y0, e.size, e.alpha])).toEqual(plain.map((e) => [e.x0, e.y0, e.size, e.alpha]));
+    // Unclocked entities keep seeded, distinct phases.
+    expect(new Set(plain.map((e) => e.pulsePhase.toFixed(6))).size).toBeGreaterThan(1);
+  });
+
+  it('rate runs pulse faster: rate 2 halves the effective period', () => {
+    const [e] = buildEntities(pulsing({ clock: { rate: 2 } }), createRng(1), W, H);
+    expect(alphaAt(e!, 250) - e!.alpha).toBeCloseTo(e!.pulseAmp * Math.sin(Math.PI / 2), 9); // 250 ms × 2 = quarter of 2000
+  });
+
+  it('a wave keeps its travelling phase on top of the clock', () => {
+    const waved = buildEntities(pulsing({ clock: { phase: 0 }, pulse: { amp: 0.3, period: 2000, wave: { wavelength: 200 } } }), createRng(1), W, H);
+    expect(new Set(waved.map((e) => e.pulsePhase.toFixed(6))).size).toBeGreaterThan(1);
+  });
+});
+
+describe('ease — settle and buoyant', () => {
+  const mover = (ease: { type: 'settle' | 'buoyant'; tau: number } | undefined, emit?: LayerSpec['emit']): LayerSpec => ({
+    count: 1,
+    sprite: { kind: 'circle', radius: [2, 2], color: '#fff' },
+    motion: { type: 'drift', speed: [100, 100], angle: 0, ease },
+    region: { x: [0.1, 0.1], y: [0.5, 0.5] },
+    wrap: false,
+    emit,
+  });
+
+  it('settle travels speed × tau and comes to rest', () => {
+    const [e] = buildEntities(mover({ type: 'settle', tau: 2000 }), createRng(1), W, H);
+    const x0 = positionAt(e!, 0, W, H).x;
+    const far = positionAt(e!, 60000, W, H).x;
+    expect(far - x0).toBeCloseTo(100 * 2, 3); // 100 px/s × 2 s
+    expect(positionAt(e!, 60000, W, H).x).toBeCloseTo(positionAt(e!, 90000, W, H).x, 6);
+    // Decelerating: the first second covers more ground than the second.
+    const d1 = positionAt(e!, 1000, W, H).x - x0;
+    const d2 = positionAt(e!, 2000, W, H).x - positionAt(e!, 1000, W, H).x;
+    expect(d1).toBeGreaterThan(d2);
+  });
+
+  it('buoyant starts at rest and approaches the linear path', () => {
+    const [e] = buildEntities(mover({ type: 'buoyant', tau: 1000 }), createRng(1), W, H);
+    const [lin] = buildEntities(mover(undefined), createRng(1), W, H);
+    const x0 = positionAt(e!, 0, W, H).x;
+    expect(positionAt(e!, 100, W, H).x - x0).toBeLessThan(positionAt(lin!, 100, W, H).x - x0);
+    // After many τ the eased path lags the linear one by exactly speed × tau.
+    expect(positionAt(lin!, 20000, W, H).x - positionAt(e!, 20000, W, H).x).toBeCloseTo(100, 3);
+  });
+
+  it('with emit, the eased travel restarts from the spawn point on every event', () => {
+    const [e] = buildEntities(mover({ type: 'settle', tau: 500 }, { every: 5000, life: 2000, jitter: 0 }), createRng(1), W, H);
+    const x0 = positionAt(e!, 0, W, H).x;
+    expect(positionAt(e!, 5000, W, H).x).toBeCloseTo(x0, 6);
+    expect(positionAt(e!, 4999, W, H).x).toBeCloseTo(x0 + 100 * 0.5, 2); // settled 50 px out
+  });
+
+  it('draws nothing — placement is identical with and without ease', () => {
+    const a = buildEntities(mover({ type: 'settle', tau: 500 }), createRng(3), W, H);
+    const b = buildEntities(mover(undefined), createRng(3), W, H);
+    expect([a[0]!.x0, a[0]!.y0, a[0]!.size]).toEqual([b[0]!.x0, b[0]!.y0, b[0]!.size]);
   });
 });

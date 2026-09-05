@@ -164,6 +164,44 @@ export interface LayerSpec {
    * ramps down starting at `exit`. Entities are skipped entirely while at alpha 0.
    */
   life?: { enter?: number; exit?: number; fade?: number };
+  /**
+   * Sparse events — marks that appear, expand and fade in place, one at a time,
+   * with long silences between (the "one ping" primitive). Each entity is dark
+   * except for a window of `life` ms that recurs every `every` ms at a
+   * per-entity offset: `jitter` 1 (default) seeds the offset, 0 spreads the
+   * entities evenly across the period — a metronome, one event at a time.
+   * Inside a window the entity fades in over the first quarter and out over
+   * the rest; `grow` scales its size from `grow[0]` to `grow[1]` across the
+   * window — expansion rather than travel. A pure function of t. Flash safety:
+   * `every` ≥ 1000 ms and `life` ≥ 500 ms, so no entity fires more than once a
+   * second and never as a hard cut. Composes with `pulse`, `life`, `trail` and
+   * every motion; with `motion.ease` the eased travel restarts on every event.
+   */
+  emit?: { every: number; life: number; jitter?: number; grow?: [number, number] };
+  /**
+   * Phase-lock. Replaces the seeded per-entity phases of `pulse`, `grow` and
+   * `cycle` with one shared phase (`phase` in turns, 0..1, default 0) and runs
+   * those three at `rate` × scene time (default 1). Two layers declaring the
+   * same clock breathe in step; different phases give a fixed offset (call and
+   * response). `pulse.wave` still adds its position-derived phase on top, so a
+   * clocked wave stays a wave. Because a clocked layer moves in unison, its
+   * `pulse`/`grow` periods must satisfy `period / rate ≥ 1000 ms` (1 Hz).
+   */
+  clock?: { phase?: number; rate?: number };
+}
+
+/**
+ * Closed-form velocity easing for `drift`, `rise` and `wander`. `settle`
+ * starts at the entity's speed and decelerates to rest with time constant
+ * `tau` ms — it travels `speed × tau` and stops, a mark flung and coming to
+ * rest. `buoyant` starts at rest and approaches the speed over `tau` — a
+ * bubble reaching terminal velocity. Position stays an analytic function of
+ * t (no integration state). With `emit`, the eased travel restarts from the
+ * spawn point on every event.
+ */
+export interface MotionEase {
+  type: 'settle' | 'buoyant';
+  tau: number;
 }
 
 export type SpriteSpec =
@@ -271,9 +309,9 @@ export type MotionSpec =
    * wobble amplitude (px). Covers horizontal fields, diagonals (toasters) and rain
    * (angle 90).
    */
-  | { type: 'drift'; speed: [number, number]; angle?: number; bidirectional?: boolean; bob?: number }
+  | { type: 'drift'; speed: [number, number]; angle?: number; bidirectional?: boolean; bob?: number; ease?: MotionEase }
   /** Rise upward (px/sec) with an optional horizontal sway amplitude (px) — bubbles. */
-  | { type: 'rise'; speed: [number, number]; sway?: number }
+  | { type: 'rise'; speed: [number, number]; sway?: number; ease?: MotionEase }
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
   | { type: 'bounce'; speed: [number, number] }
   /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
@@ -296,7 +334,7 @@ export type MotionSpec =
    * viewport units); `coherence` (0..1) blends every entity's harmonics toward a
    * shared layer-level set — at 1 the field undulates in unison (fake flocking).
    */
-  | { type: 'wander'; speed: [number, number]; angle?: number; meander?: number; coherence?: number }
+  | { type: 'wander'; speed: [number, number]; angle?: number; meander?: number; coherence?: number; ease?: MotionEase }
   /**
    * Perspective starfield: entities live on a depth axis and stream toward the
    * viewer, projected as `screen = center + offset / z`. Size and alpha scale
@@ -379,6 +417,15 @@ export const LIMITS = {
   minSegmentDuration: 1000, // ms — flash-safety floor: segment cuts are luminance transitions
   maxTransitionDur: 5000,
   minTransitionDur: 200,
+  minEmitEvery: 1000, // ms — at most one event per second per entity (flash safety)
+  maxEmitEvery: 600000, // ms — ten minutes; longer silences than that are `life.enter`
+  minEmitLife: 500, // ms — an event is a smooth envelope, never a cut
+  maxEmitGrow: 8, // × base size across an event window
+  minClockedPeriod: 1000, // ms — a `clock`ed layer breathes in unison, so 1 Hz not 2
+  minClockRate: 0.1,
+  maxClockRate: 4,
+  minEaseTau: 100, // ms
+  maxEaseTau: 120000, // ms
 } as const;
 
 // ---------------------------------------------------------------------------
