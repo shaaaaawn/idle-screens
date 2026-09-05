@@ -240,16 +240,41 @@ test('glyphs fade in place — mid-fade ink is a subset of the finished block', 
     const y = Math.floor(i / width);
     if (!litNear(x, y)) migrated.push([x, y]);
   }
+  const exactAfterShift = (dx: number, dy: number): number => {
+    let missing = 0;
+    for (let i = 0; i < width * height; i++) {
+      if (!isLit(mHalf, i)) continue;
+      const x = i % width;
+      const y = Math.floor(i / width);
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx < 0 || sy < 0 || sx >= width || sy >= height || !isLit(mFull, sy * width + sx)) missing++;
+    }
+    return missing;
+  };
   // Ligature substitution is the one legitimate way ink can vanish outright:
   // "fi"/"fl" drawn glyph-by-glyph keep the i's tittle; the batched run forms
   // the ligature and the tittle is gone — a tight cluster of a dozen pixels,
-  // not a line. A reflow moves whole glyphs: hundreds of pixels. The bar is
-  // relative to the ink present so the test scales with LONG_TEXT.
-  const bar = Math.max(8, Math.round(half.ink * 0.01));
+  // not a line. Keep fixed, calibrated ceilings: a percentage of total ink
+  // made the gate weaker as the fixture grew. The exact-pixel ceiling also
+  // catches a one-pixel whole-block shift that the neighbourhood check alone
+  // intentionally tolerates. The four synthetic shifts prove that gate bites.
+  const EXACT_RASTER_TOLERANCE = 128; // observed 55 in CI, 78 locally
+  const OUTLIER_TOLERANCE = 24; // observed 13 in both environments
+  expect(
+    exact,
+    `too much ink changed exact position between half and full glyphFade frames — ${exact} pixels`,
+  ).toBeLessThan(EXACT_RASTER_TOLERANCE);
   expect(
     migrated.length,
-    `ink lit mid-fade must still be lit (within 1px) when the block finishes — ${migrated.length} migrated (bar ${bar}), ${exact} re-rasterised, of ${half.ink} lit at half; migrated at ${JSON.stringify(migrated.slice(0, 20))}`,
-  ).toBeLessThan(bar);
+    `ink lit mid-fade must still be lit (within 1px) when the block finishes — ${migrated.length} migrated, ${exact} re-rasterised, of ${half.ink} lit at half; migrated at ${JSON.stringify(migrated.slice(0, 20))}`,
+  ).toBeLessThan(OUTLIER_TOLERANCE);
+  const shifts: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const shifted = shifts.map(([dx, dy]) => exactAfterShift(dx, dy));
+  expect(
+    Math.min(...shifted),
+    `exact-position gate must reject a synthetic one-pixel shift; mismatches were ${shifted.join(', ')}`,
+  ).toBeGreaterThanOrEqual(EXACT_RASTER_TOLERANCE);
 });
 
 test('a wider fade window paints more of the block at the same progress', async ({ page }) => {
