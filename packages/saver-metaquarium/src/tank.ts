@@ -1015,7 +1015,7 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape, { cameraAzimuthDeg: this.num('cameraAzimuth') });
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
@@ -1221,10 +1221,11 @@ class TankInstance implements SaverInstance {
       : 'wander';
     if (shape !== this.pathShape) {
       this.pathShape = shape;
-      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape);
+      const planOpts = { cameraAzimuthDeg: this.num('cameraAzimuth') };
+      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape, planOpts);
       const rng = this.ctxSaver.rng.fork(0x715);
       for (const f of this.fish) {
-        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape);
+        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape, planOpts);
       }
     }
 

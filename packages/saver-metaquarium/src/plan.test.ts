@@ -146,3 +146,38 @@ describe('path shapes', () => {
     expect(a.points).toEqual(b.points);
   });
 });
+
+describe('crossing (MQ35)', () => {
+  const bounds = { radius: 120, yMin: 15, yMax: 72 };
+  const rngFor = (seed: number) => createRng(seed);
+  it('runs across the camera, not toward it', () => {
+    for (const az of [0, 35, 90, 200]) {
+      const plan = compileSwimPlan(rngFor(3), bounds, 'crossing', { cameraAzimuthDeg: az });
+      const a = (az * Math.PI) / 180;
+      const rx = Math.cos(a), rz = -Math.sin(a);   // screen-right
+      const dx = Math.sin(a), dz = Math.cos(a);    // toward the camera
+      let along = 0, toward = 0;
+      for (const [x, , z] of plan.points) {
+        along = Math.max(along, Math.abs(x * rx + z * rz));
+        toward = Math.max(toward, Math.abs(x * dx + z * dz));
+      }
+      expect(along).toBeGreaterThan(bounds.radius * 0.8);
+      expect(toward).toBeLessThan(along * 0.5);
+      expect(toward).toBeGreaterThan(bounds.radius * 0.2); // the return leg is behind, not on top
+    }
+  });
+  it('stays inside the tank and in the middle of the water column', () => {
+    const plan = compileSwimPlan(rngFor(9), bounds, 'crossing', { cameraAzimuthDeg: 35 });
+    for (const [x, y, z] of plan.points) {
+      expect(Math.hypot(x, z)).toBeLessThanOrEqual(bounds.radius);
+      expect(y).toBeGreaterThan(bounds.yMin + 10);
+      expect(y).toBeLessThan(bounds.yMax);
+    }
+  });
+  it('is listed, and the other shapes ignore the camera', () => {
+    expect(PATH_SHAPES).toContain('crossing');
+    const a = compileSwimPlan(rngFor(4), bounds, 'orbit', { cameraAzimuthDeg: 0 });
+    const b = compileSwimPlan(rngFor(4), bounds, 'orbit', { cameraAzimuthDeg: 180 });
+    expect(a.points).toEqual(b.points);
+  });
+});

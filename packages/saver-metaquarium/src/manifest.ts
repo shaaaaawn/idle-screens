@@ -91,8 +91,10 @@ export const METAQUARIUM_PARAMS = {
   swimStyle: { type: 'enum', default: 'loop', options: [...SWIM_STYLE_NAMES, 'auto'], ease: 'step' },
   /** The shape a fish's loop is drawn on. `wander` is the original roaming
    *  itinerary, so the default changes nothing. `orbit` laps, `eight` crosses
-   *  the middle, `helix` tours the water column, `canyon` sweeps low — same
-   *  spline engine, different itinerary. */
+   *  the middle, `helix` tours the water column, `canyon` sweeps low,
+   *  `crossing` is a camera-relative parade lane (across the frame in front,
+   *  back the other way behind; laid against cameraAzimuth when chosen) —
+   *  same spline engine, different itinerary. */
   pathShape: { type: 'enum', default: 'wander', options: [...PATH_SHAPES], ease: 'step' },
   /** How a `school` holds together: the original lattice, single file, a
    *  carousel ring, the migratory V, or a bait-ball. Ignored by every
