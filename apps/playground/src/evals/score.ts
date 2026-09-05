@@ -1,5 +1,5 @@
 import { adviseSpec, perceiveScene, validateSpec } from '@idle-screens/schema';
-import type { SaverSpec, ScenePerception } from '@idle-screens/schema';
+import type { SaverSpec, ScenePerception, SpecWarning } from '@idle-screens/schema';
 import { BENCHMARK_INTENTS } from './benchmarks';
 import { buildProvenance, computeDelta, fingerprintScreens, suggestedActionsFrom } from './provenance';
 import type {
@@ -230,10 +230,40 @@ function intentFit(screen: EvalScreen, spec: SaverSpec, perception: ScreenScore[
   return terms.length ? terms.reduce((a, t) => a + t.value, 0) / terms.length : 1;
 }
 
-/** The coverage below which a screen has no picture — see `perceptionOk`. */
-export function perceptionGateFloor(spec: SaverSpec, profile: ArtistStyleProfile): number {
-  const band = profile.composition.coverageBand?.[0];
-  const declared = spec.density === 'sparse' ? 0.0002 : undefined;
+/** A well-formed `composition.coverageBand`: two finite fractions, 0 < min ≤ max ≤ 1. */
+export function isCoverageBand(v: unknown): v is [number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 2 &&
+    v.every((x) => typeof x === 'number' && Number.isFinite(x)) &&
+    v[0] > 0 &&
+    v[0] <= v[1] &&
+    v[1] <= 1
+  );
+}
+
+/**
+ * The coverage below which a screen has no picture — see `perceptionOk`.
+ *
+ * Two doors lower the historical 0.2 % floor: a well-formed profile
+ * `coverageBand` (its lower bound), or the spec's own `density: 'sparse'`
+ * (a decade lower). The spec's door only opens when the declaration is
+ * consistent — a `density-mismatch` advisory in `advisories` means the scene
+ * contradicted it, and then the gate is the default one. Otherwise a scene
+ * whose alpha-weighted area is large but whose perceived coverage is low
+ * could gain more from the declaration (35 % of the score) than the mismatch
+ * penalty (15 %) takes back. A malformed band is ignored here; the holdout
+ * loader rejects it loudly at load time.
+ */
+export function perceptionGateFloor(
+  spec: SaverSpec,
+  profile: ArtistStyleProfile,
+  advisories: readonly SpecWarning[] = [],
+): number {
+  const rawBand = profile.composition.coverageBand;
+  const band = isCoverageBand(rawBand) ? rawBand[0] : undefined;
+  const contradicted = advisories.some((a) => a.code === 'density-mismatch');
+  const declared = spec.density === 'sparse' && !contradicted ? 0.0002 : undefined;
   const floor = Math.min(band ?? Infinity, declared ?? Infinity);
   return Number.isFinite(floor) ? Math.min(0.002, Math.max(0.00005, floor)) : 0.002;
 }
@@ -302,7 +332,7 @@ export function scoreScreen(
   // otherwise a house style built on restraint is scored as broken for
   // following its own DNA. A declared `sparse` that measures dense is caught
   // by adviseSpec's `density-mismatch`, which the advisory penalty reads.
-  const coverageFloor = perceptionGateFloor(screen.spec, profile);
+  const coverageFloor = perceptionGateFloor(screen.spec, profile, advisories);
   const lumVarFloor = 0.00005 * (coverageFloor / 0.002);
   const perceptionOk =
     perception.coverage >= coverageFloor && lumVar >= lumVarFloor && entityCount > 0

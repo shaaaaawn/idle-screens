@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SaverSpec } from '@idle-screens/schema';
 import { getCatalog } from './catalog';
-import { perceptionGateFloor, scoreScreen } from './score';
+import { adviseSpec } from '@idle-screens/schema';
+import { isCoverageBand, perceptionGateFloor, scoreScreen } from './score';
 import type { ArtistStyleProfile, EvalScreen } from './types';
 
 /**
@@ -63,6 +64,22 @@ describe('perception gate honours declared density', () => {
     expect(perceptionGateFloor({ ...oneMark, density: 'dense' }, profile)).toBe(0.002);
   });
 
+  it('the spec door stays shut when the declaration is contradicted (density-mismatch)', () => {
+    const mismatch = [{ path: 'density', code: 'density-mismatch', message: 'x' }];
+    expect(perceptionGateFloor({ ...oneMark, density: 'sparse' }, profile, mismatch)).toBe(0.002);
+    // The profile door is a statement about the style, not the spec — it still opens.
+    expect(perceptionGateFloor({ ...oneMark, density: 'sparse' }, sparseProfile, mismatch)).toBe(0.0001);
+  });
+
+  it('a malformed profile band is ignored rather than trusted', () => {
+    for (const bad of [[0, 0.01], [0.02, 0.01], [-0.1, 0.5], [0.001, 2], [0.001], ['a', 'b'], 0.001]) {
+      expect(isCoverageBand(bad)).toBe(false);
+      const broken = { ...profile, composition: { ...profile.composition, coverageBand: bad as never } };
+      expect(perceptionGateFloor(oneMark, broken)).toBe(0.002);
+    }
+    expect(isCoverageBand([0.0001, 0.01])).toBe(true);
+  });
+
   it('a faithful one-mark scene passes the gate under either declaration and fails it under neither', () => {
     const undeclared = scoreScreen(screenFor(oneMark, profile), profile);
     expect(undeclared.perceptionOk).toBeLessThan(1);
@@ -89,8 +106,14 @@ describe('perception gate honours declared density', () => {
         },
       ],
     };
+    const advisories = adviseSpec(field);
+    expect(advisories.some((a) => a.code === 'density-mismatch')).toBe(true);
+    // The contradicted declaration buys no gate relief at all …
+    expect(perceptionGateFloor(field, profile, advisories)).toBe(0.002);
     const honest = scoreScreen(screenFor({ ...field, density: undefined }, profile), profile);
     const gamed = scoreScreen(screenFor(field, profile), profile);
+    expect(gamed.perceptionOk).toBe(honest.perceptionOk);
+    // … and pays the mismatch penalty on top.
     expect(gamed.advisoryPenalty).toBeGreaterThan(honest.advisoryPenalty);
     expect(gamed.score).toBeLessThan(honest.score);
   });

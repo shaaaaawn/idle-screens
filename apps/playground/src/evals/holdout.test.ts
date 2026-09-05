@@ -19,6 +19,19 @@ describe('holdout loader', () => {
     );
   });
 
+  it('rejects a malformed composition.coverageBand by name', () => {
+    const study = getCatalog().artists[0]!;
+    const house = { ...study, id: 'h', origin: 'house' as const };
+    const withBand = (coverageBand: unknown) => ({
+      profiles: [{ ...house, composition: { ...house.composition, coverageBand } }],
+    });
+    expect(() => parseHoldoutProfiles(withBand([0.02, 0.01]))).toThrow(/profile h has a malformed composition.coverageBand/);
+    expect(() => parseHoldoutProfiles(withBand([0, 0.5]))).toThrow(/coverageBand/);
+    expect(() => parseHoldoutProfiles(withBand('sparse'))).toThrow(/coverageBand/);
+    expect(parseHoldoutProfiles(withBand([0.0001, 0.01]))).toHaveLength(1);
+    expect(parseHoldoutProfiles(withBand(undefined))).toHaveLength(1);
+  });
+
   it('refuses a study profile smuggled into the holdout set', () => {
     const study = { ...getCatalog().artists[0]! };
     expect(() => parseHoldoutProfiles({ profiles: [study] })).toThrow(/must be origin:'house'/);
