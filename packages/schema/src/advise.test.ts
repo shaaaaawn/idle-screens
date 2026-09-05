@@ -176,6 +176,81 @@ describe('adviseSpec', () => {
   });
 });
 
+describe('adviseSpec — spatial text (#44)', () => {
+  const vp: SaverSpec = { ...base, units: 'viewport', layers: [] };
+  const block = (text: string, x: number, y: number, extra: Partial<Extract<SaverSpec['layers'][number]['sprite'], { kind: 'textBlock' }>> = {}, key?: string) => ({
+    key,
+    count: 1,
+    sprite: { kind: 'textBlock' as const, text, maxWidth: 0.4, fontSize: 0.05, ...extra },
+    motion: { type: 'static' as const },
+    position: { x, y },
+  });
+
+  it('warns when a textBlock runs off the right edge', () => {
+    const w = adviseSpec({ ...vp, layers: [block('A caption that is far too wide for where it sits', 0.85, 0.5)] });
+    const off = w.find((x) => x.code === 'text-off-screen');
+    expect(off).toBeDefined();
+    expect(off!.path).toBe('layers[0]');
+    expect(off!.message).toMatch(/right edge/);
+  });
+
+  it('warns when a textBlock runs off the bottom edge', () => {
+    const w = adviseSpec({ ...vp, layers: [block('one\ntwo\nthree\nfour\nfive', 0.1, 0.9)] });
+    expect(w.find((x) => x.code === 'text-off-screen')!.message).toMatch(/bottom edge/);
+  });
+
+  it('does not flag a block that fits', () => {
+    // position.x is a fraction of width (0.5·1920 = 960 px); maxWidth is a
+    // fraction of min(w,h) (0.4·1080 = 432 px) — the box ends at 1392 of 1920.
+    expect(adviseSpec({ ...vp, layers: [block('Fits comfortably here', 0.5, 0.5)] }).filter((x) => x.code === 'text-off-screen')).toEqual([]);
+  });
+
+  it('warns when two static text layers paint over each other, once per pair', () => {
+    const w = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.3, {}, 'title'), block('Body copy under it', 0.1, 0.3, {}, 'body')],
+    });
+    const overlaps = w.filter((x) => x.code === 'text-overlap');
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0]!.path).toBe('layers[0]');
+    expect(overlaps[0]!.message).toMatch(/`title` and `body`/);
+  });
+
+  it('does not flag stacked blocks that clear each other', () => {
+    const w = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.2, {}, 'title'), block('Body copy under it', 0.1, 0.4, {}, 'body')],
+    });
+    expect(w.filter((x) => x.code === 'text-overlap')).toEqual([]);
+  });
+
+  it('judges plain text sprites too — align/baseline move the anchor, maxWidth caps the box', () => {
+    const rightAligned: SaverSpec = {
+      ...vp,
+      layers: [
+        // Left-aligned at x 0.98: the whole string hangs off the right edge.
+        { count: 1, sprite: { kind: 'text', strings: ['TELEMETRY NOMINAL'], font: 'bold 40px monospace', align: 'left' }, motion: { type: 'static' }, position: { x: 0.98, y: 0.5 } },
+        // Right-aligned at the same spot: fits.
+        { count: 1, sprite: { kind: 'text', strings: ['TELEMETRY NOMINAL'], font: 'bold 40px monospace', align: 'right' }, motion: { type: 'static' }, position: { x: 0.98, y: 0.7 } },
+        // Left-aligned but squeezed by maxWidth: fits.
+        { count: 1, sprite: { kind: 'text', strings: ['TELEMETRY NOMINAL'], font: 'bold 40px monospace', align: 'left', maxWidth: 0.02 }, motion: { type: 'static' }, position: { x: 0.98, y: 0.9 } },
+      ],
+    };
+    const off = adviseSpec(rightAligned).filter((x) => x.code === 'text-off-screen');
+    expect(off.map((x) => x.path)).toEqual(['layers[0]']);
+  });
+
+  it('ignores moving text — it has no fixed box to judge', () => {
+    const w = adviseSpec({
+      ...vp,
+      layers: [
+        { count: 1, sprite: { kind: 'textBlock', text: 'A caption that is far too wide for where it sits', maxWidth: 0.4, fontSize: 0.05 }, motion: { type: 'drift', speed: [0.01, 0.02] }, region: { x: [0.9, 0.95] } },
+      ],
+    });
+    expect(w.filter((x) => x.code === 'text-off-screen' || x.code === 'text-overlap')).toEqual([]);
+  });
+});
+
 describe('describeScene', () => {
   it('returns snapshots at requested time values', () => {
     const desc = describeScene(base, { times: [0, 3000] });

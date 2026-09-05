@@ -297,6 +297,14 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
   `perceiveScene().text`.)
+- `adviseSpec(spec)` — non-blocking advisories (also on
+  `perceiveScene().advisories`). Two of them are **spatial**, for static text:
+  `text-off-screen` (a text/textBlock box crosses the viewport edge by more
+  than 1%) and `text-overlap` (two static text layers share more than 10% of
+  the smaller box). Boxes come from the same character-class width table the
+  textBlock line-breaker uses, so they are estimates of the renderer's own
+  layout — a caption that fails these will look wrong on the wall; one that
+  passes may still sit a few px off.
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
