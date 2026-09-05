@@ -896,6 +896,27 @@ is estimated from font size × string length. Good enough to perceive
 composition, focus, balance, and motion — not a substitute for a human (or VLM)
 judgement of beauty.
 
+**Motion comes in both units.** `motion[].meanSpeed` / `maxSpeed` are px per
+second at the perceived size; `meanSpeedVp` / `maxSpeedVp` are the same speeds
+in viewport units per second (fractions of `min(w,h)` — the unit specs are
+authored in), which do not change with the preview size; `1.0` crosses the
+short side of the screen every second. `moving` is judged in viewport units,
+so it gives the same answer at every size. Each layer also carries `heading` (screen degrees: 0 right, 90 down) and
+`headingSpread` (0 = a conveyor, everything moving the same way — the
+"screen-wipe" to avoid; 1 = scattered). Sampling a centroid over time gives the
+WRONG sign for a wrapping full-viewport scatter, which is why heading is
+reported directly.
+
+**Colour is its own channel.** `perceiveScene(...).colour` and
+`diffScenes(...).colour` carry the hue / saturation / warmth (red minus blue,
+−1 cold … 1 warm) of the alpha × area weighted sprite mass and of the
+background plate. Judge "warmer / cooler" on `colour.warmthDelta`, not on
+`meanLuminance` — plausible cool tones weigh MORE under luma than the reds they
+replace, so a calming edit pushes luminance up. `diffScenes` also reports a
+`motion` channel (overall and per-layer speed deltas with headings) and
+advises at the diff's own viewport, so its `advisories.added/removed` agree
+with `adviseSpec` at that size.
+
 ## Sequence envelope (`idle-sequence`)
 
 A second top-level format that composes multiple SaverSpecs into a sequenced
