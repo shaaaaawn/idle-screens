@@ -252,8 +252,11 @@ export function isCoverageBand(v: unknown): v is [number, number] {
  * contradicted it, and then the gate is the default one. Otherwise a scene
  * whose alpha-weighted area is large but whose perceived coverage is low
  * could gain more from the declaration (35 % of the score) than the mismatch
- * penalty (15 %) takes back. A malformed band is ignored here; the holdout
- * loader rejects it loudly at load time.
+ * penalty (15 %) takes back. Neither door can RAISE the floor above the
+ * historical 0.2 % — this gate asks "is there a picture at all?", and a
+ * style's higher minimum coverage is an intent constraint that belongs in
+ * the benchmark bands. A malformed band is ignored here; the holdout loader
+ * rejects it loudly at load time.
  */
 export function perceptionGateFloor(
   spec: SaverSpec,

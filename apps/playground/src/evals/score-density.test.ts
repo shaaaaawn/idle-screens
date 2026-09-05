@@ -58,6 +58,11 @@ describe('perception gate honours declared density', () => {
     expect(perceptionGateFloor(oneMark, sparseProfile)).toBe(0.0001);
   });
 
+  it('a band can lower the gate but never raise it — a higher minimum is an intent constraint, not a gate', () => {
+    const dense = { ...profile, composition: { ...profile.composition, coverageBand: [0.01, 0.05] as [number, number] } };
+    expect(perceptionGateFloor(oneMark, dense)).toBe(0.002);
+  });
+
   it('a spec-declared sparse lowers the floor a decade, clamped', () => {
     expect(perceptionGateFloor({ ...oneMark, density: 'sparse' }, profile)).toBe(0.0002);
     expect(perceptionGateFloor({ ...oneMark, density: 'sparse' }, sparseProfile)).toBe(0.0001);
