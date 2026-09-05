@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot,
-  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf,
+  anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
+  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf, fitBreath,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
 
@@ -21,10 +21,11 @@ describe('swim styles', () => {
     // A literal is the only thing here that fails when someone renames a
     // style out from under the scenes already published with it.
     expect([...SWIM_STYLE_NAMES].sort()).toEqual(
-      ['bottom', 'drift', 'hover', 'loop', 'patrol', 'school', 'surface'],
+      ['bottom', 'chase', 'drift', 'follow', 'hover', 'loop', 'pair', 'patrol', 'school', 'surface'],
     );
+    // `auto` is a manifest option, not a style: it resolves per fish.
     expect([...(METAQUARIUM_PARAMS.swimStyle.options ?? [])].sort())
-      .toEqual([...SWIM_STYLE_NAMES].sort());
+      .toEqual([...SWIM_STYLE_NAMES, 'auto'].sort());
     for (const n of SWIM_STYLE_NAMES) expect(swimStyleOf(n).name).toBe(n);
   });
   it('variance 0 is a uniform population, not a synchronised one', () => {
@@ -150,6 +151,72 @@ describe('swim styles', () => {
     expect(swimStyleOf('hover').travel).toBeLessThan(0.25);
     expect(swimStyleOf('patrol').travel).toBe(1);
     expect(swimStyleOf('school').formation).toBe(true);
+  });
+});
+
+describe('relationships, auto styles, breathing, sway', () => {
+  it('bonded styles declare their bond; every older style is unbonded', () => {
+    expect(swimStyleOf('follow').bond).toBe('follow');
+    expect(swimStyleOf('pair').bond).toBe('pair');
+    expect(swimStyleOf('chase').bond).toBe('chase');
+    for (const n of ['loop', 'school', 'drift', 'hover', 'patrol', 'bottom', 'surface']) {
+      expect(swimStyleOf(n).bond ?? 'none').toBe('none');
+      // Exactly one older style forms; a style that silently became a
+      // formation (or school stopped being one) must fail here.
+      expect(swimStyleOf(n).formation).toBe(n === 'school');
+    }
+  });
+  it('fitBreath caps a breath that would push seats out of the glass', () => {
+    const bounds = { yRange: 57, radius: 120 };
+    // A ring's vertical reach is capped at 24: ×1.22 = 29.3 > 28.5 half-column.
+    const fit = fitBreath({ up: 24, reach: 50 }, 1.22, bounds, 0);
+    expect(fit).toBeCloseTo(28.5 / 24, 5);
+    expect(24 * fit).toBeLessThanOrEqual(bounds.yRange / 2);
+    // A shoal that fits breathes the full amount.
+    expect(fitBreath({ up: 10, reach: 30 }, 1.22, bounds, 0)).toBe(1.22);
+    // Never below 1: a shoal already at the limit holds, it does not shrink.
+    expect(fitBreath({ up: 40, reach: 30 }, 1.22, bounds, 0)).toBe(1);
+  });
+  it('auto covers every minted breed and every NPC breed, and loops for strangers', () => {
+    for (const b of ['betafish', 'angelfish', 'seahorse', 'seaturtle',
+      'blowfish', 'hackerfish', 'glowfish', 'babyfish', 'shark', 'crab', 'jellyfish', 'dori']) {
+      expect(AUTO_STYLE_BY_BREED[b]).toBeDefined();
+      expect(swimStyleOf(AUTO_STYLE_BY_BREED[b]!).name).toBe(AUTO_STYLE_BY_BREED[b]);
+    }
+    expect(autoStyleFor('seahorse').name).toBe('hover');
+    expect(autoStyleFor('SeaTurtle').name).toBe('surface');
+    expect(autoStyleFor('reef@night').name).toBe('loop');
+    expect(autoStyleFor(undefined).name).toBe('loop');
+  });
+  it('breathing only ever expands, and 0 is exactly 1', () => {
+    for (let t = 0; t < 60; t += 0.37) {
+      expect(formationBreathe(t, 0)).toBe(1);
+      expect(formationBreathe(t, 1)).toBeGreaterThanOrEqual(1);
+      expect(formationBreathe(t, 1)).toBeLessThanOrEqual(1.22 + 1e-9);
+      expect(formationBreathe(t, 2)).toBe(formationBreathe(t, 1));
+    }
+  });
+  it('idle sway belongs to station-keepers only', () => {
+    for (const n of ['loop', 'school', 'patrol', 'bottom', 'surface', 'follow']) {
+      expect(idleSway(swimStyleOf(n), 3.3, 1)).toBe(0);
+    }
+    const hover = Array.from({ length: 50 }, (_, i) => idleSway(swimStyleOf('hover'), i * 0.3, 0));
+    expect(Math.max(...hover.map(Math.abs))).toBeGreaterThan(0.3);
+    expect(Math.max(...hover.map(Math.abs))).toBeLessThan(0.5);
+    expect(Math.abs(idleSway(swimStyleOf('drift'), 3.49, 0))).toBeLessThan(0.25);
+  });
+  it('the wheel is the ring tilted; the ring itself stays flat for published scenes', () => {
+    const ups = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'wheel').up);
+    expect(Math.max(...ups) - Math.min(...ups)).toBeGreaterThan(FISH_LENGTH);
+    expect(Math.max(...ups.map(Math.abs))).toBeLessThanOrEqual(28);
+    const ringUps = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'ring').up);
+    expect(Math.max(...ringUps.map(Math.abs))).toBeLessThanOrEqual(FISH_LENGTH * 0.3);
+    for (let i = 0; i < 8; i++) {
+      const a = formationSlot(i, 8, 0.4, undefined, 'ring');
+      const b = formationSlot(i, 8, 0.4, undefined, 'wheel');
+      expect(a.side).toBe(b.side);
+      expect(a.back).toBe(b.back);
+    }
   });
 });
 

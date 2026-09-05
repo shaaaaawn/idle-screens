@@ -109,7 +109,7 @@ swapped with a distant artist.
 
 ### 5. Score
 
-Use `scoreSpec(spec, profile, intent)` (`evals/score.ts`):
+The house scorer is `scoreScreen` / `scoreSuite` in `evals/score.ts`; from the command line it is `eval:score-run` (below). Per screen it runs:
 
 1. `validateSpec` — hard gate (invalid = fail)
 2. `adviseSpec` — high-severity advisories
@@ -121,13 +121,60 @@ Never grade on vibes alone. Persist numbers for the next run.
 
 ### 6. Run artifact (input to next cycle)
 
-Write under `apps/playground/src/evals/runs/<runId>/`:
+A run is a directory holding:
 
-- `summary.json` — suite medians, per-artist scores, gap histogram
-- `results.jsonl` — one line per screen
+- `summary.json` — suite medians, per-artist scores, gap histogram,
+  `fixturesRun` / `fixturesTotal` (a partial run must be readable as partial)
+- `results.jsonl` — one line per screen, including validation errors
 - `gaps.md` — aggregated schemaGaps + score failures (feed
   `spec-feature-pipeline` / prompting notes)
 - `diff-vs-<prevRunId>.md` — when re-running after schema/prompt changes
+
+**Where:** catalog baselines (`eval:styles`) live in the repo at
+`apps/playground/src/evals/runs/<runId>/`. **Trials — a model authoring
+specs — never write inside the repo:** they go to the mono's
+`datasets/evals/<suite>/<runId>/`, which is what the planner reads.
+
+## Running a trial as the model under test
+
+This is the path a planner-launched agent (Claude Code, Codex, pi) takes.
+**You are the model being measured.** No OpenRouter key, no second model,
+no generator script: you author every spec yourself, and `eval:score-run`
+grades them with the house scorer.
+
+```bash
+MONO=~/code/idle-mono
+RUN=$MONO/datasets/evals/style-authoring-v1/run-$(date -u +%Y%m%dT%H%M)-<model>-<scope>
+mkdir -p "$RUN"
+cd $MONO/idle-screens
+
+# 1. the fixtures: every screen the suite wants + the full StyleDNA profiles
+EVAL_RUN_DIR=$RUN EVAL_FIXTURES=1 pnpm --filter @idle-screens/playground eval:score-run
+#    → $RUN/fixtures.json, $RUN/specs/ (empty)
+
+# 2. author: for each screen in fixtures.json (within the fixture scope you
+#    were given), write a SaverSpec YOURSELF from that artist's profile and
+#    the screen's intent, as $RUN/specs/<screen.id>.json
+
+# 3. score — re-run as often as you like; gaps.md lists invalid specs with
+#    their validation errors. Fix and re-score until every spec validates.
+EVAL_RUN_DIR=$RUN EVAL_MODEL=<resolved model id> EVAL_OPERATOR=<who> \
+  EVAL_AXES='{"artist":"all"}' EVAL_TRIALS=1 \
+  pnpm --filter @idle-screens/playground eval:score-run
+#    → $RUN/summary.json, results.jsonl, gaps.md
+```
+
+- Held-out suite: add `EVAL_SUITE=style-authoring-holdout-v1` and
+  `IDLE_EVAL_HOLDOUT_DIR=$MONO/evals-holdout` to both commands. The holdout
+  profiles land in `fixtures.json` under `datasets/` — never copy them into
+  the repo.
+- N trials = N run directories, each authored fresh. Report the median of
+  the trials' `suiteMedian`.
+- A run whose specs did not validate has measured nothing: report it as
+  failed, not done. Zero scored trials is a failure, whatever the summary
+  file says.
+- Never create files under `apps/playground/src/evals/runs/` for a trial,
+  never add a `*.test.ts` to run one, never leave scratch in the repo tree.
 
 ## Anti-patterns
 
@@ -143,7 +190,7 @@ Write under `apps/playground/src/evals/runs/<runId>/`:
 2. **Run timeline** (top) — select a past run for provenance / next-cycle inputs
 3. **New run…** — capture harness, model, system prompt, note, parent; scores append to the timeline
 4. **Compare** — one benchmark × all artists; **By artist** for signatures
-5. Headless: `pnpm --filter @idle-screens/playground eval:styles` → `evals/runs/` + `index.json`
+5. Headless baseline of the catalog: `pnpm --filter @idle-screens/playground eval:styles` → `evals/runs/` + `index.json` (this scores the shipped signature screens — it is NOT a model trial; see “Running a trial as the model under test”)
 6. Never start a cycle blank — read the selected run's `nextCycle.suggestedActions`
 
 ## Additional resources

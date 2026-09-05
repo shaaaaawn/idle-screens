@@ -115,6 +115,13 @@ export interface SaverInstance {
    *  outside the render tick. Resolve null for "nothing to show yet".
    *  Optional. */
   capture?(): Promise<ImageBitmap | null>;
+  /** Describe the CURRENT state in words and numbers — what a pixel capture
+   *  cannot say: which objects exist, where they are, what behaviour is in
+   *  flight. Plain JSON, small (a few KB), synchronous — read from the last
+   *  rendered frame, never a fresh simulation. The analytic perception a
+   *  non-vision agent gets for a saver that has no declarative spec.
+   *  Return null for "nothing yet". Optional. */
+  inspect?(): Record<string, unknown> | null;
   /** Steer parameters over time. Optional. */
   applyTrack?(track: ControlTrack): void;
   /** Seek logical animation time (ms) for workbench preview. Optional. */

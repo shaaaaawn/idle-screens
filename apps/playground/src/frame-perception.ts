@@ -53,6 +53,13 @@ export interface FramePerception {
   /** Why this saver is unsupported — or, for 'sampled', why the numbers may
    *  move run to run (derived from `manifest.timeModel` when declared). */
   reason?: string;
+  /**
+   * The raw grid the numbers above were reduced from — only when the caller
+   * asked (`includeGrid`). Off by default because `all()` would then carry
+   * 30 savers x 3840 cells across a test bridge for readings nobody diffs;
+   * `spec-conformance` needs the cells, so it opts in.
+   */
+  grid?: LuminanceGrid;
 }
 
 const COLS = 80;
@@ -272,7 +279,10 @@ export function wirePerceptionHarness(savers: SaverPlugin[]): void {
       savers.map((s) => ({
         id: s.manifest.id,
         label: s.manifest.label,
-        hasSpec: false,
+        // A schema saver is `compileSaver(spec)` and carries its spec; an
+        // imperative one does not. Was hardcoded false, which made the flag
+        // useless for exactly the sweep spec-conformance wants.
+        hasSpec: !!s.spec,
         // Exposed so tests/tools can derive capability expectations from the
         // manifest instead of maintaining hand lists of saver ids.
         timeModel: s.manifest.timeModel,
@@ -281,6 +291,15 @@ export function wirePerceptionHarness(savers: SaverPlugin[]): void {
       const saver = savers.find((s) => s.manifest.id === id);
       if (!saver) return Promise.reject(new Error(`unknown saver: ${id}`));
       return perceiveSaverFrame(saver, opts);
+    },
+    /**
+     * Analytic-vs-canvas conformance for one spec (see `spec-conformance.ts`).
+     * Imported lazily so the perception harness keeps no import cycle with a
+     * module that imports back from here.
+     */
+    conformance: async (spec: unknown, opts?: PerceiveFrameOptions) => {
+      const { specConformance } = await import('./spec-conformance');
+      return specConformance(spec as never, opts ?? {});
     },
     all: async (opts?: PerceiveFrameOptions): Promise<Array<{ id: string } & FramePerception>> => {
       const out: Array<{ id: string } & FramePerception> = [];
@@ -309,6 +328,8 @@ export interface PerceiveFrameOptions {
    * proportionally-correct thumbnail cost no extra memory.
    */
   dpr?: number;
+  /** Attach the full `LuminanceGrid` to the result (see FramePerception.grid). */
+  includeGrid?: boolean;
 }
 
 /**
@@ -468,6 +489,7 @@ export async function perceiveSaverFrame(
       motion,
       support: deterministic ? 'deterministic' : 'sampled',
       ...(reason ? { reason } : {}),
+      ...(opts.includeGrid ? { grid } : {}),
     };
   } catch (err) {
     return empty('unsupported', `Mount failed: ${err instanceof Error ? err.message : String(err)}`);

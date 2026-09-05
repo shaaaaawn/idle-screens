@@ -174,6 +174,8 @@ export type EvalHarness =
   | 'playground-ui'
   | 'headless-vitest'
   | 'agent-loop'
+  /** A model under test authored the specs itself; eval:score-run graded them. */
+  | 'agent-authored'
   | 'mcp'
   | 'manual';
 

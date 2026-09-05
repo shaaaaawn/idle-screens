@@ -2,6 +2,7 @@ mod about;
 mod bundle;
 mod cli;
 mod config;
+mod config_write;
 mod idle;
 mod pair;
 mod platform;
@@ -24,7 +25,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("{}", about::summary());
 
     if let Some(cli::Command::Tray) = cli.command {
-        return tray::run(cli.kiosk, cli.forwardable_args());
+        return tray::run(&cli);
     }
 
     let settings = Settings::load(&cli)?;

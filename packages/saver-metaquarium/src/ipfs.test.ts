@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG } from './ipfs';
+import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG, expandFishMixSlots } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
@@ -89,6 +89,43 @@ describe('parseFishMix', () => {
     expect(r.entries).toHaveLength(24);
     expect(new Set(r.entries.map((e) => e.id)).size).toBe(24); // 24 distinct seahorses
     expect(r.problems).toEqual(['"seahorse:30": count clamped to 24']);
+  });
+  it('parses a per-token @style and keeps untagged tokens style-less', () => {
+    const r = parseFishMix('457:2@hover, 257:1@School, 100:1');
+    expect(r.problems).toEqual([]);
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([
+      [457, 'hover'], [458, 'hover'], [257, 'school'], [100, null],
+    ]);
+    const slots = expandFishMixSlots(r.entries, 24);
+    expect(slots.map((sl) => sl.style ?? null)).toEqual(['hover', 'hover', 'school', null]);
+    expect(slots[0]!.url).toContain('fish_457');
+  });
+  it('degrades an unknown @style to a problem without dropping the fish', () => {
+    const r = parseFishMix('257:1@zoom');
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([[257, null]]);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain('unknown style "zoom"');
+  });
+  it('preserves @ inside custom aliases and parses only a trailing style suffix', () => {
+    const catalog = [
+      { id: 9, name: 'Night reef', breed: 'reef@night', ipfs3d: '/reef.glb', localGlb: '' },
+      { id: 10, name: 'Hover reef', breed: 'reef@hover', ipfs3d: '/hover.glb', localGlb: '' },
+    ];
+    const unstyled = parseFishMix('reef@night:2', catalog);
+    expect(unstyled.problems).toEqual([]);
+    expect(unstyled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
+
+    const styled = parseFishMix('reef@night:2@hover', catalog);
+    expect(styled.problems).toEqual([]);
+    expect(styled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2, style: 'hover' }]);
+
+    const typo = parseFishMix('reef@night:2@zoom', catalog);
+    expect(typo.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
+    expect(typo.problems[0]).toContain('unknown style "zoom"');
+
+    const collidingAlias = parseFishMix('reef@hover', catalog);
+    expect(collidingAlias.problems).toEqual([]);
+    expect(collidingAlias.entries).toEqual([{ id: 10, breed: 'reef@hover', url: '/hover.glb', count: 1 }]);
   });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });

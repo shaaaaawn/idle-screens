@@ -78,12 +78,16 @@ pub struct Settings {
     pub app_id: String,
 }
 
+/// The config file a run reads: `--config` if given, else the default path.
+pub fn config_path(cli: &Cli) -> PathBuf {
+    cli.config
+        .clone()
+        .unwrap_or_else(|| config_dir().join("config.toml"))
+}
+
 impl Settings {
     pub fn load(cli: &Cli) -> anyhow::Result<Self> {
-        let path = cli
-            .config
-            .clone()
-            .unwrap_or_else(|| config_dir().join("config.toml"));
+        let path = config_path(cli);
         let file: FileConfig = match std::fs::read_to_string(&path) {
             Ok(text) => {
                 toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?
@@ -100,7 +104,15 @@ impl Settings {
                 log::warn!("config: unrecognized mode {m:?} (expected \"savers\" | \"channel\"); defaulting to \"savers\"");
             }
         }
+        // An explicit `--saver` asks for the bundled engine, so it has to be able
+        // to override a config that selects channel mode -- otherwise the flag is
+        // silently ignored and the channel streams instead, breaking the config
+        // file's own contract that CLI flags win. `--channel` still takes
+        // precedence over `--saver` when both are passed.
         let channel_choice = cli.channel.clone().or_else(|| {
+            if cli.saver.is_some() {
+                return None;
+            }
             if file.mode.as_deref() == Some("channel") {
                 file.channel.clone().filter(|c| !c.is_empty())
             } else {
@@ -277,6 +289,35 @@ mod tests {
             ),
             other => panic!("expected Mode::Channel, got {other:?}"),
         }
+    }
+
+    /// Regression: a config pinning channel mode used to swallow `--saver`
+    /// entirely -- the flag parsed, was stored, and then never applied because
+    /// mode had already resolved to Channel. Verified on Hyprland: `--saver
+    /// warp` streamed the configured channel instead.
+    #[test]
+    fn cli_saver_overrides_config_channel_mode() {
+        let file: FileConfig =
+            toml::from_str("mode = \"channel\"\nchannel = \"fishtank\"").unwrap();
+        let s = Settings::merge(&cli(&["--saver", "warp"]), file);
+        assert_eq!(s.mode, Mode::Savers);
+        assert_eq!(s.saver.as_deref(), Some("warp"));
+    }
+
+    /// `--channel` still wins when both are passed: the saver stays pinned for
+    /// a later switch back to the bundled engine, but mode is Channel.
+    #[test]
+    fn cli_channel_beats_cli_saver() {
+        let file: FileConfig = toml::from_str("").unwrap();
+        let s = Settings::merge(&cli(&["--saver", "warp", "--channel", "ballet"]), file);
+        match s.mode {
+            Mode::Channel(url) => assert!(
+                is_channel_url(&url, "ballet"),
+                "unexpected channel url: {url}"
+            ),
+            other => panic!("expected Mode::Channel, got {other:?}"),
+        }
+        assert_eq!(s.saver.as_deref(), Some("warp"));
     }
 
     #[test]

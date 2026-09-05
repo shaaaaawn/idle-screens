@@ -15,7 +15,13 @@
  */
 
 export type SwimStyle =
-  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface';
+  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface'
+  | 'follow' | 'pair' | 'chase';
+
+/** How a fish relates to another fish. `none` is every pre-relationship
+ *  style. A bonded fish rides the plan of the nearest preceding unbonded fish
+ *  in slot order (its LEADER) — closed-form, because the leader's own pose is. */
+export type Bond = 'none' | 'follow' | 'pair' | 'chase';
 
 /** Where in the water column a style lives. */
 export type DepthBand = 'free' | 'floor' | 'ceiling' | 'mid';
@@ -42,6 +48,8 @@ export interface SwimStyleSpec {
    *  80 minutes). At any timescale anyone is watching it reads as staying
    *  put, which is the effect being bought — but the loop is not fenced. */
   travel: number;
+  /** Relationship to other fish (MQ31). Absent = `none`. */
+  bond?: Bond;
 }
 
 /**
@@ -65,7 +73,68 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'patrol', label: 'Patrol', speedMul: 0.55, band: 'mid', bobAmp: 1, bobHz: 0.09, formation: false, travel: 1 },
   { name: 'bottom', label: 'Bottom-hugger', speedMul: 0.7, band: 'floor', bobAmp: 2, bobHz: 0.4, formation: false, travel: 1 },
   { name: 'surface', label: 'Surface-skimmer', speedMul: 0.9, band: 'ceiling', bobAmp: 3, bobHz: 0.55, formation: false, travel: 1 },
+  // Relationships (MQ31). A bonded fish has no route of its own: it rides
+  // its leader's plan at a lag, so a `@follow` trio behind a turtle is a
+  // file, a `@pair` couple orbits a shared point, and a `@chase` closes on
+  // its leader and falls back. All three stay pure in t because the leader
+  // is — the follower samples the SAME closed form at `d - lag`.
+  { name: 'follow', label: 'Follower', speedMul: 1, band: 'free', bobAmp: 1.2, bobHz: 0.5, formation: false, travel: 1, bond: 'follow' },
+  { name: 'pair', label: 'Pair', speedMul: 0.8, band: 'free', bobAmp: 2.5, bobHz: 0.35, formation: false, travel: 1, bond: 'pair' },
+  { name: 'chase', label: 'Chaser', speedMul: 1, band: 'free', bobAmp: 1, bobHz: 0.6, formation: false, travel: 1, bond: 'chase' },
 ];
+
+/**
+ * `swimStyle: 'auto'` — species-aware defaults from the cast (MQ33). The
+ * scene names no behaviour; each untagged token swims the way its breed
+ * does. A `@style` on the token still wins. Breeds this table does not know
+ * (a custom catalog) loop, the pre-style behaviour.
+ */
+export const AUTO_STYLE_BY_BREED: Readonly<Record<string, SwimStyle>> = {
+  angelfish: 'school',
+  betafish: 'drift',
+  seahorse: 'hover',
+  seaturtle: 'surface',
+  // The unminted NPC set.
+  blowfish: 'hover',
+  hackerfish: 'loop',
+  glowfish: 'drift',
+  babyfish: 'school',
+  shark: 'patrol',
+  crab: 'bottom',
+  jellyfish: 'drift',
+  dori: 'school',
+};
+
+export function autoStyleFor(breed: string | undefined): SwimStyleSpec {
+  const name = breed ? AUTO_STYLE_BY_BREED[breed.toLowerCase()] : undefined;
+  return swimStyleOf(name ?? 'loop');
+}
+
+/**
+ * Formation breathing (MQ34): the lattice relaxes outward and draws back in
+ * on a slow cycle. The factor never drops below 1, so the no-pair-inside-a-
+ * body-length law the seating charts are tested against still holds at every
+ * instant — a school breathes OUT from its guaranteed spacing, never into it.
+ * `amount` 0 (the default) is exactly 1: no change to any published scene.
+ */
+export function formationBreathe(tSec: number, amount: number): number {
+  const a = Math.max(0, Math.min(1, amount));
+  if (a <= 0) return 1;
+  return 1 + a * 0.22 * (0.5 + 0.5 * Math.sin(tSec * 0.42));
+}
+
+/**
+ * Idle micro-motion (MQ36): a fish that works a patch of water (`travel` < 1)
+ * turns in place while it holds station, instead of pointing rigidly down a
+ * loop it is barely moving along — "a stationary fish is a statue with a
+ * tail". Yaw in radians, zero for every touring style, so `loop` and the
+ * formations are untouched. Amplitude grows as travel shrinks: hover sways
+ * ~25°, drift ~11°.
+ */
+export function idleSway(style: SwimStyleSpec, tSec: number, phase: number): number {
+  if (style.travel >= 1 || style.formation) return 0;
+  return (1 - style.travel) * 0.5 * Math.sin(tSec * 0.45 + phase);
+}
 
 export const SWIM_STYLE_NAMES: readonly SwimStyle[] = SWIM_STYLES.map((s) => s.name);
 
@@ -173,9 +242,10 @@ const FORMATION_HALF_WIDTH = 62;
  * - `ring`    — a carousel around the carrier, the ring swimming as one
  * - `wedge`   — the migratory V, ranks widening behind the point
  * - `ball`    — a bait-ball: Fibonacci-shell seats on a sphere
+ * - `wheel`   — the ring tilted so it reads from a side camera (MQ34)
  */
-export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball';
-export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball'];
+export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball' | 'wheel';
+export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball', 'wheel'];
 
 export function formationSlot(
   index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
@@ -209,6 +279,22 @@ export function formationSlot(
     return {
       side: Math.cos(a) * r,
       up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      back: Math.sin(a) * r,
+    };
+  }
+  if (shape === 'wheel') {
+    // The ring, TILTED: seats rise and fall around the carousel so it reads
+    // as a wheel from a side camera. A flat ring was verified invisible from
+    // every side view — a line of fish, not a circle (MQ34). A separate
+    // shape rather than a change to `ring`, so scenes already published on
+    // `ring` render exactly as before. Horizontal spacing is the ring's, so
+    // the arc-length law holds; the vertical reach is capped so the
+    // carrier's y-clamp keeps the top seat under the lid.
+    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const a = (index / Math.max(1, count)) * Math.PI * 2;
+    return {
+      side: Math.cos(a) * r,
+      up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.3 * j,
       back: Math.sin(a) * r,
     };
   }
@@ -307,6 +393,28 @@ export function formationExtent(
     reach = Math.max(reach, Math.hypot(s.side, s.back));
   }
   return { side, up, back, reach };
+}
+
+/**
+ * The largest breath a formation can take and still fit the glass. Breathing
+ * scales seats and extent together, and the carrier keeps the shoal inside
+ * by moving its CENTRE — which only works while the extent fits: a ring's
+ * vertical reach is capped at 24 units, and at a full breath (×1.22) that is
+ * 29.3 against a 57-unit water column, so the carrier's y-clamp inverted and
+ * the top and bottom seats left the tank (review, MQ34). Cap the breath so
+ * the breathed extent (plus a margin for per-seat jitter) never exceeds what
+ * the carrier can keep inside.
+ */
+export function fitBreath(
+  extent: { up: number; reach: number },
+  lattice: number,
+  bounds: { yRange: number; radius: number },
+  margin = FISH_LENGTH * 0.5,
+): number {
+  let fit = lattice;
+  if (extent.up > 0) fit = Math.min(fit, Math.max(1, (bounds.yRange / 2 - margin) / extent.up));
+  if (extent.reach > 0) fit = Math.min(fit, Math.max(1, (bounds.radius - margin) / extent.reach));
+  return fit;
 }
 
 /** Depth band as a fraction of the tank's vertical extent — the tank owns the

@@ -183,6 +183,37 @@ export class IdleScreenElement extends HostBase {
     });
   }
 
+  /**
+   * The mounted saver's own account of its frame (`SaverInstance.inspect`) —
+   * a convenience that forwards to whatever is mounted. Synchronous and
+   * last-known: a main-thread saver answers live; a Worker-hosted saver
+   * answers the most recent `inspectAsync()` (null until one has been made).
+   * Null when nothing is mounted or the saver does not describe itself.
+   */
+  inspect(): Record<string, unknown> | null {
+    try {
+      return this.instance?.inspect?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `inspect()` with the round trip a Worker-hosted saver needs (2 s timeout,
+   * null on timeout). Main-thread savers answer immediately with the same
+   * value `inspect()` would.
+   */
+  async inspectAsync(): Promise<Record<string, unknown> | null> {
+    const inst = this.instance as (SaverInstance & { inspectAsync?: () => Promise<Record<string, unknown> | null> }) | null;
+    if (!inst) return null;
+    try {
+      if (typeof inst.inspectAsync === 'function') return await inst.inspectAsync();
+      return inst.inspect?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   connectedCallback(): void {
     if (!this.shadowRoot) this.buildDom();
     this.maybeStart();
@@ -514,8 +545,20 @@ export class IdleScreenElement extends HostBase {
       }
     };
     worker.addEventListener('message', onCaptured);
+    let inspectSeq = 0;
+    const pendingInspects = new Map<number, (state: Record<string, unknown> | null) => void>();
+    const onInspected = (e: MessageEvent<WorkerOutbound>): void => {
+      if (e.data.type !== 'inspected') return;
+      const settle = pendingInspects.get(e.data.id);
+      if (settle) {
+        pendingInspects.delete(e.data.id);
+        settle(e.data.state);
+      }
+    };
+    worker.addEventListener('message', onInspected);
 
-    const proxy: SaverInstance = {
+    let lastInspect: Record<string, unknown> | null = null;
+    const proxy: SaverInstance & { inspectAsync(): Promise<Record<string, unknown> | null> } = {
       setPaused: (p) => worker.postMessage({ type: 'pause', paused: p } satisfies WorkerInbound),
       resize: (w, h, newDpr) => worker.postMessage({ type: 'resize', width: w, height: h, dpr: newDpr ?? dpr } satisfies WorkerInbound),
       applyTrack: (track) => worker.postMessage({ type: 'track', track } satisfies WorkerInbound),
@@ -536,11 +579,36 @@ export class IdleScreenElement extends HostBase {
           });
           worker.postMessage({ type: 'capture', id } satisfies WorkerInbound);
         }),
+      // The proxy's inspect is async under the hood (a worker round trip);
+      // the SaverInstance contract is synchronous, so expose the promise
+      // form as `inspectAsync` and answer the last state synchronously.
+      inspect: () => lastInspect,
+      inspectAsync: () =>
+        new Promise<Record<string, unknown> | null>((resolve) => {
+          if (disposed) {
+            resolve(null);
+            return;
+          }
+          const id = ++inspectSeq;
+          const timer = setTimeout(() => {
+            pendingInspects.delete(id);
+            resolve(null);
+          }, 2000);
+          pendingInspects.set(id, (state) => {
+            clearTimeout(timer);
+            lastInspect = state;
+            resolve(state);
+          });
+          worker.postMessage({ type: 'inspect', id } satisfies WorkerInbound);
+        }),
       dispose: () => {
         disposed = true;
         worker.removeEventListener('message', onCaptured);
+        worker.removeEventListener('message', onInspected);
         for (const settle of pendingCaptures.values()) settle(null);
         pendingCaptures.clear();
+        for (const settle of pendingInspects.values()) settle(null);
+        pendingInspects.clear();
         this.cleanupWorkerHandlers?.();
         this.cleanupWorkerHandlers = null;
         worker.postMessage({ type: 'dispose' } satisfies WorkerInbound);
@@ -576,6 +644,17 @@ export class IdleScreenElement extends HostBase {
           this.cleanupWorkerHandlers = () => {
             worker.removeEventListener('error', onCrash);
             worker.removeEventListener('messageerror', onCrash);
+            // disposeInstance() caches the Worker for reuse WITHOUT calling
+            // proxy.dispose(), so the capture/inspect listeners and any
+            // in-flight requests must be cleared here too — or every remount
+            // stacks another listener on the cached Worker and a pending
+            // inspect settles from a later mount's answer.
+            worker.removeEventListener('message', onCaptured);
+            worker.removeEventListener('message', onInspected);
+            for (const settle of pendingCaptures.values()) settle(null);
+            pendingCaptures.clear();
+            for (const settle of pendingInspects.values()) settle(null);
+            pendingInspects.clear();
           };
 
           resolve(proxy);

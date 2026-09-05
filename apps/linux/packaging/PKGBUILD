@@ -14,7 +14,8 @@ sha256sums=('SKIP') # replace with the checksum printed by make-src-tarball.sh
 
 build() {
   cd "$pkgname-$pkgver"
-  cargo build --release --locked
+  # Mark the binary as a release build; build.rs reads this for the About item.
+  IDLE_BUILD_KIND=release cargo build --release --locked
 }
 
 check() {
@@ -24,11 +25,33 @@ check() {
 
 package() {
   cd "$pkgname-$pkgver"
+
   install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  # The Omarchy launcher shim: without it the idle wiring has nothing to call,
+  # which is why a pacman install used to be less functional than the tarball.
+  install -Dm755 packaging/omarchy/omarchy-idle-screens \
+    "$pkgdir/usr/bin/omarchy-idle-screens"
+
   install -d "$pkgdir/usr/share/idle-screens/web"
   cp -r webroot/. "$pkgdir/usr/share/idle-screens/web/"
+
+  # Tray launcher. Autostart is deliberately NOT enabled here -- a package must
+  # not write to $HOME. Per user, either run the Omarchy wiring below or:
+  #   cp /usr/share/applications/idle-screens-tray.desktop ~/.config/autostart/
+  install -Dm644 packaging/omarchy/idle-screens-tray.desktop \
+    "$pkgdir/usr/share/applications/idle-screens-tray.desktop"
+
+  # Omarchy wiring, run post-install by the user (they touch ~/.config).
+  install -Dm755 packaging/omarchy/install-omarchy.sh \
+    packaging/omarchy/install-omarchy-plugin.sh \
+    packaging/omarchy/install-hypridle.sh \
+    -t "$pkgdir/usr/share/idle-screens/omarchy/"
+  install -Dm644 packaging/omarchy/hypridle.listener.snippet \
+    -t "$pkgdir/usr/share/idle-screens/omarchy/"
+
   install -Dm644 packaging/config.toml.example \
-    packaging/hypridle.conf.example packaging/hypridle.lua.example \
+    packaging/hypridle.conf.example packaging/hypridle-kiosk.conf.example \
+    packaging/hypridle.lua.example \
     -t "$pkgdir/usr/share/doc/$pkgname/"
   [ -f LICENSE ] && install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" || true
 }

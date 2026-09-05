@@ -105,7 +105,35 @@ extract, and run:
 ./install.sh
 ```
 
-Set `PREFIX=/usr` to install system-wide (default is `/usr/local`).
+Installs to `~/.local` by default — **no sudo**. Set `PREFIX=/usr` (or
+`/usr/local`) for a system-wide install; the installer only escalates when the
+prefix is not writable.
+
+To remove an install (shipped in the same tarball):
+
+```bash
+./uninstall.sh          # remove from PREFIX (default ~/.local)
+./uninstall.sh --all    # also sweep /usr/local and /usr
+./uninstall.sh --purge  # also drop config, device id, and update cache
+```
+
+A plain uninstall keeps `~/.config/idle-screens` and the per-machine device id,
+so reinstalling does not re-pair the machine.
+
+**Bundle lookup.** The binary searches for the web bundle in this order, taking
+the first that contains `index.html` + `assets/main.js`:
+
+1. `$IDLE_SCREENS_WEB` (runtime override, used by `dev-run.sh`)
+2. the `IDLE_SCREENS_WEB_DIR` build-time override
+3. `~/.local/share/idle-screens/web` (user-local install)
+4. `/usr/local/share/idle-screens/web`
+5. `/usr/share/idle-screens/web` (packaged install)
+
+A user-local install therefore wins over a leftover system one. Before this
+order existed, `/usr/share` was the only default while `install.sh` honored
+`PREFIX` for the bundle — so a rootless install put the bundle where the binary
+never looked and silently rendered whichever stale bundle a previous system
+install had left behind.
 
 ### Option B — manual (from source)
 
@@ -193,7 +221,20 @@ idle-screens-wayland tray          # StatusNotifier icon (Waybar tray)
 ```
 
 Menu: show saver, kiosk mode, check updates, open config, quit tray.
-Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by `install.sh`).
+Autostart: `~/.config/autostart/idle-screens-tray.desktop` (installed by
+`install.sh`, which writes an **absolute** `Exec=` path). Two things make the
+tray survive login on Omarchy, both learned the hard way:
+
+- systemd's `xdg-autostart-generator` resolves `Exec=` when it generates the
+  unit, early enough that `~/.local/bin` is not reliably on its PATH. A bare
+  `Exec=idle-screens-wayland` yields *no unit at all*, or binds to a stale
+  `/usr/bin` copy.
+- The tray retries registration for up to 5 minutes. Under uwsm the autostart
+  unit races the bar that owns `org.kde.StatusNotifierWatcher` (Quickshell on
+  Omarchy); a single attempt loses that race and exits 1 with
+  "The name is not activatable", so the tray silently never appears.
+
+Check it with `systemctl --user status 'app-idle\x2dscreens\x2dtray@autostart.service'`.
 
 Idle-triggered launch is handled by the Quickshell idle service or hypridle
 (whichever your Omarchy uses); the tray is for manual control.

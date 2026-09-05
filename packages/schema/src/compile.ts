@@ -18,7 +18,7 @@ import {
 } from './steer';
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
-import { resolveSegment } from './sequence';
+import { resolveSegment, segmentStart } from './sequence';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -405,10 +405,15 @@ class SpecInstance implements SaverInstance {
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
       if (rs?.glyphAlphas) {
-        // glyphFade: every glyph draws individually at its full-line prefix
-        // advance. measureText is paint-only (the caret's trick) — positions
-        // come from the platform's real glyph widths, never the em table, and
-        // depend only on the fixed prefix, so glyphs never shift as they fade.
+        // glyphFade: the contiguous fully-opaque leading run draws as ONE
+        // fillText — a single draw forms ligatures and pair kerning exactly
+        // like the un-revealed path (pixel parity once fully revealed), and it
+        // drops the O(n²) per-frame prefix re-measure for glyphs that have
+        // finished fading. Only the fading tail draws glyph-by-glyph, each at
+        // its full-line prefix advance. measureText is paint-only (the caret's
+        // trick) — positions come from the platform's real glyph widths, never
+        // the em table, and depend only on the fixed prefix, so glyphs never
+        // shift as they fade.
         ctx.textAlign = 'left';
         const baseAlpha = ctx.globalAlpha;
         for (let li = 0; li < lines.length; li++) {
@@ -417,8 +422,15 @@ class SpecInstance implements SaverInstance {
           const clusters = graphemeClusters(lines[li]!.text);
           const lw = ctx.measureText(lines[li]!.text).width;
           const x0 = align === 'center' ? (maxWPx - lw) / 2 : align === 'right' ? maxWPx - lw : 0;
+          let opaque = 0;
+          while (opaque < clusters.length && (alphas[opaque] ?? 0) >= 1) opaque++;
           let prefix = '';
-          for (let gi = 0; gi < clusters.length; gi++) {
+          if (opaque > 0) {
+            prefix = clusters.slice(0, opaque).join('');
+            ctx.globalAlpha = baseAlpha;
+            ctx.fillText(prefix, x0, li * lh);
+          }
+          for (let gi = opaque; gi < clusters.length; gi++) {
             const a = alphas[gi] ?? 0;
             if (a <= 0) break; // alphas only fall in reading order
             ctx.globalAlpha = baseAlpha * a;
@@ -701,6 +713,18 @@ class SequenceInstance implements SaverInstance {
   private startT = 0;
   private baseT = 0;
   private lastT = 0;
+  /** The T most recently passed to renderFrame — the clock a steer displaces. */
+  private renderedT = 0;
+  /**
+   * The clicker's two pieces of state. `clockOffset` is added to every T so
+   * a `sequence.segment` steer lands the timeline at the target segment's
+   * start and STAYS there as the wall clock keeps ticking — the steer moves
+   * the clock instead of fighting it. `releasedBelow` records that the steer
+   * counts as the presenter clicking past every `advance: 'input'` hold
+   * before the target (see `resolveSegment`).
+   */
+  private clockOffset = 0;
+  private releasedBelow = 0;
 
   constructor(seq: IdleSequence, ctx: SaverContext) {
     this.seq = seq;
@@ -803,7 +827,8 @@ class SequenceInstance implements SaverInstance {
   }
 
   renderFrame(T: number, seed: number): void {
-    const resolved = resolveSegment(this.seq, T);
+    this.renderedT = T;
+    const resolved = resolveSegment(this.seq, T + this.clockOffset, { releasedBelow: this.releasedBelow });
     const { index, localT } = resolved;
 
     // Check if the *previous* segment has a morph into this one
@@ -904,14 +929,15 @@ class SequenceInstance implements SaverInstance {
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
-      if (idx !== this.activeIndex) {
-        for (let i = 0; i < this.children.length; i++) {
-          if (i !== idx) this.releaseChild(i);
-        }
-        this.activeIndex = idx;
-        const child = this.ensureChild(idx);
-        child.renderFrame(0, this.seq.segments[idx]!.scene.seed ?? this.seq.seed ?? 0);
-      }
+      // Displace the clock so T + offset == the target segment's start: the
+      // segment begins at localT 0 (its `life.enter` build replays) and the
+      // next animation frame resolves to the same segment instead of snapping
+      // back to whatever the wall clock said. The steer also releases every
+      // `advance: 'input'` hold before the target; holds at and after it stay
+      // armed, so steering backwards re-arms the ones in between.
+      this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
+      this.releasedBelow = idx;
+      this.renderFrame(this.renderedT, this.seed);
     }
 
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');

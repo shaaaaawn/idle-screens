@@ -127,7 +127,7 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing; `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris) |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail (ms of history) |
+| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
@@ -297,6 +297,14 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
   `perceiveScene().text`.)
+- `adviseSpec(spec)` — non-blocking advisories (also on
+  `perceiveScene().advisories`). Two of them are **spatial**, for static text:
+  `text-off-screen` (a text/textBlock box crosses the viewport edge by more
+  than 1%) and `text-overlap` (two static text layers share more than 10% of
+  the smaller box). Boxes come from the same character-class width table the
+  textBlock line-breaker uses, so they are estimates of the renderer's own
+  layout — a caption that fails these will look wrong on the wall; one that
+  passes may still sit a few px off.
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
@@ -337,8 +345,12 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
 be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
 the final segment may omit duration (holds indefinitely).
 
-**Advance mode:** `auto` (default), `input`, or `either`. Validated but not
-wired to runtime behavior — timer/input drivers are planned for a follow-up.
+**Advance mode:** `auto` (default) and `either` advance on the timer. `input`
+makes a timed segment **hold** at the end of its `duration` until a
+`sequence.segment` steer releases it — the clicker (see Steering below). The
+held scene keeps animating (its `localT` keeps growing), so a slide waiting for
+the presenter never freezes. A durationless final segment holds regardless of
+`advance`.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
 `{ type: 'morph', dur: number }` smoothly interpolates paint properties
@@ -352,7 +364,8 @@ seed is unused. `dur` must be between 200 and 5000 ms.
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
 `loop: true`, `T` wraps at the sum of all durations (loop is incompatible with
-a durationless final segment).
+a durationless final segment). An unreleased `advance: 'input'` hold blocks the
+wrap; after a wrap every hold is armed again.
 
 **Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
 viewer needs zero changes. All children share a single canvas; only the active
@@ -360,8 +373,20 @@ segment's `SpecInstance` is alive at any time. `workerReady` is `false` (the
 worker compile-hook does not dispatch sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
-`applyTrack`. The `SequenceInstance` intercepts this path before delegation.
-Remaining deltas are forwarded to the active child's `applyTrack`.
+`applyTrack` (`setParam("sequence.segment", n)` over MCP). The
+`SequenceInstance` intercepts this path before delegation; remaining deltas are
+forwarded to the active child's `applyTrack`.
+
+The steer **moves the clock, not the frame**: it displaces the timeline so the
+target segment starts at its own `localT` 0 (its `life.enter` build replays)
+and then runs on the timer from there — the next animation frame resolves to
+the same segment instead of snapping back to the wall clock. A steer to
+segment `n` also counts as the presenter clicking past every `advance: 'input'`
+hold before `n`; holds at and after `n` stay armed, so steering backwards
+re-arms the ones in between. This is the whole clicker: a deck is a sequence
+whose slides carry `advance: 'input'`, and "next" is one `setParam`. Pinned by
+`sequence.test.ts` → "sequence.segment steering is sticky" and
+"advance: 'input' holds until released".
 
 **Seed:** `seq.seed` is forwarded to children that lack a scene-level seed
 (offset by segment index for independence). Children with their own seed are

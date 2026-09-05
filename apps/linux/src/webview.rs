@@ -29,8 +29,11 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
     // A screensaver has no right-click menu.
     view.connect_context_menu(|_, _, _| true);
 
-    // Windowed dev: Escape in the webview → native quit via custom URI.
-    if state.settings.windowed {
+    // Escape in the webview → native quit via custom URI. Windowed dev needs
+    // it because there is no input watcher to dismiss the window; kiosk needs
+    // it because suppressing that watcher is the whole point, which otherwise
+    // leaves SIGTERM as the only exit.
+    if state.settings.windowed || state.settings.kiosk {
         let quit_state = state.clone();
         view.connect_decide_policy(move |_, decision, decision_type| {
             if decision_type != PolicyDecisionType::NavigationAction {

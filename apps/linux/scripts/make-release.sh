@@ -22,8 +22,8 @@ cp target/release/idle-screens-wayland "$root/"
 cp -r webroot "$root/web"
 cp -r packaging "$root/"
 cp ../../LICENSE "$root/LICENSE" 2>/dev/null || true
-cp scripts/install.sh "$root/"
-chmod +x "$root/install.sh" "$root/packaging/omarchy/"*.sh 2>/dev/null || true
+cp scripts/install.sh scripts/uninstall.sh "$root/"
+chmod +x "$root/install.sh" "$root/uninstall.sh" "$root/packaging/omarchy/"*.sh 2>/dev/null || true
 
 tar -czf "$out" -C "$staging" "$bundle"
 ( cd dist && sha256sum "$(basename "$out")" ) | tee dist/SHA256SUMS
