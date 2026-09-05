@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test:e2e": "playwright test",
-    "eval:styles": "WRITE_STYLE_EVAL_BASELINE=1 vitest run src/evals/write-baseline.test.ts"
+    "eval:styles": "WRITE_STYLE_EVAL_BASELINE=1 vitest run src/evals/write-baseline.test.ts",
+    "eval:score-run": "vitest run src/evals/score-run.test.ts"
   },
   "dependencies": {
     "@idle-screens/capabilities": "workspace:*",
