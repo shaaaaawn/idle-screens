@@ -369,7 +369,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         err(`${path}.emit.life`, 'must be <= emit.every (the visible window cannot outlast its period)');
       }
       if (em.jitter !== undefined && (!isNum(em.jitter) || em.jitter < 0 || em.jitter > 1)) {
-        err(`${path}.emit.jitter`, 'must be 0..1 (0 = evenly staggered, 1 = seeded offsets)');
+        err(`${path}.emit.jitter`, 'must be 0..1 (0 = evenly staggered, 1 = scattered by a fixed sequence)');
       }
       if (em.grow !== undefined) {
         if (!Array.isArray(em.grow) || em.grow.length !== 2 || !isNum(em.grow[0]) || !isNum(em.grow[1])) {
