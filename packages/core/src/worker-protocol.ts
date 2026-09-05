@@ -36,6 +36,7 @@ export type WorkerInbound =
   | { type: 'track'; track: ControlTrack }
   | { type: 'sample' }
   | { type: 'capture'; id: number }
+  | { type: 'inspect'; id: number }
   | { type: 'dispose' };
 
 /** Worker → main thread messages. */
@@ -43,6 +44,7 @@ export type WorkerOutbound =
   | { type: 'mounted' }
   | { type: 'sampled'; hasContent: boolean }
   | { type: 'captured'; id: number; bitmap: ImageBitmap | null }
+  | { type: 'inspected'; id: number; state: Record<string, unknown> | null }
   | { type: 'error'; message: string };
 
 /** Options for {@link runIdleWorker}. */
@@ -216,6 +218,19 @@ export function runIdleWorker(
           }
         }
         post({ type: 'sampled', hasContent });
+        break;
+      }
+      case 'inspect': {
+        // State dump for perception (the worker owns the instance, so this
+        // is the only read path). Synchronous by contract; a throwing saver
+        // answers null rather than killing the worker.
+        let state: Record<string, unknown> | null = null;
+        try {
+          state = instance?.inspect?.() ?? null;
+        } catch {
+          state = null;
+        }
+        post({ type: 'inspected', id: msg.id, state });
         break;
       }
       case 'capture': {

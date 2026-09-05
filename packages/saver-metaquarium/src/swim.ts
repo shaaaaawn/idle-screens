@@ -15,7 +15,13 @@
  */
 
 export type SwimStyle =
-  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface';
+  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface'
+  | 'follow' | 'pair' | 'chase';
+
+/** How a fish relates to another fish. `none` is every pre-relationship
+ *  style. A bonded fish rides the plan of the nearest preceding unbonded fish
+ *  in slot order (its LEADER) — closed-form, because the leader's own pose is. */
+export type Bond = 'none' | 'follow' | 'pair' | 'chase';
 
 /** Where in the water column a style lives. */
 export type DepthBand = 'free' | 'floor' | 'ceiling' | 'mid';
@@ -42,6 +48,8 @@ export interface SwimStyleSpec {
    *  80 minutes). At any timescale anyone is watching it reads as staying
    *  put, which is the effect being bought — but the loop is not fenced. */
   travel: number;
+  /** Relationship to other fish (MQ31). Absent = `none`. */
+  bond?: Bond;
 }
 
 /**
@@ -65,7 +73,68 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'patrol', label: 'Patrol', speedMul: 0.55, band: 'mid', bobAmp: 1, bobHz: 0.09, formation: false, travel: 1 },
   { name: 'bottom', label: 'Bottom-hugger', speedMul: 0.7, band: 'floor', bobAmp: 2, bobHz: 0.4, formation: false, travel: 1 },
   { name: 'surface', label: 'Surface-skimmer', speedMul: 0.9, band: 'ceiling', bobAmp: 3, bobHz: 0.55, formation: false, travel: 1 },
+  // Relationships (MQ31). A bonded fish has no route of its own: it rides
+  // its leader's plan at a lag, so a `@follow` trio behind a turtle is a
+  // file, a `@pair` couple orbits a shared point, and a `@chase` closes on
+  // its leader and falls back. All three stay pure in t because the leader
+  // is — the follower samples the SAME closed form at `d - lag`.
+  { name: 'follow', label: 'Follower', speedMul: 1, band: 'free', bobAmp: 1.2, bobHz: 0.5, formation: false, travel: 1, bond: 'follow' },
+  { name: 'pair', label: 'Pair', speedMul: 0.8, band: 'free', bobAmp: 2.5, bobHz: 0.35, formation: false, travel: 1, bond: 'pair' },
+  { name: 'chase', label: 'Chaser', speedMul: 1, band: 'free', bobAmp: 1, bobHz: 0.6, formation: false, travel: 1, bond: 'chase' },
 ];
+
+/**
+ * `swimStyle: 'auto'` — species-aware defaults from the cast (MQ33). The
+ * scene names no behaviour; each untagged token swims the way its breed
+ * does. A `@style` on the token still wins. Breeds this table does not know
+ * (a custom catalog) loop, the pre-style behaviour.
+ */
+export const AUTO_STYLE_BY_BREED: Readonly<Record<string, SwimStyle>> = {
+  angelfish: 'school',
+  betafish: 'drift',
+  seahorse: 'hover',
+  seaturtle: 'surface',
+  // The unminted NPC set.
+  blowfish: 'hover',
+  hackerfish: 'loop',
+  glowfish: 'drift',
+  babyfish: 'school',
+  shark: 'patrol',
+  crab: 'bottom',
+  jellyfish: 'drift',
+  dori: 'school',
+};
+
+export function autoStyleFor(breed: string | undefined): SwimStyleSpec {
+  const name = breed ? AUTO_STYLE_BY_BREED[breed.toLowerCase()] : undefined;
+  return swimStyleOf(name ?? 'loop');
+}
+
+/**
+ * Formation breathing (MQ34): the lattice relaxes outward and draws back in
+ * on a slow cycle. The factor never drops below 1, so the no-pair-inside-a-
+ * body-length law the seating charts are tested against still holds at every
+ * instant — a school breathes OUT from its guaranteed spacing, never into it.
+ * `amount` 0 (the default) is exactly 1: no change to any published scene.
+ */
+export function formationBreathe(tSec: number, amount: number): number {
+  const a = Math.max(0, Math.min(1, amount));
+  if (a <= 0) return 1;
+  return 1 + a * 0.22 * (0.5 + 0.5 * Math.sin(tSec * 0.42));
+}
+
+/**
+ * Idle micro-motion (MQ36): a fish that works a patch of water (`travel` < 1)
+ * turns in place while it holds station, instead of pointing rigidly down a
+ * loop it is barely moving along — "a stationary fish is a statue with a
+ * tail". Yaw in radians, zero for every touring style, so `loop` and the
+ * formations are untouched. Amplitude grows as travel shrinks: hover sways
+ * ~25°, drift ~11°.
+ */
+export function idleSway(style: SwimStyleSpec, tSec: number, phase: number): number {
+  if (style.travel >= 1 || style.formation) return 0;
+  return (1 - style.travel) * 0.5 * Math.sin(tSec * 0.45 + phase);
+}
 
 export const SWIM_STYLE_NAMES: readonly SwimStyle[] = SWIM_STYLES.map((s) => s.name);
 
@@ -206,9 +275,14 @@ export function formationSlot(
     // body length of arc between them.
     const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
     const a = (index / Math.max(1, count)) * Math.PI * 2;
+    // The carousel TILTS: seats rise and fall around the ring so it reads
+    // as a wheel from a side camera. A flat ring was verified invisible from
+    // every side view — a line of fish, not a circle (MQ34). Horizontal
+    // spacing is unchanged so the arc-length law holds; the vertical reach
+    // is capped so the carrier's y-clamp keeps the top seat under the lid.
     return {
       side: Math.cos(a) * r,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.3 * j,
       back: Math.sin(a) * r,
     };
   }

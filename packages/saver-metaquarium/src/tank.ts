@@ -49,9 +49,8 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  anchorFraction, bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES,
-  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec,
-} from './swim';
+  anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
+  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
@@ -424,6 +423,40 @@ interface Fish {
   tail: Object3D | null;
 }
 
+/** One fish as `inspect()` reports it — the analytic view of a frame. */
+interface InspectFish {
+  index: number;
+  url: string;
+  breed: string | null;
+  style: string;
+  band: string;
+  bond: string;
+  /** Formation seat, or null for a free fish. */
+  seat: number | null;
+  x: number;
+  y: number;
+  z: number;
+  /** Compass heading in the ground plane, degrees (0 = +z, 90 = +x). */
+  heading: number;
+  /** A maneuver event is displacing this fish right now. */
+  maneuvering: boolean;
+}
+
+/** The leader a bonded fish rides: plan, where along it, and the light pull
+ *  it took this frame so the file moves as one. */
+interface LeaderFrame {
+  plan: SwimPlan;
+  /** The leader's style — a follower swims in its leader's depth band, so an
+   *  escort behind a surface turtle skims with it instead of riding the raw
+   *  spline thirty units below. */
+  style: SwimStyleSpec;
+  d: number;
+  effort: number;
+  phase: number;
+  pullX: number;
+  pullZ: number;
+}
+
 // ---------------------------------------------------------------------------
 // TankInstance — the studs: renderer, fog, floor, fish on spline plans.
 // ---------------------------------------------------------------------------
@@ -470,6 +503,14 @@ class TankInstance implements SaverInstance {
   private wantUrls: string[] = [];
   /** Per-slot style from `@style` tokens (MQ30); null = the scene's swimStyle. */
   private wantStyles: Array<SwimStyleSpec | null> = [];
+  /** Per-slot breed from the mix, for `swimStyle: 'auto'` (MQ33). */
+  private wantBreeds: string[] = [];
+  /** Ground-plane centres of the room's light shafts — what `lightSeek`
+   *  pulls toward (MQ32). Empty when the room has no rays. */
+  private rayPools: Array<[number, number]> = [];
+  /** What the last rendered frame looked like, in numbers — `inspect()`. */
+  private lastFish: InspectFish[] = [];
+  private lastFrameT = 0;
   private wantKey = '';
   private wantInputKey = '';
   /** Last fishMix string whose parse problems were warned — once per mix,
@@ -680,6 +721,7 @@ class TankInstance implements SaverInstance {
       this.terrainMat = null;
       this.rayMat = null;
       this.ceiling = null;
+      this.rayPools = [];
     }
     const preset: EnvironmentPreset = environmentOf(envName);
     const can = affordableLayers(this.quality.envBudget, preset);
@@ -727,6 +769,9 @@ class TankInstance implements SaverInstance {
       );
       material.visible = strength > 0;
       group.add(rg);
+      // Where the light falls, for light-seeking fish. Read once per room —
+      // the shafts never move.
+      this.rayPools = rg.children.map((m) => [m.position.x, m.position.z]);
       this.rayMat = material;
       this.presetRayStrength = preset.rays.strength;
     }
@@ -824,6 +869,7 @@ class TankInstance implements SaverInstance {
 
     let want: string[] = [];
     let styles: Array<SwimStyleSpec | null> = [];
+    let breeds: string[] = [];
     this.mixMode = false;
     if (mixStr !== '') {
       const parsed = parseFishMix(mixStr, this.catalog);
@@ -835,6 +881,7 @@ class TankInstance implements SaverInstance {
       const slots = expandFishMixSlots(parsed.entries, cap);
       want = slots.map((sl) => sl.url);
       styles = slots.map((sl) => (sl.style ? swimStyleOf(sl.style) : null));
+      breeds = slots.map((sl) => sl.breed);
       this.mixMode = want.length > 0;
     }
     if (!this.mixMode) {
@@ -850,6 +897,7 @@ class TankInstance implements SaverInstance {
     }
     this.wantUrls = want;
     this.wantStyles = this.mixMode ? styles : [];
+    this.wantBreeds = this.mixMode ? breeds : [];
     this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
     if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
     else delete this.ctxSaver.host.dataset.mqMix;
@@ -1149,9 +1197,17 @@ class TankInstance implements SaverInstance {
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
-    const sceneStyle = swimStyleOf(this.str('swimStyle'));
+    const sceneStyleName = this.str('swimStyle');
+    // `auto` is not a style: each untagged fish resolves to its breed's
+    // default (MQ33). swimStyleOf('auto') falls back to loop, which is what
+    // a fish with no known breed (single-breed fishUrl mode) should do.
+    const autoMode = sceneStyleName === 'auto';
+    const sceneStyle = swimStyleOf(sceneStyleName);
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
+    const seek = this.num('lightSeek');
+    const pools = this.rayPools;
+    const lattice = formationBreathe(tSec, this.num('formationBreathe'));
 
     const spec = maneuverSpecOf(this.str('maneuver'));
     const mnvRate = this.num('maneuverRate');
@@ -1189,21 +1245,46 @@ class TankInstance implements SaverInstance {
     // Formation seats are handed out over the SUBSET of fish whose effective
     // style forms — a `@school` trio inside a hovering tank is a school of
     // three, seated 0..2, not three fish holding seats in a school of eight.
-    const styleAt = (i: number): SwimStyleSpec => this.wantStyles[i] ?? sceneStyle;
+    const styleAt = (i: number): SwimStyleSpec =>
+      this.wantStyles[i] ?? (autoMode ? autoStyleFor(this.wantBreeds[i]) : sceneStyle);
     const formationSeat = new Map<number, number>();
     for (let i = 0; i < visible; i++) {
       if (styleAt(i).formation) formationSeat.set(i, formationSeat.size);
     }
     const fcount = formationSeat.size;
     const formationStyle = fcount > 0 ? styleAt(formationSeat.keys().next().value as number) : null;
-    const extent = fcount > 0 ? formationExtent(fcount, variance, fshape) : null;
+    const extent0 = fcount > 0 ? formationExtent(fcount, variance, fshape) : null;
+    // Breathing scales seats AND extent together, so the carrier's inward
+    // pull still measures the shoal it is actually keeping in the glass.
+    const extent = extent0
+      ? { side: extent0.side * lattice, up: extent0.up * lattice, back: extent0.back * lattice, reach: extent0.reach * lattice }
+      : null;
     const carrier = extent && formationStyle ? this.carrierFrame(extent, formationStyle, tSec, warpSec, speed) : null;
+    // Relationships (MQ31), resolved in SLOT order: a bonded fish rides the
+    // most recent unbonded free fish before it. `pair` seats two on one
+    // plan; a third opens a new pair. Nothing here accumulates — a follower
+    // is the leader's closed form sampled at a lag.
+    let leader: LeaderFrame | null = null;
+    let followRank = 0;
+    let pendingPair: LeaderFrame | null = null;
+    // Proximity startle (MQ31): free fish flinch in a wave from a SENTINEL —
+    // the first free fish in slot order — delayed by ground distance, the
+    // same 90 u/s the formation wave uses. The sentinel is fixed per scene so
+    // no fish changes epicentre mid-flinch.
+    let sentinel: { x: number; z: number } | null = null;
+    const report: InspectFish[] = [];
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
       const style = styleAt(f.index);
       const seat = formationSeat.get(f.index) ?? f.index;
+      const bond = style.bond ?? 'none';
+      // Whose depth band this fish swims in: its own, or its leader's.
+      let bandStyle: SwimStyleSpec = style;
+      // A chaser's extra tail work — kept OUT of `mnv`, which may be the
+      // shared idle constant.
+      let flurryBoost = 0;
 
       // Style + per-fish variation. Both are pure functions of (index, t), so
       // a scene stays frame-addressable no matter how varied it looks.
@@ -1237,6 +1318,16 @@ class TankInstance implements SaverInstance {
       if (spec?.contagious && style.formation) {
         const slot0 = formationSlot(seat, fcount, variance, undefined, fshape);
         seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
+      } else if (spec?.contagious) {
+        // Undisplaced position — where the fish would be with no event in
+        // flight — so the delay itself never depends on the flinch it times.
+        const base = swimPoseAtDistance(f.plan, anchor + effort * style.travel);
+        if (!sentinel) {
+          sentinel = { x: base.x, z: base.z };
+          seatDelay = 0;
+        } else {
+          seatDelay = Math.hypot(base.x - sentinel.x, base.z - sentinel.z) / 90;
+        }
       }
       const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
       const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
@@ -1263,6 +1354,9 @@ class TankInstance implements SaverInstance {
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
         const slot = formationSlot(seat, fcount, variance, undefined, fshape);
+        slot.side *= lattice;
+        slot.up *= lattice;
+        slot.back *= lattice;
         // A seated fish darts AHEAD of its slot and settles back — the
         // closing displacement, because the permanent one would walk it out
         // of the school forever.
@@ -1286,7 +1380,82 @@ class TankInstance implements SaverInstance {
           fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
       } else {
-        pose = swimPoseAtDistance(f.plan, d);
+        const rel = bond === 'pair' ? pendingPair : bond === 'follow' || bond === 'chase' ? leader : null;
+        if (rel) bandStyle = rel.style;
+        let flurryExtra = 0;
+        if (rel) {
+          // Ride the leader's route behind it. A chaser's lag breathes —
+          // closing in, falling back — and its tail works hardest as it
+          // closes; a follower keeps a fixed station in the file.
+          let lag = 0;
+          if (bond === 'follow') {
+            lag = FISH_LENGTH * 1.7 * (followRank + 1);
+          } else if (bond === 'chase') {
+            const c = 0.5 + 0.5 * Math.sin(tSec * 0.7 + varn.phase);
+            lag = FISH_LENGTH * (1.3 + 1.6 * c);
+            flurryExtra = (1 - c) * 0.8;
+          }
+          pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          beat = rel.effort - lag;
+          const hl = Math.hypot(pose.fx, pose.fz) || 1;
+          const rxn = pose.fz / hl, rzn = -pose.fx / hl;
+          let ox = rel.pullX, oz = rel.pullZ, oy = 0;
+          if (bond === 'pair') {
+            // The second of the pair, opposite its partner on the shared orbit.
+            const th = tSec * 0.6 + rel.phase + Math.PI;
+            const R = FISH_LENGTH * 1.1;
+            ox += rxn * R * Math.cos(th);
+            oz += rzn * R * Math.cos(th);
+            oy = R * 0.5 * Math.sin(th);
+            pendingPair = null;
+          } else {
+            // Off the leader's exact line, so a file is not a stack.
+            const off = (fishHash(f.index, 61) - 0.5) * FISH_LENGTH * (bond === 'follow' ? 0.8 : 0.5);
+            ox += rxn * off;
+            oz += rzn * off;
+            followRank += 1;
+          }
+          pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
+        } else {
+          pose = swimPoseAtDistance(f.plan, d);
+          // Light-seeking: each free fish is drawn toward ITS shaft (chosen
+          // by index, so the choice never flips as it moves) by a per-fish
+          // appetite. The loop shrinks toward the pool — still the same
+          // closed form, translated — and followers take the same pull.
+          let pullX = 0, pullZ = 0;
+          if (seek > 0 && pools.length > 0) {
+            const pool = pools[Math.floor(fishHash(f.index, 53) * pools.length) % pools.length]!;
+            const k = seek * 0.7 * (0.5 + 0.5 * fishHash(f.index, 59));
+            pullX = (pool[0] - pose.x) * k;
+            pullZ = (pool[1] - pose.z) * k;
+          }
+          const me: LeaderFrame = { plan: f.plan, style, d, effort, phase: varn.phase, pullX, pullZ };
+          let oy = 0;
+          if (bond === 'pair') {
+            // First of a pair: takes one side of the shared orbit and waits
+            // for a partner. An odd pair fish simply swims its own route.
+            const th = tSec * 0.6 + varn.phase;
+            const R = FISH_LENGTH * 1.1;
+            const hl = Math.hypot(pose.fx, pose.fz) || 1;
+            pullX += (pose.fz / hl) * R * Math.cos(th);
+            pullZ += (-pose.fx / hl) * R * Math.cos(th);
+            oy = R * 0.5 * Math.sin(th);
+            pendingPair = me;
+          } else {
+            leader = me;
+            followRank = 0;
+          }
+          // Idle micro-motion: a station-keeper turns in place (MQ36).
+          const sway = idleSway(style, tSec, varn.phase);
+          let fx = pose.fx, fz = pose.fz;
+          if (sway !== 0) {
+            const cs = Math.cos(sway), sn = Math.sin(sway);
+            fx = pose.fx * cs - pose.fz * sn;
+            fz = pose.fx * sn + pose.fz * cs;
+          }
+          pose = { ...pose, x: pose.x + pullX, y: pose.y + oy, z: pose.z + pullZ, fx, fz };
+        }
+        flurryBoost = flurryExtra;
       }
 
       // Depth band, then bob. Clamping BEFORE the bob keeps a bottom-hugger
@@ -1298,7 +1467,7 @@ class TankInstance implements SaverInstance {
       // Clamp AFTER the bob. Clamping first let a fish bob straight back out
       // of the band it was just put in — a bottom-hugger that leaves the floor
       // is not band-limited, it is just a fish.
-      const band = bandRange(style.band);
+      const band = bandRange(bandStyle.band);
       if (band) {
         let lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
         let hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
@@ -1307,7 +1476,7 @@ class TankInstance implements SaverInstance {
         // "surface" turtles cruised mid-frame far below the ceiling they were
         // named for. Ride just under the actual plane, capped so a steered
         // waterY of 220 cannot fly the cast out of every camera's frame.
-        if (style.band === 'ceiling' && this.ceiling) {
+        if (bandStyle.band === 'ceiling' && this.ceiling) {
           const wparam = this.num('waterY');
           const wy = wparam >= 0 ? wparam : this.presetWaterY;
           const ceilY = Math.min(wy - FISH_LENGTH * 0.8, BOUNDS.yMax + 60);
@@ -1375,7 +1544,7 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        const w = Math.min(1.6, wiggle + mnv.flurry * 0.6);
+        const w = Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
         f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
@@ -1387,7 +1556,86 @@ class TankInstance implements SaverInstance {
         // warpSec === tSec·speed when speed is constant — same phase as before.
         f.tail.rotation.y = Math.sin(warpSec * 6 + f.index) * 0.5;
       }
+
+      report.push({
+        index: f.index,
+        url: f.url,
+        breed: this.wantBreeds[f.index] ?? null,
+        style: style.name,
+        band: bandStyle.band,
+        bond,
+        seat: style.formation ? seat : null,
+        x: Math.round(px * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        z: Math.round(pz * 10) / 10,
+        heading: Math.round(((Math.atan2(pose.fx, pose.fz) * 180) / Math.PI + 360) % 360),
+        maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
+      });
     }
+    this.lastFish = report;
+    this.lastFrameT = t;
+  }
+
+  /**
+   * The frame in numbers (MQ38): what is in the tank, where, doing what —
+   * for `perceiveChannel`, which cannot read a classic saver's pixels into
+   * meaning. Reads the last rendered frame; never simulates. Small on
+   * purpose: 24 fish × a dozen fields.
+   */
+  inspect(): Record<string, unknown> {
+    const fish = this.lastFish;
+    const byStyle: Record<string, number> = {};
+    for (const f of fish) byStyle[f.style] = (byStyle[f.style] ?? 0) + 1;
+    const maneuvering = fish.filter((f) => f.maneuvering).length;
+    const cx = fish.length ? fish.reduce((a, f) => a + f.x, 0) / fish.length : 0;
+    const cy = fish.length ? fish.reduce((a, f) => a + f.y, 0) / fish.length : 0;
+    const cz = fish.length ? fish.reduce((a, f) => a + f.z, 0) / fish.length : 0;
+    const spread = fish.length
+      ? Math.sqrt(fish.reduce((a, f) => a + (f.x - cx) ** 2 + (f.y - cy) ** 2 + (f.z - cz) ** 2, 0) / fish.length)
+      : 0;
+    return {
+      saver: 'metaquarium',
+      t: this.lastFrameT,
+      camera: {
+        azimuth: this.num('cameraAzimuth'),
+        elevation: this.num('cameraElevation'),
+        distance: this.num('cameraDistance'),
+        autoRotate: this.num('autoRotate'),
+      },
+      room: {
+        environment: this.str('environment'),
+        floorKind: this.str('floorKind'),
+        waterY: this.ceiling ? (this.num('waterY') >= 0 ? this.num('waterY') : this.presetWaterY) : null,
+        rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
+        rayPools: this.rayPools.length,
+      },
+      cast: {
+        fishMix: this.str('fishMix'),
+        mixMode: this.mixMode,
+        wanted: this.wantUrls.length,
+        loaded: this.loadedCount(),
+        visible: fish.length,
+        cap: this.quality.fishCap,
+        byStyle,
+        swimStyle: this.str('swimStyle'),
+        pathShape: this.pathShape,
+        formationShape: this.str('formationShape'),
+      },
+      maneuver: {
+        name: this.str('maneuver'),
+        rate: this.num('maneuverRate'),
+        intensity: this.num('maneuverIntensity'),
+        active: maneuvering,
+      },
+      motion: {
+        centroid: { x: Math.round(cx * 10) / 10, y: Math.round(cy * 10) / 10, z: Math.round(cz * 10) / 10 },
+        spread: Math.round(spread * 10) / 10,
+        lightSeek: this.num('lightSeek'),
+        formationBreathe: this.num('formationBreathe'),
+      },
+      quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      fish,
+    };
   }
 
   // ---- render ----

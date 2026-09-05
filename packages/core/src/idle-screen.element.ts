@@ -514,8 +514,20 @@ export class IdleScreenElement extends HostBase {
       }
     };
     worker.addEventListener('message', onCaptured);
+    let inspectSeq = 0;
+    const pendingInspects = new Map<number, (state: Record<string, unknown> | null) => void>();
+    const onInspected = (e: MessageEvent<WorkerOutbound>): void => {
+      if (e.data.type !== 'inspected') return;
+      const settle = pendingInspects.get(e.data.id);
+      if (settle) {
+        pendingInspects.delete(e.data.id);
+        settle(e.data.state);
+      }
+    };
+    worker.addEventListener('message', onInspected);
 
-    const proxy: SaverInstance = {
+    let lastInspect: Record<string, unknown> | null = null;
+    const proxy: SaverInstance & { inspectAsync(): Promise<Record<string, unknown> | null> } = {
       setPaused: (p) => worker.postMessage({ type: 'pause', paused: p } satisfies WorkerInbound),
       resize: (w, h, newDpr) => worker.postMessage({ type: 'resize', width: w, height: h, dpr: newDpr ?? dpr } satisfies WorkerInbound),
       applyTrack: (track) => worker.postMessage({ type: 'track', track } satisfies WorkerInbound),
@@ -536,11 +548,36 @@ export class IdleScreenElement extends HostBase {
           });
           worker.postMessage({ type: 'capture', id } satisfies WorkerInbound);
         }),
+      // The proxy's inspect is async under the hood (a worker round trip);
+      // the SaverInstance contract is synchronous, so expose the promise
+      // form as `inspectAsync` and answer the last state synchronously.
+      inspect: () => lastInspect,
+      inspectAsync: () =>
+        new Promise<Record<string, unknown> | null>((resolve) => {
+          if (disposed) {
+            resolve(null);
+            return;
+          }
+          const id = ++inspectSeq;
+          const timer = setTimeout(() => {
+            pendingInspects.delete(id);
+            resolve(null);
+          }, 2000);
+          pendingInspects.set(id, (state) => {
+            clearTimeout(timer);
+            lastInspect = state;
+            resolve(state);
+          });
+          worker.postMessage({ type: 'inspect', id } satisfies WorkerInbound);
+        }),
       dispose: () => {
         disposed = true;
         worker.removeEventListener('message', onCaptured);
+        worker.removeEventListener('message', onInspected);
         for (const settle of pendingCaptures.values()) settle(null);
         pendingCaptures.clear();
+        for (const settle of pendingInspects.values()) settle(null);
+        pendingInspects.clear();
         this.cleanupWorkerHandlers?.();
         this.cleanupWorkerHandlers = null;
         worker.postMessage({ type: 'dispose' } satisfies WorkerInbound);

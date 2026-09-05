@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot,
+  anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
   SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
@@ -21,10 +21,11 @@ describe('swim styles', () => {
     // A literal is the only thing here that fails when someone renames a
     // style out from under the scenes already published with it.
     expect([...SWIM_STYLE_NAMES].sort()).toEqual(
-      ['bottom', 'drift', 'hover', 'loop', 'patrol', 'school', 'surface'],
+      ['bottom', 'chase', 'drift', 'follow', 'hover', 'loop', 'pair', 'patrol', 'school', 'surface'],
     );
+    // `auto` is a manifest option, not a style: it resolves per fish.
     expect([...(METAQUARIUM_PARAMS.swimStyle.options ?? [])].sort())
-      .toEqual([...SWIM_STYLE_NAMES].sort());
+      .toEqual([...SWIM_STYLE_NAMES, 'auto'].sort());
     for (const n of SWIM_STYLE_NAMES) expect(swimStyleOf(n).name).toBe(n);
   });
   it('variance 0 is a uniform population, not a synchronised one', () => {
@@ -150,6 +151,51 @@ describe('swim styles', () => {
     expect(swimStyleOf('hover').travel).toBeLessThan(0.25);
     expect(swimStyleOf('patrol').travel).toBe(1);
     expect(swimStyleOf('school').formation).toBe(true);
+  });
+});
+
+describe('relationships, auto styles, breathing, sway', () => {
+  it('bonded styles declare their bond; every older style is unbonded', () => {
+    expect(swimStyleOf('follow').bond).toBe('follow');
+    expect(swimStyleOf('pair').bond).toBe('pair');
+    expect(swimStyleOf('chase').bond).toBe('chase');
+    for (const n of ['loop', 'school', 'drift', 'hover', 'patrol', 'bottom', 'surface']) {
+      expect(swimStyleOf(n).bond ?? 'none').toBe('none');
+      expect(swimStyleOf(n).formation || swimStyleOf(n).travel >= 0).toBe(true);
+    }
+  });
+  it('auto covers every minted breed and every NPC breed, and loops for strangers', () => {
+    for (const b of ['betafish', 'angelfish', 'seahorse', 'seaturtle',
+      'blowfish', 'hackerfish', 'glowfish', 'babyfish', 'shark', 'crab', 'jellyfish', 'dori']) {
+      expect(AUTO_STYLE_BY_BREED[b]).toBeDefined();
+      expect(swimStyleOf(AUTO_STYLE_BY_BREED[b]!).name).toBe(AUTO_STYLE_BY_BREED[b]);
+    }
+    expect(autoStyleFor('seahorse').name).toBe('hover');
+    expect(autoStyleFor('SeaTurtle').name).toBe('surface');
+    expect(autoStyleFor('reef@night').name).toBe('loop');
+    expect(autoStyleFor(undefined).name).toBe('loop');
+  });
+  it('breathing only ever expands, and 0 is exactly 1', () => {
+    for (let t = 0; t < 60; t += 0.37) {
+      expect(formationBreathe(t, 0)).toBe(1);
+      expect(formationBreathe(t, 1)).toBeGreaterThanOrEqual(1);
+      expect(formationBreathe(t, 1)).toBeLessThanOrEqual(1.22 + 1e-9);
+      expect(formationBreathe(t, 2)).toBe(formationBreathe(t, 1));
+    }
+  });
+  it('idle sway belongs to station-keepers only', () => {
+    for (const n of ['loop', 'school', 'patrol', 'bottom', 'surface', 'follow']) {
+      expect(idleSway(swimStyleOf(n), 3.3, 1)).toBe(0);
+    }
+    const hover = Array.from({ length: 50 }, (_, i) => idleSway(swimStyleOf('hover'), i * 0.3, 0));
+    expect(Math.max(...hover.map(Math.abs))).toBeGreaterThan(0.3);
+    expect(Math.max(...hover.map(Math.abs))).toBeLessThan(0.5);
+    expect(Math.abs(idleSway(swimStyleOf('drift'), 3.49, 0))).toBeLessThan(0.25);
+  });
+  it('the ring is tilted, not flat — seats rise and fall around it', () => {
+    const ups = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'ring').up);
+    expect(Math.max(...ups) - Math.min(...ups)).toBeGreaterThan(FISH_LENGTH);
+    expect(Math.max(...ups.map(Math.abs))).toBeLessThanOrEqual(28);
   });
 });
 

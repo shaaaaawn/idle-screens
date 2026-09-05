@@ -64,6 +64,9 @@ frame loop (rAF or renderFrame(t)):
 | moteDensity | number | 0 | Plankton motes, 0–1 of the tier budget (400/250/120). 0 = off |
 | moteColor | color | #7fd6ff | Mote tint |
 | floorColor | color | #0a1d33 | Floor disc color (the old hardcoded navy) |
+| swimStyle | enum | loop | `loop` (pre-style), `school`, `drift`, `hover`, `patrol`, `bottom`, `surface`; relationship styles `follow` / `pair` / `chase` bond a fish to the nearest preceding unbonded fish in the mix (and swim in its depth band); `auto` gives each untagged token its breed's default |
+| lightSeek | number | 0 | Free fish drawn toward the room's light shafts, each to its own pool (needs rays) |
+| formationBreathe | number | 0 | The school relaxes outward and back on a ~15 s cycle; only ever expands |
 
 ## File map
 
