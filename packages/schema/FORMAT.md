@@ -471,9 +471,11 @@ and configured the second.
 - `{ "type": "bounce", "speed": [0.12, 0.24] }` — diagonal, reflecting off edges
 - `{ "type": "static" }` — stays exactly where placed (use with `position` for HUD text)
 - `{ "type": "orbit", "speed": [10, 40], "radius": [0.05, 0.2], "center": { "x": 0.5, "y": 0.5 } }`
-  — angular speed in deg/sec; `center` may instead be `{ "layer": "planet" }`
-  to orbit a single-entity parent layer (moons around a wandering planet;
-  strictly one level deep)
+  — angular speed in deg/sec; a **negative** speed orbits the other way
+  (counter-rotating rings, meshing gears); `center` may instead be
+  `{ "layer": "planet" }` to orbit a single-entity parent layer (moons around a
+  wandering planet; strictly one level deep — and the parent must have
+  `count: 1`)
 - `{ "type": "wander", "speed": [0.004, 0.012], "angle": 0, "meander": 0.1, "coherence": 0.7 }`
   — organic harmonic drift: base velocity plus 3 seeded sine octaves per axis.
   Flowing curved paths with zero simulation state. `meander` scales the
@@ -486,7 +488,10 @@ and configured the second.
 - `{ "type": "path", "points": [{"x":0.1,"y":0.7}, ...], "duration": 30000, "curve": "smooth", "closed": true, "scatter": 0.02 }`
   — choreographed spline (Catmull-Rom, or `linear`); 2..24 waypoints, lap time
   ≥ 2 s; `closed` loops (default), open paths ping-pong; `scatter` offsets
-  entities sharing the path; each entity gets a seeded phase along it
+  entities sharing the path (**must be > 0** — omit it for an exact path
+  rather than writing `0`); each entity gets a seeded phase along it. A single
+  entity cannot show a curve — use `count` ≥ 12 (plus `trail`/`ghosting`) to
+  make the whole path read
 
 All speeds are ranges; each entity draws its own value (seeded).
 

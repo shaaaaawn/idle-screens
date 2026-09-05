@@ -44,8 +44,8 @@ describe('off-center weighs ink, not entity count (X384)', () => {
   it('24 slivers in one half against a full-height stripe in the other: silent', () => {
     expect(codes(diptych, { width: 1000, height: 1000 })).not.toContain('off-center');
   });
-  it('a real cluster in one corner still fires, and reports the ink centroid', () => {
-    const corner = scene([{ key: 'c', count: 20, region: { x: [0.85, 1], y: [0.4, 0.6] }, sprite: { kind: 'circle', radius: [0.02, 0.03], color: '#ffffff' }, motion: { type: 'static' } } as LayerSpec]);
+  it('a real cluster off to one side still fires, and reports the ink centroid', () => {
+    const corner = scene([{ key: 'c', count: 20, region: { x: [0.78, 0.95], y: [0.4, 0.6] }, sprite: { kind: 'circle', radius: [0.02, 0.03], color: '#ffffff' }, motion: { type: 'static' } } as LayerSpec]);
     const w = adviseSpec(corner, { width: 960, height: 540 }).find((x) => x.code === 'off-center');
     expect(w).toBeDefined();
     const p = perceiveScene(corner, { viewport: { width: 960, height: 540 } });

@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { polygonArea, polygonPoints } from './shapes';
-import { buildEntities, linkPairs, positionAt } from './simulate';
-import { LIMITS, type FinishSpec, type SaverSpec } from './types';
+import { buildEntities, entityScales, linkPairs, positionAt } from './simulate';
+import type { FinishSpec, SaverSpec } from './types';
 
 export interface LayerSnapshot {
   key: string | undefined;
@@ -44,9 +44,7 @@ export function describeScene(
   const { width: w, height: h } = options.viewport ?? { width: 1920, height: 1080 };
   const seed = options.seed ?? spec.seed ?? 42;
   const times = options.times ?? [0, 5000, 15000];
-  const scale = spec.units === 'viewport' ? Math.min(w, h) : 1;
-  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  const { scale, countScale } = entityScales(spec, w, h);
 
   const rng = createRng(seed);
   const builtLayers = spec.layers.map((layer) => ({
@@ -138,7 +136,7 @@ export function describeScene(
   });
 
   return {
-    spec: { id: spec.id, label: spec.label, units: spec.units ?? 'px', ...(spec.finish ? { finish: spec.finish } : {}) },
+    spec: { id: spec.id, label: spec.label, units: spec.units ?? 'viewport', ...(spec.finish ? { finish: spec.finish } : {}) },
     snapshots,
   };
 }

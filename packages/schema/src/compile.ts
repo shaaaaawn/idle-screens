@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
@@ -465,13 +465,7 @@ class SpecInstance implements SaverInstance {
   /** (Re)seed and place all entities — deterministic for the seed + viewport. */
   private rebuild(): void {
     const rng = createRng(this.seed);
-    const scale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
-    const refVp = this.effSpec.referenceViewport ?? LIMITS.referenceViewport;
-    let countScale = scale > 1 ? Math.min(this.w, this.h) / refVp : 1;
-    if (countScale > 1) {
-      const rawTotal = this.effSpec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
-      if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
-    }
+    const { scale, countScale } = entityScales(this.effSpec, this.w, this.h);
     this.layers = this.effSpec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, this.w, this.h, scale, countScale) }));
     this.lastStructural = structuralSignature(this.effSpec);
   }
