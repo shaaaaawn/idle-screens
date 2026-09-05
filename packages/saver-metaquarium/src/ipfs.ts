@@ -170,10 +170,14 @@ export function parseFishMix(
     if (at >= 0) {
       const styleRaw = token.slice(at + 1).trim().toLowerCase();
       const styledCore = token.slice(0, at).trim();
-      if ((SWIM_STYLE_NAMES as readonly string[]).includes(styleRaw)) {
+      if (resolvesAsToken(token)) {
+        // A complete legacy alias wins even when it ends in a word that is
+        // also a style name. Authors can still style it by appending another
+        // suffix (`reef@hover@school`).
+      } else if ((SWIM_STYLE_NAMES as readonly string[]).includes(styleRaw)) {
         core = styledCore;
         style = styleRaw as SwimStyle;
-      } else if (resolvesAsToken(styledCore) && !resolvesAsToken(token)) {
+      } else if (resolvesAsToken(styledCore)) {
         // Preserve a complete alias such as `reef@night`; only diagnose a
         // misspelled suffix when removing it exposes a real id/alias.
         core = styledCore;
