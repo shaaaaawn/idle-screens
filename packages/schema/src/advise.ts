@@ -63,7 +63,7 @@ export function adviseSpec(
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none and will render at angle 0`,
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing${layer.spin ? ' (spin still rotates the mark)' : ' and it renders at angle 0'}`,
       });
     }
 

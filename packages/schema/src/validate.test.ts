@@ -399,6 +399,9 @@ describe('validateSpec — data layouts and bars (#49)', () => {
     expect(paths(layer({ layout: { type: 'list', gap: 0 } }))).toContain('layers[0].layout.gap');
     expect(paths(layer({ layout: { type: 'list', gap: { x: 1 } } as never }))).toContain('layers[0].layout.gap');
     expect(validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, y: 0.05 } } })).valid).toBe(true);
+    const odd = validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, z: 1 } } as never }));
+    expect(odd.valid).toBe(true);
+    expect((odd.warnings ?? []).some((w) => w.path === 'layers[0].layout.gap.z' && w.code === 'unknown-property')).toBe(true);
     expect(paths(layer({ layout: { type: 'pile' } as never }))).toContain('layers[0].layout');
   });
 

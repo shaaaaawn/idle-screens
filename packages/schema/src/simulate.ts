@@ -51,6 +51,8 @@ export interface Entity {
   size2?: number;
   /** Reading-order index into `bar.values`. Only set for bar sprites. */
   barIndex?: number;
+  /** Placed by a list/table layout: variants cycle from the ordered base index, in step. Only set for data layouts. */
+  ordered?: true;
   /** Orbit parent layer key (motion.center = { layer }). Center resolved at render time. */
   orbitParent?: string;
   /** Harmonic drift params. Only set for wander motion. */
@@ -404,6 +406,7 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       // Optional feature fields last (guarded draws inside — wander draws 18 here).
       ...(size2 !== undefined ? { size2 } : {}),
       ...(sprite.kind === 'bar' ? { barIndex: i } : {}),
+      ...(ordered ? { ordered: true as const } : {}),
       ...(orbitParent ? { orbitParent } : {}),
       ...(m.type === 'wander'
         ? {
@@ -706,6 +709,9 @@ export function headingAt(e: Entity, t: number, w: number, h: number): number | 
 /** Time-varying sprite index for text/emoji cycling. Returns static index when cyclePeriod is 0. */
 export function spriteIndexAt(e: Entity, t: number, variants: number): number {
   if (!e.cyclePeriod || variants <= 1) return e.spriteIndex;
+  // Under a data layout the rows keep their reading order and advance in
+  // step — a marquee — instead of each entity cycling from its own phase.
+  if (e.ordered) return (e.spriteIndex + Math.floor(clockTime(e, t) / e.cyclePeriod)) % variants;
   return Math.floor(clockTime(e, t) / e.cyclePeriod + (e.cyclePhase ?? e.phase) / (2 * Math.PI)) % variants;
 }
 

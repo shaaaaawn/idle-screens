@@ -320,6 +320,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         } else if (lay.type === 'table' && isObj(lay.gap)) {
           if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
           if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
+          for (const k of unknownKeys(lay.gap, new Set(['x', 'y']))) {
+            warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored`);
+          }
         } else {
           err(`${path}.layout.gap`, lay.type === 'table' ? 'must be a number > 0 or { x?, y? }' : 'must be a number > 0');
         }

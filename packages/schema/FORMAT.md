@@ -455,6 +455,9 @@ Shipped working specs (also exposed as `EXAMPLE_SPECS` /
 showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `warp-tunnel` (warp + streaks), `polygons` (chain links + heavy ghosting),
 `matrix-rain` (grid layout + glyph cycle + ghosting), and `procession`
-(path + layer-parented orbit + life staging + ring/rect sprites). See
-[`src/examples/`](./src/examples/). The dashboard exercises the static/HUD
-subset at scale (34 layers of keyed, positioned text).
+(path + layer-parented orbit + life staging + ring/rect sprites);
+`nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
+`pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
+and feathered rect) and `relay-board` (list layout + bar: a chart in five
+layers). See [`src/examples/`](./src/examples/). The dashboard exercises the
+static/HUD subset at scale (34 layers of keyed, positioned text).

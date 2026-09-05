@@ -271,8 +271,10 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
       container.append(
         makeField('Color', colorField(s.color, (v) => { (layer.sprite as typeof s).color = v; })),
         makeField('Values', textField(s.values.join(', '), (v) => { const nums = v.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n >= 0); if (nums.length) (layer.sprite as typeof s).values = nums; })),
-        makeField('Length', numInput(s.length, { step: 0.01, min: 0 }, (v) => { (layer.sprite as typeof s).length = v; })),
-        makeField('Thickness', numInput(s.thickness, { step: 0.002, min: 0 }, (v) => { (layer.sprite as typeof s).thickness = v; })),
+        makeField('Length', numInput(s.length, { step: 0.01, min: 0.001 }, (v) => { (layer.sprite as typeof s).length = Math.max(0.001, v); })),
+        makeField('Thickness', numInput(s.thickness, { step: 0.002, min: 0.001 }, (v) => { (layer.sprite as typeof s).thickness = Math.max(0.001, v); })),
+        makeField('Max', numInput(s.max ?? Math.max(...s.values, 1), { step: 1, min: 0.001 }, (v) => { (layer.sprite as typeof s).max = v > 0 ? v : undefined; })),
+        makeField('Direction', selectField(s.direction ?? 'right', ['right', 'left', 'up', 'down'] as const, (v) => { (layer.sprite as typeof s).direction = v === 'right' ? undefined : v; })),
       );
     } else if (s.kind === 'emoji') {
       container.append(makeField('Glyphs', textField(s.glyphs.join(' '), (v) => { (layer.sprite as typeof s).glyphs = v.split(/\s+/).filter(Boolean); })));

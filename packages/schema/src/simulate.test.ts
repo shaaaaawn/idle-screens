@@ -457,6 +457,13 @@ describe('layout: list / table', () => {
     expect(listed.map((e) => e.alpha)).toEqual(scattered.map((e) => e.alpha));
   });
 
+  it('a cycling sprite under a list keeps reading order and advances in step (a marquee)', () => {
+    const ents = buildEntities(labels({ sprite: { kind: 'text', strings: ['A', 'B', 'C', 'D'], cycle: { period: 1000 } } }), createRng(1), W, H);
+    expect(ents.map((e) => spriteIndexAt(e, 0, 4))).toEqual([0, 1, 2, 3]);
+    expect(ents.map((e) => spriteIndexAt(e, 1000, 4))).toEqual([1, 2, 3, 0]);
+    expect(ents.map((e) => spriteIndexAt(e, 2500, 4))).toEqual([2, 3, 0, 1]);
+  });
+
   it('takes palette colours in order too, unless weights are given', () => {
     const bars = buildEntities({ count: 3, sprite: { kind: 'bar', values: [1, 2, 3], length: 100, thickness: 10, color: '#fff', colors: ['#111', '#222', '#333'] }, motion: { type: 'static' }, layout: { type: 'list' } }, createRng(1), W, H);
     expect(bars.map((e) => e.colorIndex)).toEqual([0, 1, 2]);
