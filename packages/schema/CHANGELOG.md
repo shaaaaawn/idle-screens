@@ -1,5 +1,62 @@
 # @idle-screens/schema
 
+## 3.5.0
+
+### Minor Changes
+
+- ec9c568: The sequence clicker. `advance: 'input'` now does what FORMAT.md always said:
+  a timed segment holds at the end of its `duration` until a `sequence.segment`
+  steer releases it, and the held scene keeps animating rather than freezing.
+  `auto` and `either` advance on the timer as before.
+  
+  The `sequence.segment` steer is now sticky. `applyTrack` used to switch the
+  active segment and lose it on the next animation frame, because `renderFrame`
+  re-derived the segment from the wall clock alone. The steer now displaces the
+  sequence's clock so the target segment starts at its own `localT` 0 and then
+  runs on the timer — the next frame resolves to the same segment. A steer to
+  segment `n` releases every `advance: 'input'` hold before `n` and leaves the
+  rest armed, so steering backwards re-arms the holds in between; in `loop`
+  mode an unreleased hold blocks the wrap and a fresh lap re-arms every hold.
+  
+  `resolveSegment` gains an optional `{ releasedBelow }` argument and reports
+  `held: true` on a waiting segment; `segmentStart(seq, index)` is exported.
+  Sequences without `advance: 'input'` resolve exactly as before.
+- 31f9d13: Spatial text advisories. `adviseSpec` (and so `perceiveScene().advisories`)
+  gains the two checks every text-bearing scene was missing: `text-off-screen`
+  when a static `text` / `textBlock` box crosses the viewport edge by more than
+  1% of that dimension, and `text-overlap` when two static text layers share
+  more than 10% of the smaller box (reported once per layer pair). Boxes mirror
+  the renderer — `position` semantics, `align` / `baseline`, `maxWidth` as a
+  hard cap for `text`, `breakTextBlock` line-breaking for `textBlock` — using
+  the character-class width table the line-breaker already uses, so an author
+  without eyes now hears about the most common layout bug it makes. Moving text
+  is not judged. All shipped examples still produce zero advisories.
+- c2d6757: `glyphFade`, the fourth `textBlock.reveal` mode — the caption look, where each glyph fades up over a staggered alpha ramp instead of appearing whole. Additive: a spec without `reveal` renders exactly as before, and the three existing modes are untouched.
+  
+  `mode: 'glyphFade'` gains one companion field, `fade` (each glyph's fade window as a fraction of `progress`, 0 exclusive to 1, default 0.15 — small reads as a soft typewriter, large as a wave of overlapping fades). The alpha law: glyph `g` of `total` starts at `(g/total)·(1−fade)` and ramps linearly to opaque over a `fade`-wide window, so `progress` 0 paints nothing and 1 paints everything, and the whole animation stays one steerable numeric glide rather than a burst of per-keystroke cues.
+  
+  The mode holds the format's load-bearing invariant — layout is computed from the full text, always, and reveal only masks paint. Per-glyph x-positions come from `measureText` prefix advances (the trick the caret already established: paint-only, never an input to layout), so a glyph's position depends only on its fixed prefix and cannot shift as its alpha ramps; a mocked-ctx test pins the same glyph to the same x at two different progress values, and a playground pixel e2e asserts ink grows monotonically with progress on a real canvas.
+  
+  `perceive` reports `revealed` as the **mean glyph alpha** rather than the frontier fraction — partial-alpha ink is not the same quantity as a hard frontier — and luminance/coverage scale with it, so a non-vision agent steering the mode still sees what it painted. `validate` accepts the new mode and bounds `fade`. Native clients (iOS/tvOS) route unknown modes into the typewriter arm, so a `glyphFade` spec degrades to typewriter on t3 and baked full text on t2; this is documented in FORMAT.md.
+  
+  Note for the release cutter: this code has been on `main` since 2026-08-22 (PR #94) with no changeset, so npm has been a release behind the source. This changeset is the version bump it never got.
+
+### Patch Changes
+
+- 5b194c6: FORMAT.md: the `trail` row now states that `length` is **milliseconds** (max
+  5000) and `fade` is a **number 0..1** — not a boolean. `links.falloff` two rows
+  down *is* a boolean, so `{"length": 1600, "fade": true}` was the natural guess
+  and the validator's `must be 0..1` was the only place that said otherwise
+  (mcp_feedback F16, and F9 for the millisecond half). Documentation only — the
+  JSON Schema and the runtime validator already carried the type.
+- a729243: glyphFade draws the fully-opaque leading run as a single fillText: long
+  reveal blocks stop paying an O(n²) per-frame prefix re-measure, and a fully
+  revealed block now forms ligatures and pair kerning identically to the same
+  block without `reveal`. Only the still-fading tail draws glyph-by-glyph, at
+  the same prefix advances as before. (#97)
+- Updated dependencies [f43fb23]
+  - @idle-screens/core@0.4.7
+
 ## 3.4.5
 
 ### Patch Changes
