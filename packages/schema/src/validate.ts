@@ -36,7 +36,7 @@ const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -377,6 +377,11 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         } else if (em.grow[0] < 0 || em.grow[1] < 0 || em.grow[0] > LIMITS.maxEmitGrow || em.grow[1] > LIMITS.maxEmitGrow) {
           err(`${path}.emit.grow`, `each multiplier must be 0..${LIMITS.maxEmitGrow}`);
         }
+      }
+      // jitter 0 promises one event at a time; that only holds while a window
+      // is shorter than the stagger between entities.
+      if (em.jitter === 0 && isNum(em.every) && isNum(em.life) && isNum(layer.count) && layer.count > 1 && em.life > em.every / layer.count) {
+        warn(`${path}.emit.life`, 'emit-overlap', `jitter 0 staggers ${layer.count} entities ${(em.every / layer.count).toFixed(0)} ms apart but each stays lit ${em.life} ms — windows overlap, so more than one event is visible at a time. Shorten life or lengthen every`);
       }
       for (const k of unknownKeys(em, new Set(['every', 'life', 'jitter', 'grow']))) {
         warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored`);

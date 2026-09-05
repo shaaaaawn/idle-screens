@@ -109,22 +109,27 @@ function drawOsc(rng: Rng, amp: number): WanderOsc {
   return osc;
 }
 
+const GOLDEN = 0.6180339887498949;
+
 /**
- * Per-entity sparse-event parameters. One seeded draw, guarded by `emit`'s
- * presence. `jitter` blends an even stagger (entity i at i/n of the period —
- * a metronome) with the seeded offset.
+ * Per-entity sparse-event parameters. NO rng draws: the scattered offset is a
+ * fixed low-discrepancy (golden-ratio) sequence over the entity index, so
+ * declaring `emit` never disturbs this layer's — or any later layer's —
+ * seeded stream, and the same spec times its events identically under every
+ * seed (event timing is composition, like a grid, not scatter). `jitter`
+ * blends an even stagger (entity i at i/n of the period — a metronome) with
+ * that scattered offset.
  */
 function emitParams(
   emit: NonNullable<LayerSpec['emit']>,
   i: number,
   n: number,
-  rng: Rng,
 ): NonNullable<Entity['emit']> {
   const every = emit.every;
   const jitter = Math.max(0, Math.min(1, emit.jitter ?? 1));
-  const seeded = rng.range(0, every);
+  const scattered = (((i + 0.5) * GOLDEN) % 1) * every;
   const even = (i / Math.max(1, n)) * every;
-  const phase = ((even * (1 - jitter) + seeded * jitter) % every + every) % every;
+  const phase = ((even * (1 - jitter) + scattered * jitter) % every + every) % every;
   return {
     every,
     life: Math.min(emit.life, every),
@@ -410,11 +415,9 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     }
   }
   if (layer.emit) {
-    // Emit offsets are drawn in a second pass so that toggling `emit` on a
-    // layer never rearranges it: every placement/size/phase draw above is
-    // identical with or without emit, and a spec without emit consumes no
-    // extra draws at all (stream compat).
-    for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length, rng);
+    // Assigned after the loop and without any rng draw (see emitParams), so
+    // toggling `emit` rearranges nothing — not this layer, not the ones after.
+    for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length);
   }
   return out;
 }

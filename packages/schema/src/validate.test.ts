@@ -305,6 +305,23 @@ describe('validateSpec — time structure (#47)', () => {
     expect(paths(withLayer({ emit: { every: 2000, life: 1000, grow: [0, 99] } }))).toContain('layers[0].emit.grow');
   });
 
+  it('caps the far side of every bound too', () => {
+    expect(paths(withLayer({ emit: { every: 600001, life: 500 } }))).toContain('layers[0].emit.every');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, grow: [-1, 2] } }))).toContain('layers[0].emit.grow');
+    expect(paths(withLayer({ clock: { rate: 0.01 } }))).toContain('layers[0].clock.rate');
+    expect(paths(withLayer({ clock: { phase: -0.1 } }))).toContain('layers[0].clock.phase');
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'buoyant', tau: 120001 } } }))).toContain('layers[0].motion.ease.tau');
+  });
+
+  it('warns when jitter 0 cannot keep one event at a time, and when emit/clock land inside sprite', () => {
+    const overlap = validateSpec(withLayer({ emit: { every: 12000, life: 5000, jitter: 0 } }));
+    expect(overlap.valid).toBe(true);
+    expect((overlap.warnings ?? []).some((w) => w.code === 'emit-overlap' && w.path === 'layers[0].emit.life')).toBe(true);
+    expect((validateSpec(withLayer({ emit: { every: 12000, life: 4000, jitter: 0 } })).warnings ?? []).filter((w) => w.code === 'emit-overlap')).toEqual([]);
+    const misplaced = validateSpec(withLayer({ sprite: { kind: 'ring', radius: [4, 8], color: '#4fb3a8', emit: { every: 2000, life: 1000 } } as never }));
+    expect((misplaced.warnings ?? []).some((w) => w.code === 'misplaced-property' && w.path === 'layers[0].sprite.emit')).toBe(true);
+  });
+
   it('a clocked layer needs period / rate >= 1000 ms — the whole layer breathes in unison', () => {
     expect(paths(withLayer({ pulse: { amp: 0.2, period: 800 }, clock: {} }))).toContain('layers[0].pulse.period');
     expect(paths(withLayer({ pulse: { amp: 0.2, period: 1500 }, clock: { rate: 2 } }))).toContain('layers[0].pulse.period');

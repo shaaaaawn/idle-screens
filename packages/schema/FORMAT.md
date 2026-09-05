@@ -77,7 +77,9 @@ Author against the JSON Schema; ship through the runtime validator.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
-`min ≤ max`; `colorWeights` length must match `colors`; orbit layer-parents
+`min ≤ max`; `colorWeights` length must match `colors`; `emit.life ≤
+emit.every`; a `clock`ed layer's `pulse`/`grow`/`cycle` period must satisfy
+`period / rate ≥ 1000`; orbit layer-parents
 must exist, have `count: 1`, and not themselves orbit a layer.
 
 ## Structure
@@ -136,7 +138,7 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
-| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time), 1 seeds the offsets; `grow: [from, to]` scales size across the window — expansion rather than travel |
+| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.field", …)` |
 | `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
@@ -241,7 +243,9 @@ shaping, no integration state:
 and decelerates to rest with time constant `tau` ms (it travels `speed × tau`
 and stops — a mark flung and coming to rest); `"buoyant"` starts at rest and
 approaches the speed over `tau` (a bubble reaching terminal velocity). With
-`emit`, the eased travel restarts from the spawn point on every event.
+`emit`, the eased travel restarts from the spawn point on every event. For
+`wander` only the base velocity eases — the harmonic meander keeps breathing,
+so a settled wanderer hovers rather than freezes.
 
 **Time structure, composed.** `emit` is how a scene does *almost nothing,
 almost never*: one ring every twelve seconds that expands and fades

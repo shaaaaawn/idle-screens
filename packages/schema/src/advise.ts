@@ -137,8 +137,11 @@ export function adviseSpec(
       // by that duty, not by whichever instant we happen to sample.
       let duty = 1;
       if (layer.emit) {
-        const g = layer.emit.grow ? (layer.emit.grow[0] + layer.emit.grow[1]) / 2 : 1;
-        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g * g;
+        // Area scales with size², so the time-mean over a linear size ramp
+        // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
+        const [ga, gb] = layer.emit.grow ?? [1, 1];
+        const g2 = (ga * ga + ga * gb + gb * gb) / 3;
+        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
       }
       totalCoverage += (pixArea * e.alpha * duty) / (w * h);
     }

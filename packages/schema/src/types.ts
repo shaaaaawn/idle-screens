@@ -168,8 +168,11 @@ export interface LayerSpec {
    * Sparse events — marks that appear, expand and fade in place, one at a time,
    * with long silences between (the "one ping" primitive). Each entity is dark
    * except for a window of `life` ms that recurs every `every` ms at a
-   * per-entity offset: `jitter` 1 (default) seeds the offset, 0 spreads the
-   * entities evenly across the period — a metronome, one event at a time.
+   * per-entity offset: `jitter` 1 (default) scatters the offsets (a fixed
+   * low-discrepancy sequence — not seeded, so declaring `emit` disturbs no
+   * other draw and the same spec times its events identically under every
+   * seed), 0 spreads the entities evenly across the period — a metronome, one
+   * event at a time as long as `life ≤ every / count`.
    * Inside a window the entity fades in over the first quarter and out over
    * the rest; `grow` scales its size from `grow[0]` to `grow[1]` across the
    * window — expansion rather than travel. A pure function of t. Flash safety:
@@ -197,7 +200,9 @@ export interface LayerSpec {
  * rest. `buoyant` starts at rest and approaches the speed over `tau` — a
  * bubble reaching terminal velocity. Position stays an analytic function of
  * t (no integration state). With `emit`, the eased travel restarts from the
- * spawn point on every event.
+ * spawn point on every event. For `wander` only the base velocity eases —
+ * the harmonic meander keeps breathing, so a settled wanderer hovers rather
+ * than freezes.
  */
 export interface MotionEase {
   type: 'settle' | 'buoyant';

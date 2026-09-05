@@ -27,6 +27,9 @@ asking for (idle-mono registry #47):
 All three are pure functions of `t`; `perceiveScene`, `adviseSpec` (whose
 coverage now weighs an emit layer by its duty cycle) and `motionStats` see
 them through the same `alphaAt` / `sizeAt` / `positionAt` the renderer uses.
-Entity streams of existing specs are unchanged: `emit` draws once, guarded by
-its presence, after every older draw; `clock` and `ease` draw nothing. New
-exports `emitWindow` / `emitEnvelope`; new shipped example `pings`.
+Entity streams of existing specs are unchanged, and so are those of a spec
+you add these to: `emit` offsets come from a fixed low-discrepancy sequence
+(not the seeded stream), and `clock` and `ease` draw nothing, so declaring
+any of the three disturbs no other layer. New exports `emitWindow` /
+`emitEnvelope`; new shipped example `pings`. A validator warning
+`emit-overlap` fires when `jitter: 0` cannot keep one event at a time.

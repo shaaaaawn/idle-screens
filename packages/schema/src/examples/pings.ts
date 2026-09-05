@@ -3,9 +3,10 @@ import type { SaverSpec } from '../types';
 /**
  * Pings — almost nothing, almost never.
  * A near-black ground and one teal hue. Three rings take turns: each one
- * appears, expands to sixteen times its size and fades over five seconds,
- * then the frame is empty until the next — `emit` with `jitter: 0` spaces
- * them evenly, one event every four seconds. Underneath, a few motes rise,
+ * appears, grows sixteenfold (0.15× → 2.4× its radius) and fades over four
+ * seconds, then the frame is empty until the next — `emit` with `jitter: 0`
+ * spaces them evenly, one event every four seconds, and `life` is kept at
+ * the stagger so no two rings are ever lit together. Underneath, a few motes rise,
  * `settle` to rest and fade on their own, longer, seeded schedule. Nothing
  * travels; everything grows and goes. The house style Fathom describes this
  * exactly and, before `emit`, could not be authored.
@@ -28,7 +29,7 @@ export const PINGS_SPEC: SaverSpec = {
       region: { x: [0.2, 0.8], y: [0.25, 0.75] },
       motion: { type: 'static' },
       // One ring at a time: three entities evenly staggered across 12 s.
-      emit: { every: 12000, life: 5000, jitter: 0, grow: [0.15, 2.4] },
+      emit: { every: 12000, life: 4000, jitter: 0, grow: [0.15, 2.4] },
     },
     {
       key: 'motes',

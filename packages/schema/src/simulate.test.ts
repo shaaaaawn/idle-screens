@@ -305,14 +305,19 @@ describe('emit — sparse events', () => {
     }
   });
 
-  it('jitter 1 seeds the offsets; the draw is guarded so undeclared specs keep their stream', () => {
+  it('jitter 1 scatters the offsets with no rng draw — this layer and the next are placed identically', () => {
     const jittered = buildEntities(ring({ every: 12000, life: 3000 }), createRng(1), W, H);
     const phases = jittered.map((e) => e.emit!.phase);
-    expect(new Set(phases.map((p) => Math.round(p))).size).toBeGreaterThan(1);
+    expect(new Set(phases.map((p) => Math.round(p))).size).toBe(4);
     for (const p of phases) { expect(p).toBeGreaterThanOrEqual(0); expect(p).toBeLessThan(12000); }
-    // Placement is identical with and without emit (emit draws last).
     const plain = buildEntities(ring(undefined), createRng(1), W, H);
     expect(jittered.map((e) => [e.x0, e.y0, e.size])).toEqual(plain.map((e) => [e.x0, e.y0, e.size]));
+    // A later layer sharing the scene rng is untouched too.
+    const rngA = createRng(5); buildEntities(ring({ every: 12000, life: 3000 }), rngA, W, H); const nextA = buildEntities(driftLayer, rngA, W, H);
+    const rngB = createRng(5); buildEntities(ring(undefined), rngB, W, H); const nextB = buildEntities(driftLayer, rngB, W, H);
+    expect(nextA).toEqual(nextB);
+    // And the offsets do not depend on the seed — event timing is composition, not scatter.
+    expect(buildEntities(ring({ every: 12000, life: 3000 }), createRng(99), W, H).map((e) => e.emit!.phase)).toEqual(phases);
   });
 
   it('grow scales size from grow[0] to grow[1] across the window', () => {

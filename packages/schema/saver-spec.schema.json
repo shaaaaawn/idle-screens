@@ -453,7 +453,7 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1,
-              "description": "0 = entities evenly staggered across the period (one event at a time); 1 (default) = seeded per-entity offsets."
+              "description": "0 = entities evenly staggered across the period (one event at a time while life <= every / count); 1 (default) = scattered offsets from a fixed low-discrepancy sequence (not seeded)."
             },
             "grow": {
               "type": "array",

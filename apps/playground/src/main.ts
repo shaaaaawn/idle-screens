@@ -16,7 +16,7 @@ import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
 import { createMetaquarium, FISH_CATALOG, NPC_CATALOG } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
-import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
+import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, PINGS_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
 import { sampleSaver, sampleStrobe, type ValidateResult } from './validate';
 import { buildDevDocs } from './dev-docs';
@@ -92,6 +92,7 @@ const SAVER_GROUPS: SaverGroup[] = [
       compileSaver(PROCESSION_SPEC),
       compileSaver(NOSTALGHIA_CANDLE_SPEC),
       compileSaver(HAIKU_SPEC),
+      compileSaver(PINGS_SPEC),
     ],
   },
 ];
