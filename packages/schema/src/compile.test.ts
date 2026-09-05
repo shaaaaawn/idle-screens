@@ -582,3 +582,18 @@ describe('shape glyphs draw (#46)', () => {
     expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
   });
 });
+
+describe('bar sprites draw (#49)', () => {
+  it('one fillRect per bar with a non-zero value, sized by value / max', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'bars', label: 'Bars', units: 'px',
+      layers: [{ count: 3, sprite: { kind: 'bar', values: [50, 100, 0], max: 100, length: 200, thickness: 10, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.1, y: 0.1 }, layout: { type: 'list', gap: 30 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance; // paints one frame
+    const rects = (mockCtx.fillRect as unknown as { mock: { calls: number[][] } }).mock.calls.slice(1); // drop the background
+    expect(rects).toHaveLength(2); // the zero-value bar draws nothing
+    expect(rects[0]![2]).toBeCloseTo(100, 6); // 200 × 50 / 100
+    expect(rects[1]![2]).toBeCloseTo(200, 6);
+    inst.dispose();
+  });
+});

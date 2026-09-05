@@ -19,6 +19,7 @@ const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colo
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
+const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
 const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
@@ -213,7 +214,10 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else {
       if (layer.position.x < 0 || layer.position.x > 1) err(`${path}.position.x`, 'must be 0..1');
       if (layer.position.y < 0 || layer.position.y > 1) err(`${path}.position.y`, 'must be 0..1');
-      if (isNum(layer.count) && layer.count !== 1) err(`${path}.position`, 'position requires count: 1');
+      const dataLayout = isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table');
+      if (isNum(layer.count) && layer.count !== 1 && !dataLayout) {
+        err(`${path}.position`, "position requires count: 1 — or a layout of type 'list' / 'table', where it anchors the whole block");
+      }
     }
   }
   if (layer.region !== undefined) {
@@ -304,8 +308,37 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   }
 
   if (layer.layout !== undefined) {
-    if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
-      err(`${path}.layout`, "must be an object with type: 'grid'");
+    if (isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table')) {
+      const lay = layer.layout;
+      if (lay.type === 'table' && (!isNum(lay.columns) || !Number.isInteger(lay.columns) || lay.columns < 1 || lay.columns > LIMITS.maxGridColumns)) {
+        err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
+      }
+      const gapOk = (v: unknown): boolean => isNum(v) && v > 0;
+      if (lay.gap !== undefined) {
+        if (isNum(lay.gap)) {
+          if (!gapOk(lay.gap)) err(`${path}.layout.gap`, 'must be > 0 (viewport units of min(w,h), or px)');
+        } else if (lay.type === 'table' && isObj(lay.gap)) {
+          if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
+          if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
+        } else {
+          err(`${path}.layout.gap`, lay.type === 'table' ? 'must be a number > 0 or { x?, y? }' : 'must be a number > 0');
+        }
+      }
+      for (const k of unknownKeys(lay, new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']))) {
+        warn(`${path}.layout.${k}`, 'unknown-property', `unknown layout property '${k}' — will be ignored`);
+      }
+      // A data layout reads variants in order: N labels want N strings.
+      const sp = layer.sprite;
+      if (isObj(sp) && isNum(layer.count)) {
+        const variants = sp.kind === 'text' && Array.isArray(sp.strings) ? sp.strings.length
+          : sp.kind === 'emoji' && Array.isArray(sp.glyphs) ? sp.glyphs.length
+            : sp.kind === 'bar' && Array.isArray(sp.values) ? sp.values.length : null;
+        if (variants !== null && variants !== layer.count) {
+          warn(`${path}.count`, 'list-length-mismatch', `count is ${layer.count} but the sprite carries ${variants} ${sp.kind === 'bar' ? 'values' : 'variants'} — a ${lay.type} layout reads them in order, so they cycle or go unused`);
+        }
+      }
+    } else if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
+      err(`${path}.layout`, "must be an object with type: 'grid' | 'list' | 'table'");
     } else {
       if (layer.layout.columns !== undefined && (!isNum(layer.layout.columns) || !Number.isInteger(layer.layout.columns) || layer.layout.columns < 1 || layer.layout.columns > LIMITS.maxGridColumns)) {
         err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
@@ -479,6 +512,19 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     }
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'bar') {
+    knownSet = KNOWN_BAR;
+    if (!Array.isArray(sprite.values) || sprite.values.length === 0 || sprite.values.length > LIMITS.maxPerLayer || !sprite.values.every((v) => isNum(v) && v >= 0)) {
+      err(`${path}.values`, `must be 1..${LIMITS.maxPerLayer} numbers >= 0`);
+    }
+    if (!isNum(sprite.length) || sprite.length <= 0) err(`${path}.length`, 'must be > 0 (full-scale bar length)');
+    if (!isNum(sprite.thickness) || sprite.thickness <= 0) err(`${path}.thickness`, 'must be > 0');
+    if (sprite.max !== undefined && (!isNum(sprite.max) || sprite.max <= 0)) err(`${path}.max`, 'must be > 0');
+    if (sprite.direction !== undefined && !['right', 'left', 'up', 'down'].includes(sprite.direction as string)) {
+      err(`${path}.direction`, "must be 'right' | 'left' | 'up' | 'down'");
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
   } else if (sprite.kind === 'polygon') {
     knownSet = KNOWN_POLYGON;
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px (circumradius)');
@@ -559,7 +605,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       }
     }
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | polygon | stroke | textBlock');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | bar | polygon | stroke | textBlock');
     return;
   }
 

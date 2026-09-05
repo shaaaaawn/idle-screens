@@ -174,7 +174,7 @@ export function structuralSignature(spec: SaverSpec): string {
         // (streak), width+aspect (rect), palette pick (all shaped sprites).
         s.radius,
         s.length,
-        l.sprite.kind === 'rect' ? [s.width, s.aspect] : undefined,
+        l.sprite.kind === 'rect' ? [s.width, s.aspect] : l.sprite.kind === 'bar' ? [s.length, s.thickness] : undefined,
         Array.isArray(s.colors) ? s.colors.length : undefined,
         s.colorWeights,
         l.sprite.kind === 'emoji'

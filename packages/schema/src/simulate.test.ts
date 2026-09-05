@@ -417,3 +417,50 @@ describe('ease — settle and buoyant', () => {
     expect([a[0]!.x0, a[0]!.y0, a[0]!.size]).toEqual([b[0]!.x0, b[0]!.y0, b[0]!.size]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Data layouts (#49): list / table, ordered variants, bar sprites
+// ---------------------------------------------------------------------------
+
+describe('layout: list / table', () => {
+  const labels = (extra: Partial<LayerSpec> = {}): LayerSpec => ({
+    count: 4,
+    sprite: { kind: 'text', strings: ['A', 'B', 'C', 'D'] },
+    size: [20, 20],
+    motion: { type: 'static' },
+    layout: { type: 'list', gap: 50 },
+    position: { x: 0.1, y: 0.2 },
+    ...extra,
+  });
+
+  it('stacks entities from the anchor in reading order, with strings in order', () => {
+    const ents = buildEntities(labels(), createRng(1), W, H);
+    expect(ents.map((e) => [e.x0, e.y0])).toEqual([[80, 120], [80, 170], [80, 220], [80, 270]]);
+    expect(ents.map((e) => e.spriteIndex)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('table fills columns row-major with per-axis gaps', () => {
+    const ents = buildEntities(labels({ count: 5, layout: { type: 'table', columns: 2, gap: { x: 100, y: 30 } } }), createRng(1), W, H);
+    expect(ents.map((e) => [e.x0, e.y0])).toEqual([[80, 120], [180, 120], [80, 150], [180, 150], [80, 180]]);
+  });
+
+  it('without a position the block is centred in the region', () => {
+    const ents = buildEntities(labels({ position: undefined, region: { x: [0, 0.5], y: [0, 1] } }), createRng(1), W, H);
+    const ys = ents.map((e) => e.y0);
+    expect(ents[0]!.x0).toBe(200); // centre of the left half
+    expect((ys[0]! + ys[3]!) / 2).toBeCloseTo(300, 9); // centred vertically
+  });
+
+  it('burns the two scatter draws so the rest of the layer stream is unchanged when the layout toggles', () => {
+    const scattered = buildEntities(labels({ layout: undefined, position: undefined, alpha: [0.2, 0.9] }), createRng(7), W, H);
+    const listed = buildEntities(labels({ position: undefined, alpha: [0.2, 0.9] }), createRng(7), W, H);
+    expect(listed.map((e) => e.alpha)).toEqual(scattered.map((e) => e.alpha));
+  });
+
+  it('takes palette colours in order too, unless weights are given', () => {
+    const bars = buildEntities({ count: 3, sprite: { kind: 'bar', values: [1, 2, 3], length: 100, thickness: 10, color: '#fff', colors: ['#111', '#222', '#333'] }, motion: { type: 'static' }, layout: { type: 'list' } }, createRng(1), W, H);
+    expect(bars.map((e) => e.colorIndex)).toEqual([0, 1, 2]);
+    expect(bars.map((e) => e.barIndex)).toEqual([0, 1, 2]);
+    expect(bars.map((e) => [e.size, e.size2])).toEqual([[100, 10], [100, 10], [100, 10]]);
+  });
+});

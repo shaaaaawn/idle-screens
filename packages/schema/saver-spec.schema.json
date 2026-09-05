@@ -389,49 +389,80 @@
           "description": "Draw lines between entities. The layer's entity count (count field) must be <= 200 for performance."
         },
         "layout": {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "grid"
-            },
-            "columns": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "description": "Grid columns. Default: aspect-fit square-ish grid."
-            },
-            "jitter": {
-              "oneOf": [
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1
+          "oneOf": [
+        {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "const": "grid"
                 },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "x": {
+                "columns": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100,
+                  "description": "Grid columns. Default: aspect-fit square-ish grid."
+                },
+                "jitter": {
+                  "oneOf": [
+                    {
                       "type": "number",
                       "minimum": 0,
                       "maximum": 1
                     },
-                    "y": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 1
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
                 }
-              ],
-              "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
+              },
+              "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
+            },
+            {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "list" },
+                "gap": { "type": "number", "exclusiveMinimum": 0, "description": "Row pitch in viewport units of min(w,h) (px in px specs). Default 0.06 / 40 px." }
+              },
+              "description": "Data layout: entities stacked in one column in reading order; strings[i], glyphs[i] and colors[i] are taken in order. position (any count) anchors the block's top-left; otherwise centred in region."
+            },
+            {
+              "type": "object",
+              "required": ["type", "columns"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "table" },
+                "columns": { "type": "integer", "minimum": 1, "maximum": 100 },
+                "gap": {
+                  "oneOf": [
+                    { "type": "number", "exclusiveMinimum": 0 },
+                    { "type": "object", "additionalProperties": false, "properties": { "x": { "type": "number", "exclusiveMinimum": 0 }, "y": { "type": "number", "exclusiveMinimum": 0 } } }
+                  ],
+                  "description": "Cell pitch, one number or {x, y}, in viewport units of min(w,h). Default 0.06."
+                }
+              },
+              "description": "Data layout: entities fill columns row-major in reading order (see list)."
             }
-          },
-          "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
+          ]
         },
         "emit": {
           "type": "object",
@@ -510,7 +541,16 @@
       "if": {
         "required": [
           "position"
-        ]
+        ],
+        "not": {
+          "required": ["layout"],
+          "properties": {
+            "layout": {
+              "required": ["type"],
+              "properties": { "type": { "enum": ["list", "table"] } }
+            }
+          }
+        }
       },
       "then": {
         "properties": {
@@ -746,6 +786,23 @@
             }
           },
           "description": "Axis-aligned rectangle (rotates with spin) \u2014 Mondrian blocks, confetti, city lights."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "values", "length", "thickness", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "bar" },
+            "values": { "type": "array", "minItems": 1, "maxItems": 400, "items": { "type": "number", "minimum": 0 }, "description": "One value per entity in reading order; bar i is length x values[i] / max. Paint: steer layers.N.sprite.values and the bars glide." },
+            "length": { "type": "number", "exclusiveMinimum": 0, "description": "Full-scale bar length (px or viewport-units of min(w,h))." },
+            "thickness": { "type": "number", "exclusiveMinimum": 0, "description": "Bar thickness (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "max": { "type": "number", "exclusiveMinimum": 0, "description": "Full-scale value. Default: the largest value." },
+            "direction": { "enum": ["right", "left", "up", "down"], "description": "Growth direction from the entity's position. Default right." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (in order under a list/table layout, seeded otherwise)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "A data bar whose length is a number. Pair with a list layout for a chart that is one layer."
         },
         {
           "type": "object",

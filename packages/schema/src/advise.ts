@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
@@ -123,6 +124,8 @@ export function adviseSpec(
       let pixArea: number;
       if (layer.sprite.kind === 'circle') {
         pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'bar') {
+        pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;

@@ -47,8 +47,10 @@ export interface Entity {
   orbitCy: number; // orbit center y (px)
   colorIndex: number; // index into sprite colors[] (-1 = use sprite.color)
   cyclePeriod: number; // ms (0 = no cycling)
-  /** Rect sprite second dimension (height px). Only set for rect sprites. */
+  /** Rect sprite second dimension (height px), or bar thickness. Only set for rect / bar sprites. */
   size2?: number;
+  /** Reading-order index into `bar.values`. Only set for bar sprites. */
+  barIndex?: number;
   /** Orbit parent layer key (motion.center = { layer }). Center resolved at render time. */
   orbitParent?: string;
   /** Harmonic drift params. Only set for wander motion. */
@@ -164,7 +166,7 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   // showed it full-width — a renderer-vs-perception split that burned four
   // publishes to isolate. Upscaling is equally wrong: it invents phantom cells
   // beyond the authored lattice. Grid cost is already bounded by maxPerLayer.
-  const effectiveCount = countScale === 1 || layer.layout?.type === 'grid'
+  const effectiveCount = countScale === 1 || layer.layout !== undefined
     ? layer.count
     : Math.max(1, Math.min(
         Math.round(layer.count * countScale),
@@ -196,6 +198,30 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
 
   // Grid layout geometry (pure — no draws).
   const layout = layer.layout;
+  // Data layouts (list / table): reading order from an anchor, no scatter.
+  const ordered = layout?.type === 'list' || layout?.type === 'table';
+  let gapX = 0;
+  let gapY = 0;
+  let listX0 = 0;
+  let listY0 = 0;
+  let listCols = 1;
+  if (layout?.type === 'list' || layout?.type === 'table') {
+    const dflt = scale === 1 ? LIMITS.defaultListGapPx : LIMITS.defaultListGap;
+    const g = layout.gap ?? dflt;
+    gapX = (typeof g === 'number' ? g : g.x ?? dflt) * scale;
+    gapY = (typeof g === 'number' ? g : g.y ?? dflt) * scale;
+    listCols = layout.type === 'list' ? 1 : Math.max(1, Math.round(layout.columns));
+    const rows = Math.max(1, Math.ceil(effectiveCount / listCols));
+    if (layer.position) {
+      listX0 = layer.position.x * w;
+      listY0 = layer.position.y * h;
+    } else {
+      const [rx0, rx1] = layer.region?.x ?? [0, 1];
+      const [ry0, ry1] = layer.region?.y ?? [0, 1];
+      listX0 = ((rx0 + rx1) / 2) * w - ((listCols - 1) * gapX) / 2;
+      listY0 = ((ry0 + ry1) / 2) * h - ((rows - 1) * gapY) / 2;
+    }
+  }
   let gridCols = 0;
   let cellW = 0;
   let cellH = 0;
@@ -228,11 +254,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
             ? rng.range(sprite.length[0], sprite.length[1]) * scale
             : sprite.kind === 'rect'
               ? rng.range(sprite.width[0], sprite.width[1]) * scale
-              : rng.range(smin, smax) * scale;
+              : sprite.kind === 'bar'
+                ? sprite.length * scale
+                : rng.range(smin, smax) * scale;
     // Guarded extra draw: only rect sprites with an aspect range consume it.
     const size2 = sprite.kind === 'rect'
       ? size * (sprite.aspect ? rng.range(sprite.aspect[0], sprite.aspect[1]) : 1)
-      : undefined;
+      : sprite.kind === 'bar'
+        ? sprite.thickness * scale
+        : undefined;
 
     let vx = 0;
     let vy = 0;
@@ -298,6 +328,13 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     if (layer.position && layer.count === 1) {
       x0 = layer.position.x * w;
       y0 = layer.position.y * h;
+    } else if (layout?.type === 'list' || layout?.type === 'table') {
+      // Reading order from the anchor. Burn the two scatter draws so toggling a
+      // data layout on or off leaves the rest of this layer's stream intact.
+      rng.next();
+      rng.next();
+      x0 = listX0 + (i % listCols) * gapX;
+      y0 = listY0 + Math.floor(i / listCols) * gapY;
     } else if (layout?.type === 'grid') {
       // Grid cells row-major; same 2-draw budget as scatter so toggling layout
       // shifts only THIS layer's stream (layout is structural — rebuild anyway).
@@ -324,7 +361,10 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       x0,
       y0,
       size,
-      spriteIndex: variants > 1 ? rng.int(0, variants - 1) : 0,
+      // Data layouts read variants in order — strings[i] beside bar i. The
+      // seeded draw is still consumed so a layout is placement only: toggling
+      // list/table never disturbs the layer's alpha, pulse or spin stream.
+      spriteIndex: variants > 1 ? (ordered ? (rng.int(0, variants - 1), i % variants) : rng.int(0, variants - 1)) : 0,
       phase: rng.range(0, Math.PI * 2),
       vx,
       vy,
@@ -356,11 +396,14 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       colorIndex: colorsLen > 0
         ? (colorWeights && colorWeights.length === colorsLen
             ? weightedIndex(rng.next(), colorWeights)
-            : rng.int(0, colorsLen - 1))
+            : ordered
+              ? (rng.int(0, colorsLen - 1), i % colorsLen) // data layouts: palette in reading order; draw burned for stream parity
+              : rng.int(0, colorsLen - 1))
         : -1,
       cyclePeriod: cycle ? cycle.period : 0,
       // Optional feature fields last (guarded draws inside — wander draws 18 here).
       ...(size2 !== undefined ? { size2 } : {}),
+      ...(sprite.kind === 'bar' ? { barIndex: i } : {}),
       ...(orbitParent ? { orbitParent } : {}),
       ...(m.type === 'wander'
         ? {

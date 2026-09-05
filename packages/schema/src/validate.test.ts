@@ -380,3 +380,44 @@ describe('validateSpec — shape glyphs (#46)', () => {
     expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', colors: ['#fff'], colorWeights: [1, 2] }))).toContain('layers[0].sprite.colorWeights');
   });
 });
+
+describe('validateSpec — data layouts and bars (#49)', () => {
+  const layer = (extra: Partial<SaverSpec['layers'][number]>): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite: { kind: 'text', strings: ['a', 'b', 'c'] }, size: [20, 20], motion: { type: 'static' }, ...extra }],
+  });
+
+  it('position with count > 1 is allowed as the anchor of a list / table, and only there', () => {
+    expect(validateSpec(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'list' } })).valid).toBe(true);
+    expect(validateSpec(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'table', columns: 2 } })).valid).toBe(true);
+    expect(paths(layer({ position: { x: 0.1, y: 0.1 } }))).toContain('layers[0].position');
+    expect(paths(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'grid' } }))).toContain('layers[0].position');
+  });
+
+  it('table needs integer columns; gap must be positive (number, or {x, y} for table)', () => {
+    expect(paths(layer({ layout: { type: 'table', columns: 0 } }))).toContain('layers[0].layout.columns');
+    expect(paths(layer({ layout: { type: 'list', gap: 0 } }))).toContain('layers[0].layout.gap');
+    expect(paths(layer({ layout: { type: 'list', gap: { x: 1 } } as never }))).toContain('layers[0].layout.gap');
+    expect(validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, y: 0.05 } } })).valid).toBe(true);
+    expect(paths(layer({ layout: { type: 'pile' } as never }))).toContain('layers[0].layout');
+  });
+
+  it('warns when a list layout has a different number of variants than entities', () => {
+    const r = validateSpec(layer({ count: 5, layout: { type: 'list' } }));
+    expect(r.valid).toBe(true);
+    expect((r.warnings ?? []).some((w) => w.code === 'list-length-mismatch' && w.path === 'layers[0].count')).toBe(true);
+    expect((validateSpec(layer({ layout: { type: 'list' } })).warnings ?? []).filter((w) => w.code === 'list-length-mismatch')).toEqual([]);
+  });
+
+  it('bar: values, length, thickness, max, direction', () => {
+    const bar = (sprite: Record<string, unknown>) => layer({ sprite: { kind: 'bar', values: [1, 2, 3], length: 100, thickness: 8, color: '#fff', ...sprite } as never, layout: { type: 'list' } });
+    expect(validateSpec(bar({})).valid).toBe(true);
+    expect(paths(bar({ values: [] }))).toContain('layers[0].sprite.values');
+    expect(paths(bar({ values: [1, -2, 3] }))).toContain('layers[0].sprite.values');
+    expect(paths(bar({ length: 0 }))).toContain('layers[0].sprite.length');
+    expect(paths(bar({ thickness: -1 }))).toContain('layers[0].sprite.thickness');
+    expect(paths(bar({ max: 0 }))).toContain('layers[0].sprite.max');
+    expect(paths(bar({ direction: 'sideways' }))).toContain('layers[0].sprite.direction');
+    expect(validateSpec(bar({ direction: 'up', colors: ['#fff', '#f00', '#0f0'] })).valid).toBe(true);
+  });
+});

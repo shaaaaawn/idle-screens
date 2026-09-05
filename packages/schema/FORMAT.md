@@ -35,7 +35,8 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `textBlock.reveal` — animated typing/deleting via one steerable paint param;
 `emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
-(2026-09-05 — shape glyphs).
+(2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
+(2026-09-05 — data layout).
 
 ## Safety invariants
 
@@ -138,12 +139,12 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06); text/emoji take `strings[i]` / `glyphs[i]` and palettes `colors[i]` **in order**, so N labels are one layer |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.field", …)` |
-| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
+| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -170,6 +171,12 @@ with distance, removing pop-in at the cutoff.
   rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
   `feather` 0..1 softens the edges — that fraction of the half-size fades out
   toward the border (Rothko's block at 0.5–0.8)
+- `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
+  a data bar: entity *i* draws `length × values[i] / max` (viewport units),
+  `thickness` thick, growing from its position toward `direction` (`right`
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.values", […])`
+  glides every bar. With `layout: { type: "list" }` a chart is one layer and
+  its labels another — the dashboard genre stops needing one layer per number
 - `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
   regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
   6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
@@ -224,7 +231,7 @@ with distance, removing pop-in at the cutoff.
   glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
   back to 1.
 
-`circle`, `ring`, `streak`, `rect`, `polygon` and `stroke` all accept
+`circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
 `colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
 (relative weights, same length — "mostly cool tones, occasional ember").
 

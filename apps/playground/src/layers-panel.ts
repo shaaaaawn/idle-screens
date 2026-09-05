@@ -14,7 +14,7 @@ export interface LayersHandle {
   dispose(): void;
 }
 
-const SPRITE_KINDS: readonly SpriteSpec['kind'][] = ['circle', 'ring', 'streak', 'rect', 'polygon', 'stroke', 'emoji', 'text', 'textBlock'];
+const SPRITE_KINDS: readonly SpriteSpec['kind'][] = ['circle', 'ring', 'streak', 'rect', 'polygon', 'stroke', 'bar', 'emoji', 'text', 'textBlock'];
 const MOTION_TYPES: readonly MotionSpec['type'][] = ['drift', 'rise', 'bounce', 'static', 'orbit', 'wander', 'warp', 'path'];
 
 function cloneSpec(spec: SaverSpec): SaverSpec {
@@ -29,6 +29,7 @@ function defaultSprite(kind: SpriteSpec['kind']): SpriteSpec {
     case 'rect': return { kind: 'rect', width: [0.005, 0.015], color: '#ffffff' };
     case 'polygon': return { kind: 'polygon', radius: [0.01, 0.03], color: '#ffffff', sides: 6 };
     case 'stroke': return { kind: 'stroke', length: [0.05, 0.12], points: [[-1, 0.3], [0, -0.6], [1, 0.2]], color: '#ffffff', width: 0.003, taper: true };
+    case 'bar': return { kind: 'bar', values: [60, 80, 45], max: 100, length: 0.3, thickness: 0.02, color: '#ffffff' };
     case 'emoji': return { kind: 'emoji', glyphs: ['⭐'] };
     case 'text': return { kind: 'text', strings: ['hello'], color: '#ffffff' };
     case 'textBlock': return { kind: 'textBlock', text: 'Hello world', maxWidth: 0.5, fontSize: 0.04 };
@@ -265,6 +266,13 @@ export function buildLayersPanel(mount: HTMLElement): LayersHandle {
         makeField('Width', numInput(s.width ?? 0.002, { step: 0.0005, min: 0 }, (v) => { (layer.sprite as typeof s).width = v; })),
         makeField('Taper', checkField(s.taper ?? false, (v) => { (layer.sprite as typeof s).taper = v || undefined; })),
         makeField('Orient', checkField(s.orient ?? false, (v) => { (layer.sprite as typeof s).orient = v || undefined; })),
+      );
+    } else if (s.kind === 'bar') {
+      container.append(
+        makeField('Color', colorField(s.color, (v) => { (layer.sprite as typeof s).color = v; })),
+        makeField('Values', textField(s.values.join(', '), (v) => { const nums = v.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n >= 0); if (nums.length) (layer.sprite as typeof s).values = nums; })),
+        makeField('Length', numInput(s.length, { step: 0.01, min: 0 }, (v) => { (layer.sprite as typeof s).length = v; })),
+        makeField('Thickness', numInput(s.thickness, { step: 0.002, min: 0 }, (v) => { (layer.sprite as typeof s).thickness = v; })),
       );
     } else if (s.kind === 'emoji') {
       container.append(makeField('Glyphs', textField(s.glyphs.join(' '), (v) => { (layer.sprite as typeof s).glyphs = v.split(/\s+/).filter(Boolean); })));

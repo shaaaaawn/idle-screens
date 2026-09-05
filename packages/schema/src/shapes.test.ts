@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
 import { buildEntities } from './simulate';
-import { featherAlphas, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper } from './shapes';
+import { barBox, barFraction, featherAlphas, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper } from './shapes';
 import { dominanceRanking, luminanceGrid, perceiveScene } from './perceive';
 import type { LayerSpec, SaverSpec } from './types';
 
@@ -114,5 +114,34 @@ describe('shape glyphs in the entity model and perception', () => {
     expect(litCells).toBeGreaterThanOrEqual(60);
     const area = (sprite: LayerSpec['sprite']) => dominanceRanking(base([{ count: 1, sprite, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }]))[0]!.factors.area;
     expect(area({ kind: 'rect', width: [200, 200], color: '#fff', feather: 0.8 })).toBeLessThan(area({ kind: 'rect', width: [200, 200], color: '#fff' }));
+  });
+});
+
+describe('bar geometry', () => {
+  const bar = (extra: Record<string, unknown> = {}) => ({ kind: 'bar', values: [50, 100, 0], length: 200, thickness: 10, color: '#fff', ...extra }) as Extract<LayerSpec['sprite'], { kind: 'bar' }>;
+
+  it('fraction is value / max, max defaulting to the largest value, clamped and cycling by index', () => {
+    expect(barFraction(bar(), 0)).toBe(0.5);
+    expect(barFraction(bar(), 1)).toBe(1);
+    expect(barFraction(bar(), 2)).toBe(0);
+    expect(barFraction(bar(), 3)).toBe(0.5); // cycles
+    expect(barFraction(bar({ max: 200 }), 1)).toBe(0.5);
+    expect(barFraction(bar({ values: [300], max: 100 }), 0)).toBe(1); // clamped
+    expect(barFraction(bar({ values: [0, 0] }), 0)).toBe(0); // no max → nothing to draw
+  });
+
+  it('boxes grow from the origin toward the direction', () => {
+    expect(barBox('right', 100, 10)).toEqual({ cx: 50, cy: 0, halfX: 50, halfY: 5 });
+    expect(barBox('left', 100, 10)).toEqual({ cx: -50, cy: 0, halfX: 50, halfY: 5 });
+    expect(barBox('up', 100, 10)).toEqual({ cx: 0, cy: -50, halfX: 5, halfY: 50 });
+    expect(barBox('down', 100, 10)).toEqual({ cx: 0, cy: 50, halfX: 5, halfY: 50 });
+  });
+
+  it('perception: a fuller bar carries more weight, and values are read at paint time', () => {
+    const spec = (values: number[]): SaverSpec => base([{ count: 1, sprite: { kind: 'bar', values, max: 100, length: 400, thickness: 20, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.2, y: 0.5 }, layout: { type: 'list' } }]);
+    const half = dominanceRanking(spec([50]))[0]!.factors.area;
+    const full = dominanceRanking(spec([100]))[0]!.factors.area;
+    expect(full).toBeCloseTo(half * 2, 9);
+    expect(luminanceGrid(spec([100])).coverage).toBeGreaterThan(luminanceGrid(spec([25])).coverage);
   });
 });

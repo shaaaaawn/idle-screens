@@ -16,7 +16,7 @@
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
-import { pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -413,6 +413,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         centerY = box.cy;
         halfX = box.halfX;
         halfY = box.halfY;
+      } else if (s.kind === 'bar') {
+        const len = sz * barFraction(s, e.barIndex ?? 0);
+        if (len <= 0) continue;
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        const box = barBox(s.direction ?? 'right', len, th);
+        centerX = p.x + box.cx;
+        centerY = p.y + box.cy;
+        halfX = box.halfX;
+        halfY = box.halfY;
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
@@ -762,6 +771,10 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
         entArea = sz * h2 * f;
       }
       else if (s.kind === 'polygon') entArea = polygonArea(polygonPoints(s, sz / 2));
+      else if (s.kind === 'bar') {
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
+      }
       else if (s.kind === 'stroke') {
         const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
         entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;

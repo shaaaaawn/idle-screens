@@ -19,7 +19,7 @@ import {
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
 import { resolveSegment, segmentStart } from './sequence';
-import { FEATHER_STEPS, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -377,6 +377,20 @@ class SpecInstance implements SaverInstance {
       } else {
         ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
       }
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'bar') {
+      const len = sz * barFraction(sprite, e.barIndex ?? 0);
+      if (len <= 0) return;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+      const box = barBox(sprite.direction ?? 'right', len, th);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      ctx.fillStyle = resolvedColor;
+      ctx.fillRect(box.cx - box.halfX, box.cy - box.halfY, box.halfX * 2, box.halfY * 2);
       ctx.restore();
       return;
     }

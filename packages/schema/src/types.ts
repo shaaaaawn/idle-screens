@@ -122,7 +122,8 @@ export interface LayerSpec {
   key?: string;
   /**
    * Exact fractional position {x, y} for a single entity (0 = left/top, 1 = right/bottom).
-   * Only valid when `count` is 1. Overrides `region` scatter placement.
+   * Only valid when `count` is 1 — or, with a `list` / `table` layout, as the
+   * top-left anchor of the whole block. Overrides `region` scatter placement.
    */
   position?: { x: number; y: number };
   /**
@@ -157,7 +158,19 @@ export interface LayerSpec {
    * the cell size — `{ y: 1 }` keeps columns crisp while scattering vertically
    * (Matrix rain). Unlocks column effects, LED walls, mosaics, uniform dot fields.
    */
-  layout?: { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } };
+  layout?:
+    | { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } }
+    /**
+     * Data layouts — entities in READING ORDER, no scatter. `list` stacks them
+     * in one column `gap` apart (viewport units of min(w,h), default 0.06);
+     * `table` fills `columns` row-major with `gap` `{x, y}` (one number = both).
+     * Text and emoji sprites take `strings[i]` / `glyphs[i]` in order instead of
+     * a seeded pick, and palette `colors[i]` likewise, so N labels or N bars are
+     * ONE layer. `position` (with any count) is the block's top-left anchor;
+     * without it the block is centred in `region`.
+     */
+    | { type: 'list'; gap?: number }
+    | { type: 'table'; columns: number; gap?: number | { x?: number; y?: number } };
   /**
    * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
    * before `enter` (ms), ramps up over `fade` ms (default 1000), holds at 1, then
@@ -242,6 +255,24 @@ export type SpriteSpec =
    * Mondrian blocks, confetti, city lights.
    */
   | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; feather?: number; colors?: string[]; colorWeights?: number[] }
+  /**
+   * A data bar. Entity i draws a bar `length × values[i] / max` long (viewport
+   * units of min(w,h)), `thickness` thick, growing from its position toward
+   * `direction` (default 'right'). `values` are PAINT — steer
+   * `layers.N.sprite.values` and the bars glide; `max` defaults to the largest
+   * value. Pair with a `list` layout: a chart is one layer, labels another.
+   */
+  | {
+      kind: 'bar';
+      values: number[];
+      length: number;
+      thickness: number;
+      color: string;
+      max?: number;
+      direction?: 'right' | 'left' | 'up' | 'down';
+      colors?: string[];
+      colorWeights?: number[];
+    }
   /**
    * Regular or custom polygon. `sides` (3..12, default 6) draws a regular
    * n-gon of the seeded `radius` (circumradius), point up; `points` (3..24
@@ -460,6 +491,8 @@ export const LIMITS = {
   minClockedPeriod: 1000, // ms — a `clock`ed layer breathes in unison, so 1 Hz not 2
   minClockRate: 0.1,
   maxClockRate: 4,
+  defaultListGap: 0.06, // viewport units between list/table cells (40 px in px specs)
+  defaultListGapPx: 40,
   minPolygonSides: 3,
   maxPolygonSides: 12,
   maxShapePoints: 24, // polygon.points / stroke.points

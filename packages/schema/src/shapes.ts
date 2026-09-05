@@ -11,13 +11,34 @@
  */
 import type { SpriteSpec } from './types';
 
-export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' }>;
+export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' | 'bar' }>;
+export type BarSprite = Extract<SpriteSpec, { kind: 'bar' }>;
 export type PolygonSprite = Extract<SpriteSpec, { kind: 'polygon' }>;
 export type StrokeSprite = Extract<SpriteSpec, { kind: 'stroke' }>;
 
 /** Every sprite that paints with `color` / `colors[]` (as opposed to glyphs). */
 export function isShapedSprite(s: SpriteSpec): s is ShapedSprite {
-  return s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect' || s.kind === 'polygon' || s.kind === 'stroke';
+  return s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect' || s.kind === 'polygon' || s.kind === 'stroke' || s.kind === 'bar';
+}
+
+/** 0..1 fill of bar `index`: `values[i] / max`, `max` defaulting to the largest value. Read at paint time so steered values glide. */
+export function barFraction(s: BarSprite, index: number): number {
+  const n = s.values.length;
+  if (n === 0) return 0;
+  const v = s.values[((index % n) + n) % n] ?? 0;
+  const max = s.max ?? s.values.reduce((m, x) => Math.max(m, x), 0);
+  if (!(max > 0)) return 0;
+  return Math.max(0, Math.min(1, v / max));
+}
+
+/** Box of a bar `len` long and `thick` thick growing from (0,0) toward `direction`: centre + half extents, px. */
+export function barBox(direction: NonNullable<BarSprite['direction']>, len: number, thick: number): { cx: number; cy: number; halfX: number; halfY: number } {
+  switch (direction) {
+    case 'left': return { cx: -len / 2, cy: 0, halfX: len / 2, halfY: thick / 2 };
+    case 'up': return { cx: 0, cy: -len / 2, halfX: thick / 2, halfY: len / 2 };
+    case 'down': return { cx: 0, cy: len / 2, halfX: thick / 2, halfY: len / 2 };
+    default: return { cx: len / 2, cy: 0, halfX: len / 2, halfY: thick / 2 };
+  }
 }
 
 export const DEFAULT_POLYGON_SIDES = 6;
