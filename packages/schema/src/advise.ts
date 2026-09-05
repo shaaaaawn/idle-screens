@@ -18,6 +18,13 @@ import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWar
 const LOW_CONTRAST_FLOOR = 0.05;
 
 /**
+ * A spec that declares `density: 'sparse'` is promising a mostly-empty frame.
+ * Above this alpha-weighted coverage the promise is broken (2 % of the frame
+ * is a comfortable field, not restraint — `lanterns` measures ~1.5 %).
+ */
+const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
+
+/**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
  * call advise only on specs that have already passed validation.
  */
@@ -145,7 +152,12 @@ export function adviseSpec(
     }
   }
 
-  if (totalCoverage < 0.0005 && spec.layers.length > 0) {
+  // A declared `density` is read before either density advisory fires — and
+  // then checked against the measurement, so the declaration cannot be used
+  // to silence a scene that is empty by accident rather than by intent.
+  const density = spec.density ?? 'normal';
+  const wouldBeSparse = totalCoverage < 0.0005 && spec.layers.length > 0;
+  if (wouldBeSparse && density !== 'sparse') {
     warnings.push({
       path: 'layers',
       code: 'sparse-scene',
@@ -153,11 +165,25 @@ export function adviseSpec(
     });
   }
 
-  if (totalEntities > 500) {
+  if (totalEntities > 500 && density !== 'dense') {
     warnings.push({
       path: 'layers',
       code: 'dense-scene',
       message: `${totalEntities} entities — scene may feel crowded and hurt performance on low-end devices`,
+    });
+  }
+
+  if (density === 'sparse' && totalCoverage > SPARSE_DECLARED_MAX_COVERAGE) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared sparse but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(2)}% — either the declaration or the scene is wrong`,
+    });
+  } else if (density === 'dense' && wouldBeSparse) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared dense but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(4)}% — the scene will look empty`,
     });
   }
 

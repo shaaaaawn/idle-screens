@@ -1099,6 +1099,10 @@
           ],
           "description": "Advisory intensity for capability/reduced-motion gating."
         },
+        "density": {
+          "enum": ["sparse", "normal", "dense"],
+          "description": "Declared density intent. sparse withholds the sparse-scene advisory (the emptiness is the point); dense withholds dense-scene. Checked against measured coverage (density-mismatch). A hint only — changes no pixel."
+        },
         "units": {
           "enum": [
             "px",

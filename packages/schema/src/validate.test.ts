@@ -36,6 +36,14 @@ describe('validateSpec', () => {
     expect(paths({ ...base(), background: { type: 'gradient', stops: [{ at: 0, color: '#000' }] } })).toContain('background.stops');
   });
 
+  it('accepts a declared density and rejects anything outside the enum', () => {
+    for (const density of ['sparse', 'normal', 'dense'] as const) {
+      expect(validateSpec({ ...base(), density }).valid).toBe(true);
+    }
+    expect(paths({ ...base(), density: 'empty' })).toContain('density');
+    expect(paths({ ...base(), density: 0.1 })).toContain('density');
+  });
+
   it('requires a non-empty layers array', () => {
     expect(paths({ ...base(), layers: [] })).toContain('layers');
   });

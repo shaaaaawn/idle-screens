@@ -230,6 +230,14 @@ function intentFit(screen: EvalScreen, spec: SaverSpec, perception: ScreenScore[
   return terms.length ? terms.reduce((a, t) => a + t.value, 0) / terms.length : 1;
 }
 
+/** The coverage below which a screen has no picture — see `perceptionOk`. */
+export function perceptionGateFloor(spec: SaverSpec, profile: ArtistStyleProfile): number {
+  const band = profile.composition.coverageBand?.[0];
+  const declared = spec.density === 'sparse' ? 0.0002 : undefined;
+  const floor = Math.min(band ?? Infinity, declared ?? Infinity);
+  return Number.isFinite(floor) ? Math.min(0.002, Math.max(0.00005, floor)) : 0.002;
+}
+
 export function scoreScreen(
   screen: EvalScreen,
   profile: ArtistStyleProfile,
@@ -271,7 +279,7 @@ export function scoreScreen(
 
   const advisories = adviseSpec(screen.spec, viewport);
   const high = advisories.filter((a) =>
-    /clump|contrast|flash|empty|degenerate|full-coherence/i.test(`${a.code} ${a.message}`),
+    /clump|contrast|flash|empty|degenerate|full-coherence|density-mismatch/i.test(`${a.code} ${a.message}`),
   );
   const perception = perceiveScene(screen.spec, { viewport, t, seed: screen.spec.seed });
   const entityCount = screen.spec.layers.reduce((n, l) => n + l.count, 0);
@@ -288,10 +296,18 @@ export function scoreScreen(
     topDominanceShare,
   };
 
+  // The perception gate: is there a picture at all? Its floor is 0.2 % of
+  // the frame unless the style itself expects less (`composition.coverageBand`)
+  // or the spec declares the emptiness deliberate (`density: 'sparse'`) —
+  // otherwise a house style built on restraint is scored as broken for
+  // following its own DNA. A declared `sparse` that measures dense is caught
+  // by adviseSpec's `density-mismatch`, which the advisory penalty reads.
+  const coverageFloor = perceptionGateFloor(screen.spec, profile);
+  const lumVarFloor = 0.00005 * (coverageFloor / 0.002);
   const perceptionOk =
-    perception.coverage >= 0.002 && lumVar >= 0.00005 && entityCount > 0
+    perception.coverage >= coverageFloor && lumVar >= lumVarFloor && entityCount > 0
       ? 1
-      : perception.coverage >= 0.001
+      : perception.coverage >= coverageFloor / 2
         ? 0.5
         : 0;
 

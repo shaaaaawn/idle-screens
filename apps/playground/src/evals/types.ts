@@ -108,6 +108,13 @@ export interface ArtistStyleProfile {
     regionBias?: { x?: [number, number]; y?: [number, number] };
     densityScale: number;
     layerCountHint: number;
+    /**
+     * Expected alpha-weighted coverage range for a faithful screen. When set,
+     * the scorer's perception gate uses the lower bound instead of the global
+     * 0.2 % floor — a style whose premise is emptiness (Fathom) is otherwise
+     * scored as broken for following its own DNA.
+     */
+    coverageBand?: [number, number];
   };
   /** What schema v1 cannot express for this style — feeds next cycle. */
   schemaGaps: string[];
