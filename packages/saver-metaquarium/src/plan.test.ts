@@ -163,7 +163,7 @@ describe('crossing (MQ35)', () => {
       }
       expect(along).toBeGreaterThan(bounds.radius * 0.8);
       expect(toward).toBeLessThan(along * 0.5);
-      expect(toward).toBeGreaterThan(bounds.radius * 0.2); // the return leg is behind, not on top
+      expect(toward).toBeGreaterThan(bounds.radius * 0.18 - 1e-9); // the return leg is behind, not on top (depth draws 0.18–0.3)
     }
   });
   it('stays inside the tank and in the middle of the water column', () => {

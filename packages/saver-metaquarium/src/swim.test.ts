@@ -205,10 +205,18 @@ describe('relationships, auto styles, breathing, sway', () => {
     expect(Math.max(...hover.map(Math.abs))).toBeLessThan(0.5);
     expect(Math.abs(idleSway(swimStyleOf('drift'), 3.49, 0))).toBeLessThan(0.25);
   });
-  it('the ring is tilted, not flat — seats rise and fall around it', () => {
-    const ups = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'ring').up);
+  it('the wheel is the ring tilted; the ring itself stays flat for published scenes', () => {
+    const ups = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'wheel').up);
     expect(Math.max(...ups) - Math.min(...ups)).toBeGreaterThan(FISH_LENGTH);
     expect(Math.max(...ups.map(Math.abs))).toBeLessThanOrEqual(28);
+    const ringUps = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'ring').up);
+    expect(Math.max(...ringUps.map(Math.abs))).toBeLessThanOrEqual(FISH_LENGTH * 0.3);
+    for (let i = 0; i < 8; i++) {
+      const a = formationSlot(i, 8, 0.4, undefined, 'ring');
+      const b = formationSlot(i, 8, 0.4, undefined, 'wheel');
+      expect(a.side).toBe(b.side);
+      expect(a.back).toBe(b.back);
+    }
   });
 });
 

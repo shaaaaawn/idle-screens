@@ -97,7 +97,8 @@ export const METAQUARIUM_PARAMS = {
    *  same spline engine, different itinerary. */
   pathShape: { type: 'enum', default: 'wander', options: [...PATH_SHAPES], ease: 'step' },
   /** How a `school` holds together: the original lattice, single file, a
-   *  carousel ring, the migratory V, or a bait-ball. Ignored by every
+   *  carousel ring, the migratory V, a bait-ball, or the ring tilted into a
+   *  `wheel` that reads from a side camera. Ignored by every
    *  non-formation style; the same no-pair-inside-a-body-length law holds
    *  for all of them. */
   formationShape: { type: 'enum', default: 'phalanx', options: [...FORMATION_SHAPES], ease: 'step' },

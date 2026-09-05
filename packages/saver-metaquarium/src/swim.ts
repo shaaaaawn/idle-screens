@@ -242,9 +242,10 @@ const FORMATION_HALF_WIDTH = 62;
  * - `ring`    — a carousel around the carrier, the ring swimming as one
  * - `wedge`   — the migratory V, ranks widening behind the point
  * - `ball`    — a bait-ball: Fibonacci-shell seats on a sphere
+ * - `wheel`   — the ring tilted so it reads from a side camera (MQ34)
  */
-export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball';
-export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball'];
+export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball' | 'wheel';
+export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball', 'wheel'];
 
 export function formationSlot(
   index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
@@ -275,11 +276,22 @@ export function formationSlot(
     // body length of arc between them.
     const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
     const a = (index / Math.max(1, count)) * Math.PI * 2;
-    // The carousel TILTS: seats rise and fall around the ring so it reads
+    return {
+      side: Math.cos(a) * r,
+      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      back: Math.sin(a) * r,
+    };
+  }
+  if (shape === 'wheel') {
+    // The ring, TILTED: seats rise and fall around the carousel so it reads
     // as a wheel from a side camera. A flat ring was verified invisible from
-    // every side view — a line of fish, not a circle (MQ34). Horizontal
-    // spacing is unchanged so the arc-length law holds; the vertical reach
-    // is capped so the carrier's y-clamp keeps the top seat under the lid.
+    // every side view — a line of fish, not a circle (MQ34). A separate
+    // shape rather than a change to `ring`, so scenes already published on
+    // `ring` render exactly as before. Horizontal spacing is the ring's, so
+    // the arc-length law holds; the vertical reach is capped so the
+    // carrier's y-clamp keeps the top seat under the lid.
+    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const a = (index / Math.max(1, count)) * Math.PI * 2;
     return {
       side: Math.cos(a) * r,
       up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.3 * j,

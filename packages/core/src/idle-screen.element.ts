@@ -183,6 +183,37 @@ export class IdleScreenElement extends HostBase {
     });
   }
 
+  /**
+   * The mounted saver's own account of its frame (`SaverInstance.inspect`) —
+   * a convenience that forwards to whatever is mounted. Synchronous and
+   * last-known: a main-thread saver answers live; a Worker-hosted saver
+   * answers the most recent `inspectAsync()` (null until one has been made).
+   * Null when nothing is mounted or the saver does not describe itself.
+   */
+  inspect(): Record<string, unknown> | null {
+    try {
+      return this.instance?.inspect?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `inspect()` with the round trip a Worker-hosted saver needs (2 s timeout,
+   * null on timeout). Main-thread savers answer immediately with the same
+   * value `inspect()` would.
+   */
+  async inspectAsync(): Promise<Record<string, unknown> | null> {
+    const inst = this.instance as (SaverInstance & { inspectAsync?: () => Promise<Record<string, unknown> | null> }) | null;
+    if (!inst) return null;
+    try {
+      if (typeof inst.inspectAsync === 'function') return await inst.inspectAsync();
+      return inst.inspect?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   connectedCallback(): void {
     if (!this.shadowRoot) this.buildDom();
     this.maybeStart();

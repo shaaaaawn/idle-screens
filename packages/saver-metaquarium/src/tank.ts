@@ -544,6 +544,9 @@ class TankInstance implements SaverInstance {
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
   private pathShape: PathShape = 'wander';
+  /** The camera azimuth every `crossing` lane in the tank is laid against.
+   *  Owned here so spawn-time and steer-time compiles agree. */
+  private laneAzimuth = 0;
   /** Decoder paths this tank retained, released on dispose. */
   private readonly dracoPaths = new Set<string>();
 
@@ -1017,7 +1020,7 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape, { cameraAzimuthDeg: this.num('cameraAzimuth') });
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape, { cameraAzimuthDeg: this.laneAzimuth });
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
@@ -1221,9 +1224,22 @@ class TankInstance implements SaverInstance {
     const shape = (PATH_SHAPES as readonly string[]).includes(shapeRaw)
       ? (shapeRaw as PathShape)
       : 'wander';
-    if (shape !== this.pathShape) {
+    // `crossing` is laid against the camera, and the camera moves: a steered
+    // cameraAzimuth or an autoRotate orbit would otherwise leave the parade
+    // running across a view that is no longer there, and a fish spawned later
+    // would lay its lane at a different angle from the shoal's. One lane
+    // azimuth is owned by the tank (`laneAzimuth`), used by every compile —
+    // spawn included — and re-laid when the EFFECTIVE azimuth has turned by
+    // more than 2°. Re-laying rotates the whole lane while every fish keeps
+    // its arc distance, so the parade turns with the camera instead of
+    // jumping. Other shapes ignore the azimuth and are never re-laid for it.
+    const azEff = this.num('cameraAzimuth') + this.num('autoRotate') * tSec;
+    const laneMoved = shape === 'crossing'
+      && Math.abs(((azEff - this.laneAzimuth + 540) % 360) - 180) > 2;
+    if (shape !== this.pathShape || laneMoved) {
       this.pathShape = shape;
-      const planOpts = { cameraAzimuthDeg: this.num('cameraAzimuth') };
+      this.laneAzimuth = azEff;
+      const planOpts = { cameraAzimuthDeg: this.laneAzimuth };
       this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape, planOpts);
       const rng = this.ctxSaver.rng.fork(0x715);
       for (const f of this.fish) {
@@ -1374,6 +1390,15 @@ class TankInstance implements SaverInstance {
           extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
         beat = cf.lead;
+        // A seated fish can lead too: a bonded fish after a school trails
+        // the CARRIER route behind the whole formation, which is what
+        // "follow the school" should mean. Retires any half-formed pair.
+        leader = {
+          plan: this.carrierPlan, style, d: cf.lead - (extent?.back ?? 0), effort: cf.lead,
+          phase: varn.phase, pullX: 0, pullZ: 0,
+        };
+        followRank = 0;
+        pendingPair = null;
         // A rigid body means every fish points EXACTLY the same way, which
         // measures as polarisation 1.00 and looks like a formation flight.
         // A few degrees of per-fish yaw, scaled by variance, buys back the
@@ -1389,6 +1414,10 @@ class TankInstance implements SaverInstance {
           fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
       } else {
+        // A pair is two CONSECUTIVE pair fish; anything else between them
+        // retires the half-formed one, so a later `@pair` never bonds
+        // across an unrelated fish.
+        if (bond !== 'pair') pendingPair = null;
         const rel = bond === 'pair' ? pendingPair : bond === 'follow' || bond === 'chase' ? leader : null;
         if (rel) bandStyle = rel.style;
         let flurryExtra = 0;
