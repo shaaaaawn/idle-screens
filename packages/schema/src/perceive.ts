@@ -418,10 +418,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         if (len <= 0) continue;
         const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
         const box = barBox(s.direction ?? 'right', len, th);
-        centerX = p.x + box.cx;
-        centerY = p.y + box.cy;
-        halfX = box.halfX;
-        halfY = box.halfY;
+        // The renderer rotates the bar about the entity with `spin`; rotate
+        // the box's offset the same way and take the rotated box's AABB.
+        const rot = rotationAt(e, tPass);
+        const cr = Math.cos(rot);
+        const sr = Math.sin(rot);
+        centerX = p.x + box.cx * cr - box.cy * sr;
+        centerY = p.y + box.cx * sr + box.cy * cr;
+        halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
+        halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;

@@ -137,6 +137,16 @@ describe('bar geometry', () => {
     expect(barBox('down', 100, 10)).toEqual({ cx: 0, cy: 50, halfX: 5, halfY: 50 });
   });
 
+  it('perception follows a spinning bar around its anchor', () => {
+    // A bar pointing right at t=0; with spin 90 deg/s, after 1 s it points down.
+    const spec = (spin: number): SaverSpec => base([{ count: 1, sprite: { kind: 'bar', values: [100], max: 100, length: 300, thickness: 20, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 }, layout: { type: 'list' }, spin }]);
+    const still = luminanceGrid(spec(0), { t: 1000 });
+    const turned = luminanceGrid(spec(90), { t: 1000 });
+    expect(still.centroid!.x).toBeGreaterThan(0.5); // ink to the right of the anchor
+    // The spun bar's centroid has left the right-hand half-line; it has swung toward the vertical.
+    expect(Math.abs(turned.centroid!.x - 0.5)).toBeLessThan(still.centroid!.x - 0.5);
+  });
+
   it('perception: a fuller bar carries more weight, and values are read at paint time', () => {
     const spec = (values: number[]): SaverSpec => base([{ count: 1, sprite: { kind: 'bar', values, max: 100, length: 400, thickness: 20, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.2, y: 0.5 }, layout: { type: 'list' } }]);
     const half = dominanceRanking(spec([50]))[0]!.factors.area;
