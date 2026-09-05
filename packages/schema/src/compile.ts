@@ -18,7 +18,7 @@ import {
 } from './steer';
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
-import { resolveSegment } from './sequence';
+import { resolveSegment, segmentStart } from './sequence';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -713,6 +713,18 @@ class SequenceInstance implements SaverInstance {
   private startT = 0;
   private baseT = 0;
   private lastT = 0;
+  /** The T most recently passed to renderFrame — the clock a steer displaces. */
+  private renderedT = 0;
+  /**
+   * The clicker's two pieces of state. `clockOffset` is added to every T so
+   * a `sequence.segment` steer lands the timeline at the target segment's
+   * start and STAYS there as the wall clock keeps ticking — the steer moves
+   * the clock instead of fighting it. `releasedBelow` records that the steer
+   * counts as the presenter clicking past every `advance: 'input'` hold
+   * before the target (see `resolveSegment`).
+   */
+  private clockOffset = 0;
+  private releasedBelow = 0;
 
   constructor(seq: IdleSequence, ctx: SaverContext) {
     this.seq = seq;
@@ -815,7 +827,8 @@ class SequenceInstance implements SaverInstance {
   }
 
   renderFrame(T: number, seed: number): void {
-    const resolved = resolveSegment(this.seq, T);
+    this.renderedT = T;
+    const resolved = resolveSegment(this.seq, T + this.clockOffset, { releasedBelow: this.releasedBelow });
     const { index, localT } = resolved;
 
     // Check if the *previous* segment has a morph into this one
@@ -916,14 +929,15 @@ class SequenceInstance implements SaverInstance {
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
-      if (idx !== this.activeIndex) {
-        for (let i = 0; i < this.children.length; i++) {
-          if (i !== idx) this.releaseChild(i);
-        }
-        this.activeIndex = idx;
-        const child = this.ensureChild(idx);
-        child.renderFrame(0, this.seq.segments[idx]!.scene.seed ?? this.seq.seed ?? 0);
-      }
+      // Displace the clock so T + offset == the target segment's start: the
+      // segment begins at localT 0 (its `life.enter` build replays) and the
+      // next animation frame resolves to the same segment instead of snapping
+      // back to whatever the wall clock said. The steer also releases every
+      // `advance: 'input'` hold before the target; holds at and after it stay
+      // armed, so steering backwards re-arms the ones in between.
+      this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
+      this.releasedBelow = idx;
+      this.renderFrame(this.renderedT, this.seed);
     }
 
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
