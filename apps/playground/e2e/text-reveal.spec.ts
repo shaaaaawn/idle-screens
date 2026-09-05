@@ -206,15 +206,50 @@ test('glyphs fade in place — mid-fade ink is a subset of the finished block', 
   // prefix advance that depends only on the (fixed) prefix, ramping alpha can
   // only brighten a pixel, never move it. If positions were derived from
   // anything alpha-dependent, lit pixels would migrate and this would fail.
+  //
+  // Tolerance is ONE pixel of neighbourhood, not zero: since a729243 the
+  // finished run is re-drawn as a single batched fillText (ligatures + pair
+  // kerning, pixel parity with the un-revealed path), while a still-fading
+  // glyph draws alone at its prefix advance. The same glyph rasterises with
+  // slightly different antialiased edges alone vs inside a run, so a few
+  // edge pixels legitimately shift by a sub-pixel amount when the run
+  // saturates. A reflow moves whole glyphs — many pixels with NO lit
+  // neighbour — which is what the strict bar below still catches.
   const half = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5)));
   const full = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(1)));
   const mHalf = decodeMask(half.mask);
   const mFull = decodeMask(full.mask);
-  let moved = 0;
-  for (let i = 0; i < half.width * half.height; i++) {
-    if (isLit(mHalf, i) && !isLit(mFull, i)) moved++;
+  const { width, height } = half;
+  const litNear = (x: number, y: number): boolean => {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+        if (isLit(mFull, yy * width + xx)) return true;
+      }
+    }
+    return false;
+  };
+  let exact = 0;
+  const migrated: Array<[number, number]> = [];
+  for (let i = 0; i < width * height; i++) {
+    if (!isLit(mHalf, i) || isLit(mFull, i)) continue;
+    exact++;
+    const x = i % width;
+    const y = Math.floor(i / width);
+    if (!litNear(x, y)) migrated.push([x, y]);
   }
-  expect(moved, 'ink lit mid-fade must still be lit when the block finishes').toBeLessThan(8);
+  // Ligature substitution is the one legitimate way ink can vanish outright:
+  // "fi"/"fl" drawn glyph-by-glyph keep the i's tittle; the batched run forms
+  // the ligature and the tittle is gone — a tight cluster of a dozen pixels,
+  // not a line. A reflow moves whole glyphs: hundreds of pixels. The bar is
+  // relative to the ink present so the test scales with LONG_TEXT.
+  const bar = Math.max(8, Math.round(half.ink * 0.01));
+  expect(
+    migrated.length,
+    `ink lit mid-fade must still be lit (within 1px) when the block finishes — ${migrated.length} migrated (bar ${bar}), ${exact} re-rasterised, of ${half.ink} lit at half; migrated at ${JSON.stringify(migrated.slice(0, 20))}`,
+  ).toBeLessThan(bar);
 });
 
 test('a wider fade window paints more of the block at the same progress', async ({ page }) => {
