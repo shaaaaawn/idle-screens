@@ -62,6 +62,7 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 608, name: 'Dori', breed: 'dori', ipfs3d: '', localGlb: '/assets/metaquarium/npc-dori.glb' },
 ];
 
+import { SWIM_STYLE_NAMES, type SwimStyle } from './swim';
 import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
 import type { Breed } from './farm';
 
@@ -69,6 +70,16 @@ export interface FishMixEntry {
   id: number;
   url: string;
   count: number;
+  /** Per-token swim style (`id[:count]@style`, MQ30). Absent = the scene's
+   *  `swimStyle`. This is what turns a monoculture into a community:
+   *  `457:3@hover, 257:6@school, 497:1@surface`. */
+  style?: SwimStyle;
+}
+
+/** One spawn slot: the URL to load and, if the token said so, how it swims. */
+export interface FishSlot {
+  url: string;
+  style?: SwimStyle;
 }
 
 export interface FishMixResult {
@@ -129,7 +140,22 @@ export function parseFishMix(
   for (const rawToken of mix.split(',')) {
     const token = rawToken.trim();
     if (token === '') continue;
-    const [idRaw, countRaw, ...extra] = token.split(':');
+    // `@style` is parsed off the END first so `id:count` stays exactly as
+    // documented; an unknown style is a problem but the fish still swims,
+    // on the scene's style — degrade the tag, never drop the fish.
+    let style: SwimStyle | undefined;
+    let core = token;
+    const at = token.indexOf('@');
+    if (at >= 0) {
+      const styleRaw = token.slice(at + 1).trim().toLowerCase();
+      core = token.slice(0, at).trim();
+      if ((SWIM_STYLE_NAMES as readonly string[]).includes(styleRaw)) {
+        style = styleRaw as SwimStyle;
+      } else {
+        problems.push(`"${token}": unknown style "${styleRaw}" (${SWIM_STYLE_NAMES.join(', ')}) — swimming with the scene's swimStyle`);
+      }
+    }
+    const [idRaw, countRaw, ...extra] = core.split(':');
     if (extra.length > 0) {
       problems.push(`"${token}": too many ':' — expected id[:count]`);
       continue;
@@ -188,12 +214,12 @@ export function parseFishMix(
     // Minted individuals are unique per scene; everything else (custom
     // catalogs, NPC species) keeps plain count semantics.
     if (!unique || fish.id > TOTAL_SUPPLY) {
-      entries.push({ id: fish.id, url, count });
+      entries.push({ id: fish.id, url, count, ...(style ? { style } : {}) });
       continue;
     }
     const breed = breedOf(fish.id);
     if (!breed) {
-      entries.push({ id: fish.id, url, count });
+      entries.push({ id: fish.id, url, count, ...(style ? { style } : {}) });
       continue;
     }
     // Breed aliases spread across the whole range for variety; numeric ids
@@ -220,7 +246,7 @@ export function parseFishMix(
         problems.push(`fish ${got}: no asset URL`);
         continue;
       }
-      entries.push({ id: got, url: gotUrl, count: 1 });
+      entries.push({ id: got, url: gotUrl, count: 1, ...(style ? { style } : {}) });
     }
   }
   return { entries, problems };
@@ -230,9 +256,18 @@ export function parseFishMix(
  *  from: `"257:2,100:1"` → [url257, url257, url100]. Slot order IS the
  *  DSL order, so fish 0..N are stable for a given string. */
 export function expandFishMix(entries: FishMixEntry[], cap: number): string[] {
-  const urls: string[] = [];
+  return expandFishMixSlots(entries, cap).map((s) => s.url);
+}
+
+/** The same expansion carrying each token's `@style` per slot (MQ30). The
+ *  tank spawns from this; `expandFishMix` stays for callers that only need
+ *  the URLs. */
+export function expandFishMixSlots(entries: FishMixEntry[], cap: number): FishSlot[] {
+  const slots: FishSlot[] = [];
   for (const e of entries) {
-    for (let i = 0; i < e.count && urls.length < cap; i++) urls.push(e.url);
+    for (let i = 0; i < e.count && slots.length < cap; i++) {
+      slots.push(e.style ? { url: e.url, style: e.style } : { url: e.url });
+    }
   }
-  return urls;
+  return slots;
 }

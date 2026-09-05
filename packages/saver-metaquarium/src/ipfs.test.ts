@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG } from './ipfs';
+import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG, expandFishMixSlots } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
@@ -89,6 +89,22 @@ describe('parseFishMix', () => {
     expect(r.entries).toHaveLength(24);
     expect(new Set(r.entries.map((e) => e.id)).size).toBe(24); // 24 distinct seahorses
     expect(r.problems).toEqual(['"seahorse:30": count clamped to 24']);
+  });
+  it('parses a per-token @style and keeps untagged tokens style-less', () => {
+    const r = parseFishMix('457:2@hover, 257:1@School, 100:1');
+    expect(r.problems).toEqual([]);
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([
+      [457, 'hover'], [458, 'hover'], [257, 'school'], [100, null],
+    ]);
+    const slots = expandFishMixSlots(r.entries, 24);
+    expect(slots.map((sl) => sl.style ?? null)).toEqual(['hover', 'hover', 'school', null]);
+    expect(slots[0]!.url).toContain('fish_457');
+  });
+  it('degrades an unknown @style to a problem without dropping the fish', () => {
+    const r = parseFishMix('257:1@zoom');
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([[257, null]]);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain('unknown style "zoom"');
   });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });
