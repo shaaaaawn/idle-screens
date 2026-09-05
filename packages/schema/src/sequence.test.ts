@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createRng, type SaverContext, type SaverInstance } from '@idle-screens/core';
-import { resolveSegment } from './sequence';
+import { resolveSegment, segmentStart } from './sequence';
 import { validateSequence } from './validate';
 import { compileSequence } from './compile';
 import type { IdleSequence, SaverSpec } from './types';
@@ -737,12 +737,12 @@ describe('SequenceInstance — morph segue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Discrete advance — the two gaps a deck needs closed.
+// Discrete advance — the clicker.
 //
-// These tests pin *current* behaviour, not desired behaviour. Both are
-// characterization tests: they exist so the gap is a fact in CI rather than a
-// claim in a doc, and so whoever implements input-driven advance has a red
-// test to turn green. See idle-mono docs/timeline-and-presentations.md
+// These began life as characterization tests pinning two gaps (a steer that
+// reverted on the next frame, an `advance` field no runtime read). They now pin
+// the behaviour a deck needs: the segment steer holds, and `advance: 'input'`
+// waits for the presenter. See idle-mono docs/timeline-and-presentations.md
 // (registry #3 presentations, #43 input advance).
 // ---------------------------------------------------------------------------
 
@@ -751,48 +751,139 @@ function activeIndexOf(inst: SaverInstance): number {
   return (inst as unknown as { activeIndex: number }).activeIndex;
 }
 
-describe('SequenceInstance — sequence.segment steering is not sticky', () => {
+function steerTo(inst: SaverInstance, segment: number): void {
+  inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'sequence.segment', value: segment, ease: 'step' }] });
+}
+
+describe('SequenceInstance — sequence.segment steering is sticky', () => {
   it('applyTrack switches the active segment', () => {
     const inst = mountSync(compileSequence(seq()));
     inst.renderFrame!(1000, 1);
     expect(activeIndexOf(inst)).toBe(0);
 
-    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'sequence.segment', value: 2, ease: 'step' }] });
+    steerTo(inst, 2);
     expect(activeIndexOf(inst)).toBe(2);
     inst.dispose();
   });
 
-  it('but the next frame reverts it to whatever the wall clock says', () => {
+  it('and the next frame keeps it there — the steer moves the clock, not the frame', () => {
     const inst = mountSync(compileSequence(seq()));
     inst.renderFrame!(1000, 1);
-    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'sequence.segment', value: 2, ease: 'step' }] });
+    steerTo(inst, 2);
     expect(activeIndexOf(inst)).toBe(2);
 
-    // One rAF tick later. renderFrame derives the segment from resolveSegment(T)
-    // alone — applyTrack moved neither the clock (baseT) nor a steer offset, so
-    // the steered segment survives exactly one frame (~16 ms on a live viewer).
+    // One rAF tick later, and many after that: the wall clock keeps ticking
+    // but the displaced timeline resolves to the steered segment.
     inst.renderFrame!(1016, 1);
+    expect(activeIndexOf(inst)).toBe(2);
+    inst.renderFrame!(3000, 1);
+    expect(activeIndexOf(inst)).toBe(2);
+    inst.dispose();
+  });
+
+  it('the steered segment starts from its own localT 0 and then runs on the timer', () => {
+    // c (index 2) is 4000 ms. Steered into at wall 1000 ⇒ it ends at wall 5000
+    // and, with no durationless tail, the sequence holds on its last segment.
+    const inst = mountSync(compileSequence(seq()));
+    inst.renderFrame!(1000, 1);
+    steerTo(inst, 2);
+    inst.renderFrame!(4999, 1);
+    expect(activeIndexOf(inst)).toBe(2);
+
+    // Steering BACK to a is honoured too, and the timer advances from there.
+    steerTo(inst, 0);
+    expect(activeIndexOf(inst)).toBe(0);
+    inst.renderFrame!(4999 + 4999, 1); // 4999 ms into a (5000 ms long)
+    expect(activeIndexOf(inst)).toBe(0);
+    inst.renderFrame!(4999 + 5000, 1); // a's boundary → b
+    expect(activeIndexOf(inst)).toBe(1);
+    inst.dispose();
+  });
+
+  it("a steer past an 'input' hold releases it; steering back re-arms it", () => {
+    const held = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, advance: 'input' },
+        { key: 'b', scene: SCENE, duration: 3000 },
+        { key: 'c', scene: SCENE, duration: 4000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(held));
+    inst.renderFrame!(9000, 1);
+    expect(activeIndexOf(inst)).toBe(0); // held on a, waiting for the presenter
+
+    steerTo(inst, 1); // click
+    expect(activeIndexOf(inst)).toBe(1);
+    inst.renderFrame!(9000 + 3000, 1); // b ran its 3000 ms → c on the timer
+    expect(activeIndexOf(inst)).toBe(2);
+
+    steerTo(inst, 0); // back to the first slide: its hold is armed again
+    inst.renderFrame!(12000 + 9000, 1);
     expect(activeIndexOf(inst)).toBe(0);
     inst.dispose();
   });
 });
 
-describe('resolveSegment — advance is validated but inert', () => {
-  it("advance: 'input' does not hold the segment past its duration", () => {
-    const s = seq({
+describe("resolveSegment — advance: 'input' holds until released", () => {
+  const withInput = () =>
+    seq({
       segments: [
         { key: 'a', scene: SCENE, duration: 5000, advance: 'input' },
         { key: 'b', scene: SCENE, duration: 3000 },
       ],
     });
-    expect(validateSequence(s).valid).toBe(true);
 
-    // Wanted (a deck): hold on 'a' until an input event arrives.
-    // Actual: the timer advances regardless — `advance` reaches no runtime.
-    expect(resolveSegment(s, 6000).index).toBe(1);
+  it("advance: 'input' holds the segment past its duration", () => {
+    const s = withInput();
+    expect(validateSequence(s).valid).toBe(true);
+    const r = resolveSegment(s, 6000);
+    expect(r.index).toBe(0);
+    expect(r.held).toBe(true);
+    // The held scene keeps animating — its clock is not frozen at `duration`.
+    expect(r.localT).toBe(6000);
   });
 
-  it("advance: 'input' on the final durationless segment is indistinguishable from omitting it", () => {
+  it('is not held while still inside its duration', () => {
+    expect(resolveSegment(withInput(), 2500)).toEqual({ index: 0, localT: 2500, startT: 0 });
+  });
+
+  it('a release below the segment lets the timer through', () => {
+    const r = resolveSegment(withInput(), 6000, { releasedBelow: 1 });
+    expect(r).toEqual({ index: 1, localT: 1000, startT: 5000 });
+  });
+
+  it("'auto' and 'either' advance on the timer", () => {
+    for (const advance of ['auto', 'either'] as const) {
+      const s = seq({
+        segments: [
+          { key: 'a', scene: SCENE, duration: 5000, advance },
+          { key: 'b', scene: SCENE, duration: 3000 },
+        ],
+      });
+      expect(resolveSegment(s, 6000)).toEqual({ index: 1, localT: 1000, startT: 5000 });
+    }
+  });
+
+  it("an 'input' hold in a loop blocks the wrap, and a fresh lap re-arms every hold", () => {
+    const s = seq({
+      loop: true,
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 },
+        { key: 'b', scene: SCENE, duration: 3000, advance: 'input' },
+      ],
+    });
+    // Unreleased: the lap cannot complete; b holds.
+    expect(resolveSegment(s, 9000)).toMatchObject({ index: 1, held: true, localT: 4000 });
+    // Released (the presenter clicked past b): the timeline wraps, and on
+    // the new lap b is armed again.
+    expect(resolveSegment(s, 9000, { releasedBelow: 2 })).toEqual({ index: 0, localT: 1000, startT: 0 });
+    // Lap 3 (T ≥ 2×totalTimed): modulo, not one-lap subtract. 17000 % 8000 = 1000.
+    expect(resolveSegment(s, 17000, { releasedBelow: 2 })).toEqual({ index: 0, localT: 1000, startT: 0 });
+    // Fresh lap re-arms holds. 8500 is 500 ms into lap 2, still before b's hold.
+    expect(resolveSegment(s, 8500, { releasedBelow: 0 })).toMatchObject({ index: 1, held: true, localT: 3500 });
+  });
+
+  it("advance: 'input' on the final durationless segment changes nothing — it already holds", () => {
     const withAdvance = seq({
       segments: [
         { key: 'a', scene: SCENE, duration: 5000 },
@@ -806,5 +897,15 @@ describe('resolveSegment — advance is validated but inert', () => {
       ],
     });
     expect(resolveSegment(withAdvance, 9000)).toEqual(resolveSegment(without, 9000));
+  });
+});
+
+describe('segmentStart', () => {
+  it('is the prefix sum of the durations before the segment', () => {
+    const s = seq();
+    expect(segmentStart(s, 0)).toBe(0);
+    expect(segmentStart(s, 1)).toBe(5000);
+    expect(segmentStart(s, 2)).toBe(8000);
+    expect(segmentStart(s, 99)).toBe(8000); // clamped to the last segment
   });
 });
