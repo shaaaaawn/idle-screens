@@ -82,15 +82,23 @@ export const METAQUARIUM_PARAMS = {
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
   /** How the fish move. `loop` is exactly the pre-style behaviour, so the
    *  default changes nothing. A small named set on purpose: a silhouette of
-   *  movement you can name is one you can choose from. */
-  swimStyle: { type: 'enum', default: 'loop', options: [...SWIM_STYLE_NAMES], ease: 'step' },
+   *  movement you can name is one you can choose from. `auto` lets each
+   *  untagged fishMix token swim the way its breed does (seahorse hover,
+   *  turtle skim the surface, angelfish school, betafish drift); a token's
+   *  `@style` still wins. The relationship styles — `follow`, `pair`,
+   *  `chase` — bond a fish to the nearest preceding unbonded fish in the mix
+   *  (`seaturtle:1, 257:3@follow` is a turtle with an escort). */
+  swimStyle: { type: 'enum', default: 'loop', options: [...SWIM_STYLE_NAMES, 'auto'], ease: 'step' },
   /** The shape a fish's loop is drawn on. `wander` is the original roaming
    *  itinerary, so the default changes nothing. `orbit` laps, `eight` crosses
-   *  the middle, `helix` tours the water column, `canyon` sweeps low — same
-   *  spline engine, different itinerary. */
+   *  the middle, `helix` tours the water column, `canyon` sweeps low,
+   *  `crossing` is a camera-relative parade lane (across the frame in front,
+   *  back the other way behind; laid against cameraAzimuth when chosen) —
+   *  same spline engine, different itinerary. */
   pathShape: { type: 'enum', default: 'wander', options: [...PATH_SHAPES], ease: 'step' },
   /** How a `school` holds together: the original lattice, single file, a
-   *  carousel ring, the migratory V, or a bait-ball. Ignored by every
+   *  carousel ring, the migratory V, a bait-ball, or the ring tilted into a
+   *  `wheel` that reads from a side camera. Ignored by every
    *  non-formation style; the same no-pair-inside-a-body-length law holds
    *  for all of them. */
   formationShape: { type: 'enum', default: 'phalanx', options: [...FORMATION_SHAPES], ease: 'step' },
@@ -120,6 +128,17 @@ export const METAQUARIUM_PARAMS = {
    *  differently because a dependency was bumped. 0.3–0.4 is the recommended
    *  value for a clip-less cast — the studio swim variants all set it. */
   bodyWiggle: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Light-seeking: free-swimming fish are drawn toward the room's light
+   *  shafts, each fish to its own pool. 0 (default) leaves every route
+   *  where it was; 1 pulls a fish most of the way into its shaft, so the
+   *  cast gathers in the light and a `rayStrength` dial becomes a staging
+   *  dial too. Needs a room with rays; formations are steered by their
+   *  carrier and ignore it. */
+  lightSeek: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Formation breathing: the school relaxes outward and draws back in on a
+   *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
+   *  to a fifth. Only ever expands, so the spacing guarantee holds. */
+  formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish

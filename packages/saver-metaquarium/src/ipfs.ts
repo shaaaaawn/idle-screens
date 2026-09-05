@@ -68,6 +68,9 @@ import type { Breed } from './farm';
 
 export interface FishMixEntry {
   id: number;
+  /** Catalog breed, so the tank can pick a species-aware style under
+   *  `swimStyle: 'auto'` without re-resolving the id. */
+  breed: string;
   url: string;
   count: number;
   /** Per-token swim style (`id[:count]@style`, MQ30). Absent = the scene's
@@ -79,6 +82,7 @@ export interface FishMixEntry {
 /** One spawn slot: the URL to load and, if the token said so, how it swims. */
 export interface FishSlot {
   url: string;
+  breed: string;
   style?: SwimStyle;
 }
 
@@ -243,12 +247,12 @@ export function parseFishMix(
     // Minted individuals are unique per scene; everything else (custom
     // catalogs, NPC species) keeps plain count semantics.
     if (!unique || fish.id > TOTAL_SUPPLY) {
-      entries.push({ id: fish.id, url, count, ...(style ? { style } : {}) });
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}) });
       continue;
     }
     const breed = breedOf(fish.id);
     if (!breed) {
-      entries.push({ id: fish.id, url, count, ...(style ? { style } : {}) });
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}) });
       continue;
     }
     // Breed aliases spread across the whole range for variety; numeric ids
@@ -275,7 +279,7 @@ export function parseFishMix(
         problems.push(`fish ${got}: no asset URL`);
         continue;
       }
-      entries.push({ id: got, url: gotUrl, count: 1, ...(style ? { style } : {}) });
+      entries.push({ id: got, breed: fish.breed, url: gotUrl, count: 1, ...(style ? { style } : {}) });
     }
   }
   return { entries, problems };
@@ -295,7 +299,7 @@ export function expandFishMixSlots(entries: FishMixEntry[], cap: number): FishSl
   const slots: FishSlot[] = [];
   for (const e of entries) {
     for (let i = 0; i < e.count && slots.length < cap; i++) {
-      slots.push(e.style ? { url: e.url, style: e.style } : { url: e.url });
+      slots.push(e.style ? { url: e.url, breed: e.breed, style: e.style } : { url: e.url, breed: e.breed });
     }
   }
   return slots;

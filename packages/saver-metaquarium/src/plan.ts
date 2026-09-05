@@ -85,13 +85,53 @@ function splineAt(points: SwimPlan['points'], g: number): [number, number, numbe
  * - `eight`  — a lissajous figure-eight crossing the tank's middle
  * - `helix`  — climbing-then-diving spiral column, the water-column tour
  * - `canyon` — long low sweeps hugging one axis, back and forth near the floor
+ * - `crossing` — a camera-relative parade lane: across the frame in front,
+ *                back the other way behind (MQ35)
  */
-export type PathShape = 'wander' | 'orbit' | 'eight' | 'helix' | 'canyon';
-export const PATH_SHAPES: readonly PathShape[] = ['wander', 'orbit', 'eight', 'helix', 'canyon'];
+export type PathShape = 'wander' | 'orbit' | 'eight' | 'helix' | 'canyon' | 'crossing';
+export const PATH_SHAPES: readonly PathShape[] = ['wander', 'orbit', 'eight', 'helix', 'canyon', 'crossing'];
 
-function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds): SwimPlan['points'] {
+/** Extra inputs a shape may read. `crossing` needs to know where the camera
+ *  is; every other shape ignores this. */
+export interface PlanOpts {
+  /** Camera azimuth in degrees, the tank's convention (camera sits at
+   *  `(sin az, ·, cos az)·distance`, looking at the centre). */
+  cameraAzimuthDeg?: number;
+}
+
+function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds, opts: PlanOpts = {}): SwimPlan['points'] {
   const points: SwimPlan['points'] = [];
   const ySpan = bounds.yMax - bounds.yMin;
+  if (shape === 'crossing') {
+    // The parade that used to be an orbit hack. The lane runs along the
+    // camera's screen-right axis at mid depth; the return leg is the far
+    // side of a flat ellipse, so fish cross the frame one way in front and
+    // come back the other way behind — a procession, not a carousel. Laid
+    // relative to the azimuth at compile time (plans are compiled when the
+    // shape is chosen), which is the still-camera case a parade is for.
+    const n = 16;
+    const az = ((opts.cameraAzimuthDeg ?? 0) * Math.PI) / 180;
+    // Screen-right for a camera at (sin az, cos az): (cos az, -sin az).
+    const rx = Math.cos(az), rz = -Math.sin(az);
+    // Toward the camera: (sin az, cos az).
+    const dx = Math.sin(az), dz = Math.cos(az);
+    const len = bounds.radius * 0.9;
+    const depth = bounds.radius * rng.range(0.18, 0.3);
+    const y0 = bounds.yMin + ySpan * rng.range(0.35, 0.6);
+    const lift = ySpan * rng.range(0.04, 0.1);
+    for (let i = 0; i < n; i++) {
+      const u = (i / n) * Math.PI * 2;
+      const along = Math.sin(u) * len;
+      const toward = Math.cos(u) * depth;
+      points.push([
+        rx * along + dx * toward,
+        // The far leg rides a little higher so it never hides behind the near one.
+        y0 + (toward < 0 ? lift : 0) + ySpan * rng.range(0, 0.04),
+        rz * along + dz * toward,
+      ]);
+    }
+    return points;
+  }
   if (shape === 'orbit') {
     // A near-circle with gentle radius/height breathing — reads as a patrol
     // lap, not a mechanical ring.
@@ -187,8 +227,8 @@ function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds): SwimPla
  * changes) so the loop reads as purposeful wandering, never a circle; other
  * shapes swap the waypoints and keep everything else.
  */
-export function compileSwimPlan(rng: Rng, bounds: TankBounds, shape: PathShape = 'wander'): SwimPlan {
-  const points = shapeWaypoints(shape, rng, bounds);
+export function compileSwimPlan(rng: Rng, bounds: TankBounds, shape: PathShape = 'wander', opts: PlanOpts = {}): SwimPlan {
+  const points = shapeWaypoints(shape, rng, bounds, opts);
   const n = points.length;
 
   // Arc-length table over the closed loop.

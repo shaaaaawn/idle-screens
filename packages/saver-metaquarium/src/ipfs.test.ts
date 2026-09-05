@@ -113,19 +113,19 @@ describe('parseFishMix', () => {
     ];
     const unstyled = parseFishMix('reef@night:2', catalog);
     expect(unstyled.problems).toEqual([]);
-    expect(unstyled.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2 }]);
+    expect(unstyled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
 
     const styled = parseFishMix('reef@night:2@hover', catalog);
     expect(styled.problems).toEqual([]);
-    expect(styled.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2, style: 'hover' }]);
+    expect(styled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2, style: 'hover' }]);
 
     const typo = parseFishMix('reef@night:2@zoom', catalog);
-    expect(typo.entries).toEqual([{ id: 9, url: '/reef.glb', count: 2 }]);
+    expect(typo.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
     expect(typo.problems[0]).toContain('unknown style "zoom"');
 
     const collidingAlias = parseFishMix('reef@hover', catalog);
     expect(collidingAlias.problems).toEqual([]);
-    expect(collidingAlias.entries).toEqual([{ id: 10, url: '/hover.glb', count: 1 }]);
+    expect(collidingAlias.entries).toEqual([{ id: 10, breed: 'reef@hover', url: '/hover.glb', count: 1 }]);
   });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });
