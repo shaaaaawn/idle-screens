@@ -1,0 +1,292 @@
+/**
+ * Layer cohesion — does a layer read as ONE form, or as N separate marks?
+ *
+ * The gap this closes: every other perception channel reports a heavily
+ * overlapping layer identically whether its sprites merge into a silhouette or
+ * stay legible as individual discs. Luminance, coverage, dominance and the
+ * braille map are all blind to it, because they measure ink, not edges. An
+ * agent drawing a *shape* out of sprites therefore cannot tell success from
+ * failure without publishing and looking at real pixels.
+ *
+ * Two independent facts decide it, so both are reported:
+ *
+ * - `overlap` — geometry. What fraction of a typical entity's outline is buried
+ *   inside a sibling. Scattered fields sit near 0; a deliberate mass sits high.
+ * - `seamless` — paint. Whether an overlap between two of this layer's entities
+ *   paints as an invisible join. Only a hard-edged, fully opaque, single-colour,
+ *   un-blended layer merges; anything else shows every internal edge.
+ *
+ * Both are analytic, deterministic and renderer-free, like the rest of
+ * `perceive.ts`.
+ */
+
+import { polygonPoints } from './shapes';
+import { positionAt, rotationAt, sizeAt, type Entity } from './simulate';
+import type { LayerSpec } from './types';
+
+/**
+ * Above this mean covered-outline fraction a layer is treated as *trying* to be
+ * one form rather than a field of marks.
+ *
+ * Calibrated against the shipped examples rather than picked. Measured across
+ * all 42 fillable layers in `src/examples/`, the particle fields top out at
+ * 0.153 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
+ * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.079), while
+ * a layer authored as a silhouette — circles packed several times over their
+ * own area, the idiom that draws a wave or a mountain — measures 0.79 to 0.85.
+ * `aurora`'s wander curtains are the one shipped layer in the upper band, at
+ * 0.891, and they are a deliberate overlapping wash. Nothing sits between
+ * 0.153 and 0.786, so the exact threshold is not delicate.
+ */
+const MERGE_FLOOR = 0.35;
+
+/**
+ * Below this base opacity a heavily overlapping layer is an atmospheric wash by
+ * intent — the playbook's own advice is a field of soft circles at alpha ~0.2 —
+ * and its visible internal edges are the effect, not a defect. The advisory
+ * stays silent there; the numbers are still reported.
+ */
+const WASH_ALPHA_MAX = 0.45;
+
+/**
+ * Sample time for a spec-level cohesion read, matching `perceiveScene`'s own
+ * default so the advisory and the reported numbers agree on the usual call.
+ * Past all typical `life.enter` staging; `grow` has had time to breathe.
+ */
+export const COHESION_T = 5000;
+
+/** Outline samples per entity. 24 resolves a half-covered circle to ~4 %. */
+const OUTLINE_SAMPLES = 24;
+
+/**
+ * Cap on the entities whose outlines are traced. Above this the measured set is
+ * a deterministic stride through the layer (every k-th entity); coverage is
+ * still tested against *every* sibling, so the estimate stays unbiased.
+ */
+const MAX_TRACED = 240;
+
+/** What a layer will read as on the wall. */
+export type CohesionRead =
+  /** Entities merge into a single silhouette — the layer draws a shape. */
+  | 'mass'
+  /** Entities overlap heavily but every overlap paints a visible edge. */
+  | 'seamed'
+  /** Entities stand alone — a field of marks, which most layers are. */
+  | 'marks';
+
+export interface LayerCohesion {
+  layerIndex: number;
+  key: string | undefined;
+  /**
+   * Mean fraction of an entity's outline covered by a same-layer sibling, 0..1.
+   * `null` for sprite kinds where a merged silhouette is not a meaningful idea
+   * (lines, glyphs and text: ring, streak, stroke, bar, emoji, text, textBlock).
+   */
+  overlap: number | null;
+  /** Do this layer's overlaps paint as invisible joins? */
+  seamless: boolean;
+  /** Why not, when not — the field to act on. `null` when seamless. */
+  seamCause: string | null;
+  /** The verdict. `null` when `overlap` is null. */
+  reads: CohesionRead | null;
+}
+
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+
+interface Shape {
+  cx: number;
+  cy: number;
+  /** Bounding radius, for the pairwise prefilter. */
+  br: number;
+  contains(x: number, y: number): boolean;
+  outline(n: number): Array<{ x: number; y: number }>;
+}
+
+function circleShape(cx: number, cy: number, r: number): Shape {
+  return {
+    cx, cy, br: r,
+    contains: (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < r * r,
+    outline: (n) => Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2;
+      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+    }),
+  };
+}
+
+function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: number): Shape {
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const toLocal = (x: number, y: number) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return { lx: dx * cos + dy * sin, ly: -dx * sin + dy * cos };
+  };
+  return {
+    cx, cy, br: Math.hypot(halfW, halfH),
+    contains: (x, y) => {
+      const { lx, ly } = toLocal(x, y);
+      return Math.abs(lx) < halfW && Math.abs(ly) < halfH;
+    },
+    outline: (n) => Array.from({ length: n }, (_, i) => {
+      // Walk the perimeter at constant parameter, not constant arc length —
+      // enough for a fraction, and it never favours one side.
+      const u = (i / n) * 4;
+      const side = Math.floor(u);
+      const f = u - side;
+      const lx = side === 0 ? -halfW + 2 * halfW * f : side === 1 ? halfW : side === 2 ? halfW - 2 * halfW * f : -halfW;
+      const ly = side === 0 ? -halfH : side === 1 ? -halfH + 2 * halfH * f : side === 2 ? halfH : halfH - 2 * halfH * f;
+      return { x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos };
+    }),
+  };
+}
+
+function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape {
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const abs = pts.map((p) => ({ x: cx + p.x * cos - p.y * sin, y: cy + p.x * sin + p.y * cos }));
+  let br = 0;
+  for (const p of abs) br = Math.max(br, Math.hypot(p.x - cx, p.y - cy));
+  return {
+    cx, cy, br,
+    contains: (x, y) => {
+      let inside = false;
+      for (let i = 0, j = abs.length - 1; i < abs.length; j = i++) {
+        const a = abs[i]!;
+        const b = abs[j]!;
+        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+      }
+      return inside;
+    },
+    outline: (n) => Array.from({ length: n }, (_, i) => {
+      const u = (i / n) * abs.length;
+      const k = Math.floor(u);
+      const f = u - k;
+      const a = abs[k % abs.length]!;
+      const b = abs[(k + 1) % abs.length]!;
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+    }),
+  };
+}
+
+/** The shape an entity paints at `t`, or null for kinds with no fillable area. */
+function shapeOf(layer: LayerSpec, e: Entity, t: number, w: number, h: number): Shape | null {
+  const s = layer.sprite;
+  if (s.kind !== 'circle' && s.kind !== 'rect' && s.kind !== 'polygon') return null;
+  const p = positionAt(e, t, w, h);
+  const sz = sizeAt(e, t);
+  if (!(sz > 0)) return null;
+  if (s.kind === 'circle') return circleShape(p.x, p.y, sz / 2);
+  const rot = rotationAt(e, t);
+  if (s.kind === 'rect') {
+    const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
+    return rectShape(p.x, p.y, sz / 2, h2 / 2, rot);
+  }
+  return polygonShape(p.x, p.y, polygonPoints(s, sz / 2), rot);
+}
+
+// ---------------------------------------------------------------------------
+// Paint: will an overlap show?
+// ---------------------------------------------------------------------------
+
+/**
+ * Why this layer's overlaps paint a visible edge, or null when they vanish.
+ *
+ * Opacity is judged over the whole timeline, not this instant: a layer that
+ * breathes with `pulse` is translucent at some point in every cycle, so its
+ * seams appear even if the sampled frame happens to catch it at full alpha.
+ */
+export function seamCauseOf(layer: LayerSpec): string | null {
+  const s = layer.sprite;
+  if ((s.kind === 'circle' || s.kind === 'polygon') && s.soft) {
+    return 'sprite.soft — radial falloff never forms a hard union';
+  }
+  if (s.kind === 'rect' && s.feather) {
+    return 'rect.feather — a feathered edge never forms a hard union';
+  }
+  if (layer.blend) {
+    return `blend: ${layer.blend} — overlaps composite instead of covering`;
+  }
+  const [lo, hi] = layer.alpha ?? [1, 1];
+  if (lo < 1 || hi < 1) {
+    return `alpha ${lo === hi ? lo : `${lo}..${hi}`} — every overlap paints a darker patch`;
+  }
+  if (layer.pulse && layer.pulse.amp > 0) {
+    return 'pulse — the layer is translucent for part of every cycle';
+  }
+  const colours = 'colors' in s && Array.isArray(s.colors) ? new Set(s.colors) : null;
+  if (colours && colours.size > 1) {
+    return `sprite.colors has ${colours.size} colours — neighbours of unlike colour show their join`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-layer cohesion for an already-built scene. Takes entities rather than a
+ * spec so `perceiveScene` and `adviseSpec` can each pass the scene they already
+ * built instead of building a third one.
+ */
+export function cohesionOf(
+  layers: Array<{ layer: LayerSpec; entities: Entity[] }>,
+  t: number,
+  w: number,
+  h: number,
+): LayerCohesion[] {
+  return layers.map(({ layer, entities }, layerIndex) => {
+    const seamCause = seamCauseOf(layer);
+    const base: Omit<LayerCohesion, 'overlap' | 'reads'> = {
+      layerIndex,
+      key: layer.key,
+      seamless: seamCause === null,
+      seamCause,
+    };
+
+    const shapes: Array<Shape | null> = entities.map((e) => shapeOf(layer, e, t, w, h));
+    const solid = shapes.filter((x): x is Shape => x !== null);
+    // A single entity has no sibling to merge with, and unsupported kinds have
+    // no fillable outline — in both cases the question does not apply.
+    if (solid.length < 2) return { ...base, overlap: null, reads: null };
+
+    const stride = Math.max(1, Math.ceil(solid.length / MAX_TRACED));
+    let covered = 0;
+    let traced = 0;
+    for (let i = 0; i < solid.length; i += stride) {
+      const self = solid[i]!;
+      const pts = self.outline(OUTLINE_SAMPLES);
+      let hit = 0;
+      for (const p of pts) {
+        for (let j = 0; j < solid.length; j++) {
+          if (j === i) continue;
+          const other = solid[j]!;
+          const dx = p.x - other.cx;
+          const dy = p.y - other.cy;
+          if (dx * dx + dy * dy > other.br * other.br) continue; // cheap reject
+          if (other.contains(p.x, p.y)) { hit++; break; }
+        }
+      }
+      covered += hit / pts.length;
+      traced++;
+    }
+
+    const overlap = Number((covered / traced).toFixed(4));
+    const reads: CohesionRead = overlap < MERGE_FLOOR ? 'marks' : seamCause === null ? 'mass' : 'seamed';
+    return { ...base, overlap, reads };
+  });
+}
+
+/**
+ * True when a `seamed` layer is worth warning about: dense enough to be
+ * deliberate, and opaque enough that it cannot be an atmospheric wash. Keeps
+ * the advisory off the soft low-alpha glow fields the playbook recommends.
+ */
+export function seamsWorthWarning(layer: LayerSpec, c: LayerCohesion, entityCount: number): boolean {
+  if (c.reads !== 'seamed' || entityCount < 6) return false;
+  const [lo, hi] = layer.alpha ?? [1, 1];
+  if ((lo + hi) / 2 < WASH_ALPHA_MAX) return false;
+  return layer.blend !== 'lighter' && layer.blend !== 'screen';
+}

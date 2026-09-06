@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
@@ -44,6 +45,14 @@ export function adviseSpec(
   const bgLuma = backgroundLuma(spec);
   const bgRgb = backgroundRgb(spec);
 
+  // Do overlapping layers actually merge? Computed once from the entities we
+  // already built; the advisory below fires only on the case where the author
+  // clearly wanted one shape and the paint settings defeat it.
+  const cohesion = cohesionOf(
+    spec.layers.map((layer, i) => ({ layer, entities: allEntities[i]! })),
+    COHESION_T, w, h,
+  );
+
   let totalEntities = 0;
   let textLayerCount = 0;
   let motionLayerCount = 0;
@@ -57,6 +66,18 @@ export function adviseSpec(
     const isStaticText = isText && layer.motion.type === 'static';
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
+
+    const coh = cohesion[li]!;
+    if (seamsWorthWarning(layer, coh, entities.length)) {
+      warnings.push({
+        path: `layers[${li}]`,
+        code: 'overlap-seams',
+        message:
+          `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
+          + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
+          + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
+      });
+    }
 
     if (layer.trail && layer.motion.type === 'static') {
       warnings.push({

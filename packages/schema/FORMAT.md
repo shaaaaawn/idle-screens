@@ -246,6 +246,17 @@ with distance, removing pop-in at the cutoff.
 `colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
 (relative weights, same length — "mostly cool tones, occasional ember").
 
+**Drawing a shape out of sprites.** Overlapping sprites merge into one seamless
+silhouette under exactly one set of conditions: a single flat colour, `alpha`
+of `[1, 1]`, no `blend`, no `pulse`, and hard edges (no `soft`, no
+`rect.feather`). Anything else leaves every overlap visible as an internal edge,
+so the layer reads as a pile of sprites rather than a form — `soft` in
+particular reads as smoke, not mass. Depth then comes from *layer order* and a
+different flat colour per layer, painting back to front, and a later layer can
+be used to cut a clean edge across an earlier one. `layerCohesion` measures
+which of the two you got; `overlap-seams` warns when you asked for the first
+and configured the second.
+
 ### `motion` (one of)
 
 - `{ "type": "drift", "speed": [0.02, 0.06], "angle": 0, "bidirectional": true, "bob": 0.004 }`
@@ -359,6 +370,17 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
+- `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
+  The luminance maps measure ink, not edges, so a layer whose sprites merged
+  into a silhouette and one that stayed a pile of discs are identical in every
+  other channel. Two independent facts, both reported (also on
+  `perceiveScene().form`): `overlap` is geometry — the mean fraction of an
+  entity's outline buried inside a sibling (shipped particle fields measure
+  ≤ 0.153; a packed silhouette measures 0.79–0.85; `null` for lines, glyphs and
+  text, where a merged silhouette is not a meaningful idea). `seamless` is
+  paint — whether those overlaps vanish or draw an internal edge, with
+  `seamCause` naming the field to change. `reads` combines them into `mass`,
+  `seamed` or `marks`.
 - `textSprites(spec, opts)` — the literal strings and rendered sizes of every
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
@@ -371,6 +393,11 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   textBlock line-breaker uses, so they are estimates of the renderer's own
   layout — a caption that fails these will look wrong on the wall; one that
   passes may still sit a few px off.
+  `overlap-seams` catches the trap the other channels are blind to: a layer
+  whose entities bury each other (so it was drawn as one shape) but whose paint
+  settings make every overlap visible. It is gated to stay off deliberate
+  washes — it needs at least 6 entities and a mean base alpha of 0.45, and
+  never fires under `blend: lighter` / `screen`. No shipped example trips it.
   The two density advisories read the spec's declared `density` first:
   `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
   under `"dense"`, and `density-mismatch` fires instead when the measured

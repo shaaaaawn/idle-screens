@@ -15,6 +15,7 @@
  */
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
+import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 import {
@@ -843,6 +844,17 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
 // Motion stats
 // ---------------------------------------------------------------------------
 
+/**
+ * Does each layer read as one merged form or as separate marks? The one thing
+ * the luminance maps cannot answer — they measure ink, not edges, so a layer
+ * that merged into a silhouette and one that stayed a pile of discs look
+ * identical in every other channel. See `cohesion.ts`.
+ */
+export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  const scene = buildScene(spec, opts);
+  return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
+}
+
 export interface LayerMotionStats {
   layerIndex: number;
   key: string | undefined;
@@ -983,6 +995,8 @@ export interface ScenePerception {
   colProfile: number[];
   dominance: DominanceEntry[];
   motion: LayerMotionStats[];
+  /** Per layer: merged silhouette, seamed overlap, or separate marks. */
+  form: LayerCohesion[];
   /** Literal strings + sizes of any text layers (glyphs don't show in the maps). */
   text: TextSpriteInfo[];
   advisories: ReturnType<typeof adviseSpec>;
@@ -1007,6 +1021,7 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
     motion: motionStats(spec, opts),
+    form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
     advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }),
   };
