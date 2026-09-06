@@ -185,6 +185,47 @@ describe('layer cohesion', () => {
     expect(late.advisories.filter((wn) => wn.code === 'overlap-seams')).toHaveLength(0);
   });
 
+  // --- review round two -------------------------------------------------
+
+  it('insets along the edge normal, so a concave shape with its centre in the notch still merges', () => {
+    // An arch: a filled block with a notch cut out of the bottom middle. The
+    // entity centre (0, 0) sits IN the notch, outside the filled area, so a
+    // centre-directed inset would push samples out of the shape entirely.
+    const arch: Array<[number, number]> = [
+      [-1, -1], [-0.5, -1], [-0.5, 0.3], [0.5, 0.3],
+      [0.5, -1], [1, -1], [1, 1], [-1, 1],
+    ];
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'arches', label: 'arches', seed: 4,
+      layers: [{
+        count: 3,
+        sprite: { kind: 'polygon', radius: [0.12, 0.12], color: '#16325a', points: arch },
+        motion: { type: 'static' },
+        region: { x: [0.5, 0.5], y: [0.5, 0.5] },
+        alpha: [1, 1],
+      }],
+    };
+    const c = layerCohesion(spec)[0]!;
+    expect(c.overlap).toBe(1);
+    expect(c.reads).toBe('mass');
+  });
+
+  it('form and its advisory count the same entities above the reference viewport', () => {
+    // countScale > 1 scales the layer past LIMITS.maxTotal; buildScene clamps
+    // it and adviseSpec now clamps identically, so the two cannot disagree.
+    const spec = packed({
+      sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' },
+      alpha: [0.84, 0.96],
+    });
+    spec.layers[0]!.count = 300;
+    spec.layers.push({ ...spec.layers[0]!, key: 'filler' } as LayerSpec);
+    const viewport = { width: 3840, height: 2160 };
+    const p = perceiveSceneSync(spec, { viewport });
+    const seamed = p.form.filter((f) => f.reads === 'seamed').map((f) => f.layerIndex);
+    const warned = p.advisories.filter((wn) => wn.code === 'overlap-seams').map((wn) => Number(wn.path.match(/\d+/)![0]));
+    expect(warned).toEqual(seamed);
+  });
+
   it('rides along in the perception bundle', async () => {
     const { perceiveScene } = await import('./perceive');
     const spec = packed({ sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' }, alpha: [1, 1] });

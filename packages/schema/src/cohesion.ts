@@ -105,42 +105,21 @@ interface Shape {
 }
 
 /**
- * `n` points spread along a closed path by ARC LENGTH, not by vertex index.
- * A long skinny rectangle has two edges carrying most of its perimeter; giving
- * every edge the same share of samples would report a fully-buried long side as
- * only a quarter covered.
- */
-function sampleClosedPath(v: Array<{ x: number; y: number }>, n: number): Array<{ x: number; y: number }> {
-  const seg = v.map((p, i) => {
-    const q = v[(i + 1) % v.length]!;
-    return Math.hypot(q.x - p.x, q.y - p.y);
-  });
-  const total = seg.reduce((a, b) => a + b, 0);
-  if (!(total > 0)) return v.slice(0, n);
-  const out: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < n; i++) {
-    let d = (i / n) * total;
-    let k = 0;
-    while (k < seg.length - 1 && d > seg[k]!) { d -= seg[k]!; k++; }
-    const p = v[k]!;
-    const q = v[(k + 1) % v.length]!;
-    const f = seg[k]! > 0 ? d / seg[k]! : 0;
-    out.push({ x: p.x + (q.x - p.x) * f, y: p.y + (q.y - p.y) * f });
-  }
-  return out;
-}
-
-/**
- * Outline samples are nudged this far toward their own shape's centre before
- * being tested, so the question asked is "is the ink just inside my edge also
- * covered?" rather than "is a point exactly on my edge inside a sibling?".
+ * Outline samples are stepped this far INSIDE their own shape, as a fraction of
+ * its bounding radius, before being tested. The question asked is then "is the
+ * ink just inside my edge also covered?" rather than "is a point exactly on my
+ * edge inside a sibling?".
  *
  * Exact-boundary tests are degenerate in both directions: coincident circles
  * sample every point exactly on the sibling's rim, and a polygon point lying on
  * a horizontal edge fails the ray-cast's `(a.y > y) !== (b.y > y)` test — two
  * flat rects sharing a y therefore reported their buried long edges as exposed.
- * Relative, so it holds at any viewport scale, and four orders of magnitude
- * below a pixel for any real sprite.
+ *
+ * The step follows the edge's inward NORMAL, not the direction of the entity
+ * centre: a concave polygon can have its centre outside its own filled area, so
+ * a centre-directed nudge would push samples across the concavity and out of
+ * the shape. Relative, so it holds at any viewport scale, and four orders of
+ * magnitude below a pixel for any real sprite.
  */
 const EDGE_INSET = 1e-4;
 
@@ -150,7 +129,8 @@ function circleShape(cx: number, cy: number, r: number): Shape {
     contains: (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < r * r,
     outline: (n) => Array.from({ length: n }, (_, i) => {
       const a = (i / n) * Math.PI * 2;
-      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+      const inner = r * (1 - EDGE_INSET); // inward normal of a circle is its radius
+      return { x: cx + inner * Math.cos(a), y: cy + inner * Math.sin(a) };
     }),
   };
 }
@@ -159,18 +139,54 @@ function circleShape(cx: number, cy: number, r: number): Shape {
 function polyShape(cx: number, cy: number, abs: Array<{ x: number; y: number }>): Shape {
   let br = 0;
   for (const p of abs) br = Math.max(br, Math.hypot(p.x - cx, p.y - cy));
+  const inside = (x: number, y: number): boolean => {
+    let hit = false;
+    for (let i = 0, j = abs.length - 1; i < abs.length; j = i++) {
+      const a = abs[i]!;
+      const b = abs[j]!;
+      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+    }
+    return hit;
+  };
+  const seg = abs.map((p, i) => {
+    const q = abs[(i + 1) % abs.length]!;
+    return Math.hypot(q.x - p.x, q.y - p.y);
+  });
+  const perimeter = seg.reduce((a, b) => a + b, 0);
+  const step = br * EDGE_INSET;
   return {
     cx, cy, br,
-    contains: (x, y) => {
-      let inside = false;
-      for (let i = 0, j = abs.length - 1; i < abs.length; j = i++) {
-        const a = abs[i]!;
-        const b = abs[j]!;
-        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    contains: inside,
+    /**
+     * `n` points spread along the perimeter by ARC LENGTH, not one share per
+     * edge — a long skinny rectangle has two edges carrying almost all of its
+     * perimeter, and an equal-per-edge split would report a fully buried long
+     * side as only a quarter covered. Each point is then stepped along its
+     * edge's inward normal, whichever of the two candidates lands inside.
+     */
+    outline: (n) => {
+      if (!(perimeter > 0)) return abs.slice(0, n);
+      const out: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i < n; i++) {
+        let d = (i / n) * perimeter;
+        let k = 0;
+        while (k < seg.length - 1 && d > seg[k]!) { d -= seg[k]!; k++; }
+        const a = abs[k]!;
+        const b = abs[(k + 1) % abs.length]!;
+        const len = seg[k]!;
+        const f = len > 0 ? d / len : 0;
+        const px = a.x + (b.x - a.x) * f;
+        const py = a.y + (b.y - a.y) * f;
+        if (len <= 0) { out.push({ x: px, y: py }); continue; }
+        const ux = (b.x - a.x) / len;
+        const uy = (b.y - a.y) / len;
+        let qx = px - uy * step;
+        let qy = py + ux * step;
+        if (!inside(qx, qy)) { qx = px + uy * step; qy = py - ux * step; }
+        out.push({ x: qx, y: qy });
       }
-      return inside;
+      return out;
     },
-    outline: (n) => sampleClosedPath(abs, n),
   };
 }
 
@@ -288,10 +304,7 @@ export function cohesionOf(
     let traced = 0;
     for (let i = 0; i < solid.length; i += stride) {
       const self = solid[i]!;
-      const pts = self.outline(OUTLINE_SAMPLES).map((p) => ({
-        x: self.cx + (p.x - self.cx) * (1 - EDGE_INSET),
-        y: self.cy + (p.y - self.cy) * (1 - EDGE_INSET),
-      }));
+      const pts = self.outline(OUTLINE_SAMPLES);
       let hit = 0;
       for (const p of pts) {
         for (let j = 0; j < solid.length; j++) {

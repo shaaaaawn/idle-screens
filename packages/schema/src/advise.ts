@@ -46,7 +46,16 @@ export function adviseSpec(
   const h = viewport.height;
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  // Mirror buildScene's maxTotal clamp: without it a dense scene above the
+  // reference viewport is advised on more entities than the renderer will
+  // build, and `perceiveScene` would pair a `form` channel counted one way
+  // with an `overlap-seams` advisory counted the other. (Part of F49, which
+  // tracks the same divergence for describeScene.)
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((sum, l) => sum + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
   const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
   const bgLuma = backgroundLuma(spec);
