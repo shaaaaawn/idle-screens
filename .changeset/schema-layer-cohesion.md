@@ -15,6 +15,6 @@ Every other channel measures ink, not edges. A layer whose circles merged into a
 
 A new `overlap-seams` advisory fires on the trap: a layer packed tightly enough to have been drawn as one shape, whose paint settings defeat it. It is gated to stay off deliberate washes — at least 6 entities, mean base alpha at or above 0.45, and never under `blend: lighter` / `screen`. **No shipped example trips it**, and a test pins that.
 
-Calibration is measured, not guessed: across all 42 fillable layers in `src/examples/`, particle fields top out at 0.167 while a packed silhouette measures 0.79 to 0.85, with nothing in between. `aurora`'s wander curtains are the one shipped layer in the upper band, at 0.892, correctly reported as `seamed` and correctly left un-warned.
+Calibration is measured, not guessed: across all 42 fillable layers in `src/examples/`, particle fields top out at 0.154 while a packed silhouette measures 0.79 to 0.85, with nothing in between. `aurora`'s wander curtains are the one shipped layer in the upper band, at 0.892, correctly reported as `seamed` and correctly left un-warned.
 
 FORMAT.md also gains the positive rule this exposes: overlapping sprites merge only at one flat colour, alpha 1, no blend, no pulse and hard edges, with depth coming from layer order instead of alpha.

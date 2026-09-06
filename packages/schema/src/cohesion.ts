@@ -30,13 +30,13 @@ import type { LayerSpec } from './types';
  *
  * Calibrated against the shipped examples rather than picked. Measured across
  * all 42 fillable layers in `src/examples/`, the particle fields top out at
- * 0.167 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
+ * 0.154 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
  * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.083), while
  * a layer authored as a silhouette — circles packed several times over their
  * own area, the idiom that draws a wave or a mountain — measures 0.79 to 0.85.
  * `aurora`'s wander curtains are the one shipped layer in the upper band, at
  * 0.892, and they are a deliberate overlapping wash. Nothing sits between
- * 0.167 and 0.786, so the exact threshold is not delicate.
+ * 0.154 and 0.786, so the exact threshold is not delicate.
  */
 const MERGE_FLOOR = 0.35;
 
@@ -136,7 +136,7 @@ function circleShape(cx: number, cy: number, r: number): Shape {
 }
 
 /** A convex or concave polygon given by absolute vertices. */
-function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>): Shape {
+function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>): Shape | null {
   // Drop consecutive coincident vertices up front. A zero-length edge has no
   // normal to step along, and leaving one in would emit a sample sitting
   // exactly on the boundary — the degeneracy EDGE_INSET exists to avoid.
@@ -144,7 +144,9 @@ function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>)
     const q = raw[(i + 1) % raw.length]!;
     return Math.hypot(q.x - p.x, q.y - p.y) > 0;
   });
-  if (abs.length < 3) return circleShape(cx, cy, 0);
+  // Fewer than three distinct vertices encloses no area — the renderer fills
+  // nothing, so there is no silhouette to ask about.
+  if (abs.length < 3) return null;
 
   let br = 0;
   for (const p of abs) br = Math.max(br, Math.hypot(p.x - cx, p.y - cy));
@@ -178,7 +180,7 @@ function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>)
      * edge's inward normal, whichever of the two candidates lands inside.
      */
     outline: (n) => {
-      if (!(perimeter > 0)) return abs.slice(0, n);
+      if (!(perimeter > 0)) return [];
       const out: Array<{ x: number; y: number }> = [];
       for (let i = 0; i < n; i++) {
         let d = (i / n) * perimeter;
@@ -195,23 +197,27 @@ function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>)
         // Back off until a candidate lands inside: a sliver thinner than even
         // the bounded step still gets the best sample available rather than
         // one outside its own shape.
-        let placed = false;
-        for (let t = step; t > 0 && !placed; t /= 8) {
-          for (const sign of [1, -1]) {
-            const qx = px - sign * uy * t;
-            const qy = py + sign * ux * t;
-            if (inside(qx, qy)) { out.push({ x: qx, y: qy }); placed = true; break; }
-          }
+        // A sample that cannot be placed strictly inside is DROPPED rather than
+        // emitted on the boundary: an exact-edge point is the degeneracy the
+        // inset exists to remove, and reporting it as exposed would be a guess.
+        // The caller measures the samples it got, so an unmeasurable sliver
+        // reports no outline instead of a wrong one.
+        for (let t = step; t > 0; t /= 8) {
+          const qx1 = px - uy * t;
+          const qy1 = py + ux * t;
+          if (inside(qx1, qy1)) { out.push({ x: qx1, y: qy1 }); break; }
+          const qx2 = px + uy * t;
+          const qy2 = py - ux * t;
+          if (inside(qx2, qy2)) { out.push({ x: qx2, y: qy2 }); break; }
           if (t < step * 1e-3) break;
         }
-        if (!placed) out.push({ x: px, y: py });
       }
       return out;
     },
   };
 }
 
-function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: number): Shape {
+function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: number): Shape | null {
   const cos = Math.cos(rot);
   const sin = Math.sin(rot);
   const corner = (lx: number, ly: number) => ({ x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos });
@@ -220,7 +226,7 @@ function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: nu
   ]);
 }
 
-function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape {
+function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape | null {
   const cos = Math.cos(rot);
   const sin = Math.sin(rot);
   return polyShape(cx, cy, pts.map((p) => ({ x: cx + p.x * cos - p.y * sin, y: cy + p.x * sin + p.y * cos })));
@@ -315,7 +321,7 @@ export function cohesionOf(
     if (lifeAlphaAt(layer.life, t) <= 0) return { ...base, overlap: null, reads: null };
 
     const shapes: Array<Shape | null> = entities.map((e) => shapeOf(layer, e, t, w, h));
-    const solid = shapes.filter((x): x is Shape => x !== null);
+    const solid = shapes.filter((x): x is Shape => x !== null && x.br > 0);
     // A single entity has no sibling to merge with, and unsupported kinds have
     // no fillable outline — in both cases the question does not apply.
     if (solid.length < 2) return { ...base, overlap: null, reads: null };
@@ -326,6 +332,7 @@ export function cohesionOf(
     for (let i = 0; i < solid.length; i += stride) {
       const self = solid[i]!;
       const pts = self.outline(OUTLINE_SAMPLES);
+      if (pts.length === 0) continue; // no measurable outline; not 'exposed'
       let hit = 0;
       for (const p of pts) {
         for (let j = 0; j < solid.length; j++) {
@@ -341,6 +348,7 @@ export function cohesionOf(
       traced++;
     }
 
+    if (traced === 0) return { ...base, overlap: null, reads: null };
     const overlap = Number((covered / traced).toFixed(4));
     const reads: CohesionRead = overlap < MERGE_FLOOR ? 'marks' : seamCause === null ? 'mass' : 'seamed';
     return { ...base, overlap, reads };

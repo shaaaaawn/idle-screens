@@ -257,6 +257,26 @@ describe('layer cohesion', () => {
     expect(p.advisories.filter((wn) => wn.code === 'overlap-seams')).toHaveLength(0);
   });
 
+  it('a polygon with no enclosed area has no silhouette to report', () => {
+    // Three vertices that collapse to a single distinct point: the renderer
+    // fills nothing, so the answer is null rather than "uncovered marks".
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'degenerate', label: 'degenerate', seed: 8,
+      layers: [{
+        count: 4,
+        sprite: {
+          kind: 'polygon', radius: [0.1, 0.1], color: '#16325a',
+          points: [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]] as Array<[number, number]>,
+        },
+        motion: { type: 'static' },
+        alpha: [1, 1],
+      }],
+    };
+    const c = layerCohesion(spec)[0]!;
+    expect(c.overlap).toBeNull();
+    expect(c.reads).toBeNull();
+  });
+
   it('rides along in the perception bundle', async () => {
     const { perceiveScene } = await import('./perceive');
     const spec = packed({ sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' }, alpha: [1, 1] });
