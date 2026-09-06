@@ -20,7 +20,7 @@
  * `perceive.ts`.
  */
 
-import { polygonPoints } from './shapes';
+import { polygonArea, polygonPoints } from './shapes';
 import { lifeAlphaAt, positionAt, rotationAt, sizeAt, type Entity } from './simulate';
 import type { LayerSpec } from './types';
 
@@ -31,7 +31,7 @@ import type { LayerSpec } from './types';
  * Calibrated against the shipped examples rather than picked. Measured across
  * all 42 fillable layers in `src/examples/`, the particle fields top out at
  * 0.154 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
- * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.083), while
+ * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.087), while
  * a layer authored as a silhouette — circles packed several times over their
  * own area, the idiom that draws a wave or a mountain — measures 0.79 to 0.85.
  * `aurora`'s wander curtains are the one shipped layer in the upper band, at
@@ -100,6 +100,9 @@ interface Shape {
   cy: number;
   /** Bounding radius, for the pairwise prefilter. */
   br: number;
+  /** Enclosed area in px². Zero means the sprite paints nothing — collinear
+   *  polygon vertices reach here with a nonzero bounding radius. */
+  area: number;
   contains(x: number, y: number): boolean;
   outline(n: number): Array<{ x: number; y: number }>;
 }
@@ -125,7 +128,7 @@ const EDGE_INSET = 1e-4;
 
 function circleShape(cx: number, cy: number, r: number): Shape {
   return {
-    cx, cy, br: r,
+    cx, cy, br: r, area: Math.PI * r * r,
     contains: (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < r * r,
     outline: (n) => Array.from({ length: n }, (_, i) => {
       const a = (i / n) * Math.PI * 2;
@@ -169,8 +172,10 @@ function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>)
   // the bounding radius.
   const shortest = Math.min(...seg);
   const step = Math.min(br * EDGE_INSET, shortest * 0.25);
+  const area = polygonArea(abs);
+  if (!(area > 0)) return null; // collinear vertices enclose nothing
   return {
-    cx, cy, br,
+    cx, cy, br, area,
     contains: inside,
     /**
      * `n` points spread along the perimeter by ARC LENGTH, not one share per
@@ -321,7 +326,9 @@ export function cohesionOf(
     if (lifeAlphaAt(layer.life, t) <= 0) return { ...base, overlap: null, reads: null };
 
     const shapes: Array<Shape | null> = entities.map((e) => shapeOf(layer, e, t, w, h));
-    const solid = shapes.filter((x): x is Shape => x !== null && x.br > 0);
+    // A sprite that fills nothing is not a sibling: it cannot cover a
+    // neighbour's outline and it must not make a lone sprite look like a pair.
+    const solid = shapes.filter((x): x is Shape => x !== null && x.area > 0);
     // A single entity has no sibling to merge with, and unsupported kinds have
     // no fillable outline — in both cases the question does not apply.
     if (solid.length < 2) return { ...base, overlap: null, reads: null };

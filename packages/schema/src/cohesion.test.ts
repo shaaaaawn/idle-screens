@@ -277,6 +277,27 @@ describe('layer cohesion', () => {
     expect(c.reads).toBeNull();
   });
 
+  it('a collinear polygon fills nothing, so a real sprite beside it is still alone', () => {
+    // Nonzero radius, three distinct vertices, zero enclosed area. It must not
+    // count as a sibling — otherwise one painting sprite plus one non-painting
+    // one looks like a pair of separate marks instead of a single sprite.
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'flat', label: 'flat', seed: 9,
+      layers: [{
+        count: 2,
+        sprite: {
+          kind: 'polygon', radius: [0.1, 0.1], color: '#16325a',
+          points: [[-1, 0], [0, 0], [1, 0]] as Array<[number, number]>,
+        },
+        motion: { type: 'static' },
+        alpha: [1, 1],
+      }],
+    };
+    const c = layerCohesion(spec)[0]!;
+    expect(c.overlap).toBeNull();
+    expect(c.reads).toBeNull();
+  });
+
   it('rides along in the perception bundle', async () => {
     const { perceiveScene } = await import('./perceive');
     const spec = packed({ sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' }, alpha: [1, 1] });
