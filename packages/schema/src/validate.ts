@@ -9,7 +9,7 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
@@ -86,6 +86,9 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (spec.seed !== undefined && !isNum(spec.seed)) err('seed', 'must be a number');
   if (spec.motionIntensity !== undefined && !['calm', 'moderate', 'energetic'].includes(spec.motionIntensity as string)) {
     err('motionIntensity', 'must be calm | moderate | energetic');
+  }
+  if (spec.density !== undefined && !['sparse', 'normal', 'dense'].includes(spec.density as string)) {
+    err('density', 'must be sparse | normal | dense');
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");

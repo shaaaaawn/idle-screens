@@ -108,6 +108,18 @@ export interface ArtistStyleProfile {
     regionBias?: { x?: [number, number]; y?: [number, number] };
     densityScale: number;
     layerCountHint: number;
+    /**
+     * Expected alpha-weighted coverage range for a faithful screen. When set,
+     * the scorer's perception gate — "is there a picture at all?" — LOWERS its
+     * 0.2 % floor to the band's lower bound; a style whose premise is
+     * emptiness (Fathom) is otherwise scored as broken for following its own
+     * DNA. The band can only lower that gate, never raise it: a higher minimum
+     * coverage is an intent constraint, which is what the benchmark bands
+     * (`minCoverage`) express, not a "no picture" test. The upper bound is
+     * documentation for now. Must satisfy 0 < min ≤ max ≤ 1 (the holdout
+     * loader rejects anything else).
+     */
+    coverageBand?: [number, number];
   };
   /** What schema v1 cannot express for this style — feeds next cycle. */
   schemaGaps: string[];

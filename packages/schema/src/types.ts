@@ -22,6 +22,16 @@ export interface SaverSpec {
   layers: LayerSpec[];
   motionIntensity?: 'calm' | 'moderate' | 'energetic';
   /**
+   * Declared density intent. `sparse` says the emptiness is the point (one
+   * mark on a dark ground, long silences): `adviseSpec` withholds
+   * `sparse-scene`, and scorers that gate on coverage should read this before
+   * calling a faithful scene broken. `dense` withholds `dense-scene` the same
+   * way. Either declaration is checked against the measured coverage and a
+   * `density-mismatch` advisory fires when the scene contradicts it. Omitted
+   * means `normal`. A hint only — it changes no pixel.
+   */
+  density?: 'sparse' | 'normal' | 'dense';
+  /**
    * Frame persistence (0..1, capped at LIMITS.maxGhosting). Instead of fully clearing,
    * each frame the background is painted at reduced alpha so moving entities leave
    * decaying after-images (Mystify smears, long-exposure light). Inherently

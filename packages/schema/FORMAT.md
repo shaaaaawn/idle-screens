@@ -94,6 +94,7 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "label": "Snowfall",
   "seed": 42,                    // optional; falls back to the host's seed
   "motionIntensity": "calm",     // optional: calm | moderate | energetic
+  "density": "normal",           // optional: sparse | normal | dense — declared intent, see below
   "units": "viewport",           // optional: viewport (default) | px
   "referenceViewport": 1080,     // optional; design resolution for density scaling
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
@@ -111,6 +112,16 @@ use that CSS font verbatim and do not scale with the viewport.
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
 trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is off.
+
+`density` declares what the emptiness or the crowding means. `sparse` says
+the scene is *meant* to be almost empty — one faint mark on a dark ground,
+long silences — so `adviseSpec` withholds `sparse-scene` and a scorer that
+gates on coverage should read the declaration before calling a faithful
+scene broken. `dense` withholds `dense-scene` the same way. The declaration
+is checked, not trusted: a `sparse` scene whose alpha-weighted coverage
+exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
+`density-mismatch` advisory instead. Omitted means `normal`. Like
+`motionIntensity`, it is a hint — it changes no pixel.
 
 ### `background`
 
@@ -360,6 +371,11 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   textBlock line-breaker uses, so they are estimates of the renderer's own
   layout — a caption that fails these will look wrong on the wall; one that
   passes may still sit a few px off.
+  The two density advisories read the spec's declared `density` first:
+  `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
+  under `"dense"`, and `density-mismatch` fires instead when the measured
+  coverage contradicts the declaration (a "sparse" scene covering more than
+  2 % of the frame, a "dense" one that would have read as empty).
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
