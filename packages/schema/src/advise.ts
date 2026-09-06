@@ -1,5 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
+import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
@@ -18,23 +20,54 @@ import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWar
 const LOW_CONTRAST_FLOOR = 0.05;
 
 /**
+ * A spec that declares `density: 'sparse'` is promising a mostly-empty frame.
+ * Above this alpha-weighted coverage the promise is broken (2 % of the frame
+ * is a comfortable field, not restraint — `lanterns` measures ~1.5 %).
+ */
+const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
+
+/**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
  * call advise only on specs that have already passed validation.
  */
 export function adviseSpec(
   spec: SaverSpec,
   viewport = { width: 1920, height: 1080 },
+  /**
+   * Sample point. `perceiveScene` forwards its own `t`/`seed` so the advisories
+   * describe the same scene its other channels do — without them a caller
+   * perceiving at t = 30 s would get `form` for that instant beside an
+   * `overlap-seams` advisory computed for a different one.
+   */
+  opts: { t?: number; seed?: number } = {},
 ): SpecWarning[] {
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  const rng = createRng(spec.seed ?? 42);
+  // Mirror buildScene's maxTotal clamp: without it a dense scene above the
+  // reference viewport is advised on more entities than the renderer will
+  // build, and `perceiveScene` would pair a `form` channel counted one way
+  // with an `overlap-seams` advisory counted the other. (Part of F49, which
+  // tracks the same divergence for describeScene.)
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((sum, l) => sum + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
+  const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
   const bgLuma = backgroundLuma(spec);
   const bgRgb = backgroundRgb(spec);
+
+  // Do overlapping layers actually merge? Computed once from the entities we
+  // already built; the advisory below fires only on the case where the author
+  // clearly wanted one shape and the paint settings defeat it.
+  const cohesion = cohesionOf(
+    spec.layers.map((layer, i) => ({ layer, entities: allEntities[i]! })),
+    opts.t ?? COHESION_T, w, h,
+  );
 
   let totalEntities = 0;
   let textLayerCount = 0;
@@ -50,6 +83,18 @@ export function adviseSpec(
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
 
+    const coh = cohesion[li]!;
+    if (seamsWorthWarning(layer, coh, entities.length)) {
+      warnings.push({
+        path: `layers[${li}]`,
+        code: 'overlap-seams',
+        message:
+          `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
+          + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
+          + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
+      });
+    }
+
     if (layer.trail && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].trail`,
@@ -58,11 +103,11 @@ export function adviseSpec(
       });
     }
 
-    if (layer.sprite.kind === 'streak' && layer.motion.type === 'static') {
+    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: 'streak sprites orient along the motion heading — static entities have none and will render at angle 0',
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing${layer.spin ? ' (spin still rotates the mark)' : ' and it renders at angle 0'}`,
       });
     }
 
@@ -123,6 +168,8 @@ export function adviseSpec(
       let pixArea: number;
       if (layer.sprite.kind === 'circle') {
         pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'bar') {
+        pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
@@ -132,7 +179,18 @@ export function adviseSpec(
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }
-      totalCoverage += (pixArea * e.alpha) / (w * h);
+      // Sparse-event layers are lit only for `life` of every `every` ms, at a
+      // mean envelope of ~½, and at a mean grown size — judge their coverage
+      // by that duty, not by whichever instant we happen to sample.
+      let duty = 1;
+      if (layer.emit) {
+        // Area scales with size², so the time-mean over a linear size ramp
+        // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
+        const [ga, gb] = layer.emit.grow ?? [1, 1];
+        const g2 = (ga * ga + ga * gb + gb * gb) / 3;
+        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
+      }
+      totalCoverage += (pixArea * e.alpha * duty) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {
@@ -145,7 +203,12 @@ export function adviseSpec(
     }
   }
 
-  if (totalCoverage < 0.0005 && spec.layers.length > 0) {
+  // A declared `density` is read before either density advisory fires — and
+  // then checked against the measurement, so the declaration cannot be used
+  // to silence a scene that is empty by accident rather than by intent.
+  const density = spec.density ?? 'normal';
+  const wouldBeSparse = totalCoverage < 0.0005 && spec.layers.length > 0;
+  if (wouldBeSparse && density !== 'sparse') {
     warnings.push({
       path: 'layers',
       code: 'sparse-scene',
@@ -153,11 +216,25 @@ export function adviseSpec(
     });
   }
 
-  if (totalEntities > 500) {
+  if (totalEntities > 500 && density !== 'dense') {
     warnings.push({
       path: 'layers',
       code: 'dense-scene',
       message: `${totalEntities} entities — scene may feel crowded and hurt performance on low-end devices`,
+    });
+  }
+
+  if (density === 'sparse' && totalCoverage > SPARSE_DECLARED_MAX_COVERAGE) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared sparse but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(2)}% — either the declaration or the scene is wrong`,
+    });
+  } else if (density === 'dense' && wouldBeSparse) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared dense but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(4)}% — the scene will look empty`,
     });
   }
 

@@ -32,7 +32,11 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
 (2026-07-21 — "the v1 ceiling");
 `textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
-`textBlock.reveal` — animated typing/deleting via one steerable paint param.
+`textBlock.reveal` — animated typing/deleting via one steerable paint param;
+`emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
+(2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
+(2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
+(2026-09-05 — data layout).
 
 ## Safety invariants
 
@@ -48,7 +52,10 @@ These hold **by construction** — no spec can violate them:
    so a layer will generally not pulse in unison (edge case: if spawn positions
    alias the wavelength, phases may coincide). `ghosting` only *smooths* luminance
    changes (it composites frames over a faded copy of the last), never sharpens
-   them.
+   them. `clock` deliberately removes the per-entity phase, so the validator
+   floors a clocked layer's periods at 1000 ms (1 Hz) instead — a layer in
+   unison breathes, it never flashes. `emit` events are floored at one per
+   second per entity and always ride a smooth envelope, never a cut.
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
    depth-units/sec; orbit at 180 deg/sec; path laps at ≥ 2 s).
 4. **Work is bounded.** ≤ 36 layers, ≤ 400 entities per layer, ≤ 800 total,
@@ -72,7 +79,10 @@ Author against the JSON Schema; ship through the runtime validator.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
-`min ≤ max`; `colorWeights` length must match `colors`; orbit layer-parents
+`min ≤ max`; `colorWeights` length must match `colors`; `emit.life ≤
+emit.every`; a `clock`ed layer's `pulse`/`grow`/`cycle` period must satisfy
+`period / rate ≥ 1000`; a `polygon` takes `sides` or `points`, not both (the
+JSON Schema enforces this one too); orbit layer-parents
 must exist, have `count: 1`, and not themselves orbit a layer.
 
 ## Structure
@@ -84,6 +94,7 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "label": "Snowfall",
   "seed": 42,                    // optional; falls back to the host's seed
   "motionIntensity": "calm",     // optional: calm | moderate | energetic
+  "density": "normal",           // optional: sparse | normal | dense — declared intent, see below
   "units": "viewport",           // optional: viewport (default) | px
   "referenceViewport": 1080,     // optional; design resolution for density scaling
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
@@ -101,6 +112,16 @@ use that CSS font verbatim and do not scale with the viewport.
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
 trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is off.
+
+`density` declares what the emptiness or the crowding means. `sparse` says
+the scene is *meant* to be almost empty — one faint mark on a dark ground,
+long silences — so `adviseSpec` withholds `sparse-scene` and a scorer that
+gates on coverage should read the declaration before calling a faithful
+scene broken. `dense` withholds `dense-scene` the same way. The declaration
+is checked, not trusted: a `sparse` scene whose alpha-weighted coverage
+exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
+`density-mismatch` advisory instead. Omitted means `normal`. Like
+`motionIntensity`, it is a hint — it changes no pixel.
 
 ### `background`
 
@@ -129,10 +150,12 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06); text/emoji take `strings[i]` / `glyphs[i]` and palettes `colors[i]` **in order**, so N labels are one layer |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
+| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
+| `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.field", …)` |
-| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
+| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -155,8 +178,31 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "streak", "length": [0.01, 0.03], "color": "#cfd8ff", "width": 0.002 }` —
   a line oriented along the entity's analytic heading with a faded tail
   (rain that reads as rain, shooting stars, warp stars)
-- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
-  rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
+- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347", "feather": 0.6 }` —
+  rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
+  `feather` 0..1 softens the edges — that fraction of the half-size fades out
+  toward the border (Rothko's block at 0.5–0.8)
+- `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
+  a data bar: entity *i* draws `length × values[i] / max` (viewport units),
+  `thickness` thick, growing from its position toward `direction` (`right`
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.values", […])`
+  glides every bar. With `layout: { type: "list" }` a chart is one layer and
+  its labels another — the dashboard genre stops needing one layer per number
+- `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
+  regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
+  6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
+  coordinates in −1..1 scaled by the radius — for any facet (a Picasso shard,
+  a Kandinsky triangle, a Mondrian plane). `soft` feathers the fill from the
+  centre. Rotates with `spin`. `points` are paint, so two polygons with the
+  same point count `morph` into each other
+- `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
+  a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
+  unit box spans the seeded `length`, stroked `width` wide with round joins.
+  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
+  `taper` thins the mark to almost nothing at both ends (a brush stroke rather
+  than a line); `orient: true` turns the path's +x along the entity's heading,
+  like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
+  O'Keeffe's petal, Basquiat's scrawl
 - `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
@@ -196,9 +242,20 @@ with distance, removing pop-in at the cutoff.
   glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
   back to 1.
 
-`circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
-per-entity palette pick) and `colorWeights: [...]` (relative weights, same
-length — "mostly cool tones, occasional ember").
+`circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
+`colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
+(relative weights, same length — "mostly cool tones, occasional ember").
+
+**Drawing a shape out of sprites.** Overlapping sprites merge into one seamless
+silhouette under exactly one set of conditions: a single flat colour, `alpha`
+of `[1, 1]`, no `blend`, no `pulse`, and hard edges (no `soft`, no
+`rect.feather`). Anything else leaves every overlap visible as an internal edge,
+so the layer reads as a pile of sprites rather than a form — `soft` in
+particular reads as smoke, not mass. Depth then comes from *layer order* and a
+different flat colour per layer, painting back to front, and a later layer can
+be used to cut a clean edge across an earlier one. `layerCohesion` measures
+which of the two you got; `overlap-seams` warns when you asked for the first
+and configured the second.
 
 ### `motion` (one of)
 
@@ -227,6 +284,26 @@ length — "mostly cool tones, occasional ember").
   entities sharing the path; each entity gets a seeded phase along it
 
 All speeds are ranges; each entity draws its own value (seeded).
+
+`drift`, `rise` and `wander` also accept **`ease`** — closed-form velocity
+shaping, no integration state:
+`{ "ease": { "type": "settle", "tau": 2500 } }` starts at the entity's speed
+and decelerates to rest with time constant `tau` ms (it travels `speed × tau`
+and stops — a mark flung and coming to rest); `"buoyant"` starts at rest and
+approaches the speed over `tau` (a bubble reaching terminal velocity). With
+`emit`, the eased travel restarts from the spawn point on every event. For
+`wander` only the base velocity eases — the harmonic meander keeps breathing,
+so a settled wanderer hovers rather than freezes.
+
+**Time structure, composed.** `emit` is how a scene does *almost nothing,
+almost never*: one ring every twelve seconds that expands and fades
+(`emit: { every: 12000, life: 5000, jitter: 0, grow: [0.15, 2.4] }`) reads as
+an event, where the same ring pulsing forever reads as wallpaper. Long
+`every`, low `count`, `jitter: 0` for a metronome, `1` for weather; pair with
+`ease: settle` so a mark is flung and comes to rest before it fades ("expand,
+drift a little, settle, fade" is one layer). `clock` is the other half: two
+layers on the same clock are a duet, not a coincidence. The shipped `pings`
+example is the whole idea in two layers.
 
 ## Determinism contract
 
@@ -293,6 +370,17 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
+- `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
+  The luminance maps measure ink, not edges, so a layer whose sprites merged
+  into a silhouette and one that stayed a pile of discs are identical in every
+  other channel. Two independent facts, both reported (also on
+  `perceiveScene().form`): `overlap` is geometry — the mean fraction of an
+  entity's outline buried inside a sibling (shipped particle fields measure
+  ≤ 0.154; a packed silhouette measures 0.79–0.85; `null` for lines, glyphs and
+  text, where a merged silhouette is not a meaningful idea). `seamless` is
+  paint — whether those overlaps vanish or draw an internal edge, with
+  `seamCause` naming the field to change. `reads` combines them into `mass`,
+  `seamed` or `marks`.
 - `textSprites(spec, opts)` — the literal strings and rendered sizes of every
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
@@ -305,6 +393,16 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   textBlock line-breaker uses, so they are estimates of the renderer's own
   layout — a caption that fails these will look wrong on the wall; one that
   passes may still sit a few px off.
+  `overlap-seams` catches the trap the other channels are blind to: a layer
+  whose entities bury each other (so it was drawn as one shape) but whose paint
+  settings make every overlap visible. It is gated to stay off deliberate
+  washes — it needs at least 6 entities and a mean base alpha of 0.45, and
+  never fires under `blend: lighter` / `screen`. No shipped example trips it.
+  The two density advisories read the spec's declared `density` first:
+  `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
+  under `"dense"`, and `density-mismatch` fires instead when the measured
+  coverage contradicts the declaration (a "sparse" scene covering more than
+  2 % of the frame, a "dense" one that would have read as empty).
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
@@ -400,6 +498,9 @@ Shipped working specs (also exposed as `EXAMPLE_SPECS` /
 showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `warp-tunnel` (warp + streaks), `polygons` (chain links + heavy ghosting),
 `matrix-rain` (grid layout + glyph cycle + ghosting), and `procession`
-(path + layer-parented orbit + life staging + ring/rect sprites). See
-[`src/examples/`](./src/examples/). The dashboard exercises the static/HUD
-subset at scale (34 layers of keyed, positioned text).
+(path + layer-parented orbit + life staging + ring/rect sprites);
+`nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
+`pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
+and feathered rect) and `relay-board` (list layout + bar: a chart in five
+layers). See [`src/examples/`](./src/examples/). The dashboard exercises the
+static/HUD subset at scale (34 layers of keyed, positioned text).

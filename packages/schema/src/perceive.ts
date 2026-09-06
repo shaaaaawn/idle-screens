@@ -15,7 +15,9 @@
  */
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
+import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
+import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -25,6 +27,7 @@ import {
   linkEdges,
   positionAt,
   revealState,
+  rotationAt,
   sizeAt,
   type Entity,
 } from './simulate';
@@ -345,6 +348,39 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const sz = sizeAt(e, tPass);
       const s = layer.sprite;
 
+      if (s.kind === 'stroke') {
+        // Stamp along the sampled path, rotated like the renderer does.
+        const pts = strokeSamples(s, sz / 2);
+        let angle = rotationAt(e, tPass);
+        if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
+        const ca = Math.cos(angle);
+        const sa = Math.sin(angle);
+        const lw = strokeWidthPx(s, scale);
+        const stampAt = (q: { x: number; y: number }, u: number): void => {
+          const x = p.x + q.x * ca - q.y * sa;
+          const y = p.y + q.x * sa + q.y * ca;
+          const c = Math.floor(x / cellW);
+          const r = Math.floor(y / cellH);
+          if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+          const taper = s.taper ? strokeTaper(u) : 1;
+          compose(r * cols + c, lum, a * Math.min(1, (lw * taper) / cellH), layer.blend);
+        };
+        // Rasterize each segment at half-cell steps so a long stroke leaves a
+        // continuous line of ink, not a dotted one.
+        const step = Math.min(cellW, cellH) / 2;
+        stampAt(pts[0]!, 0);
+        for (let i = 1; i < pts.length; i++) {
+          const q0 = pts[i - 1]!;
+          const q1 = pts[i]!;
+          const segLen = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+          const sub = Math.max(1, Math.ceil(segLen / step));
+          for (let k = 1; k <= sub; k++) {
+            const f = k / sub;
+            stampAt({ x: q0.x + (q1.x - q0.x) * f, y: q0.y + (q1.y - q0.y) * f }, (i - 1 + f) / (pts.length - 1));
+          }
+        }
+        continue;
+      }
       if (s.kind === 'streak') {
         // Stamp along the segment from tail to head.
         const heading = headingAt(e, tPass, w, h) ?? 0;
@@ -378,9 +414,30 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         centerY = box.cy;
         halfX = box.halfX;
         halfY = box.halfY;
+      } else if (s.kind === 'bar') {
+        const len = sz * barFraction(s, e.barIndex ?? 0);
+        if (len <= 0) continue;
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        const box = barBox(s.direction ?? 'right', len, th);
+        // The renderer rotates the bar about the entity with `spin`; rotate
+        // the box's offset the same way and take the rotated box's AABB.
+        const rot = rotationAt(e, tPass);
+        const cr = Math.cos(rot);
+        const sr = Math.sin(rot);
+        centerX = p.x + box.cx * cr - box.cy * sr;
+        centerY = p.y + box.cx * sr + box.cy * cr;
+        halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
+        halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
       }
-      const circular = s.kind === 'circle' || s.kind === 'ring';
-      const soft = s.kind === 'circle' && !!s.soft;
+      const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
+      const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
+      // A polygon fills only part of its disc; a feathered rect only part of
+      // its box. Scale the splat weight rather than trace the outline.
+      const shapeWeight = s.kind === 'polygon'
+        ? polygonFill(s, sz / 2)
+        : s.kind === 'rect' && s.feather
+          ? (1 - s.feather / 2) * (1 - s.feather / 2)
+          : 1;
       const additive = layer.blend === 'lighter' || layer.blend === 'screen';
       // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
       // falloff outside the solid core, so coverage tracks what the audience
@@ -419,9 +476,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
             } else {
               wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             }
-            compose(r * cols + c, lum, a * wgt, layer.blend);
+            compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else {
-            compose(r * cols + c, lum, a * inkWeight, layer.blend);
+            compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
         }
       }
@@ -716,7 +773,17 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
       else if (s.kind === 'rect') {
         const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
-        entArea = sz * h2;
+        const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
+        entArea = sz * h2 * f;
+      }
+      else if (s.kind === 'polygon') entArea = polygonArea(polygonPoints(s, sz / 2));
+      else if (s.kind === 'bar') {
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
+      }
+      else if (s.kind === 'stroke') {
+        const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
+        entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 });
@@ -776,6 +843,17 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
 // ---------------------------------------------------------------------------
 // Motion stats
 // ---------------------------------------------------------------------------
+
+/**
+ * Does each layer read as one merged form or as separate marks? The one thing
+ * the luminance maps cannot answer — they measure ink, not edges, so a layer
+ * that merged into a silhouette and one that stayed a pile of discs look
+ * identical in every other channel. See `cohesion.ts`.
+ */
+export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  const scene = buildScene(spec, opts);
+  return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
+}
 
 export interface LayerMotionStats {
   layerIndex: number;
@@ -917,6 +995,8 @@ export interface ScenePerception {
   colProfile: number[];
   dominance: DominanceEntry[];
   motion: LayerMotionStats[];
+  /** Per layer: merged silhouette, seamed overlap, or separate marks. */
+  form: LayerCohesion[];
   /** Literal strings + sizes of any text layers (glyphs don't show in the maps). */
   text: TextSpriteInfo[];
   advisories: ReturnType<typeof adviseSpec>;
@@ -941,7 +1021,8 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
     motion: motionStats(spec, opts),
+    form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
-    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }),
+    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
   };
 }

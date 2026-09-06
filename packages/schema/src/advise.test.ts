@@ -133,6 +133,50 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'sparse-scene')).toBe(true);
   });
 
+  it('withholds sparse-scene when the spec declares density: sparse — the emptiness is the point', () => {
+    const sparse: SaverSpec = {
+      ...base,
+      density: 'sparse',
+      layers: [{ count: 3, sprite: { kind: 'circle', radius: [0.5, 1], color: '#fff' }, alpha: [0.1, 0.2], motion: { type: 'static' } }],
+    };
+    const codes = adviseSpec(sparse).map((x) => x.code);
+    expect(codes).not.toContain('sparse-scene');
+    expect(codes).not.toContain('density-mismatch');
+  });
+
+  it('flags density-mismatch when a declared-sparse scene is actually a field', () => {
+    const field: SaverSpec = {
+      ...base,
+      density: 'sparse',
+      layers: [{ count: 200, sprite: { kind: 'circle', radius: [40, 60], color: '#fff' }, motion: { type: 'static' } }],
+    };
+    const w = adviseSpec(field);
+    expect(w.some((x) => x.code === 'density-mismatch' && x.path === 'density')).toBe(true);
+  });
+
+  it('withholds dense-scene under density: dense, and flags a dense declaration on an empty scene', () => {
+    const crowd: SaverSpec = {
+      ...base,
+      density: 'dense',
+      layers: [
+        { count: 300, sprite: { kind: 'circle', radius: [2, 4], color: '#fff' }, motion: { type: 'drift', speed: [10, 30] } },
+        { count: 300, sprite: { kind: 'circle', radius: [2, 4], color: '#fff' }, motion: { type: 'drift', speed: [10, 30] } },
+      ],
+    };
+    expect(adviseSpec(crowd).map((x) => x.code)).not.toContain('dense-scene');
+    const empty: SaverSpec = {
+      ...base,
+      density: 'dense',
+      layers: [{ count: 3, sprite: { kind: 'circle', radius: [0.5, 1], color: '#fff' }, alpha: [0.1, 0.2], motion: { type: 'static' } }],
+    };
+    expect(adviseSpec(empty).map((x) => x.code)).toContain('density-mismatch');
+  });
+
+  it('an undeclared spec advises exactly as before', () => {
+    const codes = (spec: SaverSpec): string[] => adviseSpec(spec).map((x) => x.code);
+    expect(codes({ ...base, density: 'normal' })).toEqual(codes(base));
+  });
+
   it('warns on text-heavy static specs', () => {
     const heavy: SaverSpec = {
       ...base,

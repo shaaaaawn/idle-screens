@@ -9,34 +9,37 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life',
+  'layout', 'life', 'emit', 'clock',
 ]);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
-const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
+const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
+const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
+const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
-const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
-const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
+const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
+const KNOWN_RISE = new Set(['type', 'speed', 'sway', 'ease']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
 const KNOWN_STATIC = new Set(['type']);
 const KNOWN_ORBIT = new Set(['type', 'speed', 'radius', 'center']);
-const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence']);
+const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence', 'ease']);
 const KNOWN_WARP = new Set(['type', 'speed', 'center']);
 const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -83,6 +86,9 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (spec.seed !== undefined && !isNum(spec.seed)) err('seed', 'must be a number');
   if (spec.motionIntensity !== undefined && !['calm', 'moderate', 'energetic'].includes(spec.motionIntensity as string)) {
     err('motionIntensity', 'must be calm | moderate | energetic');
+  }
+  if (spec.density !== undefined && !['sparse', 'normal', 'dense'].includes(spec.density as string)) {
+    err('density', 'must be sparse | normal | dense');
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");
@@ -211,7 +217,10 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else {
       if (layer.position.x < 0 || layer.position.x > 1) err(`${path}.position.x`, 'must be 0..1');
       if (layer.position.y < 0 || layer.position.y > 1) err(`${path}.position.y`, 'must be 0..1');
-      if (isNum(layer.count) && layer.count !== 1) err(`${path}.position`, 'position requires count: 1');
+      const dataLayout = isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table');
+      if (isNum(layer.count) && layer.count !== 1 && !dataLayout) {
+        err(`${path}.position`, "position requires count: 1 — or a layout of type 'list' / 'table', where it anchors the whole block");
+      }
     }
   }
   if (layer.region !== undefined) {
@@ -302,8 +311,40 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   }
 
   if (layer.layout !== undefined) {
-    if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
-      err(`${path}.layout`, "must be an object with type: 'grid'");
+    if (isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table')) {
+      const lay = layer.layout;
+      if (lay.type === 'table' && (!isNum(lay.columns) || !Number.isInteger(lay.columns) || lay.columns < 1 || lay.columns > LIMITS.maxGridColumns)) {
+        err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
+      }
+      const gapOk = (v: unknown): boolean => isNum(v) && v > 0;
+      if (lay.gap !== undefined) {
+        if (isNum(lay.gap)) {
+          if (!gapOk(lay.gap)) err(`${path}.layout.gap`, 'must be > 0 (viewport units of min(w,h), or px)');
+        } else if (lay.type === 'table' && isObj(lay.gap)) {
+          if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
+          if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
+          for (const k of unknownKeys(lay.gap, new Set(['x', 'y']))) {
+            warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored`);
+          }
+        } else {
+          err(`${path}.layout.gap`, lay.type === 'table' ? 'must be a number > 0 or { x?, y? }' : 'must be a number > 0');
+        }
+      }
+      for (const k of unknownKeys(lay, new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']))) {
+        warn(`${path}.layout.${k}`, 'unknown-property', `unknown layout property '${k}' — will be ignored`);
+      }
+      // A data layout reads variants in order: N labels want N strings.
+      const sp = layer.sprite;
+      if (isObj(sp) && isNum(layer.count)) {
+        const variants = sp.kind === 'text' && Array.isArray(sp.strings) ? sp.strings.length
+          : sp.kind === 'emoji' && Array.isArray(sp.glyphs) ? sp.glyphs.length
+            : sp.kind === 'bar' && Array.isArray(sp.values) ? sp.values.length : null;
+        if (variants !== null && variants !== layer.count) {
+          warn(`${path}.count`, 'list-length-mismatch', `count is ${layer.count} but the sprite carries ${variants} ${sp.kind === 'bar' ? 'values' : 'variants'} — a ${lay.type} layout reads them in order, so they cycle or go unused`);
+        }
+      }
+    } else if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
+      err(`${path}.layout`, "must be an object with type: 'grid' | 'list' | 'table'");
     } else {
       if (layer.layout.columns !== undefined && (!isNum(layer.layout.columns) || !Number.isInteger(layer.layout.columns) || layer.layout.columns < 1 || layer.layout.columns > LIMITS.maxGridColumns)) {
         err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
@@ -356,6 +397,68 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     }
   }
 
+  if (layer.emit !== undefined) {
+    if (!isObj(layer.emit)) err(`${path}.emit`, 'must be an object { every, life, jitter?, grow? }');
+    else {
+      const em = layer.emit;
+      if (!isNum(em.every) || em.every < LIMITS.minEmitEvery || em.every > LIMITS.maxEmitEvery) {
+        err(`${path}.emit.every`, `must be ${LIMITS.minEmitEvery}..${LIMITS.maxEmitEvery} ms (at most one event per second per entity)`);
+      }
+      if (!isNum(em.life) || em.life < LIMITS.minEmitLife) {
+        err(`${path}.emit.life`, `must be >= ${LIMITS.minEmitLife} ms (an event is a smooth envelope, never a cut)`);
+      } else if (isNum(em.every) && em.life > em.every) {
+        err(`${path}.emit.life`, 'must be <= emit.every (the visible window cannot outlast its period)');
+      }
+      if (em.jitter !== undefined && (!isNum(em.jitter) || em.jitter < 0 || em.jitter > 1)) {
+        err(`${path}.emit.jitter`, 'must be 0..1 (0 = evenly staggered, 1 = scattered by a fixed sequence)');
+      }
+      if (em.grow !== undefined) {
+        if (!Array.isArray(em.grow) || em.grow.length !== 2 || !isNum(em.grow[0]) || !isNum(em.grow[1])) {
+          err(`${path}.emit.grow`, 'must be [from, to] size multipliers');
+        } else if (em.grow[0] < 0 || em.grow[1] < 0 || em.grow[0] > LIMITS.maxEmitGrow || em.grow[1] > LIMITS.maxEmitGrow) {
+          err(`${path}.emit.grow`, `each multiplier must be 0..${LIMITS.maxEmitGrow}`);
+        }
+      }
+      // jitter 0 promises one event at a time; that only holds while a window
+      // is shorter than the stagger between entities.
+      if (em.jitter === 0 && isNum(em.every) && isNum(em.life) && isNum(layer.count) && layer.count > 1 && em.life > em.every / layer.count) {
+        warn(`${path}.emit.life`, 'emit-overlap', `jitter 0 staggers ${layer.count} entities ${(em.every / layer.count).toFixed(0)} ms apart but each stays lit ${em.life} ms — windows overlap, so more than one event is visible at a time. Shorten life or lengthen every`);
+      }
+      for (const k of unknownKeys(em, new Set(['every', 'life', 'jitter', 'grow']))) {
+        warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (layer.clock !== undefined) {
+    if (!isObj(layer.clock)) err(`${path}.clock`, 'must be an object { phase?, rate? }');
+    else {
+      const ck = layer.clock;
+      if (ck.phase !== undefined && (!isNum(ck.phase) || ck.phase < 0 || ck.phase > 1)) {
+        err(`${path}.clock.phase`, 'must be 0..1 (turns)');
+      }
+      const rate = ck.rate === undefined ? 1 : ck.rate;
+      if (!isNum(rate) || rate < LIMITS.minClockRate || rate > LIMITS.maxClockRate) {
+        err(`${path}.clock.rate`, `must be ${LIMITS.minClockRate}..${LIMITS.maxClockRate}`);
+      } else {
+        // A clocked layer pulses in unison — every entity at once — so the
+        // per-entity-phase defence is gone and the period floor doubles.
+        const floor = LIMITS.minClockedPeriod * rate;
+        if (isObj(layer.pulse) && isNum(layer.pulse.period) && layer.pulse.period < floor) {
+          err(`${path}.pulse.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod} — the whole layer breathes in unison)`);
+        }
+        if (isObj(layer.grow) && isNum(layer.grow.period) && layer.grow.period < floor) {
+          err(`${path}.grow.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+        const sp = layer.sprite;
+        if (isObj(sp) && isObj(sp.cycle) && isNum(sp.cycle.period) && sp.cycle.period < floor) {
+          err(`${path}.sprite.cycle.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+      }
+      for (const k of unknownKeys(ck, new Set(['phase', 'rate']))) {
+        warn(`${path}.clock.${k}`, 'unknown-property', `unknown clock property '${k}' — will be ignored`);
+      }
+    }
+  }
   validateSprite(layer.sprite, `${path}.sprite`, err, warn);
   validateMotion(layer.motion, `${path}.motion`, err, warn, spec);
 }
@@ -410,6 +513,45 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.aspect !== undefined && (!isRange(sprite.aspect) || sprite.aspect[0] <= 0)) {
       err(`${path}.aspect`, 'must be a [min,max] range of positive height/width ratios');
     }
+    if (sprite.feather !== undefined && (!isNum(sprite.feather) || sprite.feather < 0 || sprite.feather > 1)) {
+      err(`${path}.feather`, 'must be 0..1 (fraction of the half-size that fades out)');
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'bar') {
+    knownSet = KNOWN_BAR;
+    if (!Array.isArray(sprite.values) || sprite.values.length === 0 || sprite.values.length > LIMITS.maxPerLayer || !sprite.values.every((v) => isNum(v) && v >= 0)) {
+      err(`${path}.values`, `must be 1..${LIMITS.maxPerLayer} numbers >= 0`);
+    }
+    if (!isNum(sprite.length) || sprite.length <= 0) err(`${path}.length`, 'must be > 0 (full-scale bar length)');
+    if (!isNum(sprite.thickness) || sprite.thickness <= 0) err(`${path}.thickness`, 'must be > 0');
+    if (sprite.max !== undefined && (!isNum(sprite.max) || sprite.max <= 0)) err(`${path}.max`, 'must be > 0');
+    if (sprite.direction !== undefined && !['right', 'left', 'up', 'down'].includes(sprite.direction as string)) {
+      err(`${path}.direction`, "must be 'right' | 'left' | 'up' | 'down'");
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'polygon') {
+    knownSet = KNOWN_POLYGON;
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px (circumradius)');
+    if (sprite.sides !== undefined && sprite.points !== undefined) {
+      err(`${path}.sides`, 'use sides (a regular polygon) or points (a custom one), not both');
+    }
+    if (sprite.sides !== undefined && (!isNum(sprite.sides) || !Number.isInteger(sprite.sides) || sprite.sides < LIMITS.minPolygonSides || sprite.sides > LIMITS.maxPolygonSides)) {
+      err(`${path}.sides`, `must be an integer ${LIMITS.minPolygonSides}..${LIMITS.maxPolygonSides}`);
+    }
+    if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
+    if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'stroke') {
+    knownSet = KNOWN_STROKE;
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px (the mark\'s bounding size)');
+    validateShapePoints(sprite.points, `${path}.points`, 2, err);
+    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
+    if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
+    if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -469,7 +611,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       }
     }
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | bar | polygon | stroke | textBlock');
     return;
   }
 
@@ -528,6 +670,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     if (motion.bidirectional !== undefined && typeof motion.bidirectional !== 'boolean') err(`${path}.bidirectional`, 'must be a boolean');
     if (motion.bob !== undefined && !isNum(motion.bob)) err(`${path}.bob`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 10–200 px/sec`);
     }
@@ -535,6 +678,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     knownSet = KNOWN_RISE;
     speedOk(motion.speed, `${path}.speed`);
     if (motion.sway !== undefined && !isNum(motion.sway)) err(`${path}.sway`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 5–80 px/sec`);
     }
@@ -586,6 +730,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     }
   } else if (motion.type === 'wander') {
     knownSet = KNOWN_WANDER;
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     speedOk(motion.speed, `${path}.speed`);
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     const meanderCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
@@ -636,6 +781,31 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
 
   for (const k of unknownKeys(motion, knownSet)) {
     warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
+  }
+}
+
+/** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
+function validateShapePoints(points: unknown, path: string, min: number, err: (p: string, m: string) => void): void {
+  if (!Array.isArray(points) || points.length < min || points.length > LIMITS.maxShapePoints) {
+    return err(path, `must be ${min}..${LIMITS.maxShapePoints} [x, y] pairs in unit coordinates (-1..1)`);
+  }
+  for (let i = 0; i < points.length; i++) {
+    const pt: unknown = points[i]; // by index, so a sparse array's holes are rejected too
+    if (!Array.isArray(pt) || pt.length !== 2 || !isNum(pt[0]) || !isNum(pt[1]) || Math.abs(pt[0]) > 1 || Math.abs(pt[1]) > 1) {
+      err(`${path}[${i}]`, 'must be an [x, y] pair with each coordinate in -1..1');
+    }
+  }
+}
+
+function validateEase(ease: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (ease === undefined) return;
+  if (!isObj(ease)) return err(path, "must be an object { type: 'settle' | 'buoyant', tau }");
+  if (ease.type !== 'settle' && ease.type !== 'buoyant') err(`${path}.type`, "must be 'settle' | 'buoyant'");
+  if (!isNum(ease.tau) || ease.tau < LIMITS.minEaseTau || ease.tau > LIMITS.maxEaseTau) {
+    err(`${path}.tau`, `must be ${LIMITS.minEaseTau}..${LIMITS.maxEaseTau} ms`);
+  }
+  for (const k of unknownKeys(ease, new Set(['type', 'tau']))) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown ease property '${k}' — will be ignored`);
   }
 }
 
