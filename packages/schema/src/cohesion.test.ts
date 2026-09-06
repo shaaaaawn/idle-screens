@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { adviseSpec } from './advise';
 import { EXAMPLE_SPECS } from './examples';
-import { layerCohesion } from './perceive';
+import { layerCohesion, perceiveScene as perceiveSceneSync } from './perceive';
 import type { LayerSpec, SaverSpec } from './types';
 
 /** One layer of 30 entities packed into a small box — the silhouette idiom. */
@@ -112,6 +112,77 @@ describe('layer cohesion', () => {
       layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.2, 0.2], color: '#fff' }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
     };
     expect(layerCohesion(spec)[0]!.overlap).toBeNull();
+  });
+
+  // --- review round one -------------------------------------------------
+
+  it('coincident sprites are one painted shape, not two uncovered ones', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'stack', label: 'stack', seed: 5,
+      layers: [{
+        count: 4,
+        sprite: { kind: 'circle', radius: [0.1, 0.1], color: '#16325a' },
+        motion: { type: 'static' },
+        region: { x: [0.5, 0.5], y: [0.5, 0.5] },
+        alpha: [1, 1],
+      }],
+    };
+    const c = layerCohesion(spec)[0]!;
+    expect(c.overlap).toBe(1); // the boundary counts as inside
+    expect(c.reads).toBe('mass');
+  });
+
+  it('measures a skinny shape by arc length, not by edge count', () => {
+    // Wide flat rects packed along one line: the long top and bottom edges are
+    // buried by neighbours while the short ends stay exposed. Sampling each of
+    // the four edges equally would cap this near 0.5 however long the shape is.
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'slats', label: 'slats', seed: 11,
+      layers: [{
+        count: 10,
+        sprite: { kind: 'rect', width: [0.32, 0.32], aspect: [0.06, 0.06], color: '#16325a' },
+        motion: { type: 'static' },
+        region: { x: [0.4, 0.6], y: [0.5, 0.5] },
+        alpha: [1, 1],
+      }],
+    };
+    expect(layerCohesion(spec)[0]!.overlap!).toBeGreaterThan(0.7);
+  });
+
+  it('a palette entry with zero weight cannot seam anything', () => {
+    const spec = packed({
+      sprite: {
+        kind: 'circle', radius: [0.07, 0.11], color: '#16325a',
+        colors: ['#16325a', '#ff0000'], colorWeights: [1, 0],
+      },
+      alpha: [1, 1],
+    });
+    const c = layerCohesion(spec)[0]!;
+    expect(c.seamCause).toBeNull();
+    expect(c.reads).toBe('mass');
+    expect(seams(spec)).toHaveLength(0);
+  });
+
+  it('a layer staged out by life has nothing to read', () => {
+    const spec = packed({
+      sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' },
+      alpha: [1, 1],
+      life: { enter: 0, exit: 1000, fade: 0 },
+    });
+    expect(layerCohesion(spec, { t: 5000 })[0]!.reads).toBeNull();
+    expect(layerCohesion(spec, { t: 500 })[0]!.reads).toBe('mass');
+  });
+
+  it('form and its advisory describe the same instant under a custom t', () => {
+    const spec = packed({
+      sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' },
+      alpha: [1, 1],
+      life: { enter: 0, exit: 1000, fade: 0 },
+    });
+    // At t = 5 s the layer is gone, so neither channel should describe it.
+    const late = perceiveSceneSync(spec, { t: 5000 });
+    expect(late.form[0]!.reads).toBeNull();
+    expect(late.advisories.filter((wn) => wn.code === 'overlap-seams')).toHaveLength(0);
   });
 
   it('rides along in the perception bundle', async () => {

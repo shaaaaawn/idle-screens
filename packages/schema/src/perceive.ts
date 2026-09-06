@@ -1023,6 +1023,6 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     motion: motionStats(spec, opts),
     form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
-    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }),
+    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
   };
 }

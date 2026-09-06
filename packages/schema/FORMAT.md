@@ -376,7 +376,7 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   other channel. Two independent facts, both reported (also on
   `perceiveScene().form`): `overlap` is geometry — the mean fraction of an
   entity's outline buried inside a sibling (shipped particle fields measure
-  ≤ 0.153; a packed silhouette measures 0.79–0.85; `null` for lines, glyphs and
+  ≤ 0.167; a packed silhouette measures 0.79–0.85; `null` for lines, glyphs and
   text, where a merged silhouette is not a meaningful idea). `seamless` is
   paint — whether those overlaps vanish or draw an internal edge, with
   `seamCause` naming the field to change. `reads` combines them into `mass`,

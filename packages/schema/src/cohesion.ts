@@ -21,7 +21,7 @@
  */
 
 import { polygonPoints } from './shapes';
-import { positionAt, rotationAt, sizeAt, type Entity } from './simulate';
+import { lifeAlphaAt, positionAt, rotationAt, sizeAt, type Entity } from './simulate';
 import type { LayerSpec } from './types';
 
 /**
@@ -30,13 +30,13 @@ import type { LayerSpec } from './types';
  *
  * Calibrated against the shipped examples rather than picked. Measured across
  * all 42 fillable layers in `src/examples/`, the particle fields top out at
- * 0.153 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
- * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.079), while
+ * 0.167 (`facets/planes`; snowfall, lanterns and constellation are all 0.000,
+ * `comets/stars` 0.001, `aquarium` 0.015, `procession/lanterns` 0.083), while
  * a layer authored as a silhouette — circles packed several times over their
  * own area, the idiom that draws a wave or a mountain — measures 0.79 to 0.85.
  * `aurora`'s wander curtains are the one shipped layer in the upper band, at
- * 0.891, and they are a deliberate overlapping wash. Nothing sits between
- * 0.153 and 0.786, so the exact threshold is not delicate.
+ * 0.892, and they are a deliberate overlapping wash. Nothing sits between
+ * 0.167 and 0.786, so the exact threshold is not delicate.
  */
 const MERGE_FLOOR = 0.35;
 
@@ -104,6 +104,46 @@ interface Shape {
   outline(n: number): Array<{ x: number; y: number }>;
 }
 
+/**
+ * `n` points spread along a closed path by ARC LENGTH, not by vertex index.
+ * A long skinny rectangle has two edges carrying most of its perimeter; giving
+ * every edge the same share of samples would report a fully-buried long side as
+ * only a quarter covered.
+ */
+function sampleClosedPath(v: Array<{ x: number; y: number }>, n: number): Array<{ x: number; y: number }> {
+  const seg = v.map((p, i) => {
+    const q = v[(i + 1) % v.length]!;
+    return Math.hypot(q.x - p.x, q.y - p.y);
+  });
+  const total = seg.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return v.slice(0, n);
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < n; i++) {
+    let d = (i / n) * total;
+    let k = 0;
+    while (k < seg.length - 1 && d > seg[k]!) { d -= seg[k]!; k++; }
+    const p = v[k]!;
+    const q = v[(k + 1) % v.length]!;
+    const f = seg[k]! > 0 ? d / seg[k]! : 0;
+    out.push({ x: p.x + (q.x - p.x) * f, y: p.y + (q.y - p.y) * f });
+  }
+  return out;
+}
+
+/**
+ * Outline samples are nudged this far toward their own shape's centre before
+ * being tested, so the question asked is "is the ink just inside my edge also
+ * covered?" rather than "is a point exactly on my edge inside a sibling?".
+ *
+ * Exact-boundary tests are degenerate in both directions: coincident circles
+ * sample every point exactly on the sibling's rim, and a polygon point lying on
+ * a horizontal edge fails the ray-cast's `(a.y > y) !== (b.y > y)` test — two
+ * flat rects sharing a y therefore reported their buried long edges as exposed.
+ * Relative, so it holds at any viewport scale, and four orders of magnitude
+ * below a pixel for any real sprite.
+ */
+const EDGE_INSET = 1e-4;
+
 function circleShape(cx: number, cy: number, r: number): Shape {
   return {
     cx, cy, br: r,
@@ -115,37 +155,8 @@ function circleShape(cx: number, cy: number, r: number): Shape {
   };
 }
 
-function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: number): Shape {
-  const cos = Math.cos(rot);
-  const sin = Math.sin(rot);
-  const toLocal = (x: number, y: number) => {
-    const dx = x - cx;
-    const dy = y - cy;
-    return { lx: dx * cos + dy * sin, ly: -dx * sin + dy * cos };
-  };
-  return {
-    cx, cy, br: Math.hypot(halfW, halfH),
-    contains: (x, y) => {
-      const { lx, ly } = toLocal(x, y);
-      return Math.abs(lx) < halfW && Math.abs(ly) < halfH;
-    },
-    outline: (n) => Array.from({ length: n }, (_, i) => {
-      // Walk the perimeter at constant parameter, not constant arc length —
-      // enough for a fraction, and it never favours one side.
-      const u = (i / n) * 4;
-      const side = Math.floor(u);
-      const f = u - side;
-      const lx = side === 0 ? -halfW + 2 * halfW * f : side === 1 ? halfW : side === 2 ? halfW - 2 * halfW * f : -halfW;
-      const ly = side === 0 ? -halfH : side === 1 ? -halfH + 2 * halfH * f : side === 2 ? halfH : halfH - 2 * halfH * f;
-      return { x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos };
-    }),
-  };
-}
-
-function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape {
-  const cos = Math.cos(rot);
-  const sin = Math.sin(rot);
-  const abs = pts.map((p) => ({ x: cx + p.x * cos - p.y * sin, y: cy + p.x * sin + p.y * cos }));
+/** A convex or concave polygon given by absolute vertices. */
+function polyShape(cx: number, cy: number, abs: Array<{ x: number; y: number }>): Shape {
   let br = 0;
   for (const p of abs) br = Math.max(br, Math.hypot(p.x - cx, p.y - cy));
   return {
@@ -159,15 +170,23 @@ function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number 
       }
       return inside;
     },
-    outline: (n) => Array.from({ length: n }, (_, i) => {
-      const u = (i / n) * abs.length;
-      const k = Math.floor(u);
-      const f = u - k;
-      const a = abs[k % abs.length]!;
-      const b = abs[(k + 1) % abs.length]!;
-      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
-    }),
+    outline: (n) => sampleClosedPath(abs, n),
   };
+}
+
+function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: number): Shape {
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const corner = (lx: number, ly: number) => ({ x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos });
+  return polyShape(cx, cy, [
+    corner(-halfW, -halfH), corner(halfW, -halfH), corner(halfW, halfH), corner(-halfW, halfH),
+  ]);
+}
+
+function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape {
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  return polyShape(cx, cy, pts.map((p) => ({ x: cx + p.x * cos - p.y * sin, y: cy + p.x * sin + p.y * cos })));
 }
 
 /** The shape an entity paints at `t`, or null for kinds with no fillable area. */
@@ -215,9 +234,17 @@ export function seamCauseOf(layer: LayerSpec): string | null {
   if (layer.pulse && layer.pulse.amp > 0) {
     return 'pulse — the layer is translucent for part of every cycle';
   }
-  const colours = 'colors' in s && Array.isArray(s.colors) ? new Set(s.colors) : null;
-  if (colours && colours.size > 1) {
-    return `sprite.colors has ${colours.size} colours — neighbours of unlike colour show their join`;
+  // Only palette entries the seeded pick can actually reach count: a
+  // `colorWeights` entry of 0 means that colour is never drawn, so it cannot
+  // put a seam between two neighbours.
+  const palette = 'colors' in s && Array.isArray(s.colors) ? s.colors : null;
+  const weights = 'colorWeights' in s && Array.isArray(s.colorWeights) ? s.colorWeights : null;
+  if (palette) {
+    const aligned = weights !== null && weights.length === palette.length;
+    const reachable = new Set(palette.filter((_, i) => !aligned || (weights![i] ?? 0) > 0));
+    if (reachable.size > 1) {
+      return `sprite.colors has ${reachable.size} reachable colours — neighbours of unlike colour show their join`;
+    }
   }
   return null;
 }
@@ -246,6 +273,10 @@ export function cohesionOf(
       seamCause,
     };
 
+    // A layer staged out by `life` paints nothing at this instant, so asking
+    // what it reads as has no answer — same as an unsupported sprite kind.
+    if (lifeAlphaAt(layer.life, t) <= 0) return { ...base, overlap: null, reads: null };
+
     const shapes: Array<Shape | null> = entities.map((e) => shapeOf(layer, e, t, w, h));
     const solid = shapes.filter((x): x is Shape => x !== null);
     // A single entity has no sibling to merge with, and unsupported kinds have
@@ -257,7 +288,10 @@ export function cohesionOf(
     let traced = 0;
     for (let i = 0; i < solid.length; i += stride) {
       const self = solid[i]!;
-      const pts = self.outline(OUTLINE_SAMPLES);
+      const pts = self.outline(OUTLINE_SAMPLES).map((p) => ({
+        x: self.cx + (p.x - self.cx) * (1 - EDGE_INSET),
+        y: self.cy + (p.y - self.cy) * (1 - EDGE_INSET),
+      }));
       let hit = 0;
       for (const p of pts) {
         for (let j = 0; j < solid.length; j++) {

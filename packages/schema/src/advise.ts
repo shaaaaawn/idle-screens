@@ -33,6 +33,13 @@ const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
 export function adviseSpec(
   spec: SaverSpec,
   viewport = { width: 1920, height: 1080 },
+  /**
+   * Sample point. `perceiveScene` forwards its own `t`/`seed` so the advisories
+   * describe the same scene its other channels do — without them a caller
+   * perceiving at t = 30 s would get `form` for that instant beside an
+   * `overlap-seams` advisory computed for a different one.
+   */
+  opts: { t?: number; seed?: number } = {},
 ): SpecWarning[] {
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
@@ -40,7 +47,7 @@ export function adviseSpec(
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
   const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  const rng = createRng(spec.seed ?? 42);
+  const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
   const bgLuma = backgroundLuma(spec);
   const bgRgb = backgroundRgb(spec);
@@ -50,7 +57,7 @@ export function adviseSpec(
   // clearly wanted one shape and the paint settings defeat it.
   const cohesion = cohesionOf(
     spec.layers.map((layer, i) => ({ layer, entities: allEntities[i]! })),
-    COHESION_T, w, h,
+    opts.t ?? COHESION_T, w, h,
   );
 
   let totalEntities = 0;
