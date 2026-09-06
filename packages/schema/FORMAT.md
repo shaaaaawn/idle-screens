@@ -32,7 +32,11 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
 (2026-07-21 — "the v1 ceiling");
 `textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
-`textBlock.reveal` — animated typing/deleting via one steerable paint param.
+`textBlock.reveal` — animated typing/deleting via one steerable paint param;
+`emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
+(2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
+(2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
+(2026-09-05 — data layout).
 
 ## Safety invariants
 
@@ -48,7 +52,10 @@ These hold **by construction** — no spec can violate them:
    so a layer will generally not pulse in unison (edge case: if spawn positions
    alias the wavelength, phases may coincide). `ghosting` only *smooths* luminance
    changes (it composites frames over a faded copy of the last), never sharpens
-   them.
+   them. `clock` deliberately removes the per-entity phase, so the validator
+   floors a clocked layer's periods at 1000 ms (1 Hz) instead — a layer in
+   unison breathes, it never flashes. `emit` events are floored at one per
+   second per entity and always ride a smooth envelope, never a cut.
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
    depth-units/sec; orbit at 180 deg/sec; path laps at ≥ 2 s).
 4. **Work is bounded.** ≤ 36 layers, ≤ 400 entities per layer, ≤ 800 total,
@@ -72,7 +79,10 @@ Author against the JSON Schema; ship through the runtime validator.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
-`min ≤ max`; `colorWeights` length must match `colors`; orbit layer-parents
+`min ≤ max`; `colorWeights` length must match `colors`; `emit.life ≤
+emit.every`; a `clock`ed layer's `pulse`/`grow`/`cycle` period must satisfy
+`period / rate ≥ 1000`; a `polygon` takes `sides` or `points`, not both (the
+JSON Schema enforces this one too); orbit layer-parents
 must exist, have `count: 1`, and not themselves orbit a layer.
 
 ## Structure
@@ -129,10 +139,12 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06); text/emoji take `strings[i]` / `glyphs[i]` and palettes `colors[i]` **in order**, so N labels are one layer |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
+| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
+| `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.field", …)` |
-| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
+| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -155,8 +167,31 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "streak", "length": [0.01, 0.03], "color": "#cfd8ff", "width": 0.002 }` —
   a line oriented along the entity's analytic heading with a faded tail
   (rain that reads as rain, shooting stars, warp stars)
-- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
-  rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
+- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347", "feather": 0.6 }` —
+  rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
+  `feather` 0..1 softens the edges — that fraction of the half-size fades out
+  toward the border (Rothko's block at 0.5–0.8)
+- `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
+  a data bar: entity *i* draws `length × values[i] / max` (viewport units),
+  `thickness` thick, growing from its position toward `direction` (`right`
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.values", […])`
+  glides every bar. With `layout: { type: "list" }` a chart is one layer and
+  its labels another — the dashboard genre stops needing one layer per number
+- `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
+  regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
+  6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
+  coordinates in −1..1 scaled by the radius — for any facet (a Picasso shard,
+  a Kandinsky triangle, a Mondrian plane). `soft` feathers the fill from the
+  centre. Rotates with `spin`. `points` are paint, so two polygons with the
+  same point count `morph` into each other
+- `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
+  a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
+  unit box spans the seeded `length`, stroked `width` wide with round joins.
+  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
+  `taper` thins the mark to almost nothing at both ends (a brush stroke rather
+  than a line); `orient: true` turns the path's +x along the entity's heading,
+  like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
+  O'Keeffe's petal, Basquiat's scrawl
 - `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
@@ -196,9 +231,9 @@ with distance, removing pop-in at the cutoff.
   glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
   back to 1.
 
-`circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
-per-entity palette pick) and `colorWeights: [...]` (relative weights, same
-length — "mostly cool tones, occasional ember").
+`circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
+`colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
+(relative weights, same length — "mostly cool tones, occasional ember").
 
 ### `motion` (one of)
 
@@ -227,6 +262,26 @@ length — "mostly cool tones, occasional ember").
   entities sharing the path; each entity gets a seeded phase along it
 
 All speeds are ranges; each entity draws its own value (seeded).
+
+`drift`, `rise` and `wander` also accept **`ease`** — closed-form velocity
+shaping, no integration state:
+`{ "ease": { "type": "settle", "tau": 2500 } }` starts at the entity's speed
+and decelerates to rest with time constant `tau` ms (it travels `speed × tau`
+and stops — a mark flung and coming to rest); `"buoyant"` starts at rest and
+approaches the speed over `tau` (a bubble reaching terminal velocity). With
+`emit`, the eased travel restarts from the spawn point on every event. For
+`wander` only the base velocity eases — the harmonic meander keeps breathing,
+so a settled wanderer hovers rather than freezes.
+
+**Time structure, composed.** `emit` is how a scene does *almost nothing,
+almost never*: one ring every twelve seconds that expands and fades
+(`emit: { every: 12000, life: 5000, jitter: 0, grow: [0.15, 2.4] }`) reads as
+an event, where the same ring pulsing forever reads as wallpaper. Long
+`every`, low `count`, `jitter: 0` for a metronome, `1` for weather; pair with
+`ease: settle` so a mark is flung and comes to rest before it fades ("expand,
+drift a little, settle, fade" is one layer). `clock` is the other half: two
+layers on the same clock are a duet, not a coincidence. The shipped `pings`
+example is the whole idea in two layers.
 
 ## Determinism contract
 
@@ -400,6 +455,9 @@ Shipped working specs (also exposed as `EXAMPLE_SPECS` /
 showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `warp-tunnel` (warp + streaks), `polygons` (chain links + heavy ghosting),
 `matrix-rain` (grid layout + glyph cycle + ghosting), and `procession`
-(path + layer-parented orbit + life staging + ring/rect sprites). See
-[`src/examples/`](./src/examples/). The dashboard exercises the static/HUD
-subset at scale (34 layers of keyed, positioned text).
+(path + layer-parented orbit + life staging + ring/rect sprites);
+`nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
+`pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
+and feathered rect) and `relay-board` (list layout + bar: a chart in five
+layers). See [`src/examples/`](./src/examples/). The dashboard exercises the
+static/HUD subset at scale (34 layers of keyed, positioned text).

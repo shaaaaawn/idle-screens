@@ -8,6 +8,7 @@
  */
 
 import type { Entity } from './simulate';
+import { isShapedSprite } from './shapes';
 import type { LayerSpec, SaverSpec } from './types';
 
 /** Perceptual luma (0..1) of a hex colour. */
@@ -23,7 +24,7 @@ export function hexLuma(hex: string): number {
 
 export function spriteLuma(layer: LayerSpec, e: Entity): number {
   const s = layer.sprite;
-  if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
+  if (isShapedSprite(s)) {
     return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
   }
   if (s.kind === 'text' || s.kind === 'textBlock') return hexLuma(s.color ?? '#e6e8ef');
@@ -33,7 +34,7 @@ export function spriteLuma(layer: LayerSpec, e: Entity): number {
 /** The hex a given entity actually paints with, or null for glyph sprites. */
 export function spriteHex(layer: LayerSpec, e: Entity): string | null {
   const s = layer.sprite;
-  if (s.kind === 'circle' || s.kind === 'ring' || s.kind === 'streak' || s.kind === 'rect') {
+  if (isShapedSprite(s)) {
     return s.colors?.[e.colorIndex] ?? s.color;
   }
   if (s.kind === 'text' || s.kind === 'textBlock') return s.color ?? '#e6e8ef';

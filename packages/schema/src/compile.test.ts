@@ -29,6 +29,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     stroke: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
+    closePath: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
     translate: vi.fn(),
@@ -46,6 +47,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     textBaseline: 'middle',
     lineWidth: 1,
     lineCap: 'butt',
+    lineJoin: 'miter',
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -514,5 +516,84 @@ describe('textBlock glyphFade drawing', () => {
       expect(more[i]!.text).toBe(some[i]!.text);
       expect(more[i]!.x).toBe(some[i]!.x);
     }
+  });
+});
+
+describe('shape glyphs draw (#46)', () => {
+  const scene = (sprite: SaverSpec['layers'][number]['sprite'], blend?: 'lighter'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'shapes',
+    label: 'Shapes',
+    units: 'px',
+    layers: [{ count: 2, sprite, motion: { type: 'drift', speed: [10, 20] }, spin: 30, ...(blend ? { blend } : {}) }],
+  });
+  const calls = (fn: unknown): number => (fn as { mock: { calls: unknown[] } }).mock.calls.length;
+  // A reduced-motion mount paints one frame; renderFrame paints a second — so
+  // every per-frame count below is doubled.
+  const FRAMES = 2;
+  const render = (spec: SaverSpec): void => {
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    inst.renderFrame!(1234, 42);
+    inst.dispose();
+  };
+
+  it('polygon: one closed path per entity, a radial gradient only when soft', () => {
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', sides: 5 }));
+    expect(calls(mockCtx.closePath)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.fill)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.createRadialGradient)).toBe(0);
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', points: [[-1, 1], [0, -1], [1, 1]], soft: true }));
+    expect(calls(mockCtx.createRadialGradient)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('stroke: a single stroked path, or one segment per sample when tapered', () => {
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3 }));
+    const plain = calls(mockCtx.stroke);
+    expect(plain).toBe(FRAMES * 2);
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3, taper: true, orient: true }));
+    expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
+  });
+
+  it('feathered rect paints outside-in: the full-size fill faintest first, the core at full alpha last', () => {
+    const seen: Array<{ w: number; a: number }> = [];
+    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number, h: number) => void }).fillRect = (_x, _y, w) => {
+      seen.push({ w, a: (mockCtx as unknown as { globalAlpha: number }).globalAlpha });
+    };
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'f', label: 'F', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], color: '#fff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const fills = seen.slice(1); // drop the background
+    expect(fills).toHaveLength(6);
+    expect(fills[0]!.w).toBeCloseTo(60, 9); // full size first …
+    expect(fills[0]!.a).toBeCloseTo(1 / 6, 9); // … at the faintest alpha
+    expect(fills[5]!.w).toBeCloseTo(60 * (1 - 0.5 * 5 / 6), 9); // the core last …
+    expect(fills[5]!.a).toBeCloseTo(1, 9); // … at full alpha
+    for (let i = 1; i < 6; i++) expect(fills[i]!.w).toBeLessThan(fills[i - 1]!.w);
+    inst.dispose();
+  });
+
+  it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
+    const hard = calls(mockCtx.fillRect);
+    expect(hard).toBe(FRAMES * (1 + 2)); // background + two entities per frame
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff', feather: 0.5 }, 'lighter'));
+    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
+  });
+});
+
+describe('bar sprites draw (#49)', () => {
+  it('one fillRect per bar with a non-zero value, sized by value / max', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'bars', label: 'Bars', units: 'px',
+      layers: [{ count: 3, sprite: { kind: 'bar', values: [50, 100, 0], max: 100, length: 200, thickness: 10, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.1, y: 0.1 }, layout: { type: 'list', gap: 30 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance; // paints one frame
+    const rects = (mockCtx.fillRect as unknown as { mock: { calls: number[][] } }).mock.calls.slice(1); // drop the background
+    expect(rects).toHaveLength(2); // the zero-value bar draws nothing
+    expect(rects[0]![2]).toBeCloseTo(100, 6); // 200 × 50 / 100
+    expect(rects[1]![2]).toBeCloseTo(200, 6);
+    inst.dispose();
   });
 });

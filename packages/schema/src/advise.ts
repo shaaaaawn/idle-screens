@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
@@ -58,11 +59,11 @@ export function adviseSpec(
       });
     }
 
-    if (layer.sprite.kind === 'streak' && layer.motion.type === 'static') {
+    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: 'streak sprites orient along the motion heading — static entities have none and will render at angle 0',
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing${layer.spin ? ' (spin still rotates the mark)' : ' and it renders at angle 0'}`,
       });
     }
 
@@ -123,6 +124,8 @@ export function adviseSpec(
       let pixArea: number;
       if (layer.sprite.kind === 'circle') {
         pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'bar') {
+        pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
@@ -132,7 +135,18 @@ export function adviseSpec(
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }
-      totalCoverage += (pixArea * e.alpha) / (w * h);
+      // Sparse-event layers are lit only for `life` of every `every` ms, at a
+      // mean envelope of ~½, and at a mean grown size — judge their coverage
+      // by that duty, not by whichever instant we happen to sample.
+      let duty = 1;
+      if (layer.emit) {
+        // Area scales with size², so the time-mean over a linear size ramp
+        // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
+        const [ga, gb] = layer.emit.grow ?? [1, 1];
+        const g2 = (ga * ga + ga * gb + gb * gb) / 3;
+        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
+      }
+      totalCoverage += (pixArea * e.alpha * duty) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {

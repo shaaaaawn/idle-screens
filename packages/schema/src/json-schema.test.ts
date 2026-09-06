@@ -30,6 +30,10 @@ describe('saver-spec.schema.json', () => {
 
   it('rejects structural garbage the runtime also rejects', () => {
     const bad = [
+      {
+        schemaVersion: 1, id: 'x', label: 'X',
+        layers: [{ count: 1, sprite: { kind: 'polygon', radius: [1, 4], color: '#fff', sides: 4, points: [[-1, 1], [0, -1], [1, 1]] }, motion: { type: 'static' } }],
+      },
       {},
       { schemaVersion: 2, id: 'x', label: 'X', layers: [] },
       { schemaVersion: 1, id: 'x', label: 'X', layers: [] },

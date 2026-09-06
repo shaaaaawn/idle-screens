@@ -284,3 +284,143 @@ describe('validateSpec warnings', () => {
     expect(validateSpec(base()).warnings).toEqual([]);
   });
 });
+
+describe('validateSpec — time structure (#47)', () => {
+  const withLayer = (layer: Partial<SaverSpec['layers'][number]>): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite: { kind: 'ring', radius: [4, 8], color: '#4fb3a8' }, motion: { type: 'static' }, ...layer }],
+  });
+
+  it('accepts a well-formed emit / clock / ease', () => {
+    expect(validateSpec(withLayer({ emit: { every: 12000, life: 5000, jitter: 0, grow: [0.2, 2] } })).valid).toBe(true);
+    expect(validateSpec(withLayer({ pulse: { amp: 0.2, period: 2000 }, clock: { phase: 0.5, rate: 2 } })).valid).toBe(true);
+    expect(validateSpec(withLayer({ motion: { type: 'rise', speed: [10, 20], ease: { type: 'settle', tau: 1500 } } })).valid).toBe(true);
+  });
+
+  it('floors emit.every at 1000 ms and emit.life at 500 ms, and life may not exceed every', () => {
+    expect(paths(withLayer({ emit: { every: 500, life: 500 } }))).toContain('layers[0].emit.every');
+    expect(paths(withLayer({ emit: { every: 5000, life: 200 } }))).toContain('layers[0].emit.life');
+    expect(paths(withLayer({ emit: { every: 2000, life: 3000 } }))).toContain('layers[0].emit.life');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, jitter: 2 } }))).toContain('layers[0].emit.jitter');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, grow: [0, 99] } }))).toContain('layers[0].emit.grow');
+  });
+
+  it('caps the far side of every bound too', () => {
+    expect(paths(withLayer({ emit: { every: 600001, life: 500 } }))).toContain('layers[0].emit.every');
+    expect(paths(withLayer({ emit: { every: 2000, life: 1000, grow: [-1, 2] } }))).toContain('layers[0].emit.grow');
+    expect(paths(withLayer({ clock: { rate: 0.01 } }))).toContain('layers[0].clock.rate');
+    expect(paths(withLayer({ clock: { phase: -0.1 } }))).toContain('layers[0].clock.phase');
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'buoyant', tau: 120001 } } }))).toContain('layers[0].motion.ease.tau');
+  });
+
+  it('warns when jitter 0 cannot keep one event at a time, and when emit/clock land inside sprite', () => {
+    const overlap = validateSpec(withLayer({ emit: { every: 12000, life: 5000, jitter: 0 } }));
+    expect(overlap.valid).toBe(true);
+    expect((overlap.warnings ?? []).some((w) => w.code === 'emit-overlap' && w.path === 'layers[0].emit.life')).toBe(true);
+    expect((validateSpec(withLayer({ emit: { every: 12000, life: 4000, jitter: 0 } })).warnings ?? []).filter((w) => w.code === 'emit-overlap')).toEqual([]);
+    const misplaced = validateSpec(withLayer({ sprite: { kind: 'ring', radius: [4, 8], color: '#4fb3a8', emit: { every: 2000, life: 1000 } } as never }));
+    expect((misplaced.warnings ?? []).some((w) => w.code === 'misplaced-property' && w.path === 'layers[0].sprite.emit')).toBe(true);
+  });
+
+  it('a clocked layer needs period / rate >= 1000 ms — the whole layer breathes in unison', () => {
+    expect(paths(withLayer({ pulse: { amp: 0.2, period: 800 }, clock: {} }))).toContain('layers[0].pulse.period');
+    expect(paths(withLayer({ pulse: { amp: 0.2, period: 1500 }, clock: { rate: 2 } }))).toContain('layers[0].pulse.period');
+    expect(paths(withLayer({ grow: { amp: 0.2, period: 900 }, clock: {} }))).toContain('layers[0].grow.period');
+    expect(validateSpec(withLayer({ pulse: { amp: 0.2, period: 800 } })).valid).toBe(true); // unclocked: 500 floor still applies
+    expect(paths(withLayer({ clock: { phase: 1.5 } }))).toContain('layers[0].clock.phase');
+    expect(paths(withLayer({ clock: { rate: 9 } }))).toContain('layers[0].clock.rate');
+  });
+
+  it('ease needs a known type and a bounded tau, and is a motion property of drift / rise / wander only', () => {
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'bounce', tau: 500 } as never } }))).toContain('layers[0].motion.ease.type');
+    expect(paths(withLayer({ motion: { type: 'drift', speed: [10, 20], ease: { type: 'settle', tau: 10 } } }))).toContain('layers[0].motion.ease.tau');
+    const onBounce = validateSpec(withLayer({ motion: { type: 'bounce', speed: [10, 20], ease: { type: 'settle', tau: 500 } } as never }));
+    expect(onBounce.valid).toBe(true);
+    expect((onBounce.warnings ?? []).some((w) => w.path === 'layers[0].motion.ease' && w.code === 'unknown-property')).toBe(true);
+  });
+});
+
+describe('validateSpec — shape glyphs (#46)', () => {
+  const withSprite = (sprite: SaverSpec['layers'][number]['sprite']): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite, motion: { type: 'static' } }],
+  });
+
+  it('accepts regular and custom polygons, strokes, and a feathered rect', () => {
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 3 })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -1], [1, 1]], soft: true })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [0, -0.5], [1, 0]], color: '#fff', width: 2, taper: true, orient: true })).valid).toBe(true);
+    expect(validateSpec(withSprite({ kind: 'rect', width: [4, 8], color: '#fff', feather: 0.6 })).valid).toBe(true);
+  });
+
+  it('polygon: sides 3..12, sides xor points, points in the unit box', () => {
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 2 }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 13 }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', sides: 4, points: [[-1, 1], [0, -1], [1, 1]] }))).toContain('layers[0].sprite.sides');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -1]] }))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', points: [[-1, 1], [0, -2], [1, 1]] }))).toContain('layers[0].sprite.points[1]');
+  });
+
+  it('stroke: points required (2..24), width > 0, curve enum; feather 0..1 on rect', () => {
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], color: '#fff' } as never))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[0, 0]], color: '#fff' }))).toContain('layers[0].sprite.points');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', width: 0 }))).toContain('layers[0].sprite.width');
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', curve: 'bezier' as never }))).toContain('layers[0].sprite.curve');
+    expect(paths(withSprite({ kind: 'rect', width: [4, 8], color: '#fff', feather: 1.5 }))).toContain('layers[0].sprite.feather');
+  });
+
+  it('rejects holes in a sparse points array', () => {
+    const sparse: Array<[number, number]> = [];
+    sparse[0] = [-1, 0]; sparse[2] = [1, 0]; // index 1 is a hole
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: sparse, color: '#fff' }))).toContain('layers[0].sprite.points[1]');
+  });
+
+  it('polygon and stroke take a palette like every shaped sprite', () => {
+    expect(validateSpec(withSprite({ kind: 'polygon', radius: [4, 8], color: '#fff', colors: ['#fff', '#f00'], colorWeights: [3, 1] })).valid).toBe(true);
+    expect(paths(withSprite({ kind: 'stroke', length: [10, 20], points: [[-1, 0], [1, 0]], color: '#fff', colors: ['#fff'], colorWeights: [1, 2] }))).toContain('layers[0].sprite.colorWeights');
+  });
+});
+
+describe('validateSpec — data layouts and bars (#49)', () => {
+  const layer = (extra: Partial<SaverSpec['layers'][number]>): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 3, sprite: { kind: 'text', strings: ['a', 'b', 'c'] }, size: [20, 20], motion: { type: 'static' }, ...extra }],
+  });
+
+  it('position with count > 1 is allowed as the anchor of a list / table, and only there', () => {
+    expect(validateSpec(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'list' } })).valid).toBe(true);
+    expect(validateSpec(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'table', columns: 2 } })).valid).toBe(true);
+    expect(paths(layer({ position: { x: 0.1, y: 0.1 } }))).toContain('layers[0].position');
+    expect(paths(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'grid' } }))).toContain('layers[0].position');
+  });
+
+  it('table needs integer columns; gap must be positive (number, or {x, y} for table)', () => {
+    expect(paths(layer({ layout: { type: 'table', columns: 0 } }))).toContain('layers[0].layout.columns');
+    expect(paths(layer({ layout: { type: 'list', gap: 0 } }))).toContain('layers[0].layout.gap');
+    expect(paths(layer({ layout: { type: 'list', gap: { x: 1 } } as never }))).toContain('layers[0].layout.gap');
+    expect(validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, y: 0.05 } } })).valid).toBe(true);
+    const odd = validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, z: 1 } } as never }));
+    expect(odd.valid).toBe(true);
+    expect((odd.warnings ?? []).some((w) => w.path === 'layers[0].layout.gap.z' && w.code === 'unknown-property')).toBe(true);
+    expect(paths(layer({ layout: { type: 'pile' } as never }))).toContain('layers[0].layout');
+  });
+
+  it('warns when a list layout has a different number of variants than entities', () => {
+    const r = validateSpec(layer({ count: 5, layout: { type: 'list' } }));
+    expect(r.valid).toBe(true);
+    expect((r.warnings ?? []).some((w) => w.code === 'list-length-mismatch' && w.path === 'layers[0].count')).toBe(true);
+    expect((validateSpec(layer({ layout: { type: 'list' } })).warnings ?? []).filter((w) => w.code === 'list-length-mismatch')).toEqual([]);
+  });
+
+  it('bar: values, length, thickness, max, direction', () => {
+    const bar = (sprite: Record<string, unknown>) => layer({ sprite: { kind: 'bar', values: [1, 2, 3], length: 100, thickness: 8, color: '#fff', ...sprite } as never, layout: { type: 'list' } });
+    expect(validateSpec(bar({})).valid).toBe(true);
+    expect(paths(bar({ values: [] }))).toContain('layers[0].sprite.values');
+    expect(paths(bar({ values: [1, -2, 3] }))).toContain('layers[0].sprite.values');
+    expect(paths(bar({ length: 0 }))).toContain('layers[0].sprite.length');
+    expect(paths(bar({ thickness: -1 }))).toContain('layers[0].sprite.thickness');
+    expect(paths(bar({ max: 0 }))).toContain('layers[0].sprite.max');
+    expect(paths(bar({ direction: 'sideways' }))).toContain('layers[0].sprite.direction');
+    expect(validateSpec(bar({ direction: 'up', colors: ['#fff', '#f00', '#0f0'] })).valid).toBe(true);
+  });
+});

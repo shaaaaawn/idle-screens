@@ -4,14 +4,17 @@ import { AURORA_SPEC } from './aurora';
 import { COMETS_SPEC } from './comets';
 import { CONSTELLATION_SPEC } from './constellation';
 import { DASHBOARD_SPEC } from './dev-dashboard';
+import { FACETS_SPEC } from './facets';
 import { HAIKU_SPEC } from './haiku';
 import { LANTERNS_SPEC } from './lanterns';
 import { MATRIX_RAIN_SPEC } from './matrix-rain';
 import { NOSTALGHIA_CANDLE_SPEC } from './nostalghia-candle';
 import { POLYGONS_SPEC } from './polygons';
 import { ORRERY_SPEC } from './orrery';
+import { PINGS_SPEC } from './pings';
 import { PROCESSION_SPEC } from './procession';
 import { RAIN_SPEC } from './rain';
+import { RELAY_BOARD_SPEC } from './relay-board';
 import { SAKURA_SPEC } from './sakura';
 import { SNOWFALL_SPEC } from './snowfall';
 import { WARP_TUNNEL_SPEC } from './warp-tunnel';
@@ -29,6 +32,9 @@ export { ORRERY_SPEC } from './orrery';
 export { AURORA_SPEC } from './aurora';
 export { MATRIX_RAIN_SPEC } from './matrix-rain';
 export { NOSTALGHIA_CANDLE_SPEC } from './nostalghia-candle';
+export { PINGS_SPEC } from './pings';
+export { FACETS_SPEC } from './facets';
+export { RELAY_BOARD_SPEC } from './relay-board';
 export { POLYGONS_SPEC } from './polygons';
 export { PROCESSION_SPEC } from './procession';
 export { WARP_TUNNEL_SPEC } from './warp-tunnel';
@@ -58,6 +64,9 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'procession', label: 'Night Procession', spec: PROCESSION_SPEC },
   { id: 'nostalghia-candle', label: "Nostalghia's Candle", spec: NOSTALGHIA_CANDLE_SPEC },
   { id: 'haiku', label: 'Haiku', spec: HAIKU_SPEC },
+  { id: 'pings', label: 'Pings', spec: PINGS_SPEC },
+  { id: 'facets', label: 'Facets', spec: FACETS_SPEC },
+  { id: 'relay-board', label: 'Relay Board', spec: RELAY_BOARD_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */

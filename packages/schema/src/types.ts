@@ -122,7 +122,8 @@ export interface LayerSpec {
   key?: string;
   /**
    * Exact fractional position {x, y} for a single entity (0 = left/top, 1 = right/bottom).
-   * Only valid when `count` is 1. Overrides `region` scatter placement.
+   * Only valid when `count` is 1 — or, with a `list` / `table` layout, as the
+   * top-left anchor of the whole block. Overrides `region` scatter placement.
    */
   position?: { x: number; y: number };
   /**
@@ -157,13 +158,68 @@ export interface LayerSpec {
    * the cell size — `{ y: 1 }` keeps columns crisp while scattering vertically
    * (Matrix rain). Unlocks column effects, LED walls, mosaics, uniform dot fields.
    */
-  layout?: { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } };
+  layout?:
+    | { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } }
+    /**
+     * Data layouts — entities in READING ORDER, no scatter. `list` stacks them
+     * in one column `gap` apart (viewport units of min(w,h), default 0.06);
+     * `table` fills `columns` row-major with `gap` `{x, y}` (one number = both).
+     * Text and emoji sprites take `strings[i]` / `glyphs[i]` in order instead of
+     * a seeded pick, and palette `colors[i]` likewise, so N labels or N bars are
+     * ONE layer. `position` (with any count) is the block's top-left anchor;
+     * without it the block is centred in `region`.
+     */
+    | { type: 'list'; gap?: number }
+    | { type: 'table'; columns: number; gap?: number | { x?: number; y?: number } };
   /**
    * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
    * before `enter` (ms), ramps up over `fade` ms (default 1000), holds at 1, then
    * ramps down starting at `exit`. Entities are skipped entirely while at alpha 0.
    */
   life?: { enter?: number; exit?: number; fade?: number };
+  /**
+   * Sparse events — marks that appear, expand and fade in place, one at a time,
+   * with long silences between (the "one ping" primitive). Each entity is dark
+   * except for a window of `life` ms that recurs every `every` ms at a
+   * per-entity offset: `jitter` 1 (default) scatters the offsets (a fixed
+   * low-discrepancy sequence — not seeded, so declaring `emit` disturbs no
+   * other draw and the same spec times its events identically under every
+   * seed), 0 spreads the entities evenly across the period — a metronome, one
+   * event at a time as long as `life ≤ every / count`.
+   * Inside a window the entity fades in over the first quarter and out over
+   * the rest; `grow` scales its size from `grow[0]` to `grow[1]` across the
+   * window — expansion rather than travel. A pure function of t. Flash safety:
+   * `every` ≥ 1000 ms and `life` ≥ 500 ms, so no entity fires more than once a
+   * second and never as a hard cut. Composes with `pulse`, `life`, `trail` and
+   * every motion; with `motion.ease` the eased travel restarts on every event.
+   */
+  emit?: { every: number; life: number; jitter?: number; grow?: [number, number] };
+  /**
+   * Phase-lock. Replaces the seeded per-entity phases of `pulse`, `grow` and
+   * `cycle` with one shared phase (`phase` in turns, 0..1, default 0) and runs
+   * those three at `rate` × scene time (default 1). Two layers declaring the
+   * same clock breathe in step; different phases give a fixed offset (call and
+   * response). `pulse.wave` still adds its position-derived phase on top, so a
+   * clocked wave stays a wave. Because a clocked layer moves in unison, its
+   * `pulse`/`grow` periods must satisfy `period / rate ≥ 1000 ms` (1 Hz).
+   */
+  clock?: { phase?: number; rate?: number };
+}
+
+/**
+ * Closed-form velocity easing for `drift`, `rise` and `wander`. `settle`
+ * starts at the entity's speed and decelerates to rest with time constant
+ * `tau` ms — it travels `speed × tau` and stops, a mark flung and coming to
+ * rest. `buoyant` starts at rest and approaches the speed over `tau` — a
+ * bubble reaching terminal velocity. Position stays an analytic function of
+ * t (no integration state). With `emit`, the eased travel restarts from the
+ * spawn point on every event. For `wander` only the base velocity eases —
+ * the harmonic meander keeps breathing, so a settled wanderer hovers rather
+ * than freezes.
+ */
+export interface MotionEase {
+  type: 'settle' | 'buoyant';
+  tau: number;
 }
 
 export type SpriteSpec =
@@ -194,9 +250,58 @@ export type SpriteSpec =
   /**
    * Axis-aligned rectangle (rotates with `spin`). `width` is the horizontal size
    * range; `aspect` the height/width ratio range (default [1,1] = squares).
+   * `feather` (0..1) softens the edges: that fraction of the half-size fades
+   * out toward the border — Rothko's soft-edged block at 0.5–0.8.
    * Mondrian blocks, confetti, city lights.
    */
-  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; colors?: string[]; colorWeights?: number[] }
+  | { kind: 'rect'; width: [number, number]; aspect?: [number, number]; color: string; feather?: number; colors?: string[]; colorWeights?: number[] }
+  /**
+   * A data bar. Entity i draws a bar `length × values[i] / max` long (viewport
+   * units of min(w,h)), `thickness` thick, growing from its position toward
+   * `direction` (default 'right'). `values` are PAINT — steer
+   * `layers.N.sprite.values` and the bars glide; `max` defaults to the largest
+   * value. Pair with a `list` layout: a chart is one layer, labels another.
+   */
+  | {
+      kind: 'bar';
+      values: number[];
+      length: number;
+      thickness: number;
+      color: string;
+      max?: number;
+      direction?: 'right' | 'left' | 'up' | 'down';
+      colors?: string[];
+      colorWeights?: number[];
+    }
+  /**
+   * Regular or custom polygon. `sides` (3..12, default 6) draws a regular
+   * n-gon of the seeded `radius` (circumradius), point up; `points` (3..24
+   * unit coordinates in −1..1, scaled by the radius) draws any facet — a
+   * Picasso shard, a Kandinsky triangle, a Mondrian plane. `soft` feathers
+   * the fill from the centre like a soft circle. Rotates with `spin`.
+   */
+  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; soft?: boolean; colors?: string[]; colorWeights?: number[] }
+  /**
+   * A freehand mark: a path through `points` (2..24 unit coordinates in
+   * −1..1, scaled by the seeded `length`) stroked `width` wide with round
+   * joins. `curve: 'smooth'` (default) runs a Catmull-Rom spline through the
+   * points, `'linear'` a polyline. `taper` thins the mark to almost nothing at
+   * both ends — a brush stroke rather than a line. `orient` turns the path's
+   * +x along the entity's heading (like `streak`). Rotates with `spin`. Van
+   * Gogh's stroke, Hokusai's contour, O'Keeffe's petal, Basquiat's scrawl.
+   */
+  | {
+      kind: 'stroke';
+      length: [number, number];
+      points: Array<[number, number]>;
+      color: string;
+      width?: number;
+      curve?: 'smooth' | 'linear';
+      taper?: boolean;
+      orient?: boolean;
+      colors?: string[];
+      colorWeights?: number[];
+    }
   /**
    * Multi-line text block with deterministic line-breaking. Unlike `text` (one
    * string drawn as a single fillText call), `textBlock` wraps `text` within
@@ -271,9 +376,9 @@ export type MotionSpec =
    * wobble amplitude (px). Covers horizontal fields, diagonals (toasters) and rain
    * (angle 90).
    */
-  | { type: 'drift'; speed: [number, number]; angle?: number; bidirectional?: boolean; bob?: number }
+  | { type: 'drift'; speed: [number, number]; angle?: number; bidirectional?: boolean; bob?: number; ease?: MotionEase }
   /** Rise upward (px/sec) with an optional horizontal sway amplitude (px) — bubbles. */
-  | { type: 'rise'; speed: [number, number]; sway?: number }
+  | { type: 'rise'; speed: [number, number]; sway?: number; ease?: MotionEase }
   /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
   | { type: 'bounce'; speed: [number, number] }
   /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
@@ -296,7 +401,7 @@ export type MotionSpec =
    * viewport units); `coherence` (0..1) blends every entity's harmonics toward a
    * shared layer-level set — at 1 the field undulates in unison (fake flocking).
    */
-  | { type: 'wander'; speed: [number, number]; angle?: number; meander?: number; coherence?: number }
+  | { type: 'wander'; speed: [number, number]; angle?: number; meander?: number; coherence?: number; ease?: MotionEase }
   /**
    * Perspective starfield: entities live on a depth axis and stream toward the
    * viewer, projected as `screen = center + offset / z`. Size and alpha scale
@@ -379,6 +484,20 @@ export const LIMITS = {
   minSegmentDuration: 1000, // ms — flash-safety floor: segment cuts are luminance transitions
   maxTransitionDur: 5000,
   minTransitionDur: 200,
+  minEmitEvery: 1000, // ms — at most one event per second per entity (flash safety)
+  maxEmitEvery: 600000, // ms — ten minutes; longer silences than that are `life.enter`
+  minEmitLife: 500, // ms — an event is a smooth envelope, never a cut
+  maxEmitGrow: 8, // × base size across an event window
+  minClockedPeriod: 1000, // ms — a `clock`ed layer breathes in unison, so 1 Hz not 2
+  minClockRate: 0.1,
+  maxClockRate: 4,
+  defaultListGap: 0.06, // viewport units between list/table cells (40 px in px specs)
+  defaultListGapPx: 40,
+  minPolygonSides: 3,
+  maxPolygonSides: 12,
+  maxShapePoints: 24, // polygon.points / stroke.points
+  minEaseTau: 100, // ms
+  maxEaseTau: 120000, // ms
 } as const;
 
 // ---------------------------------------------------------------------------
