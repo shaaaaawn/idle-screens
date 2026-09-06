@@ -1,5 +1,107 @@
 # @idle-screens/schema
 
+## 3.6.0
+
+### Minor Changes
+
+- cb1c4fd: Data layout — the dashboard genre stops needing one layer per number
+  (idle-mono registry #49):
+  
+  - **`layout: { type: 'list', gap? }`** and **`{ type: 'table', columns, gap? }`**
+    place a layer's entities in reading order — one column, or `columns`
+    row-major — `gap` apart (viewport units of `min(w,h)`, default 0.06), from
+    `position` as the block's top-left anchor (now allowed with any `count`
+    under these layouts) or centred in `region`. Text and emoji sprites take
+    `strings[i]` / `glyphs[i]` in order instead of a seeded pick, and palette
+    `colors[i]` likewise, so N labels are one layer. The layouts burn the two
+    scatter draws, so toggling one on or off leaves the rest of the layer's
+    stream intact.
+  - **`bar`** sprite — `{ values, length, thickness, color, max?, direction? }`.
+    Entity i draws `length × values[i] / max` toward `direction` (`right`
+    default, `left`, `up`, `down`). `values` are paint, read at draw time, so
+    `setParam("bars.values", [...])` glides every bar; `max` defaults to the
+    largest value. Perception measures each bar at its current value.
+  - New advisory warning `list-length-mismatch` when a data layout's `count`
+    disagrees with the number of strings / glyphs / values it will read.
+  
+  New shipped example `relay-board`: a six-row status chart in five layers —
+  labels, bars, readouts, a title and a dust field — where the benchmark
+  dashboards averaged twenty-five hand-positioned `count: 1` blocks. Existing
+  entity streams are byte-identical.
+- 01a6e80: `density: 'sparse' | 'normal' | 'dense'` — a declared density intent on the spec, the way `motionIntensity` declares tempo. `sparse` says the emptiness is the point: `adviseSpec` withholds `sparse-scene`, and coverage-gated scorers can read the declaration before scoring a faithful one-mark scene as broken (the holdout house style built on restraint sat at the suite floor for exactly this reason). `dense` withholds `dense-scene`. The declaration is checked against measured coverage and a new `density-mismatch` advisory fires when the scene contradicts it. Additive: specs without `density` render and advise exactly as before.
+- 3142a7d: Layer cohesion — the perception channel that answers "does this read as one form, or as a pile of sprites?"
+  
+  Every other channel measures ink, not edges. A layer whose circles merged into a silhouette and one whose circles stayed legible as circles have the same coverage, the same luminance, the same dominance share and the same braille map, so an agent drawing a *shape* out of sprites could not tell success from failure without publishing and looking at real pixels.
+  
+  `layerCohesion(spec, opts)` (also `perceiveScene().form`) reports two independent facts per layer:
+  
+  - **`overlap`** — geometry. The mean fraction of an entity's outline buried inside a same-layer sibling, traced with 24 outline samples against every sibling. `null` for kinds where a merged silhouette is not a meaningful idea (ring, streak, stroke, bar, emoji, text, textBlock) and for single-entity layers.
+  - **`seamless` / `seamCause`** — paint. Whether those overlaps vanish or draw a visible internal edge, and which field is responsible: `soft`, `rect.feather`, any `blend`, `alpha` below 1, `pulse`, or a multi-colour palette. Opacity is judged over the whole timeline, not the sampled instant, so a pulsing layer is correctly called out.
+  
+  `reads` combines them into `mass`, `seamed` or `marks`.
+  
+  A new `overlap-seams` advisory fires on the trap: a layer packed tightly enough to have been drawn as one shape, whose paint settings defeat it. It is gated to stay off deliberate washes — at least 6 entities, mean base alpha at or above 0.45, and never under `blend: lighter` / `screen`. **No shipped example trips it**, and a test pins that.
+  
+  Calibration is measured, not guessed: across all 42 fillable layers in `src/examples/`, particle fields top out at 0.154 while a packed silhouette measures 0.79 to 0.85, with nothing in between. `aurora`'s wander curtains are the one shipped layer in the upper band, at 0.892, correctly reported as `seamed` and correctly left un-warned.
+  
+  FORMAT.md also gains the positive rule this exposes: overlapping sprites merge only at one flat colour, alpha 1, no blend, no pulse and hard edges, with depth coming from layer order instead of alpha.
+- 25cf7d8: Shape glyphs — the path-based sprite family nine of the fifteen style
+  profiles asked for (idle-mono registry #46):
+  
+  - **`polygon`** — `{ radius, color, sides? | points?, soft? }`. A regular
+    n-gon (3..12 sides, default 6, point up) of the seeded circumradius, or any
+    facet from 3..24 unit-coordinate `points` scaled by the radius. `soft`
+    feathers the fill from the centre. Rotates with `spin`; `points` are paint,
+    so two polygons with the same point count `morph`.
+  - **`stroke`** — `{ length, points, color, width?, curve?, taper?, orient? }`.
+    A freehand mark: a Catmull-Rom spline (or polyline) through 2..24
+    unit-coordinate points, scaled so the unit box spans the seeded `length`,
+    stroked with round joins; `taper` thins it to almost nothing at both ends
+    (a brush stroke, not a line); `orient` turns it along the heading like
+    `streak`.
+  - **`rect.feather`** (0..1) — a soft-edged rectangle: that fraction of the
+    half-size fades out toward the border, drawn as nested fills whose
+    composited alpha ramps linearly (exact under source-over, summed under
+    additive blends).
+  
+  Both new kinds take `colors[]` / `colorWeights` like every shaped sprite,
+  and every geometric fact lives in one module (`shapes.ts`) shared by the
+  renderer and the perception model: polygons splat as their disc weighted by
+  fill ratio, strokes stamp along their sampled path, feathered rects weigh
+  their soft band at half. New shipped example `facets`. Existing entity
+  streams are byte-identical (no new draws for existing kinds).
+- 423b40f: Time structure — three additive, closed-form primitives the style evals kept
+  asking for (idle-mono registry #47):
+  
+  - `layer.emit: { every, life, jitter?, grow? }` — **sparse events**. Each
+    entity is dark except for a `life`-ms window every `every` ms at a
+    per-entity offset (`jitter` 0 staggers entities evenly, one event at a
+    time; 1, the default, seeds the offsets). Inside a window the entity fades
+    in over the first quarter and out over the rest, and `grow: [from, to]`
+    scales its size across the window — expansion rather than travel, the "one
+    ping" primitive a house style could not author before. Flash safety:
+    `every` ≥ 1000 ms, `life` ≥ 500 ms, smooth envelope always.
+  - `layer.clock: { phase?, rate? }` — **phase-lock**. Replaces the seeded
+    per-entity phases of `pulse`, `grow` and `cycle` with one shared phase
+    (turns) and a time multiplier, so two layers can breathe in step or at a
+    fixed offset. Because a clocked layer moves in unison, its periods must
+    satisfy `period / rate ≥ 1000 ms`. A `pulse.wave` keeps its position-derived
+    phase on top of the clock's.
+  - `motion.ease: { type: 'settle' | 'buoyant', tau }` on `drift`, `rise` and
+    `wander` — closed-form velocity easing: `settle` decelerates from speed to
+    rest (travelling `speed × tau`), `buoyant` accelerates from rest. With
+    `emit`, the eased travel restarts on every event.
+  
+  All three are pure functions of `t`; `perceiveScene`, `adviseSpec` (whose
+  coverage now weighs an emit layer by its duty cycle) and `motionStats` see
+  them through the same `alphaAt` / `sizeAt` / `positionAt` the renderer uses.
+  Entity streams of existing specs are unchanged, and so are those of a spec
+  you add these to: `emit` offsets come from a fixed low-discrepancy sequence
+  (not the seeded stream), and `clock` and `ease` draw nothing, so declaring
+  any of the three disturbs no other layer. New exports `emitWindow` /
+  `emitEnvelope`; new shipped example `pings`. A validator warning
+  `emit-overlap` fires when `jitter: 0` cannot keep one event at a time.
+
 ## 3.5.0
 
 ### Minor Changes

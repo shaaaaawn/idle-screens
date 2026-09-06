@@ -1,5 +1,17 @@
 # @idle-screens/mac-web
 
+## 0.0.18
+
+### Patch Changes
+
+- Updated dependencies [cb1c4fd]
+- Updated dependencies [01a6e80]
+- Updated dependencies [3142a7d]
+- Updated dependencies [25cf7d8]
+- Updated dependencies [423b40f]
+  - @idle-screens/schema@3.6.0
+  - @idle-screens/savers-classic@3.2.4
+
 ## 0.0.17
 
 ### Patch Changes
