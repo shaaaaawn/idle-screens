@@ -4,6 +4,7 @@ export * from './simulate';
 export * from './compile';
 export * from './steer';
 export * from './advise';
+export * from './cohesion';
 export * from './describe';
 export * from './perceive';
 export * from './sequence';

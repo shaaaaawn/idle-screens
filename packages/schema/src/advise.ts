@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
 import { structuralSignature } from './steer';
@@ -32,17 +33,41 @@ const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
 export function adviseSpec(
   spec: SaverSpec,
   viewport = { width: 1920, height: 1080 },
+  /**
+   * Sample point. `perceiveScene` forwards its own `t`/`seed` so the advisories
+   * describe the same scene its other channels do — without them a caller
+   * perceiving at t = 30 s would get `form` for that instant beside an
+   * `overlap-seams` advisory computed for a different one.
+   */
+  opts: { t?: number; seed?: number } = {},
 ): SpecWarning[] {
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  const rng = createRng(spec.seed ?? 42);
+  // Mirror buildScene's maxTotal clamp: without it a dense scene above the
+  // reference viewport is advised on more entities than the renderer will
+  // build, and `perceiveScene` would pair a `form` channel counted one way
+  // with an `overlap-seams` advisory counted the other. (Part of F49, which
+  // tracks the same divergence for describeScene.)
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((sum, l) => sum + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
+  const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
   const bgLuma = backgroundLuma(spec);
   const bgRgb = backgroundRgb(spec);
+
+  // Do overlapping layers actually merge? Computed once from the entities we
+  // already built; the advisory below fires only on the case where the author
+  // clearly wanted one shape and the paint settings defeat it.
+  const cohesion = cohesionOf(
+    spec.layers.map((layer, i) => ({ layer, entities: allEntities[i]! })),
+    opts.t ?? COHESION_T, w, h,
+  );
 
   let totalEntities = 0;
   let textLayerCount = 0;
@@ -57,6 +82,18 @@ export function adviseSpec(
     const isStaticText = isText && layer.motion.type === 'static';
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
+
+    const coh = cohesion[li]!;
+    if (seamsWorthWarning(layer, coh, entities.length)) {
+      warnings.push({
+        path: `layers[${li}]`,
+        code: 'overlap-seams',
+        message:
+          `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
+          + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
+          + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
+      });
+    }
 
     if (layer.trail && layer.motion.type === 'static') {
       warnings.push({
