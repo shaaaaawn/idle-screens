@@ -210,20 +210,51 @@ describe('layer cohesion', () => {
     expect(c.reads).toBe('mass');
   });
 
-  it('form and its advisory count the same entities above the reference viewport', () => {
-    // countScale > 1 scales the layer past LIMITS.maxTotal; buildScene clamps
-    // it and adviseSpec now clamps identically, so the two cannot disagree.
-    const spec = packed({
-      sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' },
-      alpha: [0.84, 0.96],
+  it('a sliver thinner than the nominal inset still merges with its twin', () => {
+    // Both normal candidates would overshoot a shape this thin, putting every
+    // sample outside its own rect; the step is bounded by the shortest edge.
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'slivers', label: 'slivers', seed: 6,
+      layers: [{
+        count: 3,
+        sprite: { kind: 'rect', width: [0.2, 0.2], aspect: [0.00001, 0.00001], color: '#16325a' },
+        motion: { type: 'static' },
+        region: { x: [0.5, 0.5], y: [0.5, 0.5] },
+        alpha: [1, 1],
+      }],
+    };
+    // A tip sample or two can still land outside a sliver this extreme;
+    // what matters is that it merges rather than reporting near zero.
+    expect(layerCohesion(spec)[0]!.overlap!).toBeGreaterThan(0.9);
+  });
+
+  it('adviseSpec counts the entities the renderer will build, not the unclamped scale-up', () => {
+    // At 4K countScale is 2, which would take these three layers to 966 raw
+    // entities — over LIMITS.maxTotal. buildScene clamps, so the small layer
+    // lands at 5 entities and falls under the advisory's 6-entity gate.
+    // Without the matching clamp in adviseSpec it would see 6 and fire, while
+    // `form` in the same response described the 5-entity layer.
+    const filler = (key: string): LayerSpec => ({
+      key, count: 240,
+      sprite: { kind: 'circle', radius: [0.002, 0.003], color: '#222222' },
+      motion: { type: 'static' },
     });
-    spec.layers[0]!.count = 300;
-    spec.layers.push({ ...spec.layers[0]!, key: 'filler' } as LayerSpec);
-    const viewport = { width: 3840, height: 2160 };
-    const p = perceiveSceneSync(spec, { viewport });
-    const seamed = p.form.filter((f) => f.reads === 'seamed').map((f) => f.layerIndex);
-    const warned = p.advisories.filter((wn) => wn.code === 'overlap-seams').map((wn) => Number(wn.path.match(/\d+/)![0]));
-    expect(warned).toEqual(seamed);
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'crowded', label: 'crowded', seed: 1831,
+      layers: [
+        {
+          key: 'body', count: 3,
+          sprite: { kind: 'circle', radius: [0.07, 0.11], color: '#16325a' },
+          motion: { type: 'static' },
+          region: { x: [0.1, 0.18], y: [0.44, 0.56] },
+          alpha: [0.84, 0.96],
+        },
+        filler('a'), filler('b'),
+      ],
+    };
+    const p = perceiveSceneSync(spec, { viewport: { width: 3840, height: 2160 } });
+    expect(p.form[0]!.reads).toBe('seamed'); // packed, and alpha < 1
+    expect(p.advisories.filter((wn) => wn.code === 'overlap-seams')).toHaveLength(0);
   });
 
   it('rides along in the perception bundle', async () => {

@@ -136,7 +136,16 @@ function circleShape(cx: number, cy: number, r: number): Shape {
 }
 
 /** A convex or concave polygon given by absolute vertices. */
-function polyShape(cx: number, cy: number, abs: Array<{ x: number; y: number }>): Shape {
+function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>): Shape {
+  // Drop consecutive coincident vertices up front. A zero-length edge has no
+  // normal to step along, and leaving one in would emit a sample sitting
+  // exactly on the boundary — the degeneracy EDGE_INSET exists to avoid.
+  const abs = raw.filter((p, i) => {
+    const q = raw[(i + 1) % raw.length]!;
+    return Math.hypot(q.x - p.x, q.y - p.y) > 0;
+  });
+  if (abs.length < 3) return circleShape(cx, cy, 0);
+
   let br = 0;
   for (const p of abs) br = Math.max(br, Math.hypot(p.x - cx, p.y - cy));
   const inside = (x: number, y: number): boolean => {
@@ -153,7 +162,11 @@ function polyShape(cx: number, cy: number, abs: Array<{ x: number; y: number }>)
     return Math.hypot(q.x - p.x, q.y - p.y);
   });
   const perimeter = seg.reduce((a, b) => a + b, 0);
-  const step = br * EDGE_INSET;
+  // A shape thinner than the nominal inset would have BOTH normal candidates
+  // overshoot it, so the step is bounded by the shortest edge as well as by
+  // the bounding radius.
+  const shortest = Math.min(...seg);
+  const step = Math.min(br * EDGE_INSET, shortest * 0.25);
   return {
     cx, cy, br,
     contains: inside,
@@ -174,16 +187,24 @@ function polyShape(cx: number, cy: number, abs: Array<{ x: number; y: number }>)
         const a = abs[k]!;
         const b = abs[(k + 1) % abs.length]!;
         const len = seg[k]!;
-        const f = len > 0 ? d / len : 0;
+        const f = d / len;
         const px = a.x + (b.x - a.x) * f;
         const py = a.y + (b.y - a.y) * f;
-        if (len <= 0) { out.push({ x: px, y: py }); continue; }
         const ux = (b.x - a.x) / len;
         const uy = (b.y - a.y) / len;
-        let qx = px - uy * step;
-        let qy = py + ux * step;
-        if (!inside(qx, qy)) { qx = px + uy * step; qy = py - ux * step; }
-        out.push({ x: qx, y: qy });
+        // Back off until a candidate lands inside: a sliver thinner than even
+        // the bounded step still gets the best sample available rather than
+        // one outside its own shape.
+        let placed = false;
+        for (let t = step; t > 0 && !placed; t /= 8) {
+          for (const sign of [1, -1]) {
+            const qx = px - sign * uy * t;
+            const qy = py + sign * ux * t;
+            if (inside(qx, qy)) { out.push({ x: qx, y: qy }); placed = true; break; }
+          }
+          if (t < step * 1e-3) break;
+        }
+        if (!placed) out.push({ x: px, y: py });
       }
       return out;
     },
