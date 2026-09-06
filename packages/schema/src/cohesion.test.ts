@@ -277,10 +277,12 @@ describe('layer cohesion', () => {
     expect(c.reads).toBeNull();
   });
 
-  it('a collinear polygon fills nothing, so a real sprite beside it is still alone', () => {
-    // Nonzero radius, three distinct vertices, zero enclosed area. It must not
-    // count as a sibling — otherwise one painting sprite plus one non-painting
-    // one looks like a pair of separate marks instead of a single sprite.
+  it('a collinear polygon encloses no area, so there is nothing to read', () => {
+    // Nonzero radius and three distinct vertices, but zero enclosed area — the
+    // case a bounding-radius filter lets through. Every entity in a layer
+    // shares one sprite, so a layer that MIXES painting and non-painting
+    // shapes is not expressible; what this pins is that zero-fill shapes are
+    // excluded from `solid`, which is what stops them counting as siblings.
     const spec: SaverSpec = {
       schemaVersion: 1, id: 'flat', label: 'flat', seed: 9,
       layers: [{
