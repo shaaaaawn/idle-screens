@@ -77,6 +77,7 @@ import {
   qualityFor,
   type TankQuality,
 } from './quality';
+import { LogicalClock } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
@@ -525,8 +526,8 @@ class TankInstance implements SaverInstance {
   private h: number;
   private frameId: number | null = null;
   private paused = false;
-  private startT = 0;
   private t = 0;
+  private readonly clock = new LogicalClock();
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
@@ -1696,7 +1697,7 @@ class TankInstance implements SaverInstance {
   private start(): void {
     if (this.frameId !== null || typeof requestAnimationFrame === 'undefined')
       return;
-    this.startT = 0;
+    this.clock.resume();
     this.frameId = requestAnimationFrame((now) => this.loop(now));
   }
 
@@ -1705,13 +1706,13 @@ class TankInstance implements SaverInstance {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    this.clock.pause();
   }
 
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
-    if (this.startT === 0) this.startT = now;
     this.governFrame(now);
-    this.t = now - this.startT;
+    this.t = this.clock.sample(now);
     this.setState(this.t);
     this.renderScene();
   }
@@ -1786,6 +1787,7 @@ class TankInstance implements SaverInstance {
 
   renderFrame(t: number, _seed: number): void {
     this.t = t;
+    this.clock.seek(t);
     this.setState(t);
     this.renderScene();
   }
