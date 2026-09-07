@@ -1101,7 +1101,7 @@
               "type": "array",
               "items": {
                 "type": "number",
-                "minimum": 0,
+                "minimum": -180,
                 "maximum": 180
               },
               "minItems": 2,

@@ -134,6 +134,20 @@ describe('saver-spec.schema.json', () => {
     expect(check.errors ?? []).toEqual([]);
   });
 
+  it('accepts negative orbit speeds for counter-rotation', () => {
+    const spec = {
+      schemaVersion: 1, id: 'counter-orbit', label: 'Counter orbit',
+      layers: [{
+        count: 2,
+        sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#fff' },
+        motion: { type: 'orbit', speed: [-30, -20], radius: [0.1, 0.2] },
+      }],
+    };
+    expect(validateSpec(spec).valid).toBe(true);
+    expect(check(spec)).toBe(true);
+    expect(check.errors ?? []).toEqual([]);
+  });
+
   it('rejects idle-sequence with fade transition (v1 is cut-only)', () => {
     const scene = {
       schemaVersion: 1, id: 's', label: 'S',
