@@ -43,6 +43,20 @@ describe('buildEntities (seeded, deterministic)', () => {
     expect(a).not.toEqual(b);
   });
 
+  it('keeps omitted text/emoji sizes at their 1080p pixel equivalents', () => {
+    const layer: LayerSpec = {
+      count: 10,
+      sprite: { kind: 'emoji', glyphs: ['x'] },
+      motion: { type: 'static' },
+    };
+    const px = buildEntities(layer, createRng(1), W, H);
+    const viewport = buildEntities(layer, createRng(1), 1080, 1080, 1080);
+    for (const entity of [...px, ...viewport]) {
+      expect(entity.size).toBeGreaterThanOrEqual(20);
+      expect(entity.size).toBeLessThanOrEqual(40);
+    }
+  });
+
   it('grid layers are exempt from count scaling — the lattice never truncates', () => {
     // A scaled count doesn't thin a grid like a scatter field, it truncates it
     // row-major. Live failure this pins: an 18-column single-row grid at

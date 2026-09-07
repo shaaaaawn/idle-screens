@@ -174,7 +174,12 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
         Math.round(layer.count * countScale),
         layer.links ? LIMITS.maxLinkLayerCount : LIMITS.maxPerLayer,
       ));
-  const [smin, smax] = layer.size ?? [20, 40];
+  // Defaults are authored as their 1080p-equivalent viewport fractions. Using
+  // the legacy px defaults directly would multiply 20..40 by the viewport.
+  const defaultSize = scale === 1
+    ? [20, 40] as const
+    : [20 / LIMITS.referenceViewport, 40 / LIMITS.referenceViewport] as const;
+  const [smin, smax] = layer.size ?? defaultSize;
   const variants = spriteVariants(layer.sprite);
   const sprite = layer.sprite;
   const spriteColors = isShapedSprite(sprite) ? sprite.colors : undefined;

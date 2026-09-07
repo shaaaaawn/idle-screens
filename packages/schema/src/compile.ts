@@ -637,7 +637,9 @@ class SpecInstance implements SaverInstance {
     const positions = built.entities.map((e) => this.entityPos(e, t, parentE));
     const maxDistPx = links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
     const edges = linkEdges(links, positions, maxDistPx, wrap, this.w, this.h);
-    const lw = (links.width ?? 1) * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
+    const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
+    const defaultWidth = unitScale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+    const lw = (links.width ?? defaultWidth) * unitScale;
     ctx.lineWidth = lw;
     ctx.lineCap = 'butt'; // streak sprites set 'round'; reset so link ends stay crisp
 
