@@ -955,7 +955,7 @@ class TankInstance implements SaverInstance {
       }
     };
     await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
-    if (this.paused) this.renderStill();
+    if (!this.disposed && this.paused) this.renderStill();
   }
 
   private template(url: string, dracoPath = ''): Promise<FishTemplate | null> {
