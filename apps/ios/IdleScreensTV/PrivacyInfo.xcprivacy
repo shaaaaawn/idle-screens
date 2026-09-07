@@ -20,26 +20,13 @@
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 	<!--
-	  The app can publish a scene to a channel (MCPClient.publishScene), and the
-	  server retains that scene and its history. That is user-authored content
-	  leaving the device, so it is declared. It is NOT linked to identity: this
-	  product has no accounts and issues capability tokens, not user ids.
+	  No NSPrivacyCollectedDataTypes: unlike the iOS target, this app has no path
+	  to MCPClient.publishScene/publishSpec. The TV target's sources are
+	  IdleScreensTV plus IdleScreens/API, Theme, Render and Assets.xcassets — not
+	  IdleScreens/App, where AppState+VJ.swift makes the only publish calls. The
+	  TV app only previews channels; it never sends user-authored content off
+	  the device. Re-check this if TV ever grows a publish/VJ path.
 	-->
-	<key>NSPrivacyCollectedDataTypes</key>
-	<array>
-		<dict>
-			<key>NSPrivacyCollectedDataType</key>
-			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
-			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<false/>
-			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
-			<key>NSPrivacyCollectedDataTypePurposes</key>
-			<array>
-				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-			</array>
-		</dict>
-	</array>
 	<!--
 	  CA92.1 — app-owned defaults only. NOT 1C8F.1: that code is for defaults
 	  shared through an App Group, and there is no App Group in this project
