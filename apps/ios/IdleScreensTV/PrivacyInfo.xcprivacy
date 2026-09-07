@@ -20,13 +20,30 @@
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 	<!--
-	  No NSPrivacyCollectedDataTypes: unlike the iOS target, this app has no path
-	  to MCPClient.publishScene/publishSpec. The TV target's sources are
-	  IdleScreensTV plus IdleScreens/API, Theme, Render and Assets.xcassets — not
-	  IdleScreens/App, where AppState+VJ.swift makes the only publish calls. The
-	  TV app only previews channels; it never sends user-authored content off
-	  the device. Re-check this if TV ever grows a publish/VJ path.
+	  This target has no path to MCPClient.publishScene/publishSpec — those live
+	  in IdleScreens/App/AppState+VJ.swift, outside the TV target's sources
+	  (IdleScreensTV plus IdleScreens/API, Theme, Render, Assets.xcassets). But
+	  PerceptionView polls the previewScene MCP tool every 5s with the channel's
+	  current scene spec (TVAppState.currentSpecJSON) to render a fallback
+	  preview, which is the same user-authored content leaving the device that
+	  the iOS manifest declares for publishScene/publishSpec. Declared here for
+	  the same reason: under-declaring is the rejection risk.
 	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
 	<!--
 	  CA92.1 — app-owned defaults only. NOT 1C8F.1: that code is for defaults
 	  shared through an App Group, and there is no App Group in this project
