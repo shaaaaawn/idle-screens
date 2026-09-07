@@ -18,31 +18,16 @@ export type EvalId =
 
 /**
  * The medium/format family a suite belongs to. Suites of one kind share a
- * deliverable shape and a scorer vocabulary; a page groups by it.
- *
- * `LocalEvalKind` is the subset this repo's own `EVALS` entries may use.
- * `EvalKind` is the full shared vocabulary: it also carries the kinds the
- * mono's greenroom/evals/registry.json declares for the suites that live
- * there (lighting, pattern, typography, programme, behaviour, data), kept
- * here so the two registries share one name for each kind. `EvalDefinition`
- * is typed to `LocalEvalKind`, not `EvalKind` — a suite in this file can
- * never accidentally take on a mono-only kind, so drift between the two
- * vocabularies fails to compile instead of silently passing.
+ * deliverable shape and a scorer vocabulary; a page groups by it. The mono's
+ * greenroom/evals/registry.json declares the same kinds for the suites that
+ * live there (lighting, pattern, typography, programme, behaviour, data).
  */
-export type LocalEvalKind = 'style' | 'comprehension' | 'contract';
-export type EvalKind =
-  | LocalEvalKind
-  | 'lighting'
-  | 'pattern'
-  | 'typography'
-  | 'programme'
-  | 'behaviour'
-  | 'data';
+export type EvalKind = 'style' | 'comprehension' | 'contract' | 'lighting' | 'pattern' | 'typography' | 'programme' | 'behaviour' | 'data';
 
 export interface EvalDefinition {
   id: EvalId;
   title: string;
-  kind: LocalEvalKind;
+  kind: EvalKind;
   /** One sentence a non-expert can read. */
   measures: string;
   harness: EvalHarness;
