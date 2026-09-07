@@ -57,6 +57,25 @@ describe('buildEntities (seeded, deterministic)', () => {
     }
   });
 
+  it('lets drift, rise, and wander entities leave the viewport when wrap is false', () => {
+    const sprite = { kind: 'emoji' as const, glyphs: ['x'] };
+    const position = { x: 0.5, y: 0.5 };
+    const motions: LayerSpec['motion'][] = [
+      { type: 'drift', speed: [100, 100], angle: 0 },
+      { type: 'rise', speed: [100, 100] },
+      { type: 'wander', speed: [100, 100], angle: 0, meander: 0 },
+    ];
+    for (const motion of motions) {
+      const [entity] = buildEntities(
+        { count: 1, sprite, size: [10, 10], motion, position, wrap: false },
+        createRng(1), 100, 100,
+      );
+      const p = positionAt(entity!, 2000, 100, 100);
+      if (motion.type === 'rise') expect(p.y).toBeLessThan(-100);
+      else expect(p.x).toBeGreaterThan(200);
+    }
+  });
+
   it('grid layers are exempt from count scaling — the lattice never truncates', () => {
     // A scaled count doesn't thin a grid like a scatter field, it truncates it
     // row-major. Live failure this pins: an 18-column single-row grid at
