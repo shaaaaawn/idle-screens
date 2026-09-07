@@ -7,6 +7,8 @@ const spec: SaverSpec = {
   id: 't',
   label: 'T',
   units: 'px',
+  ghosting: 0.2,
+  referenceViewport: 1080,
   background: {
     type: 'gradient',
     stops: [
@@ -37,6 +39,11 @@ describe('resolveSpecPath', () => {
     expect((t.parent as Record<string, unknown>)[t.key as string]).toBe('#204060');
   });
 
+  it('resolves steerable top-level paint and sizing fields', () => {
+    expect(resolveSpecPath(spec, 'ghosting')?.key).toBe('ghosting');
+    expect(resolveSpecPath(spec, 'referenceViewport')?.key).toBe('referenceViewport');
+  });
+
   it('returns null for unknown paths', () => {
     expect(resolveSpecPath(spec, 'layers.9.count')).toBeNull();
     expect(resolveSpecPath(spec, 'nope.count')).toBeNull();
@@ -51,10 +58,14 @@ describe('applyDeltasToSpec', () => {
       { t: 1, path: 'dots.count', value: 200 },
       { t: 2, path: 'background.stops.1.color', value: '#ffffff' },
       { t: 3, path: 'unknown.path', value: 1 },
+      { t: 4, path: 'ghosting', value: 0.8 },
+      { t: 5, path: 'referenceViewport', value: 720 },
     ]);
     expect(out.layers[0]!.count).toBe(200);
     expect((out.background as { stops: Array<{ color: string }> }).stops[1]!.color).toBe('#ffffff');
     expect(spec.layers[0]!.count).toBe(10); // base untouched
+    expect(out.ghosting).toBe(0.8);
+    expect(out.referenceViewport).toBe(720);
   });
 });
 
@@ -88,6 +99,7 @@ describe('structuralSignature', () => {
     const countChange = applyDeltasToSpec(spec, [{ t: 0, path: 'dots.count', value: 99 }]);
     expect(structuralSignature(colorOnly)).toBe(base);
     expect(structuralSignature(countChange)).not.toBe(base);
+    expect(structuralSignature({ ...spec, referenceViewport: 720 })).not.toBe(base);
   });
 });
 
@@ -101,6 +113,8 @@ describe('steerablePaths', () => {
     expect(paths).toContain('background.stops.0.color');
     expect(paths).toContain('background.stops.0.at');
     expect(paths).toContain('background.stops.1.color');
+    expect(paths).toContain('ghosting');
+    expect(paths).toContain('referenceViewport');
   });
 
   it('skips metadata fields', () => {
