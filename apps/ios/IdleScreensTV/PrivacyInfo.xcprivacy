@@ -4,9 +4,9 @@
 <dict>
 	<!--
 	  Privacy manifest. Required since 2024-05 for any app whose bundle touches a
-	  required-reason API. Audited 2026-09-07 across all Swift sources in this
-	  project: UserDefaults is the ONLY category used (24 call sites). File
-	  timestamps, system boot time, disk space and active-keyboard APIs have zero
+	  required-reason API. Audited 2026-09-07 against this target's compiled
+	  sources: UserDefaults is the only required-reason category used. File
+	  timestamps, system boot time, disk space and active-keyboard APIs have no
 	  call sites, so they are deliberately absent rather than forgotten — adding a
 	  category the app does not use is its own review problem.
 	-->
