@@ -135,9 +135,8 @@ function dracoLoader(path: string): DRACOLoader {
   return loader;
 }
 
-/** Tanks currently able to decode, per decoder path. The decoder outlives any
- *  single tank (templates are cached page-wide) but must not outlive the LAST
- *  one, or its worker leaks for the life of the page. */
+/** Active decode tasks per decoder path. A template no longer needs Draco
+ *  after parsing, so lifetime follows the work instead of any tank. */
 const DRACO_USERS = new Map<string, number>();
 
 function retainDraco(path: string): void {
@@ -156,6 +155,21 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.get(k)?.dispose();
   DRACO_BY_PATH.delete(k);
 }
+
+async function withDracoLoader<T>(
+  path: string,
+  task: (loader: DRACOLoader) => Promise<T>,
+): Promise<T> {
+  retainDraco(path);
+  try {
+    return await task(dracoLoader(path));
+  } finally {
+    releaseDraco(path);
+  }
+}
+
+/** Test seam for the shared decoder lifetime; not exported by the package. */
+export const __withDracoLoaderForTest = withDracoLoader;
 
 /**
  * The water ceiling: one translucent plane above the fish, rippling in the
@@ -549,9 +563,6 @@ class TankInstance implements SaverInstance {
   /** The camera azimuth every `crossing` lane in the tank is laid against.
    *  Owned here so spawn-time and steer-time compiles agree. */
   private laneAzimuth = 0;
-  /** Decoder paths this tank retained, released on dispose. */
-  private readonly dracoPaths = new Set<string>();
-
   constructor(
     ctx: SaverContext,
     space: ParamSpace,
@@ -975,18 +986,12 @@ class TankInstance implements SaverInstance {
           })();
           const loader = new GLTFLoader();
           const draco = needsDraco(buf);
-          if (draco) {
-            // Retain ONCE per path per tank — the release side is one call per
-            // unique path at dispose, so retaining per model would leak the
-            // refcount and the worker would never be freed.
-            const key = dracoDecoderPath(dracoPath);
-            if (!this.dracoPaths.has(key)) {
-              this.dracoPaths.add(key);
-              retainDraco(dracoPath);
-            }
-            loader.setDRACOLoader(dracoLoader(dracoPath));
-          }
-          const gltf = await loader.parseAsync(buf, '');
+          const gltf = draco
+            ? await withDracoLoader(dracoPath, async (decoder) => {
+                loader.setDRACOLoader(decoder);
+                return loader.parseAsync(buf, '');
+              })
+            : await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -1830,8 +1835,6 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
-    for (const p of this.dracoPaths) releaseDraco(p);
-    this.dracoPaths.clear();
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();
