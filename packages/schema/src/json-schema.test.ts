@@ -110,6 +110,30 @@ describe('saver-spec.schema.json', () => {
     expect(check(seq)).toBe(true);
   });
 
+  it('accepts the runtime-supported textBlock reveal controls', () => {
+    const spec = {
+      schemaVersion: 1, id: 'reveal', label: 'Reveal',
+      layers: [{
+        count: 1,
+        sprite: {
+          kind: 'textBlock', text: 'Hello', maxWidth: 0.8, fontSize: 0.05,
+          reveal: {
+            progress: 0.5,
+            mode: 'glyphFade',
+            speed: 20,
+            caret: { blink: 1.2, color: '#fff' },
+            fade: 0.15,
+          },
+        },
+        motion: { type: 'static' },
+        position: { x: 0.1, y: 0.1 },
+      }],
+    };
+    expect(validateSpec(spec).valid).toBe(true);
+    expect(check(spec)).toBe(true);
+    expect(check.errors ?? []).toEqual([]);
+  });
+
   it('rejects idle-sequence with fade transition (v1 is cut-only)', () => {
     const scene = {
       schemaVersion: 1, id: 's', label: 'S',
