@@ -77,7 +77,7 @@ import {
   qualityFor,
   type TankQuality,
 } from './quality';
-import { LogicalClock } from './runtime';
+import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
@@ -536,6 +536,7 @@ class TankInstance implements SaverInstance {
    *  (speed changes glide); when it does not, the legacy constant-speed
    *  formula is kept bit-for-bit. */
   private speedTracked = false;
+  private autoRotateTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
@@ -1156,9 +1157,10 @@ class TankInstance implements SaverInstance {
     this.reconcile();
 
     // Camera orbit
-    const az = MathUtils.degToRad(
-      this.num('cameraAzimuth') + this.num('autoRotate') * tSec,
+    const rotation = rateOffset(
+      this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
+    const az = MathUtils.degToRad(this.num('cameraAzimuth') + rotation);
     const el = MathUtils.degToRad(this.num('cameraElevation'));
     const dist = this.num('cameraDistance');
     this.camera.position.set(
@@ -1782,6 +1784,7 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');
     if (this.paused) this.renderStill();
   }
 
