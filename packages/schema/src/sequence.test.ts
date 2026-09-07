@@ -734,6 +734,26 @@ describe('SequenceInstance — morph segue', () => {
     inst2.dispose();
     // If this doesn't crash and the chain root logic works, seeds are deterministic
   });
+
+  it('preserves paint steering after a completed morph', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(7000, 1);
+    inst.applyTrack!({
+      program: 'test',
+      seed: 1,
+      deltas: [{ t: 7000, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 }],
+    });
+
+    const activeSpec = (): SaverSpec => {
+      const state = inst as unknown as { activeIndex: number; children: Array<{ effSpec: SaverSpec } | null> };
+      return state.children[state.activeIndex]!.effSpec;
+    };
+    expect(activeSpec().background).toEqual({ type: 'solid', color: '#ff0000' });
+
+    inst.renderFrame!(7016, 1);
+    expect(activeSpec().background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

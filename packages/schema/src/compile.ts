@@ -983,7 +983,6 @@ class SequenceInstance implements SaverInstance {
         child.hotSwapSpec(this.childScene(index));
       } else {
         child = this.ensureChild(index);
-        if (useMorphSeed) child.hotSwapSpec(this.childScene(index));
       }
       child.renderFrame(localT, effSeed);
     }
