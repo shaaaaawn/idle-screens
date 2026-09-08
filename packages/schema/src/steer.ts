@@ -123,6 +123,17 @@ export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
   const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer']);
   const INDEXED = new Set(['layers', 'stops']);
+  // Mirror resolveSpecPath's layer-key precedence: a root field named the
+  // same as a layer's key resolves to that layer, not the scalar, so don't
+  // advertise a root path we can't actually deliver a delta to.
+  const layers = (spec as { layers?: unknown }).layers;
+  const shadowedRootKeys = new Set(
+    Array.isArray(layers)
+      ? layers
+          .map((l) => (l && typeof l === 'object' ? (l as Record<string, unknown>).key : undefined))
+          .filter((k): k is string => typeof k === 'string' && STEERABLE_ROOT_KEYS.has(k))
+      : [],
+  );
   const out: string[] = [];
   const walk = (node: unknown, prefix: string, key: string): void => {
     if (Array.isArray(node) && INDEXED.has(key)) {
@@ -136,6 +147,7 @@ export function steerablePaths(spec: unknown): string[] {
     if (node && typeof node === 'object') {
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
         if (SKIP.has(k)) continue;
+        if (!prefix && shadowedRootKeys.has(k)) continue;
         walk(v, prefix ? `${prefix}.${k}` : k, k);
       }
       return;

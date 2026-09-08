@@ -35,13 +35,13 @@
 | G5  | Spec version stamping / migration | Open     | Schema 2.3.0 viewport-unit default broke previously-valid live channels |
 | G6  | `reveal` on textBlock — animated typing/deleting | Open | One numeric paint param rides the existing steer glide; iOS/tvOS native renderer must follow |
 
----
-
-## Open ideas (not yet implemented)
-
 B2 (richer `links`) and B3 (weighted color palettes) shipped in the v1
 ceiling batch (2026-07-21) — see the status table above for their final
 shape (`links.falloff`/`mode`, `sprite.colorWeights[]`).
+
+---
+
+## Open ideas (not yet implemented)
 
 ### C2 — Render-stat confirmation
 

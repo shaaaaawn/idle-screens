@@ -160,6 +160,17 @@ describe('steerablePaths', () => {
     expect(steerablePaths(null)).toEqual([]);
     expect(steerablePaths(42)).toEqual([]);
   });
+
+  it('omits a root field shadowed by a same-named layer key', () => {
+    const shadowed: SaverSpec = {
+      ...spec,
+      layers: [{ ...spec.layers[0]!, key: 'ghosting' }],
+    };
+    const paths = steerablePaths(shadowed);
+    expect(paths).not.toContain('ghosting');
+    expect(paths).toContain('referenceViewport');
+    expect(paths).toContain('layers.0.count');
+  });
 });
 
 describe('easeSmooth', () => {
