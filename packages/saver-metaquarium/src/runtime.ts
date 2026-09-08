@@ -5,7 +5,7 @@ export class LogicalClock {
   private base = 0;
   private origin: number | null = null;
   private current = 0;
-  private paused = false;
+  private paused = true;
 
   resume(): void {
     this.paused = false;
