@@ -492,7 +492,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false && motionWraps, w, h);
       const la = Math.min(1, (layer.links.alpha ?? 0.6) * lifeA);
       const lum = layer.links.color ? hexLuma(layer.links.color) : 0.7;
-      const wgt = Math.min(1, ((layer.links.width ?? 1) * scale) / cellH) * la * alphaScale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const wgt = Math.min(1, ((layer.links.width ?? defaultWidth) * scale) / cellH) * la * alphaScale;
       for (const edge of edges) {
         const pi = positions[edge.i]!;
         const pj = positions[edge.j]!;
@@ -814,7 +815,8 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       const motionWraps = ['drift', 'rise', 'wander'].includes(layer.motion.type);
       const edges = linkEdges(layer.links, positions, layer.links.maxDist * scale, layer.wrap !== false && motionWraps, w, h);
       const la = (layer.links.alpha ?? 0.6) * lifeA;
-      const lw = (layer.links.width ?? 1) * scale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const lw = (layer.links.width ?? defaultWidth) * scale;
       for (const edge of edges) area += edge.dist * lw * la * LINE_SALIENCE;
     }
     const meanLuma = entities.length ? lumAcc / entities.length : 0;

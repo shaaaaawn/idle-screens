@@ -77,6 +77,7 @@ import {
   qualityFor,
   type TankQuality,
 } from './quality';
+import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
@@ -134,9 +135,8 @@ function dracoLoader(path: string): DRACOLoader {
   return loader;
 }
 
-/** Tanks currently able to decode, per decoder path. The decoder outlives any
- *  single tank (templates are cached page-wide) but must not outlive the LAST
- *  one, or its worker leaks for the life of the page. */
+/** Active decode tasks per decoder path. A template no longer needs Draco
+ *  after parsing, so lifetime follows the work instead of any tank. */
 const DRACO_USERS = new Map<string, number>();
 
 function retainDraco(path: string): void {
@@ -155,6 +155,21 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.get(k)?.dispose();
   DRACO_BY_PATH.delete(k);
 }
+
+async function withDracoLoader<T>(
+  path: string,
+  task: (loader: DRACOLoader) => Promise<T>,
+): Promise<T> {
+  retainDraco(path);
+  try {
+    return await task(dracoLoader(path));
+  } finally {
+    releaseDraco(path);
+  }
+}
+
+/** Test seam for the shared decoder lifetime; not exported by the package. */
+export const __withDracoLoaderForTest = withDracoLoader;
 
 /**
  * The water ceiling: one translucent plane above the fish, rippling in the
@@ -525,8 +540,8 @@ class TankInstance implements SaverInstance {
   private h: number;
   private frameId: number | null = null;
   private paused = false;
-  private startT = 0;
   private t = 0;
+  private readonly clock = new LogicalClock();
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
@@ -535,6 +550,7 @@ class TankInstance implements SaverInstance {
    *  (speed changes glide); when it does not, the legacy constant-speed
    *  formula is kept bit-for-bit. */
   private speedTracked = false;
+  private autoRotateTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
@@ -547,9 +563,6 @@ class TankInstance implements SaverInstance {
   /** The camera azimuth every `crossing` lane in the tank is laid against.
    *  Owned here so spawn-time and steer-time compiles agree. */
   private laneAzimuth = 0;
-  /** Decoder paths this tank retained, released on dispose. */
-  private readonly dracoPaths = new Set<string>();
-
   constructor(
     ctx: SaverContext,
     space: ParamSpace,
@@ -942,7 +955,7 @@ class TankInstance implements SaverInstance {
       }
     };
     await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
-    if (this.paused) this.renderStill();
+    if (!this.disposed && this.paused) this.renderStill();
   }
 
   private template(url: string, dracoPath = ''): Promise<FishTemplate | null> {
@@ -973,18 +986,12 @@ class TankInstance implements SaverInstance {
           })();
           const loader = new GLTFLoader();
           const draco = needsDraco(buf);
-          if (draco) {
-            // Retain ONCE per path per tank — the release side is one call per
-            // unique path at dispose, so retaining per model would leak the
-            // refcount and the worker would never be freed.
-            const key = dracoDecoderPath(dracoPath);
-            if (!this.dracoPaths.has(key)) {
-              this.dracoPaths.add(key);
-              retainDraco(dracoPath);
-            }
-            loader.setDRACOLoader(dracoLoader(dracoPath));
-          }
-          const gltf = await loader.parseAsync(buf, '');
+          const gltf = draco
+            ? await withDracoLoader(dracoPath, async (decoder) => {
+                loader.setDRACOLoader(decoder);
+                return loader.parseAsync(buf, '');
+              })
+            : await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -1155,9 +1162,10 @@ class TankInstance implements SaverInstance {
     this.reconcile();
 
     // Camera orbit
-    const az = MathUtils.degToRad(
-      this.num('cameraAzimuth') + this.num('autoRotate') * tSec,
+    const rotation = rateOffset(
+      this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
+    const az = MathUtils.degToRad(this.num('cameraAzimuth') + rotation);
     const el = MathUtils.degToRad(this.num('cameraElevation'));
     const dist = this.num('cameraDistance');
     this.camera.position.set(
@@ -1696,7 +1704,7 @@ class TankInstance implements SaverInstance {
   private start(): void {
     if (this.frameId !== null || typeof requestAnimationFrame === 'undefined')
       return;
-    this.startT = 0;
+    this.clock.resume();
     this.frameId = requestAnimationFrame((now) => this.loop(now));
   }
 
@@ -1705,13 +1713,13 @@ class TankInstance implements SaverInstance {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    this.clock.pause();
   }
 
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
-    if (this.startT === 0) this.startT = now;
     this.governFrame(now);
-    this.t = now - this.startT;
+    this.t = this.clock.sample(now);
     this.setState(this.t);
     this.renderScene();
   }
@@ -1781,11 +1789,13 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');
     if (this.paused) this.renderStill();
   }
 
   renderFrame(t: number, _seed: number): void {
     this.t = t;
+    this.clock.seek(t);
     this.setState(t);
     this.renderScene();
   }
@@ -1825,8 +1835,6 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
-    for (const p of this.dracoPaths) releaseDraco(p);
-    this.dracoPaths.clear();
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();

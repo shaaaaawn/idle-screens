@@ -197,7 +197,8 @@ export function adviseSpec(
       const positions = entities.map((e) => positionAt(e, 0, w, h));
       const maxDistPx = layer.links.maxDist * scale;
       const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false, w, h);
-      const lwPx = (layer.links.width ?? 1) * scale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const lwPx = (layer.links.width ?? defaultWidth) * scale;
       const la = layer.links.alpha ?? 1;
       for (const edge of edges) totalCoverage += (edge.dist * lwPx * la) / (w * h);
     }

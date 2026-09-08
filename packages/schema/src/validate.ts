@@ -479,6 +479,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.strings`, 'must be a non-empty array of strings');
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.font !== undefined && !isStr(sprite.font)) {
+      err(`${path}.font`, 'must be a string');
+    }
     if (sprite.align !== undefined && !['left', 'center', 'right'].includes(sprite.align as string)) {
       err(`${path}.align`, 'must be left | center | right');
     }

@@ -49,6 +49,57 @@
       "maxItems": 2,
       "description": "[min, max] px/sec, capped at 4000 so nothing teleports."
     },
+    "textReveal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mode": {
+          "enum": [
+            "typewriter",
+            "word",
+            "line",
+            "glyphFade"
+          ]
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "caret": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "blink": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "color": {
+                  "$ref": "#/definitions/hexColor"
+                }
+              }
+            }
+          ]
+        },
+        "fade": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      },
+      "description": "Animated reveal controls for a text block."
+    },
     "background": {
       "oneOf": [
         {
@@ -898,6 +949,9 @@
             },
             "color": {
               "$ref": "#/definitions/hexColor"
+            },
+            "reveal": {
+              "$ref": "#/definitions/textReveal"
             }
           },
           "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
@@ -1047,7 +1101,7 @@
               "type": "array",
               "items": {
                 "type": "number",
-                "minimum": 0,
+                "minimum": -180,
                 "maximum": 180
               },
               "minItems": 2,
