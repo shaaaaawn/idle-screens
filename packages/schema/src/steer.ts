@@ -5,7 +5,7 @@
  * changes existing values only — unknown paths are ignored (the server
  * validates and rejects them; the runtime stays lenient).
  */
-import type { SaverSpec } from './types';
+import { LIMITS, type SaverSpec } from './types';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -21,10 +21,16 @@ export function resolveSpecPath(spec: unknown, path: string): PathTarget | null 
   const parts = path.split('.');
   if (parts.some((p) => UNSAFE_KEYS.has(p))) return null;
   const s = spec as { layers?: Array<Record<string, unknown>> };
-  if (parts[0] !== 'layers' && parts[0] !== 'background' && !STEERABLE_ROOT_KEYS.has(parts[0]!) && Array.isArray(s.layers)) {
+  if (parts[0] !== 'layers' && parts[0] !== 'background' && Array.isArray(s.layers)) {
+    // A layer's own key wins over a root field of the same name — a layer
+    // named "ghosting" or "referenceViewport" must still resolve to itself,
+    // not get shadowed by the identically-named root scalar.
     const idx = s.layers.findIndex((l) => l && l.key === parts[0]);
-    if (idx === -1) return null;
-    parts.splice(0, 1, 'layers', String(idx));
+    if (idx !== -1) {
+      parts.splice(0, 1, 'layers', String(idx));
+    } else if (!STEERABLE_ROOT_KEYS.has(parts[0]!)) {
+      return null;
+    }
   }
   let node: unknown = spec;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -153,7 +159,10 @@ export function easeSmooth(k: number): number {
 export function structuralSignature(spec: SaverSpec): string {
   return JSON.stringify([
     spec.units,
-    spec.referenceViewport,
+    // Normalized against the same default every renderer uses — an omitted
+    // referenceViewport and an explicit 1080 render identically, so they must
+    // hash identically or a same-sizing morph gets rejected as structural.
+    spec.referenceViewport ?? LIMITS.referenceViewport,
     spec.layers.map((l) => {
       const s = l.sprite as Record<string, unknown>;
       return [
