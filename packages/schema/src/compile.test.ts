@@ -188,6 +188,10 @@ describe('compileSaver', () => {
         links: { k: 1, maxDist: 1, mode: 'chain' },
       }],
     };
+    // stub2dContext() already initializes lineWidth to 1 — reset it to a
+    // sentinel so the assertion below actually exercises drawLinks' default,
+    // rather than passing whether or not it ever assigns lineWidth.
+    mockCtx.lineWidth = -1;
     const inst = mountSync(compileSaver(spec), saverCtx({ width: 1080, height: 1080, reducedMotion: true }));
     expect(mockCtx.stroke).toHaveBeenCalled();
     expect(mockCtx.lineWidth).toBe(1);

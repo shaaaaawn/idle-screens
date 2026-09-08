@@ -39,31 +39,9 @@
 
 ## Open ideas (not yet implemented)
 
-### B2 — Richer `links`
-
-**Problem.** Links connect to `k` nearest neighbors within `maxDist`. Two gaps:
-(a) edges are uniform brightness regardless of distance, (b) nearest-neighbor
-produces a local mesh, not the long-range connections of a real attention graph.
-
-**Proposal.**
-- `links.falloff?: 'linear' | boolean` — alpha × `(1 - dist/maxDist)`.
-- `links.mode?: 'nearest' | 'random' | 'mixed'` — `random` = seeded random
-  partners (long-range), `mixed` = some near + some far.
-
-**Where.** `src/types.ts` (`links`), the link-drawing code in the compiled saver
-runtime, `src/simulate.ts`.
-
-**Constraints.** `maxLinksK = 8`; random edges must be seeded per-layer.
-
-### B3 — Weighted color palettes
-
-**Problem.** `circle.colors` picks uniformly. "Sparse bright" requires duplicating
-cool entries — fragile.
-
-**Proposal.** Accept `colors: string[]` (current, uniform) or
-`colors: { pick: string[]; weights?: number[] }`.
-
-**Where.** `src/types.ts` (`SpriteSpec` circle), `src/simulate.ts`.
+B2 (richer `links`) and B3 (weighted color palettes) shipped in the v1
+ceiling batch (2026-07-21) — see the status table above for their final
+shape (`links.falloff`/`mode`, `sprite.colorWeights[]`).
 
 ### C2 — Render-stat confirmation
 
