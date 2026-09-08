@@ -105,9 +105,11 @@ must exist, have `count: 1`, and not themselves orbit a layer.
 
 With `units: "viewport"` (the default) every dimensional value — sizes, radii,
 speeds, distances, wavelengths, stroke widths — is a fraction of
-`min(width, height)`, so specs scale to any display. Exception: text sprites
-with an explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`)
-use that CSS font verbatim and do not scale with the viewport.
+`min(width, height)`, so specs scale to any display. Text sprites with an
+explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`) are no
+exception: the compiler rescales that number by
+`min(width, height) / referenceViewport` so the text holds its apparent size,
+and only `units: "px"` specs get it verbatim. See **Scale** below.
 
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
@@ -169,7 +171,8 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "emoji", "glyphs": ["🐟", "🐠"], "cycle": { "period": 800 } }` —
   glyph picked per entity (seeded); optional `cycle` rotates variants over time
 - `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ... }`
-  — a `font` **with** a px size is used verbatim; a family/weight only
+  — a `font` **with** a px size keeps that shorthand, its number rescaled to the
+  viewport (verbatim only under `units: "px"`); a family/weight only
   (`"bold monospace"`) composes with the seeded per-entity `size`
 - `{ "kind": "circle", "radius": [0.001, 0.003], "color": "#ffffff", "soft": true }` —
   `soft` renders a radial-falloff glow orb instead of a hard disc
@@ -304,6 +307,134 @@ an event, where the same ring pulsing forever reads as wallpaper. Long
 drift a little, settle, fade" is one layer). `clock` is the other half: two
 layers on the same clock are a duet, not a coincidence. The shipped `pings`
 example is the whole idea in two layers.
+## Scale — what the numbers actually look like
+
+Every dimensional value is a fraction of `min(width, height)`. On a 1920×1080
+display that divisor is **1080**, so `0.01` is 10.8 px there and the same
+fraction of the short side on a phone or a 4K wall. Nothing below is a rule —
+they are measured landmarks, because the most common authoring failure is not
+a bad idea, it is an idea rendered two orders of magnitude too small or too
+large to see. The px conversions and coverage figures are measured
+(`perceiveScene` at 1920×1080, 40 opaque white entities on black, unless a row
+says otherwise); the "reads as" readings and the recipe advice are judgment.
+
+### `circle.radius` (a **radius**, so a dot is twice this wide)
+
+| radius | px radius @1080p | px across | coverage (40) | reads as |
+|---|---|---|---|---|
+| `0.0005` | 0.5 | 1 | 0.9 % | star grain — texture, never the subject |
+| `0.002` | 2.2 | 4 | 1.0 % | dust, embers, distant snow |
+| `0.005` | 5.4 | 11 | 1.6 % | a distinct dot; graph node, firefly |
+| `0.02` | 21.6 | 43 | 6.2 % | a clear disc — bokeh, a planet |
+| `0.05` | 54 | 108 | 21 % | a focal object, or a soft glow field |
+| `0.1` | 108 | 216 | 52 % | dominant form — sun, moon, one per scene |
+| `0.2` | 216 | 432 | 88 % | 40 % of the short side; only as a soft glow plate |
+
+**Read the coverage column with its floor in mind.** `perceiveScene` samples an
+80 × 48 grid, so a cell is ~24 × 22 px at 1080p and anything smaller registers as
+one cell per entity. That is why the top two rungs both land near 1 % despite a
+16 × difference in area — below `radius ≈ 0.01` the column counts entities, not
+pixels. It becomes an area measurement from `0.02` up.
+
+The shipped examples put entity *fields* almost entirely in `0.0003 – 0.007`
+and large forms in `0.03 – 0.185` (the biggest is a `ring` gauge in
+`dev-dashboard`). The gap between is thinly populated
+but not empty, and the exception is instructive: `aurora` runs 60–100-entity
+layers at `radius [0.045, 0.11]`, because a soft additive orb that large is
+atmosphere rather than an object. Within one scene, `lanterns`' three parallax
+layers step by ~2.2 × and ~2.4 × per layer; steps much smaller than that read
+as one layer with a wide size range rather than as depth.
+
+The bottom two rungs are texture, not content, and `adviseSpec` says so: a
+`0.002` field stops raising `sparse-scene` at ~70 entities, while a `0.0005`
+field would need over a thousand — far past `LIMITS.maxPerLayer` (400) — so it
+raises `sparse-scene` at every legal count and always needs a brighter layer
+above it.
+
+### `size` (emoji), `fontSize` (textBlock), `size` (text sprites)
+
+`0.02` ≈ 22 px, `0.035` ≈ 38 px, `0.05` ≈ 54 px, `0.1` ≈ 108 px at 1080p.
+Emoji fields in the examples sit at `0.011 – 0.078`; `haiku`, the one textBlock
+example, sets `fontSize: 0.05`.
+
+An explicit px size inside a `font` string (`"bold 14px monospace"`) is **not**
+absolute: under the default `viewport` units the compiler rescales it by
+`min(w, h) / referenceViewport`, so it holds its apparent size across displays
+(14 px at 1080p becomes 28 px at 4K and 5 px on a phone). Only `units: "px"`
+specs get the number verbatim. Two consequences: a font pinned for a 4K wall
+becomes illegibly small on a phone-sized viewport, and a spec that genuinely
+wants fixed pixels must say `units: "px"`.
+
+### `speed` (viewport fractions per second)
+
+| speed | px/s @1080p | crosses the short side | crosses a 16:9 width |
+|---|---|---|---|
+| `0.001` | 1.1 | 17 min | 30 min |
+| `0.005` | 5.4 | 3.3 min | 5.9 min |
+| `0.02` | 21.6 | 50 s | 89 s |
+| `0.06` | 65 | 17 s | 30 s |
+| `0.15` | 162 | 7 s | 12 s |
+
+An ambient scene meant to live on a wall for hours wants its background layers
+under `0.005` — anything faster resolves as traffic rather than atmosphere.
+Above `0.06` a layer reads as an event (rain, warp, a passing comet). Speeds
+are ranges and each entity draws its own, so a `[0.002, 0.008]` layer already
+carries internal parallax.
+
+### `links.maxDist`
+
+Link density is governed by `maxDist` relative to the mean spacing between
+entities, `sqrt(w·h / count) / min(w, h)` — for 40 entities at 1920×1080 that
+is `0.21` (228 px), for 100 it is `0.13` (144 px). Measured at `k: 3`, count 40,
+averaged over 15 seeds:
+
+| `maxDist` | edges drawn (of `k·count`) | graph |
+|---|---|---|
+| 0.5 × spacing | ~12 % | scattered pairs; ~45 % of nodes isolated |
+| 1.0 × spacing | ~45 % | a constellation with a few loners |
+| 1.5 × spacing | ~60 % | usually one connected component, rarely an isolate |
+| 2.0 × spacing | ~62 % | saturated — `k` is now the binding cap |
+
+Past ~2 × spacing, raising `maxDist` costs distance tests and buys nothing;
+raise `k` instead. `describeScene` reports `linksDrawn` / `linksExpected` and
+`isolatedNodes`, so connectivity is checkable per spec rather than guessed —
+worth doing, since the seed moves these by several points either way.
+
+### Recipes
+
+**Parallax depth.** Three or four layers where size and speed rise together —
+scaling size alone reads as a size distribution, not as distance. `lanterns`'
+ladder, which the numbers above are drawn from: `radius [0.0005, 0.0013]` /
+`speed [0.0005, 0.002]` / `alpha [0.35, 1]` far, `radius [0.0014, 0.0028]` /
+`speed [0.006, 0.013]` / `alpha [0.5, 0.9]` mid, `radius [0.0032, 0.006]` /
+`speed [0.015, 0.026]` / `alpha [0.6, 1]` near. Note that alpha *narrows*
+toward the front rather than simply rising — the far layer spans the whole
+range because distance is what varies it; the near layer is uniformly present.
+
+**Glow stacking.** `soft: true` + `blend: "lighter"` + `alpha` around 0.5–0.9,
+with `pulse: { amp: 0.2, period: 3000 }` for breathing. Glow reads only against
+a dark plate — over a pale background use `"screen"`. Do not assume a soft orb
+covers what a hard disc of the same radius would: `perceiveScene` models the
+halo as reaching 2.4 × the radius, so a large soft additive layer measures far
+*more* coverage than its hard equivalent — ~2.5 × at `radius 0.05` — while a
+small one measures *less*, ~0.5 × at `radius 0.005`, because the faint outer
+halo falls under the per-cell visibility threshold. The crossover sits near
+`radius 0.01`. Re-measure after switching `soft` or `blend` rather than
+compensating by a rule of thumb.
+
+**Graph web.** `count 40–100`, `radius [0.002, 0.005]`, a slow `drift`
+(`speed [0.002, 0.007]`) so the topology keeps re-forming, and `links` with
+`k: 3`, `maxDist` at 1.5 × mean spacing (`0.3` for 40 entities, `0.2` for 100),
+`alpha: 0.15`, `width: 0.0005`. Link alpha wants to be much lower than the
+nodes' — at 0.15 the web is a suggestion, at 0.5 it is a diagram. Add
+`falloff: true` to fade edges toward the cutoff instead of popping them.
+
+**Focal pin.** One `count: 1` layer with `motion: { type: "static" }` and an
+explicit `position`, `radius` in the `0.05 – 0.15` band, over a field of
+`0.002`-scale entities. The size ratio between the two is what makes it read as
+a subject rather than the largest member of the crowd — an order of magnitude
+or more, which is the gap the ladder above shows between the field rungs and
+the focal ones.
 
 ## Determinism contract
 

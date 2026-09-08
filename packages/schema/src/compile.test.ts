@@ -175,6 +175,24 @@ describe('compileSaver', () => {
     expect(() => inst.applyTrack!({ program: 'test', seed: 42, deltas: [] })).not.toThrow();
     inst.dispose();
   });
+
+  it('renders an omitted link width as one pixel at the reference viewport', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1,
+      id: 'default-link-width',
+      label: 'Default link width',
+      layers: [{
+        count: 2,
+        sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#fff' },
+        motion: { type: 'static' },
+        links: { k: 1, maxDist: 1, mode: 'chain' },
+      }],
+    };
+    const inst = mountSync(compileSaver(spec), saverCtx({ width: 1080, height: 1080, reducedMotion: true }));
+    expect(mockCtx.stroke).toHaveBeenCalled();
+    expect(mockCtx.lineWidth).toBe(1);
+    inst.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

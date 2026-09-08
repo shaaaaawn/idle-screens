@@ -68,6 +68,7 @@ describe('validateSpec', () => {
     const circle = { ...base(), layers: [{ count: 5, sprite: { kind: 'circle', radius: [2, 6], color: '#fff' }, motion: { type: 'rise', speed: [10, 20] } }] };
     expect(validateSpec(circle).valid).toBe(true);
     expect(paths({ ...base(), layers: [{ count: 5, sprite: { kind: 'circle', radius: [2, 6], color: 'white' }, motion: { type: 'rise', speed: [10, 20] } }] })).toContain('layers[0].sprite.color');
+    expect(paths({ ...base(), layers: [{ count: 1, sprite: { kind: 'text', strings: ['hello'], font: ['24px monospace'] }, motion: { type: 'static' } }] })).toContain('layers[0].sprite.font');
   });
 
   it('enforces safety/perf caps (per-layer, total, speed)', () => {

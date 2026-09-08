@@ -13,6 +13,7 @@ interface PathTarget {
 }
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport']);
 
 /** Resolve a dot-path (key-aware) to its parent + final key; null if absent. */
 export function resolveSpecPath(spec: unknown, path: string): PathTarget | null {
@@ -20,7 +21,7 @@ export function resolveSpecPath(spec: unknown, path: string): PathTarget | null 
   const parts = path.split('.');
   if (parts.some((p) => UNSAFE_KEYS.has(p))) return null;
   const s = spec as { layers?: Array<Record<string, unknown>> };
-  if (parts[0] !== 'layers' && parts[0] !== 'background' && Array.isArray(s.layers)) {
+  if (parts[0] !== 'layers' && parts[0] !== 'background' && !STEERABLE_ROOT_KEYS.has(parts[0]!) && Array.isArray(s.layers)) {
     const idx = s.layers.findIndex((l) => l && l.key === parts[0]);
     if (idx === -1) return null;
     parts.splice(0, 1, 'layers', String(idx));
@@ -114,7 +115,7 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  */
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
-  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'mode', 'curve', 'layer']);
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer']);
   const INDEXED = new Set(['layers', 'stops']);
   const out: string[] = [];
   const walk = (node: unknown, prefix: string, key: string): void => {
@@ -152,6 +153,7 @@ export function easeSmooth(k: number): number {
 export function structuralSignature(spec: SaverSpec): string {
   return JSON.stringify([
     spec.units,
+    spec.referenceViewport,
     spec.layers.map((l) => {
       const s = l.sprite as Record<string, unknown>;
       return [

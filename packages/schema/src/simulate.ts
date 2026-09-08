@@ -55,6 +55,8 @@ export interface Entity {
   ordered?: true;
   /** Orbit parent layer key (motion.center = { layer }). Center resolved at render time. */
   orbitParent?: string;
+  /** Present only when the layer explicitly disables edge wrapping. */
+  wrapDisabled?: true;
   /** Harmonic drift params. Only set for wander motion. */
   wander?: { own: WanderOsc; shared: WanderOsc; coherence: number; margin: number };
   /** Depth-axis params. Only set for warp motion. */
@@ -174,7 +176,12 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
         Math.round(layer.count * countScale),
         layer.links ? LIMITS.maxLinkLayerCount : LIMITS.maxPerLayer,
       ));
-  const [smin, smax] = layer.size ?? [20, 40];
+  // Defaults are authored as their 1080p-equivalent viewport fractions. Using
+  // the legacy px defaults directly would multiply 20..40 by the viewport.
+  const defaultSize = scale === 1
+    ? [20, 40] as const
+    : [20 / LIMITS.referenceViewport, 40 / LIMITS.referenceViewport] as const;
+  const [smin, smax] = layer.size ?? defaultSize;
   const variants = spriteVariants(layer.sprite);
   const sprite = layer.sprite;
   const spriteColors = isShapedSprite(sprite) ? sprite.colors : undefined;
@@ -408,6 +415,7 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       ...(sprite.kind === 'bar' ? { barIndex: i } : {}),
       ...(ordered ? { ordered: true as const } : {}),
       ...(orbitParent ? { orbitParent } : {}),
+      ...(layer.wrap === false ? { wrapDisabled: true as const } : {}),
       ...(m.type === 'wander'
         ? {
             wander: {
@@ -653,9 +661,10 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
     };
   }
   if (e.motion === 'rise') {
+    const y = e.y0 + e.vy * dt;
     return {
       x: e.x0 + (e.bob ? e.bob * Math.sin(t / 700 + e.phase) : 0),
-      y: wrap(e.y0 + e.vy * dt, -m, h + m),
+      y: e.wrapDisabled ? y : wrap(y, -m, h + m),
       flip: false,
     };
   }
@@ -675,15 +684,19 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
       }
     }
     const margin = m + wp.margin;
+    const x = e.x0 + e.vx * dt + hx;
+    const y = e.y0 + e.vy * dt + hy;
     return {
-      x: wrap(e.x0 + e.vx * dt + hx, -margin, w + margin),
-      y: wrap(e.y0 + e.vy * dt + hy, -margin, h + margin),
+      x: e.wrapDisabled ? x : wrap(x, -margin, w + margin),
+      y: e.wrapDisabled ? y : wrap(y, -margin, h + margin),
       flip: e.headingLeft,
     };
   }
   // drift
-  const x = wrap(e.x0 + e.vx * dt, -m, w + m);
-  let y = e.vy !== 0 ? wrap(e.y0 + e.vy * dt, -m, h + m) : e.y0;
+  const rawX = e.x0 + e.vx * dt;
+  const x = e.wrapDisabled ? rawX : wrap(rawX, -m, w + m);
+  const rawY = e.y0 + e.vy * dt;
+  let y = e.vy !== 0 && !e.wrapDisabled ? wrap(rawY, -m, h + m) : rawY;
   if (e.bob) y += e.bob * Math.sin(t / 500 + e.phase);
   return { x, y, flip: e.headingLeft };
 }
