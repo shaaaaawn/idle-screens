@@ -3,7 +3,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createRng, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { resolveSegment, segmentStart } from './sequence';
 import { validateSequence } from './validate';
-import { compileSequence } from './compile';
+import { compileSaver, compileSequence } from './compile';
+import { lerpSpec } from './steer';
 import type { IdleSequence, SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
@@ -927,5 +928,162 @@ describe('segmentStart', () => {
     expect(segmentStart(s, 1)).toBe(5000);
     expect(segmentStart(s, 2)).toBe(8000);
     expect(segmentStart(s, 99)).toBe(8000); // clamped to the last segment
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 0 pins — today's behaviour, asserted so the change that flips each one
+// is handed a red test that names it. See idle-mono
+// docs/ambient-presentation-implementation-plan.md ("Phase 0 — pin and
+// report"). Every test here is green BECAUSE the current behaviour is present.
+// ---------------------------------------------------------------------------
+
+describe('Phase 0 pins — current sequence-clock, morph and track semantics', () => {
+  /** A single hard circle drifting right, never wrapping — one `ctx.arc` per frame. */
+  const DRIFT_SCENE: SaverSpec = {
+    schemaVersion: 1,
+    id: 'drift-pin',
+    label: 'Drift pin',
+    seed: 11,
+    background: { type: 'solid', color: '#101010' },
+    layers: [{
+      count: 1,
+      sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' },
+      motion: { type: 'drift', speed: [0.05, 0.05], angle: 0 },
+      wrap: false,
+    }],
+  };
+
+  /**
+   * Position of the circle painted for frame T. A freshly created child paints
+   * a construction frame at t = 0 first (SpecInstance renders once when it
+   * mounts paused), so the frame asked for is always the LAST arc call.
+   */
+  function arcAt(inst: SaverInstance, T: number): { x: number; y: number } {
+    vi.mocked(mockCtx.arc).mockClear();
+    inst.renderFrame!(T, 1);
+    const calls = vi.mocked(mockCtx.arc).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const [x, y] = calls[calls.length - 1] as unknown as [number, number];
+    return { x, y };
+  }
+
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+  it('segment boundary rewinds the child clock (pin for #58 — a bed on the global clock)', () => {
+    // Today: the incoming child renders at its own localT, which restarts at 0
+    // on every boundary, so an entity shared by two segments jumps back to its
+    // T=0 position. #58 adds an opt-in `bed` that keeps running through the
+    // boundary; the segments themselves must keep this behaviour (absent field
+    // ⇒ byte-identical), so this pin stays green after #58 lands — only a
+    // sibling test on the `bed` path asserts the inverse.
+    const duration = 5000;
+    const s = seq({
+      segments: [
+        { key: 'a', scene: DRIFT_SCENE, duration },
+        { key: 'b', scene: DRIFT_SCENE, duration },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+
+    const before = arcAt(inst, duration - 10);
+    const after = arcAt(inst, duration + 10);
+    const twentyMsTravel = dist(arcAt(inst, duration - 30), before);
+
+    // The jump across the boundary dwarfs 20 ms of drift…
+    expect(twentyMsTravel).toBeGreaterThan(0);
+    expect(dist(before, after)).toBeGreaterThan(20 * twentyMsTravel);
+    // …because the incoming segment is rendering at localT = 10 ms, exactly
+    // where segment 0 was at T = 10 ms.
+    const atStart = arcAt(inst, 10);
+    expect(after.x).toBeCloseTo(atStart.x, 6);
+    expect(after.y).toBeCloseTo(atStart.y, 6);
+    inst.dispose();
+  });
+
+  it('morph steps textBlock.text at k > 0 while colours take the midpoint (pin for #45 — text cross-fade)', () => {
+    // Today: lerpSpec interpolates numbers and hex colours; every other value
+    // (strings, so `textBlock.text`) switches to the target on the first morph
+    // frame. #45 adds an opt-in `transition.text: 'crossfade'`; the default
+    // (`step`) keeps this behaviour.
+    const block = (text: string, color: string): SaverSpec => ({
+      schemaVersion: 1,
+      id: 'text-pin',
+      label: 'Text pin',
+      seed: 1,
+      background: { type: 'solid', color },
+      layers: [{
+        count: 1,
+        sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.04, color },
+        motion: { type: 'static' },
+        position: { x: 0.2, y: 0.2 },
+      }],
+    });
+    const a = block('Alpha', '#000000');
+    const b = block('Omega', '#ffffff');
+
+    const mid = lerpSpec(a, b, 0.5);
+    const sprite = mid.layers[0]!.sprite as { text: string; color: string };
+    expect(sprite.text).toBe('Omega');
+    expect(sprite.color).toBe('#808080');
+    expect((mid.background as { color: string }).color).toBe('#808080');
+
+    // k = 0 is the only frame that still shows the outgoing string.
+    const start = lerpSpec(a, b, 0);
+    expect((start.layers[0]!.sprite as { text: string }).text).toBe('Alpha');
+    const early = lerpSpec(a, b, 0.001);
+    expect((early.layers[0]!.sprite as { text: string }).text).toBe('Omega');
+  });
+
+  it('applyTrack applies all deltas as one glide regardless of delta.t (pin for #60 — timed release)', () => {
+    // Today: SpecInstance.applyTrack folds every delta last-wins into ONE
+    // target and glides over max(dur); `delta.t` is never read — it is the
+    // steer's wall-clock stamp, not a schedule. Timed release (#60 server half,
+    // an `after` field or DO-side release) must not change this: an engine
+    // that scheduled by `t` would defer every existing live steer by minutes.
+    const scene: SaverSpec = {
+      schemaVersion: 1,
+      id: 'track-pin',
+      label: 'Track pin',
+      seed: 3,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{
+        count: 4,
+        sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#000000' },
+        motion: { type: 'static' },
+      }],
+    };
+    const plugin = compileSaver(scene);
+    const mounted = plugin.mount(saverCtx());
+    if (mounted instanceof Promise) throw new Error('Expected synchronous mount');
+    const inst = mounted;
+
+    inst.applyTrack!({
+      program: 'pin',
+      seed: 3,
+      deltas: [
+        { t: 0, path: 'background.color', value: '#ffffff', ease: 'smooth', dur: 1000 },
+        { t: 60_000, path: 'layers.0.sprite.color', value: '#ffffff', ease: 'smooth', dur: 200 },
+      ],
+    });
+
+    type Glide = { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null;
+    const state = inst as unknown as { transition: Glide; effSpec: SaverSpec };
+    expect(state.transition).not.toBeNull();
+    const glide = state.transition!;
+    // One transition, whose target carries BOTH deltas — the t: 60 000 one is
+    // not held back.
+    expect((glide.to.background as { color: string }).color).toBe('#ffffff');
+    expect((glide.to.layers[0]!.sprite as { color: string }).color).toBe('#ffffff');
+    expect(glide.dur).toBe(1000); // max(dur), not per-delta
+    expect(glide.startT).toBe(0); // the clock now, not delta.t
+
+    // Half-way through the single glide both values are mid-flight together.
+    inst.renderFrame!(500, 3);
+    const bg = (state.effSpec.background as { color: string }).color;
+    const fg = (state.effSpec.layers[0]!.sprite as { color: string }).color;
+    expect(bg).toBe('#808080');
+    expect(fg).toBe('#808080');
+    inst.dispose();
   });
 });
