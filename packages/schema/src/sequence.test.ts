@@ -1310,6 +1310,36 @@ describe('SequenceInstance — bed', () => {
     alone.dispose();
   });
 
+  it("a crossfade morph's chain-root child, freshly mounted mid-morph over a bed, does not double-paint the outgoing words (1f)", () => {
+    const withText = (text: string): SaverSpec => ({
+      ...SCENE,
+      layers: [{ count: 1, sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.05 }, motion: { type: 'static' } }],
+    });
+    const outgoing = withText('Alpha');
+    const incoming = withText('Omega');
+    const inst = mountSync(compileSequence(bedSeq({
+      segments: [
+        { key: 'a', scene: outgoing, duration: 5000, transition: { type: 'morph', dur: 1000, text: 'crossfade' } },
+        { key: 'b', scene: incoming, duration: 3000 },
+        { key: 'c', scene: incoming, duration: 4000 },
+      ],
+    })));
+    // Land deep in segment 2 first so the morph's chain-root slot (segment 0)
+    // is empty — every child but the active one is released on a segment switch.
+    inst.renderFrame!(8500, 1);
+    vi.mocked(mockCtx.fillText).mockClear();
+    // Seek straight into the crossfade window: the chain-root child is
+    // constructed for the first time with the morph (and its paint
+    // overrides) already active — the regression cubic flagged on #159 is
+    // the constructor's own paused-mount paint leaving a stray full-opacity
+    // "Alpha" underneath the real, partial-alpha crossfade paint.
+    inst.renderFrame!(5500, 1); // localT 500 of dur 1000 -> k = 0.5
+    const painted = vi.mocked(mockCtx.fillText).mock.calls.map((c) => c[0]);
+    expect(painted.filter((t) => t === 'Alpha')).toHaveLength(1);
+    expect(painted.filter((t) => t === 'Omega')).toHaveLength(1);
+    inst.dispose();
+  });
+
   it('a fade over a bed puts both segments on canvases of their own: incoming at k, outgoing at 1 − k, each cleared', () => {
     const recs = perCanvasContexts();
     const host = document.createElement('div');

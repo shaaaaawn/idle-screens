@@ -687,7 +687,7 @@ sprite. `text` is a morph option only (a `fade` already cross-fades whole
 frames; a `cut` has no window) and the validator rejects it elsewhere.
 **Default `step` is today's behaviour byte for byte** — the sequence
 baseline pins it — and a flip to `crossfade` by default would be a major
-with the baseline regenerated. **Native:** tvOS **steps** the words (it
+change, with the baseline regenerated. **Native:** tvOS **steps** the words (it
 ignores `text`) but already cross-fades whole frames on every segment
 change using the transition's `dur`, so the result on the Apple TV is
 close to the web's. Morph requires structurally

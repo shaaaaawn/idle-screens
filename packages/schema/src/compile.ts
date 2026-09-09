@@ -149,6 +149,16 @@ interface SpecInstanceOptions {
    * A sequence's segment children over a `bed` render this way.
    */
   transparent?: boolean;
+  /**
+   * Skip the constructor's own eager paused-mount paint. For a transparent
+   * instance whose owner is about to call `renderFrame` again immediately
+   * with paint overrides already set (a morph chain-root child, mounted
+   * mid-morph) — the constructor's plain paint would otherwise leave a
+   * stray full-opacity frame on the shared surface underneath, which a
+   * partial-alpha override pass (`text: 'crossfade'`) then composites over
+   * rather than replaces.
+   */
+  skipInitialPaint?: boolean;
 }
 
 class SpecInstance implements SaverInstance {
@@ -209,8 +219,11 @@ class SpecInstance implements SaverInstance {
     this.rebuild();
 
     this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderFrame(0, this.seed);
-    else this.start();
+    if (this.paused) {
+      if (!opts.skipInitialPaint) this.renderFrame(0, this.seed);
+    } else {
+      this.start();
+    }
   }
 
   /** Viewport factor for absolute px sizes — 1 for `units: 'px'` specs. */
@@ -1194,13 +1207,15 @@ class SequenceInstance implements SaverInstance {
    * with the root's scene so its seed and entity placement are continuous
    * with the chain, then hot-swaps to the segment's own spec. Either way the
    * retained track is applied last, so a steer made while another segment
-   * was up is already in effect on this child's first frame.
+   * was up is already in effect on this child's first frame. `skipInitialPaint`
+   * is for a caller (the morph branch) that is about to render a real frame,
+   * paint overrides included, in this same call — see `SpecInstanceOptions`.
    */
-  private ensureChild(index: number, rootScene?: SaverSpec): SpecInstance {
+  private ensureChild(index: number, rootScene?: SaverSpec, skipInitialPaint?: boolean): SpecInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null });
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
@@ -1277,7 +1292,11 @@ class SequenceInstance implements SaverInstance {
         if (i !== chainRoot) this.releaseChild(i);
       }
 
-      const child = this.ensureChild(chainRoot);
+      // A fresh mount here is about to be repainted for real a few lines
+      // down (hotSwapPaint + overrides + renderFrame) within this same call
+      // — skip the constructor's own paint so a crossfade's partial-alpha
+      // passes don't composite over a stray full-opacity frame underneath.
+      const child = this.ensureChild(chainRoot, undefined, true);
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
       // The lerp endpoints carry the retained track: hotSwapPaint replaces the
