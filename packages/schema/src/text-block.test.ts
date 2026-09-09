@@ -464,7 +464,7 @@ describe('textBlock anchor / font / opacity validation', () => {
   it('accepts a family/weight font and rejects one carrying a size', () => {
     expect(validateSpec(textBlockSpec({ font: 'bold monospace' })).valid).toBe(true);
     expect(validateSpec(textBlockSpec({ font: "300 'Inter', sans-serif" })).valid).toBe(true);
-    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '']) {
+    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '50% monospace', '']) {
       const res = validateSpec(textBlockSpec({ font }));
       expect(res.valid).toBe(false);
       expect(res.errors.some((e) => e.path.endsWith('.font'))).toBe(true);

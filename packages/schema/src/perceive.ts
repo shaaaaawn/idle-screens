@@ -795,7 +795,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t);
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;

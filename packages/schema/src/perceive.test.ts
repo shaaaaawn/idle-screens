@@ -219,6 +219,20 @@ describe('dominanceRanking', () => {
     const later = ranks.find((r) => r.key === 'later')!;
     expect(later.share).toBe(0);
   });
+
+  it('a faded textBlock is not ranked as if it were fully opaque', () => {
+    const s = spec([
+      { key: 'disc', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [40, 40], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'faint', count: 1, position: { x: 0.7, y: 0.7 }, sprite: { kind: 'textBlock', text: 'hush', maxWidth: 0.5, fontSize: 0.08, opacity: 0.05 }, motion: { type: 'static' } },
+    ], { units: undefined });
+    const opaque = spec([
+      { key: 'disc', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [40, 40], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'faint', count: 1, position: { x: 0.7, y: 0.7 }, sprite: { kind: 'textBlock', text: 'hush', maxWidth: 0.5, fontSize: 0.08 }, motion: { type: 'static' } },
+    ], { units: undefined });
+    const faded = dominanceRanking(s).find((r) => r.key === 'faint')!;
+    const full = dominanceRanking(opaque).find((r) => r.key === 'faint')!;
+    expect(faded.share).toBeLessThan(full.share);
+  });
 });
 
 describe('motionStats', () => {

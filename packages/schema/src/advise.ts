@@ -175,7 +175,7 @@ export function adviseSpec(
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
         const maxWPx = layer.sprite.maxWidth * scale;
         const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
-        pixArea = maxWPx * lines.length * lh * 0.55;
+        pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }

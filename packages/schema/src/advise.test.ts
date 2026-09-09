@@ -133,6 +133,23 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'sparse-scene')).toBe(true);
   });
 
+  it('a near-invisible textBlock does not count as coverage (sparse-scene still fires)', () => {
+    // A big block would normally cover plenty of the frame (well above the
+    // 0.05% sparse threshold) — but opacity 0.001 means almost nothing is
+    // actually painted, so it should still read as sparse. Before the fix,
+    // coverage ignored textBlock opacity and this scene registered ~4%
+    // covered, well clear of sparse.
+    const faded: SaverSpec = {
+      ...base,
+      units: undefined,
+      layers: [
+        { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'barely there', maxWidth: 0.9, fontSize: 0.1, opacity: 0.001 }, motion: { type: 'static' } },
+      ],
+    };
+    const w = adviseSpec(faded);
+    expect(w.some((x) => x.code === 'sparse-scene')).toBe(true);
+  });
+
   it('withholds sparse-scene when the spec declares density: sparse — the emptiness is the point', () => {
     const sparse: SaverSpec = {
       ...base,
