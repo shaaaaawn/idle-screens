@@ -543,7 +543,11 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
 interface TextBoxAt {
   li: number;
   label: string;
-  /** What the layer actually paints at rest: entity alpha (± pulse) × a textBlock's own `opacity`. */
+  /**
+   * Worst case, not "at rest": base alpha minus its pulse trough (never the
+   * `emit` envelope, whose on/off duty cycle is excluded on purpose) times a
+   * textBlock's own `opacity`.
+   */
   alpha: number;
   x0: number;
   y0: number;

@@ -458,21 +458,39 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
   });
 
   it('composites the text at its own layer blend, not always source-over', () => {
-    // Additive: dark ink adds almost nothing to a near-black ground — fails.
-    const dimAdditive: SaverSpec = {
+    // Same ground, ink and alpha: additive lifts clear of the floor while
+    // source-over does not — a regression to always-source-over would flip
+    // the additive case to fire too, so this fails loudly if that branch
+    // stops being exercised.
+    const additive: SaverSpec = {
       ...vp,
-      background: { type: 'solid', color: '#05050a' },
-      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#101418', role: 'read' }), blend: 'lighter', alpha: [0.9, 0.9] }],
+      background: { type: 'solid', color: '#505050' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#ffffff', role: 'read' }), blend: 'lighter', alpha: [0.5, 0.5] }],
     };
-    expect(legibility(dimAdditive).map((x) => x.code)).toEqual(['text-legibility']);
+    expect(legibility(additive)).toEqual([]);
 
-    // Bright ink under the same additive blend lifts well clear of the floor.
-    const brightAdditive: SaverSpec = {
+    const sourceOver: SaverSpec = {
       ...vp,
-      background: { type: 'solid', color: '#05050a' },
-      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#f2f4f8', role: 'read' }), blend: 'lighter', alpha: [0.9, 0.9] }],
+      background: { type: 'solid', color: '#505050' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#ffffff', role: 'read' }), alpha: [0.5, 0.5] }],
     };
-    expect(legibility(brightAdditive)).toEqual([]);
+    expect(legibility(sourceOver).map((x) => x.code)).toEqual(['text-legibility']);
+
+    // Same story for `multiply`: mid-tone ink darkens the ground more than a
+    // plain source-over blend would, crossing the floor in the other direction.
+    const multiply: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#b4b4b4' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#464646', role: 'read' }), blend: 'multiply', alpha: [0.9, 0.9] }],
+    };
+    expect(legibility(multiply)).toEqual([]);
+
+    const multiplyAsSourceOver: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#b4b4b4' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#464646', role: 'read' }), alpha: [0.9, 0.9] }],
+    };
+    expect(legibility(multiplyAsSourceOver).map((x) => x.code)).toEqual(['text-legibility']);
   });
 
   it("text at x: 0.02 fires text-safe-area (with its box) only under role: 'read'", () => {
