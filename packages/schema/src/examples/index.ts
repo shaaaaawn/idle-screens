@@ -7,6 +7,7 @@ import { DASHBOARD_SPEC } from './dev-dashboard';
 import { FACETS_SPEC } from './facets';
 import { HAIKU_SPEC } from './haiku';
 import { LANTERNS_SPEC } from './lanterns';
+import { LOBBY_TALK_SPEC } from './lobby-talk';
 import { MATRIX_RAIN_SPEC } from './matrix-rain';
 import { NOSTALGHIA_CANDLE_SPEC } from './nostalghia-candle';
 import { POLYGONS_SPEC } from './polygons';
@@ -25,6 +26,7 @@ export { CONSTELLATION_SPEC } from './constellation';
 export { RAIN_SPEC } from './rain';
 export { SNOWFALL_SPEC } from './snowfall';
 export { LANTERNS_SPEC } from './lanterns';
+export { LOBBY_TALK_SPEC } from './lobby-talk';
 export { SAKURA_SPEC } from './sakura';
 export { DASHBOARD_SPEC } from './dev-dashboard';
 export { HAIKU_SPEC } from './haiku';
@@ -67,6 +69,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'pings', label: 'Pings', spec: PINGS_SPEC },
   { id: 'facets', label: 'Facets', spec: FACETS_SPEC },
   { id: 'relay-board', label: 'Relay Board', spec: RELAY_BOARD_SPEC },
+  { id: 'lobby-talk', label: 'Lobby Talk', spec: LOBBY_TALK_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */

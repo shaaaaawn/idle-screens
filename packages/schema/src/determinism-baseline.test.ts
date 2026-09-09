@@ -49,5 +49,7 @@ describe('determinism baseline — entity streams must not shift', () => {
     expect(ids).toContain('sakura');
     expect(ids).toContain('rain');
     expect(ids).toContain('dev-dashboard');
+    expect(ids).toContain('relay-board');
+    expect(ids).toContain('lobby-talk');
   });
 });
