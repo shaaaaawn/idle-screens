@@ -826,6 +826,126 @@ describe('SequenceInstance — morph segue', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Track retention — a steer lands on the segment that owns the path.
+//
+// Children are created lazily and disposed at every boundary, so before this
+// a steer forwarded to the active child alone died with it, and a steer to a
+// path only a later segment owns (`bars.sprite.values` while the title slide was up)
+// landed nowhere. Plan Phase 2.1, viewer half (idle-mono
+// docs/ambient-presentation-implementation-plan.md).
+// ---------------------------------------------------------------------------
+
+describe('SequenceInstance — retained track', () => {
+  const BARS: SaverSpec = {
+    schemaVersion: 1,
+    id: 'bars',
+    label: 'Bars',
+    layers: [{
+      key: 'bars',
+      count: 3,
+      sprite: { kind: 'bar', values: [10, 20, 30], max: 100, length: 0.5, thickness: 0.02, color: '#17e8c8' },
+      motion: { type: 'static' },
+      position: { x: 0.3, y: 0.3 },
+      layout: { type: 'list', gap: 0.1 },
+    }],
+  };
+  /** Segments 0 and 1 are title cards without `bars`; segment 2 owns it. */
+  const barsSeq = (): IdleSequence => seq({
+    segments: [
+      { key: 'a', scene: SCENE, duration: 5000 },
+      { key: 'b', scene: SCENE, duration: 3000 },
+      { key: 'c', scene: BARS, duration: 4000 },
+    ],
+  });
+  const childSpec = (inst: SaverInstance, index: number): SaverSpec | undefined =>
+    (inst as unknown as { children: Array<{ effSpec: SaverSpec } | null> }).children[index]?.effSpec;
+  const barValues = (spec: SaverSpec | undefined): unknown => (spec?.layers[0]?.sprite as { values?: unknown } | undefined)?.values;
+  const steer = (inst: SaverInstance, path: string, value: unknown): void =>
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path, value, ease: 'step', dur: 0 }] } as never);
+
+  it('a steer to a path only a later segment owns lands there when the timer reaches it', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1); // segment 0 — no `bars` layer here
+    steer(inst, 'bars.sprite.values', [90, 80, 70]);
+    expect(childSpec(inst, 0)!.layers).toEqual(SCENE.layers); // dropped on the child that does not own the key
+    inst.renderFrame!(9000, 1); // segment 2, created now
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(barValues(childSpec(inst, 2))).toEqual([90, 80, 70]);
+    inst.dispose();
+  });
+
+  it('… and when the clicker jumps to it in the same track', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1);
+    inst.applyTrack!({
+      program: 'test',
+      seed: 1,
+      deltas: [
+        { t: 0, path: 'bars.sprite.values', value: [5, 6, 7], ease: 'step', dur: 0 },
+        { t: 0, path: 'sequence.segment', value: 2, ease: 'step' },
+      ],
+    } as never);
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(barValues(childSpec(inst, 2))).toEqual([5, 6, 7]);
+    inst.dispose();
+  });
+
+  it('survives leaving and re-entering the segment (the child is rebuilt from the retained set)', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(9000, 1);
+    steer(inst, 'bars.sprite.values', [1, 2, 3]);
+    expect(barValues(childSpec(inst, 2))).toEqual([1, 2, 3]); // active child: applied on this call
+    steerTo(inst, 0);
+    expect(childSpec(inst, 2)).toBeUndefined(); // disposed on the switch
+    steerTo(inst, 2);
+    expect(barValues(childSpec(inst, 2))).toEqual([1, 2, 3]);
+    inst.dispose();
+  });
+
+  it('last wins per path across calls; a delta invalid for a child is skipped without taking the rest down', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'bars.sprite.values', [1, 1, 1]);
+    steer(inst, 'bars.sprite.values', [2, 2, 2]);
+    steer(inst, 'layers.0.count', 5000); // resolves on every segment, valid on none (entity cap)
+    inst.renderFrame!(9000, 1);
+    expect(barValues(childSpec(inst, 2))).toEqual([2, 2, 2]);
+    expect(childSpec(inst, 2)!.layers[0]!.count).toBe(3);
+    inst.dispose();
+  });
+
+  it('a steer to a path the active child owns still applies immediately', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'background.color', '#ff0000');
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('a steered colour rides through a morph instead of vanishing for `dur` (both lerp endpoints carry the track)', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'background.color', '#ff0000');
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) on the chain root
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.renderFrame!(7000, 1); // morph finalised: segment 1's child is created fresh from the root scene
+    expect(activeIndexOf(inst)).toBe(1);
+    expect(childSpec(inst, 1)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('no track ⇒ the children render the untouched scene objects (byte-identical path)', () => {
+    // No sequence seed, so childScene hands the child the stored scene itself.
+    const inst = mountSync(compileSequence({ ...barsSeq(), seed: undefined }));
+    inst.renderFrame!(1000, 1);
+    expect(childSpec(inst, 0)).toBe(SCENE);
+    inst.renderFrame!(9000, 1);
+    expect(childSpec(inst, 2)).toBe(BARS);
+    inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Discrete advance — the clicker.
 //
 // These began life as characterization tests pinning two gaps (a steer that
