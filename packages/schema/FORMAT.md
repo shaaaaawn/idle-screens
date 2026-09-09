@@ -158,7 +158,7 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
-| `key` | string | none | addressable name → `setParam("key.field", …)` |
+| `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
@@ -190,8 +190,9 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
   a data bar: entity *i* draws `length × values[i] / max` (viewport units),
   `thickness` thick, growing from its position toward `direction` (`right`
-  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.values", […])`
-  glides every bar. With `layout: { type: "list" }` a chart is one layer and
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.sprite.values", […])`
+  glides every bar (the field lives under `sprite`, so the path does too —
+  `bars.values` resolves nothing). With `layout: { type: "list" }` a chart is one layer and
   its labels another — the dashboard genre stops needing one layer per number
 - `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
   regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
@@ -502,8 +503,10 @@ fixed-step warm-up (≤ 120 frames) from a full clear on any non-contiguous seek
 ## Steering
 
 Compiled specs accept live parameter changes via dot-paths —
-`layers.0.count`, `background.stops.0.color`, or `key`-based paths like
-`cpu-gauge.color` when layers declare `key`. Changes interpolate over a
+`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`, or
+`key`-based paths like `cpu-gauge.count` / `cpu-gauge.sprite.color` when
+layers declare `key` (the key replaces `layers.N`; everything after it
+mirrors the JSON, so a sprite field keeps its `sprite.` segment). Changes interpolate over a
 control-track (`step` | `linear` | `smooth`). Placement/motion changes trigger
 a deterministic rebuild (same seed → same stream). See `@idle-screens/core`
 for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
