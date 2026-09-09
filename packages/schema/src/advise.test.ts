@@ -374,6 +374,23 @@ describe('adviseSequence', () => {
     expect(warnings.filter((w) => w.code === 'boundary-luminance-jump')).toHaveLength(0);
   });
 
+  it('fade-degrades-on-low-tier: once per sequence when any fade is declared, never for cut/morph (1c)', () => {
+    const fades = adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+        { key: 'c', scene, duration: 5000 },
+      ],
+    })).filter((w) => w.code === 'fade-degrades-on-low-tier');
+    expect(fades).toHaveLength(1);
+    expect(fades[0]!.path).toBe('segments[0].transition');
+    expect(fades[0]!.message).toMatch(/^informational: 2 fade transitions/);
+    for (const transition of [{ type: 'cut' } as const, { type: 'morph', dur: 800 } as const, undefined]) {
+      const w = adviseSequence(mkSeq({ segments: [{ key: 'a', scene, duration: 5000, transition }, { key: 'b', scene, duration: 5000 }] }));
+      expect(w.filter((x) => x.code === 'fade-degrades-on-low-tier')).toHaveLength(0);
+    }
+  });
+
   it('warns on large luminance jump at boundary', () => {
     const dark: SaverSpec = { ...scene, background: { type: 'solid', color: '#000000' } };
     const bright: SaverSpec = { ...scene, background: { type: 'solid', color: '#ffffff' } };

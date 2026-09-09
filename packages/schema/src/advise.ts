@@ -464,6 +464,18 @@ export function adviseSequence(
     }
   }
 
+  // Informational, once per sequence: a fade costs two live segments for
+  // `dur`, which the lowest tiers cannot afford, so they play it as a cut.
+  const fades = seq.segments.filter((s) => s.transition?.type === 'fade').length;
+  if (fades > 0) {
+    const first = seq.segments.findIndex((s) => s.transition?.type === 'fade');
+    warnings.push({
+      path: `segments[${first}].transition`,
+      code: 'fade-degrades-on-low-tier',
+      message: `informational: ${fades} fade transition${fades === 1 ? '' : 's'} declared — viewers on the 'basic' or 'minimal' capability tier render fade as cut (two live segments for dur is over that budget); the show still plays`,
+    });
+  }
+
   for (let i = 0; i < seq.segments.length - 1; i++) {
     const lumaA = backgroundLuma(seq.segments[i]!.scene);
     const lumaB = backgroundLuma(seq.segments[i + 1]!.scene);
