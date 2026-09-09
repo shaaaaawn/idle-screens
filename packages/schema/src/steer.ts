@@ -104,28 +104,49 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
   return walk(from, to) as SaverSpec;
 }
 
-/** JSON with sorted object keys, so two specs compare by value not by authoring order. */
-function canonical(v: unknown): string {
-  return JSON.stringify(v, (_k, val: unknown) => {
-    if (val && typeof val === 'object' && !Array.isArray(val)) {
-      const o = val as Record<string, unknown>;
-      return Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
-    }
-    return val;
-  });
-}
-
 /**
  * True when a morph from `a` to `b` has nothing to interpolate: the two specs
- * differ, yet the half-way frame `lerpSpec(a, b, 0.5)` already equals `b` —
- * every difference is a value lerpSpec steps (strings such as
+ * differ, yet every difference is a value lerpSpec steps (strings such as
  * `textBlock.text`, mismatched arrays) rather than a number or hex colour it
  * glides. Such a morph looks exactly like a cut. Identical specs return
  * false: a no-op morph is continuity, not a cut.
+ *
+ * Walks `a`/`b` directly rather than sampling `lerpSpec(a, b, 0.5)`: two hex
+ * colours a single 8-bit step apart (`#000000` → `#010101`) round their
+ * midpoint to the target channel-for-channel, which would make a genuine
+ * (if subtle) colour glide look identical to a step.
  */
 export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
-  const mid = canonical(lerpSpec(a, b, 0.5));
-  return mid === canonical(b) && mid !== canonical(a);
+  let hasDiff = false;
+  let hasGlide = false;
+  const walk = (x: unknown, y: unknown): void => {
+    if (x === y) return;
+    if (typeof x === 'number' && typeof y === 'number') {
+      hasDiff = true;
+      hasGlide = true;
+      return;
+    }
+    if (typeof x === 'string' && typeof y === 'string' && HEX.test(x) && HEX.test(y)) {
+      hasDiff = true;
+      const ca = hexToRgb(x);
+      const cb = hexToRgb(y);
+      if (ca.some((v, i) => v !== cb[i])) hasGlide = true;
+      return;
+    }
+    if (Array.isArray(x) && Array.isArray(y) && x.length === y.length) {
+      for (let i = 0; i < y.length; i++) walk(x[i], y[i]);
+      return;
+    }
+    if (x && y && typeof x === 'object' && typeof y === 'object' && !Array.isArray(x) && !Array.isArray(y)) {
+      for (const k of Object.keys(y as Record<string, unknown>)) {
+        walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k]);
+      }
+      return;
+    }
+    hasDiff = true; // non-interpolable → steps to target
+  };
+  walk(a, b);
+  return hasDiff && !hasGlide;
 }
 
 /**

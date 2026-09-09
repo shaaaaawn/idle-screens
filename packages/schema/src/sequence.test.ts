@@ -650,6 +650,18 @@ describe('validateSequence — morph', () => {
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
+  it('is silent for a one-step colour glide (rounding must not mask real interpolation)', () => {
+    // #000000 -> #010101 differ by 1 per channel: lerpSpec's rounded midpoint
+    // lands exactly on the target colour, but the colour still glides.
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#000000'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#010101'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
   it('is silent for a cut between text-only twins', () => {
     const r = validateSequence(morphSeq({
       segments: [
