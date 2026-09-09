@@ -959,6 +959,49 @@ describe('SequenceInstance — retained track', () => {
     expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
     inst.dispose();
   });
+
+  it('a freshly created child with retained deltas paints a full warm-up frame, not a ghosted blend of the pre-steer scene', () => {
+    // Regression: SpecInstance's own mount does one stray paint at t=0 (it
+    // starts paused, like every sequence child) using the PRE-steer spec —
+    // applyDeltasNow updates effSpec afterward but (before this fix) left
+    // lastRenderT at that stray 0. With `ghosting` on, the child's first
+    // real frame then read as "contiguous" with that stray paint and
+    // composited over it at partial alpha instead of clearing, briefly
+    // showing a ghost of the un-steered scene.
+    //
+    // The sprite is `circle` (draws via arc/fill, never fillRect) so every
+    // fillRect call in this test is unambiguously the background paint —
+    // one per paintFrame, in order.
+    const GHOST_SCENE: SaverSpec = {
+      schemaVersion: 1,
+      id: 'ghost',
+      label: 'Ghost',
+      ghosting: 0.9,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    const s = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 }, // no `background` field — the delta is a no-op here, only retained
+        { key: 'b', scene: GHOST_SCENE, duration: 4000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(1000, 1); // segment 0
+    steer(inst, 'background.color', '#ff0000');
+    const bgAlphas: number[] = [];
+    (mockCtx as unknown as { fillRect: (...args: number[]) => void }).fillRect = vi.fn(() => {
+      bgAlphas.push((mockCtx as unknown as { globalAlpha: number }).globalAlpha);
+    });
+    inst.renderFrame!(5100, 1); // segment 1 created fresh, localT=100ms — well inside the 250ms contiguity window
+    // bgAlphas[0] is the child's own construction-time stray paint (t=0, the
+    // pre-steer spec, always a full clear). bgAlphas[1] is the first paint of
+    // the real localT=100 frame: it must also be a full-alpha clear (the
+    // warm-up's first step), not a `1 - g^k` blend over that stale paint.
+    expect(bgAlphas[0]).toBe(1);
+    expect(bgAlphas[1]).toBe(1);
+    inst.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

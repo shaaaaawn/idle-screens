@@ -664,12 +664,19 @@ class SpecInstance implements SaverInstance {
    * made while another segment was active lands on the segment that owns the
    * path. Not painting matters: a child is created inside the parent's
    * renderFrame, and a stray t=0 paint here would make the real frame that
-   * follows look "contiguous" to the ghosting warm-up.
+   * follows look "contiguous" to the ghosting warm-up — but the constructor
+   * already painted ONE stray t=0 frame of the pre-steer spec (SpecInstance's
+   * own mount does an immediate render when paused, which every sequence
+   * child is), so `lastRenderT` must be reset too: otherwise, with `ghosting`
+   * on, the real frame that follows still finds itself "contiguous" with
+   * that stray paint and composites over it at partial alpha, briefly
+   * showing a ghost of the un-steered scene.
    */
   applyDeltasNow(deltas: Iterable<SteerDelta>): void {
     const next = applyRetainedDeltas(this.effSpec, deltas);
     if (next === this.effSpec) return;
     this.transition = null;
+    this.lastRenderT = Number.NEGATIVE_INFINITY;
     this.effSpec = next;
     if (structuralSignature(this.effSpec) !== this.lastStructural) this.rebuild();
     else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
