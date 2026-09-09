@@ -13,6 +13,7 @@ import {
   applyDeltasToSpec,
   easeSmooth,
   lerpSpec,
+  resolveSpecPath,
   structuralSignature,
   type SteerDelta,
 } from './steer';
@@ -22,6 +23,25 @@ import { resolveSegment, segmentStart } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
+
+/**
+ * Apply steering deltas to a spec one at a time, keeping each only if its
+ * path resolves on this spec AND the result validates. This is the routing
+ * rule for a sequence's retained track: a key path (`bars.sprite.values`) lands on
+ * whichever segment owns the key and is a no-op on the others, and one delta
+ * that is out of bounds for a given segment does not take the rest down with
+ * it. Returns `spec` itself (same reference) when nothing applied, so callers
+ * can skip work — and so a sequence with no track is byte-identical.
+ */
+function applyRetainedDeltas(spec: SaverSpec, deltas: Iterable<SteerDelta>): SaverSpec {
+  let out = spec;
+  for (const d of deltas) {
+    if (!resolveSpecPath(out, d.path)) continue;
+    const next = applyDeltasToSpec(out, [d]);
+    if (validateSpec(next).valid) out = next;
+  }
+  return out;
+}
 
 /** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
 function hexToRgba(hex: string, alpha: number): string {
@@ -636,6 +656,25 @@ class SpecInstance implements SaverInstance {
     }
   }
 
+  /**
+   * Apply steering deltas immediately: no glide, no frame painted. Each delta
+   * is routed by `applyRetainedDeltas` (unresolvable or invalid ones are
+   * skipped on this spec alone). `SequenceInstance` uses this to hand a
+   * freshly created child the track the sequence has retained, so a steer
+   * made while another segment was active lands on the segment that owns the
+   * path. Not painting matters: a child is created inside the parent's
+   * renderFrame, and a stray t=0 paint here would make the real frame that
+   * follows look "contiguous" to the ghosting warm-up.
+   */
+  applyDeltasNow(deltas: Iterable<SteerDelta>): void {
+    const next = applyRetainedDeltas(this.effSpec, deltas);
+    if (next === this.effSpec) return;
+    this.transition = null;
+    this.effSpec = next;
+    if (structuralSignature(this.effSpec) !== this.lastStructural) this.rebuild();
+    else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
   private drawLinks(built: Built, t: number, lifeA: number, parentE: Entity | null): void {
     const { links } = built.layer;
     if (!links) return;
@@ -840,6 +879,17 @@ class SequenceInstance implements SaverInstance {
    */
   private clockOffset = 0;
   private releasedBelow = 0;
+  /**
+   * Every non-`sequence.segment` delta this instance has been handed, last
+   * wins per path, merged across `applyTrack` calls. Children are created
+   * lazily and disposed on every segment switch, so a steer forwarded only
+   * to the active child would evaporate at the next boundary — and a steer
+   * to a path only a *later* segment owns (`bars.sprite.values` while the title
+   * slide is up) would land nowhere. Re-applied to every child on creation
+   * and folded into the morph endpoints; each child keeps the deltas that
+   * resolve on it (see `applyRetainedDeltas`).
+   */
+  private readonly retainedDeltas = new Map<string, SteerDelta>();
 
   constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
@@ -911,15 +961,30 @@ class SequenceInstance implements SaverInstance {
     return tr?.type === 'morph' ? tr.dur : 0;
   }
 
-  private ensureChild(index: number): SpecInstance {
+  /** A segment's scene with the retained track applied — `scene` itself when nothing resolves on it. */
+  private steeredScene(scene: SaverSpec): SaverSpec {
+    return this.retainedDeltas.size === 0 ? scene : applyRetainedDeltas(scene, this.retainedDeltas.values());
+  }
+
+  /**
+   * The child for segment `index`, created paused on the shared surface if
+   * the slot is empty. `rootScene` (a morph chain's root) mounts the child
+   * with the root's scene so its seed and entity placement are continuous
+   * with the chain, then hot-swaps to the segment's own spec. Either way the
+   * retained track is applied last, so a steer made while another segment
+   * was up is already in effect on this child's first frame.
+   */
+  private ensureChild(index: number, rootScene?: SaverSpec): SpecInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(this.childScene(index), this.childCtx);
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx);
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
       child.setPaused(true);
+      if (rootScene) child.hotSwapSpec(this.childScene(index));
+      if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
     }
     return child;
   }
@@ -979,8 +1044,11 @@ class SequenceInstance implements SaverInstance {
       const child = this.ensureChild(chainRoot);
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
-      const specA = this.childScene(prevIdx);
-      const specB = this.childScene(index);
+      // The lerp endpoints carry the retained track: hotSwapPaint replaces the
+      // child's whole effSpec every morph frame, so without this a steered
+      // colour would vanish for `dur` and snap back when the morph finalises.
+      const specA = this.steeredScene(this.childScene(prevIdx));
+      const specB = this.steeredScene(this.childScene(index));
       child.hotSwapPaint(lerpSpec(specA, specB, k));
       child.renderFrame(localT, this.childSeed(chainRoot, seed));
     } else {
@@ -1009,16 +1077,7 @@ class SequenceInstance implements SaverInstance {
 
       // If using morph seed, mount the child with the chain root's scene+seed
       // but immediately hot-swap to the current segment's spec.
-      let child: SpecInstance;
-      if (useMorphSeed && !this.children[index]) {
-        const rootScene = this.childScene(chainRoot);
-        child = new SpecInstance(rootScene, this.childCtx);
-        this.children[index] = child;
-        child.setPaused(true);
-        child.hotSwapSpec(this.childScene(index));
-      } else {
-        child = this.ensureChild(index);
-      }
+      const child = useMorphSeed ? this.ensureChild(index, this.childScene(chainRoot)) : this.ensureChild(index);
       child.renderFrame(localT, effSeed);
     }
   }
@@ -1052,6 +1111,11 @@ class SequenceInstance implements SaverInstance {
 
   applyTrack(track: ControlTrack): void {
     const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    // Retain first: a `sequence.segment` steer in the same track creates the
+    // target child inside renderFrame below, and it must see these deltas.
+    for (const d of deltas) {
+      if (d.path !== 'sequence.segment' && typeof d.path === 'string') this.retainedDeltas.set(d.path, d);
+    }
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
@@ -1066,6 +1130,8 @@ class SequenceInstance implements SaverInstance {
       this.renderFrame(this.renderedT, this.seed);
     }
 
+    // The active child still gets the track directly, as before retention:
+    // a steer to a path it owns applies on this call, not at the next boundary.
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
     if (childDeltas.length > 0 && this.activeIndex >= 0) {
       const child = this.children[this.activeIndex];
