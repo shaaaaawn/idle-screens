@@ -863,6 +863,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (!isStr(seq.label) || seq.label.trim() === '') err('label', 'must be a non-empty string');
   if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
   if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
+  if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');

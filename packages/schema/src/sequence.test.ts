@@ -275,6 +275,15 @@ describe('validateSequence', () => {
     expect(r.errors.some((e) => e.path.includes('scene'))).toBe(true);
   });
 
+  it("accepts sync: 'mount' | 'epoch' and rejects anything else (1b)", () => {
+    expect(validateSequence(seq()).valid).toBe(true);
+    expect(validateSequence(seq({ sync: 'mount' })).valid).toBe(true);
+    expect(validateSequence(seq({ sync: 'epoch' })).valid).toBe(true);
+    const bad = validateSequence({ ...seq(), sync: 'server' });
+    expect(bad.valid).toBe(false);
+    expect(bad.errors.some((e) => e.path === 'sync')).toBe(true);
+  });
+
   it('rejects fade transition (not yet supported)', () => {
     const r = validateSequence(seq({
       segments: [{
