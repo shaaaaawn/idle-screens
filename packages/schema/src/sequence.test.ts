@@ -610,6 +610,65 @@ describe('validateSequence — morph', () => {
     const r = validateSequence(morphSeq());
     expect((r.warnings ?? []).filter((w) => w.code === 'morph-structural-mismatch')).toHaveLength(0);
   });
+
+  // morph-nothing-morphable — structural twins whose only differences are
+  // values lerpSpec steps (textBlock.text above all). Warning, never error.
+  const caption = (text: string, color: string): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'caption',
+    label: 'Caption',
+    background: { type: 'solid', color: '#101010' },
+    layers: [{
+      count: 1,
+      sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.04, color },
+      motion: { type: 'static' },
+      position: { x: 0.2, y: 0.2 },
+    }],
+  });
+
+  it('warns morph-nothing-morphable for text-only twins', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#e6e8ef'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act II', '#e6e8ef'), duration: 5000 },
+      ],
+    }));
+    expect(r.valid).toBe(true);
+    const w = (r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe('segments[0].transition');
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-structural-mismatch')).toHaveLength(0);
+  });
+
+  it('is silent for colour twins (the colour glides, so the morph is visible)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#e6e8ef'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act II', '#101010'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
+  it('is silent for a cut between text-only twins', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#e6e8ef'), duration: 5000, transition: { type: 'cut' } },
+        { key: 'b', scene: caption('Act II', '#e6e8ef'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
+  it('is silent for identical twins (a no-op morph is continuity, not a cut)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#e6e8ef'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#e6e8ef'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
 });
 
 describe('SequenceInstance — morph segue', () => {

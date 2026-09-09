@@ -104,6 +104,30 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
   return walk(from, to) as SaverSpec;
 }
 
+/** JSON with sorted object keys, so two specs compare by value not by authoring order. */
+function canonical(v: unknown): string {
+  return JSON.stringify(v, (_k, val: unknown) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const o = val as Record<string, unknown>;
+      return Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+    }
+    return val;
+  });
+}
+
+/**
+ * True when a morph from `a` to `b` has nothing to interpolate: the two specs
+ * differ, yet the half-way frame `lerpSpec(a, b, 0.5)` already equals `b` —
+ * every difference is a value lerpSpec steps (strings such as
+ * `textBlock.text`, mismatched arrays) rather than a number or hex colour it
+ * glides. Such a morph looks exactly like a cut. Identical specs return
+ * false: a no-op morph is continuity, not a cut.
+ */
+export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
+  const mid = canonical(lerpSpec(a, b, 0.5));
+  return mid === canonical(b) && mid !== canonical(a);
+}
+
 /**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
  * like "layers.0.count", "background.stops.1.color", etc. Metadata fields

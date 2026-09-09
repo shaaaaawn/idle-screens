@@ -3,7 +3,7 @@ import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, sprit
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
-import { structuralSignature } from './steer';
+import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
 
 /**
@@ -483,6 +483,12 @@ export function adviseSequence(
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      } else if (morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene)) {
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-nothing-morphable',
+          message: `segments ${i}→${i + 1} differ only in values morph cannot interpolate (strings such as textBlock.text step on the first frame): the morph will look like a cut — fade text via colour or reveal.progress`,
         });
       }
     }

@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
-import { structuralSignature } from './steer';
+import { morphNothingMorphable, structuralSignature } from './steer';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -932,6 +932,16 @@ export function validateSequence(seq: unknown): ValidationResult {
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      } else if (morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec)) {
+        // Structural twins whose only differences are values lerpSpec steps
+        // (strings — textBlock.text above all). The morph runs, but every
+        // frame of it shows segment i+1: it reads as a cut. A warning, never
+        // an error, so every stored sequence stays valid.
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-nothing-morphable',
+          message: `segments ${i}→${i + 1} differ only in values morph cannot interpolate (strings such as textBlock.text step on the first frame): the morph will look like a cut — fade text via colour or reveal.progress`,
         });
       }
     }
