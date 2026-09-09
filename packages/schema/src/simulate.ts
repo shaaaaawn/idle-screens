@@ -853,12 +853,35 @@ const CHAR_NARROW = new Set('iIljtf1!|.,;:\'"()[]{}');
 const CHAR_WIDE = new Set('mwMWGOQD@%');
 
 /**
+ * Which advance table the line-breaker uses. `proportional` is the
+ * character-class table below (the default, and the only table until
+ * `textBlock.font` existed); `mono` is a uniform 0.6 em advance — the classic
+ * monospace cell (Courier, Menlo, SF Mono all sit within a percent of it).
+ */
+export type TextMetricsClass = 'proportional' | 'mono';
+
+const MONO_FAMILY_RE = /\b(?:ui-)?mono(?:space)?\b|courier|menlo|monaco|consolas|inconsolata|fira\s*code|source\s*code|jetbrains|ibm\s*plex\s*mono|roboto\s*mono/i;
+
+/**
+ * Metrics class for a `textBlock.font` string: `mono` when the family names
+ * a monospace face (the generic `monospace`, or a well-known fixed-pitch
+ * family), else `proportional`. Absent font ⇒ proportional, as before.
+ */
+export function textMetricsClassFor(font?: string): TextMetricsClass {
+  return font && MONO_FAMILY_RE.test(font) ? 'mono' : 'proportional';
+}
+
+const MONO_ADVANCE_EM = 0.6;
+
+/**
  * Approximate glyph width as a fraction of em. Uses character-class buckets
  * so line breaks are identical across platforms (no measureText). The average
  * across Latin text lands near 0.55, close to perceive.ts's 0.62 heuristic
- * but with per-class refinement.
+ * but with per-class refinement. Under `mono` every glyph (space included)
+ * advances the same cell.
  */
-function charWidthEm(ch: string): number {
+function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): number {
+  if (metrics === 'mono') return MONO_ADVANCE_EM;
   if (ch === ' ' || ch === '\t') return 0.3;
   if (CHAR_NARROW.has(ch)) return 0.35;
   if (CHAR_WIDE.has(ch)) return 0.72;
@@ -866,9 +889,9 @@ function charWidthEm(ch: string): number {
 }
 
 /** Em-width of a string under the same character-class table `breakTextBlock` uses. */
-export function textWidthEm(str: string): number {
+export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
   let w = 0;
-  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!);
+  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!, metrics);
   return w;
 }
 
@@ -882,7 +905,7 @@ export interface TextBlockLine {
  * whitespace; a single word wider than the limit gets its own line unbroken.
  * Explicit `\n` always forces a break. Pure, deterministic, no canvas needed.
  */
-export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[] {
+export function breakTextBlock(text: string, maxWidthEm: number, metrics: TextMetricsClass = 'proportional'): TextBlockLine[] {
   const paragraphs = text.split('\n');
   const lines: TextBlockLine[] = [];
 
@@ -898,12 +921,12 @@ export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[
     }
 
     let lineText = words[0]!;
-    let lineW = textWidthEm(lineText);
-    const spaceW = charWidthEm(' ');
+    let lineW = textWidthEm(lineText, metrics);
+    const spaceW = charWidthEm(' ', metrics);
 
     for (let i = 1; i < words.length; i++) {
       const word = words[i]!;
-      const wordW = textWidthEm(word);
+      const wordW = textWidthEm(word, metrics);
       if (lineW + spaceW + wordW <= maxWidthEm) {
         lineText += ' ' + word;
         lineW += spaceW + wordW;

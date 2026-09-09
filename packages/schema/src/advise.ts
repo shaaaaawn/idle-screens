@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textWidthEm, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
 
@@ -174,7 +174,7 @@ export function adviseSpec(
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
         const maxWPx = layer.sprite.maxWidth * scale;
-        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx);
+        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
         pixArea = maxWPx * lines.length * lh * 0.55;
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
@@ -437,7 +437,7 @@ function textBlockBoxAt(
   const fsPx = s.fontSize * unit;
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unit;
-  const lines = breakTextBlock(s.text, maxWPx / fsPx);
+  const lines = breakTextBlock(s.text, maxWPx / fsPx, textMetricsClassFor(s.font));
   const maxLineW = lines.reduce((mx, l) => Math.max(mx, l.widthEm), 0) * fsPx;
   const totalH = lines.length * lh;
   const align = s.align ?? 'left';

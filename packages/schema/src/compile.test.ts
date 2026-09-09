@@ -723,3 +723,33 @@ describe('textBlock anchor / font / opacity draw (1a)', () => {
     inst.dispose();
   });
 });
+
+describe('textBlock font selects the line-breaker metrics class (1a)', () => {
+  function spec(font?: string): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'mono',
+      label: 'Mono',
+      layers: [{
+        count: 1,
+        // 4 narrow words: 6.5 em proportional (one line at 8 em), 11.4 em mono (wraps).
+        sprite: { kind: 'textBlock', text: 'iiii iiii iiii iiii', maxWidth: 0.4, fontSize: 0.05, ...(font ? { font } : {}) },
+        motion: { type: 'static' },
+        position: { x: 0.1, y: 0.1 },
+      }],
+    } as SaverSpec;
+  }
+  function lineCount(s: SaverSpec): number {
+    const fills: string[] = [];
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string) => fills.push(text));
+    const inst = mountSync(compileSaver(s), saverCtx({ width: 640, height: 400 }));
+    inst.renderFrame!(0, 42);
+    inst.dispose();
+    return fills.length;
+  }
+  it('wraps a monospace block by the uniform advance and a default block by the proportional table', () => {
+    expect(lineCount(spec())).toBe(1);
+    expect(lineCount(spec('bold sans-serif'))).toBe(1);
+    expect(lineCount(spec('monospace'))).toBeGreaterThan(1);
+  });
+});

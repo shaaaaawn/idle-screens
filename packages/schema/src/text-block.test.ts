@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakTextBlock } from './simulate';
+import { breakTextBlock, textMetricsClassFor, textWidthEm } from './simulate';
 import { validateSpec } from './validate';
 import { adviseSpec } from './advise';
 import { textSprites, perceiveScene, luminanceGrid, type PerceiveOptions, type LuminanceGrid } from './perceive';
@@ -544,5 +544,45 @@ describe('textBlock anchor in perception and steering', () => {
     const sum = (g: LuminanceGrid) => g.cells.reduce((a: number, b: number) => a + b, 0);
     expect(sum(luminanceGrid(textBlockSpec({ opacity: 0.2 }), { t: 0 })))
       .toBeLessThan(sum(luminanceGrid(textBlockSpec(), { t: 0 })));
+  });
+});
+
+describe('monospace metrics class (textBlock.font)', () => {
+  it('selects mono for monospace families and proportional otherwise', () => {
+    for (const f of ['monospace', 'bold monospace', "'SF Mono', monospace", 'Menlo', 'Courier New', 'ui-monospace', 'Fira Code', 'JetBrains Mono']) {
+      expect(textMetricsClassFor(f)).toBe('mono');
+    }
+    for (const f of [undefined, 'bold sans-serif', "300 'Inter', sans-serif", 'serif', 'Monotype Corsiva']) {
+      expect(textMetricsClassFor(f)).toBe('proportional');
+    }
+  });
+
+  it('mono advances every glyph by the same cell', () => {
+    expect(textWidthEm('iiii', 'mono')).toBe(textWidthEm('mmmm', 'mono'));
+    expect(textWidthEm('a b', 'mono')).toBeCloseTo(1.8, 9);
+    expect(textWidthEm('iiii')).toBeLessThan(textWidthEm('mmmm'));
+  });
+
+  it('breaks differ from the proportional table for narrow-heavy text; default is unchanged', () => {
+    const text = 'iiii iiii iiii iiii';
+    expect(breakTextBlock(text, 8).length).toBe(1);
+    expect(breakTextBlock(text, 8, 'proportional')).toEqual(breakTextBlock(text, 8));
+    const mono = breakTextBlock(text, 8, 'mono');
+    expect(mono.length).toBeGreaterThan(1);
+    expect(mono.every((l) => l.widthEm <= 8)).toBe(true);
+  });
+
+  it('a mono font widens the perceived box', () => {
+    const prop = textSprites(textBlockSpec({ text: 'iiii iiii', maxWidth: 1 }));
+    const mono = textSprites(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, font: 'monospace' }));
+    expect(prop[0]!.sizePx).toBe(mono[0]!.sizePx);
+    const cols = (spec: SaverSpec) => {
+      const g = luminanceGrid(spec, { t: 0 });
+      let n = 0;
+      for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) if (g.cells[r * g.cols + c]! > g.background[r]! + 0.01) n++;
+      return n;
+    };
+    expect(cols(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, font: 'monospace', fontSize: 0.08 })))
+      .toBeGreaterThan(cols(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, fontSize: 0.08 })));
   });
 });

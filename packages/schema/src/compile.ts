@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -479,7 +479,7 @@ class SpecInstance implements SaverInstance {
       const lh = (sprite.lineHeight ?? 1.4) * fsPx;
       const maxWPx = sprite.maxWidth * unitScale;
       const maxWEm = maxWPx / fsPx;
-      const lines = breakTextBlock(sprite.text, maxWEm);
+      const lines = breakTextBlock(sprite.text, maxWEm, textMetricsClassFor(sprite.font));
       const align = sprite.align ?? 'left';
       // Reveal masks glyphs; layout above always ran on the full text, so
       // lines never reflow while typing.
