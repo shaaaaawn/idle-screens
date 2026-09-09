@@ -660,6 +660,20 @@ describe('validateSequence — morph', () => {
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
+  it('is silent when a layer differs only in its addressable key (never rendered)', () => {
+    const a = caption('Act I', '#e6e8ef');
+    a.layers[0]!.key = 'caption-a';
+    const b = caption('Act I', '#e6e8ef');
+    b.layers[0]!.key = 'caption-b';
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: a, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: b, duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
   it('still fires when a source-only field disappears (a real step, not silently dropped)', () => {
     const withLife = caption('Act I', '#e6e8ef');
     withLife.layers[0]!.life = { enter: 500, fade: 300 };

@@ -115,11 +115,12 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  * colours a single 8-bit step apart (`#000000` → `#010101`) round their
  * midpoint to the target channel-for-channel, which would make a genuine
  * (if subtle) colour glide look identical to a step. `id`/`label`/
- * `schemaVersion` are identification metadata, never rendered (excluded from
- * `structuralSignature` for the same reason) — a segment pair that differs
- * only there renders identically and is not a morph at all.
+ * `schemaVersion`/layer `key` are identification metadata, never rendered
+ * (excluded from `structuralSignature`/`steerablePaths` for the same reason)
+ * — a segment pair that differs only there renders identically and is not a
+ * morph at all.
  */
-const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion']);
+const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion', 'key']);
 
 export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
   let hasDiff = false;
