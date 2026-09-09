@@ -955,6 +955,22 @@ describe('SequenceInstance — retained track', () => {
     expect(childSpec(inst, 2)).toBe(BARS);
     inst.dispose();
   });
+
+  it('a steer that arrives while a morph is already in progress takes effect immediately, not on the next natural frame', () => {
+    // Regression: the chain-root child (the one actually rendering mid-morph)
+    // is never keyed at children[activeIndex], so forwarding a plain
+    // child.applyTrack() there was silently a no-op. Without an explicit
+    // re-render, the retained delta would sit un-painted until some other
+    // caller happened to render the next frame.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) already blending toward B
+    expect(childSpec(inst, 0)!.background).not.toEqual({ type: 'solid', color: '#ff0000' });
+    steer(inst, 'background.color', '#ff0000'); // no further renderFrame call follows
+    // Both lerp endpoints now carry the same steered colour, so the lerp is a
+    // no-op regardless of progress k — the value is exact, not merely closer.
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

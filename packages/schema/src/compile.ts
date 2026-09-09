@@ -1219,6 +1219,7 @@ class SequenceInstance implements SaverInstance {
       if (d.path !== 'sequence.segment' && typeof d.path === 'string') this.retainedDeltas.set(d.path, d);
     }
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
+    let switchedSegment = false;
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
       // A steer to segment 0 under loop is the clicker doing the same jump
@@ -1234,20 +1235,35 @@ class SequenceInstance implements SaverInstance {
       this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
       this.releasedBelow = idx;
       this.renderFrame(this.renderedT, this.seed);
+      switchedSegment = true;
     }
 
-    // The active child still gets the track directly, as before retention:
-    // a steer to a path it owns applies on this call, not at the next boundary.
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
     if (childDeltas.length > 0) {
-      if (this.activeIndex >= 0) {
+      if (this.morphFromIndex >= 0) {
+        // Mid-morph, the rendered child lives at the chain-root slot, not
+        // `children[activeIndex]` — forwarding a child.applyTrack() there
+        // would silently no-op AND get overwritten by the morph's own
+        // hotSwapPaint on the very next frame regardless, so a transition
+        // glide on this path can't coexist with the morph's own cross-fade.
+        // The delta is already retained above, so a re-render is all that's
+        // needed to reach it via steeredScene: it takes effect this frame,
+        // immediately rather than gliding over its own `dur`. Skip only when
+        // the segDelta branch above already re-rendered with these deltas
+        // retained.
+        if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);
+      } else if (this.activeIndex >= 0) {
+        // Not mid-morph: the active child still gets the track directly, as
+        // before retention — a steer to a path it owns glides on this call
+        // rather than snapping at the next boundary.
         const child = this.children[this.activeIndex];
         child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
       }
       // The outgoing segment during a fade is a standalone SpecInstance, not
       // one of `this.children` — without this it would freeze at whatever it
       // last rendered instead of picking up a mid-fade steer like the
-      // incoming segment does.
+      // incoming segment does. Independent of the morph/active branching
+      // above: fade and morph are mutually exclusive per-frame states.
       this.fading?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
     }
   }
