@@ -673,8 +673,19 @@ sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
 `applyTrack` (`setParam("sequence.segment", n)` over MCP). The
-`SequenceInstance` intercepts this path before delegation; remaining deltas are
-forwarded to the active child's `applyTrack`.
+`SequenceInstance` intercepts this path before delegation; every other delta
+is forwarded to the active segment's `applyTrack` **and retained** (last wins
+per path, merged across calls). Segment instances are created lazily and
+disposed at each boundary, so the retained set is re-applied to every segment
+as it comes up: **a steer persists across segment changes and lands on the
+segment that owns the path.** `bars.sprite.values` steered while the title
+slide is up takes effect the moment the chart slide appears (by timer or by
+clicker), and stays if the show leaves and returns; on segments without a
+`bars` key the delta is simply a no-op, as is any delta whose value does not
+validate on that particular segment (the rest of the set still applies). A
+morph's two lerp endpoints carry the retained set too, so a steered colour
+rides through the glide instead of vanishing for `dur`. Pinned by
+`sequence.test.ts` → "SequenceInstance — retained track".
 
 The steer **moves the clock, not the frame**: it displaces the timeline so the
 target segment starts at its own `localT` 0 (its `life.enter` build replays)
