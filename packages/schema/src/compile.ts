@@ -1293,10 +1293,13 @@ class SequenceInstance implements SaverInstance {
       }
 
       // A fresh mount here is about to be repainted for real a few lines
-      // down (hotSwapPaint + overrides + renderFrame) within this same call
-      // — skip the constructor's own paint so a crossfade's partial-alpha
-      // passes don't composite over a stray full-opacity frame underneath.
-      const child = this.ensureChild(chainRoot, undefined, true);
+      // down (hotSwapPaint + overrides + renderFrame) within this same call.
+      // Only `text: 'crossfade'` needs the constructor's own paint skipped —
+      // its partial-alpha passes would otherwise composite over a stray
+      // full-opacity frame underneath; `step` (the common case) is left to
+      // paint at construction as it always has, so a fresh mount's ghosting
+      // contiguity (`lastRenderT`) is unaffected.
+      const child = this.ensureChild(chainRoot, undefined, this.morphTextCrossfades(prevIdx));
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
       // The lerp endpoints carry the retained track: hotSwapPaint replaces the
