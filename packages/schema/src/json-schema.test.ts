@@ -163,4 +163,26 @@ describe('saver-spec.schema.json', () => {
     };
     expect(check(seq)).toBe(false);
   });
+
+  it('agrees with the runtime validator on textBlock anchor / font / opacity / maxWidth (1a)', () => {
+    const block = (sprite: Record<string, unknown>) => ({
+      schemaVersion: 1, id: 'x', label: 'X',
+      layers: [{
+        count: 1,
+        sprite: { kind: 'textBlock', text: 'hi', maxWidth: 1.5, fontSize: 0.04, ...sprite },
+        motion: { type: 'static' },
+        position: { x: 0.5, y: 0.5 },
+      }],
+    });
+    const good = [block({ anchor: 'center', font: 'bold monospace', opacity: 0.5 }), block({ font: "300 'Inter', sans-serif" })];
+    const bad = [block({ font: 'bold 14px monospace' }), block({ anchor: 'middle' }), block({ maxWidth: 2.5 }), block({ opacity: 1.5 })];
+    for (const spec of good) {
+      expect(validateSpec(spec).valid).toBe(true);
+      expect(check(spec)).toBe(true);
+    }
+    for (const spec of bad) {
+      expect(validateSpec(spec).valid).toBe(false);
+      expect(check(spec)).toBe(false);
+    }
+  });
 });

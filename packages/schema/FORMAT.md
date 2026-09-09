@@ -36,7 +36,8 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
-(2026-09-05 — data layout).
+(2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity` and the
+`maxWidth` cap lifted to 2.0 (2026-09-08 — ambient presentations).
 
 ## Safety invariants
 
@@ -206,18 +207,55 @@ with distance, removing pop-in at the cutoff.
   than a line); `orient: true` turns the path's +x along the entity's heading,
   like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
   O'Keeffe's petal, Basquiat's scrawl
-- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
+- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef", "anchor": "top-left", "font": "system-ui, sans-serif", "opacity": 1 }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
-  textBlock sprites at validation time. `position` is always the block's
-  **top-left corner** regardless of `align` (align moves text within the box,
-  not the box itself — different from the `text` sprite where `align`/`baseline`
-  shift the meaning of `position`). Line breaks are computed from a fixed
-  character-class metrics table so wrapping is identical across platforms; note
-  that the table is approximate — a painted line may slightly exceed `maxWidth`
-  when the real font is wider than the table estimates, so `maxWidth` is a
-  layout target, not a hard clip.
+  textBlock sprites at validation time. Without `anchor`, `position` is the
+  **top-left corner of the `maxWidth` layout box** regardless of `align`
+  (align moves text within the box, not the box itself — different from the
+  `text` sprite where `align`/`baseline` shift the meaning of `position`).
+  `maxWidth` may reach `2.0` — wider than the frame is legal (a wide caption
+  on a portrait screen); the `text-off-screen` advisory reports what runs
+  out. Line breaks are computed from a fixed character-class metrics table so
+  wrapping is identical across platforms; note that the table is approximate
+  — a painted line may slightly exceed `maxWidth` when the real font is wider
+  than the table estimates, so `maxWidth` is a layout target, not a hard clip.
   Use with `count: 1`, `motion: { type: "static" }`, and `position`.
+
+  `anchor` (one of nine compass points: `top-left`, `top`, `top-right`,
+  `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`) says
+  which point of the **rendered text** `position` names — the widest line
+  wide, as `align` lays it inside `maxWidth`, and `lines × lineHeight` tall,
+  measured after line-breaking. With `anchor: "center"` and
+  `position: { "x": 0.5, "y": 0.5 }` the block is centred on **every** aspect
+  ratio — `position` is in viewport fractions while `maxWidth` is in
+  `min(w,h)`, so hand-computing a centred `x` for one screen misses on the
+  next; the anchor removes the arithmetic. Under an anchor `align` only
+  shapes the ragged edge (shorter lines sit left/centre/right of the widest);
+  it no longer moves the ink. Anchor is placement, so it is part of the
+  structural signature (a change rebuilds); rotation stays about the anchor
+  point. The perception boxes (`text-overlap`, `text-off-screen`) follow the
+  same rule. Absent ⇒ exactly the pre-anchor behaviour above. **Native
+  clients that do not read `anchor` render as absent (layout-box top-left).**
+
+  `font` is a CSS family and/or weight/style — `"bold monospace"`,
+  `"300 'Inter', sans-serif"` — composed with the scaled `fontSize` the way
+  the `text` sprite composes a size-less font; a **size inside it is
+  rejected** (`fontSize` owns size, so the block keeps scaling with the
+  viewport). A monospace family (`monospace`, `ui-monospace`, Menlo, Courier,
+  SF Mono, Fira Code, …) switches the line-breaker to a uniform 0.6 em
+  advance so mono wraps land where the real face puts them; every other
+  family uses the proportional table. Default `system-ui, sans-serif`.
+  **Native clients fall back to the system face** until a face table exists.
+
+  `opacity` (0–1, default 1) multiplies the block's paint alpha — the whole
+  block, on top of the layer's per-entity `alpha`. It is **paint**, not
+  carpentry: excluded from the structural signature, so
+  `setParam("h.sprite.opacity", 0, { dur: 1500 })` glides the block out
+  without a rebuild (and back in with `1`). Declare `"opacity": 1` on the
+  block to make the path steerable (a `setParam` cannot create a field that
+  is not there). Scales perceived ink in the luminance grid. **Native clients
+  without `opacity` render at 1.**
 
   textBlock also accepts `reveal` — animated typing/deleting:
   `{ "reveal": { "progress": 1, "mode": "typewriter", "speed": 0, "caret": true } }`.
