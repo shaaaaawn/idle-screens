@@ -391,6 +391,29 @@ describe('adviseSequence', () => {
     }
   });
 
+  it('fade-degrades-on-low-tier: not raised for a fade on the last segment without loop (it never runs)', () => {
+    const w = adviseSequence(mkSeq({
+      loop: false,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(0);
+  });
+
+  it("fade-degrades-on-low-tier: raised for the last segment's fade under loop (it's the wrap's transition)", () => {
+    const w = adviseSequence(mkSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe('segments[1].transition');
+  });
+
   it('warns on large luminance jump at boundary', () => {
     const dark: SaverSpec = { ...scene, background: { type: 'solid', color: '#000000' } };
     const bright: SaverSpec = { ...scene, background: { type: 'solid', color: '#ffffff' } };

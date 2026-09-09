@@ -895,6 +895,16 @@ class SequenceInstance implements SaverInstance {
   private clockOffset = 0;
   private releasedBelow = 0;
   /**
+   * Set by a `sequence.segment` steer that targets segment 0 under `loop:
+   * true`: the steer resets the clock to segment 0's own start (localT 0),
+   * so `renderFrame`'s wrap check (which compares the raw, ever-increasing
+   * clock against `timedTotal()`) can no longer recognize the jump as a
+   * wrap. This flag lets the clicker's jump to 0 still count as one, so the
+   * last segment's fade plays instead of a hard cut. Cleared once the wrap
+   * window (if any) has passed.
+   */
+  private pendingWrapFade = false;
+  /**
    * Every non-`sequence.segment` delta this instance has been handed, last
    * wins per path, merged across `applyTrack` calls. Children are created
    * lazily and disposed on every segment switch, so a steer forwarded only
@@ -1108,10 +1118,15 @@ class SequenceInstance implements SaverInstance {
     // last segment's `fade` is the wrap's transition. Cut and morph paths
     // are untouched: fadeDur is 0 for them.
     const lastIdx = this.seq.segments.length - 1;
-    const wrapped = this.seq.loop && index === 0 && lastIdx > 0 && T + this.clockOffset >= this.timedTotal();
+    const wrapped = this.seq.loop && index === 0 && lastIdx > 0
+      && (T + this.clockOffset >= this.timedTotal() || this.pendingWrapFade);
     const fadeFrom = prevIdx >= 0 ? prevIdx : wrapped ? lastIdx : -1;
     const fadeActive = fadeFrom >= 0 && localT < this.fadeDur(fadeFrom);
     if (!fadeActive && this.fading) this.releaseFading();
+    // The flag only needs to survive the frames still inside the wrap fade
+    // window; once that ends (or the clock moves off segment 0) it has done
+    // its job.
+    if (this.pendingWrapFade && (index !== 0 || !fadeActive)) this.pendingWrapFade = false;
 
     if (morphActive) {
       // Morph in progress: keep the child keyed to the chain root
@@ -1206,6 +1221,10 @@ class SequenceInstance implements SaverInstance {
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
+      // A steer to segment 0 under loop is the clicker doing the same jump
+      // the wall clock does on a natural lap wrap — it should trigger the
+      // last segment's fade the same way (see `pendingWrapFade`).
+      this.pendingWrapFade = this.seq.loop && idx === 0 && this.seq.segments.length > 1;
       // Displace the clock so T + offset == the target segment's start: the
       // segment begins at localT 0 (its `life.enter` build replays) and the
       // next animation frame resolves to the same segment instead of snapping
@@ -1220,9 +1239,16 @@ class SequenceInstance implements SaverInstance {
     // The active child still gets the track directly, as before retention:
     // a steer to a path it owns applies on this call, not at the next boundary.
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
-    if (childDeltas.length > 0 && this.activeIndex >= 0) {
-      const child = this.children[this.activeIndex];
-      child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+    if (childDeltas.length > 0) {
+      if (this.activeIndex >= 0) {
+        const child = this.children[this.activeIndex];
+        child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      }
+      // The outgoing segment during a fade is a standalone SpecInstance, not
+      // one of `this.children` — without this it would freeze at whatever it
+      // last rendered instead of picking up a mid-fade steer like the
+      // incoming segment does.
+      this.fading?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
     }
   }
 
