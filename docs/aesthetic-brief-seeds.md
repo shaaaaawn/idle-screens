@@ -28,7 +28,7 @@ page. If a brief cannot be written without paraphrasing them, it is not ready.
 
 ## Why these and not more painters
 
-The fifteen artist studies are well-trodden ground: every frontier model has a
+The ten artist studies are well-trodden ground: every frontier model has a
 strong prior for "Impressionism", so a high score cannot distinguish reading
 the DNA from recognising the name. These sit further out. *Utopian Scholastic*
 and *Hipness Purgatory* are precise and documented, so a brief can be checked
