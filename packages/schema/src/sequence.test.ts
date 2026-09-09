@@ -660,6 +660,32 @@ describe('validateSequence — morph', () => {
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
+  it('still fires when a source-only field disappears (a real step, not silently dropped)', () => {
+    const withLife = caption('Act I', '#e6e8ef');
+    withLife.layers[0]!.life = { enter: 500, fade: 300 };
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: withLife, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#e6e8ef'), duration: 5000 },
+      ],
+    }));
+    // layers[0].life only exists on the outgoing side: still a genuine
+    // (non-interpolable) difference, so this must not read as identical twins.
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(1);
+  });
+
+  it('is silent for hex colours that only differ in spelling (case, 3- vs 6-digit)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#000'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#000000'), duration: 5000 },
+      ],
+    }));
+    // Same colour under a different spelling is a no-op, not a difference — the
+    // documented contract is that identical (rendered) specs return false.
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
   it('is silent for a one-step colour glide (rounding must not mask real interpolation)', () => {
     // #000000 -> #010101 differ by 1 per channel: lerpSpec's rounded midpoint
     // lands exactly on the target colour, but the colour still glides.

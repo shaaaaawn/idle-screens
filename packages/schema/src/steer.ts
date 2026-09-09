@@ -133,10 +133,13 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
       return;
     }
     if (typeof x === 'string' && typeof y === 'string' && HEX.test(x) && HEX.test(y)) {
-      hasDiff = true;
       const ca = hexToRgb(x);
       const cb = hexToRgb(y);
-      if (ca.some((v, i) => v !== cb[i])) hasGlide = true;
+      if (ca.some((v, i) => v !== cb[i])) {
+        hasDiff = true;
+        hasGlide = true;
+      }
+      // else: same colour under a different spelling (case, 3- vs 6-digit) — a no-op, not a difference.
       return;
     }
     if (Array.isArray(x) && Array.isArray(y) && x.length === y.length) {
@@ -144,7 +147,8 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
       return;
     }
     if (x && y && typeof x === 'object' && typeof y === 'object' && !Array.isArray(x) && !Array.isArray(y)) {
-      for (const k of Object.keys(y as Record<string, unknown>)) {
+      const keys = new Set([...Object.keys(x as Record<string, unknown>), ...Object.keys(y as Record<string, unknown>)]);
+      for (const k of keys) {
         walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], k);
       }
       return;
