@@ -29,11 +29,11 @@ const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'cen
 /**
  * A CSS length inside a textBlock `font` — size belongs to `fontSize`. No
  * trailing boundary check: a `\b`-based (or lookahead-based) version misses
- * both "50% monospace" (`%` isn't a word character, so `\b` never matches
- * right after it) and "50%monospace" / "14pxmonospace" (glued straight onto
- * the family name, so any word-boundary-style check after the unit passes
- * them through). The leading `\d` immediately before the unit is enough to
- * identify an embedded size regardless of what follows it.
+ * "50% monospace" (`%` isn't a word character, so there is no boundary after
+ * it when the next char is whitespace) and "14pxmonospace" (glued straight
+ * onto the family name, so the word boundary between two word characters
+ * passes it through). The leading `\d` immediately before the unit is enough
+ * to identify an embedded size regardless of what follows it.
  */
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
