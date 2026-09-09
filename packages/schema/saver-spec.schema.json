@@ -1463,7 +1463,7 @@
             "input",
             "either"
           ],
-          "description": "How the segment advances. Validated; runtime drivers planned for a follow-up."
+          "description": "How the segment advances. 'auto' (default) and 'either' advance on the timer; 'input' holds a timed segment at the end of its duration (the scene keeps animating) until a sequence.segment steer releases it — the clicker. A durationless final segment holds regardless."
         },
         "transition": {
           "type": "object",

@@ -241,9 +241,11 @@ with distance, removing pop-in at the cutoff.
   blink is in full cycles/sec, capped at 3 for flash safety, and is a square
   wave of `t` like every other animation). With `align: "center"`/`"right"`
   the revealing line stays anchored to its alignment as it types — only
-  left-aligned text reads as a classic typewriter. To "edit" text live:
-  glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
-  back to 1.
+  left-aligned text reads as a classic typewriter. `text` itself is paint
+  that **steps**: a `setParam` swap or a sequence `morph` switches the string
+  whole on the first frame — nothing interpolates a string — so to "edit"
+  text live: glide `reveal.progress` to 0, swap `text` while nothing is
+  visible, glide back to 1 (or fade the block via its `color`).
 
 `circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
 `colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
@@ -582,13 +584,21 @@ the presenter never freezes. A durationless final segment holds regardless of
 `advance`.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
-`{ type: 'morph', dur: number }` smoothly interpolates paint properties
-(colors, opacity values) over `dur` ms when crossing into the next segment.
-Morph requires structurally identical adjacent segments (same
-`structuralSignature`); if they differ, the engine falls back to cut and the
-validator emits a `morph-structural-mismatch` warning. During a morph, entity
-placement inherits the outgoing segment's seed — the incoming segment's own
-seed is unused. `dur` must be between 200 and 5000 ms.
+`{ type: 'morph', dur: number }` interpolates **numbers and hex colours**
+(colour, alpha, pulse, `reveal.progress`, …) over `dur` ms when crossing into
+the next segment; **every other value — strings, and `textBlock.text` above
+all — switches on the first morph frame.** A caption change therefore does not
+cross-fade under a morph: fade text via its colour (glide it into the
+background and back) or via `reveal.progress`. Morph requires structurally
+identical adjacent segments (same `structuralSignature`); if they differ, the
+engine falls back to cut and the validator emits a `morph-structural-mismatch`
+warning. When the segments are structural twins whose only differences are
+values morph steps (a text-only change), the morph runs but every frame of it
+shows the incoming segment — it reads as a cut — and the validator emits a
+`morph-nothing-morphable` warning (never an error; stored sequences stay
+valid). During a morph, entity placement inherits the outgoing segment's seed
+— the incoming segment's own seed is unused. `dur` must be between 200 and
+5000 ms.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
