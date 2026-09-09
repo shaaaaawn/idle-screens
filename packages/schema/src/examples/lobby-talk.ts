@@ -71,7 +71,7 @@ export const LOBBY_TALK_SPEC: SaverSpec = {
         kind: 'bar',
         values: [82, 64, 91, 37, 58],
         max: 100,
-        length: 0.75,
+        length: 0.42,
         thickness: 0.026,
         color: '#7fe0d2',
         colors: ['#7fe0d2', '#7fe0d2', '#ffcf7a', '#7fe0d2', '#7fe0d2'],

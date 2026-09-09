@@ -170,6 +170,21 @@ export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: n
 }
 
 /**
+ * Standard alpha (source-over) composite of `colour` at `alpha` over `ground` —
+ * what a translucent or faint layer actually paints, rather than its
+ * configured colour at full strength. Used so a `role: 'read'` text at low
+ * alpha (or a `textBlock` with `opacity < 1`) is measured for what it really
+ * puts on screen, not the undiluted ink colour.
+ */
+export function sourceOverPlate(ground: Rgb, colour: Rgb, alpha: number): Rgb {
+  return {
+    r: ground.r + (colour.r - ground.r) * alpha,
+    g: ground.g + (colour.g - ground.g) * alpha,
+    b: ground.b + (colour.b - ground.b) * alpha,
+  };
+}
+
+/**
  * The plate an additive layer leaves behind it at full strength: `colour ×
  * alpha` added to the ground (`lighter`), or screened onto it (`screen`).
  * Per channel, clamped to 1 — the same arithmetic the canvas applies, minus

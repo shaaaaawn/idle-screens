@@ -276,7 +276,7 @@ with distance, removing pop-in at the cutoff.
   additive layer (`blend: lighter` / `screen`) whose entities can reach the
   box and are at least a glyph tall, taken at its peak alpha (base + pulse)
   composited over that background — a glow parked under a caption is
-  measured, dust is not; both ratios are in the message. `text-safe-area`
+  measured, dust is not; both ratios appear in the message when an additive layer is beneath — a plate-less read reports only the background ratio. `text-safe-area`
   fires when the box (a `list`'s whole extent) lies within **5 %** of any
   viewport edge, where bezels and overscan hide it. Each is judged at the
   viewport passed to `adviseSpec` — check the portrait one too. `role` is a
