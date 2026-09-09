@@ -195,6 +195,23 @@ describe('saver-spec.schema.json', () => {
     }
   });
 
+  it('agrees with the runtime validator on a sequence bed (1d)', () => {
+    const scene = { schemaVersion: 1, id: 'x', label: 'X', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['🔵'] }, motion: { type: 'static' } }] };
+    const seq = (bed?: unknown) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      ...(bed !== undefined ? { bed } : {}),
+      segments: [{ key: 'a', scene, duration: 2000 }],
+    });
+    for (const good of [seq(), seq({ ...scene, id: 'bed', background: { type: 'solid', color: '#101020' } })]) {
+      expect(validateSequence(good).valid).toBe(true);
+      expect(check(good)).toBe(true);
+    }
+    for (const bad of [seq('ground'), seq({ ...scene, layers: [] }), seq({ ...scene, bogus: 1 })]) {
+      expect(check(bad)).toBe(false);
+    }
+    expect(validateSequence(seq({ ...scene, layers: [] })).valid).toBe(false);
+  });
+
   it("agrees with the runtime validator on sequence sync (1b)", () => {
     const scene = { schemaVersion: 1, id: 'x', label: 'X', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['🔵'] }, motion: { type: 'static' } }] };
     const seq = (sync?: string) => ({

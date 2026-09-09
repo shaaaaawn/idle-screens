@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, renderBrailleMap, renderDensityMap } from './perceive';
+import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap } from './perceive';
+import type { IdleSequence } from './types';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
 import type { SaverSpec } from './types';
 
@@ -271,5 +272,72 @@ describe('perceiveScene across all shipped examples', () => {
       expect(p.dominance.length).toBe(s.layers.length);
       expect(p.motion.length).toBe(s.layers.length);
     }
+  });
+});
+
+describe('perceiveSequenceFrame (1d — bed + segment)', () => {
+  const dark: SaverSpec = {
+    schemaVersion: 1, id: 'dark', label: 'Dark',
+    background: { type: 'solid', color: '#101010' },
+    layers: [{ key: 'dot', count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' }, position: { x: 0.8, y: 0.8 } }],
+  };
+  const bed: SaverSpec = {
+    schemaVersion: 1, id: 'bed', label: 'Bed',
+    background: { type: 'solid', color: '#202030' },
+    layers: [{ key: 'orb', count: 1, sprite: { kind: 'circle', radius: [0.15, 0.15], color: '#ffffff' }, motion: { type: 'drift', speed: [0.05, 0.05], angle: 0 }, position: { x: 0.2, y: 0.3 } }],
+  };
+  const seqOf = (withBed: boolean): IdleSequence => ({
+    format: 'idle-sequence', schemaVersion: 1, id: 'p', label: 'P', loop: false, seed: 7,
+    ...(withBed ? { bed } : {}),
+    segments: [
+      { key: 'a', scene: dark, duration: 5000 },
+      { key: 'b', scene: { ...dark, id: 'b', layers: [{ ...dark.layers[0]!, key: 'text', sprite: { kind: 'textBlock', text: 'Act II', fontSize: 0.05, maxWidth: 0.5 } }] }, duration: 5000 },
+    ],
+  });
+
+  it('without a bed it is perceiveScene of the resolved segment at localT, plus the segment field', () => {
+    const p = perceiveSequenceFrame(seqOf(false), 6000);
+    expect(p.bed).toBe(false);
+    expect(p.segment).toEqual({ index: 1, key: 'b', localT: 1000 });
+    const plain = perceiveScene(seqOf(false).segments[1]!.scene, { t: 1000 });
+    expect(p.braille).toBe(plain.braille);
+    expect(p.coverage).toBe(plain.coverage);
+    expect(p.dominance).toEqual(plain.dominance);
+    expect(p.text).toEqual(plain.text);
+    expect(p.t).toBe(1000);
+  });
+
+  it('with a bed the maps are the composite: more coverage than either alone, bed layers keyed bed:', () => {
+    const p = perceiveSequenceFrame(seqOf(true), 2000);
+    expect(p.bed).toBe(true);
+    expect(p.segment.index).toBe(0);
+    const bedAlone = perceiveScene(bed, { t: 2000, seed: 7 });
+    const segAlone = perceiveScene(dark, { t: 2000 });
+    expect(p.coverage).toBeGreaterThanOrEqual(bedAlone.coverage);
+    expect(p.coverage).toBeGreaterThanOrEqual(segAlone.coverage);
+    expect(p.coverage).toBeGreaterThan(bedAlone.coverage - 1e-9 + segAlone.coverage * 0.5);
+    expect(p.dominance.map((d) => d.key).sort()).toEqual(['bed:orb', 'dot']);
+    expect(p.dominance[0]!.key).toBe('bed:orb'); // the big bright orb outranks the dot
+    expect(p.dominance.reduce((s, d) => s + d.share, 0)).toBeCloseTo(1, 9);
+    expect(p.motion.map((m) => m.key)).toEqual(['bed:orb', 'dot']);
+    expect(p.motion[0]!.moving).toBe(true);
+    expect(p.motion[1]!.layerIndex).toBe(1); // segment indices shift past the bed's layers
+  });
+
+  it("the bed runs on the global clock: its centroid is continuous across the boundary while the segment's clock resets", () => {
+    const before = perceiveSequenceFrame(seqOf(true), 4990);
+    const after = perceiveSequenceFrame(seqOf(true), 5010);
+    expect(before.segment.index).toBe(0);
+    expect(after.segment).toEqual({ index: 1, key: 'b', localT: 10 });
+    const bx = (T: number) => luminanceGrid(bed, { t: T, seed: 7 }).centroid!.x;
+    expect(Math.abs(bx(5010) - bx(4990))).toBeLessThan(0.01);
+    expect(Math.abs(after.centroid!.x - before.centroid!.x)).toBeLessThan(0.05);
+    expect(after.text.map((t) => t.key)).toEqual(['text']); // segment b's caption, listed after the bed's (none)
+    expect(after.text[0]!.layerIndex).toBe(1);
+  });
+
+  it('bed advisories are prefixed bed.; the segment background never fires against the bed', () => {
+    const p = perceiveSequenceFrame(seqOf(true), 2000);
+    for (const a of p.advisories) expect(a.path.startsWith('bed.') || a.path.startsWith('layers')).toBe(true);
   });
 });

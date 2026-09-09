@@ -34,6 +34,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     createLinearGradient: vi.fn(() => stubGradient()),
     createRadialGradient: vi.fn(() => stubGradient()),
     drawImage: vi.fn(),
+    clearRect: vi.fn(),
     fillStyle: '',
     strokeStyle: '',
     globalAlpha: 1,
@@ -304,6 +305,53 @@ describe('validateSequence', () => {
     }));
     expect(unknown.valid).toBe(false);
     expect(unknown.errors.some((e) => e.path === 'segments[0].transition.type')).toBe(true);
+  });
+
+  describe('bed (1d)', () => {
+    const BED_OK: SaverSpec = {
+      schemaVersion: 1, id: 'bed', label: 'Bed',
+      background: { type: 'solid', color: '#0a0a1a' },
+      layers: [{ count: 10, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, motion: { type: 'drift', speed: [0.05, 0.1], angle: 0 } }],
+    };
+    it('accepts a valid bed and validates it with validateSpec (errors prefixed bed.)', () => {
+      expect(validateSequence(seq({ bed: BED_OK })).valid).toBe(true);
+      const bad = validateSequence(seq({ bed: { ...BED_OK, layers: [] } }));
+      expect(bad.valid).toBe(false);
+      expect(bad.errors.some((e) => e.path === 'bed.layers')).toBe(true);
+      const notObj = validateSequence(seq({ bed: 'ground' as never }));
+      expect(notObj.valid).toBe(false);
+      expect(notObj.errors.some((e) => e.path === 'bed')).toBe(true);
+    });
+
+    it('counts bed entities together with the largest segment for the perf cap', () => {
+      // Two layers each, under the 400-per-layer cap; only the bed + largest-segment sum is over.
+      const big = (count: number): SaverSpec => ({ ...SCENE, layers: [{ ...SCENE.layers[0]!, count }, { ...SCENE.layers[0]!, count: 100 }] });
+      const bed = { ...BED_OK, layers: [{ ...BED_OK.layers[0]!, count: 400 }] };
+      const ok = validateSequence(seq({ bed, segments: [{ key: 'a', scene: big(300), duration: 5000 }, { key: 'b', scene: big(50), duration: 5000 }] }));
+      expect(ok.errors).toEqual([]);
+      const over = validateSequence(seq({ bed, segments: [{ key: 'a', scene: big(301), duration: 5000 }, { key: 'b', scene: big(50), duration: 5000 }] }));
+      expect(over.valid).toBe(false);
+      expect(over.errors.some((e) => e.path === 'bed' && /400 \+ largest segment 401 = 801 exceeds cap 800/.test(e.message))).toBe(true);
+      // Each alone is legal — only the pair is over.
+      expect(validateSequence(seq({ segments: [{ key: 'a', scene: big(301), duration: 5000 }] })).errors).toEqual([]);
+    });
+
+    it('warns bed-hides-segment-background for every segment that declares a background', () => {
+      const r = validateSequence(seq({
+        bed: BED_OK,
+        segments: [
+          { key: 'a', scene: { ...SCENE, background: { type: 'solid', color: '#123456' } }, duration: 5000 },
+          { key: 'b', scene: SCENE, duration: 5000 },
+          { key: 'c', scene: { ...SCENE, background: { type: 'gradient', stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#111111' }] } }, duration: 5000 },
+        ],
+      }));
+      expect(r.valid).toBe(true);
+      const w = (r.warnings ?? []).filter((x) => x.code === 'bed-hides-segment-background');
+      expect(w.map((x) => x.path)).toEqual(['segments[0].scene.background', 'segments[2].scene.background']);
+      // No bed ⇒ no warning, whatever the segments declare.
+      const none = validateSequence(seq({ segments: [{ key: 'a', scene: { ...SCENE, background: { type: 'solid', color: '#123456' } }, duration: 5000 }] }));
+      expect((none.warnings ?? []).filter((x) => x.code === 'bed-hides-segment-background')).toHaveLength(0);
+    });
   });
 
   it('accepts cut transition', () => {
@@ -957,6 +1005,38 @@ describe('SequenceInstance — retained track', () => {
   });
 });
 
+interface Rec { fills: string[]; drawAlphas: number[]; clears: number; ctx: CanvasRenderingContext2D }
+/**
+ * One recording context per canvas element, so the shared surface (the one
+ * canvas in the host) and a fade's offscreen canvases can be told apart.
+ */
+function perCanvasContexts(): Map<HTMLCanvasElement, Rec> {
+  const recs = new Map<HTMLCanvasElement, Rec>();
+  HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
+    let rec = recs.get(this);
+    if (!rec) {
+      const c = stub2dContext();
+      const r: Rec = { fills: [], drawAlphas: [], clears: 0, ctx: c };
+      let _fs = '';
+      Object.defineProperty(c, 'fillStyle', {
+        get: () => _fs,
+        set: (v: string) => { _fs = v; if (typeof v === 'string') r.fills.push(v); },
+      });
+      (c as { drawImage: unknown }).drawImage = vi.fn(function (this: { globalAlpha: number }) { r.drawAlphas.push(this.globalAlpha); });
+      (c as { clearRect: unknown }).clearRect = vi.fn(() => { r.clears++; });
+      recs.set(this, r);
+      rec = r;
+    }
+    return rec.ctx;
+  } as never;
+  return recs;
+}
+const fadingOf = (inst: SaverInstance) => (inst as unknown as { fading: { index: number; child: SaverInstance } | null }).fading;
+const fadingInOf = (inst: SaverInstance) => (inst as unknown as { fadingIn: { index: number; child: SaverInstance } | null }).fadingIn;
+const mainOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec => recs.get(host.querySelector('canvas')!)!;
+const offscreenOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec[] =>
+  [...recs.entries()].filter(([c]) => !host.contains(c)).map(([, r]) => r);
+
 // ---------------------------------------------------------------------------
 // Fade — the general cross-fade between unlike segments (plan 1c, #45).
 // ---------------------------------------------------------------------------
@@ -970,37 +1050,6 @@ describe('SequenceInstance — fade transition', () => {
     ...overrides,
   });
 
-  interface Rec { fills: string[]; drawAlphas: number[] }
-  /**
-   * One recording context per canvas element, so the shared surface (the one
-   * canvas in the host) and the fade's offscreen canvas can be told apart.
-   */
-  function perCanvasContexts(): Map<HTMLCanvasElement, Rec> {
-    const recs = new Map<HTMLCanvasElement, Rec>();
-    const ctxs = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
-    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
-      let ctx = ctxs.get(this);
-      if (!ctx) {
-        const rec: Rec = { fills: [], drawAlphas: [] };
-        const c = stub2dContext();
-        let _fs = '';
-        Object.defineProperty(c, 'fillStyle', {
-          get: () => _fs,
-          set: (v: string) => { _fs = v; if (typeof v === 'string') rec.fills.push(v); },
-        });
-        (c as { drawImage: unknown }).drawImage = vi.fn(function (this: { globalAlpha: number }) { rec.drawAlphas.push(this.globalAlpha); });
-        ctxs.set(this, c);
-        recs.set(this, rec);
-        ctx = c;
-      }
-      return ctx;
-    } as never;
-    return recs;
-  }
-  const fadingOf = (inst: SaverInstance) => (inst as unknown as { fading: { index: number; child: SaverInstance } | null }).fading;
-  const mainOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec => recs.get(host.querySelector('canvas')!)!;
-  const offscreenOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec[] =>
-    [...recs.entries()].filter(([c]) => !host.contains(c)).map(([, r]) => r);
   const DEFAULT_BG = '#05050a'; // SCENE_STRUCTURAL_DIFF declares no background
 
   it('renders both segments during the window and composites the outgoing at a decreasing alpha', () => {
@@ -1138,6 +1187,178 @@ describe('SequenceInstance — fade transition', () => {
       expect(mainOf(recs, host).drawAlphas).toEqual([]);
       inst.dispose();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bed — a sequence-level scene on the global clock (plan 1d, #58).
+// ---------------------------------------------------------------------------
+
+describe('SequenceInstance — bed', () => {
+  /** One drifting circle: the only `arc` caller in these sequences (segments draw emoji via fillText). */
+  const BED: SaverSpec = {
+    schemaVersion: 1, id: 'bed', label: 'Bed',
+    background: { type: 'solid', color: '#0a0a1a' },
+    layers: [{ key: 'orb', count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'drift', speed: [0.1, 0.1], angle: 0 } }],
+  };
+  const SEG_BG = '#123456';
+  const bedSeq = (overrides: Partial<IdleSequence> = {}): IdleSequence => seq({
+    bed: BED,
+    segments: [
+      { key: 'a', scene: { ...SCENE, background: { type: 'solid', color: SEG_BG } }, duration: 5000 },
+      { key: 'b', scene: SCENE, duration: 3000 },
+      { key: 'c', scene: SCENE, duration: 4000 },
+    ],
+    ...overrides,
+  });
+  const bedOf = (inst: SaverInstance) => (inst as unknown as { bed: { effSpec: SaverSpec } | null }).bed;
+  const childSpec = (inst: SaverInstance, index: number): SaverSpec | undefined =>
+    (inst as unknown as { children: Array<{ effSpec: SaverSpec } | null> }).children[index]?.effSpec;
+  const steer = (inst: SaverInstance, path: string, value: unknown): void =>
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path, value, ease: 'step', dur: 0 }] } as never);
+  /** x of the bed orb in the frame rendered at T (the last arc call). */
+  const orbX = (inst: SaverInstance, T: number): number => {
+    vi.mocked(mockCtx.arc).mockClear();
+    inst.renderFrame!(T, 1);
+    const calls = vi.mocked(mockCtx.arc).mock.calls;
+    expect(calls.length).toBe(1);
+    return calls[0]![0] as number;
+  };
+
+  it('absent bed ⇒ no bed instance; segment backgrounds paint as today', () => {
+    const rec = (() => { const fills: string[] = []; let _fs = ''; Object.defineProperty(mockCtx, 'fillStyle', { get: () => _fs, set: (v: string) => { _fs = v; if (typeof v === 'string') fills.push(v); } }); return fills; })();
+    const inst = mountSync(compileSequence({ ...bedSeq(), bed: undefined }));
+    expect(bedOf(inst)).toBeNull();
+    inst.renderFrame!(1000, 1);
+    expect(rec).toContain(SEG_BG);
+    expect(vi.mocked(mockCtx.arc)).not.toHaveBeenCalled();
+    inst.dispose();
+  });
+
+  it("paints the bed's ground first and never the segment's background", () => {
+    const fills: string[] = [];
+    let _fs = '';
+    Object.defineProperty(mockCtx, 'fillStyle', { get: () => _fs, set: (v: string) => { _fs = v; if (typeof v === 'string') fills.push(v); } });
+    const inst = mountSync(compileSequence(bedSeq()));
+    expect(bedOf(inst)).not.toBeNull();
+    inst.renderFrame!(1000, 1);
+    expect(fills[0]).toBe('#0a0a1a'); // the bed's ground, before any ink
+    expect(fills).not.toContain(SEG_BG);
+    inst.dispose();
+  });
+
+  it('a bed drift entity is continuous across a segment boundary (the inverse of the Phase 0 rewind pin)', () => {
+    const inst = mountSync(compileSequence(bedSeq()));
+    const x0 = orbX(inst, 10); // what a rewound instance would show 10 ms into a segment
+    const before = orbX(inst, 4990);
+    const after = orbX(inst, 5010);
+    expect(activeIndexOf(inst)).toBe(1);
+    // 0.1 viewport/s on a 400 px short side = 40 px/s → 0.8 px over 20 ms.
+    expect(Math.abs(after - before)).toBeLessThan(2);
+    expect(Math.abs(after - x0)).toBeGreaterThan(50);
+    inst.dispose();
+  });
+
+  it('… and across a sequence.segment steer: the clicker rewinds the segment, not the bed', () => {
+    const inst = mountSync(compileSequence(bedSeq()));
+    const before = orbX(inst, 4990);
+    vi.mocked(mockCtx.arc).mockClear();
+    steerTo(inst, 2); // re-renders at renderedT 4990 with the clock displaced for the segments
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(vi.mocked(mockCtx.arc).mock.calls[0]![0]).toBe(before);
+    const after = orbX(inst, 5010);
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(Math.abs(after - before)).toBeLessThan(2);
+    inst.dispose();
+  });
+
+  it('bed.<path> steers reach the bed (prefix stripped), by index and by key, and are not retained for segments', () => {
+    const inst = mountSync(compileSequence(bedSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'bed.layers.0.sprite.color', '#ff0000');
+    expect((bedOf(inst)!.effSpec.layers[0]!.sprite as { color: string }).color).toBe('#ff0000');
+    steer(inst, 'bed.orb.sprite.color', '#00ff00');
+    expect((bedOf(inst)!.effSpec.layers[0]!.sprite as { color: string }).color).toBe('#00ff00');
+    expect(childSpec(inst, 0)!.layers).toEqual(SCENE.layers);
+    const retained = (inst as unknown as { retainedDeltas: Map<string, unknown> }).retainedDeltas;
+    expect([...retained.keys()]).toEqual([]);
+    inst.dispose();
+  });
+
+  it('without a bed, bed.* paths still reach the segments (a layer keyed `bed` keeps working)', () => {
+    const scene: SaverSpec = { ...SCENE, layers: [{ ...SCENE.layers[0]!, key: 'bed', sprite: { kind: 'emoji', glyphs: ['🔵'] } }] };
+    const inst = mountSync(compileSequence(seq({ segments: [{ key: 'a', scene, duration: 5000 }] })));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'bed.sprite.glyphs', ['🟢']);
+    expect((childSpec(inst, 0)!.layers[0]!.sprite as { glyphs: string[] }).glyphs).toEqual(['🟢']);
+    inst.dispose();
+  });
+
+  it('a segment\'s ghosting is ignored over a bed (one paint per frame, no warm-up replay)', () => {
+    const ghosted: SaverSpec = { ...SCENE, ghosting: 0.9 };
+    // A fresh child paints once at construction (t = 0) and once for the frame.
+    const withBed = mountSync(compileSequence(bedSeq({ segments: [{ key: 'a', scene: ghosted, duration: 5000 }] })));
+    vi.mocked(mockCtx.fillText).mockClear();
+    withBed.renderFrame!(3000, 1); // a non-contiguous seek: ghosting would replay up to 53 frames
+    expect(vi.mocked(mockCtx.fillText)).toHaveBeenCalledTimes(2);
+    withBed.dispose();
+    const alone = mountSync(compileSequence(seq({ segments: [{ key: 'a', scene: ghosted, duration: 5000 }] })));
+    vi.mocked(mockCtx.fillText).mockClear();
+    alone.renderFrame!(3000, 1);
+    expect(vi.mocked(mockCtx.fillText).mock.calls.length).toBeGreaterThan(10);
+    alone.dispose();
+  });
+
+  it('a fade over a bed puts both segments on canvases of their own: incoming at k, outgoing at 1 − k, each cleared', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(bedSeq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+        { key: 'b', scene: SCENE, duration: 5000 },
+      ],
+    })), saverCtx({ host }));
+    inst.renderFrame!(4000, 1);
+    inst.renderFrame!(5300, 1);
+    const k = 0.3 * 0.3 * (3 - 0.6);
+    const main = mainOf(recs, host);
+    expect(main.fills).toContain('#0a0a1a');
+    expect(main.drawAlphas).toHaveLength(2);
+    expect(main.drawAlphas[0]).toBeCloseTo(k, 5);
+    expect(main.drawAlphas[1]).toBeCloseTo(1 - k, 5);
+    expect(fadingInOf(inst)?.index).toBe(1);
+    expect(fadingOf(inst)?.index).toBe(0);
+    const off = offscreenOf(recs, host);
+    expect(off).toHaveLength(2);
+    for (const o of off) {
+      expect(o.clears).toBe(1); // transparent children never clear; their owner does
+      expect(o.fills).not.toContain('#0a0a1a');
+      expect(o.fills).not.toContain('#05050a');
+    }
+    inst.renderFrame!(6100, 1);
+    expect(fadingInOf(inst)).toBeNull();
+    expect(fadingOf(inst)).toBeNull();
+    expect(host.querySelectorAll('canvas')).toHaveLength(1);
+    inst.dispose();
+  });
+
+  it('costTier counts the bed together with the largest segment', () => {
+    const big = (count: number): SaverSpec => ({ ...SCENE, layers: [{ ...SCENE.layers[0]!, count }] });
+    const bed = { ...BED, layers: [{ ...BED.layers[0]!, count: 100 }] };
+    const segments = [{ key: 'a', scene: big(100), duration: 5000 }, { key: 'b', scene: big(20), duration: 5000 }];
+    expect(compileSequence(seq({ segments })).manifest.costTier).toBe('low'); // 100
+    expect(compileSequence(seq({ bed, segments })).manifest.costTier).toBe('medium'); // 100 + 100
+  });
+
+  it('the bed is disposed with the sequence and resized with it', () => {
+    const inst = mountSync(compileSequence(bedSeq()));
+    const bed = bedOf(inst) as unknown as SaverInstance;
+    const resized = vi.spyOn(bed, 'resize');
+    const disposed = vi.spyOn(bed, 'dispose');
+    inst.resize(800, 600);
+    expect(resized).toHaveBeenCalledWith(800, 600, undefined);
+    inst.dispose();
+    expect(disposed).toHaveBeenCalledTimes(1);
   });
 });
 
