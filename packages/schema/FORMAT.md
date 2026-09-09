@@ -684,8 +684,11 @@ clicker), and stays if the show leaves and returns; on segments without a
 `bars` key the delta is simply a no-op, as is any delta whose value does not
 validate on that particular segment (the rest of the set still applies). A
 morph's two lerp endpoints carry the retained set too, so a steered colour
-rides through the glide instead of vanishing for `dur`. Pinned by
-`sequence.test.ts` → "SequenceInstance — retained track".
+rides through the glide instead of vanishing for `dur` — but a steer that
+lands while the morph itself is in progress takes effect immediately rather
+than gliding over its own `dur`, since the morph's cross-fade is already the
+active transition on that child. Pinned by `sequence.test.ts` →
+"SequenceInstance — retained track".
 
 The steer **moves the clock, not the frame**: it displaces the timeline so the
 target segment starts at its own `localT` 0 (its `life.enter` build replays)
