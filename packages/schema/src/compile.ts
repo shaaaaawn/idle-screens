@@ -847,6 +847,21 @@ export function compileSaver(spec: unknown): SaverPlugin {
 export interface SequenceMountContext extends SaverContext {
   /** ms already elapsed on the shared sequence clock. Ignored unless `sync: 'epoch'`. */
   sequenceBaseT?: number;
+  /**
+   * The device's compute tier (`computeTier` from `@idle-screens/capabilities`;
+   * the string union is repeated here so schema does not depend on that
+   * package). A `fade` transition keeps two segments live for `dur`, which
+   * `basic` (canvas2d only) and `minimal` cannot afford: on those tiers fade
+   * renders as `cut`. Absent ⇒ fade enabled.
+   */
+  capabilityTier?: 'minimal' | 'basic' | 'standard' | 'high';
+}
+
+/** A live `fade`: the outgoing segment on its own canvas, composited over the incoming one. */
+interface FadingChild {
+  index: number;
+  child: SpecInstance;
+  canvas: HTMLCanvasElement | OffscreenCanvas;
 }
 
 class SequenceInstance implements SaverInstance {
@@ -890,10 +905,15 @@ class SequenceInstance implements SaverInstance {
    * resolve on it (see `applyRetainedDeltas`).
    */
   private readonly retainedDeltas = new Map<string, SteerDelta>();
+  /** The outgoing segment while a `fade` runs; null otherwise. */
+  private fading: FadingChild | null = null;
+  /** False on the `basic`/`minimal` capability tiers — fade renders as cut. */
+  private readonly fadeEnabled: boolean;
 
   constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
-    const { sequenceBaseT, ...plainCtx } = ctx;
+    const { sequenceBaseT, capabilityTier, ...plainCtx } = ctx;
+    this.fadeEnabled = capabilityTier !== 'basic' && capabilityTier !== 'minimal';
     // `sync: 'epoch'`: seed the clock from the host's shared time, the same
     // way `baseT` carries SpecInstance's clock across pause/resume — the first
     // frame renders at `baseT`, not 0. Absent/`mount` ignores the hint and T
@@ -959,6 +979,60 @@ class SequenceInstance implements SaverInstance {
   private morphDur(from: number): number {
     const tr = this.seq.segments[from]?.transition;
     return tr?.type === 'morph' ? tr.dur : 0;
+  }
+
+  /** Length of the fade out of segment `from`, or 0 (no fade, or a tier that plays it as cut). */
+  private fadeDur(from: number): number {
+    const tr = this.seq.segments[from]?.transition;
+    return this.fadeEnabled && tr?.type === 'fade' ? tr.dur : 0;
+  }
+
+  /** Sum of every timed segment — the lap length under `loop: true`. */
+  private timedTotal(): number {
+    const last = this.seq.segments.length - 1;
+    return segmentStart(this.seq, last) + (this.seq.segments[last]!.duration ?? 0);
+  }
+
+  private releaseFading(): void {
+    if (!this.fading) return;
+    this.fading.child.dispose();
+    this.fading = null;
+  }
+
+  /**
+   * Cross-fade: the outgoing segment `from` stays alive on a canvas of its own,
+   * keeps animating at `duration(from) + localT` (it does not freeze — and if
+   * it was an `advance: 'input'` hold it resumes from its duration, not from
+   * wherever the hold had reached), and is composited over the incoming frame
+   * already on the shared surface at `1 − easeSmooth(localT / dur)`. Two live
+   * segments for `dur` only; the outgoing one is disposed when the fade ends.
+   * Like a morph, the outgoing child mounts on its morph chain root's scene
+   * and seed so its entities are the ones the viewer was watching.
+   */
+  private compositeFade(from: number, localT: number, seed: number): void {
+    const dur = this.fadeDur(from);
+    if (this.fading && this.fading.index !== from) this.releaseFading();
+    if (!this.fading) {
+      const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
+        ? document.createElement('canvas')
+        : new OffscreenCanvas(Math.max(1, this.childCtx.width), Math.max(1, this.childCtx.height));
+      const root = this.morphChainRoot(from);
+      const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas });
+      child.setPaused(true);
+      if (root !== from) child.hotSwapSpec(this.childScene(from));
+      if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
+      this.fading = { index: from, child, canvas };
+    }
+    const outDur = this.seq.segments[from]!.duration ?? 0;
+    this.fading.child.renderFrame(outDur + localT, this.childSeed(this.morphChainRoot(from), seed));
+
+    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+    if (!main) return;
+    main.save();
+    main.globalAlpha = 1 - easeSmooth(localT / dur);
+    main.globalCompositeOperation = 'source-over';
+    main.drawImage(this.fading.canvas, 0, 0, this.childCtx.width, this.childCtx.height);
+    main.restore();
   }
 
   /** A segment's scene with the retained track applied — `scene` itself when nothing resolves on it. */
@@ -1029,6 +1103,16 @@ class SequenceInstance implements SaverInstance {
       && this.canMorph(prevIdx)
       && localT < this.morphDur(prevIdx);
 
+    // A fade comes from the previous segment in the list — or, under
+    // `loop: true`, from the last segment when the lap wraps to 0, so the
+    // last segment's `fade` is the wrap's transition. Cut and morph paths
+    // are untouched: fadeDur is 0 for them.
+    const lastIdx = this.seq.segments.length - 1;
+    const wrapped = this.seq.loop && index === 0 && lastIdx > 0 && T + this.clockOffset >= this.timedTotal();
+    const fadeFrom = prevIdx >= 0 ? prevIdx : wrapped ? lastIdx : -1;
+    const fadeActive = fadeFrom >= 0 && localT < this.fadeDur(fadeFrom);
+    if (!fadeActive && this.fading) this.releaseFading();
+
     if (morphActive) {
       // Morph in progress: keep the child keyed to the chain root
       // (preserves its seed/entity placement through chained morphs).
@@ -1079,6 +1163,7 @@ class SequenceInstance implements SaverInstance {
       // but immediately hot-swap to the current segment's spec.
       const child = useMorphSeed ? this.ensureChild(index, this.childScene(chainRoot)) : this.ensureChild(index);
       child.renderFrame(localT, effSeed);
+      if (fadeActive) this.compositeFade(fadeFrom, localT, seed);
     }
   }
 
@@ -1092,6 +1177,7 @@ class SequenceInstance implements SaverInstance {
     for (const child of this.children) {
       child?.setPaused(true);
     }
+    this.fading?.child.setPaused(true);
   }
 
   resize(width: number, height: number, dpr?: number): void {
@@ -1107,6 +1193,7 @@ class SequenceInstance implements SaverInstance {
     for (const child of this.children) {
       child?.resize(width, height, dpr);
     }
+    this.fading?.child.resize(width, height, dpr);
   }
 
   applyTrack(track: ControlTrack): void {
@@ -1141,6 +1228,7 @@ class SequenceInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
+    this.releaseFading();
     for (let i = 0; i < this.children.length; i++) {
       this.releaseChild(i);
     }
