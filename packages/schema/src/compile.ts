@@ -120,9 +120,22 @@ interface Built {
   entities: Entity[];
 }
 
+/** Per-instance options a host (today: `SequenceInstance`) sets; a plain compileSaver mount sets none. */
+interface SpecInstanceOptions {
+  /**
+   * Draw over whatever is already on the surface: `drawBackground` is skipped,
+   * the frame is not cleared to a colour, and `ghosting` is ignored (a smear
+   * needs an opaque ground to decay into — the surface owner may declare its
+   * own). The instance never clears the surface either; the owner does.
+   * A sequence's segment children over a `bed` render this way.
+   */
+  transparent?: boolean;
+}
+
 class SpecInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly ownsCanvas: boolean;
+  private readonly transparent: boolean;
   private readonly ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private readonly saverCtx: SaverContext;
   private readonly seed: number;
@@ -146,9 +159,11 @@ class SpecInstance implements SaverInstance {
   constructor(
     private readonly spec: SaverSpec,
     ctx: SaverContext,
+    opts: SpecInstanceOptions = {},
   ) {
     this.effSpec = spec;
     this.saverCtx = ctx;
+    this.transparent = opts.transparent === true;
     this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
@@ -726,9 +741,11 @@ class SpecInstance implements SaverInstance {
    *  showing through — the ghosting smear. */
   private paintFrame(t: number, bgAlpha: number): void {
     const { ctx } = this;
-    ctx.globalAlpha = bgAlpha;
-    ctx.globalCompositeOperation = 'source-over';
-    this.drawBackground(t);
+    if (!this.transparent) {
+      ctx.globalAlpha = bgAlpha;
+      ctx.globalCompositeOperation = 'source-over';
+      this.drawBackground(t);
+    }
     ctx.globalAlpha = 1;
     for (const built of this.layers) {
       const lifeA = lifeAlphaAt(built.layer.life, t);
@@ -756,7 +773,7 @@ class SpecInstance implements SaverInstance {
    */
   renderFrame(t: number, _seed: number): void {
     this.stepTransition(t);
-    const g = this.effSpec.ghosting ?? 0;
+    const g = this.transparent ? 0 : (this.effSpec.ghosting ?? 0);
     if (g > 0) {
       const dt = 1000 / 60;
       const contiguous = this.lastRenderT !== Number.NEGATIVE_INFINITY
@@ -857,12 +874,15 @@ export interface SequenceMountContext extends SaverContext {
   capabilityTier?: 'minimal' | 'basic' | 'standard' | 'high';
 }
 
-/** A live `fade`: the outgoing segment on its own canvas, composited over the incoming one. */
-interface FadingChild {
+/** A segment child on a canvas of its own, composited onto the shared surface during a `fade`. */
+interface OffscreenChild {
   index: number;
   child: SpecInstance;
   canvas: HTMLCanvasElement | OffscreenCanvas;
 }
+
+/** `bed.<path>` routes a steer to the sequence's bed when one exists. */
+const BED_PREFIX = 'bed.';
 
 class SequenceInstance implements SaverInstance {
   private readonly seq: IdleSequence;
@@ -906,9 +926,24 @@ class SequenceInstance implements SaverInstance {
    */
   private readonly retainedDeltas = new Map<string, SteerDelta>();
   /** The outgoing segment while a `fade` runs; null otherwise. */
-  private fading: FadingChild | null = null;
+  private fading: OffscreenChild | null = null;
+  /**
+   * The incoming segment while a `fade` runs over a `bed`. Children over a
+   * bed are transparent, so a cross-fade needs both of them on canvases of
+   * their own — the incoming composited at k, the outgoing at 1 − k. Without
+   * a bed the incoming paints its own opaque ground on the shared surface and
+   * this stays null.
+   */
+  private fadingIn: OffscreenChild | null = null;
   /** False on the `basic`/`minimal` capability tiers — fade renders as cut. */
   private readonly fadeEnabled: boolean;
+  /**
+   * The sequence's `bed`: one scene on the shared surface, drawn first every
+   * frame at the sequence clock — WITHOUT `clockOffset`, so a
+   * `sequence.segment` steer rewinds the segment and never the bed — and never
+   * re-created. Segments render over it transparently. Null when absent.
+   */
+  private readonly bed: SpecInstance | null;
 
   constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
@@ -944,6 +979,12 @@ class SequenceInstance implements SaverInstance {
     // from starting its own rAF. SequenceInstance.loop is the only clock.
     this.childCtx = { ...plainCtx, surface: surface!, reducedMotion: true };
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
+    if (seq.bed) {
+      this.bed = new SpecInstance(this.bedScene(seq.bed), this.childCtx);
+      this.bed.setPaused(true);
+    } else {
+      this.bed = null;
+    }
     this.paused = ctx.reducedMotion;
     if (this.paused) this.renderFrame(this.baseT, this.seed);
     else this.start();
@@ -951,6 +992,18 @@ class SequenceInstance implements SaverInstance {
 
   private childSeed(index: number, fallback: number): number {
     return this.seq.segments[index]!.scene.seed ?? this.seq.seed ?? fallback;
+  }
+
+  /**
+   * The bed's seed follows the segment rule (own seed, else the sequence seed)
+   * but offset by `maxSegments`, past every segment's `seed + index`, so a bed
+   * and segment 0 never share an entity stream and adding a segment does not
+   * re-seat the bed.
+   */
+  private bedScene(bed: SaverSpec): SaverSpec {
+    if (bed.seed != null) return bed;
+    if (this.seq.seed != null) return { ...bed, seed: this.seq.seed + LIMITS.maxSegments };
+    return bed;
   }
 
   private childScene(index: number): SaverSpec {
@@ -994,45 +1047,69 @@ class SequenceInstance implements SaverInstance {
   }
 
   private releaseFading(): void {
-    if (!this.fading) return;
-    this.fading.child.dispose();
-    this.fading = null;
+    if (this.fading) {
+      this.fading.child.dispose();
+      this.fading = null;
+    }
+    if (this.fadingIn) {
+      this.fadingIn.child.dispose();
+      this.fadingIn = null;
+    }
   }
 
   /**
-   * Cross-fade: the outgoing segment `from` stays alive on a canvas of its own,
-   * keeps animating at `duration(from) + localT` (it does not freeze — and if
-   * it was an `advance: 'input'` hold it resumes from its duration, not from
-   * wherever the hold had reached), and is composited over the incoming frame
-   * already on the shared surface at `1 − easeSmooth(localT / dur)`. Two live
-   * segments for `dur` only; the outgoing one is disposed when the fade ends.
-   * Like a morph, the outgoing child mounts on its morph chain root's scene
-   * and seed so its entities are the ones the viewer was watching.
+   * A segment child on a canvas of its own. Like a morph it mounts on its
+   * chain root's scene and seed (so its entities are the ones the viewer was
+   * watching) and hot-swaps to the segment's spec; the retained track is
+   * applied last. Transparent over a bed, opaque otherwise.
    */
-  private compositeFade(from: number, localT: number, seed: number): void {
-    const dur = this.fadeDur(from);
-    if (this.fading && this.fading.index !== from) this.releaseFading();
-    if (!this.fading) {
-      const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
-        ? document.createElement('canvas')
-        : new OffscreenCanvas(Math.max(1, this.childCtx.width), Math.max(1, this.childCtx.height));
-      const root = this.morphChainRoot(from);
-      const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas });
-      child.setPaused(true);
-      if (root !== from) child.hotSwapSpec(this.childScene(from));
-      if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
-      this.fading = { index: from, child, canvas };
-    }
-    const outDur = this.seq.segments[from]!.duration ?? 0;
-    this.fading.child.renderFrame(outDur + localT, this.childSeed(this.morphChainRoot(from), seed));
+  private offscreenChild(index: number, root: number): OffscreenChild {
+    const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
+      ? document.createElement('canvas')
+      : new OffscreenCanvas(Math.max(1, this.childCtx.width), Math.max(1, this.childCtx.height));
+    const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas }, { transparent: this.bed !== null });
+    child.setPaused(true);
+    if (root !== index) child.hotSwapSpec(this.childScene(index));
+    if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
+    return { index, child, canvas };
+  }
 
+  /** Render an offscreen child; a transparent one never clears, so its owner does here. */
+  private renderOffscreen(oc: OffscreenChild, t: number, seed: number): void {
+    if (this.bed) {
+      const c = oc.canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      c?.clearRect(0, 0, this.childCtx.width, this.childCtx.height);
+    }
+    oc.child.renderFrame(t, seed);
+  }
+
+  /** Draw an offscreen canvas onto the shared surface at `alpha`. */
+  private composite(canvas: HTMLCanvasElement | OffscreenCanvas, alpha: number): void {
     const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
     if (!main) return;
     main.save();
-    main.globalAlpha = 1 - easeSmooth(localT / dur);
+    main.globalAlpha = alpha;
     main.globalCompositeOperation = 'source-over';
-    main.drawImage(this.fading.canvas, 0, 0, this.childCtx.width, this.childCtx.height);
+    main.drawImage(canvas, 0, 0, this.childCtx.width, this.childCtx.height);
     main.restore();
+  }
+
+  /**
+   * Render the outgoing segment `from` of a live fade onto its own canvas. It
+   * keeps animating at `duration(from) + localT` (it does not freeze — and if
+   * it was an `advance: 'input'` hold it resumes from its duration, not from
+   * wherever the hold had reached). Two live segments for `dur` only; the
+   * outgoing one is disposed when the fade ends.
+   */
+  private renderOutgoing(from: number, localT: number, seed: number): OffscreenChild {
+    if (this.fading && this.fading.index !== from) {
+      this.fading.child.dispose();
+      this.fading = null;
+    }
+    if (!this.fading) this.fading = this.offscreenChild(from, this.morphChainRoot(from));
+    const outDur = this.seq.segments[from]!.duration ?? 0;
+    this.renderOffscreen(this.fading, outDur + localT, this.childSeed(this.morphChainRoot(from), seed));
+    return this.fading;
   }
 
   /** A segment's scene with the retained track applied — `scene` itself when nothing resolves on it. */
@@ -1052,7 +1129,7 @@ class SequenceInstance implements SaverInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx);
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
@@ -1096,6 +1173,10 @@ class SequenceInstance implements SaverInstance {
     this.renderedT = T;
     const resolved = resolveSegment(this.seq, T + this.clockOffset, { releasedBelow: this.releasedBelow });
     const { index, localT } = resolved;
+
+    // The bed is the ground: painted first, on the global clock. `T` here is
+    // the sequence clock before `clockOffset`, so the clicker never rewinds it.
+    this.bed?.renderFrame(T, this.seq.bed?.seed ?? this.seq.seed ?? seed);
 
     // Check if the *previous* segment has a morph into this one
     const prevIdx = index > 0 ? index - 1 : -1;
@@ -1159,11 +1240,33 @@ class SequenceInstance implements SaverInstance {
       const useMorphSeed = chainRoot < index;
       const effSeed = useMorphSeed ? this.childSeed(chainRoot, seed) : this.childSeed(index, seed);
 
+      if (fadeActive && this.bed) {
+        // Over a bed both segments are transparent ink, so both go to canvases
+        // of their own: incoming at k, outgoing over it at 1 − k. The incoming
+        // moves to the shared surface (via ensureChild) once the fade ends.
+        const k = easeSmooth(localT / this.fadeDur(fadeFrom));
+        if (this.fadingIn && this.fadingIn.index !== index) {
+          this.fadingIn.child.dispose();
+          this.fadingIn = null;
+        }
+        if (!this.fadingIn) this.fadingIn = this.offscreenChild(index, useMorphSeed ? chainRoot : index);
+        this.renderOffscreen(this.fadingIn, localT, effSeed);
+        const out = this.renderOutgoing(fadeFrom, localT, seed);
+        this.composite(this.fadingIn.canvas, k);
+        this.composite(out.canvas, 1 - k);
+        return;
+      }
+
       // If using morph seed, mount the child with the chain root's scene+seed
       // but immediately hot-swap to the current segment's spec.
       const child = useMorphSeed ? this.ensureChild(index, this.childScene(chainRoot)) : this.ensureChild(index);
       child.renderFrame(localT, effSeed);
-      if (fadeActive) this.compositeFade(fadeFrom, localT, seed);
+      if (fadeActive) {
+        // The outgoing segment on its own canvas over the incoming frame at
+        // 1 − easeSmooth(k): the incoming's opaque ground fades in beneath it.
+        const out = this.renderOutgoing(fadeFrom, localT, seed);
+        this.composite(out.canvas, 1 - easeSmooth(localT / this.fadeDur(fadeFrom)));
+      }
     }
   }
 
@@ -1178,6 +1281,8 @@ class SequenceInstance implements SaverInstance {
       child?.setPaused(true);
     }
     this.fading?.child.setPaused(true);
+    this.fadingIn?.child.setPaused(true);
+    this.bed?.setPaused(true);
   }
 
   resize(width: number, height: number, dpr?: number): void {
@@ -1194,10 +1299,19 @@ class SequenceInstance implements SaverInstance {
       child?.resize(width, height, dpr);
     }
     this.fading?.child.resize(width, height, dpr);
+    this.fadingIn?.child.resize(width, height, dpr);
+    this.bed?.resize(width, height, dpr);
   }
 
   applyTrack(track: ControlTrack): void {
-    const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    const all = (track?.deltas ?? []) as unknown as SteerDelta[];
+    // `bed.<path>` goes to the bed with the prefix stripped — only when a bed
+    // exists; otherwise the path reaches the segments as today (a layer keyed
+    // `bed` keeps working).
+    const isBedPath = (d: SteerDelta): boolean => this.bed !== null && typeof d.path === 'string' && d.path.startsWith(BED_PREFIX);
+    const bedDeltas = all.filter(isBedPath).map((d) => ({ ...d, path: d.path.slice(BED_PREFIX.length) }));
+    if (bedDeltas.length > 0) this.bed!.applyTrack({ ...track, deltas: bedDeltas as unknown as ParamDelta[] });
+    const deltas = all.filter((d) => !isBedPath(d));
     // Retain first: a `sequence.segment` steer in the same track creates the
     // target child inside renderFrame below, and it must see these deltas.
     for (const d of deltas) {
@@ -1223,6 +1337,10 @@ class SequenceInstance implements SaverInstance {
     if (childDeltas.length > 0 && this.activeIndex >= 0) {
       const child = this.children[this.activeIndex];
       child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      // Offscreen children of a live fade are not in `children`; hand them the
+      // set directly so a steer during the window is not held until it ends.
+      this.fading?.child.applyDeltasNow(childDeltas);
+      this.fadingIn?.child.applyDeltasNow(childDeltas);
     }
   }
 
@@ -1232,15 +1350,19 @@ class SequenceInstance implements SaverInstance {
     for (let i = 0; i < this.children.length; i++) {
       this.releaseChild(i);
     }
+    this.bed?.dispose();
     if (this.canvas) this.canvas.remove();
   }
 }
 
 function sequenceManifest(seq: IdleSequence): SaverManifest {
-  const maxTotal = seq.segments.reduce((max, s) => {
+  const maxSegment = seq.segments.reduce((max, s) => {
     const t = s.scene.layers.reduce((n, l) => n + l.count, 0);
     return Math.max(max, t);
   }, 0);
+  // A bed is live alongside whichever segment is up, so it costs on top of the largest.
+  const bedTotal = seq.bed ? seq.bed.layers.reduce((n, l) => n + l.count, 0) : 0;
+  const maxTotal = bedTotal + maxSegment;
   const costTier = maxTotal < 30 ? 'idle' : maxTotal < 150 ? 'low' : maxTotal < 400 ? 'medium' : 'high';
   return {
     id: seq.id,
