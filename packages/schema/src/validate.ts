@@ -27,12 +27,15 @@ const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseli
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
 /**
- * A CSS length inside a textBlock `font` — size belongs to `fontSize`. Uses a
- * lookahead instead of `\b`: `%` is not a word character, so `\b` never
- * matches right after it (there's no word/non-word transition), letting
- * "50% monospace" slip past a `\b`-based check.
+ * A CSS length inside a textBlock `font` — size belongs to `fontSize`. No
+ * trailing boundary check: a `\b`-based (or lookahead-based) version misses
+ * both "50% monospace" (`%` isn't a word character, so `\b` never matches
+ * right after it) and "50%monospace" / "14pxmonospace" (glued straight onto
+ * the family name, so any word-boundary-style check after the unit passes
+ * them through). The leading `\d` immediately before the unit is enough to
+ * identify an embedded size regardless of what follows it.
  */
-const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)(?![a-zA-Z0-9])/i;
+const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);

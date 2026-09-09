@@ -860,7 +860,7 @@ const CHAR_WIDE = new Set('mwMWGOQD@%');
  */
 export type TextMetricsClass = 'proportional' | 'mono';
 
-const MONO_FAMILY_RE = /\b(?:ui-)?mono(?:space)?\b|courier|menlo|monaco|consolas|inconsolata|fira\s*code|source\s*code|jetbrains|ibm\s*plex\s*mono|roboto\s*mono/i;
+const MONO_FAMILY_RE = /\b(?:ui-)?mono(?:space)?\b|courier|menlo|monaco|sfmono|consolas|inconsolata|fira\s*code|source\s*code|jetbrains|ibm\s*plex\s*mono|roboto\s*mono/i;
 
 /**
  * Metrics class for a `textBlock.font` string: `mono` when the family names
@@ -888,8 +888,14 @@ function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): nu
   return 0.55;
 }
 
-/** Em-width of a string under the same character-class table `breakTextBlock` uses. */
+/**
+ * Em-width of a string under the same character-class table `breakTextBlock`
+ * uses. `mono` counts grapheme clusters, not UTF-16 code units — an emoji or
+ * combining/ZWJ sequence is one advance-width cell, matching what's painted,
+ * not one cell per surrogate half or combining mark.
+ */
 export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
+  if (metrics === 'mono') return graphemeClusters(str).length * MONO_ADVANCE_EM;
   let w = 0;
   for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!, metrics);
   return w;

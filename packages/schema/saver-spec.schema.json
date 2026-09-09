@@ -970,7 +970,7 @@
             "font": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!.*\\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)(?![a-zA-Z0-9])).*$",
+              "pattern": "^(?!.*\\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)).*$",
               "description": "CSS font family and/or weight/style only, e.g. 'bold monospace' or \"300 'Inter', sans-serif\" — a size inside it is rejected (fontSize owns size). A monospace family switches the line-breaker to a uniform advance. Default 'system-ui, sans-serif'; native clients fall back to the system face."
             },
             "opacity": {
