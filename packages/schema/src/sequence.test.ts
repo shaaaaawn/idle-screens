@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createRng, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { resolveSegment, segmentStart } from './sequence';
 import { validateSequence } from './validate';
-import { compileSaver, compileSequence } from './compile';
+import { compileSaver, compileSequence, type SequenceMountContext } from './compile';
 import { lerpSpec } from './steer';
 import type { IdleSequence, SaverSpec } from './types';
 
@@ -1152,6 +1152,144 @@ describe('Phase 0 pins — current sequence-clock, morph and track semantics', (
     const fg = (state.effSpec.layers[0]!.sprite as { color: string }).color;
     expect(bg).toBe('#808080');
     expect(fg).toBe('#808080');
+    inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sync: 'epoch' — the sequence clock seeded from the host (1b)
+// ---------------------------------------------------------------------------
+
+describe("sync: 'epoch' seeds the sequence clock from sequenceBaseT (1b)", () => {
+  const BG = ['#111111', '#222222', '#333333'];
+
+  /** A solid background per segment plus a self-typing block: 10 graphemes at 5/s, so the painted prefix reads out localT. */
+  function typingScene(i: number): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: `typing-${i}`,
+      label: `Typing ${i}`,
+      background: { type: 'solid', color: BG[i]! },
+      layers: [{
+        key: 'h',
+        count: 1,
+        sprite: { kind: 'textBlock', text: 'ABCDEFGHIJ', maxWidth: 0.9, fontSize: 0.05, color: '#e6e8ef', reveal: { speed: 5 } },
+        motion: { type: 'static' },
+        position: { x: 0.1, y: 0.1 },
+      }],
+    } as SaverSpec;
+  }
+
+  function epochSeq(overrides: Partial<IdleSequence> = {}, seg0: Partial<IdleSequence['segments'][number]> = {}): IdleSequence {
+    return {
+      format: 'idle-sequence',
+      schemaVersion: 1,
+      id: 'epoch-test',
+      label: 'Epoch Test',
+      seed: 1,
+      loop: false,
+      segments: [
+        { key: 'a', scene: typingScene(0), duration: 4000, ...seg0 },
+        { key: 'b', scene: typingScene(1), duration: 4000 },
+        { key: 'c', scene: typingScene(2), duration: 4000 },
+      ],
+      ...overrides,
+    };
+  }
+
+  /** The host's mount context carrying the shared clock — typed as a host would type it. */
+  function epochCtx(sequenceBaseT: number, overrides: Partial<SaverContext> = {}): SequenceMountContext {
+    return { ...saverCtx(overrides), sequenceBaseT };
+  }
+
+  /** Swap in a context that records every fillStyle (backgrounds) and fillText (typed prefix). */
+  function recordingCtx() {
+    const fills: string[] = [];
+    const texts: string[] = [];
+    const ctx = stub2dContext();
+    let _fs = '';
+    Object.defineProperty(ctx, 'fillStyle', {
+      get: () => _fs,
+      set: (v: string) => { _fs = v; if (typeof v === 'string') fills.push(v); },
+    });
+    (ctx as { fillText: unknown }).fillText = vi.fn((t: string) => texts.push(t));
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as any;
+    return { fills, texts, reset: () => { fills.length = 0; texts.length = 0; } };
+  }
+
+  it('renders segment 1 at localT 1000 for baseT 5000 on a 3×4000 ms sequence', () => {
+    const rec = recordingCtx();
+    const inst = mountSync(compileSequence(epochSeq({ sync: 'epoch' })), epochCtx(5000, { reducedMotion: true }));
+    expect(rec.fills).toContain(BG[1]);
+    expect(rec.fills).not.toContain(BG[0]);
+    // 5 graphemes/s × 1 s = 'ABCDE' — the clock is 1000 ms into segment 1.
+    expect(rec.texts).toEqual(['ABCDE']);
+    inst.dispose();
+  });
+
+  it('the rAF loop starts at baseT, not 0', () => {
+    const rec = recordingCtx();
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { const id = nextId++; pending.set(id, cb); return id; });
+    const caf = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => { pending.delete(Number(id)); });
+    const inst = mountSync(compileSequence(epochSeq({ sync: 'epoch' })), epochCtx(5000));
+    const tick = (now: number) => { for (const [id, cb] of [...pending.entries()]) { pending.delete(id); cb(now); } };
+    tick(16); // first frame: lastT = 16 − 16 + 5000
+    expect(rec.fills).toContain(BG[1]);
+    expect(rec.texts).toEqual(['ABCDE']);
+    rec.reset();
+    tick(3016); // lastT 8000 → segment 2, localT 0 → nothing typed yet
+    expect(rec.fills).toContain(BG[2]);
+    expect(rec.texts).toEqual([]);
+    inst.dispose();
+    raf.mockRestore();
+    caf.mockRestore();
+  });
+
+  it("absent sync (and explicit 'mount') ignores sequenceBaseT — T starts at 0 as today", () => {
+    for (const sync of [undefined, 'mount'] as const) {
+      const rec = recordingCtx();
+      const inst = mountSync(compileSequence(epochSeq(sync ? { sync } : {})), epochCtx(5000, { reducedMotion: true }));
+      expect(rec.fills).toContain(BG[0]);
+      expect(rec.fills).not.toContain(BG[1]);
+      expect(rec.texts).toEqual([]); // localT 0 — nothing typed
+      inst.dispose();
+    }
+  });
+
+  it("'epoch' without a sequenceBaseT starts at 0 (a host that does not pass it loses nothing)", () => {
+    const rec = recordingCtx();
+    const inst = mountSync(compileSequence(epochSeq({ sync: 'epoch' })), saverCtx({ reducedMotion: true }));
+    expect(rec.fills).toContain(BG[0]);
+    expect(rec.texts).toEqual([]);
+    inst.dispose();
+  });
+
+  it("a late joiner past an unreleased advance: 'input' hold lands ON the held segment", () => {
+    const rec = recordingCtx();
+    // Segment 0 holds for the presenter; the room's clock is already 5000 ms
+    // in. The hold is armed for this viewer too (releasedBelow 0), so it must
+    // show segment 0 — still animating at localT 5000 — not segment 1.
+    const inst = mountSync(compileSequence(epochSeq({ sync: 'epoch' }, { advance: 'input' })), epochCtx(5000, { reducedMotion: true }));
+    expect(rec.fills).toContain(BG[0]);
+    expect(rec.fills).not.toContain(BG[1]);
+    expect(rec.texts).toEqual(['ABCDEFGHIJ']); // localT 5000 → fully typed
+    // The clicker releases it from the seeded clock: segment 1 begins at its own localT 0.
+    rec.reset();
+    inst.applyTrack!({ deltas: [{ t: 0, path: 'sequence.segment', value: 1 }] } as never);
+    expect(rec.fills).toContain(BG[1]);
+    expect(rec.texts).toEqual([]);
+    inst.dispose();
+  });
+
+  it('a sequence.segment steer after an epoch mount lands at the target segment start', () => {
+    const rec = recordingCtx();
+    const inst = mountSync(compileSequence(epochSeq({ sync: 'epoch' })), epochCtx(5000, { reducedMotion: true }));
+    rec.reset();
+    inst.applyTrack!({ deltas: [{ t: 0, path: 'sequence.segment', value: 2 }] } as never);
+    expect(rec.fills).toContain(BG[2]);
+    expect(rec.texts).toEqual([]); // localT 0
     inst.dispose();
   });
 });

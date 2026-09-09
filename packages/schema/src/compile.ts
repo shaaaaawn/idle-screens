@@ -798,6 +798,18 @@ export function compileSaver(spec: unknown): SaverPlugin {
 // Sequence — multi-segment timeline compiled as a single SaverPlugin
 // ---------------------------------------------------------------------------
 
+/**
+ * Mount context for a compiled sequence. A plain `SaverContext` works — the
+ * clock starts at 0, as every SaverPlugin's does. `sequenceBaseT` is read
+ * only when the sequence declares `sync: 'epoch'`; hosts pass the shared
+ * clock's elapsed ms (idlescreens.com: `Date.now() − scene.epoch`) so every
+ * viewer of that sequence resolves the same segment.
+ */
+export interface SequenceMountContext extends SaverContext {
+  /** ms already elapsed on the shared sequence clock. Ignored unless `sync: 'epoch'`. */
+  sequenceBaseT?: number;
+}
+
 class SequenceInstance implements SaverInstance {
   private readonly seq: IdleSequence;
   private readonly childCtx: SaverContext;
@@ -829,8 +841,20 @@ class SequenceInstance implements SaverInstance {
   private clockOffset = 0;
   private releasedBelow = 0;
 
-  constructor(seq: IdleSequence, ctx: SaverContext) {
+  constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
+    const { sequenceBaseT, ...plainCtx } = ctx;
+    // `sync: 'epoch'`: seed the clock from the host's shared time, the same
+    // way `baseT` carries SpecInstance's clock across pause/resume — the first
+    // frame renders at `baseT`, not 0. Absent/`mount` ignores the hint and T
+    // starts at 0 exactly as before the field existed. Holds are untouched:
+    // `releasedBelow` stays 0, so a late joiner whose clock is past an
+    // unreleased `advance: 'input'` hold lands ON the held segment.
+    if (seq.sync === 'epoch' && typeof sequenceBaseT === 'number' && Number.isFinite(sequenceBaseT)) {
+      this.baseT = Math.max(0, sequenceBaseT);
+      this.lastT = this.baseT;
+      this.renderedT = this.baseT;
+    }
 
     let surface = ctx.surface ?? null;
     let canvas: HTMLCanvasElement | null = null;
@@ -848,10 +872,10 @@ class SequenceInstance implements SaverInstance {
     this.seed = ((seq.seed ?? ctx.seed ?? 0) >>> 0) || 1;
     // Children are always parent-driven: reducedMotion:true keeps SpecInstance
     // from starting its own rAF. SequenceInstance.loop is the only clock.
-    this.childCtx = { ...ctx, surface: surface!, reducedMotion: true };
+    this.childCtx = { ...plainCtx, surface: surface!, reducedMotion: true };
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
     this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderFrame(0, this.seed);
+    if (this.paused) this.renderFrame(this.baseT, this.seed);
     else this.start();
   }
 
