@@ -1104,6 +1104,23 @@ const bedSeed = (seq: IdleSequence): number | undefined =>
  * renderer actually draws at `T`, not just what the raw specs would show.
  * Without a bed this is `perceiveScene(segment, localT)` plus the `segment`
  * field. Intended as the payload behind a sequence-aware previewScene.
+ *
+ * Two known approximations, both accepted for a coarse, cheap, renderer-free
+ * tool rather than fixed here:
+ * - **Transitions aren't composed.** During a `fade` or `morph` window the
+ *   renderer also paints the outgoing (or interpolating) segment, but this
+ *   only ever perceives the segment `resolveSegment` resolves to — call it at
+ *   a `T` outside the transition's `dur` for an accurate read. Doing this
+ *   properly needs the same transition-eligibility state `SequenceInstance`
+ *   holds (capability tier gates `fade`; `morph` needs a structural-signature
+ *   match) — this analytical path has no such context.
+ * - **Ink composites onto the bed by addition, not by blend mode.** This
+ *   matches a plain `source-over`, opaque-ink segment (the common case), but
+ *   a segment layer with `blend: 'multiply'`/`'screen'`/etc. or partial alpha
+ *   composites directionally differently on the real canvas than adding
+ *   luminance values ever can (`multiply` darkens; addition only brightens).
+ *   The per-cell grids don't retain per-layer blend/alpha to composite
+ *   correctly at this resolution.
  */
 export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: PerceiveSequenceOptions = {}): SequenceFramePerception {
   const { releasedBelow, ...gridOpts } = opts;

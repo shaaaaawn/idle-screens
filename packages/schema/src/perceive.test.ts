@@ -329,9 +329,12 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     const after = perceiveSequenceFrame(seqOf(true), 5010);
     expect(before.segment.index).toBe(0);
     expect(after.segment).toEqual({ index: 1, key: 'b', localT: 10 });
+    // Assert on the bed's own centroid, not the merged grid: the ink swaps
+    // from a dot to a text block across this boundary, so a merged-centroid
+    // comparison would depend on that unrelated content change rather than
+    // on whether the bed's clock is actually continuous.
     const bx = (T: number) => luminanceGrid(bed, { t: T, seed: 7 }).centroid!.x;
     expect(Math.abs(bx(5010) - bx(4990))).toBeLessThan(0.01);
-    expect(Math.abs(after.centroid!.x - before.centroid!.x)).toBeLessThan(0.05);
     expect(after.text.map((t) => t.key)).toEqual(['text']); // segment b's caption, listed after the bed's (none)
     expect(after.text[0]!.layerIndex).toBe(1);
   });

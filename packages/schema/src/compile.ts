@@ -178,7 +178,12 @@ class SpecInstance implements SaverInstance {
       this.ownsCanvas = true;
     }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    // Transparent instances (a bed's own offscreen fade canvas) never paint a
+    // background, so their cleared/unpainted pixels must stay actually
+    // transparent for `composite()`'s drawImage to blend only the ink onto
+    // the bed — an opaque (alpha: false) context turns those pixels solid
+    // black instead. Opaque instances keep alpha: false (unchanged).
+    const c2d = canvas.getContext('2d', { alpha: this.transparent }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('schema saver: no 2d context');
     this.ctx = c2d;
 

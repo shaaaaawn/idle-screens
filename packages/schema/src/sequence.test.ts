@@ -1342,6 +1342,41 @@ describe('SequenceInstance — bed', () => {
     inst.dispose();
   });
 
+  it('offscreen fade canvases over a bed get an alpha-enabled context, so a clear is real transparency, not opaque black', () => {
+    // A `{ alpha: false }` 2D context can't clear to transparent — clearRect
+    // on it fills with opaque black, so drawImage-ing it over the bed at any
+    // alpha would paint a black wash instead of just the ink. Only the
+    // transparent (bed-fade) offscreen canvases need alpha: true; the shared
+    // surface stays alpha: false, matching pre-bed behaviour exactly.
+    const calls: Array<{ canvas: HTMLCanvasElement; opts: unknown }> = [];
+    const orig = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, _type: string, opts?: unknown) {
+      calls.push({ canvas: this, opts });
+      return mockCtx;
+    } as never;
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(bedSeq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+        { key: 'b', scene: SCENE, duration: 5000 },
+      ],
+    })), saverCtx({ host }));
+    inst.renderFrame!(4000, 1);
+    inst.renderFrame!(5300, 1); // mid-fade: both the incoming and outgoing offscreen canvases exist
+    // Only a canvas's FIRST getContext call establishes its options in a real
+    // browser — later calls (e.g. renderOffscreen's plain getContext('2d'))
+    // return the existing context regardless of what they pass.
+    const firstCallPerCanvas = new Map<HTMLCanvasElement, unknown>();
+    for (const c of calls) if (!firstCallPerCanvas.has(c.canvas)) firstCallPerCanvas.set(c.canvas, c.opts);
+    const mainCanvas = host.querySelector('canvas')!;
+    expect(firstCallPerCanvas.get(mainCanvas)).toEqual({ alpha: false });
+    const offscreenFirstCalls = [...firstCallPerCanvas].filter(([canvas]) => canvas !== mainCanvas);
+    expect(offscreenFirstCalls.length).toBeGreaterThan(0);
+    for (const [, opts] of offscreenFirstCalls) expect(opts).toEqual({ alpha: true });
+    inst.dispose();
+    HTMLCanvasElement.prototype.getContext = orig;
+  });
+
   it('costTier counts the bed together with the largest segment', () => {
     const big = (count: number): SaverSpec => ({ ...SCENE, layers: [{ ...SCENE.layers[0]!, count }] });
     const bed = { ...BED, layers: [{ ...BED.layers[0]!, count: 100 }] };
