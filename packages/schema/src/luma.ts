@@ -104,3 +104,81 @@ export function colourSeparation(
   // but it separates hue from value, which is the whole point here.
   return Math.sqrt((dr * dr + dg * dg + db * db) / 3);
 }
+
+// ---------------------------------------------------------------------------
+// Legibility — WCAG 2.x relative luminance and the ratio between two colours.
+// Used only by layers that declare `role: 'read'`; `hexLuma` above stays the
+// perceptual (gamma-space) weight the perception grid is built on.
+// ---------------------------------------------------------------------------
+
+export type Rgb = { r: number; g: number; b: number };
+
+/** sRGB channel (0..1) → linear light, per WCAG 2.x. */
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+/** WCAG relative luminance (0..1, linear light) of a 0..1 RGB triple. */
+export function relativeLuminance(rgb: Rgb): number {
+  return 0.2126 * srgbToLinear(rgb.r) + 0.7152 * srgbToLinear(rgb.g) + 0.0722 * srgbToLinear(rgb.b);
+}
+
+/**
+ * WCAG legibility ratio (1..21) between two colours, order-free:
+ * `(L_lighter + 0.05) / (L_darker + 0.05)`. 4.5 is the AA floor for body
+ * text; 3 for large text.
+ */
+export function legibilityRatio(a: Rgb, b: Rgb): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const hi = Math.max(la, lb);
+  const lo = Math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * The background colour under one point, `yPx` down a `h`-tall viewport:
+ * a solid is itself; a gradient is its stops interpolated in sRGB at their
+ * rest positions (`drift` moves them ±`amount` over time — the rest position
+ * is the mean); a `band` wins where the point falls inside it. `unit` is the
+ * spec's dimensional unit (1 for `px`, `min(w,h)` otherwise), for the band.
+ */
+export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number): Rgb {
+  const bg = spec.background;
+  if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
+  if (bg.band) {
+    const bh = bg.band.height * unit;
+    if (yPx >= h - bh) return hexRgb(bg.band.color);
+  }
+  const stops = [...bg.stops].sort((a, b) => a.at - b.at);
+  const y = h > 0 ? Math.max(0, Math.min(1, yPx / h)) : 0;
+  const first = stops[0]!;
+  const last = stops[stops.length - 1]!;
+  if (y <= first.at) return hexRgb(first.color);
+  if (y >= last.at) return hexRgb(last.color);
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1]!;
+    const b = stops[i]!;
+    if (y > b.at) continue;
+    const span = b.at - a.at;
+    const k = span > 0 ? (y - a.at) / span : 1;
+    const ca = hexRgb(a.color);
+    const cb = hexRgb(b.color);
+    return { r: ca.r + (cb.r - ca.r) * k, g: ca.g + (cb.g - ca.g) * k, b: ca.b + (cb.b - ca.b) * k };
+  }
+  return hexRgb(last.color);
+}
+
+/**
+ * The plate an additive layer leaves behind it at full strength: `colour ×
+ * alpha` added to the ground (`lighter`), or screened onto it (`screen`).
+ * Per channel, clamped to 1 — the same arithmetic the canvas applies, minus
+ * the soft falloff (the centre of a soft disc is at full strength).
+ */
+export function additivePlate(ground: Rgb, colour: Rgb, alpha: number, blend: 'lighter' | 'screen'): Rgb {
+  const mix = (g: number, c: number): number => {
+    const v = c * alpha;
+    return blend === 'lighter' ? Math.min(1, g + v) : 1 - (1 - g) * (1 - v);
+  };
+  return { r: mix(ground.r, colour.r), g: mix(ground.g, colour.g), b: mix(ground.b, colour.b) };
+}

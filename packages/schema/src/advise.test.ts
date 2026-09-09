@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { adviseSpec, adviseSequence } from './advise';
 import { describeScene } from './describe';
-import { EXAMPLE_SPECS } from './examples/index';
+import { EXAMPLE_SPECS, LOBBY_TALK_SPEC } from './examples/index';
 import type { IdleSequence, SaverSpec } from './types';
 
 const base: SaverSpec = {
@@ -292,6 +294,197 @@ describe('adviseSpec — spatial text (#44)', () => {
       ],
     });
     expect(w.filter((x) => x.code === 'text-off-screen' || x.code === 'text-overlap')).toEqual([]);
+  });
+});
+
+describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () => {
+  const vp: SaverSpec = { ...base, units: 'viewport', layers: [] };
+  type TextBlockSprite = Extract<SaverSpec['layers'][number]['sprite'], { kind: 'textBlock' }>;
+  const block = (text: string, x: number, y: number, extra: Partial<TextBlockSprite> = {}, key?: string): SaverSpec['layers'][number] => ({
+    key,
+    count: 1,
+    sprite: { kind: 'textBlock', text, maxWidth: 0.4, fontSize: 0.05, ...extra },
+    motion: { type: 'static' },
+    position: { x, y },
+  });
+  const LEGIBILITY_CODES = new Set(['text-legibility', 'text-safe-area']);
+  const legibility = (spec: SaverSpec, viewport?: { width: number; height: number }) =>
+    adviseSpec(spec, viewport).filter((w) => LEGIBILITY_CODES.has(w.code));
+
+  /** Every text layer given `role`, or stripped of it. */
+  const withRole = (spec: SaverSpec, role: 'read' | 'atmosphere' | undefined): SaverSpec => ({
+    ...spec,
+    layers: spec.layers.map((l) => {
+      if (l.sprite.kind !== 'text' && l.sprite.kind !== 'textBlock') return l;
+      const sprite = { ...l.sprite } as Record<string, unknown>;
+      if (role === undefined) delete sprite.role;
+      else sprite.role = role;
+      return { ...l, sprite: sprite as SaverSpec['layers'][number]['sprite'] };
+    }),
+  });
+
+  const loadFixture = (name: string): IdleSequence =>
+    JSON.parse(readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}.sequence.json`, import.meta.url)), 'utf8')) as IdleSequence;
+
+  it('role absent (or atmosphere) ⇒ adviseSpec output is identical for every fixture, and the legibility codes never fire', () => {
+    // The shipped examples plus every segment of the two stored sequences:
+    // the widest set of real text layouts in the repo. `dev-dashboard` puts
+    // labels at x 0.035 and paints them at ~2.6:1 on purpose; both advisories
+    // would fire on it if they were not gated behind the declaration.
+    const fixtures: SaverSpec[] = [
+      ...EXAMPLE_SPECS,
+      ...loadFixture('deck').segments.map((s) => s.scene),
+      ...loadFixture('snow-white').segments.map((s) => s.scene),
+    ];
+    expect(fixtures.length).toBeGreaterThan(20);
+    for (const spec of fixtures) {
+      const today = adviseSpec(withRole(spec, undefined));
+      expect(adviseSpec(spec), spec.id).toEqual(today);
+      expect(adviseSpec(withRole(spec, 'atmosphere')), spec.id).toEqual(today);
+      expect(today.filter((w) => LEGIBILITY_CODES.has(w.code)), spec.id).toEqual([]);
+    }
+  });
+
+  it('the shipped lobby-talk example declares role: read on every text layer and has zero advisories, landscape and portrait', () => {
+    const roles = LOBBY_TALK_SPEC.layers
+      .filter((l) => l.sprite.kind === 'text' || l.sprite.kind === 'textBlock')
+      .map((l) => (l.sprite as { role?: string }).role);
+    expect(roles.length).toBeGreaterThanOrEqual(3);
+    expect(roles.every((r) => r === 'read')).toBe(true);
+    expect(adviseSpec(LOBBY_TALK_SPEC)).toEqual([]);
+    expect(adviseSpec(LOBBY_TALK_SPEC, { width: 1080, height: 1920 })).toEqual([]);
+  });
+
+  it("role: 'read' on dim text fires text-legibility with the measured ratio; the same text undeclared is silent", () => {
+    const dim: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#0a0d18' },
+      layers: [block('Quarterly adoption', 0.3, 0.4, { color: '#3a4a5c' }, 'label')],
+    };
+    expect(legibility(dim)).toEqual([]);
+    const read = withRole(dim, 'read');
+    const w = legibility(read);
+    expect(w.map((x) => x.code)).toEqual(['text-legibility']);
+    expect(w[0]!.path).toBe('layers[0].sprite');
+    // #3a4a5c on #0a0d18 is ~2.1:1 — the message carries the number.
+    expect(w[0]!.message).toMatch(/`label`.*reads at 2\.1:1 against the background at the box centre/);
+    expect(w[0]!.message).toMatch(/below 4\.5:1/);
+    expect(w[0]!.message).not.toMatch(/contrast/i);
+    expect(w[0]!.code).not.toMatch(/contrast/i);
+    // Bright text on the same ground clears the floor.
+    expect(legibility({ ...read, layers: [block('Quarterly adoption', 0.3, 0.4, { color: '#f2f4f8', role: 'read' })] })).toEqual([]);
+  });
+
+  it('samples the background at the box centre — a gradient can pass at the top and fail at the bottom', () => {
+    const graded: SaverSpec = {
+      ...vp,
+      background: { type: 'gradient', stops: [{ at: 0, color: '#05050a' }, { at: 1, color: '#c8d0dc' }] },
+      layers: [
+        block('Top line', 0.3, 0.05, { color: '#d8e0ea', role: 'read' }, 'top'),
+        block('Bottom line', 0.3, 0.85, { color: '#d8e0ea', role: 'read' }, 'bottom'),
+      ],
+    };
+    const codes = adviseSpec(graded).filter((w) => w.code === 'text-legibility').map((w) => w.message);
+    expect(codes).toHaveLength(1);
+    expect(codes[0]).toMatch(/`bottom`/);
+  });
+
+  it('judges against the brightest additive layer that can sit under a line, at its peak pulse', () => {
+    // Bright text on a dark plate: fine on its own. A big static `lighter`
+    // glow parked under it, pulsing up to alpha 0.95, lifts the plate until
+    // the text no longer reads — the ratio in the message is the lit one.
+    const text = block('Signal locked', 0.5, 0.5, { color: '#e6e8ef', role: 'read', anchor: 'center' }, 'caption');
+    const glow = (extra: Partial<SaverSpec['layers'][number]> = {}): SaverSpec['layers'][number] => ({
+      key: 'glow',
+      count: 1,
+      sprite: { kind: 'circle', radius: [0.3, 0.3], color: '#ffffff', soft: true },
+      alpha: [0.8, 0.8],
+      pulse: { amp: 0.15, period: 4000 },
+      blend: 'lighter',
+      motion: { type: 'static' },
+      position: { x: 0.5, y: 0.5 },
+      ...extra,
+    });
+    const clear: SaverSpec = { ...vp, background: { type: 'solid', color: '#05050a' }, layers: [text] };
+    expect(legibility(clear)).toEqual([]);
+
+    const lit: SaverSpec = { ...clear, layers: [glow(), text] };
+    const w = legibility(lit);
+    expect(w.map((x) => x.code)).toEqual(['text-legibility']);
+    expect(w[0]!.message).toMatch(/under `glow` at its brightest/);
+    // The ground ratio is reported alongside and is still fine.
+    expect(w[0]!.message).toMatch(/reads at 1[5-9]\.\d:1 against the background/);
+
+    // The same glow parked far from the text does not reach it.
+    expect(legibility({ ...clear, layers: [glow({ position: { x: 0.05, y: 0.05 }, sprite: { kind: 'circle', radius: [0.04, 0.04], color: '#ffffff', soft: true } }), text] })).toEqual([]);
+    // A travelling glow can be anywhere — it counts.
+    expect(legibility({ ...clear, layers: [glow({ position: undefined, motion: { type: 'wander', speed: [0.01, 0.02] } }), text] }).map((x) => x.code)).toEqual(['text-legibility']);
+    // Dust smaller than a glyph cannot wash out a line, however bright.
+    expect(legibility({ ...clear, layers: [glow({ position: undefined, count: 60, sprite: { kind: 'circle', radius: [0.001, 0.002], color: '#ffffff', soft: true }, motion: { type: 'wander', speed: [0.01, 0.02] } }), text] })).toEqual([]);
+    // Source-over paint is not additive — it is the ground's job to be judged, not a layer's.
+    expect(legibility({ ...clear, layers: [glow({ blend: undefined }), text] })).toEqual([]);
+  });
+
+  it("text at x: 0.02 fires text-safe-area (with its box) only under role: 'read'", () => {
+    const edge: SaverSpec = { ...vp, layers: [block('Fine print', 0.02, 0.5, { color: '#ffffff' }, 'fine')] };
+    expect(legibility(edge)).toEqual([]);
+    const w = legibility(withRole(edge, 'read'));
+    expect(w.map((x) => x.code)).toEqual(['text-safe-area']);
+    expect(w[0]!.path).toBe('layers[0]');
+    expect(w[0]!.message).toMatch(/within 5% of the left edge at 1920×1080/);
+    expect(w[0]!.boxes).toHaveLength(1);
+    const b = w[0]!.boxes![0]!;
+    expect(b.x).toBeCloseTo(0.02, 3);
+    expect(b.w).toBeGreaterThan(0);
+    expect(b.y).toBeCloseTo(0.5, 3);
+    // Two edges name both; a list's whole extent is judged.
+    const corner = legibility({ ...vp, layers: [block('Corner', 0.01, 0.97, { color: '#ffffff', role: 'read' })] });
+    expect(corner.find((x) => x.code === 'text-safe-area')!.message).toMatch(/left and bottom edges/);
+  });
+
+  it('text-overlap carries both boxes in viewport fractions for every fire, role or not; the message is unchanged', () => {
+    const w = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.3, {}, 'title'), block('Body copy under it', 0.1, 0.3, {}, 'body')],
+    });
+    const overlaps = w.filter((x) => x.code === 'text-overlap');
+    expect(overlaps).toHaveLength(1);
+    const o = overlaps[0]!;
+    expect(o.message).toMatch(/`title` and `body` text boxes overlap \(~\d+% of the smaller one\) — they will paint over each other; move one or shrink it/);
+    expect(o.boxes).toHaveLength(2);
+    for (const b of o.boxes!) {
+      expect(b.x).toBeCloseTo(0.1, 3);
+      expect(b.y).toBeCloseTo(0.3, 3);
+      expect(b.w).toBeGreaterThan(0);
+      expect(b.w).toBeLessThan(1);
+      expect(b.h).toBeGreaterThan(0);
+      expect(b.h).toBeLessThan(1);
+    }
+    // Same fire, same boxes when the layers declare a role.
+    const declared = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.3, { role: 'read' }, 'title'), block('Body copy under it', 0.1, 0.3, { role: 'atmosphere' }, 'body')],
+    }).filter((x) => x.code === 'text-overlap');
+    expect(declared[0]!.boxes).toEqual(o.boxes);
+  });
+
+  it('a list of text sprites is judged per row, worst row wins, one advisory per layer', () => {
+    const rows: SaverSpec = {
+      ...vp,
+      background: { type: 'gradient', stops: [{ at: 0, color: '#05050a' }, { at: 1, color: '#b0b8c4' }] },
+      layers: [{
+        key: 'labels',
+        count: 4,
+        sprite: { kind: 'text', strings: ['One', 'Two', 'Three', 'Four'], color: '#c8d0dc', align: 'left', role: 'read' },
+        size: [0.03, 0.03],
+        motion: { type: 'static' },
+        position: { x: 0.2, y: 0.2 },
+        layout: { type: 'list', gap: 0.2 },
+      }],
+    };
+    const w = legibility(rows);
+    expect(w.map((x) => x.code)).toEqual(['text-legibility']);
+    expect(w[0]!.message).toMatch(/`labels`/);
   });
 });
 
