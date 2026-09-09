@@ -12,6 +12,8 @@ struct NativeSceneView: View {
     /// earlier instants with decaying alpha. Close for moving sprites (what
     /// ghosting is for) and bounded — see `ghostEchoes`.
     var ghosting: Double = 0
+    /// Sizes the ghost-echo budget; the tier still decides the renderer.
+    var renderClass: RenderClass = .standard
     let tier: CapabilityTier
     var watchdog: FrameWatchdog?
     var onDowngrade: () -> Void = {}
@@ -169,7 +171,8 @@ struct NativeSceneView: View {
     private func ghostEchoes(entityCount: Int) -> Int {
         guard ghosting > 0.01, tier == .t3, !staticFrame else { return 0 }
         let wanted = ghosting > 0.6 ? 4 : (ghosting > 0.3 ? 3 : 2)
-        let affordable = entityCount > 0 ? max(0, 1500 / entityCount - 1) : wanted
+        let budget = renderClass.ghostDrawBudget
+        let affordable = entityCount > 0 ? max(0, budget / entityCount - 1) : wanted
         return min(wanted, affordable)
     }
 

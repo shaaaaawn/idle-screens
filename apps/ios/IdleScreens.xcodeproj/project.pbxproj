@@ -47,6 +47,7 @@
 		5CF8C76AAD444EE804E53A86 /* ChannelSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E393D04E499C2B42C170AC0 /* ChannelSearchTests.swift */; };
 		603A182B7D3F5EBB3FDEDC0D /* PairClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9290BC579DBCC0BF2ED620D /* PairClient.swift */; };
 		6076DD6256D0FBE9290E9D34 /* OrbitParentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4F33A0B67C1A16E03B7317 /* OrbitParentTests.swift */; };
+		630F421ABED24E8958066C78 /* RenderClassTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07E1ACDD00C01EBDB5634643 /* RenderClassTests.swift */; };
 		638257243A24B750EBBCB208 /* CategoryShelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */; };
 		669AC278078A802038989216 /* ThumbImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 405E7ECF8B202E738942F67E /* ThumbImage.swift */; };
 		66B4B5A00A0D8BA463F8E912 /* UnitsAndClassicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE015920B87E767E7F917A52 /* UnitsAndClassicTests.swift */; };
@@ -175,6 +176,7 @@
 /* Begin PBXFileReference section */
 		066C4C31AB1C60A009FE0EA9 /* IdleScreensTVTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTVTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0798A8407FEE982D655152D7 /* PreviewBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewBudgetTests.swift; sourceTree = "<group>"; };
+		07E1ACDD00C01EBDB5634643 /* RenderClassTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderClassTests.swift; sourceTree = "<group>"; };
 		08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkTests.swift; sourceTree = "<group>"; };
 		0A8BD5065123552EA8608DB0 /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glass.swift; sourceTree = "<group>"; };
 		0D72066AE8508C40E5677F25 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -385,6 +387,7 @@
 				F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */,
 				DD4F33A0B67C1A16E03B7317 /* OrbitParentTests.swift */,
 				72D357847ECE6961DDCD4E7D /* ProceduralArtTests.swift */,
+				07E1ACDD00C01EBDB5634643 /* RenderClassTests.swift */,
 				5A20EE3C25B74375AE34B120 /* SceneVisibilityTests.swift */,
 				84E690026189020F4B72497F /* SequenceSubsetTests.swift */,
 				7A901E31607298040C25F564 /* SpecCoverageTests.swift */,
@@ -782,6 +785,7 @@
 				4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */,
 				6076DD6256D0FBE9290E9D34 /* OrbitParentTests.swift in Sources */,
 				2DB645ED6B99FFEDB9FD9D13 /* ProceduralArtTests.swift in Sources */,
+				630F421ABED24E8958066C78 /* RenderClassTests.swift in Sources */,
 				AA180BA84C2B379271F248EF /* SceneVisibilityTests.swift in Sources */,
 				8CD27D5B46DC98A5A22B9303 /* SequenceSubsetTests.swift in Sources */,
 				E5D119B5465B9195DE129CF4 /* SpecCoverageTests.swift in Sources */,
@@ -843,7 +847,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -885,7 +889,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -968,7 +972,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -989,7 +993,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1010,7 +1014,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1050,7 +1054,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026090901;
+				CURRENT_PROJECT_VERSION = 2026090902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
