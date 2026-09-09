@@ -466,9 +466,14 @@ export function adviseSequence(
 
   // Informational, once per sequence: a fade costs two live segments for
   // `dur`, which the lowest tiers cannot afford, so they play it as a cut.
-  const fades = seq.segments.filter((s) => s.transition?.type === 'fade').length;
+  // A `fade` on the last segment only ever runs under `loop: true` (it's the
+  // wrap's transition into segment 0) — without loop there is no next
+  // segment for it to transition into, so it never executes and should not
+  // be counted.
+  const fadeBound = seq.loop ? seq.segments.length : seq.segments.length - 1;
+  const fades = seq.segments.slice(0, fadeBound).filter((s) => s.transition?.type === 'fade').length;
   if (fades > 0) {
-    const first = seq.segments.findIndex((s) => s.transition?.type === 'fade');
+    const first = seq.segments.slice(0, fadeBound).findIndex((s) => s.transition?.type === 'fade');
     warnings.push({
       path: `segments[${first}].transition`,
       code: 'fade-degrades-on-low-tier',

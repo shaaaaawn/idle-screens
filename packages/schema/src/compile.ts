@@ -920,6 +920,16 @@ class SequenceInstance implements SaverInstance {
   private clockOffset = 0;
   private releasedBelow = 0;
   /**
+   * Set by a `sequence.segment` steer that targets segment 0 under `loop:
+   * true`: the steer resets the clock to segment 0's own start (localT 0),
+   * so `renderFrame`'s wrap check (which compares the raw, ever-increasing
+   * clock against `timedTotal()`) can no longer recognize the jump as a
+   * wrap. This flag lets the clicker's jump to 0 still count as one, so the
+   * last segment's fade plays instead of a hard cut. Cleared once the wrap
+   * window (if any) has passed.
+   */
+  private pendingWrapFade = false;
+  /**
    * Every non-`sequence.segment` delta this instance has been handed, last
    * wins per path, merged across `applyTrack` calls. Children are created
    * lazily and disposed on every segment switch, so a steer forwarded only
@@ -1188,10 +1198,15 @@ class SequenceInstance implements SaverInstance {
     // last segment's `fade` is the wrap's transition. Cut and morph paths
     // are untouched: fadeDur is 0 for them.
     const lastIdx = this.seq.segments.length - 1;
-    const wrapped = this.seq.loop && index === 0 && lastIdx > 0 && T + this.clockOffset >= this.timedTotal();
+    const wrapped = this.seq.loop && index === 0 && lastIdx > 0
+      && (T + this.clockOffset >= this.timedTotal() || this.pendingWrapFade);
     const fadeFrom = prevIdx >= 0 ? prevIdx : wrapped ? lastIdx : -1;
     const fadeActive = fadeFrom >= 0 && localT < this.fadeDur(fadeFrom);
     if (!fadeActive && this.fading) this.releaseFading();
+    // The flag only needs to survive the frames still inside the wrap fade
+    // window; once that ends (or the clock moves off segment 0) it has done
+    // its job.
+    if (this.pendingWrapFade && (index !== 0 || !fadeActive)) this.pendingWrapFade = false;
 
     if (morphActive) {
       // Morph in progress: keep the child keyed to the chain root
@@ -1317,8 +1332,13 @@ class SequenceInstance implements SaverInstance {
       if (d.path !== 'sequence.segment' && typeof d.path === 'string') this.retainedDeltas.set(d.path, d);
     }
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
+    let switchedSegment = false;
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
+      // A steer to segment 0 under loop is the clicker doing the same jump
+      // the wall clock does on a natural lap wrap — it should trigger the
+      // last segment's fade the same way (see `pendingWrapFade`).
+      this.pendingWrapFade = this.seq.loop && idx === 0 && this.seq.segments.length > 1;
       // Displace the clock so T + offset == the target segment's start: the
       // segment begins at localT 0 (its `life.enter` build replays) and the
       // next animation frame resolves to the same segment instead of snapping
@@ -1328,18 +1348,38 @@ class SequenceInstance implements SaverInstance {
       this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
       this.releasedBelow = idx;
       this.renderFrame(this.renderedT, this.seed);
+      switchedSegment = true;
     }
 
-    // The active child still gets the track directly, as before retention:
-    // a steer to a path it owns applies on this call, not at the next boundary.
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
-    if (childDeltas.length > 0 && this.activeIndex >= 0) {
-      const child = this.children[this.activeIndex];
-      child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
-      // Offscreen children of a live fade are not in `children`; hand them the
-      // set directly so a steer during the window is not held until it ends.
-      this.fading?.child.applyDeltasNow(childDeltas);
-      this.fadingIn?.child.applyDeltasNow(childDeltas);
+    if (childDeltas.length > 0) {
+      if (this.morphFromIndex >= 0) {
+        // Mid-morph, the rendered child lives at the chain-root slot, not
+        // `children[activeIndex]` — forwarding a child.applyTrack() there
+        // would silently no-op AND get overwritten by the morph's own
+        // hotSwapPaint on the very next frame regardless, so a transition
+        // glide on this path can't coexist with the morph's own cross-fade.
+        // The delta is already retained above, so a re-render is all that's
+        // needed to reach it via steeredScene: it takes effect this frame,
+        // immediately rather than gliding over its own `dur`. Skip only when
+        // the segDelta branch above already re-rendered with these deltas
+        // retained.
+        if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);
+      } else if (this.activeIndex >= 0) {
+        // Not mid-morph: the active child still gets the track directly, as
+        // before retention — a steer to a path it owns glides on this call
+        // rather than snapping at the next boundary.
+        const child = this.children[this.activeIndex];
+        child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      }
+      // The outgoing segment during a fade — and, over a bed, the incoming
+      // one too, since both are standalone offscreen SpecInstances, not
+      // `this.children` — would otherwise freeze at whatever they last
+      // rendered instead of picking up a mid-fade steer like the active
+      // child does. Independent of the morph/active branching above: fade
+      // and morph are mutually exclusive per-frame states.
+      this.fading?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      this.fadingIn?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
     }
   }
 

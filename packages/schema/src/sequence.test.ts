@@ -1003,6 +1003,22 @@ describe('SequenceInstance — retained track', () => {
     expect(childSpec(inst, 2)).toBe(BARS);
     inst.dispose();
   });
+
+  it('a steer that arrives while a morph is already in progress takes effect immediately, not on the next natural frame', () => {
+    // Regression: the chain-root child (the one actually rendering mid-morph)
+    // is never keyed at children[activeIndex], so forwarding a plain
+    // child.applyTrack() there was silently a no-op. Without an explicit
+    // re-render, the retained delta would sit un-painted until some other
+    // caller happened to render the next frame.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) already blending toward B
+    expect(childSpec(inst, 0)!.background).not.toEqual({ type: 'solid', color: '#ff0000' });
+    steer(inst, 'background.color', '#ff0000'); // no further renderFrame call follows
+    // Both lerp endpoints now carry the same steered colour, so the lerp is a
+    // no-op regardless of progress k — the value is exact, not merely closer.
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
 });
 
 interface Rec { fills: string[]; drawAlphas: number[]; clears: number; ctx: CanvasRenderingContext2D }
@@ -1149,6 +1165,35 @@ describe('SequenceInstance — fade transition', () => {
     inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'background.color', value: '#00ff00', ease: 'step', dur: 0 }] });
     inst.renderFrame!(5300, 1);
     expect(offscreenOf(recs, host)[0]!.fills).toContain('#00ff00');
+    inst.dispose();
+  });
+
+  it('a live steer mid-fade also reaches the already-fading outgoing child', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq()), saverCtx({ host }));
+    inst.renderFrame!(5300, 1); // 300 ms into the fade — the outgoing child already exists
+    expect(fadingOf(inst)).not.toBeNull();
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'background.color', value: '#00ff00', ease: 'step', dur: 0 }] });
+    expect(offscreenOf(recs, host)[0]!.fills).toContain('#00ff00');
+    inst.dispose();
+  });
+
+  it("the clicker's steer to segment 0 under loop plays the last segment's wrap fade, not a cut", () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000 },
+        { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+      ],
+    })), saverCtx({ host }));
+    inst.renderFrame!(9000, 1); // segment b, well past any fade window
+    steerTo(inst, 0);
+    expect(activeIndexOf(inst)).toBe(0);
+    expect(fadingOf(inst)?.index).toBe(1); // segment b fading out, per the wrap rule
+    expect(mainOf(recs, host).drawAlphas.at(-1)).toBeCloseTo(1, 5); // k = 0 → fully covers
     inst.dispose();
   });
 
