@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createRng, type SaverContext, type SaverInstance } from '@idle-screens/core';
 import { resolveSegment, segmentStart } from './sequence';
 import { validateSequence } from './validate';
+import { adviseSequence } from './advise';
 import { compileSaver, compileSequence, type SequenceMountContext } from './compile';
 import { lerpSpec } from './steer';
 import type { IdleSequence, SaverSpec } from './types';
@@ -1828,5 +1829,171 @@ describe("sync: 'epoch' seeds the sequence clock from sequenceBaseT (1b)", () =>
     expect(rec.fills).toContain(BG[2]);
     expect(rec.texts).toEqual([]); // localT 0
     inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// morph text: 'crossfade' (plan 1f, #45) — opt-in; default `step` is today
+// ---------------------------------------------------------------------------
+
+describe("morph text: 'crossfade' (1f)", () => {
+  const caption = (text: string, color: string, extra: Partial<SaverSpec> = {}): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'caption',
+    label: 'Caption',
+    seed: 3,
+    background: { type: 'solid', color: '#05050a' },
+    layers: [
+      {
+        key: 'cap',
+        count: 1,
+        sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.05, color },
+        motion: { type: 'static' },
+        position: { x: 0.2, y: 0.2 },
+      },
+      {
+        key: 'tag',
+        count: 1,
+        sprite: { kind: 'text', strings: [text.toUpperCase()], color, font: 'bold monospace' },
+        size: [24, 24],
+        motion: { type: 'static' },
+        position: { x: 0.5, y: 0.8 },
+      },
+    ],
+    ...extra,
+  });
+  const twins = (text?: 'step' | 'crossfade', b: SaverSpec = caption('Omega', '#ffffff')): IdleSequence => ({
+    format: 'idle-sequence',
+    schemaVersion: 1,
+    id: 'crossfade',
+    label: 'Crossfade',
+    loop: false,
+    segments: [
+      { key: 'a', scene: caption('Alpha', '#000000'), duration: 5000, transition: text ? { type: 'morph', dur: 1000, text } : { type: 'morph', dur: 1000 } },
+      { key: 'b', scene: b, duration: 5000 },
+    ],
+  });
+
+  /** Mount with a context that records every fillText with the alpha it was painted at. */
+  function mountRecording(s: IdleSequence) {
+    const calls: Array<{ text: string; alpha: number }> = [];
+    const ctx = stub2dContext();
+    (ctx as unknown as { fillText: unknown }).fillText = vi.fn(function (this: { globalAlpha: number }, text: string) {
+      calls.push({ text, alpha: +this.globalAlpha.toFixed(6) });
+    });
+    (ctx as unknown as { measureText: unknown }).measureText = vi.fn(() => ({ width: 10 }));
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as any;
+    // Paused mount: no rAF loop, so the only frames painted are the ones
+    // the test asks for.
+    const inst = mountSync(compileSequence(s), saverCtx({ reducedMotion: true }));
+    return { inst, calls };
+  }
+  const painted = (calls: Array<{ text: string; alpha: number }>, text: string) => calls.filter((c) => c.text === text);
+
+  it("validator: text is 'step' | 'crossfade', on morph only", () => {
+    expect(validateSequence(twins('step')).valid).toBe(true);
+    expect(validateSequence(twins('crossfade')).valid).toBe(true);
+    expect(validateSequence(twins()).valid).toBe(true);
+    const bad = twins();
+    (bad.segments[0]!.transition as { text?: unknown }).text = 'dissolve';
+    expect(validateSequence(bad).errors.map((e) => e.path)).toContain('segments[0].transition.text');
+    const onFade = twins();
+    (onFade.segments[0] as { transition: unknown }).transition = { type: 'fade', dur: 600, text: 'crossfade' };
+    expect(validateSequence(onFade).errors.map((e) => e.path)).toContain('segments[0].transition.text');
+  });
+
+  it('absent (or step) ⇒ the frame is what it always was: only the incoming words mid-morph, once each', () => {
+    // The sequence baseline pins the entity streams; this pins the paint.
+    for (const text of [undefined, 'step'] as const) {
+      const { inst, calls } = mountRecording(twins(text));
+      calls.length = 0;
+      inst.renderFrame!(5500, 1); // k = easeSmooth(0.5) = 0.5
+      expect(painted(calls, 'Alpha')).toEqual([]);
+      expect(painted(calls, 'ALPHA')).toEqual([]);
+      expect(painted(calls, 'Omega')).toHaveLength(1);
+      expect(painted(calls, 'OMEGA')).toHaveLength(1);
+      expect(painted(calls, 'Omega')[0]!.alpha).toBe(1);
+      inst.dispose();
+    }
+  });
+
+  it('crossfade paints both strings mid-morph at complementary alphas — textBlock and text sprites alike', () => {
+    const { inst, calls } = mountRecording(twins('crossfade'));
+    calls.length = 0;
+    inst.renderFrame!(5500, 1); // localT 500 of dur 1000 → k = 0.5
+    expect(painted(calls, 'Alpha')).toEqual([{ text: 'Alpha', alpha: 0.5 }]);
+    expect(painted(calls, 'Omega')).toEqual([{ text: 'Omega', alpha: 0.5 }]);
+    expect(painted(calls, 'ALPHA')).toEqual([{ text: 'ALPHA', alpha: 0.5 }]);
+    expect(painted(calls, 'OMEGA')).toEqual([{ text: 'OMEGA', alpha: 0.5 }]);
+
+    calls.length = 0;
+    inst.renderFrame!(5250, 1); // k = easeSmooth(0.25) = 0.15625
+    expect(painted(calls, 'Alpha')[0]!.alpha).toBeCloseTo(0.84375, 5);
+    expect(painted(calls, 'Omega')[0]!.alpha).toBeCloseTo(0.15625, 5);
+    // The outgoing words ride the lerped paint (colour glides as usual) and
+    // are drawn before the incoming, so the new words sit on top.
+    expect(calls.findIndex((c) => c.text === 'Alpha')).toBeLessThan(calls.findIndex((c) => c.text === 'Omega'));
+    inst.dispose();
+  });
+
+  it('at k = 0 only the outgoing words; at k = 1 (morph complete) only the incoming, once', () => {
+    const { inst, calls } = mountRecording(twins('crossfade'));
+    calls.length = 0;
+    inst.renderFrame!(5000, 1); // boundary: k = 0
+    expect(painted(calls, 'Alpha')).toEqual([{ text: 'Alpha', alpha: 1 }]);
+    expect(painted(calls, 'Omega')).toEqual([]);
+
+    // localT = dur → morph over. The first frame past the window finalises
+    // the morph and re-mounts segment 1's child from the chain root (a
+    // paused mount paints the root scene once at construction, before the
+    // real frame overpaints it — pre-existing, and invisible); the frame
+    // after that is the steady state this asserts.
+    inst.renderFrame!(6000, 1);
+    calls.length = 0;
+    inst.renderFrame!(6000, 1);
+    expect(painted(calls, 'Alpha')).toEqual([]);
+    expect(painted(calls, 'Omega')).toEqual([{ text: 'Omega', alpha: 1 }]);
+    expect(painted(calls, 'OMEGA')).toEqual([{ text: 'OMEGA', alpha: 1 }]);
+
+    // Seeking back into the window re-arms the crossfade (same re-mount
+    // rule: the chain-root child was released when the morph finalised);
+    // leaving it clears it.
+    inst.renderFrame!(5500, 1);
+    calls.length = 0;
+    inst.renderFrame!(5500, 1);
+    expect(painted(calls, 'Alpha')).toEqual([{ text: 'Alpha', alpha: 0.5 }]);
+    expect(painted(calls, 'Omega')).toEqual([{ text: 'Omega', alpha: 0.5 }]);
+    inst.renderFrame!(2000, 1); // back in segment 0 (re-mounts its child)
+    calls.length = 0;
+    inst.renderFrame!(2000, 1);
+    expect(painted(calls, 'Alpha')).toEqual([{ text: 'Alpha', alpha: 1 }]);
+    expect(painted(calls, 'Omega')).toEqual([]);
+    inst.dispose();
+  });
+
+  it('crossfade between same-worded twins is a plain morph frame (one draw per text layer)', () => {
+    const { inst, calls } = mountRecording(twins('crossfade', caption('Alpha', '#ffffff')));
+    calls.length = 0;
+    inst.renderFrame!(5500, 1);
+    expect(painted(calls, 'Alpha')).toEqual([{ text: 'Alpha', alpha: 1 }]);
+    expect(painted(calls, 'ALPHA')).toEqual([{ text: 'ALPHA', alpha: 1 }]);
+    inst.dispose();
+  });
+
+  it("morph-nothing-morphable is suppressed under crossfade when the words differ, and only then", () => {
+    const codes = (s: IdleSequence) => (validateSequence(s).warnings ?? []).map((w) => w.code);
+    const same = (text: string) => caption(text, '#000000');
+    // Text-only twins: step (explicit or default) reads as a cut → warns.
+    expect(codes(twins(undefined, same('Omega')))).toContain('morph-nothing-morphable');
+    expect(codes(twins('step', same('Omega')))).toContain('morph-nothing-morphable');
+    // Under crossfade the words are the thing that morphs.
+    expect(codes(twins('crossfade', same('Omega')))).not.toContain('morph-nothing-morphable');
+    // Crossfade with the same words and only a stepped string elsewhere
+    // (`font`) still has nothing to morph.
+    const fontOnly: SaverSpec = { ...same('Alpha'), layers: same('Alpha').layers.map((l) => ({ ...l, sprite: { ...l.sprite, font: 'serif' } as never })) };
+    expect(codes(twins('crossfade', fontOnly))).toContain('morph-nothing-morphable');
+    // adviseSequence agrees.
+    expect(adviseSequence(twins('crossfade', same('Omega'))).map((w) => w.code)).not.toContain('morph-nothing-morphable');
+    expect(adviseSequence(twins('step', same('Omega'))).map((w) => w.code)).toContain('morph-nothing-morphable');
   });
 });

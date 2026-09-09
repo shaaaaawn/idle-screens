@@ -248,4 +248,22 @@ describe('saver-spec.schema.json', () => {
       expect(check(withRole(kind, 'shout'))).toBe(false);
     }
   });
+  it("agrees with the runtime validator on morph text: 'step' | 'crossfade' (1f)", () => {
+    const scene = {
+      schemaVersion: 1, id: 's', label: 'S',
+      layers: [{ count: 1, sprite: { kind: 'textBlock', text: 'Hi', maxWidth: 0.5, fontSize: 0.05 }, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } }],
+    };
+    const seq = (transition: Record<string, unknown>) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      segments: [{ key: 'a', scene, duration: 2000, transition }, { key: 'b', scene: { ...scene, layers: [{ ...scene.layers[0], sprite: { ...scene.layers[0]!.sprite, text: 'Bye' } }] }, duration: 2000 }],
+    });
+    for (const good of [{ type: 'morph', dur: 600 }, { type: 'morph', dur: 600, text: 'step' }, { type: 'morph', dur: 600, text: 'crossfade' }]) {
+      expect(validateSequence(seq(good)).valid).toBe(true);
+      expect(check(seq(good))).toBe(true);
+    }
+    for (const bad of [{ type: 'morph', dur: 600, text: 'dissolve' }, { type: 'fade', dur: 600, text: 'crossfade' }, { type: 'cut', text: 'step' }]) {
+      expect(validateSequence(seq(bad)).valid).toBe(false);
+      expect(check(seq(bad))).toBe(false);
+    }
+  });
 });
