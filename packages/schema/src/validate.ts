@@ -851,6 +851,7 @@ export function validateSequence(seq: unknown): ValidationResult {
       }
     }
   }
+  if (isObj(seq) && isObj(seq.bed)) normalizeColors(seq.bed);
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -933,6 +934,38 @@ export function validateSequence(seq: unknown): ValidationResult {
 
   if (seq.loop === true && hasDurationless) {
     err('loop', 'loop: true requires all segments to have a duration');
+  }
+
+  // The bed: a full SaverSpec, live alongside whichever segment is up.
+  if (seq.bed !== undefined) {
+    if (!isObj(seq.bed)) {
+      err('bed', 'must be a SaverSpec object');
+    } else {
+      const bedResult = validateSpec(seq.bed);
+      for (const e of bedResult.errors) errors.push({ path: `bed.${e.path}`, message: e.message });
+      for (const w of bedResult.warnings ?? []) warnings.push({ path: `bed.${w.path}`, code: w.code, message: w.message });
+      if (bedResult.valid) {
+        const entityTotal = (spec: unknown): number =>
+          isObj(spec) && Array.isArray(spec.layers)
+            ? spec.layers.reduce<number>((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0)
+            : 0;
+        const bedTotal = entityTotal(seq.bed);
+        const largest = seq.segments.reduce<number>((m, s) => Math.max(m, isObj(s) ? entityTotal(s.scene) : 0), 0);
+        if (bedTotal + largest > LIMITS.maxTotal) {
+          err('bed', `bed entities ${bedTotal} + largest segment ${largest} = ${bedTotal + largest} exceeds cap ${LIMITS.maxTotal} (the two are live at once)`);
+        }
+        // The bed owns the ground: a segment background is never painted over it.
+        seq.segments.forEach((s, i) => {
+          if (isObj(s) && isObj(s.scene) && s.scene.background !== undefined) {
+            warnings.push({
+              path: `segments[${i}].scene.background`,
+              code: 'bed-hides-segment-background',
+              message: `segment ${i} declares a background but the sequence has a bed — segments render transparently over the bed, so this background is never painted`,
+            });
+          }
+        });
+      }
+    }
   }
 
   // Warn when morph is requested but signatures differ (will fall back to cut)

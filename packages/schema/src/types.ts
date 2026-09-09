@@ -581,5 +581,15 @@ export interface IdleSequence {
    * lands mid-loop. `advance: 'input'` holds stay armed under either mode.
    */
   sync?: 'mount' | 'epoch';
+  /**
+   * A scene drawn under every segment on the sequence's **global** clock —
+   * the ground that does not reset at a boundary or under a `sequence.segment`
+   * steer. Segments render over it transparently (their `background` and
+   * `ghosting` are ignored; the bed may declare its own). Its entities count
+   * toward the perf cap together with the largest segment's, since the two
+   * are live at once. Steer it with `bed.<path>`. Absent ⇒ every segment
+   * paints its own ground, exactly as before the field existed.
+   */
+  bed?: SaverSpec;
   segments: SequenceSegment[];
 }

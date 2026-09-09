@@ -1456,6 +1456,10 @@
           ],
           "description": "What the sequence clock is anchored to. 'mount' (default): every viewer starts at T = 0 when it mounts — a joiner sees segment 0 (pre-roll semantics). 'epoch': a viewer handed sequenceBaseT on its mount context (the host's Date.now() − epoch) starts its clock there, so every screen shows the same segment; a late joiner lands mid-loop. advance: 'input' holds stay armed under either. Native clients that anchor at their own mount behave as 'mount'."
         },
+        "bed": {
+          "$ref": "#/definitions/saverSpec",
+          "description": "A scene drawn under every segment on the sequence's global clock — the ground that does not reset at a boundary or under a sequence.segment steer. Segments render over it transparently (their background and ghosting are ignored; validateSequence warns bed-hides-segment-background). Its entities plus the largest segment's must stay within the 800 cap (enforced by validateSequence). Steer it with bed.<path>. Native clients that ignore it render segments with their own backgrounds."
+        },
         "segments": {
           "type": "array",
           "minItems": 1,
