@@ -24,7 +24,10 @@ const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'so
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity']);
+const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
+/** A CSS length inside a textBlock `font` — size belongs to `fontSize`. */
+const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)\b/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
@@ -577,6 +580,19 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.align`, "must be 'left' | 'center' | 'right'");
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.anchor !== undefined && !TEXT_BLOCK_ANCHORS.has(sprite.anchor as string)) {
+      err(`${path}.anchor`, "must be 'top-left' | 'top' | 'top-right' | 'left' | 'center' | 'right' | 'bottom-left' | 'bottom' | 'bottom-right'");
+    }
+    if (sprite.font !== undefined) {
+      if (!isStr(sprite.font) || sprite.font.trim() === '') {
+        err(`${path}.font`, 'must be a non-empty string (family and/or weight)');
+      } else if (FONT_SIZE_RE.test(sprite.font)) {
+        err(`${path}.font`, 'must name a family and/or weight only — fontSize owns the size');
+      }
+    }
+    if (sprite.opacity !== undefined && (!isNum(sprite.opacity) || sprite.opacity < 0 || sprite.opacity > 1)) {
+      err(`${path}.opacity`, 'must be a number between 0 and 1');
+    }
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {

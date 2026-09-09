@@ -443,3 +443,54 @@ describe('glyphFade in perceive', () => {
     expect(sum(lit)).toBeGreaterThan(sum(dim));
   });
 });
+
+// ---------------------------------------------------------------------------
+// anchor / font / opacity / lifted maxWidth (ambient presentations 1a)
+// ---------------------------------------------------------------------------
+
+describe('textBlock anchor / font / opacity validation', () => {
+  it('accepts every compass anchor', () => {
+    for (const anchor of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) {
+      expect(validateSpec(textBlockSpec({ anchor })).valid).toBe(true);
+    }
+  });
+
+  it('rejects an unknown anchor', () => {
+    const res = validateSpec(textBlockSpec({ anchor: 'middle' }));
+    expect(res.valid).toBe(false);
+    expect(res.errors.some((e) => e.path.endsWith('.anchor'))).toBe(true);
+  });
+
+  it('accepts a family/weight font and rejects one carrying a size', () => {
+    expect(validateSpec(textBlockSpec({ font: 'bold monospace' })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ font: "300 'Inter', sans-serif" })).valid).toBe(true);
+    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '']) {
+      const res = validateSpec(textBlockSpec({ font }));
+      expect(res.valid).toBe(false);
+      expect(res.errors.some((e) => e.path.endsWith('.font'))).toBe(true);
+    }
+    expect(validateSpec(textBlockSpec({ font: 12 })).valid).toBe(false);
+  });
+
+  it('accepts opacity in 0..1 and rejects outside', () => {
+    expect(validateSpec(textBlockSpec({ opacity: 0 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 0.4 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 1 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 1.2 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ opacity: -0.1 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ opacity: '1' })).valid).toBe(false);
+  });
+
+  it('maxWidth may exceed the frame up to 2.0 of min(w,h)', () => {
+    expect(validateSpec(textBlockSpec({ maxWidth: 1.5 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ maxWidth: 2 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ maxWidth: 2.01 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ maxWidth: 0 })).valid).toBe(false);
+  });
+
+  it('the new fields are known properties (no unknown-property warning)', () => {
+    const res = validateSpec(textBlockSpec({ anchor: 'center', font: 'bold monospace', opacity: 0.8 }));
+    expect(res.valid).toBe(true);
+    expect(res.warnings?.some((w) => w.code === 'unknown-property')).toBeFalsy();
+  });
+});
