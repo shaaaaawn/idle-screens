@@ -37,8 +37,9 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
 (2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
-`maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope, and
-the `fade` transition (2026-09-08 — ambient presentations).
+`maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
+the `fade` transition, and `role` on text sprites (2026-09-08 — ambient
+presentations).
 
 ## Safety invariants
 
@@ -172,10 +173,12 @@ with distance, removing pop-in at the cutoff.
 
 - `{ "kind": "emoji", "glyphs": ["🐟", "🐠"], "cycle": { "period": 800 } }` —
   glyph picked per entity (seeded); optional `cycle` rotates variants over time
-- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ... }`
+- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
   viewport (verbatim only under `units: "px"`); a family/weight only
-  (`"bold monospace"`) composes with the seeded per-entity `size`
+  (`"bold monospace"`) composes with the seeded per-entity `size`; `role` is
+  the legibility opt-in described under `textBlock` below (same field, same
+  meaning on both text sprites)
 - `{ "kind": "circle", "radius": [0.001, 0.003], "color": "#ffffff", "soft": true }` —
   `soft` renders a radial-falloff glow orb instead of a hard disc
 - `{ "kind": "ring", "radius": [0.002, 0.005], "color": "#d8f6ff", "width": 0.001 }` —
@@ -258,6 +261,29 @@ with distance, removing pop-in at the cutoff.
   block to make the path steerable (a `setParam` cannot create a field that
   is not there). Scales perceived ink in the luminance grid. **Native clients
   without `opacity` render at 1.**
+
+  `role` (`"read"` | `"atmosphere"`, on `textBlock` **and** `text`) declares
+  what the words are *for*, and is the only thing that turns legibility
+  checking on. Absent, or `"atmosphere"`, the layer is texture — a haiku
+  fading in a corner, dim labels on a wall board, the `dev-dashboard`'s
+  2.6:1 telemetry — and `adviseSpec` says nothing about how readable it is,
+  exactly as before the field existed; keep atmospheric text undeclared, the
+  advisories would only nag. `"read"` says the words must be read from
+  across the room, and opts that layer into two advisories:
+  `text-legibility` fires when the text colour's WCAG ratio falls below
+  **4.5:1** against the background sampled at the box centre (gradient stops
+  interpolated at rest, `band` honoured) **or** against the brightest
+  additive layer (`blend: lighter` / `screen`) whose entities can reach the
+  box and are at least a glyph tall, taken at its peak alpha (base + pulse)
+  composited over that background — a glow parked under a caption is
+  measured, dust is not; both ratios are in the message. `text-safe-area`
+  fires when the box (a `list`'s whole extent) lies within **5 %** of any
+  viewport edge, where bezels and overscan hide it. Each is judged at the
+  viewport passed to `adviseSpec` — check the portrait one too. `role` is a
+  declaration only: it changes **no pixel anywhere, on any client**, is not
+  in the structural signature, and native players ignore it with nothing to
+  fall back to. The shipped `lobby-talk` example declares it on every text
+  layer and produces zero advisories, landscape and portrait.
 
   textBlock also accepts `reveal` — animated typing/deleting:
   `{ "reveal": { "progress": 1, "mode": "typewriter", "speed": 0, "caret": true } }`.
@@ -571,10 +597,16 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   `perceiveScene().advisories`). Two of them are **spatial**, for static text:
   `text-off-screen` (a text/textBlock box crosses the viewport edge by more
   than 1%) and `text-overlap` (two static text layers share more than 10% of
-  the smaller box). Boxes come from the same character-class width table the
-  textBlock line-breaker uses, so they are estimates of the renderer's own
-  layout — a caption that fails these will look wrong on the wall; one that
-  passes may still sit a few px off.
+  the smaller box; it carries both boxes as `boxes: [{x, y, w, h}]` in
+  viewport fractions so the fix needs no re-derivation). Boxes come from the
+  same character-class width table the textBlock line-breaker uses, so they
+  are estimates of the renderer's own layout — a caption that fails these
+  will look wrong on the wall; one that passes may still sit a few px off.
+  Two more are **opt-in** through the text sprite's `role: "read"` (see the
+  `textBlock` sprite): `text-legibility` (WCAG ratio below 4.5:1 against the
+  background at the box centre or under the brightest additive layer that can
+  sit beneath the line) and `text-safe-area` (the box within 5 % of an edge,
+  with its box in `boxes`). Undeclared text is never measured for either.
   `overlap-seams` catches the trap the other channels are blind to: a layer
   whose entities bury each other (so it was drawn as one shape) but whose paint
   settings make every overlap visible. It is gated to stay off deliberate
@@ -800,5 +832,7 @@ showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
 `pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
 and feathered rect) and `relay-board` (list layout + bar: a chart in five
-layers). See [`src/examples/`](./src/examples/). The dashboard exercises the
+layers); and `lobby-talk` (one screen of a quarter-in-review, every text
+layer `role: "read"`, zero advisories — readable copy over additive
+atmosphere). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).
