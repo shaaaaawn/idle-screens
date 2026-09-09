@@ -43,7 +43,7 @@ apps/mac/
     Diagnostics.swift        the Diagnostics… report (why the saver didn't start)
     SystemActivity.swift     containers / MCP servers / dev servers snapshot
     SystemInfo.swift         battery + display-sleep introspection
-    ThumbnailRenderer.swift  offscreen WKWebView previews, PNG-cached per version
+    ThumbnailRenderer.swift  offscreen WKWebView previews, PNG-cached on the saver set
     ServerEndpoint.swift     where the app talks to (prod, or the `serverBaseURL` default)
     BuildInfo.swift          build provenance — local dev build or deployed release
     SaverCatalog.swift       GENERATED from web/src/savers.ts
