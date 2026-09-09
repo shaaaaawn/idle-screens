@@ -111,15 +111,19 @@ struct NativeSceneView: View {
                 layers.first { $0.key == key }?.entities.first
             }
             if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
+            if let links = layer.links {
+                drawLinks(links, layer: layer, at: t, in: space, dim: dim,
+                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &ctx)
+            }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
                 let point = SceneMotion.position(of: entity, at: t, in: space, dim: dim,
                                                  wrap: layer.wrap, parent: parentEntity)
-                var alpha = entity.alpha
-                if let pulse = layer.pulse {
-                    let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
-                    alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
-                }
+                // One alpha model for both tiers. This used to be computed
+                // inline, which quietly skipped everything SceneMotion knows
+                // about — the warp fade-in and the emit window included, so
+                // those worked on the sprite tier and nowhere else.
+                let alpha = SceneMotion.pulsedAlpha(of: entity, layer: layer, at: t)
                 // Web engine sizeAt(): margins/wrap above intentionally use the
                 // base size, like web.
                 // Ghost echoes first, so the live sprite paints over its trail.
@@ -142,6 +146,11 @@ struct NativeSceneView: View {
                              dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
                     }
                 }
+                if let trail = layer.trail {
+                    drawTrail(trail, entity: entity, layer: layer, at: t, head: point,
+                              in: space, dim: dim, alpha: alpha * lifeAlpha,
+                              parent: parentEntity, ctx: &ctx)
+                }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
                 draw(entity: entity, size: grownSize, sprite: layer.sprite,
                      units: layer.units, at: point,
@@ -162,6 +171,122 @@ struct NativeSceneView: View {
         let wanted = ghosting > 0.6 ? 4 : (ghosting > 0.3 ? 3 : 2)
         let affordable = entityCount > 0 ? max(0, 1500 / entityCount - 1) : wanted
         return min(wanted, affordable)
+    }
+
+    // MARK: - Trail and links
+
+    /// Afterglow sampled from the entity's OWN past positions — the motion is
+    /// analytic, so the trail is exact rather than a recorded history.
+    private func drawTrail(_ trail: SpecSubset.Trail, entity: CompiledEntity,
+                           layer: CompiledLayer, at t: TimeInterval, head: CGPoint,
+                           in space: CGSize, dim: CGFloat, alpha: Double,
+                           parent: CompiledEntity?, ctx: inout GraphicsContext) {
+        let fade = trail.fade ?? 1
+        let samples = min(Int((trail.length / 50).rounded(.up)), 24)
+        guard samples > 0, alpha > 0 else { return }
+        let headSize = entity.size * SceneMotion.growScale(of: entity, at: t)
+        let color = Color(.sRGB, red: entity.red, green: entity.green, blue: entity.blue,
+                          opacity: 1)
+        var prev = head
+        for step in 1...samples {
+            let k = Double(step) / Double(samples)
+            let past = t - k * trail.length / 1000
+            guard past >= 0 else { break }
+            let p = SceneMotion.position(of: entity, at: past, in: space, dim: dim,
+                                         wrap: layer.wrap, parent: parent)
+            // A wrapped entity that jumped the seam would smear a line across
+            // the frame; stop the trail at the jump instead.
+            if layer.wrap,
+               abs(p.x - prev.x) > space.width / 2 || abs(p.y - prev.y) > space.height / 2 {
+                break
+            }
+            prev = p
+            let a = alpha * (1 - k * fade)
+            if a <= 0 { break }
+            let r = headSize * dim * (1 - k * 0.7)
+            if r < 0.2 { break }
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                     with: .color(color.opacity(a)))
+        }
+    }
+
+    /// Lines between nearby entities — constellations and webs. Only motions
+    /// that actually wrap get toroidal neighbours; a bounce or orbit entity
+    /// never crosses an edge, so a "nearest image" line would cut the screen.
+    private func drawLinks(_ links: SpecSubset.Links, layer: CompiledLayer,
+                           at t: TimeInterval, in space: CGSize, dim: CGFloat,
+                           lifeAlpha: Double, parent: CompiledEntity?,
+                           ctx: inout GraphicsContext) {
+        let entities = layer.entities
+        guard entities.count > 1, links.k > 0 else { return }
+        // O(n²) neighbour search: bounded so a large layer cannot stall a frame.
+        guard entities.count <= 220 else { return }
+        let wraps = ["drift", "rise", "wander"].contains(entities[0].motionType) && layer.wrap
+        let positions = entities.map {
+            SceneMotion.position(of: $0, at: t, in: space, dim: dim,
+                                 wrap: layer.wrap, parent: parent)
+        }
+        let maxDist = links.maxDist * dim
+        let width = max(0.5, (links.width ?? (layer.units == .px ? 1 : 1.0 / 1080)) * dim)
+
+        func delta(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            var dx = b.x - a.x, dy = b.y - a.y
+            if wraps {
+                if abs(dx) > space.width / 2 { dx += dx > 0 ? -space.width : space.width }
+                if abs(dy) > space.height / 2 { dy += dy > 0 ? -space.height : space.height }
+            }
+            return CGPoint(x: dx, y: dy)
+        }
+
+        var seen = Set<Int64>()
+        func emit(_ i: Int, _ j: Int) {
+            let lo = min(i, j), hi = max(i, j)
+            let key = Int64(lo) << 32 | Int64(hi)
+            guard !seen.contains(key) else { return }
+            let d = delta(positions[lo], positions[hi])
+            let dist = hypot(d.x, d.y)
+            guard dist <= maxDist else { return }
+            seen.insert(key)
+            var a = links.alpha ?? SceneMotion.pulsedAlpha(of: entities[lo], layer: layer, at: t)
+            if links.falloff == true { a *= max(0, 1 - dist / maxDist) }
+            a *= lifeAlpha
+            guard a > 0.004 else { return }
+            let color = links.color.map { Color(hex: $0) }
+                ?? Color(.sRGB, red: entities[lo].red, green: entities[lo].green,
+                         blue: entities[lo].blue, opacity: 1)
+            var path = Path()
+            path.move(to: positions[lo])
+            path.addLine(to: CGPoint(x: positions[lo].x + d.x, y: positions[lo].y + d.y))
+            ctx.stroke(path, with: .color(color.opacity(a)),
+                       style: StrokeStyle(lineWidth: width, lineCap: .butt))
+        }
+
+        switch links.mode {
+        case "chain":
+            for i in 0..<(entities.count - 1) { emit(i, i + 1) }
+            if links.closed == true, entities.count > 2 { emit(entities.count - 1, 0) }
+        case "random":
+            // Golden-ratio stride spreads partners instead of clustering.
+            let n = entities.count
+            let strideBy = max(1, Int((Double(n) * 0.381_966).rounded()))
+            for i in 0..<n {
+                for m in 1...links.k {
+                    let j = (i + m * strideBy) % n
+                    if j != i { emit(i, j) }
+                }
+            }
+        default:  // nearest
+            for i in positions.indices {
+                var neighbours: [(dist: Double, j: Int)] = []
+                for j in positions.indices where j != i {
+                    let d = delta(positions[i], positions[j])
+                    let dist = hypot(d.x, d.y)
+                    if dist <= maxDist { neighbours.append((dist, j)) }
+                }
+                neighbours.sort { $0.dist != $1.dist ? $0.dist < $1.dist : $0.j < $1.j }
+                for n in neighbours.prefix(links.k) { emit(i, n.j) }
+            }
+        }
     }
 
     // MARK: - Background

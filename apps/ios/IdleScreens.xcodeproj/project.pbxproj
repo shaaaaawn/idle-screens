@@ -81,6 +81,7 @@
 		9954580EDE5D79CB12AE1A60 /* AppState+Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */; };
 		99AF9AC735A445DF8A2452E4 /* ChannelDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */; };
 		9A22D7E8589100795D25A712 /* PairingSheetAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64D757754C3AA6ACA6EACBF6 /* PairingSheetAnchorTests.swift */; };
+		9FDCE31ED7127F1006FAAD26 /* LayerFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6BC6EA701B39BF0912BCE20 /* LayerFeatureTests.swift */; };
 		A283256BA27B747A9FCD7508 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
 		A286AB92111C75F2E85539A9 /* ProceduralChannelArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A90895DB785841700E11AEB /* ProceduralChannelArt.swift */; };
 		A35D22B41699F53D6F62A43B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6339510B5B7C996B622F160 /* AppState.swift */; };
@@ -267,6 +268,7 @@
 		DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryShelfTests.swift; sourceTree = "<group>"; };
 		DD4F33A0B67C1A16E03B7317 /* OrbitParentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitParentTests.swift; sourceTree = "<group>"; };
 		E5C8CF7BAE45EAB80E2DAE2F /* AquariumFieldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AquariumFieldTests.swift; sourceTree = "<group>"; };
+		E6BC6EA701B39BF0912BCE20 /* LayerFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerFeatureTests.swift; sourceTree = "<group>"; };
 		EA0BCADF9C61254DBB05CA24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroChannelCard.swift; sourceTree = "<group>"; };
 		EC0792A7AF508D892DF54811 /* TVDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVDesign.swift; sourceTree = "<group>"; };
@@ -378,6 +380,7 @@
 				2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */,
 				08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */,
 				F6CF9EBBF30731AF766FA4CC /* HomeSectionsTests.swift */,
+				E6BC6EA701B39BF0912BCE20 /* LayerFeatureTests.swift */,
 				7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */,
 				F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */,
 				DD4F33A0B67C1A16E03B7317 /* OrbitParentTests.swift */,
@@ -774,6 +777,7 @@
 				70C0E78D93C5088327E16069 /* ClassicSaverTests.swift in Sources */,
 				730801F453F51D04CF89FDD5 /* DeepLinkTests.swift in Sources */,
 				C563BF50C01A99FD72FAD212 /* HomeSectionsTests.swift in Sources */,
+				9FDCE31ED7127F1006FAAD26 /* LayerFeatureTests.swift in Sources */,
 				B39D9751769F3397C53C5EF0 /* LobbyFixtureTests.swift in Sources */,
 				4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */,
 				6076DD6256D0FBE9290E9D34 /* OrbitParentTests.swift in Sources */,

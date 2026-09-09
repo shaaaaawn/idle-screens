@@ -86,17 +86,22 @@ enum SceneMotion {
                 y: wrapValue(y0 + entity.vy * dim * t + hy, -margin, size.height + margin))
 
         default:  // drift + unknown
-            let bobX = entity.bob != 0 ? entity.bob * dim * sin(tms / 700 + entity.phase) : 0
-            var px = x0 + entity.vx * dim * t + bobX
-            var py = y0 + entity.vy * dim * t
-            if wrap {
-                px = px.truncatingRemainder(dividingBy: size.width)
-                if px < 0 { px += size.width }
-                py = py.truncatingRemainder(dividingBy: size.height)
-                if py < 0 { py += size.height }
-            } else {
-                px = min(size.width, max(0, px))
-                py = min(size.height, max(0, py))
+            // Web parity, corrected on four counts (simulate.ts, end of
+            // positionAt): the wrap range is the viewport plus a one-sprite
+            // MARGIN, so a sprite glides off the edge and returns instead of
+            // popping at x=0; y only wraps when the entity actually has
+            // vertical velocity; `bob` offsets Y (not X) on a 500ms period —
+            // rise is the one that sways horizontally, on 700; and a layer
+            // with wrapping disabled simply leaves, rather than being clamped
+            // to the border where sprites pile up in a line.
+            let rawX = x0 + entity.vx * dim * t
+            let px = wrap ? wrapValue(rawX, -m, size.width + m) : rawX
+            let rawY = y0 + entity.vy * dim * t
+            var py = (wrap && entity.vy != 0)
+                ? wrapValue(rawY, -m, size.height + m)
+                : rawY
+            if entity.bob != 0 {
+                py += entity.bob * dim * sin(tms / 500 + entity.phase)
             }
             return CGPoint(x: px, y: py)
         }
@@ -166,6 +171,10 @@ enum SceneMotion {
         if let w = entity.warp {
             s *= Swift.min(1 / warpDepth(w, at: t), warpMaxScale)
         }
+        if let emit = entity.emit, emit.growFrom != 1 || emit.growTo != 1,
+           let u = emit.window(at: t) {
+            s *= emit.growFrom + (emit.growTo - emit.growFrom) * u
+        }
         return max(s, 0.01)
     }
 
@@ -178,18 +187,27 @@ enum SceneMotion {
     /// Pulse alpha at time `t` (seconds), matching the Canvas renderer.
     static func pulsedAlpha(of entity: CompiledEntity, layer: CompiledLayer,
                             at t: TimeInterval) -> Double {
+        // Pulse is ADDITIVE in the web engine (`alpha + amp·sin`), not a
+        // percentage of the base alpha. Multiplying shrank every pulse to a
+        // fraction of its authored swing — at alpha 0.5, amp 0.4 the web
+        // breathes 0.1…0.9 where this used to manage 0.3…0.7.
         var alpha = entity.alpha
+        if let pulse = layer.pulse, pulse.amp != 0 {
+            alpha += pulse.amp * sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
+        }
         if let w = entity.warp {
             // Fade in over the first 20% of depth after respawning at the far
             // plane, so a recycled entity doesn't pop into view.
             let z = warpDepth(w, at: t)
             alpha *= Swift.min(1, Swift.max(0, (1 - z) / 0.2))
         }
-        if let pulse = layer.pulse {
-            let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
-            alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
+        if let emit = entity.emit {
+            // Sparse events: absent between appearances, and shaped by an
+            // attack/decay envelope while present.
+            guard let u = emit.window(at: t) else { return 0 }
+            alpha *= EmitParams.envelope(u)
         }
-        return alpha
+        return Swift.min(1, Swift.max(0, alpha))
     }
 
     /// Web engine's wrap(): cyclic wrap of v into [lo, hi).

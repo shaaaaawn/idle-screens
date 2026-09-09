@@ -76,6 +76,73 @@ struct SpecSubset: Decodable, Equatable {
         /// Structural placement: grid cells, or list/table reading order from
         /// an anchor, instead of seeded scatter.
         var layout: Layout?
+        /// Relative palette weights, lifted out of `sprite` so the compiler
+        /// can pick a colour beside it. Ignored unless it matches `colors`.
+        var colorWeights: [Double]?
+        /// Afterglow behind moving entities, sampled from past positions.
+        var trail: Trail?
+        /// Sparse-event window: each entity appears for `life` ms every
+        /// `every` ms instead of being permanently on screen.
+        var emit: Emit?
+        /// Lines drawn between nearby entities of this layer.
+        var links: Links?
+
+        private enum CodingKeys: String, CodingKey {
+            case key, count, sprite, size, motion, wrap, alpha, blend, pulse
+            case spin, region, position, grow, life, layout, trail, emit, links
+        }
+        private struct SpriteExtras: Decodable { var colorWeights: [Double]? }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            key = try? c.decodeIfPresent(String.self, forKey: .key)
+            count = (try? c.decode(Int.self, forKey: .count)) ?? 0
+            sprite = (try? c.decode(Sprite.self, forKey: .sprite)) ?? .unknown
+            size = try? c.decodeIfPresent([Double].self, forKey: .size)
+            motion = (try? c.decode(Motion.self, forKey: .motion)) ?? Motion(type: "drift")
+            wrap = try? c.decodeIfPresent(Bool.self, forKey: .wrap)
+            alpha = try? c.decodeIfPresent([Double].self, forKey: .alpha)
+            blend = try? c.decodeIfPresent(String.self, forKey: .blend)
+            pulse = try? c.decodeIfPresent(Pulse.self, forKey: .pulse)
+            spin = try? c.decodeIfPresent(Spin.self, forKey: .spin)
+            region = try? c.decodeIfPresent(Region.self, forKey: .region)
+            position = try? c.decodeIfPresent(Position.self, forKey: .position)
+            grow = try? c.decodeIfPresent(Grow.self, forKey: .grow)
+            life = try? c.decodeIfPresent(Life.self, forKey: .life)
+            layout = try? c.decodeIfPresent(Layout.self, forKey: .layout)
+            trail = try? c.decodeIfPresent(Trail.self, forKey: .trail)
+            emit = try? c.decodeIfPresent(Emit.self, forKey: .emit)
+            links = try? c.decodeIfPresent(Links.self, forKey: .links)
+            colorWeights = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite))??.colorWeights
+        }
+    }
+
+    /// `trail`: an afterglow of past positions, `length` ms behind the head,
+    /// each dot dimmer and smaller than the last.
+    struct Trail: Decodable, Equatable, Sendable {
+        var length: Double
+        var fade: Double?
+    }
+
+    /// `emit`: entity i is on screen for `life` ms out of every `every` ms.
+    /// `jitter` blends an even stagger (a metronome) with a scattered one.
+    struct Emit: Decodable, Equatable, Sendable {
+        var every: Double
+        var life: Double
+        var jitter: Double?
+        var grow: [Double]?
+    }
+
+    /// `links`: lines between nearby entities — constellations, webs, graphs.
+    struct Links: Decodable, Equatable, Sendable {
+        var k: Int
+        var maxDist: Double
+        var color: String?
+        var alpha: Double?
+        var width: Double?
+        var mode: String?
+        var falloff: Bool?
+        var closed: Bool?
     }
 
     /// `life`: the layer appears at `enter` ms, leaves at `exit` ms, each over
@@ -180,6 +247,7 @@ struct SpecSubset: Decodable, Equatable {
     /// Motion params. drift/static/rise/bounce/orbit/wander are simulated with
     /// the web engine's analytic math; unknown types degrade to drift.
     struct Motion: Decodable, Equatable {
+        init(type: String) { self.type = type }
         var type: String
         var speed: [Double]?
         var angle: Double?
@@ -434,6 +502,8 @@ struct CompiledEntity: Equatable, Sendable {
     var wander: WanderParams?
     var warp: WarpParams?
     var path: PathParams?
+    /// Sparse-event window (see SpecSubset.Emit), or nil for always-present.
+    var emit: EmitParams?
     /// True when this entity's orbit is centred on a parent layer's entity
     /// rather than a fixed point: its own position is an offset from (0,0).
     var orbitParented: Bool = false
@@ -442,6 +512,54 @@ struct CompiledEntity: Equatable, Sendable {
     /// Second dimension: rect height (already folded into `aspect`) or a
     /// bar's thickness, in spec units.
     var thickness: Double = 0
+}
+
+/// One entity's emit window. Timing is composition, not scatter: it is
+/// derived from the index, never from the seeded stream, so declaring `emit`
+/// rearranges nothing (web parity: simulate.ts `emitParams`).
+struct EmitParams: Equatable, Sendable {
+    var every: Double      // ms between appearances
+    var life: Double       // ms visible
+    var phase: Double      // ms offset
+    var growFrom: Double
+    var growTo: Double
+
+    private static let attack = 0.25
+
+    /// 0…1 progress through this appearance, or nil while off screen.
+    func window(at t: TimeInterval) -> Double? {
+        guard every > 0, life > 0 else { return nil }
+        let ms = t * 1000
+        let local = (((ms - phase).truncatingRemainder(dividingBy: every)) + every)
+            .truncatingRemainder(dividingBy: every)
+        return local < life ? local / life : nil
+    }
+
+    /// Attack/decay envelope across one appearance.
+    static func envelope(_ u: Double) -> Double {
+        guard u >= 0, u < 1 else { return 0 }
+        func smoothstep(_ x: Double) -> Double {
+            let c = Swift.min(1, Swift.max(0, x))
+            return c * c * (3 - 2 * c)
+        }
+        return u < attack ? smoothstep(u / attack)
+                          : 1 - smoothstep((u - attack) / (1 - attack))
+    }
+
+    /// Even stagger blended with a golden-ratio scatter, by index.
+    static func make(_ emit: SpecSubset.Emit, index: Int, count: Int) -> EmitParams {
+        let golden = 0.618_033_988_749_894_9
+        let every = emit.every
+        let jitter = Swift.min(1, Swift.max(0, emit.jitter ?? 1))
+        let scattered = ((Double(index) + 0.5) * golden).truncatingRemainder(dividingBy: 1) * every
+        let even = Double(index) / Double(Swift.max(1, count)) * every
+        var phase = (even * (1 - jitter) + scattered * jitter)
+            .truncatingRemainder(dividingBy: every)
+        if phase < 0 { phase += every }
+        return EmitParams(every: every, life: Swift.min(emit.life, every), phase: phase,
+                          growFrom: emit.grow?.first ?? 1,
+                          growTo: emit.grow?.count ?? 0 > 1 ? emit.grow![1] : 1)
+    }
 }
 
 /// Warp: an entity flying at the viewer down a depth axis. `z` wraps from the
@@ -493,6 +611,8 @@ struct CompiledLayer: Equatable, Sendable {
     /// This layer's own key, and the key of the layer its orbit rides.
     var key: String?
     var orbitParentKey: String?
+    var trail: SpecSubset.Trail?
+    var links: SpecSubset.Links?
 }
 
 extension SpecSubset {
@@ -757,7 +877,17 @@ extension SpecSubset.Layer {
             case .textBlock(_, _, _, _, _, let c, _): palette = [c]
             default: palette = ["#ffffff"]
             }
-            let color = palette[min(palette.count - 1, Int(rng.next() * Double(palette.count)))]
+            // One draw either way, so weights never disturb the stream — but
+            // an unweighted pick spreads a deliberately lopsided palette
+            // evenly, which is a different picture entirely.
+            let pick = rng.next()
+            let color: String
+            if let weights = colorWeights, weights.count == palette.count,
+               weights.contains(where: { $0 > 0 }) {
+                color = palette[Self.weightedIndex(pick, weights)]
+            } else {
+                color = palette[min(palette.count - 1, Int(pick * Double(palette.count)))]
+            }
 
             // Glyph.
             let glyph: String?
@@ -832,6 +962,11 @@ extension SpecSubset.Layer {
                 thickness: barThickness
             ))
         }
+        if let emit, !entities.isEmpty {
+            for i in entities.indices {
+                entities[i].emit = EmitParams.make(emit, index: i, count: entities.count)
+            }
+        }
         return CompiledLayer(
             entities: entities,
             sprite: sprite,
@@ -841,7 +976,9 @@ extension SpecSubset.Layer {
             pulse: pulse,
             life: life,
             key: key,
-            orbitParentKey: orbitParentKey
+            orbitParentKey: orbitParentKey,
+            trail: trail,
+            links: links
         )
     }
 
@@ -853,6 +990,18 @@ extension SpecSubset.Layer {
         return (Double((value >> 16) & 0xFF) / 255,
                 Double((value >> 8) & 0xFF) / 255,
                 Double(value & 0xFF) / 255)
+    }
+
+    /// Weighted pick from one uniform draw (web parity: `weightedIndex`).
+    static func weightedIndex(_ u: Double, _ weights: [Double]) -> Int {
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return 0 }
+        var acc = 0.0
+        for (i, w) in weights.enumerated() {
+            acc += w / total
+            if u < acc { return i }
+        }
+        return weights.count - 1
     }
 
     private static func pair(_ arr: [Double]?, default fallback: (Double, Double)) -> (Double, Double) {
