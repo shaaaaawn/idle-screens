@@ -381,4 +381,51 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     const bedAtRawSeed = luminanceGrid(scatterBed, { t: 1000, seed: 7 });
     expect(bedAtRawSeed.centroid!.x).not.toBeCloseTo(bedGrid.centroid!.x, 2);
   });
+
+  it('normalizes a valid seq.seed: 0 exactly like SpecInstance does (0 is falsy, so it lands on 1)', () => {
+    const scatter: SaverSpec = {
+      schemaVersion: 1, id: 'scatter', label: 'Scatter',
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    // seq.seed: 0 + segment index 0 = a raw candidate seed of 0. SpecInstance's
+    // `(seed >>> 0) || 1` would render this with seed 1, not 0.
+    const seq: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 0, segments: [{ key: 'a', scene: scatter, duration: 5000 }] };
+    const atNormalizedSeed = luminanceGrid(scatter, { t: 1000, seed: 1 });
+    const atRawZeroSeed = luminanceGrid(scatter, { t: 1000, seed: 0 });
+    // Sanity: seed 0 vs seed 1 actually renders differently for this fixture.
+    expect(atRawZeroSeed.centroid!.x).not.toBeCloseTo(atNormalizedSeed.centroid!.x, 2);
+    const p = perceiveSequenceFrame(seq, 1000);
+    expect(p.centroid!.x).toBeCloseTo(atNormalizedSeed.centroid!.x, 9);
+  });
+
+  it('a settled morph-chained segment renders at its chain root\'s seed, not seq.seed + its own index', () => {
+    const shapeA: SaverSpec = {
+      schemaVersion: 1, id: 'a', label: 'A',
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    // Same structural signature as shapeA (same layer count/sprite kind/motion,
+    // just a different color) — the morph-eligibility check in `canMorph`
+    // only compares structure, so this pair is a legal morph chain.
+    const shapeB: SaverSpec = { ...shapeA, id: 'b', layers: [{ ...shapeA.layers[0]!, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ff0000' } }] };
+    const seq: IdleSequence = {
+      format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 7,
+      segments: [
+        { key: 'a', scene: shapeA, duration: 3000, transition: { type: 'morph', dur: 500 } },
+        { key: 'b', scene: shapeB, duration: 3000 },
+      ],
+    };
+    // T = 3600: segment 1, localT = 600 — past the 500ms morph window, so the
+    // morph has settled and SequenceInstance keeps rendering with the chain
+    // root's (segment 0's) seed forever after, never re-seeding at the
+    // boundary. seq.seed + index (7 + 1 = 8) would be a different stream.
+    const p = perceiveSequenceFrame(seq, 3600);
+    expect(p.segment).toEqual({ index: 1, key: 'b', localT: 600 });
+    const atChainRootSeed = luminanceGrid(shapeB, { t: 600, seed: 7 });
+    const atOwnIndexSeed = luminanceGrid(shapeB, { t: 600, seed: 8 });
+    // Sanity: the two candidate seeds actually render differently here.
+    expect(atOwnIndexSeed.centroid!.x).not.toBeCloseTo(atChainRootSeed.centroid!.x, 2);
+    expect(p.centroid!.x).toBeCloseTo(atChainRootSeed.centroid!.x, 9);
+  });
 });

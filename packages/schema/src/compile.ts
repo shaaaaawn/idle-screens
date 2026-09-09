@@ -19,7 +19,7 @@ import {
 } from './steer';
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
 import { LIMITS } from './types';
-import { resolveSegment, segmentStart } from './sequence';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -164,7 +164,7 @@ class SpecInstance implements SaverInstance {
     this.effSpec = spec;
     this.saverCtx = ctx;
     this.transparent = opts.transparent === true;
-    this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
+    this.seed = normalizeSeed(spec.seed ?? ctx.seed);
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
       canvas = ctx.surface;
@@ -1020,18 +1020,12 @@ class SequenceInstance implements SaverInstance {
 
   /** Whether the boundary from `from` to `from+1` should morph. */
   private canMorph(from: number): boolean {
-    const seg = this.seq.segments[from];
-    if (!seg || seg.transition?.type !== 'morph') return false;
-    const next = this.seq.segments[from + 1];
-    if (!next) return false;
-    return structuralSignature(seg.scene) === structuralSignature(next.scene);
+    return canMorph(this.seq, from);
   }
 
   /** Walk back through consecutive morph boundaries to find the chain origin. */
   private morphChainRoot(index: number): number {
-    let i = index;
-    while (i > 0 && this.canMorph(i - 1)) i--;
-    return i;
+    return morphChainRoot(this.seq, index);
   }
 
   private morphDur(from: number): number {
