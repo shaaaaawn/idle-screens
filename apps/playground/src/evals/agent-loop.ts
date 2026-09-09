@@ -104,47 +104,68 @@ const SPEC_PARAMS = (() => {
   return copy;
 })();
 
-const TOOLS: ChatToolDef[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'submit_spec',
-      description:
-        'Submit a candidate SaverSpec. Invalid specs come back with validation errors — fix and resubmit. Each valid submission is versioned (v1, v2, …).',
-      parameters: {
-        type: 'object',
-        properties: { spec: SPEC_PARAMS },
-        required: ['spec'],
+/**
+ * `schemaMode: 'allowlist'` swaps the system prompt's FORMAT.md for a ~100-line
+ * reference, but `submit_spec`'s `parameters` is JSON Schema sent on every
+ * request regardless of prompt text — if it stayed the full ~40 KB
+ * `SPEC_PARAMS`, the model would still see the complete format and the
+ * experiment would not be testing what it claims to. This loose stand-in
+ * carries no nested schema of its own; `validateSpec` still enforces the real
+ * one at `submit_spec` time; same trade the compact prompt already makes
+ * ("leaves the long tail to the validator").
+ */
+const ALLOWLIST_SPEC_PARAMS = {
+  type: 'object',
+  description: 'A candidate SaverSpec matching the "## SaverSpec v1 format" reference above. Validated on submit; errors come back with the field path.',
+};
+
+function specParamsFor(schemaMode: SchemaMode): Record<string, unknown> {
+  return schemaMode === 'allowlist' ? ALLOWLIST_SPEC_PARAMS : SPEC_PARAMS;
+}
+
+function buildTools(schemaMode: SchemaMode): ChatToolDef[] {
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'submit_spec',
+        description:
+          'Submit a candidate SaverSpec. Invalid specs come back with validation errors — fix and resubmit. Each valid submission is versioned (v1, v2, …).',
+        parameters: {
+          type: 'object',
+          properties: { spec: specParamsFor(schemaMode) },
+          required: ['spec'],
+        },
       },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'perceive',
-      description:
-        'SEE the current candidate: a braille luminance picture plus coverage, luminance, balance, dominance and advisories. Always perceive after submitting.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'perceive',
+        description:
+          'SEE the current candidate: a braille luminance picture plus coverage, luminance, balance, dominance and advisories. Always perceive after submitting.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'score',
-      description:
-        'Grade the current candidate against the style rubric and the benchmark rubric. Returns failing checks with measured vs wanted values.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'score',
+        description:
+          'Grade the current candidate against the style rubric and the benchmark rubric. Returns failing checks with measured vs wanted values.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'finish',
-      description: 'End the session. Your last submitted spec becomes the final artifact.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'finish',
+        description: 'End the session. Your last submitted spec becomes the final artifact.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-];
+  ];
+}
 
 const TOOL_LINES: Record<AgentToolName, string> = {
   submit_spec: '- submit_spec: submit a candidate spec. Validation errors come back as the result — fix and resubmit.',
@@ -307,7 +328,7 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
   const tools = resolveAgentTools(opts.tools);
   const toolSet = new Set(tools);
   const schemaMode: SchemaMode = opts.schemaMode ?? 'full';
-  const toolDefs = TOOLS.filter((t) => toolSet.has(t.function.name as AgentToolName));
+  const toolDefs = buildTools(schemaMode).filter((t) => toolSet.has(t.function.name as AgentToolName));
   const startedAt = new Date().toISOString();
   const prompt = {
     system: systemPrompt(profile, benchmark, maxToolCalls, { tools: toolSet, schemaMode }),

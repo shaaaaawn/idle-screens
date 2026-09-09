@@ -6,7 +6,7 @@
  * prompt may change.
  */
 import { describe, expect, it } from 'vitest';
-import type { SaverSpec } from '@idle-screens/schema';
+import { LIMITS, type SaverSpec } from '@idle-screens/schema';
 import specSchemaJson from '../../../../packages/schema/saver-spec.schema.json';
 import { getCatalog } from './catalog';
 import { BENCHMARK_INTENTS } from './benchmarks';
@@ -237,6 +237,24 @@ describe('agent-loop switches: schemaMode allowlist (TR1)', () => {
     expect(slim).toContain('- score: grade the current candidate');
   });
 
+  it('also shrinks submit_spec\'s tool parameters, not just the system prose', async () => {
+    // The full JSON schema sent as submit_spec's `parameters` would otherwise
+    // hand the model the complete format on every call regardless of prompt
+    // text, making the allowlist experiment not test what it claims to.
+    const { chat: fullChat, requests: fullReqs } = fakeChat([{ content: null, toolCalls: [tc('finish', {})] }]);
+    await runAgentScreen({ screen, profile, benchmark, model: 'test/model', maxToolCalls: 8, chat: fullChat });
+    const fullParams = JSON.stringify(fullReqs[0]!.tools!.find((t) => t.function.name === 'submit_spec')!.function.parameters);
+
+    const { chat: slimChat, requests: slimReqs } = fakeChat([{ content: null, toolCalls: [tc('finish', {})] }]);
+    await runAgentScreen({
+      screen, profile, benchmark, model: 'test/model', maxToolCalls: 8, chat: slimChat, schemaMode: 'allowlist',
+    });
+    const slimParams = slimReqs[0]!.tools!.find((t) => t.function.name === 'submit_spec')!.function.parameters;
+
+    expect(JSON.stringify(slimParams).length).toBeLessThan(fullParams.length * 0.1);
+    expect((slimParams as { properties?: { spec?: unknown } }).properties?.spec).not.toHaveProperty('definitions');
+  });
+
   it('every field the allowlist mentions exists in saver-spec.schema.json, for every profile', () => {
     for (const p of catalog.artists) {
       for (const b of [benchmark, null]) {
@@ -264,6 +282,35 @@ describe('agent-loop switches: schemaMode allowlist (TR1)', () => {
     // A benchmark maps its checks onto real fields; a signature screen has no such section.
     expect(md).toContain('Where the benchmark rubric looks');
     expect(buildSchemaAllowlist(profile, null)).not.toContain('Where the benchmark rubric looks');
+  });
+
+  it('surfaces colorWeights\' "at least one > 0" contains constraint (circle is always in scope)', () => {
+    // The min..max/item-type summary alone lets an all-zero colorWeights array
+    // look valid; the schema's `contains` keyword is the only place that rule
+    // lives, so it has to be rendered explicitly or submit_spec rejects it.
+    const md = buildSchemaAllowlist(profile, benchmark);
+    const contains = RAW.definitions.colorWeights.contains;
+    expect(md).toMatch(/- colorWeights: \(number [^)]+\)\[\] \([^)]+\), at least one >0/);
+    expect(contains).toEqual({ type: 'number', exclusiveMinimum: 0 });
+  });
+
+  it('flags that speedRange\'s raw 0..maxSpeed bound is not the real cap in the default viewport-units mode', () => {
+    // validateMotion (schema/src/validate.ts) divides by referenceViewport for
+    // units:'viewport' specs (the default) — a model told only the raw schema
+    // bound (0..4000) will submit speeds the validator rejects, burning calls.
+    const md = buildSchemaAllowlist(profile, benchmark);
+    const vpCap = (LIMITS.maxSpeed / LIMITS.referenceViewport).toFixed(2);
+    expect(md).toContain('effective cap is maxSpeed ÷ referenceViewport');
+    expect(md).toContain(`~${vpCap}/sec at the default referenceViewport ${LIMITS.referenceViewport}`);
+    // A spec that overrides referenceViewport gets a different cap — say so, not just the default number.
+    expect(md).toContain('lower or higher if the spec sets its own');
+    expect(md).toContain(`Only \`units: 'px'\` specs get the full ${LIMITS.maxSpeed}`);
+    // Every speedRange mention carries the caveat, not just the Types table.
+    for (const line of md.split('\n')) {
+      if (line.startsWith('- speed:') || line.startsWith('- speedRange:')) {
+        expect(line).toContain('effective cap');
+      }
+    }
   });
 
   it('is recorded on the artifact, the run and the training export', async () => {

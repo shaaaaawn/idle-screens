@@ -14,11 +14,13 @@
  * messages name the field — the model asks for a fix, not the manual.
  */
 import specSchemaJson from '../../../../packages/schema/saver-spec.schema.json';
+import { LIMITS } from '@idle-screens/schema';
 import type { ArtistStyleProfile, BenchmarkIntent } from './types';
 
 type Node = Record<string, unknown>;
 
 const ROOT = specSchemaJson as unknown as Node;
+const SPEED_RANGE_REF = '#/definitions/speedRange';
 
 /** Definitions that get their own section instead of a one-line type alias. */
 const SECTIONS = new Set(['saverSpec', 'background', 'layer', 'sprite', 'motion']);
@@ -89,6 +91,18 @@ function numberType(node: Node, kind: string): string {
   return kind;
 }
 
+/**
+ * JSON Schema `contains` on an array — e.g. `colorWeights` requires at least
+ * one item > 0 — is otherwise invisible in the `min..max`/item-type summary,
+ * so a model can submit an all-zero array that validates against the type
+ * shown here and still gets rejected by `submit_spec`.
+ */
+function containsHint(node: Node): string {
+  const c = node.contains as Node | undefined;
+  if (!c || (c.type !== 'number' && c.type !== 'integer')) return '';
+  return `, at least one ${numberType(c, '').trim()}`;
+}
+
 function typeOf(node: Node, ctx: Ctx, path: string): string {
   if (typeof node.$ref === 'string') {
     const name = node.$ref.split('/').pop() ?? node.$ref;
@@ -112,10 +126,11 @@ function typeOf(node: Node, ctx: Ctx, path: string): string {
     const inner = typeOf((node.items ?? {}) as Node, ctx, path);
     const min = typeof node.minItems === 'number' ? node.minItems : null;
     const max = typeof node.maxItems === 'number' ? node.maxItems : null;
-    if (min != null && min === max) return `[${inner} ×${min}]`;
+    const contains = containsHint(node);
+    if (min != null && min === max) return `[${inner} ×${min}]${contains}`;
     const wrapped = /[ |]/.test(inner) ? `(${inner})` : inner;
     const bounds = min != null || max != null ? ` (${min ?? 0}..${max ?? '∞'})` : '';
-    return `${wrapped}[]${bounds}`;
+    return `${wrapped}[]${bounds}${contains}`;
   }
   if (t === 'object' || node.properties) return objectType(node, ctx, path);
   return 'any';
@@ -136,16 +151,32 @@ function objectType(node: Node, ctx: Ctx, path: string): string {
 }
 
 /**
+ * The raw `0..maxSpeed` bound on `speedRange` is only the true cap for
+ * `units: 'px'` specs. `validateMotion` (schema/src/validate.ts) divides by
+ * `referenceViewport` for the default `units: 'viewport'` mode, so the real
+ * ceiling there is roughly 30x smaller — a fact the JSON schema itself cannot
+ * express (it has no field for the *other* unit's effective cap). Computed
+ * from the same `LIMITS` the validator enforces, not a hand-typed number.
+ */
+function speedCaveat(): string {
+  const vpCap = (LIMITS.maxSpeed / LIMITS.referenceViewport).toFixed(2);
+  return ` In \`units: 'viewport'\` mode the effective cap is maxSpeed ÷ referenceViewport — ~${vpCap}/sec at the default referenceViewport ${LIMITS.referenceViewport}, lower or higher if the spec sets its own. Only \`units: 'px'\` specs get the full ${LIMITS.maxSpeed}.`;
+}
+
+/**
  * The schema's own `description`, cut to its first sentence and capped, so a
  * bullet can carry the one fact the type expression cannot (what a unit means,
- * what a default is) without this file writing any prose of its own.
+ * what a default is) without this file writing any prose of its own. `speed`
+ * fields get one exception (see `speedCaveat`): the units-dependent effective
+ * cap the schema has no way to state.
  */
 function blurb(node: Node, root: Node): string {
   const d = deref(node, root).description;
   if (typeof d !== 'string') return '';
   const first = d.split(/(?<=[.!?])\s/)[0] ?? d;
   const cut = first.length > 120 ? `${first.slice(0, 117).trimEnd()}…` : first;
-  return ` — ${cut}`;
+  const caveat = node.$ref === SPEED_RANGE_REF ? speedCaveat() : '';
+  return ` — ${cut}${caveat}`;
 }
 
 /** One `- name: type — description` bullet per property of `node`. */
@@ -218,7 +249,7 @@ function collect(
   const motions = uniq([...profile.motionDialect.preferred, 'drift']);
 
   const lines: string[] = [
-    'Derived from saver-spec.schema.json — `name:` is required, `name?:` optional. Only the sprite kinds and motion types this style uses are expanded.',
+    'Derived from saver-spec.schema.json — required fields use `field:`, optional fields use `field?:`. Only the sprite kinds and motion types this style uses are expanded.',
     '',
     '### Spec (top level)',
     ...bullets(definition('saverSpec', root), ctx, 'saverSpec'),
@@ -242,7 +273,7 @@ function collect(
   if (rendered.size) {
     lines.push('', '### Types');
     for (const [name, type] of [...rendered.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      lines.push(`- ${name}: ${type}`);
+      lines.push(`- ${name}: ${type}${blurb({ $ref: `#/definitions/${name}` }, root)}`);
     }
   }
 
