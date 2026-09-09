@@ -960,6 +960,30 @@ describe('SequenceInstance — retained track', () => {
     inst.dispose();
   });
 
+  it('a structural steer that arrives mid-morph rebuilds the live child instead of leaving stale entities', () => {
+    // Regression: the morph branch replaces the whole lerped spec every frame
+    // via a paint-only hot-swap that skips SpecInstance.rebuild(). canMorph
+    // only guarantees specA/specB share structure BEFORE the retained set is
+    // applied — a structural delta (`layers.0.count` here) can validate and
+    // change effSpec, but the child's actual built entities (baked at the
+    // last rebuild) stay behind unless the swap re-checks structuralSignature.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // already mid-morph, chain-root child built at count 3
+    const child = (inst as unknown as {
+      children: Array<{ effSpec: SaverSpec; layers: Array<{ entities: unknown[] }> } | null>;
+    }).children[0]!;
+    // Entity count is scaled by viewport (400×640 here, well under the 1080
+    // reference), so the built count isn't the raw spec count — 3 scales to
+    // 1 entity, 5 scales to 2. What matters is that it MOVES when the fix
+    // rebuilds; a stale hot-swap leaves it at 1 regardless of effSpec.count.
+    const before = child.layers[0]!.entities.length;
+    steer(inst, 'layers.0.count', 5); // reachable only via the morph's own hot-swap, not the plain active-child path
+    expect(child.effSpec.layers[0]!.count).toBe(5);
+    expect(child.layers[0]!.entities.length).not.toBe(before);
+    expect(child.layers[0]!.entities.length).toBe(2);
+    inst.dispose();
+  });
+
   it('a freshly created child with retained deltas paints a full warm-up frame, not a ghosted blend of the pre-steer scene', () => {
     // Regression: SpecInstance's own mount does one stray paint at t=0 (it
     // starts paused, like every sequence child) using the PRE-steer spec —

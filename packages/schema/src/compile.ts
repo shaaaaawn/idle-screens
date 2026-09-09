@@ -804,8 +804,8 @@ class SpecInstance implements SaverInstance {
 
   /**
    * Replace the rendered spec without triggering a transition glide.
-   * Checks structural signature — use `hotSwapPaint` when the caller
-   * already knows the signature is unchanged (e.g. mid-morph lerp).
+   * Checks structural signature — use `hotSwapPaint` only when the caller
+   * already knows the signature is unchanged.
    */
   hotSwapSpec(spec: SaverSpec): void {
     this.effSpec = spec;
@@ -1051,12 +1051,18 @@ class SequenceInstance implements SaverInstance {
       const child = this.ensureChild(chainRoot);
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
-      // The lerp endpoints carry the retained track: hotSwapPaint replaces the
-      // child's whole effSpec every morph frame, so without this a steered
-      // colour would vanish for `dur` and snap back when the morph finalises.
+      // The lerp endpoints carry the retained track, so without this a
+      // steered colour would vanish for `dur` and snap back when the morph
+      // finalises. `canMorph` only guarantees specA/specB share structure
+      // BEFORE the retained set is applied — a structural delta (`layers.0.
+      // count`, a motion change) could validate on one endpoint and not the
+      // other, or change both identically but differ from what this child
+      // was last built with. hotSwapSpec (not hotSwapPaint) re-checks the
+      // signature every frame and rebuilds when it moved, so a structural
+      // steer actually takes effect instead of leaving stale entities.
       const specA = this.steeredScene(this.childScene(prevIdx));
       const specB = this.steeredScene(this.childScene(index));
-      child.hotSwapPaint(lerpSpec(specA, specB, k));
+      child.hotSwapSpec(lerpSpec(specA, specB, k));
       child.renderFrame(localT, this.childSeed(chainRoot, seed));
     } else {
       // No morph (or morph complete). If we were morphing, finalize.
@@ -1145,7 +1151,7 @@ class SequenceInstance implements SaverInstance {
         // Mid-morph, the rendered child lives at the chain-root slot, not
         // `children[activeIndex]` — forwarding a child.applyTrack() there
         // would silently no-op AND get overwritten by the morph's own
-        // hotSwapPaint on the very next frame regardless, so a transition
+        // hotSwapSpec on the very next frame regardless, so a transition
         // glide on this path can't coexist with the morph's own cross-fade.
         // The delta is already retained above, so a re-render is all that's
         // needed to reach it via steeredScene: it takes effect this frame,
