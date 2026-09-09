@@ -494,3 +494,55 @@ describe('textBlock anchor / font / opacity validation', () => {
     expect(res.warnings?.some((w) => w.code === 'unknown-property')).toBeFalsy();
   });
 });
+
+describe('textBlock anchor in perception and steering', () => {
+  const litCols = (grid: LuminanceGrid) => {
+    const cols: number[] = [];
+    for (let r = 0; r < grid.rows; r++)
+      for (let c = 0; c < grid.cols; c++)
+        if (grid.cells[r * grid.cols + c]! > grid.background[r]! + 0.01) cols.push(c);
+    return cols;
+  };
+
+  for (const [width, height] of [[1920, 1080], [1080, 1080]] as const) {
+    it(`anchor: 'center' at position 0.5/0.5 is centred in the luminance grid on ${width}×${height}`, () => {
+      const spec = textBlockSpec({ text: 'Centred title', maxWidth: 0.9, anchor: 'center' });
+      spec.layers[0]!.position = { x: 0.5, y: 0.5 };
+      const grid = luminanceGrid(spec, { t: 0, viewport: { width, height } });
+      const cols = litCols(grid);
+      expect(cols.length).toBeGreaterThan(0);
+      const mid = (Math.min(...cols) + Math.max(...cols) + 1) / 2 / grid.cols;
+      expect(Math.abs(mid - 0.5)).toBeLessThan(0.03);
+      const scene = perceiveScene(spec, { t: 0, viewport: { width, height } });
+      expect(Math.abs(scene.centroid!.y - 0.5)).toBeLessThan(0.05);
+    });
+  }
+
+  it('advisory boxes follow the anchor (text-off-screen)', () => {
+    const wide = (anchor?: string) => {
+      const spec = textBlockSpec({ text: 'A caption that is long enough to run off the frame', maxWidth: 1.2, fontSize: 0.06, ...(anchor ? { anchor } : {}) });
+      spec.layers[0]!.position = { x: 0.95, y: 0.5 };
+      return adviseSpec(spec).some((w) => w.code === 'text-off-screen');
+    };
+    expect(wide()).toBe(true);
+    expect(wide('top-left')).toBe(true);
+    expect(wide('right')).toBe(false);
+  });
+
+  it('anchor is structural; font and opacity are paint', () => {
+    const base = structuralSignature(textBlockSpec());
+    expect(structuralSignature(textBlockSpec({ anchor: 'center' }))).not.toBe(base);
+    expect(structuralSignature(textBlockSpec({ font: 'bold monospace', opacity: 0.3 }))).toBe(base);
+    // Gliding opacity keeps the signature equal — no rebuild.
+    const spec = textBlockSpec({ opacity: 1 });
+    const out = applyDeltasToSpec(spec, [{ t: 0, path: 'layers.0.sprite.opacity', value: 0 }]);
+    expect((out.layers[0]!.sprite as { opacity?: number }).opacity).toBe(0);
+    expect(structuralSignature(out)).toBe(structuralSignature(spec));
+  });
+
+  it('opacity scales perceived ink', () => {
+    const sum = (g: LuminanceGrid) => g.cells.reduce((a: number, b: number) => a + b, 0);
+    expect(sum(luminanceGrid(textBlockSpec({ opacity: 0.2 }), { t: 0 })))
+      .toBeLessThan(sum(luminanceGrid(textBlockSpec(), { t: 0 })));
+  });
+});

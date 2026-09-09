@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textWidthEm, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
 
@@ -442,7 +442,9 @@ function textBlockBoxAt(
   const totalH = lines.length * lh;
   const align = s.align ?? 'left';
   const x0 = align === 'center' ? p.x + (maxWPx - maxLineW) / 2 : align === 'right' ? p.x + maxWPx - maxLineW : p.x;
-  return { x0, y0: p.y, x1: x0 + maxLineW, y1: p.y + totalH };
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
+  return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH };
 }
 
 /**

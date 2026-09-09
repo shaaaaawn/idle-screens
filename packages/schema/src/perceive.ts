@@ -29,6 +29,7 @@ import {
   revealState,
   rotationAt,
   sizeAt,
+  textBlockAnchorOffset,
   type Entity,
 } from './simulate';
 import { LIMITS, type LayerSpec, type SaverSpec } from './types';
@@ -165,9 +166,11 @@ function textBlockBox(
   const cx = align === 'center' ? p.x + maxWPx / 2
     : align === 'right' ? p.x + maxWPx - maxLineW / 2
     : p.x + maxLineW / 2;
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
   return {
-    cx,
-    cy: p.y + totalH / 2,
+    cx: cx + dx,
+    cy: p.y + totalH / 2 + dy,
     halfX: maxLineW / 2,
     halfY: totalH / 2,
   };
@@ -452,7 +455,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
-        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) : 1);
+        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1) : 1);
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;

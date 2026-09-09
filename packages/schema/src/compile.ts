@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   easeSmooth,
@@ -489,7 +489,18 @@ class SpecInstance implements SaverInstance {
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
-      ctx.font = `${fsPx}px system-ui, sans-serif`;
+      if (sprite.anchor) {
+        // `position` names a point of the rendered text, not the layout box's
+        // top-left. Offset after line-breaking so the block's real extent
+        // (widest line × lines) is what gets anchored; rotation stays about
+        // the anchor point. Same arithmetic as perceive/advise (simulate.ts).
+        const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+        const { dx, dy } = textBlockAnchorOffset(sprite, maxWPx, maxLineW, lines.length * lh);
+        if (dx !== 0 || dy !== 0) ctx.translate(dx, dy);
+      }
+      // Paint-level alpha for the block only (layer `alpha` is baked per entity).
+      if (sprite.opacity !== undefined) ctx.globalAlpha *= sprite.opacity;
+      ctx.font = sprite.font ? composeFontShorthand(fsPx, sprite.font) : `${fsPx}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       ctx.textBaseline = 'top';
       ctx.textAlign = align;

@@ -1,5 +1,5 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SpriteSpec } from './types';
+import type { CycleSpec, LayerSpec, SpriteSpec, TextBlockAnchor } from './types';
 import { LIMITS } from './types';
 import { isShapedSprite } from './shapes';
 
@@ -917,6 +917,30 @@ export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[
   }
 
   return lines;
+}
+
+/**
+ * Where an anchored textBlock's layout origin sits relative to `position`:
+ * the (dx, dy) to ADD to `position` so that the named point of the rendered
+ * text lands on it. The rendered box is the widest line wide (placed inside
+ * the `maxWidth` box by `align`) and `lines × lineHeight` tall — so `anchor`
+ * says where the block sits and `align` only shapes its ragged edge. Absent
+ * anchor ⇒ (0, 0): `position` stays the layout box's top-left, exactly as
+ * before the field existed. Renderer, perception and advisories all call
+ * this, so their boxes agree by construction.
+ */
+export function textBlockAnchorOffset(
+  s: { anchor?: TextBlockAnchor; align?: 'left' | 'center' | 'right' },
+  maxWPx: number,
+  maxLineW: number,
+  totalH: number,
+): { dx: number; dy: number } {
+  if (!s.anchor) return { dx: 0, dy: 0 };
+  const ax = s.anchor.endsWith('left') ? 0 : s.anchor.endsWith('right') ? 1 : 0.5;
+  const ay = s.anchor.startsWith('top') ? 0 : s.anchor.startsWith('bottom') ? 1 : 0.5;
+  // Ink left edge relative to the layout origin, as `align` places it.
+  const inkX0 = s.align === 'center' ? (maxWPx - maxLineW) / 2 : s.align === 'right' ? maxWPx - maxLineW : 0;
+  return { dx: -(inkX0 + ax * maxLineW), dy: -(ay * totalH) };
 }
 
 // ---------------------------------------------------------------------------
