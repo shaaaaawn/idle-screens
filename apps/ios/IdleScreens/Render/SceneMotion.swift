@@ -9,8 +9,22 @@ enum SceneMotion {
 
     /// Position in view pixels at time `t` (seconds). `dim` is the
     /// units-scale (1 for px specs, min(w,h) for viewport specs).
+    /// `parent` is the entity a parented orbit rides (see CompiledLayer's
+    /// `orbitParentKey`): the child's own position is an offset from (0,0),
+    /// so the two move as one body.
     static func position(of entity: CompiledEntity, at t: TimeInterval,
-                         in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
+                         in size: CGSize, dim: CGFloat, wrap: Bool,
+                         parent: CompiledEntity? = nil) -> CGPoint {
+        if entity.orbitParented, let parent {
+            let offset = position(of: entity, at: t, in: size, dim: dim, wrap: wrap)
+            let anchor = position(of: parent, at: t, in: size, dim: dim, wrap: wrap)
+            return CGPoint(x: offset.x + anchor.x, y: offset.y + anchor.y)
+        }
+        return basePosition(of: entity, at: t, in: size, dim: dim, wrap: wrap)
+    }
+
+    private static func basePosition(of entity: CompiledEntity, at t: TimeInterval,
+                                     in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
         let x0 = entity.x * size.width
         let y0 = entity.y * size.height
         let m = entity.size * dim
@@ -19,6 +33,20 @@ enum SceneMotion {
         switch entity.motionType {
         case "static":
             return CGPoint(x: x0, y: y0)
+
+        case "warp" where entity.warp != nil:
+            // Flying at the viewer: depth wraps far→near, and screen offset
+            // from the vanishing point scales by the same 1/z as the sprite.
+            let w = entity.warp!
+            let persp = 1 / warpDepth(w, at: t)
+            let halfMin = Swift.min(size.width, size.height) / 2
+            return CGPoint(x: w.cx * size.width + w.ux * halfMin * persp,
+                           y: w.cy * size.height + w.uy * halfMin * persp)
+
+        case "path" where entity.path != nil:
+            let p = entity.path!
+            let pt = pathPoint(p, at: t, in: size)
+            return CGPoint(x: pt.x + p.offX * dim, y: pt.y + p.offY * dim)
 
         case "orbit":
             // vx carries angular speed in deg/sec; phase seeds the start angle.
@@ -74,11 +102,70 @@ enum SceneMotion {
         }
     }
 
+    /// Near plane for warp depth; z lives in [warpNear, 1] and screen scale
+    /// is 1/z (web parity: simulate.ts WARP_NEAR).
+    static let warpNear = 0.08
+    private static let warpMaxScale = 8.0
+
+    /// Depth of a warp entity at `t` (seconds): wraps from far (1) to near.
+    static func warpDepth(_ w: WarpParams, at t: TimeInterval) -> Double {
+        wrapValue(w.z0 - w.vz * t, warpNear, 1)
+    }
+
+    /// Position along a path loop at `t` (seconds), in view pixels. Closed
+    /// loops cycle; open ones ping-pong so they reverse instead of teleporting.
+    static func pathPoint(_ p: PathParams, at t: TimeInterval, in size: CGSize) -> CGPoint {
+        let n = p.points.count
+        guard n >= 2 else {
+            let only = p.points.first ?? (x: 0.5, y: 0.5)
+            return CGPoint(x: only.x * size.width, y: only.y * size.height)
+        }
+        var s = (t * 1000 / p.duration + p.phase).truncatingRemainder(dividingBy: 1)
+        if s < 0 { s += 1 }
+        if !p.closed {
+            let pp = s * 2
+            s = pp < 1 ? pp : 2 - pp
+        }
+        let segs = Double(p.closed ? n : n - 1)
+        let u = Swift.min(s * segs, segs - 1e-9)
+        let i = Int(u.rounded(.down))
+        let local = u - Double(i)
+        func at(_ k: Int) -> (x: Double, y: Double) {
+            p.closed ? p.points[((k % n) + n) % n]
+                     : p.points[Swift.max(0, Swift.min(n - 1, k))]
+        }
+        let p1 = at(i), p2 = at(i + 1)
+        let fx: Double, fy: Double
+        if p.smooth {
+            let p0 = at(i - 1), p3 = at(i + 2)
+            fx = catmullRom(p0.x, p1.x, p2.x, p3.x, local)
+            fy = catmullRom(p0.y, p1.y, p2.y, p3.y, local)
+        } else {
+            fx = p1.x + (p2.x - p1.x) * local
+            fy = p1.y + (p2.y - p1.y) * local
+        }
+        return CGPoint(x: fx * size.width, y: fy * size.height)
+    }
+
+    static func catmullRom(_ p0: Double, _ p1: Double, _ p2: Double,
+                           _ p3: Double, _ u: Double) -> Double {
+        let u2 = u * u, u3 = u2 * u
+        return 0.5 * (2 * p1 + (-p0 + p2) * u
+                      + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2
+                      + (-p0 + 3 * p1 - 3 * p2 + p3) * u3)
+    }
+
     /// Size multiplier for grow (size breathing) at time `t` (seconds).
     /// 1 when the layer declares no grow. Clamped positive like sizeAt().
+    /// Warp entities also scale by 1/z as they approach the viewer.
     static func growScale(of entity: CompiledEntity, at t: TimeInterval) -> Double {
-        guard entity.growAmp != 0 else { return 1 }
-        let s = 1 + entity.growAmp * sin(t * 1000 * 2 * .pi / entity.growPeriod + entity.growPhase)
+        var s = 1.0
+        if entity.growAmp != 0 {
+            s = 1 + entity.growAmp * sin(t * 1000 * 2 * .pi / entity.growPeriod + entity.growPhase)
+        }
+        if let w = entity.warp {
+            s *= Swift.min(1 / warpDepth(w, at: t), warpMaxScale)
+        }
         return max(s, 0.01)
     }
 
@@ -92,6 +179,12 @@ enum SceneMotion {
     static func pulsedAlpha(of entity: CompiledEntity, layer: CompiledLayer,
                             at t: TimeInterval) -> Double {
         var alpha = entity.alpha
+        if let w = entity.warp {
+            // Fade in over the first 20% of depth after respawning at the far
+            // plane, so a recycled entity doesn't pop into view.
+            let z = warpDepth(w, at: t)
+            alpha *= Swift.min(1, Swift.max(0, (1 - z) / 0.2))
+        }
         if let pulse = layer.pulse {
             let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
             alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))

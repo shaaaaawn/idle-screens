@@ -50,6 +50,8 @@ final class TVAppState {
     var currentSpecJSON: JSONValue?
     var compiledScene: [CompiledLayer] = []
     var specBackground: SpecSubset.Background?
+    /// 0…1 frame persistence declared by the scene (motion smear).
+    var specGhosting: Double = 0
     /// True when the channel runs a non-schema spec (e.g. classic saver
     /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
     var isClassicSpec = false
@@ -218,6 +220,7 @@ final class TVAppState {
         currentSpecJSON = nil
         compiledScene = []
         specBackground = nil
+        specGhosting = 0
         isClassicSpec = false
         classicSaverId = nil
         thumbFailed = false
@@ -233,6 +236,7 @@ final class TVAppState {
         if let cached = channels.first(where: { $0.id == channelId })?.spec {
             compiledScene = cached.compile(seed: cached.seed ?? 0)
             specBackground = cached.background
+            specGhosting = cached.ghosting ?? 0
             complexityCap = SceneComplexity.precap(for: compiledScene)
         }
         openSocket(channelId: channelId, watching: true)
@@ -388,6 +392,7 @@ final class TVAppState {
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
             specBackground = nil
+            specGhosting = 0
             return
         }
         // A valid schema spec clears the classic flag (re-publish scenario).
@@ -396,6 +401,7 @@ final class TVAppState {
         let seed = spec.seed ?? fallbackSeed ?? 0
         compiledScene = spec.compile(seed: seed)
         specBackground = spec.background
+        specGhosting = spec.ghosting ?? 0
         complexityCap = SceneComplexity.precap(for: compiledScene)
     }
 
@@ -440,6 +446,7 @@ final class TVAppState {
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
         compiledScene = scene.compile(seed: seed)
         specBackground = scene.background
+        specGhosting = scene.ghosting ?? 0
         complexityCap = SceneComplexity.precap(for: compiledScene)
     }
 

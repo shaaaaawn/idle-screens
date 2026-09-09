@@ -6,6 +6,12 @@ import SwiftUI
 struct NativeSceneView: View {
     let layers: [CompiledLayer]
     let background: SpecSubset.Background?
+    /// 0…1 frame persistence. The web engine gets this free by compositing
+    /// each frame over the last one; a SwiftUI Canvas has no accumulation
+    /// buffer, so motion is smeared by re-drawing each entity at a few
+    /// earlier instants with decaying alpha. Close for moving sprites (what
+    /// ghosting is for) and bounded — see `ghostEchoes`.
+    var ghosting: Double = 0
     let tier: CapabilityTier
     var watchdog: FrameWatchdog?
     var onDowngrade: () -> Void = {}
@@ -87,15 +93,28 @@ struct NativeSceneView: View {
         // foreground accents first).
         let total = layers.reduce(0) { $0 + $1.entities.count }
         let stride = tier == .t3 ? 1 : max(1, Int((Double(total) / 150.0).rounded(.up)))
+        let echoes = ghostEchoes(entityCount: total)
         for layer in layers {
             // Dimensional values (sizes, speeds, stroke widths) scale by
             // min(w,h) for viewport specs and by 1 for px specs. Positions
             // (x/y) are always fractions of w/h — never scaled.
             let dim = layer.units == .px ? 1 : minDim
+            // Layer lifecycle: the whole layer fades in and out on its own
+            // envelope, and is skipped outright before it enters / after it
+            // leaves (web parity: compile.ts `lifeAlphaAt` gate).
+            let lifeAlpha = layer.life?.alpha(at: t * 1000) ?? 1
+            if lifeAlpha <= 0 { continue }
+            // A parented orbit rides another layer's first entity (web
+            // parity: compile.ts `parentEntityFor`), which is how a compound
+            // creature keeps its parts attached.
+            let parentEntity = layer.orbitParentKey.flatMap { key in
+                layers.first { $0.key == key }?.entities.first
+            }
             if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
-                let point = position(of: entity, at: t, in: space, dim: dim, wrap: layer.wrap)
+                let point = SceneMotion.position(of: entity, at: t, in: space, dim: dim,
+                                                 wrap: layer.wrap, parent: parentEntity)
                 var alpha = entity.alpha
                 if let pulse = layer.pulse {
                     let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
@@ -103,13 +122,46 @@ struct NativeSceneView: View {
                 }
                 // Web engine sizeAt(): margins/wrap above intentionally use the
                 // base size, like web.
+                // Ghost echoes first, so the live sprite paints over its trail.
+                if echoes > 0 {
+                    for k in (1...echoes).reversed() {
+                        let back = t - Double(k) * Self.ghostStep
+                        guard back >= 0 else { continue }
+                        let ghostPoint = SceneMotion.position(of: entity, at: back, in: space,
+                                                              dim: dim, wrap: layer.wrap,
+                                                              parent: parentEntity)
+                        // A wrapped sprite that jumped the edge would smear a
+                        // line across the whole frame; drop those echoes.
+                        if layer.wrap,
+                           hypot(ghostPoint.x - point.x, ghostPoint.y - point.y)
+                            > min(space.width, space.height) / 2 { continue }
+                        let decay = pow(ghosting, Double(k))
+                        draw(entity: entity,
+                             size: entity.size * SceneMotion.growScale(of: entity, at: back),
+                             sprite: layer.sprite, units: layer.units, at: ghostPoint,
+                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
+                    }
+                }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
                 draw(entity: entity, size: grownSize, sprite: layer.sprite,
                      units: layer.units, at: point,
-                     dim: dim, alpha: alpha, t: t, ctx: &ctx)
+                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &ctx)
             }
             ctx.blendMode = .normal
         }
+    }
+
+    /// One echo per ~30fps frame back in time.
+    static let ghostStep: TimeInterval = 1.0 / 30
+
+    /// How many echoes to afford. Heavier persistence wants a longer tail, but
+    /// each echo re-draws every entity — so the budget, not the spec, has the
+    /// last word, and below t3 there are none at all.
+    private func ghostEchoes(entityCount: Int) -> Int {
+        guard ghosting > 0.01, tier == .t3, !staticFrame else { return 0 }
+        let wanted = ghosting > 0.6 ? 4 : (ghosting > 0.3 ? 3 : 2)
+        let affordable = entityCount > 0 ? max(0, 1500 / entityCount - 1) : wanted
+        return min(wanted, affordable)
     }
 
     // MARK: - Background
@@ -230,8 +282,148 @@ struct NativeSceneView: View {
                           reveal: reveal, at: point, dim: dim, alpha: alpha,
                           spin: spin, t: t, ctx: &ctx)
 
+        case .polygon(_, _, _, let sides, let points, let soft):
+            let r = size * dim
+            guard r >= 0.25 else { return }
+            let verts = Self.polygonPoints(sides: sides, points: points, radius: r)
+            guard verts.count >= 3 else { return }
+            var path = Path()
+            path.move(to: verts[0])
+            for v in verts.dropFirst() { path.addLine(to: v) }
+            path.closeSubpath()
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            if soft, tier == .t3 {
+                // Same falloff as a soft circle: bright core to 35%, then out.
+                layer.fill(path, with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: color, location: 0),
+                        .init(color: color.opacity(0.75), location: 0.35),
+                        .init(color: color.opacity(0), location: 1),
+                    ]),
+                    center: .zero, startRadius: 0, endRadius: r))
+            } else {
+                layer.fill(path, with: .color(color))
+            }
+
+        case .stroke(_, let pts, _, _, let width, let smooth, let taper, let orient):
+            // Unit points span a −1…1 box scaled by HALF the seeded length,
+            // so `length` is the mark's bounding diameter (streak's rule).
+            let samples = Self.strokeSamples(points: pts, halfSize: size * dim / 2,
+                                             smooth: smooth)
+            guard samples.count >= 2 else { return }
+            let lw = max(0.5, (width ?? defaultWidth) * dim)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            var angle = spin
+            if orient, entity.vx != 0 || entity.vy != 0 {
+                angle += atan2(entity.vy, entity.vx) * 180 / .pi
+            }
+            layer.rotate(by: .degrees(angle))
+            if taper {
+                // A brush mark: every sampled segment at its own width.
+                for i in 1..<samples.count {
+                    var seg = Path()
+                    seg.move(to: samples[i - 1])
+                    seg.addLine(to: samples[i])
+                    let u = (Double(i) - 0.5) / Double(samples.count - 1)
+                    layer.stroke(seg, with: .color(color),
+                                 style: StrokeStyle(lineWidth: max(0.5, lw * Self.strokeTaper(u)),
+                                                    lineCap: .round, lineJoin: .round))
+                }
+            } else {
+                var path = Path()
+                path.move(to: samples[0])
+                for pt in samples.dropFirst() { path.addLine(to: pt) }
+                layer.stroke(path, with: .color(color),
+                             style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
+            }
+
+        case .bar(let values, _, _, _, _, let maxValue, let direction):
+            // `values` are paint, read at draw time, so a steered value glides.
+            let fraction = Self.barFraction(values: values, max: maxValue, index: entity.barIndex)
+            let len = size * dim * fraction
+            guard len > 0.25 else { return }
+            let thick = entity.thickness > 0 ? entity.thickness * dim : size * dim * 0.2
+            let box = Self.barBox(direction: direction, length: len, thickness: thick)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            layer.fill(Path(box), with: .color(color))
+
         case .unknown:
             break
+        }
+    }
+
+    // MARK: - Shape geometry (port of packages/schema/src/shapes.ts)
+
+    /// Polygon vertices about the origin. `points` (unit −1…1) wins; otherwise
+    /// a regular n-gon of `sides` (default 6), point up.
+    static func polygonPoints(sides: Int?, points: [[Double]]?, radius: Double) -> [CGPoint] {
+        if let points, points.count >= 3 {
+            return points.compactMap {
+                $0.count >= 2 ? CGPoint(x: $0[0] * radius, y: $0[1] * radius) : nil
+            }
+        }
+        let n = max(3, sides ?? 6)
+        return (0..<n).map { k in
+            let a = -Double.pi / 2 + 2 * .pi * Double(k) / Double(n)
+            return CGPoint(x: cos(a) * radius, y: sin(a) * radius)
+        }
+    }
+
+    /// The stroke path, sampled. Smooth strokes run Catmull-Rom through the
+    /// control points; enough samples that every segment keeps its curve.
+    static func strokeSamples(points: [[Double]], halfSize: Double, smooth: Bool) -> [CGPoint] {
+        let pts = points.compactMap {
+            $0.count >= 2 ? (x: $0[0] * halfSize, y: $0[1] * halfSize) : nil
+        }
+        let m = pts.count
+        guard m >= 2 else { return pts.map { CGPoint(x: $0.x, y: $0.y) } }
+        let curved = smooth && m >= 3
+        let segs = m - 1
+        let n = max(24, segs * 6 + 1)
+        func at(_ k: Int) -> (x: Double, y: Double) { pts[max(0, min(m - 1, k))] }
+        return (0..<n).map { i in
+            let u = Double(i) / Double(n - 1) * Double(segs)
+            let seg = min(segs - 1, Int(u.rounded(.down)))
+            let local = u - Double(seg)
+            let p1 = at(seg), p2 = at(seg + 1)
+            guard curved else {
+                return CGPoint(x: p1.x + (p2.x - p1.x) * local,
+                               y: p1.y + (p2.y - p1.y) * local)
+            }
+            let p0 = at(seg - 1), p3 = at(seg + 2)
+            return CGPoint(x: SceneMotion.catmullRom(p0.x, p1.x, p2.x, p3.x, local),
+                           y: SceneMotion.catmullRom(p0.y, p1.y, p2.y, p3.y, local))
+        }
+    }
+
+    /// Brush profile along a mark — thin at both ends, floored so it never
+    /// vanishes mid-stroke on a coarse display.
+    static func strokeTaper(_ u: Double) -> Double {
+        max(0.15, sin(.pi * min(1, max(0, u))))
+    }
+
+    /// 0…1 fill of bar `index`: `values[i] / max`, max defaulting to the
+    /// largest value.
+    static func barFraction(values: [Double], max maxValue: Double?, index: Int) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let v = values[((index % values.count) + values.count) % values.count]
+        let top = maxValue ?? values.reduce(0) { Swift.max($0, $1) }
+        guard top > 0 else { return 0 }
+        return Swift.min(1, Swift.max(0, v / top))
+    }
+
+    /// Box of a bar growing from the origin toward `direction`.
+    static func barBox(direction: String, length: Double, thickness: Double) -> CGRect {
+        switch direction {
+        case "left":  return CGRect(x: -length, y: -thickness / 2, width: length, height: thickness)
+        case "up":    return CGRect(x: -thickness / 2, y: -length, width: thickness, height: length)
+        case "down":  return CGRect(x: -thickness / 2, y: 0, width: thickness, height: length)
+        default:      return CGRect(x: 0, y: -thickness / 2, width: length, height: thickness)
         }
     }
 
