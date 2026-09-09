@@ -33,6 +33,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     setTransform: vi.fn(),
     createLinearGradient: vi.fn(() => stubGradient()),
     createRadialGradient: vi.fn(() => stubGradient()),
+    drawImage: vi.fn(),
     fillStyle: '',
     strokeStyle: '',
     globalAlpha: 1,
@@ -284,14 +285,25 @@ describe('validateSequence', () => {
     expect(bad.errors.some((e) => e.path === 'sync')).toBe(true);
   });
 
-  it('rejects fade transition (not yet supported)', () => {
-    const r = validateSequence(seq({
-      segments: [{
-        key: 'a', scene: SCENE, duration: 5000,
-        transition: { type: 'fade' as 'cut', dur: 600 } as never,
-      }],
+  // Flipped deliberately in plan 1c: this used to assert "rejects fade
+  // transition (not yet supported)".
+  it('accepts fade transition (1c) and bounds its dur like morph', () => {
+    const withDur = (dur: unknown) => validateSequence(seq({
+      segments: [{ key: 'a', scene: SCENE, duration: 5000, transition: { type: 'fade', dur } as never }],
     }));
-    expect(r.valid).toBe(false);
+    expect(withDur(600).valid).toBe(true);
+    expect(withDur(200).valid).toBe(true);
+    expect(withDur(5000).valid).toBe(true);
+    for (const bad of [100, 6000, undefined, 'slow']) {
+      const r = withDur(bad);
+      expect(r.valid).toBe(false);
+      expect(r.errors.some((e) => e.path === 'segments[0].transition.dur')).toBe(true);
+    }
+    const unknown = validateSequence(seq({
+      segments: [{ key: 'a', scene: SCENE, duration: 5000, transition: { type: 'dissolve' } as never }],
+    }));
+    expect(unknown.valid).toBe(false);
+    expect(unknown.errors.some((e) => e.path === 'segments[0].transition.type')).toBe(true);
   });
 
   it('accepts cut transition', () => {
@@ -942,6 +954,190 @@ describe('SequenceInstance — retained track', () => {
     inst.renderFrame!(9000, 1);
     expect(childSpec(inst, 2)).toBe(BARS);
     inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fade — the general cross-fade between unlike segments (plan 1c, #45).
+// ---------------------------------------------------------------------------
+
+describe('SequenceInstance — fade transition', () => {
+  const fadeSeq = (overrides: Partial<IdleSequence> = {}): IdleSequence => morphSeq({
+    segments: [
+      { key: 'a', scene: SCENE_A, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+      { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000 },
+    ],
+    ...overrides,
+  });
+
+  interface Rec { fills: string[]; drawAlphas: number[] }
+  /**
+   * One recording context per canvas element, so the shared surface (the one
+   * canvas in the host) and the fade's offscreen canvas can be told apart.
+   */
+  function perCanvasContexts(): Map<HTMLCanvasElement, Rec> {
+    const recs = new Map<HTMLCanvasElement, Rec>();
+    const ctxs = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
+      let ctx = ctxs.get(this);
+      if (!ctx) {
+        const rec: Rec = { fills: [], drawAlphas: [] };
+        const c = stub2dContext();
+        let _fs = '';
+        Object.defineProperty(c, 'fillStyle', {
+          get: () => _fs,
+          set: (v: string) => { _fs = v; if (typeof v === 'string') rec.fills.push(v); },
+        });
+        (c as { drawImage: unknown }).drawImage = vi.fn(function (this: { globalAlpha: number }) { rec.drawAlphas.push(this.globalAlpha); });
+        ctxs.set(this, c);
+        recs.set(this, rec);
+        ctx = c;
+      }
+      return ctx;
+    } as never;
+    return recs;
+  }
+  const fadingOf = (inst: SaverInstance) => (inst as unknown as { fading: { index: number; child: SaverInstance } | null }).fading;
+  const mainOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec => recs.get(host.querySelector('canvas')!)!;
+  const offscreenOf = (recs: Map<HTMLCanvasElement, Rec>, host: HTMLElement): Rec[] =>
+    [...recs.entries()].filter(([c]) => !host.contains(c)).map(([, r]) => r);
+  const DEFAULT_BG = '#05050a'; // SCENE_STRUCTURAL_DIFF declares no background
+
+  it('renders both segments during the window and composites the outgoing at a decreasing alpha', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq()), saverCtx({ host }));
+    inst.renderFrame!(4000, 1);
+    expect(mainOf(recs, host).fills).toContain('#112233');
+    expect(fadingOf(inst)).toBeNull();
+
+    inst.renderFrame!(5300, 1); // 300 ms into a 1000 ms fade
+    const main = mainOf(recs, host);
+    expect(main.fills).toContain(DEFAULT_BG); // incoming on the shared surface
+    const off = offscreenOf(recs, host);
+    expect(off).toHaveLength(1);
+    expect(off[0]!.fills).toContain('#112233'); // outgoing on its own canvas
+    expect(host.querySelectorAll('canvas')).toHaveLength(1); // the offscreen canvas is not in the DOM
+    expect(main.drawAlphas).toHaveLength(1);
+    expect(main.drawAlphas[0]).toBeCloseTo(1 - lerpK(0.3), 5);
+    expect(fadingOf(inst)?.index).toBe(0);
+
+    inst.renderFrame!(5800, 1);
+    expect(main.drawAlphas).toHaveLength(2);
+    expect(main.drawAlphas[1]).toBeCloseTo(1 - lerpK(0.8), 5);
+    expect(main.drawAlphas[1]!).toBeLessThan(main.drawAlphas[0]!);
+
+    inst.renderFrame!(6100, 1); // fade over
+    expect(fadingOf(inst)).toBeNull();
+    expect(main.drawAlphas).toHaveLength(2);
+    expect(off[0]!.fills.filter((f) => f === '#112233').length).toBeGreaterThan(0);
+    inst.dispose();
+  });
+  /** easeSmooth, restated so the test does not import the thing it checks. */
+  function lerpK(k: number): number { return k * k * (3 - 2 * k); }
+
+  it('the outgoing segment keeps animating at its duration + localT (it does not freeze)', () => {
+    perCanvasContexts();
+    const inst = mountSync(compileSequence(fadeSeq()));
+    inst.renderFrame!(5300, 1);
+    const out = fadingOf(inst)!.child;
+    const spy = vi.spyOn(out, 'renderFrame');
+    inst.renderFrame!(5400, 1);
+    expect(spy).toHaveBeenCalledWith(5400, 42); // 5000 (its duration) + 400, the sequence seed
+    inst.dispose();
+  });
+
+  it('the outgoing child is released when the fade completes and on dispose', () => {
+    perCanvasContexts();
+    const inst = mountSync(compileSequence(fadeSeq()));
+    inst.renderFrame!(5300, 1);
+    const out = fadingOf(inst)!.child;
+    const disposed = vi.spyOn(out, 'dispose');
+    inst.renderFrame!(6000, 1);
+    expect(disposed).toHaveBeenCalledTimes(1);
+    expect(fadingOf(inst)).toBeNull();
+    inst.renderFrame!(5300, 1); // seek back into the window: a fresh outgoing child
+    const again = vi.spyOn(fadingOf(inst)!.child, 'dispose');
+    inst.dispose();
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it('the clicker fades too: a sequence.segment steer lands at localT 0 of a fade boundary', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq()), saverCtx({ host }));
+    inst.renderFrame!(1000, 1);
+    steerTo(inst, 1);
+    expect(fadingOf(inst)?.index).toBe(0);
+    expect(mainOf(recs, host).drawAlphas[0]).toBeCloseTo(1, 5); // k = 0 → the outgoing fully covers
+    inst.dispose();
+  });
+
+  it("under loop: true the last segment's fade is the wrap's transition into segment 0", () => {
+    perCanvasContexts();
+    const inst = mountSync(compileSequence(fadeSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000 },
+        { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+      ],
+    })));
+    inst.renderFrame!(9000, 1);
+    expect(fadingOf(inst)).toBeNull();
+    inst.renderFrame!(10300, 1); // lap 2, segment 0, localT 300
+    expect(activeIndexOf(inst)).toBe(0);
+    expect(fadingOf(inst)?.index).toBe(1);
+    inst.renderFrame!(11500, 1);
+    expect(fadingOf(inst)).toBeNull();
+    inst.dispose();
+  });
+
+  it('the retained track reaches the outgoing child', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq()), saverCtx({ host }));
+    inst.renderFrame!(4000, 1);
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'background.color', value: '#00ff00', ease: 'step', dur: 0 }] });
+    inst.renderFrame!(5300, 1);
+    expect(offscreenOf(recs, host)[0]!.fills).toContain('#00ff00');
+    inst.dispose();
+  });
+
+  it("tier gate: 'basic' and 'minimal' play a fade as a cut; 'standard'/'high'/absent fade", () => {
+    for (const tier of ['basic', 'minimal'] as const) {
+      const recs = perCanvasContexts();
+      const host = document.createElement('div');
+      const ctx: SequenceMountContext = { ...saverCtx({ host }), capabilityTier: tier };
+      const inst = mountSync(compileSequence(fadeSeq()), ctx);
+      inst.renderFrame!(4000, 1);
+      inst.renderFrame!(5300, 1);
+      expect(fadingOf(inst)).toBeNull();
+      expect(mainOf(recs, host).drawAlphas).toEqual([]);
+      expect(offscreenOf(recs, host)).toEqual([]);
+      expect(mainOf(recs, host).fills).toContain(DEFAULT_BG);
+      inst.dispose();
+    }
+    for (const tier of ['standard', 'high', undefined] as const) {
+      perCanvasContexts();
+      const ctx: SequenceMountContext = { ...saverCtx(), ...(tier ? { capabilityTier: tier } : {}) };
+      const inst = mountSync(compileSequence(fadeSeq()), ctx);
+      inst.renderFrame!(5300, 1);
+      expect(fadingOf(inst)?.index).toBe(0);
+      inst.dispose();
+    }
+  });
+
+  it('cut and morph boundaries never create an outgoing child or composite (their paths are untouched)', () => {
+    for (const s of [seq(), morphSeq()]) {
+      const recs = perCanvasContexts();
+      const host = document.createElement('div');
+      const inst = mountSync(compileSequence(s), saverCtx({ host }));
+      for (const T of [4000, 5000, 5300, 5800, 6100, 9000]) inst.renderFrame!(T, 1);
+      expect(fadingOf(inst)).toBeNull();
+      expect(offscreenOf(recs, host)).toEqual([]);
+      expect(mainOf(recs, host).drawAlphas).toEqual([]);
+      inst.dispose();
+    }
   });
 });
 
