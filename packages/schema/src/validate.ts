@@ -911,12 +911,12 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
-      } else if (s.transition.type === 'morph') {
+      } else if (s.transition.type === 'morph' || s.transition.type === 'fade') {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut' or 'morph'");
+        err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
       }
     }
 
