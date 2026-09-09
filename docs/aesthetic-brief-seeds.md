@@ -47,6 +47,11 @@ plays.
 Written in the house style of `saver-art-ideas.md`. Numbering continues from
 that file's ten, so a brief has one id across both.
 
+Title each brief with **CARI's own spelling**, exactly as the worklist below
+records it — `Memphis-Milano`, not `Memphis Milano`. The point of this file is
+to cite their research accurately, and a silently normalised name is a small
+way of failing at that.
+
 ### 11. Frutiger Aero — the optimism of a 2007 desktop
 Water, glass and grass, lit from behind. Vivid aqua-to-lime gradient ground;
 large soft translucent circles drifting slowly upward with `blend: lighter` —
@@ -65,7 +70,7 @@ everything rotating a few degrees per minute, never spinning. Flat opaque
 colour, hard edges, no glow anywhere. Palette: `#e8dcc0`, `#a8442a`,
 `#5c7a3f`, `#2b5f66`.
 
-### 13. Memphis Milano — the grid refuses to behave
+### 13. Memphis-Milano — the grid refuses to behave
 Postmodern furniture as motion. Bone-white ground; `rect` sprites in flat
 primary red, cobalt and canary drifting at deliberately unrelated speeds and
 angles; squiggle `stroke` marks in black doing the same; a scatter of small
