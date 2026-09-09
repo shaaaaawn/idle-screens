@@ -13,9 +13,10 @@ motion that serves the mood. What differs is the material.
 The taxonomy comes from the **Consumer Aesthetics Research Institute**
 (<https://cari.institute/aesthetics>), a research project that identifies,
 names and documents these aesthetics. Several of the names below are CARI
-coinages — *Frutiger Aero* and *Global Village Coffeehouse* among them — and
-their own guidelines record a "Name Coiner" for exactly that reason. Credit
-them wherever these briefs are surfaced.
+coinages — *Frutiger Aero* was named by Froyo Tam and Sofi Xian — and the
+catalogue records a "Name Coiner" per aesthetic wherever one is known. Using a
+coined name is citing specific people's research, not borrowing a generic
+label, so credit CARI wherever these briefs are surfaced.
 
 **Use it as inspiration and analysis, never as assets.** That is the use CARI
 names as intended, and it is the only use this pipeline can make: a SaverSpec
@@ -28,7 +29,9 @@ page. If a brief cannot be written without paraphrasing them, it is not ready.
 
 ## Why these and not more painters
 
-The ten artist studies are well-trodden ground: every frontier model has a
+The fifteen artist studies in the evals suite
+(`apps/playground/src/evals/artists.ts`, credited in its `ACCREDITATION.md` —
+fifteen profiles, fifteen rows) are well-trodden ground: every frontier model has a
 strong prior for "Impressionism", so a high score cannot distinguish reading
 the DNA from recognising the name. These sit further out. *Utopian Scholastic*
 and *Hipness Purgatory* are precise and documented, so a brief can be checked
@@ -114,103 +117,123 @@ refusing to add a second idea. Palette: `#000000`, `#ff2fb9`, `#2fe0ff`,
 
 ## The worklist
 
-All **90** aesthetics CARI catalogues, read from their `sitemap.xml` on
-2026-09-08. The eight above are written; the rest are unclaimed.
+All **90** aesthetics CARI catalogues, with the eras they record. The eight
+above are written; the rest are unclaimed.
 
-A note on honesty: this table is names and slugs only. Writing a one-line gist
-for each without reading its page would be inventing, and inventing a
-description of somebody's research is the one thing this file must not do. Read
-the page, form your own visual reading, then write the brief.
+A note on honesty: name, era and decade are CARI's own metadata — facts, taken
+from their public API. There is no gist column, because writing one for each
+without reading its page would be inventing a description of somebody's
+research, and that is the one thing this file must not do. Read the page, form
+your own visual reading, then write the brief.
 
-| Aesthetic | CARI slug |
-| --- | --- |
-| Acidgrafix | `acidgrafix` |
-| Airbrush Surrealism | `airbrush-surrealism` |
-| Austurbane | `austurbane` |
-| Blob World | `blob-world` |
-| Boho Chic | `boho-chic` |
-| Bubblegum Bling | `bubblegum-bling` |
-| Cassette Futurism | `cassette-futurism` |
-| Contempo Eclectic | `contempo-eclectic` |
-| Corporate Cyberspace | `corporate-cyberspace` |
-| Corporate Grunge | `corporate-grunge` |
-| Corporate Hippie | `corporate-hippie` |
-| Corporate Memphis | `corporate-memphis` |
-| Corporate Scene | `corporate-scene` |
-| Corporate Synthwave | `corporate-synthwave` |
-| Corporate Vaporwave | `corporate-vaporwave` |
-| Curly Girly | `curly-girly` |
-| Cyberbougie | `cyberbougie` |
-| Cyberdelia | `cyberdelia` |
-| Deco Luxe | `deco-luxe` |
-| Decoplex | `decoplex` |
-| Diner Kitsch | `diner-kitsch` |
-| Disco Deco | `disco-deco` |
-| Dollar Store Vernacular | `dollar-store-vernacular` |
-| Early Cyber | `early-cyber` |
-| Eco Beige | `eco-beige` |
-| Electroclash | `electroclash` |
-| Factory Pomo | `factory-pomo` |
-| Festival Marketplace | `festival-marketplace` |
-| Four Colors | `four-colors` |
-| Frasurbane | `frasurbane` |
-| Frutiger Aero | `frutiger-aero` |
-| Gay Nineties Revival | `gay-nineties-revival` |
-| Gen X Home | `gen-x-home` |
-| Gen X Soft Club | `gen-x-soft-club` |
-| Genericana | `genericana` |
-| Global Village Coffeehouse | `global-village-coffeehouse` |
-| Googie Kitsch | `googie-kitsch` |
-| Graffiti Pop | `graffiti-pop` |
-| Groovival | `groovival` |
-| Hexatron | `hexatron` |
-| Hipness Purgatory | `hipness-purgatory` |
-| Indie Sleaze | `indie-sleaze` |
-| Indiecraft | `indiecraft` |
-| Industrial Americana | `industrial-americana` |
-| Industrial Gothic | `industrial-gothic` |
-| Internet Awesomesauce | `internet-awesomesauce` |
-| Jumbled Font | `jumbled-font` |
-| Laser Grid | `laser-grid` |
-| Live Laugh Love | `live-laugh-love` |
-| McBling | `mcbling` |
-| Memphis Jr. | `memphis-jr` |
-| Memphis Milano | `memphis-milano` |
-| Metalheart | `metalheart` |
-| Mid Century Medieval | `mid-century-medieval` |
-| Millennium Disco | `millennium-disco` |
-| Mission School | `mission-school` |
-| Neo Vectorheart | `neo-vectorheart` |
-| Neo-Y2K | `neo-y2k` |
-| Neoclassical Pomo | `neoclassical-pomo` |
-| Neon Ooze | `neon-ooze` |
-| New Wave Tropical | `new-wave-tropical` |
-| Nouveau Organic | `nouveau-organic` |
-| Nu Brutalism | `nu-brutalism` |
-| Pacific Punk Wave | `pacific-punk-wave` |
-| Paperback Chic | `paperback-chic` |
-| Pastel Southwestern | `pastel-southwestern` |
-| Pixelscape | `pixelscape` |
-| Polychrome | `polychrome` |
-| Pomo Faux Ruins | `pomo-faux-ruins` |
-| Preschool Pop | `preschool-pop` |
-| Pulp Fantasy | `pulp-fantasy` |
-| Rad Dog Neon Surf | `rad-dog-neon-surf` |
-| Radical Surrealism | `radical-surrealism` |
-| Renaissance Revival | `renaissance-revival` |
-| Silicon Dreams | `silicon-dreams` |
-| Soft Colonial Wanderlust | `soft-colonial-wanderlust` |
-| Sportsbrut | `sportsbrut` |
-| Superflat Pop | `superflat-pop` |
-| Supergraphic Ultramodern | `supergraphic-ultramodern` |
-| Themed Spaces | `themed-spaces` |
-| Ultramodern Revival | `ultramodern-revival` |
-| Urban Grunge | `urban-grunge` |
-| Utopian Scholastic | `utopian-scholastic` |
-| Vector Minimalism | `vector-minimalism` |
-| Vectorheart | `vectorheart` |
-| Wacky Pomo | `wacky-pomo` |
-| Whimsicraft | `whimsicraft` |
-| Whimsigothic | `whimsigothic` |
-| Y2K Aesthetic | `y2k-aesthetic` |
-| Zen X | `zen-x` |
+Two traps worth knowing before you start:
+
+- **Take slugs from this table, never guess them.** `/aesthetics/vaporwave`
+  answers 200 with an empty shell — there is no Vaporwave entry, even though
+  CARI's own FAQ discusses Vaporwave. What the catalogue actually holds is
+  *Corporate Vaporwave*.
+- **There is no colour field.** Palette information exists only as prose inside
+  a description, so a palette is something you read and decide, not something
+  you can extract. Which suits us: the gallery images are off limits as an
+  input anyway.
+
+Where the numbers come from: `GET /api/aesthetics?page=0..4`, undocumented but
+open, 20 per page and `size` is ignored, `totalElements: 90`. `sitemap.xml`
+agrees at 90 unique slugs (it lists 180 aesthetic URLs, each one twice — 180 is
+not a count of entries). The `/aesthetics` index itself is client-rendered and
+carries no aesthetic links in its HTML. Read 2026-09-08.
+
+By decade: 1970s 10 · 1980s 17 · 1990s 23 · 2000s 16 · 2010s 20 · timeless 4.
+
+| Aesthetic | Era | Decade | CARI slug |
+| --- | --- | --- | --- |
+| Acidgrafix | Mid 2010s – Current | 2010s | `acidgrafix` |
+| Airbrush Surrealism | Late 1960s – Mid 1980s | 1970s | `airbrush-surrealism` |
+| Austurbane | Late 2010s – Current | 2010s | `austurbane` |
+| Blob World | Mid 2010s – Current | 2010s | `blob-world` |
+| Boho-Chic | Early 2010s – Current | 2010s | `boho-chic` |
+| Bubblegum Bling | Late 2010s – Current | 2010s | `bubblegum-bling` |
+| Cassette Futurism | Mid 1970s – Late 1980s | 1980s | `cassette-futurism` |
+| Contempo Eclectic | Mid 1980s – Mid 1990s | 1980s | `contempo-eclectic` |
+| Corporate Cyberspace | Early 1990s – Late 1990s | 1990s | `corporate-cyberspace` |
+| Corporate Grunge | Late 1980s – Mid 1990s | 1990s | `corporate-grunge` |
+| Corporate Hippie | Late 1960s – Mid 1970s | 1970s | `corporate-hippie` |
+| Corporate Memphis | Mid 2010s – Current | 2010s | `corporate-memphis` |
+| Corporate Scene | Late 1990s – Early 2010s | 2000s | `corporate-scene` |
+| Corporate Synthwave | Early 2010s – Current | 2010s | `corporate-synthwave` |
+| Corporate Vaporwave | Early 2010s – Late 2010s | 2010s | `corporate-vaporwave` |
+| Curly Girly | Late 1990s – Mid 2000s | 2000s | `curly-girly` |
+| Cyberbougie | Late 2010s – Current | 2010s | `cyberbougie` |
+| Cyberdelia | Late 1980s – Mid 1990s | 1990s | `cyberdelia` |
+| Deco-Luxe | Early 1980s – Late 1980s | 1980s | `deco-luxe` |
+| Decoplex | Early 1990s – Current | 1990s | `decoplex` |
+| Diner Kitsch | Mid 1970s – Early 1990s | 1970s | `diner-kitsch` |
+| Disco Deco | Mid 1960s – Late 1970s | 1970s | `disco-deco` |
+| Dollar Store Vernacular | Late 1960s – Current | Timeless | `dollar-store-vernacular` |
+| Early Cyber | Late 1980s – Early 1990s | 1980s | `early-cyber` |
+| Eco-Beige | Late 1980s – Mid 1990s | 1990s | `eco-beige` |
+| Electroclash | Late 1990s – Early 2000s | 2000s | `electroclash` |
+| Factory Pomo | Late 1980s – Early 1990s | 1980s | `factory-pomo` |
+| Festival Marketplace | Early 1980s – Early 1990s | 1980s | `festival-marketplace` |
+| Four Colors | Mid 2000s – Current | Timeless | `four-colors` |
+| Frasurbane | Late 1980s – Mid 1990s | 1990s | `frasurbane` |
+| Frutiger Aero | Mid 2000s – Early 2010s | 2000s | `frutiger-aero` |
+| Gay Nineties Revival | Late 1960s – Late 1970s | 1970s | `gay-nineties-revival` |
+| Gen X Soft Club | Early 1990s – Mid 2000s | 1990s | `gen-x-soft-club` |
+| Gen-X Home | Late 1990s – Early 2000s | 1990s | `gen-x-home` |
+| Genericana | Mid 1980s – Early 2010s | 2010s | `genericana` |
+| Global Village Coffeehouse | Late 1980s – Mid 1990s | 1990s | `global-village-coffeehouse` |
+| Googie Kitsch | Late 1970s – Early 2000s | 1980s | `googie-kitsch` |
+| Graffiti Pop | Early 1980s – Mid 1990s | 1980s | `graffiti-pop` |
+| Groovival | Late 1980s – Early 2000s | 1990s | `groovival` |
+| Hexatron | Early 2010s – Late 2010s | 2010s | `hexatron` |
+| Hipness Purgatory | Early 2000s – Early 2010s | 2000s | `hipness-purgatory` |
+| Indie Sleaze | Early 2000s – Early 2010s | 2000s | `indie-sleaze` |
+| Indiecraft | Mid 2000s – Mid 2010s | 2000s | `indiecraft` |
+| Industrial Americana | Early 1990s – Mid 1990s | 1990s | `industrial-americana` |
+| Industrial Gothic | Late 1970s – Late 1990s | 1980s | `industrial-gothic` |
+| Internet Awesomesauce | Late 2000s – Mid 2010s | 2010s | `internet-awesomesauce` |
+| Jumbled Font | Mid 1980s – Mid 1990s | Timeless | `jumbled-font` |
+| Laser Grid | Early 1980s – Late 1980s | 1980s | `laser-grid` |
+| Live Laugh Love | Early 2010s – Current | 2010s | `live-laugh-love` |
+| McBling | Early 2000s – Late 2000s | 2000s | `mcbling` |
+| Memphis Jr. | Late 1980s – Early 1990s | 1990s | `memphis-jr` |
+| Memphis-Milano | Early 1980s – Early 1990s | 1980s | `memphis-milano` |
+| Metalheart | Late 1990s – Mid 2000s | 2000s | `metalheart` |
+| Mid Century Medieval | Mid 1950s – Mid 1970s | 1970s | `mid-century-medieval` |
+| Millennium Disco | Late 1990s – Early 2000s | 2000s | `millennium-disco` |
+| Mission School | Mid 1990s – Early 2000s | 1990s | `mission-school` |
+| Neo-Vectorheart | Late 2010s – Current | 2010s | `neo-vectorheart` |
+| Neo-Y2K | Late 2010s – Current | 2010s | `neo-y2k` |
+| Neoclassical Pomo | Late 1970s – Early 1990s | 1980s | `neoclassical-pomo` |
+| Neon Ooze | Late 1980s – Early 1990s | 1990s | `neon-ooze` |
+| New Wave Tropical | Late 1970s – Mid 1990s | 1980s | `new-wave-tropical` |
+| Nouveau Organic | Late 1980s – Mid 1990s | 1990s | `nouveau-organic` |
+| Nu-Brutalism | Early 2010s – Current | 2010s | `nu-brutalism` |
+| Pacific Punk Wave | Mid 1970s – Early 1980s | 1970s | `pacific-punk-wave` |
+| Paperback Chic | Late 2010s – Current | 2010s | `paperback-chic` |
+| Pastel Southwestern | Early 1980s – Mid 1990s | 1980s | `pastel-southwestern` |
+| Pixelscape | Early 2000s – Mid 2000s | 2000s | `pixelscape` |
+| Polychrome | Early 2010s – Current | 2010s | `polychrome` |
+| Pomo Faux Ruins | Late 1970s – Late 1980s | 1980s | `pomo-faux-ruins` |
+| Preschool Pop | Early 1990s – Early 2000s | 1990s | `preschool-pop` |
+| Pulp Fantasy | Early 1960s – Mid 1980s | 1970s | `pulp-fantasy` |
+| Rad Dog / Neon Surf | Late 1980s – Early 1990s | 1990s | `rad-dog-neon-surf` |
+| Radical Surrealism | Late 1960s – Early 1980s | 1970s | `radical-surrealism` |
+| Renaissance Revival | Early 1990s – Late 1990s | 1990s | `renaissance-revival` |
+| Silicon Dreams | Late 1980s – Late 1990s | 1980s | `silicon-dreams` |
+| Soft Colonial Wanderlust | Late 1980s – Mid 2010s | 2000s | `soft-colonial-wanderlust` |
+| Sportsbrut | Late 2010s – Current | 2010s | `sportsbrut` |
+| Superflat Pop | Late 2000s – Early 2010s | 2000s | `superflat-pop` |
+| Supergraphic Ultramodern | Late 1960s – Late 1970s | 1970s | `supergraphic-ultramodern` |
+| Themed Spaces | Early 1990s – Early 2000s | Timeless | `themed-spaces` |
+| Ultramodern Revival | Late 1990s – Mid 2000s | 2000s | `ultramodern-revival` |
+| Urban Grunge | Early 2000s – Late 2000s | 2000s | `urban-grunge` |
+| Utopian Scholastic | Late 1980s – Late 1990s | 1990s | `utopian-scholastic` |
+| Vector Minimalism | Early 2010s – Late 2010s | 2010s | `vector-minimalism` |
+| Vectorheart | Late 1990s – Mid 2000s | 2000s | `vectorheart` |
+| Wacky Pomo | Early 1990s – Early 2000s | 1990s | `wacky-pomo` |
+| Whimsicraft | Mid 1980s – Mid 1990s | 1980s | `whimsicraft` |
+| Whimsigothic | Late 1980s – Late 1990s | 1990s | `whimsigothic` |
+| Y2K Aesthetic | Early 1990s – Late 1990s | 1990s | `y2k-aesthetic` |
+| Zen-X | Early 1990s – Early 2000s | 1990s | `zen-x` |
