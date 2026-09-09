@@ -40,7 +40,8 @@ control signals do.
    | hole     | | water    | | stage light | | wind flow | | roaming  |
    | lensing  | | Jacobian | | occlusion   | | field     | | cat      |
    +----------+ +----------+ +-------------+ +-----------+ +----------+
-             (the five passthrough savers -- they eat the live page)
+        (the five passthrough saver packages -- they eat the live page;
+         spotlight is a sixth, inside savers-classic)
 
                                     |  (core, again)
         +---------------------------+---------------+
@@ -99,8 +100,10 @@ standalone with zero dependencies, so they can be used independently. The
 
 ## Docs
 
-- **[`docs/specs/`](./docs/specs)** -- authoritative specifications: [scene-format](./docs/specs/scene-format.md) (the SaverSpec JSON format).
-- **[`docs/research/`](./docs/research)** -- original thinking and design explorations: [roadmap](./docs/research/roadmap.md), [macOS app design](./docs/research/macos-app-roadmap.md), [channels & presence](./docs/research/presence-and-channels.md), [MCP state architecture](./docs/research/mcp-state-architecture.md), and more.
+- **[`packages/schema/FORMAT.md`](./packages/schema/FORMAT.md)** -- the authoritative SaverSpec format reference.
+- **[`docs/`](./docs/README.md)** -- the indexed doc set: specs, roadmaps, design notes, authoring briefs and the historical research pile.
+- **[`docs/specs/`](./docs/specs)** -- buildable specs and format explorations, including [scene-format](./docs/specs/scene-format.md) (a thought experiment, not the shipped format).
+- **[`docs/research/`](./docs/research)** -- original thinking that motivated the project: [roadmap](./docs/research/roadmap.md), [macOS app design](./docs/research/macos-app-roadmap.md), [channels & presence](./docs/research/presence-and-channels.md), [MCP state architecture](./docs/research/mcp-state-architecture.md), and more. Historical context, not implementation guidance.
 
 ## Develop
 
@@ -113,7 +116,7 @@ pnpm build                # tsup build all packages -- run this FIRST
 pnpm typecheck
 pnpm lint
 pnpm test                 # vitest
-pnpm dev                  # the Vite playground
+pnpm dev                  # the Vite playground (localhost:5177)
 pnpm test:e2e             # Playwright (incl. the determinism proof)
 pnpm test:all             # build + typecheck + lint + test + e2e
 ```

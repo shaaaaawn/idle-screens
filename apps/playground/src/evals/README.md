@@ -27,6 +27,17 @@ carry named artistic styles.
 | `public-identity.ts` | research identity vs public identity; owns every spec `label` |
 | `agent-panel.ts` | Agent run modal + `runAgentEvalInteractive` (OpenRouter progress UI) |
 | `agent-bridge.ts` | folds agent artifacts into timeline runs (authored specs as evidence) |
+| `agent-targets.ts` | the target set an agent run fans out over |
+| `openrouter.ts` | OpenRouter chat-completions client |
+| `chamber.ts` | the evals chamber view |
+| `inspector.ts` | per-screen inspector |
+| `screens-view.ts` | screen grid rendering |
+| `holdout.ts` | held-out fixture loading (`IDLE_EVAL_HOLDOUT_DIR`, see idle-mono `evals-holdout/`) |
+| `preset-recipe/` | a separate eval: author 5 presets per saver from paramSpace alone (own README + scorer) |
+| `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
+| `runs/` | append-only run artifacts for the next cycle |
+
+`ls apps/playground/src/evals/` is the truth if this drifts.
 
 ### New run modes
 
@@ -34,8 +45,6 @@ carry named artistic styles.
 | --- | --- | --- |
 | **Agent** (default) | OpenRouter chat completions | Model-authored SaverSpecs + local scores |
 | **Re-score** | none | Scores against today's static catalog only |
-| `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
-| `runs/` | append-only run artifacts for the next cycle |
 
 ## Counts
 
@@ -49,7 +58,7 @@ carry named artistic styles.
 ```bash
 # Playground UI — Compare mode is default: one benchmark × all artists
 pnpm --filter @idle-screens/playground dev
-# open http://localhost:5173/#evals
+# open http://localhost:5177/#evals
 
 # Headless baseline (writes runs/ + runs/latest/)
 pnpm --filter @idle-screens/playground eval:styles
