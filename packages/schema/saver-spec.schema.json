@@ -1535,6 +1535,10 @@
                   "minimum": 200,
                   "maximum": 5000,
                   "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
+                },
+                "text": {
+                  "enum": ["step", "crossfade"],
+                  "description": "How text / textBlock strings change during the morph. 'step' (default, today's behaviour): the incoming string shows from the first frame. 'crossfade': each text layer whose string(s) differ is drawn twice for dur — the outgoing words at 1 − k, the incoming at k (k = the eased progress). Native clients step (tvOS already cross-fades whole frames on a segment change)."
                 }
               },
               "required": ["type", "dur"],

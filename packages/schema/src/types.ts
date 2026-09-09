@@ -574,7 +574,15 @@ export const LIMITS = {
 
 export type SequenceTransition =
   | { type: 'cut' }
-  | { type: 'morph'; dur: number }
+  /**
+   * Interpolate numbers and hex colours into the next (structurally
+   * identical) segment over `dur` ms. Strings step on the first frame —
+   * unless `text: 'crossfade'`, which draws each `text` / `textBlock` layer
+   * whose string(s) differ twice for the window: the outgoing string at
+   * `1 − k`, the incoming at `k` (k = the morph's eased progress). Default
+   * `'step'`, today's behaviour, byte for byte.
+   */
+  | { type: 'morph'; dur: number; text?: 'step' | 'crossfade' }
   /**
    * Cross-fade into the next segment over `dur` ms: the outgoing segment
    * stays alive on its own canvas and is composited over the incoming one
