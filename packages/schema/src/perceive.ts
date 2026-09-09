@@ -1077,6 +1077,18 @@ export interface PerceiveSequenceOptions extends Omit<LuminanceGridOptions, 't'>
 /** Prefix bed layers so they read apart from the segment's in a merged list. */
 const bedKey = (key: string | undefined, layerIndex: number): string => `bed:${key ?? layerIndex}`;
 
+/** The seed a segment actually renders with — mirrors `SequenceInstance.childScene`: its own seed, else `seq.seed + index`. */
+const segmentSeed = (seq: IdleSequence, index: number, scene: SaverSpec): number | undefined =>
+  scene.seed ?? (seq.seed !== undefined ? seq.seed + index : undefined);
+
+/**
+ * The seed the bed actually renders with — mirrors `SequenceInstance.bedScene`:
+ * its own seed, else `seq.seed + LIMITS.maxSegments`, past every segment's
+ * `seq.seed + index`.
+ */
+const bedSeed = (seq: IdleSequence): number | undefined =>
+  seq.bed?.seed ?? (seq.seed !== undefined ? seq.seed + LIMITS.maxSegments : undefined);
+
 /**
  * Perceive one frame of a sequence at global time `T`: resolve the segment,
  * then — when the sequence has a `bed` — compose the bed at `T` (its clock
@@ -1086,7 +1098,10 @@ const bedKey = (key: string | undefined, layerIndex: number): string => `bed:${k
  * the composite; dominance ranks bed and segment layers together by their raw
  * weights, bed layers keyed `bed:<key|index>`; text, motion and form list bed
  * layers first with the same prefix. Bed and segment are assumed to share
- * `units`/`referenceViewport`, as the renderer's shared canvas assumes.
+ * `units`/`referenceViewport`, as the renderer's shared canvas assumes. The
+ * bed and segment seeds mirror `SequenceInstance`'s derivation exactly (own
+ * seed, else offset from `seq.seed`) so the composed frame matches what the
+ * renderer actually draws at `T`, not just what the raw specs would show.
  * Without a bed this is `perceiveScene(segment, localT)` plus the `segment`
  * field. Intended as the payload behind a sequence-aware previewScene.
  */
@@ -1095,10 +1110,10 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
   const r = resolveSegment(seq, T, { releasedBelow });
   const seg = seq.segments[r.index]!;
   const segment: SequenceFramePerception['segment'] = { index: r.index, key: seg.key, localT: r.localT, ...(r.held ? { held: true } : {}) };
-  const segOpts: LuminanceGridOptions = { ...gridOpts, t: r.localT };
+  const segOpts: LuminanceGridOptions = { ...gridOpts, t: r.localT, seed: gridOpts.seed ?? segmentSeed(seq, r.index, seg.scene) };
   if (!seq.bed) return { ...perceiveScene(seg.scene, segOpts), segment, bed: false };
 
-  const bedOpts: LuminanceGridOptions = { ...gridOpts, t: T, seed: gridOpts.seed ?? seq.bed.seed ?? seq.seed };
+  const bedOpts: LuminanceGridOptions = { ...gridOpts, t: T, seed: gridOpts.seed ?? bedSeed(seq) };
   const viewport = gridOpts.viewport ?? { width: 1920, height: 1080 };
   // The segment's ink alone: a black ground contributes nothing to the sum,
   // and no ghosting — a transparent child ignores it, as the renderer does.
@@ -1135,7 +1150,7 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
     text: [...textSprites(seq.bed, bedOpts).map(prefix), ...textSprites(ink, segOpts).map(shift)],
     advisories: [
       ...adviseSpec(seq.bed, viewport, { t: T, seed: bedOpts.seed }).map((w) => ({ ...w, path: `bed.${w.path}` })),
-      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: gridOpts.seed }),
+      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed }),
     ],
     segment,
     bed: true,

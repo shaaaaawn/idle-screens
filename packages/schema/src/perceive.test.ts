@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap } from './perceive';
 import type { IdleSequence } from './types';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
-import type { SaverSpec } from './types';
+import { LIMITS, type SaverSpec } from './types';
 
 const BLANK_BRAILLE = String.fromCharCode(0x2800);
 
@@ -299,7 +299,7 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     const p = perceiveSequenceFrame(seqOf(false), 6000);
     expect(p.bed).toBe(false);
     expect(p.segment).toEqual({ index: 1, key: 'b', localT: 1000 });
-    const plain = perceiveScene(seqOf(false).segments[1]!.scene, { t: 1000 });
+    const plain = perceiveScene(seqOf(false).segments[1]!.scene, { t: 1000, seed: 8 }); // seq.seed 7 + index 1, mirroring the renderer
     expect(p.braille).toBe(plain.braille);
     expect(p.coverage).toBe(plain.coverage);
     expect(p.dominance).toEqual(plain.dominance);
@@ -339,5 +339,43 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
   it('bed advisories are prefixed bed.; the segment background never fires against the bed', () => {
     const p = perceiveSequenceFrame(seqOf(true), 2000);
     for (const a of p.advisories) expect(a.path.startsWith('bed.') || a.path.startsWith('layers')).toBe(true);
+  });
+
+  it('renders the bed and segment at the seeds SequenceInstance actually uses (own seed, else seq.seed offset), not raw seq.seed', () => {
+    // A single fixed-position entity (the `bed`/`dark` fixtures above) doesn't
+    // move when the seed changes, so it can't distinguish a correct seed from
+    // a wrong one. This fixture scatters several entities over a position
+    // range, so its centroid does depend on which seed rendered it.
+    const scatter = (id: string): SaverSpec => ({
+      schemaVersion: 1, id, label: id,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    });
+    const scatterBed = scatter('scatter-bed');
+    const scatterSeg = scatter('scatter-seg');
+    const seq: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 7, bed: scatterBed, segments: [{ key: 'a', scene: scatterSeg, duration: 5000 }] };
+
+    // compile.ts: bed seed = seq.seed + LIMITS.maxSegments; segment 0 seed = seq.seed + 0.
+    const bedGrid = luminanceGrid(scatterBed, { t: 1000, seed: 7 + LIMITS.maxSegments });
+    const segGrid = luminanceGrid(scatterSeg, { t: 1000, seed: 7 });
+    const cells = bedGrid.cells.map((v, i) => Math.min(1, v + segGrid.cells[i]!));
+    let cx = 0, dev = 0;
+    for (let r = 0; r < bedGrid.rows; r++) {
+      for (let c = 0; c < bedGrid.cols; c++) {
+        const i = r * bedGrid.cols + c;
+        const d = Math.abs(cells[i]! - bedGrid.background[r]!);
+        cx += d * (c + 0.5);
+        dev += d;
+      }
+    }
+    const expectedCentroidX = cx / dev / bedGrid.cols;
+
+    const p = perceiveSequenceFrame(seq, 1000);
+    expect(p.centroid!.x).toBeCloseTo(expectedCentroidX, 9);
+    // Sanity: the raw, unoffset seq.seed would have produced a visibly
+    // different composite for this fixture — otherwise this test proves
+    // nothing about which seed was actually used.
+    const bedAtRawSeed = luminanceGrid(scatterBed, { t: 1000, seed: 7 });
+    expect(bedAtRawSeed.centroid!.x).not.toBeCloseTo(bedGrid.centroid!.x, 2);
   });
 });
