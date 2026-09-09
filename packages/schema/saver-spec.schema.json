@@ -682,6 +682,9 @@
             },
             "cycle": {
               "$ref": "#/definitions/cycle"
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           }
         },
@@ -978,11 +981,21 @@
               "minimum": 0,
               "maximum": 1,
               "description": "Paint-level alpha multiplier for the block (default 1). Not structural — steer it with dur to fade the block in or out without a rebuild. Declare it to make the path steerable. Native clients without it render at 1."
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           },
           "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
         }
       ]
+    },
+    "textRole": {
+      "enum": [
+        "read",
+        "atmosphere"
+      ],
+      "description": "What the text is for. 'read' opts the layer into the legibility advisories (text-legibility: WCAG ratio below 4.5:1 against the background at the box centre or against the brightest additive layer over it; text-safe-area: box within 5% of an edge). 'atmosphere' (or absent) keeps it silent. A declaration only — changes no pixel on any client."
     },
     "colorWeights": {
       "type": "array",

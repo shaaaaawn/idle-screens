@@ -23,8 +23,9 @@ const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'ma
 const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
-const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity']);
+const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
+const TEXT_ROLES = new Set(['read', 'atmosphere']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
 /** A CSS length inside a textBlock `font` — size belongs to `fontSize`. */
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)\b/i;
@@ -494,6 +495,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
       err(`${path}.maxWidth`, 'must be a positive number');
     }
+    validateTextRole(sprite, path, err);
     validateCycle(sprite, path, err);
   } else if (sprite.kind === 'circle') {
     knownSet = KNOWN_CIRCLE;
@@ -593,6 +595,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.opacity !== undefined && (!isNum(sprite.opacity) || sprite.opacity < 0 || sprite.opacity > 1)) {
       err(`${path}.opacity`, 'must be a number between 0 and 1');
     }
+    validateTextRole(sprite, path, err);
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
@@ -660,6 +663,13 @@ function validatePalette(sprite: Record<string, unknown>, path: string, err: (p:
     } else if (!sprite.colorWeights.every((v: unknown) => isNum(v) && v >= 0) || !sprite.colorWeights.some((v: unknown) => isNum(v) && v > 0)) {
       err(`${path}.colorWeights`, 'weights must be >= 0 with at least one > 0');
     }
+  }
+}
+
+/** `role` on `text` / `textBlock`: a declaration of intent, one of two words. */
+function validateTextRole(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (sprite.role !== undefined && !TEXT_ROLES.has(sprite.role as string)) {
+    err(`${path}.role`, "must be 'read' | 'atmosphere'");
   }
 }
 

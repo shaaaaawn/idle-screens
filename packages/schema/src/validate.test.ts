@@ -433,3 +433,27 @@ describe('validateSpec — data layouts and bars (#49)', () => {
     expect(validateSpec(bar({ direction: 'up', colors: ['#fff', '#f00', '#0f0'] })).valid).toBe(true);
   });
 });
+
+describe("validateSpec — text role (#59, plan 1e)", () => {
+  const text = (sprite: Record<string, unknown>): SaverSpec => ({
+    ...base(),
+    layers: [{ count: 1, sprite: { kind: 'text', strings: ['hello'], ...sprite } as never, motion: { type: 'static' } }],
+  });
+  const block = (sprite: Record<string, unknown>): SaverSpec => ({
+    ...base(),
+    units: 'viewport',
+    layers: [{ count: 1, sprite: { kind: 'textBlock', text: 'hello', maxWidth: 0.5, fontSize: 0.04, ...sprite } as never, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } }],
+  });
+
+  it("accepts role: 'read' | 'atmosphere' on text and textBlock as a known key", () => {
+    for (const role of ['read', 'atmosphere']) {
+      expect(validateSpec(text({ role }))).toEqual({ valid: true, errors: [], warnings: [] });
+      expect(validateSpec(block({ role }))).toEqual({ valid: true, errors: [], warnings: [] });
+    }
+  });
+
+  it('rejects any other role', () => {
+    expect(paths(text({ role: 'shout' }))).toContain('layers[0].sprite.role');
+    expect(paths(block({ role: 1 }))).toContain('layers[0].sprite.role');
+  });
+});
