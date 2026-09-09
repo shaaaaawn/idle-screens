@@ -712,8 +712,7 @@
       "duration": 12000,
       "advance": "input",
       "transition": {
-        "type": "morph",
-        "dur": 1500
+        "type": "cut"
       }
     },
     {

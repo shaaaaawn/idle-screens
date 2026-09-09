@@ -650,6 +650,16 @@ describe('validateSequence — morph', () => {
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
+  it('is silent when segments differ only in id/label (never rendered)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: { ...caption('Act I', '#e6e8ef'), id: 'slide-a', label: 'Slide A' }, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: { ...caption('Act I', '#e6e8ef'), id: 'slide-b', label: 'Slide B' }, duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
   it('is silent for a one-step colour glide (rounding must not mask real interpolation)', () => {
     // #000000 -> #010101 differ by 1 per channel: lerpSpec's rounded midpoint
     // lands exactly on the target colour, but the colour still glides.

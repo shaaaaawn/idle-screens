@@ -114,12 +114,18 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  * Walks `a`/`b` directly rather than sampling `lerpSpec(a, b, 0.5)`: two hex
  * colours a single 8-bit step apart (`#000000` → `#010101`) round their
  * midpoint to the target channel-for-channel, which would make a genuine
- * (if subtle) colour glide look identical to a step.
+ * (if subtle) colour glide look identical to a step. `id`/`label`/
+ * `schemaVersion` are identification metadata, never rendered (excluded from
+ * `structuralSignature` for the same reason) — a segment pair that differs
+ * only there renders identically and is not a morph at all.
  */
+const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion']);
+
 export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
   let hasDiff = false;
   let hasGlide = false;
-  const walk = (x: unknown, y: unknown): void => {
+  const walk = (x: unknown, y: unknown, key?: string): void => {
+    if (key !== undefined && NON_RENDERED_KEYS.has(key)) return;
     if (x === y) return;
     if (typeof x === 'number' && typeof y === 'number') {
       hasDiff = true;
@@ -139,7 +145,7 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
     }
     if (x && y && typeof x === 'object' && typeof y === 'object' && !Array.isArray(x) && !Array.isArray(y)) {
       for (const k of Object.keys(y as Record<string, unknown>)) {
-        walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k]);
+        walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], k);
       }
       return;
     }
