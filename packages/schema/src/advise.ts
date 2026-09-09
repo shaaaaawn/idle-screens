@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { alphaAt, breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
@@ -338,10 +338,13 @@ export function adviseSpec(
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
       const box = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
-      // What the layer actually paints at rest — entity alpha (± pulse) times
-      // a textBlock's own `opacity` — so faint or invisible `role: 'read'`
-      // text is measured for what it puts on screen, not raw ink at 100%.
-      const alpha = alphaAt(e, 0) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      // What the layer guarantees it paints, worst case: base alpha minus its
+      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
+      // duty cycle is a readability question, not an ink-colour one; sampling
+      // at `t = 0` would otherwise flag every emitting layer as invisible)
+      // times a textBlock's own `opacity` — so faint or invisible
+      // `role: 'read'` text can't hide behind an unmeasured alpha.
+      const alpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
       textBoxes.push({ li, label, alpha, ...box });
     }
   }
@@ -417,15 +420,27 @@ export function adviseSpec(
     readFlagged.add(b.li);
 
     const ink = hexRgb(s.color ?? '#e6e8ef');
+    // What the layer actually paints over `base`, at its own alpha and blend —
+    // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
+    // `multiply`, is not free to hide behind a source-over assumption.
+    const textPlate = (base: Rgb, alpha: number): Rgb => {
+      if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
+      if (layer.blend === 'multiply') {
+        return {
+          r: base.r * (1 - alpha + ink.r * alpha),
+          g: base.g * (1 - alpha + ink.g * alpha),
+          b: base.b * (1 - alpha + ink.b * alpha),
+        };
+      }
+      return sourceOverPlate(base, ink, alpha);
+    };
     let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const groundRgb = backgroundRgbAt(spec, cy, h, scale);
-      // Composite at what the layer actually paints (`box.alpha`), not raw ink —
-      // a `role: 'read'` label at low opacity is not free to hide there.
-      const ground = legibilityRatio(sourceOverPlate(groundRgb, ink, box.alpha), groundRgb);
+      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
       const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
-      const plate = lit ? legibilityRatio(sourceOverPlate(lit.rgb, ink, box.alpha), lit.rgb) : Infinity;
+      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
       if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
         worst = { ground, plate, plateLabel: lit?.label ?? null };
       }
@@ -496,7 +511,7 @@ function brightestAdditivePlate(
     for (const e of entities) {
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
-      const growScale = e.motion === 'warp' ? WARP_MAX_SCALE : e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1;
+      const growScale = (e.motion === 'warp' ? WARP_MAX_SCALE : 1) * (e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1);
       const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
       if (maxDim < box.fs) continue;
       if (!entityReachesBox(e, maxDim / 2, box, w, h)) continue;
