@@ -9,7 +9,8 @@ paths through a dark, fogged tank.
 mount
   ├─ WebGLRenderer (stencil off, high-performance, sRGB, linear tone)
   ├─ Scene: fog (fogNear/fogFar) + terrain floor, and — when `environment`
-  │         is not `void` — a water ceiling, silhouette and light shafts
+  │         is not `void` — a terrain silhouette and light shafts (a water
+  │         ceiling too, for the rooms that have one: reef, kelp, ice, lagoon)
   ├─ PerspectiveCamera on param-steered spherical orbit
   └─ populate():
        for each fish index:
@@ -97,7 +98,7 @@ never changes because a dependency was bumped.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| environment | enum | `void` | The ROOM: `void` (exactly the pre-environment scene), `abyss`, `reef`, `kelp`, `ice`, `vent`, `lagoon`, `universe`. Adds a water ceiling, terrain silhouette and light shafts; never overrides your palette params |
+| environment | enum | `void` | The ROOM: `void` (exactly the pre-environment scene), `abyss`, `reef`, `kelp`, `ice`, `vent`, `lagoon`, `universe`. Adds terrain and light shafts, plus a water ceiling for the rooms that have one (reef, kelp, ice, lagoon); never overrides your palette params |
 | floorKind | enum | `auto` | Override the environment's terrain: `auto`, `flat`, `dunes`, `ridges`, `basin` |
 | waterY | number | −1 | Water-ceiling height, −1–220. −1 follows the environment (step, not smooth — the sentinel can't be interpolated through) |
 | rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason) |
