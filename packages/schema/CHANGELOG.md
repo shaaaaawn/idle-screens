@@ -1,5 +1,13 @@
 # @idle-screens/schema
 
+## 3.7.0
+
+### Minor Changes
+
+- 02b8f60: Presentation stack: sequence bed, fade between unlike segments, `sync`
+  mount/epoch, textBlock anchor/font/opacity, `role: 'read'` advisories,
+  morph `text: 'crossfade'`, and the phase-0 pins (`morph-nothing-morphable`).
+
 ## 3.6.1
 
 ### Patch Changes
