@@ -25,7 +25,8 @@ Two content modes, same as the Mac app:
   arrive over the page's own WebSocket (`/c/<id>/ws`); publishing to the channel
   restyles the saver in real time. Falls back to bundled mode if the load fails.
 - **Bundled mode** — load the shared offline web build (`file://` + query params),
-  the same artifact the Mac app ships (22 savers).
+  the same artifact the Mac app ships (22 savers when this was written; 32 today
+  — `apps/mac/web/src/savers.ts` is the source of truth).
 
 ## 2. Repo integration
 
