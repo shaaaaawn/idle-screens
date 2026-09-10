@@ -37,8 +37,8 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
 (2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
-`maxWidth` cap lifted to 2.0, `sync` on the sequence envelope, and the
-`fade` transition (2026-09-08 — ambient presentations).
+`maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope, and
+the `fade` transition (2026-09-08 — ambient presentations).
 
 ## Safety invariants
 
@@ -523,6 +523,13 @@ interpolation, and background drift is sampled at rest. These are documented
 trade-offs for a zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
+- `perceiveSequenceFrame(seq, T, {viewport?, seed?, releasedBelow?})` — the
+  same bundle for one frame of a **sequence** at global time `T`: resolves the
+  segment (reported as `segment: {index, key, localT, held?}`) and, when the
+  sequence has a `bed`, composes the bed at `T` under the segment's ink at
+  `localT` with the segment's background dropped, as the renderer stacks
+  them — the grids add, dominance ranks both by raw weight with bed layers
+  keyed `bed:<key|index>`, and text/motion/form list bed layers first.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
   (background gradient + entities + link lines, blend-aware), with coverage,
   visual-mass centroid, and **row/column deviation profiles** (1D transects of
@@ -604,6 +611,7 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "seed": 42,           // optional; forwarded to children without their own seed
   "loop": false,
   "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
+  "bed": { /* SaverSpec */ },  // optional; the ground under every segment — see **Bed**
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -686,17 +694,69 @@ not pass the hint loses nothing). **Native clients that anchor at their own
 mount behave as `mount`** until they read the field and seed from the channel
 epoch. The default is never flipped: pre-roll depends on `mount`.
 
+**Bed:** `bed` is one SaverSpec drawn **under every segment on the
+sequence's global clock** — the ground that does not reset. Every segment still
+starts at its own `localT` 0 (builds replay, `emit` phases and `reveal.speed`
+key off segment time exactly as before), but the bed's `T` runs from mount (or
+from `sequenceBaseT` under `sync: 'epoch'`) straight through every boundary,
+and a `sequence.segment` steer displaces the *segments'* clock only — the
+clicker rewinds a slide, never the bed. That is the fix for the boundary
+rewind every ambient reviewer flagged: put the motion that must be continuous
+(the drifting field, the runner-orb, the slow gradient) in the bed and the
+slide content in the segments. Rules:
+
+- **The bed owns the ground.** Segments render over it *transparently*: a
+  segment's `background` is never painted while a bed exists (the validator
+  warns `bed-hides-segment-background` on each segment that declares one), and
+  a segment's `ghosting` is ignored (a smear needs an opaque ground to decay
+  into; the bed may declare its own `ghosting`, and it works as usual). A
+  segment's ink composites over the bed with its own `blend`/`alpha`.
+- **Clock:** bed at `T`, segment at `localT`, in the same frame. Under
+  `loop: true` the bed does not wrap with the segments — it keeps counting.
+- **Steering:** `bed.<path>` routes to the bed with the prefix stripped
+  (`setParam("bed.field.sprite.color", …)`, `bed.ghosting`, …);
+  `sequenceSteerablePaths(seq)` lists them. Without a bed, `bed.*` reaches the
+  segments unchanged, so a layer keyed `bed` keeps working. Bed steers are
+  not part of the retained segment track — the bed is never re-created.
+- **Seed:** the bed uses its own `seed`, else `seq.seed + 24` (past every
+  segment's `seq.seed + index`, so it never shares a stream with segment 0 and
+  adding a segment does not re-seat it).
+- **Perf accounting:** the bed is live alongside whichever segment is up, so
+  its entities count **together with the largest segment's** toward the 800
+  cap (`validateSequence` errors on `bed` when the sum is over) and toward the
+  manifest's `costTier`. A `fade` over a bed puts both segments on canvases of
+  their own for `dur` (incoming at k, outgoing at 1 − k, both over the bed):
+  three live instances on the lowest tier, which is why fade is tier-gated.
+- **Perception:** `perceiveSequenceFrame(seq, T)` composes bed + segment (see
+  the perception API above). Bed and segments are assumed to share `units` /
+  `referenceViewport`.
+- **Native:** tvOS **ignores `bed` initially** and renders segments with their
+  own backgrounds, exactly as it does today — so a sequence authored with a bed
+  should still carry sensible segment backgrounds until the native player
+  draws the bed (a second compiled scene drawn first, which its layer model
+  already supports). Web viewers hide those backgrounds; native shows them.
+- **Not a default.** The "cheap form" — rendering a morph chain's root child at
+  `T − segmentStart(chainRoot)` so twins keep one continuous clock — is **not**
+  implemented and never will be as a default: stored morph-chained sequences
+  pin their per-segment `t = 0` frames (`sequence-baseline.test.ts`). A bed is
+  the supported way to keep motion continuous across segments; if a per-segment
+  `timebase: 'sequence'` is ever wanted it will be opt-in, after this.
+
+Absent `bed` ⇒ the code path is byte for byte what it was (the sequence
+baseline proves it): every segment paints its own ground.
+
 **Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
 viewer needs zero changes (a host that wants `sync: 'epoch'` passes a
 `SequenceMountContext`; a plain `SaverContext` still mounts). All children
 share a single canvas; only the active segment's `SpecInstance` is alive at
-any time — except for the `dur` of a `fade`, when the outgoing segment lives
-on an offscreen canvas of its own. `workerReady` is `false` (the worker
-compile-hook does not dispatch sequences).
+any time — plus the `bed`'s, when one is declared, and for the `dur` of a
+`fade` the outgoing segment on an offscreen canvas of its own. `workerReady`
+is `false` (the worker compile-hook does not dispatch sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
 `applyTrack` (`setParam("sequence.segment", n)` over MCP). The
-`SequenceInstance` intercepts this path before delegation; every other delta
+`SequenceInstance` intercepts this path before delegation, and `bed.<path>`
+deltas go to the bed (see **Bed**); every other delta
 is forwarded to the active segment's `applyTrack` **and retained** (last wins
 per path, merged across calls). Segment instances are created lazily and
 disposed at each boundary, so the retained set is re-applied to every segment

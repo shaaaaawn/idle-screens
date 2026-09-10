@@ -5,7 +5,7 @@
  * changes existing values only — unknown paths are ignored (the server
  * validates and rejects them; the runtime stays lenient).
  */
-import type { SaverSpec } from './types';
+import type { IdleSequence, SaverSpec } from './types';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -194,6 +194,20 @@ export function steerablePaths(spec: unknown): string[] {
   };
   walk(spec, '', '');
   return out;
+}
+
+/**
+ * Every path a sequence accepts on its track: `sequence.segment` (the
+ * clicker), the bed's paths under the `bed.` prefix, and the union of every
+ * segment's paths (a segment path lands on whichever segment owns it — see
+ * `SequenceInstance.applyTrack`). Deduplicated, numeric layer indices as in
+ * `steerablePaths`.
+ */
+export function sequenceSteerablePaths(seq: IdleSequence): string[] {
+  const out = new Set<string>(['sequence.segment']);
+  if (seq.bed) for (const p of steerablePaths(seq.bed)) out.add(`bed.${p}`);
+  for (const seg of seq.segments) for (const p of steerablePaths(seg.scene)) out.add(p);
+  return [...out];
 }
 
 /** Smooth (ease-in-out) progress curve used for glides. */

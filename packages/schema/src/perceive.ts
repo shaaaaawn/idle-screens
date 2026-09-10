@@ -33,7 +33,8 @@ import {
   textMetricsClassFor,
   type Entity,
 } from './simulate';
-import { LIMITS, type LayerSpec, type SaverSpec } from './types';
+import { bedRenderSeed, resolveSegment, segmentRenderSeed } from './sequence';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -537,6 +538,11 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   splatPass(t, 1);
 
   // Deviation stats
+  return finishGrid(cols, rows, cells, bgRow);
+}
+
+/** The stats every grid carries, from its cells and per-row background. */
+function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]): LuminanceGrid {
   let sum = 0;
   let covered = 0;
   let devSum = 0;
@@ -732,6 +738,37 @@ export interface DominanceEntry {
  * ribbons, so a comet layer is ranked by its comet, not just its head.
  */
 export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): DominanceEntry[] {
+  return rankDominance(rawDominance(spec, opts));
+}
+
+interface RawDominance {
+  layerIndex: number;
+  key: string | undefined;
+  weight: number;
+  entityCount: number;
+  meanLuma: number;
+  factors: DominanceEntry['factors'];
+}
+
+/** Normalize raw weights to shares and rank — shared by a scene and a composed sequence frame. */
+function rankDominance(raw: RawDominance[]): DominanceEntry[] {
+  const total = raw.reduce((s, r) => s + r.weight, 0) || 1;
+  return raw
+    .slice()
+    .sort((a, b) => b.weight - a.weight)
+    .map((r, i) => ({
+      rank: i + 1,
+      layerIndex: r.layerIndex,
+      key: r.key,
+      share: r.weight / total,
+      entityCount: r.entityCount,
+      meanLuma: r.meanLuma,
+      factors: r.factors,
+    }));
+}
+
+/** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
+function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
@@ -831,19 +868,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
     return { layerIndex, key: layer.key, weight, entityCount: entities.length, meanLuma, factors: { area: area / (w * h), contrast, blendBoost, motionBoost } };
   });
 
-  const total = raw.reduce((s, r) => s + r.weight, 0) || 1;
-  return raw
-    .slice()
-    .sort((a, b) => b.weight - a.weight)
-    .map((r, i) => ({
-      rank: i + 1,
-      layerIndex: r.layerIndex,
-      key: r.key,
-      share: r.weight / total,
-      entityCount: r.entityCount,
-      meanLuma: r.meanLuma,
-      factors: r.factors,
-    }));
+  return raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -1030,5 +1055,112 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
     advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sequence frames — bed + segment
+// ---------------------------------------------------------------------------
+
+export interface SequenceFramePerception extends ScenePerception {
+  /** Which segment the global time `T` resolved to, and where in it. */
+  segment: { index: number; key: string; localT: number; held?: true };
+  /** True when a bed was composed under the segment. */
+  bed: boolean;
+}
+
+export interface PerceiveSequenceOptions extends Omit<LuminanceGridOptions, 't'> {
+  /** Holds released by the clicker so far — see `ResolveOptions.releasedBelow`. */
+  releasedBelow?: number;
+}
+
+/** Prefix bed layers so they read apart from the segment's in a merged list. */
+const bedKey = (key: string | undefined, layerIndex: number): string => `bed:${key ?? layerIndex}`;
+
+/**
+ * Perceive one frame of a sequence at global time `T`: resolve the segment,
+ * then — when the sequence has a `bed` — compose the bed at `T` (its clock
+ * never resets) under the segment's ink at `localT`, the segment's own
+ * background dropped, exactly as the renderer stacks them. The luminance maps
+ * add the two grids (clamped), so coverage, centroid and the profiles are of
+ * the composite; dominance ranks bed and segment layers together by their raw
+ * weights, bed layers keyed `bed:<key|index>`; text, motion and form list bed
+ * layers first with the same prefix. Bed and segment are assumed to share
+ * `units`/`referenceViewport`, as the renderer's shared canvas assumes. The
+ * bed and segment seeds come from `segmentRenderSeed`/`bedRenderSeed`
+ * (`./sequence`) — the same derivation `SequenceInstance` uses, chain roots
+ * and zero-seed normalization included — so the composed frame matches what
+ * the renderer actually draws at `T`, not just what the raw specs would show.
+ * Without a bed this is `perceiveScene(segment, localT)` plus the `segment`
+ * field. Intended as the payload behind a sequence-aware previewScene.
+ *
+ * Two known approximations, both accepted for a coarse, cheap, renderer-free
+ * tool rather than fixed here:
+ * - **The transition WINDOW isn't composed.** During a live `fade` or `morph`
+ *   (i.e. `localT < transition.dur`) the renderer also paints the outgoing
+ *   (or interpolating) segment, but this only ever perceives the segment
+ *   `resolveSegment` resolves to — call it at a `T` outside the transition's
+ *   `dur` for an accurate read. (Outside that window, a morph-chained
+ *   segment's entities and seed ARE correct — `segmentRenderSeed` already
+ *   resolves the chain root.) Composing the live window properly needs the
+ *   same capability-tier gate `SequenceInstance` uses to decide whether
+ *   `fade` even plays; this analytical path has no such context.
+ * - **Ink composites onto the bed by addition, not by blend mode.** This
+ *   matches a plain `source-over`, opaque-ink segment (the common case), but
+ *   a segment layer with `blend: 'multiply'`/`'screen'`/etc. or partial alpha
+ *   composites directionally differently on the real canvas than adding
+ *   luminance values ever can (`multiply` darkens; addition only brightens).
+ *   The per-cell grids don't retain per-layer blend/alpha to composite
+ *   correctly at this resolution.
+ */
+export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: PerceiveSequenceOptions = {}): SequenceFramePerception {
+  const { releasedBelow, ...gridOpts } = opts;
+  const r = resolveSegment(seq, T, { releasedBelow });
+  const seg = seq.segments[r.index]!;
+  const segment: SequenceFramePerception['segment'] = { index: r.index, key: seg.key, localT: r.localT, ...(r.held ? { held: true } : {}) };
+  const segOpts: LuminanceGridOptions = { ...gridOpts, t: r.localT, seed: gridOpts.seed ?? segmentRenderSeed(seq, r.index) };
+  if (!seq.bed) return { ...perceiveScene(seg.scene, segOpts), segment, bed: false };
+
+  const bedOpts: LuminanceGridOptions = { ...gridOpts, t: T, seed: gridOpts.seed ?? bedRenderSeed(seq) };
+  const viewport = gridOpts.viewport ?? { width: 1920, height: 1080 };
+  // The segment's ink alone: a black ground contributes nothing to the sum,
+  // and no ghosting — a transparent child ignores it, as the renderer does.
+  const ink: SaverSpec = { ...seg.scene, background: { type: 'solid', color: '#000000' } };
+  delete ink.ghosting;
+  // For contrast, ink is judged against what is actually behind it: the bed.
+  const inkOverBed: SaverSpec = { ...ink, background: seq.bed.background ?? { type: 'solid', color: '#05050a' } };
+
+  const bedGrid = luminanceGrid(seq.bed, bedOpts);
+  const inkGrid = luminanceGrid(ink, segOpts);
+  const cells = bedGrid.cells.map((v, i) => Math.min(1, v + inkGrid.cells[i]!));
+  const grid = finishGrid(bedGrid.cols, bedGrid.rows, cells, bedGrid.background);
+
+  const bedLayers = seq.bed.layers.length;
+  const dominance = rankDominance([
+    ...rawDominance(seq.bed, bedOpts).map((d) => ({ ...d, key: bedKey(d.key, d.layerIndex) })),
+    ...rawDominance(inkOverBed, segOpts).map((d) => ({ ...d, layerIndex: d.layerIndex + bedLayers })),
+  ]);
+  const shift = <X extends { layerIndex: number }>(x: X): X => ({ ...x, layerIndex: x.layerIndex + bedLayers });
+  const prefix = <X extends { layerIndex: number; key: string | undefined }>(x: X): X => ({ ...x, key: bedKey(x.key, x.layerIndex) });
+
+  return {
+    t: r.localT,
+    braille: renderBrailleMap(grid),
+    density: renderDensityMap(grid),
+    coverage: grid.coverage,
+    meanLuminance: grid.meanLuminance,
+    centroid: grid.centroid,
+    rowProfile: grid.rowProfile,
+    colProfile: grid.colProfile,
+    dominance,
+    motion: [...motionStats(seq.bed, bedOpts).map(prefix), ...motionStats(ink, segOpts).map(shift)],
+    form: [...layerCohesion(seq.bed, bedOpts).map(prefix), ...layerCohesion(ink, segOpts).map(shift)],
+    text: [...textSprites(seq.bed, bedOpts).map(prefix), ...textSprites(ink, segOpts).map(shift)],
+    advisories: [
+      ...adviseSpec(seq.bed, viewport, { t: T, seed: bedOpts.seed }).map((w) => ({ ...w, path: `bed.${w.path}` })),
+      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed }),
+    ],
+    segment,
+    bed: true,
   };
 }

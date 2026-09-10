@@ -1,4 +1,5 @@
-import type { IdleSequence } from './types';
+import { structuralSignature } from './steer';
+import { LIMITS, type IdleSequence } from './types';
 
 export interface ResolvedSegment {
   index: number;
@@ -98,4 +99,65 @@ export function resolveSegment(seq: IdleSequence, T: number, opts: ResolveOption
   const last = segments.length - 1;
   const lastStart = totalTimed - (segments[last]!.duration ?? 0);
   return { index: last, localT: t0 - lastStart, startT: lastStart };
+}
+
+// ---------------------------------------------------------------------------
+// Render seeds — shared by SequenceInstance (compile.ts) and
+// perceiveSequenceFrame (perceive.ts), so both derive the same seed from the
+// same sequence. Kept in one place after two review rounds found the
+// perception side had drifted from the renderer's exact derivation.
+// ---------------------------------------------------------------------------
+
+/** Whether the boundary from `from` to `from + 1` morphs: same scene structure, `morph` transition. */
+export function canMorph(seq: IdleSequence, from: number): boolean {
+  const seg = seq.segments[from];
+  if (!seg || seg.transition?.type !== 'morph') return false;
+  const next = seq.segments[from + 1];
+  if (!next) return false;
+  return structuralSignature(seg.scene) === structuralSignature(next.scene);
+}
+
+/**
+ * Walk back through consecutive `morph` boundaries to the chain's origin. A
+ * morph-chained segment's entities are never re-seeded at the boundary —
+ * they're the same stream continued from wherever the chain started — so its
+ * actual render seed (see `segmentRenderSeed`) is always the chain root's,
+ * never its own index's.
+ */
+export function morphChainRoot(seq: IdleSequence, index: number): number {
+  let i = index;
+  while (i > 0 && canMorph(seq, i - 1)) i--;
+  return i;
+}
+
+/** `SpecInstance`'s seed normalization: 0 is falsy, so a valid `seed: 0` lands on 1. */
+export function normalizeSeed(seed: number): number {
+  return (seed >>> 0) || 1;
+}
+
+/**
+ * The seed segment `index`'s entities actually render with — its chain
+ * root's own seed, else `seq.seed + ` the chain root's index, normalized
+ * exactly like `SpecInstance`. `undefined` when neither is set: the same
+ * "unknowable ahead of time" case a bare `SaverSpec` has via `ctx.seed`,
+ * which callers fall back to their own default for (as `perceiveScene` does).
+ */
+export function segmentRenderSeed(seq: IdleSequence, index: number): number | undefined {
+  const root = morphChainRoot(seq, index);
+  const scene = seq.segments[root]?.scene;
+  if (!scene) return undefined;
+  const raw = scene.seed ?? (seq.seed !== undefined ? seq.seed + root : undefined);
+  return raw === undefined ? undefined : normalizeSeed(raw);
+}
+
+/**
+ * The seed the bed's entities actually render with — its own seed, else
+ * `seq.seed + LIMITS.maxSegments` (past every segment's `seq.seed + index`,
+ * so a bed and segment 0 never share a stream), normalized like
+ * `SpecInstance`. `undefined` when there's no bed or no derivable seed.
+ */
+export function bedRenderSeed(seq: IdleSequence): number | undefined {
+  if (!seq.bed) return undefined;
+  const raw = seq.bed.seed ?? (seq.seed !== undefined ? seq.seed + LIMITS.maxSegments : undefined);
+  return raw === undefined ? undefined : normalizeSeed(raw);
 }
