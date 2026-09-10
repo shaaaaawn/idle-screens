@@ -720,6 +720,64 @@ describe('validateSequence — morph', () => {
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
+  it('is silent when segments differ only in id/label (never rendered)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: { ...caption('Act I', '#e6e8ef'), id: 'slide-a', label: 'Slide A' }, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: { ...caption('Act I', '#e6e8ef'), id: 'slide-b', label: 'Slide B' }, duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
+  it('is silent when a layer differs only in its addressable key (never rendered)', () => {
+    const a = caption('Act I', '#e6e8ef');
+    a.layers[0]!.key = 'caption-a';
+    const b = caption('Act I', '#e6e8ef');
+    b.layers[0]!.key = 'caption-b';
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: a, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: b, duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
+  it('still fires when a source-only field disappears (a real step, not silently dropped)', () => {
+    const withLife = caption('Act I', '#e6e8ef');
+    withLife.layers[0]!.life = { enter: 500, fade: 300 };
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: withLife, duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#e6e8ef'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(1);
+  });
+
+  it('is silent for hex colours that only differ in spelling (case, 3- vs 6-digit)', () => {
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#000'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#000000'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
+  it('is silent for a one-step colour glide (rounding must not mask real interpolation)', () => {
+    // #000000 -> #010101 differ by 1 per channel: lerpSpec's rounded midpoint
+    // lands exactly on the target colour, but the colour still glides.
+    const r = validateSequence(morphSeq({
+      segments: [
+        { key: 'a', scene: caption('Act I', '#000000'), duration: 5000, transition: { type: 'morph', dur: 1000 } },
+        { key: 'b', scene: caption('Act I', '#010101'), duration: 5000 },
+      ],
+    }));
+    expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
+  });
+
   it('is silent for a cut between text-only twins', () => {
     const r = validateSequence(morphSeq({
       segments: [
