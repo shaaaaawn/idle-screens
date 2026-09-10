@@ -36,8 +36,9 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
-(2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity` and the
-`maxWidth` cap lifted to 2.0 (2026-09-08 — ambient presentations).
+(2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
+`maxWidth` cap lifted to 2.0, and `sync` on the sequence envelope
+(2026-09-08 — ambient presentations).
 
 ## Safety invariants
 
@@ -602,6 +603,7 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "label": "My Sequence",
   "seed": 42,           // optional; forwarded to children without their own seed
   "loop": false,
+  "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -644,10 +646,30 @@ sums of durations. Half-open segments: `[start, start+duration)`. With
 a durationless final segment). An unreleased `advance: 'input'` hold blocks the
 wrap; after a wrap every hold is armed again.
 
+**Sync:** `sync` names what the sequence clock is anchored to. `mount`
+(the default, and today's behaviour for every stored sequence) starts `T` at
+0 when the viewer mounts — every joiner sees segment 0, which is what makes a
+pre-roll a pre-roll. `epoch` lets the host seed the clock: the viewer passes
+`sequenceBaseT` (ms already elapsed on the shared clock — idlescreens.com
+passes `Date.now() − scene.epoch`) on the mount context
+(`SequenceMountContext`, a `SaverContext` plus that one field), and the
+instance starts at that `T` instead of 0, so every screen in a room resolves
+the same segment. The trade-off: a viewer joining an `epoch` sequence lands
+**mid-loop**, wherever the room is; `mount` keeps pre-roll semantics. Holds
+are the same under both — `advance: 'input'` is armed for every viewer, so a
+late joiner whose seeded clock is already past an unreleased hold lands **on**
+the held segment (still animating), not past it, and the clicker releases it
+from there. `epoch` without a `sequenceBaseT` starts at 0 (a host that does
+not pass the hint loses nothing). **Native clients that anchor at their own
+mount behave as `mount`** until they read the field and seed from the channel
+epoch. The default is never flipped: pre-roll depends on `mount`.
+
 **Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
-viewer needs zero changes. All children share a single canvas; only the active
-segment's `SpecInstance` is alive at any time. `workerReady` is `false` (the
-worker compile-hook does not dispatch sequences).
+viewer needs zero changes (a host that wants `sync: 'epoch'` passes a
+`SequenceMountContext`; a plain `SaverContext` still mounts). All children
+share a single canvas; only the active segment's `SpecInstance` is alive at
+any time. `workerReady` is `false` (the worker compile-hook does not dispatch
+sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
 `applyTrack` (`setParam("sequence.segment", n)` over MCP). The

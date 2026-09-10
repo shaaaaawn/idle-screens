@@ -564,5 +564,14 @@ export interface IdleSequence {
   label: string;
   seed?: number;
   loop: boolean;
+  /**
+   * What the sequence clock is anchored to. `mount` (default — today's
+   * behaviour): every viewer starts at T = 0 when it mounts, so a joiner sees
+   * segment 0 (pre-roll semantics). `epoch`: a viewer handed `sequenceBaseT`
+   * on its mount context (the host's `Date.now() − epoch`) starts its clock
+   * there, so every screen in a room shows the same segment — a late joiner
+   * lands mid-loop. `advance: 'input'` holds stay armed under either mode.
+   */
+  sync?: 'mount' | 'epoch';
   segments: SequenceSegment[];
 }

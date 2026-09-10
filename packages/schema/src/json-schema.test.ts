@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
 import schema from '../saver-spec.schema.json';
 import { EXAMPLE_SPECS } from './examples';
-import { validateSpec } from './validate';
+import { validateSequence, validateSpec } from './validate';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 const check = ajv.compile(schema);
@@ -184,5 +184,20 @@ describe('saver-spec.schema.json', () => {
       expect(validateSpec(spec).valid).toBe(false);
       expect(check(spec)).toBe(false);
     }
+  });
+
+  it("agrees with the runtime validator on sequence sync (1b)", () => {
+    const scene = { schemaVersion: 1, id: 'x', label: 'X', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['🔵'] }, motion: { type: 'static' } }] };
+    const seq = (sync?: string) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      ...(sync ? { sync } : {}),
+      segments: [{ key: 'a', scene, duration: 2000 }],
+    });
+    for (const s of [seq(), seq('mount'), seq('epoch')]) {
+      expect(validateSequence(s).valid).toBe(true);
+      expect(check(s)).toBe(true);
+    }
+    expect(validateSequence(seq('server')).valid).toBe(false);
+    expect(check(seq('server'))).toBe(false);
   });
 });
