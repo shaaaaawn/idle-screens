@@ -924,8 +924,8 @@
             "maxWidth": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "maximum": 1.0,
-              "description": "Block width as a viewport fraction of min(w,h)."
+              "maximum": 2.0,
+              "description": "Wrap width as a viewport fraction of min(w,h), up to 2.0 (wider than the frame is legal; the text-off-screen advisory reports overflow)."
             },
             "fontSize": {
               "type": "number",
@@ -952,9 +952,35 @@
             },
             "reveal": {
               "$ref": "#/definitions/textReveal"
+            },
+            "anchor": {
+              "enum": [
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right"
+              ],
+              "description": "Which point of the rendered text (widest line × lines·lineHeight, as align lays it out) position names. Absent: position is the top-left of the maxWidth layout box (today's behaviour). 'center' centres the block at position on every aspect ratio. Placement (structural). Native clients without anchor render as absent."
+            },
+            "font": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!.*\\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)).*$",
+              "description": "CSS font family and/or weight/style only, e.g. 'bold monospace' or \"300 'Inter', sans-serif\" — a size inside it is rejected (fontSize owns size). A monospace family switches the line-breaker to a uniform advance. Default 'system-ui, sans-serif'; native clients fall back to the system face."
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Paint-level alpha multiplier for the block (default 1). Not structural — steer it with dur to fade the block in or out without a rebuild. Declare it to make the path steerable. Native clients without it render at 1."
             }
           },
-          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
+          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
         }
       ]
     },

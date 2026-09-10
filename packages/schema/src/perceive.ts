@@ -29,6 +29,8 @@ import {
   revealState,
   rotationAt,
   sizeAt,
+  textBlockAnchorOffset,
+  textMetricsClassFor,
   type Entity,
 } from './simulate';
 import { LIMITS, type LayerSpec, type SaverSpec } from './types';
@@ -158,16 +160,18 @@ function textBlockBox(
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unitScale;
   const maxWEm = maxWPx / fsPx;
-  const lines = breakTextBlock(s.text, maxWEm);
+  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
   const totalH = lines.length * lh;
   const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
   const align = s.align ?? 'left';
   const cx = align === 'center' ? p.x + maxWPx / 2
     : align === 'right' ? p.x + maxWPx - maxLineW / 2
     : p.x + maxLineW / 2;
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
   return {
-    cx,
-    cy: p.y + totalH / 2,
+    cx: cx + dx,
+    cy: p.y + totalH / 2 + dy,
     halfX: maxLineW / 2,
     halfY: totalH / 2,
   };
@@ -187,7 +191,7 @@ function textBlockRevealFraction(
   if (!s.reveal) return 1;
   const unitScale = Math.min(w, h);
   const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
-  const lines = breakTextBlock(s.text, maxWEm);
+  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
   const rs = revealState(lines, s.reveal, t);
   if (rs.glyphAlphas) {
     // glyphFade paints partial-alpha glyphs, so the ink fraction is the mean
@@ -452,7 +456,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
-        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) : 1);
+        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1) : 1);
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
@@ -791,7 +795,7 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t);
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
       area += entArea * a;

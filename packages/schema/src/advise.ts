@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textWidthEm, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
 
@@ -174,8 +174,8 @@ export function adviseSpec(
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
         const maxWPx = layer.sprite.maxWidth * scale;
-        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx);
-        pixArea = maxWPx * lines.length * lh * 0.55;
+        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
+        pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }
@@ -437,12 +437,14 @@ function textBlockBoxAt(
   const fsPx = s.fontSize * unit;
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unit;
-  const lines = breakTextBlock(s.text, maxWPx / fsPx);
+  const lines = breakTextBlock(s.text, maxWPx / fsPx, textMetricsClassFor(s.font));
   const maxLineW = lines.reduce((mx, l) => Math.max(mx, l.widthEm), 0) * fsPx;
   const totalH = lines.length * lh;
   const align = s.align ?? 'left';
   const x0 = align === 'center' ? p.x + (maxWPx - maxLineW) / 2 : align === 'right' ? p.x + maxWPx - maxLineW : p.x;
-  return { x0, y0: p.y, x1: x0 + maxLineW, y1: p.y + totalH };
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
+  return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH };
 }
 
 /**

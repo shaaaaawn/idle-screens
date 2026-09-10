@@ -323,13 +323,42 @@ export type SpriteSpec =
   | {
       kind: 'textBlock';
       text: string;
+      /** Wrap width as a fraction of `min(w,h)` (up to 2.0 — `text-off-screen` catches overflow). */
       maxWidth: number;
       fontSize: number;
       lineHeight?: number;
+      /** Moves the painted lines inside the wrap width (ragged edge); never the block. */
       align?: 'left' | 'center' | 'right';
       color?: string;
       reveal?: TextRevealSpec;
+      /**
+       * Which point of the rendered text (widest line × lines·lineHeight, as
+       * `align` lays it out) `position` names. Absent: today's behaviour —
+       * `position` is the top-left of the `maxWidth` layout box. With
+       * `'center'` the block is centred at `position` on every aspect ratio.
+       * Placement, so it is in the structural signature.
+       */
+      anchor?: TextBlockAnchor;
+      /**
+       * CSS font family and/or weight/style only (`"bold monospace"`,
+       * `"300 'Inter', sans-serif"`). A size inside it is rejected —
+       * `fontSize` owns size. Absent: `system-ui, sans-serif`.
+       */
+      font?: string;
+      /**
+       * 0..1 multiplier on the block's paint alpha (default 1). Paint, not
+       * carpentry: excluded from the structural signature, so steering it
+       * with `dur` glides the block in or out without a rebuild. Declare it
+       * (`"opacity": 1`) to make the path steerable.
+       */
+      opacity?: number;
     };
+
+/** Compass points of a `textBlock`'s rendered box that `position` may name. */
+export type TextBlockAnchor =
+  | 'top-left' | 'top' | 'top-right'
+  | 'left' | 'center' | 'right'
+  | 'bottom-left' | 'bottom' | 'bottom-right';
 
 /**
  * Animated typing/deleting for `textBlock`. Layout always runs on the FULL
@@ -487,7 +516,7 @@ export const LIMITS = {
   maxTextBlockLength: 2000,
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
-  maxTextBlockMaxWidth: 1.0,
+  maxTextBlockMaxWidth: 2.0, // of min(w,h) — wider than the frame is legal; text-off-screen reports the overflow
   maxRevealSpeed: 120, // graphemes/sec — faster than any readable typing
   maxCaretBlinkHz: 3, // full blink cycles/sec — WCAG 2.3.1 flash-safety cap
   maxSegments: 24,

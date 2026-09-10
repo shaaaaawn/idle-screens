@@ -240,7 +240,10 @@ export function structuralSignature(spec: SaverSpec): string {
           : l.sprite.kind === 'text'
             ? [l.sprite.strings.length, l.sprite.cycle?.period]
             : l.sprite.kind === 'textBlock'
-              ? [l.sprite.fontSize]
+              // `anchor` is placement (in); `font`/`opacity`/`text` are paint
+              // (out — opacity must glide). Appended only when set so every
+              // existing spec's signature string is byte-identical.
+              ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
               : undefined,
       ];
     }),
