@@ -425,6 +425,74 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
     expect(legibility({ ...clear, layers: [glow({ blend: undefined }), text] })).toEqual([]);
   });
 
+  it("emit's on/off envelope does not zero the text's own alpha — a bright emitting label still clears the floor", () => {
+    // A `role: 'read'` layer that also declares `emit` is closed at t = 0;
+    // sampling `alphaAt(e, 0)` there would collapse the ink to the ground and
+    // always fire, regardless of colour. The measured alpha must come from
+    // the layer's base/pulse, not the emit window.
+    const emitting: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#05050a' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#f2f4f8', role: 'read' }), emit: { every: 4000, life: 400 } }],
+    };
+    expect(legibility(emitting)).toEqual([]);
+  });
+
+  it("measures a role: 'read' layer at what it actually paints — a textBlock's own low opacity, or a low-alpha layer, cannot hide behind an unmeasured alpha", () => {
+    const lowOpacity: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#05050a' },
+      layers: [block('Standby', 0.3, 0.4, { color: '#f2f4f8', role: 'read', opacity: 0.05 })],
+    };
+    expect(legibility(lowOpacity).map((x) => x.code)).toEqual(['text-legibility']);
+
+    const lowLayerAlpha: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#05050a' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#f2f4f8', role: 'read' }), alpha: [0.05, 0.05] }],
+    };
+    expect(legibility(lowLayerAlpha).map((x) => x.code)).toEqual(['text-legibility']);
+
+    // Full opacity/alpha still clears the floor against the same ground.
+    expect(legibility({ ...lowOpacity, layers: [block('Standby', 0.3, 0.4, { color: '#f2f4f8', role: 'read' })] })).toEqual([]);
+  });
+
+  it('composites the text at its own layer blend, not always source-over', () => {
+    // Same ground, ink and alpha: additive lifts clear of the floor while
+    // source-over does not — a regression to always-source-over would flip
+    // the additive case to fire too, so this fails loudly if that branch
+    // stops being exercised.
+    const additive: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#505050' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#ffffff', role: 'read' }), blend: 'lighter', alpha: [0.5, 0.5] }],
+    };
+    expect(legibility(additive)).toEqual([]);
+
+    const sourceOver: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#505050' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#ffffff', role: 'read' }), alpha: [0.5, 0.5] }],
+    };
+    expect(legibility(sourceOver).map((x) => x.code)).toEqual(['text-legibility']);
+
+    // Same story for `multiply`: mid-tone ink darkens the ground more than a
+    // plain source-over blend would, crossing the floor in the other direction.
+    const multiply: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#b4b4b4' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#464646', role: 'read' }), blend: 'multiply', alpha: [0.9, 0.9] }],
+    };
+    expect(legibility(multiply)).toEqual([]);
+
+    const multiplyAsSourceOver: SaverSpec = {
+      ...vp,
+      background: { type: 'solid', color: '#b4b4b4' },
+      layers: [{ ...block('Standby', 0.3, 0.4, { color: '#464646', role: 'read' }), alpha: [0.9, 0.9] }],
+    };
+    expect(legibility(multiplyAsSourceOver).map((x) => x.code)).toEqual(['text-legibility']);
+  });
+
   it("text at x: 0.02 fires text-safe-area (with its box) only under role: 'read'", () => {
     const edge: SaverSpec = { ...vp, layers: [block('Fine print', 0.02, 0.5, { color: '#ffffff' }, 'fine')] };
     expect(legibility(edge)).toEqual([]);

@@ -1,8 +1,8 @@
 import { createRng } from '@idle-screens/core';
-import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, spriteHex, type Rgb } from './luma';
+import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
@@ -338,7 +338,14 @@ export function adviseSpec(
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
       const box = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
-      textBoxes.push({ li, label, ...box });
+      // What the layer guarantees it paints, worst case: base alpha minus its
+      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
+      // duty cycle is a readability question, not an ink-colour one; sampling
+      // at `t = 0` would otherwise flag every emitting layer as invisible)
+      // times a textBlock's own `opacity` — so faint or invisible
+      // `role: 'read'` text can't hide behind an unmeasured alpha.
+      const alpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      textBoxes.push({ li, label, alpha, ...box });
     }
   }
   const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
@@ -413,13 +420,27 @@ export function adviseSpec(
     readFlagged.add(b.li);
 
     const ink = hexRgb(s.color ?? '#e6e8ef');
+    // What the layer actually paints over `base`, at its own alpha and blend —
+    // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
+    // `multiply`, is not free to hide behind a source-over assumption.
+    const textPlate = (base: Rgb, alpha: number): Rgb => {
+      if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
+      if (layer.blend === 'multiply') {
+        return {
+          r: base.r * (1 - alpha + ink.r * alpha),
+          g: base.g * (1 - alpha + ink.g * alpha),
+          b: base.b * (1 - alpha + ink.b * alpha),
+        };
+      }
+      return sourceOverPlate(base, ink, alpha);
+    };
     let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const groundRgb = backgroundRgbAt(spec, cy, h, scale);
-      const ground = legibilityRatio(ink, groundRgb);
+      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
       const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
-      const plate = lit ? legibilityRatio(ink, lit.rgb) : Infinity;
+      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
       if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
         worst = { ground, plate, plateLabel: lit?.label ?? null };
       }
@@ -462,11 +483,15 @@ export function adviseSpec(
 /**
  * The brightest ground a `role: 'read'` box can find itself on: for every
  * additive layer (`lighter` / `screen`) whose entities can reach the box and
- * are big enough to sit under a glyph, its brightest colour at peak alpha
- * (base + pulse) composited over the background. Reach is judged at rest:
- * a static entity is its disc at `t = 0`; an orbit is its centre ± radius;
- * every travelling motion can be anywhere. Entities whose diameter is below
- * the text's glyph height are skipped — a dust mote cannot wash out a line.
+ * are big enough to sit under a glyph, the brightest per-entity plate — its
+ * own colour composited at its own peak alpha (base + pulse), never a
+ * different entity's alpha borrowed onto it. Reach is judged at rest: a
+ * static entity is its disc at `t = 0`; an orbit is its centre ± radius;
+ * every travelling motion can be anywhere. The disc's diameter is the
+ * entity's largest possible rendered extent — grow breathing, a rect/bar's
+ * second dimension (thickness/aspect height can exceed the primary size),
+ * and the peak scale warp/emit reach over their lifecycle — so a mote that
+ * balloons under a line is not dismissed as dust because it starts small.
  */
 function brightestAdditivePlate(
   spec: SaverSpec,
@@ -483,25 +508,20 @@ function brightestAdditivePlate(
     if (blend !== 'lighter' && blend !== 'screen') continue;
     if (lj === box.li) continue;
     const entities = allEntities[lj]!;
-    let peakAlpha = 0;
-    let colour: Rgb | null = null;
     for (const e of entities) {
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
-      const reach = e.size * (1 + e.growAmp) / 2;
-      if (reach * 2 < box.fs) continue;
-      if (!entityReachesBox(e, reach, box, w, h)) continue;
+      const growScale = (e.motion === 'warp' ? WARP_MAX_SCALE : 1) * (e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1);
+      const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
+      if (maxDim < box.fs) continue;
+      if (!entityReachesBox(e, maxDim / 2, box, w, h)) continue;
       const a = Math.min(1, e.alpha + e.pulseAmp);
       if (a <= 0) continue;
-      peakAlpha = Math.max(peakAlpha, a);
-      const c = hexRgb(hex);
-      if (!colour || relativeLuminance(c) > relativeLuminance(colour)) colour = c;
-    }
-    if (!colour || peakAlpha <= 0) continue;
-    const plate = additivePlate(ground, colour, peakAlpha, blend);
-    const lum = relativeLuminance(plate);
-    if (!best || lum > best.lum) {
-      best = { rgb: plate, label: layer.key ? `\`${layer.key}\`` : `layers[${lj}]`, lum };
+      const plate = additivePlate(ground, hexRgb(hex), a, blend);
+      const lum = relativeLuminance(plate);
+      if (!best || lum > best.lum) {
+        best = { rgb: plate, label: layer.key ? `\`${layer.key}\`` : `layers[${lj}]`, lum };
+      }
     }
   }
   return best ? { rgb: best.rgb, label: best.label } : null;
@@ -523,6 +543,12 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
 interface TextBoxAt {
   li: number;
   label: string;
+  /**
+   * Worst case, not "at rest": base alpha minus its pulse trough (never the
+   * `emit` envelope, whose on/off duty cycle is excluded on purpose) times a
+   * textBlock's own `opacity`.
+   */
+  alpha: number;
   x0: number;
   y0: number;
   x1: number;
@@ -599,7 +625,7 @@ export function adviseSequence(
   for (let i = 0; i < seq.segments.length; i++) {
     const segWarnings = adviseSpec(seq.segments[i]!.scene, viewport);
     for (const w of segWarnings) {
-      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message });
+      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message, boxes: w.boxes });
     }
   }
 
