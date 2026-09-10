@@ -1522,6 +1522,19 @@
               },
               "required": ["type", "dur"],
               "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "fade" },
+                "dur": {
+                  "type": "number",
+                  "minimum": 200,
+                  "maximum": 5000,
+                  "description": "Cross-fade duration in ms: the outgoing segment keeps animating on its own canvas and is composited over the incoming one at 1 − easeSmooth(localT / dur). No structural requirement. Hosts on the 'basic' or 'minimal' capability tier render it as cut."
+                }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
             }
           ]
         }

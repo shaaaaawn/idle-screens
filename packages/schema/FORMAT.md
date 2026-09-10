@@ -37,8 +37,8 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
 (2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
-`maxWidth` cap lifted to 2.0, and `sync` on the sequence envelope
-(2026-09-08 — ambient presentations).
+`maxWidth` cap lifted to 2.0, `sync` on the sequence envelope, and the
+`fade` transition (2026-09-08 — ambient presentations).
 
 ## Safety invariants
 
@@ -640,6 +640,28 @@ valid). During a morph, entity placement inherits the outgoing segment's seed
 — the incoming segment's own seed is unused. `dur` must be between 200 and
 5000 ms.
 
+`{ type: 'fade', dur: number }` is the general cross-fade, for segments that
+have nothing in common: the outgoing segment stays alive on a canvas of its
+own for `dur` ms and is composited over the incoming one at
+`1 − easeSmooth(localT / dur)`, so both keep animating through the window. The
+outgoing segment renders at `duration + localT` — it continues rather than
+freezing (and if it was an `advance: 'input'` hold, it resumes from its
+`duration`, not from wherever the hold had reached). A fade is always from the
+previous segment in the list; under `loop: true` the **last** segment's `fade`
+is the wrap's transition into segment 0. It works through the clicker too — a
+`sequence.segment` steer lands at `localT` 0 of the fade. Same `dur` bounds
+as morph, no structural requirement, and a fade only smooths luminance, so the
+flash gate is untouched; it is the remedy for a `boundary-luminance-jump`
+advisory. **Tier gate:** two live segments for `dur` is over the budget of the
+lowest tiers, so a host on the `basic` (canvas2d only) or `minimal` capability
+tier — passed as `capabilityTier` on the `SequenceMountContext`, the tier
+`computeTier` from `@idle-screens/capabilities` reports — renders `fade` as
+`cut`; absent ⇒ fade enabled. `adviseSequence` says so once per sequence with
+the informational `fade-degrades-on-low-tier`. **Native:** tvOS already
+cross-fades on every segment change using the transition's `dur`, so `fade`
+matches the native player rather than diverging from it; native reads
+`fade.dur` where it reads the morph `dur` today.
+
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
 `loop: true`, `T` wraps at the sum of all durations (loop is incompatible with
@@ -668,8 +690,9 @@ epoch. The default is never flipped: pre-roll depends on `mount`.
 viewer needs zero changes (a host that wants `sync: 'epoch'` passes a
 `SequenceMountContext`; a plain `SaverContext` still mounts). All children
 share a single canvas; only the active segment's `SpecInstance` is alive at
-any time. `workerReady` is `false` (the worker compile-hook does not dispatch
-sequences).
+any time — except for the `dur` of a `fade`, when the outgoing segment lives
+on an offscreen canvas of its own. `workerReady` is `false` (the worker
+compile-hook does not dispatch sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
 `applyTrack` (`setParam("sequence.segment", n)` over MCP). The

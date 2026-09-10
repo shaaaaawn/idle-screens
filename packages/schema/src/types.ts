@@ -545,7 +545,15 @@ export const LIMITS = {
 
 export type SequenceTransition =
   | { type: 'cut' }
-  | { type: 'morph'; dur: number };
+  | { type: 'morph'; dur: number }
+  /**
+   * Cross-fade into the next segment over `dur` ms: the outgoing segment
+   * stays alive on its own canvas and is composited over the incoming one
+   * at `1 − easeSmooth(localT / dur)`. Works between unlike segments (no
+   * structural requirement). Hosts on the `basic`/`minimal` capability tier
+   * render it as `cut` (see `SequenceMountContext.capabilityTier`).
+   */
+  | { type: 'fade'; dur: number };
 
 export interface SequenceSegment {
   key: string;

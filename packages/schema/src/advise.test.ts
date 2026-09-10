@@ -391,6 +391,46 @@ describe('adviseSequence', () => {
     expect(warnings.filter((w) => w.code === 'boundary-luminance-jump')).toHaveLength(0);
   });
 
+  it('fade-degrades-on-low-tier: once per sequence when any fade is declared, never for cut/morph (1c)', () => {
+    const fades = adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+        { key: 'c', scene, duration: 5000 },
+      ],
+    })).filter((w) => w.code === 'fade-degrades-on-low-tier');
+    expect(fades).toHaveLength(1);
+    expect(fades[0]!.path).toBe('segments[0].transition');
+    expect(fades[0]!.message).toMatch(/^informational: 2 fade transitions/);
+    for (const transition of [{ type: 'cut' } as const, { type: 'morph', dur: 800 } as const, undefined]) {
+      const w = adviseSequence(mkSeq({ segments: [{ key: 'a', scene, duration: 5000, transition }, { key: 'b', scene, duration: 5000 }] }));
+      expect(w.filter((x) => x.code === 'fade-degrades-on-low-tier')).toHaveLength(0);
+    }
+  });
+
+  it('fade-degrades-on-low-tier: not raised for a fade on the last segment without loop (it never runs)', () => {
+    const w = adviseSequence(mkSeq({
+      loop: false,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(0);
+  });
+
+  it("fade-degrades-on-low-tier: raised for the last segment's fade under loop (it's the wrap's transition)", () => {
+    const w = adviseSequence(mkSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe('segments[1].transition');
+  });
+
   it('warns on large luminance jump at boundary', () => {
     const dark: SaverSpec = { ...scene, background: { type: 'solid', color: '#000000' } };
     const bright: SaverSpec = { ...scene, background: { type: 'solid', color: '#ffffff' } };

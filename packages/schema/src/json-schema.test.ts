@@ -148,20 +148,29 @@ describe('saver-spec.schema.json', () => {
     expect(check.errors ?? []).toEqual([]);
   });
 
-  it('rejects idle-sequence with fade transition (v1 is cut-only)', () => {
+  // Flipped deliberately in plan 1c: this used to assert "rejects
+  // idle-sequence with fade transition (v1 is cut-only)".
+  it('agrees with the runtime validator on fade transitions (1c)', () => {
     const scene = {
       schemaVersion: 1, id: 's', label: 'S',
       layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['⭐'] }, motion: { type: 'static' } }],
     };
-    const seq = {
+    const seq = (transition: Record<string, unknown>) => ({
       format: 'idle-sequence',
       schemaVersion: 1,
       id: 'seq',
       label: 'Seq',
       loop: false,
-      segments: [{ key: 'a', scene, duration: 2000, transition: { type: 'fade' } }],
-    };
-    expect(check(seq)).toBe(false);
+      segments: [{ key: 'a', scene, duration: 2000, transition }],
+    });
+    for (const good of [{ type: 'fade', dur: 600 }, { type: 'fade', dur: 200 }, { type: 'fade', dur: 5000 }]) {
+      expect(validateSequence(seq(good)).valid).toBe(true);
+      expect(check(seq(good))).toBe(true);
+    }
+    for (const bad of [{ type: 'fade' }, { type: 'fade', dur: 100 }, { type: 'fade', dur: 6000 }, { type: 'dissolve', dur: 600 }]) {
+      expect(validateSequence(seq(bad)).valid).toBe(false);
+      expect(check(seq(bad))).toBe(false);
+    }
   });
 
   it('agrees with the runtime validator on textBlock anchor / font / opacity / maxWidth (1a)', () => {
