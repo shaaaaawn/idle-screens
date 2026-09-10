@@ -1,10 +1,10 @@
 import { createRng } from '@idle-screens/core';
-import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
+import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
-import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning } from './types';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
  * Minimum RGB-space colour distance (see `colourSeparation`) between a layer
@@ -25,6 +25,16 @@ const LOW_CONTRAST_FLOOR = 0.05;
  * is a comfortable field, not restraint — `lanterns` measures ~1.5 %).
  */
 const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
+
+/**
+ * WCAG AA floor for body text. Only layers that declare `role: 'read'` are
+ * measured against it — atmospheric text is texture, not copy, and the
+ * shipped examples paint it at 2–3:1 on purpose.
+ */
+const READ_LEGIBILITY_FLOOR = 4.5;
+
+/** A `role: 'read'` box closer than this to any edge is in the overscan / bezel zone. */
+const READ_SAFE_AREA = 0.05;
 
 /**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
@@ -328,9 +338,22 @@ export function adviseSpec(
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
       const box = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
-      textBoxes.push({ li, label, ...box });
+      // What the layer guarantees it paints, worst case: base alpha minus its
+      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
+      // duty cycle is a readability question, not an ink-colour one; sampling
+      // at `t = 0` would otherwise flag every emitting layer as invisible)
+      // times a textBlock's own `opacity` — so faint or invisible
+      // `role: 'read'` text can't hide behind an unmeasured alpha.
+      const alpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      textBoxes.push({ li, label, alpha, ...box });
     }
   }
+  const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
+    x: +(b.x0 / w).toFixed(4),
+    y: +(b.y0 / h).toFixed(4),
+    w: +((b.x1 - b.x0) / w).toFixed(4),
+    h: +((b.y1 - b.y0) / h).toFixed(4),
+  });
 
   // Off-screen: any edge past the viewport by more than 1% of that dimension
   // (the width table is approximate; a hairline overhang is not a finding).
@@ -376,6 +399,80 @@ export function adviseSpec(
         path: `layers[${first.li}]`,
         code: 'text-overlap',
         message: `${first.label} and ${second.label} text boxes overlap (~${Math.round(share * 100)}% of the smaller one) — they will paint over each other; move one or shrink it`,
+        // The two boxes, so an agent can move one without re-deriving the
+        // layout. Additive: the message is unchanged.
+        boxes: [asFraction(first), asFraction(second)],
+      });
+    }
+  }
+
+  // Legibility, for text that declared it must be read (`role: 'read'`).
+  // Everything below is opt-in: a layer without the role is never measured,
+  // so the atmospheric text the examples paint at 2–3:1 stays silent.
+  const readFlagged = new Set<number>();
+  for (const b of textBoxes) {
+    if (readFlagged.has(b.li)) continue;
+    const layer = spec.layers[b.li]!;
+    const s = layer.sprite;
+    if ((s.kind !== 'text' && s.kind !== 'textBlock') || s.role !== 'read') continue;
+    // Every box of the layer (a `list` of labels is several), worst one wins.
+    const boxes = textBoxes.filter((x) => x.li === b.li);
+    readFlagged.add(b.li);
+
+    const ink = hexRgb(s.color ?? '#e6e8ef');
+    // What the layer actually paints over `base`, at its own alpha and blend —
+    // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
+    // `multiply`, is not free to hide behind a source-over assumption.
+    const textPlate = (base: Rgb, alpha: number): Rgb => {
+      if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
+      if (layer.blend === 'multiply') {
+        return {
+          r: base.r * (1 - alpha + ink.r * alpha),
+          g: base.g * (1 - alpha + ink.g * alpha),
+          b: base.b * (1 - alpha + ink.b * alpha),
+        };
+      }
+      return sourceOverPlate(base, ink, alpha);
+    };
+    let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
+    for (const box of boxes) {
+      const cy = (box.y0 + box.y1) / 2;
+      const groundRgb = backgroundRgbAt(spec, cy, h, scale);
+      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
+      const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
+      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+      if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
+        worst = { ground, plate, plateLabel: lit?.label ?? null };
+      }
+    }
+    if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
+      const under = worst.plateLabel
+        ? ` and ${worst.plate.toFixed(1)}:1 under ${worst.plateLabel} at its brightest`
+        : '';
+      warnings.push({
+        path: `layers[${b.li}].sprite`,
+        code: 'text-legibility',
+        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 against the background at the box centre${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
+      });
+    }
+
+    // Safe area: readable text that sits in the outer 5 % of the frame lands
+    // in the bezel / overscan zone on a real display.
+    const edges: string[] = [];
+    const x0 = Math.min(...boxes.map((x) => x.x0));
+    const x1 = Math.max(...boxes.map((x) => x.x1));
+    const y0 = Math.min(...boxes.map((x) => x.y0));
+    const y1 = Math.max(...boxes.map((x) => x.y1));
+    if (x0 < w * READ_SAFE_AREA) edges.push('left');
+    if (x1 > w * (1 - READ_SAFE_AREA)) edges.push('right');
+    if (y0 < h * READ_SAFE_AREA) edges.push('top');
+    if (y1 > h * (1 - READ_SAFE_AREA)) edges.push('bottom');
+    if (edges.length > 0) {
+      warnings.push({
+        path: `layers[${b.li}]`,
+        code: 'text-safe-area',
+        message: `${b.label} is declared role: 'read' but its box is within ${READ_SAFE_AREA * 100}% of the ${edges.join(' and ')} edge${edges.length === 1 ? '' : 's'} at ${w}×${h} — displays crop and bezels hide that zone; move it inward`,
+        boxes: [asFraction({ x0, y0, x1, y1 })],
       });
     }
   }
@@ -383,16 +480,84 @@ export function adviseSpec(
   return warnings;
 }
 
+/**
+ * The brightest ground a `role: 'read'` box can find itself on: for every
+ * additive layer (`lighter` / `screen`) whose entities can reach the box and
+ * are big enough to sit under a glyph, the brightest per-entity plate — its
+ * own colour composited at its own peak alpha (base + pulse), never a
+ * different entity's alpha borrowed onto it. Reach is judged at rest: a
+ * static entity is its disc at `t = 0`; an orbit is its centre ± radius;
+ * every travelling motion can be anywhere. The disc's diameter is the
+ * entity's largest possible rendered extent — grow breathing, a rect/bar's
+ * second dimension (thickness/aspect height can exceed the primary size),
+ * and the peak scale warp/emit reach over their lifecycle — so a mote that
+ * balloons under a line is not dismissed as dust because it starts small.
+ */
+function brightestAdditivePlate(
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  ground: Rgb,
+  box: TextBoxAt,
+  w: number,
+  h: number,
+): { rgb: Rgb; label: string } | null {
+  let best: { rgb: Rgb; label: string; lum: number } | null = null;
+  for (let lj = 0; lj < spec.layers.length; lj++) {
+    const layer = spec.layers[lj]!;
+    const blend = layer.blend;
+    if (blend !== 'lighter' && blend !== 'screen') continue;
+    if (lj === box.li) continue;
+    const entities = allEntities[lj]!;
+    for (const e of entities) {
+      const hex = spriteHex(layer, e);
+      if (hex === null) continue;
+      const growScale = (e.motion === 'warp' ? WARP_MAX_SCALE : 1) * (e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1);
+      const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
+      if (maxDim < box.fs) continue;
+      if (!entityReachesBox(e, maxDim / 2, box, w, h)) continue;
+      const a = Math.min(1, e.alpha + e.pulseAmp);
+      if (a <= 0) continue;
+      const plate = additivePlate(ground, hexRgb(hex), a, blend);
+      const lum = relativeLuminance(plate);
+      if (!best || lum > best.lum) {
+        best = { rgb: plate, label: layer.key ? `\`${layer.key}\`` : `layers[${lj}]`, lum };
+      }
+    }
+  }
+  return best ? { rgb: best.rgb, label: best.label } : null;
+}
+
+/** Whether an entity's disc of half-extent `r` can overlap `box` (see `brightestAdditivePlate`). */
+function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: number): boolean {
+  if (e.motion === 'static') {
+    const p = positionAt(e, 0, w, h);
+    return p.x + r > box.x0 && p.x - r < box.x1 && p.y + r > box.y0 && p.y - r < box.y1;
+  }
+  if (e.motion === 'orbit' && !e.orbitParent) {
+    const span = e.orbitR + r;
+    return e.orbitCx + span > box.x0 && e.orbitCx - span < box.x1 && e.orbitCy + span > box.y0 && e.orbitCy - span < box.y1;
+  }
+  return true;
+}
+
 interface TextBoxAt {
   li: number;
   label: string;
+  /**
+   * Worst case, not "at rest": base alpha minus its pulse trough (never the
+   * `emit` envelope, whose on/off duty cycle is excluded on purpose) times a
+   * textBlock's own `opacity`.
+   */
+  alpha: number;
   x0: number;
   y0: number;
   x1: number;
   y1: number;
+  /** Glyph height in px — what an additive layer must out-size to sit under a line. */
+  fs: number;
 }
 
-type Box = Pick<TextBoxAt, 'x0' | 'y0' | 'x1' | 'y1'>;
+type Box = Pick<TextBoxAt, 'x0' | 'y0' | 'x1' | 'y1' | 'fs'>;
 
 /**
  * Box of one `text` entity, mirroring the renderer: a `font` with a px size is
@@ -419,7 +584,7 @@ function textBoxAt(
   const baseline = s.baseline ?? 'middle';
   const x0 = align === 'left' ? p.x : align === 'right' ? p.x - fw : p.x - fw / 2;
   const y0 = baseline === 'top' ? p.y : baseline === 'bottom' ? p.y - fh : p.y - fh / 2;
-  return { x0, y0, x1: x0 + fw, y1: y0 + fh };
+  return { x0, y0, x1: x0 + fw, y1: y0 + fh, fs: fh };
 }
 
 /**
@@ -444,7 +609,7 @@ function textBlockBoxAt(
   const x0 = align === 'center' ? p.x + (maxWPx - maxLineW) / 2 : align === 'right' ? p.x + maxWPx - maxLineW : p.x;
   // Anchor moves the whole block the same way the renderer does (0,0 when absent).
   const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
-  return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH };
+  return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH, fs: fsPx };
 }
 
 /**
@@ -460,7 +625,7 @@ export function adviseSequence(
   for (let i = 0; i < seq.segments.length; i++) {
     const segWarnings = adviseSpec(seq.segments[i]!.scene, viewport);
     for (const w of segWarnings) {
-      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message });
+      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message, boxes: w.boxes });
     }
   }
 

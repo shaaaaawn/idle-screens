@@ -226,4 +226,26 @@ describe('saver-spec.schema.json', () => {
     expect(validateSequence(seq('server')).valid).toBe(false);
     expect(check(seq('server'))).toBe(false);
   });
+  it("agrees with the runtime validator on text role (1e): 'read' | 'atmosphere', nothing else", () => {
+    const withRole = (kind: 'text' | 'textBlock', role: unknown) => ({
+      schemaVersion: 1, id: 'role', label: 'Role',
+      layers: [{
+        count: 1,
+        sprite: kind === 'text'
+          ? { kind, strings: ['Read me'], color: '#fff', role }
+          : { kind, text: 'Read me', maxWidth: 0.5, fontSize: 0.04, role },
+        motion: { type: 'static' },
+        position: { x: 0.3, y: 0.3 },
+      }],
+    });
+    for (const kind of ['text', 'textBlock'] as const) {
+      for (const role of ['read', 'atmosphere']) {
+        expect(validateSpec(withRole(kind, role)).valid).toBe(true);
+        expect(check(withRole(kind, role))).toBe(true);
+        expect(check.errors ?? []).toEqual([]);
+      }
+      expect(validateSpec(withRole(kind, 'shout')).valid).toBe(false);
+      expect(check(withRole(kind, 'shout'))).toBe(false);
+    }
+  });
 });

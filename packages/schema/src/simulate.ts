@@ -6,7 +6,7 @@ import { isShapedSprite } from './shapes';
 /** Near plane for warp motion. z lives in [WARP_NEAR, 1]; screen scale is 1/z. */
 export const WARP_NEAR = 0.08;
 /** Cap on the 1/z size multiplier so near stars don't blow out. */
-const WARP_MAX_SCALE = 8;
+export const WARP_MAX_SCALE = 8;
 
 /** One axis-pair of seeded harmonic octaves for wander motion (amps px, freqs rad/ms). */
 export interface WanderOsc {

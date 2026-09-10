@@ -243,6 +243,8 @@ export type SpriteSpec =
       baseline?: 'top' | 'middle' | 'bottom';
       maxWidth?: number;
       cycle?: CycleSpec;
+      /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
+      role?: TextRole;
     }
   /** `soft` renders a radial falloff (glow orb) instead of a hard disc.
    *  `colorWeights` (same length as `colors`) biases the seeded per-entity pick —
@@ -352,7 +354,19 @@ export type SpriteSpec =
        * (`"opacity": 1`) to make the path steerable.
        */
       opacity?: number;
+      /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
+      role?: TextRole;
     };
+
+/**
+ * What a text layer is *for* — a declaration, not a pixel. `read` says the
+ * words must be readable from across the room and opts the layer into
+ * `adviseSpec`'s legibility advisories (`text-legibility`, `text-safe-area`).
+ * `atmosphere` says the text is texture (a haiku fading in a corner, dim
+ * labels on a wall board) and is the same as absent: silent. Changes no
+ * pixel anywhere, on any client; never part of the structural signature.
+ */
+export type TextRole = 'read' | 'atmosphere';
 
 /** Compass points of a `textBlock`'s rendered box that `position` may name. */
 export type TextBlockAnchor =
@@ -484,6 +498,21 @@ export interface SpecWarning {
   path: string;
   code: string;
   message: string;
+  /**
+   * Viewport-fraction boxes (`x`, `y`, `w`, `h` of `width`/`height`) the
+   * warning is about — `text-overlap` carries the two text boxes so an agent
+   * can move one without re-deriving the layout. Present only where a
+   * warning has geometry to report.
+   */
+  boxes?: WarningBox[];
+}
+
+/** A rectangle in viewport fractions (x/w of width, y/h of height). */
+export interface WarningBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /** Perf/safety caps enforced by `validateSpec`. */
