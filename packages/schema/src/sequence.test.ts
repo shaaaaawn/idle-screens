@@ -888,6 +888,209 @@ describe('SequenceInstance — morph segue', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Track retention — a steer lands on the segment that owns the path.
+//
+// Children are created lazily and disposed at every boundary, so before this
+// a steer forwarded to the active child alone died with it, and a steer to a
+// path only a later segment owns (`bars.sprite.values` while the title slide was up)
+// landed nowhere. Plan Phase 2.1, viewer half (idle-mono
+// docs/ambient-presentation-implementation-plan.md).
+// ---------------------------------------------------------------------------
+
+describe('SequenceInstance — retained track', () => {
+  const BARS: SaverSpec = {
+    schemaVersion: 1,
+    id: 'bars',
+    label: 'Bars',
+    layers: [{
+      key: 'bars',
+      count: 3,
+      sprite: { kind: 'bar', values: [10, 20, 30], max: 100, length: 0.5, thickness: 0.02, color: '#17e8c8' },
+      motion: { type: 'static' },
+      position: { x: 0.3, y: 0.3 },
+      layout: { type: 'list', gap: 0.1 },
+    }],
+  };
+  /** Segments 0 and 1 are title cards without `bars`; segment 2 owns it. */
+  const barsSeq = (): IdleSequence => seq({
+    segments: [
+      { key: 'a', scene: SCENE, duration: 5000 },
+      { key: 'b', scene: SCENE, duration: 3000 },
+      { key: 'c', scene: BARS, duration: 4000 },
+    ],
+  });
+  const childSpec = (inst: SaverInstance, index: number): SaverSpec | undefined =>
+    (inst as unknown as { children: Array<{ effSpec: SaverSpec } | null> }).children[index]?.effSpec;
+  const barValues = (spec: SaverSpec | undefined): unknown => (spec?.layers[0]?.sprite as { values?: unknown } | undefined)?.values;
+  const steer = (inst: SaverInstance, path: string, value: unknown): void =>
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path, value, ease: 'step', dur: 0 }] } as never);
+
+  it('a steer to a path only a later segment owns lands there when the timer reaches it', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1); // segment 0 — no `bars` layer here
+    steer(inst, 'bars.sprite.values', [90, 80, 70]);
+    expect(childSpec(inst, 0)!.layers).toEqual(SCENE.layers); // dropped on the child that does not own the key
+    inst.renderFrame!(9000, 1); // segment 2, created now
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(barValues(childSpec(inst, 2))).toEqual([90, 80, 70]);
+    inst.dispose();
+  });
+
+  it('… and when the clicker jumps to it in the same track', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1);
+    inst.applyTrack!({
+      program: 'test',
+      seed: 1,
+      deltas: [
+        { t: 0, path: 'bars.sprite.values', value: [5, 6, 7], ease: 'step', dur: 0 },
+        { t: 0, path: 'sequence.segment', value: 2, ease: 'step' },
+      ],
+    } as never);
+    expect(activeIndexOf(inst)).toBe(2);
+    expect(barValues(childSpec(inst, 2))).toEqual([5, 6, 7]);
+    inst.dispose();
+  });
+
+  it('survives leaving and re-entering the segment (the child is rebuilt from the retained set)', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(9000, 1);
+    steer(inst, 'bars.sprite.values', [1, 2, 3]);
+    expect(barValues(childSpec(inst, 2))).toEqual([1, 2, 3]); // active child: applied on this call
+    steerTo(inst, 0);
+    expect(childSpec(inst, 2)).toBeUndefined(); // disposed on the switch
+    steerTo(inst, 2);
+    expect(barValues(childSpec(inst, 2))).toEqual([1, 2, 3]);
+    inst.dispose();
+  });
+
+  it('last wins per path across calls; a delta invalid for a child is skipped without taking the rest down', () => {
+    const inst = mountSync(compileSequence(barsSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'bars.sprite.values', [1, 1, 1]);
+    steer(inst, 'bars.sprite.values', [2, 2, 2]);
+    steer(inst, 'layers.0.count', 5000); // resolves on every segment, valid on none (entity cap)
+    inst.renderFrame!(9000, 1);
+    expect(barValues(childSpec(inst, 2))).toEqual([2, 2, 2]);
+    expect(childSpec(inst, 2)!.layers[0]!.count).toBe(3);
+    inst.dispose();
+  });
+
+  it('a steer to a path the active child owns still applies immediately', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'background.color', '#ff0000');
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('a steered colour rides through a morph instead of vanishing for `dur` (both lerp endpoints carry the track)', () => {
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(1000, 1);
+    steer(inst, 'background.color', '#ff0000');
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) on the chain root
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.renderFrame!(7000, 1); // morph finalised: segment 1's child is created fresh from the root scene
+    expect(activeIndexOf(inst)).toBe(1);
+    expect(childSpec(inst, 1)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('no track ⇒ the children render the untouched scene objects (byte-identical path)', () => {
+    // No sequence seed, so childScene hands the child the stored scene itself.
+    const inst = mountSync(compileSequence({ ...barsSeq(), seed: undefined }));
+    inst.renderFrame!(1000, 1);
+    expect(childSpec(inst, 0)).toBe(SCENE);
+    inst.renderFrame!(9000, 1);
+    expect(childSpec(inst, 2)).toBe(BARS);
+    inst.dispose();
+  });
+
+  it('a steer that arrives while a morph is already in progress takes effect immediately, not on the next natural frame', () => {
+    // Regression: the chain-root child (the one actually rendering mid-morph)
+    // is never keyed at children[activeIndex], so forwarding a plain
+    // child.applyTrack() there was silently a no-op. Without an explicit
+    // re-render, the retained delta would sit un-painted until some other
+    // caller happened to render the next frame.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) already blending toward B
+    expect(childSpec(inst, 0)!.background).not.toEqual({ type: 'solid', color: '#ff0000' });
+    steer(inst, 'background.color', '#ff0000'); // no further renderFrame call follows
+    // Both lerp endpoints now carry the same steered colour, so the lerp is a
+    // no-op regardless of progress k — the value is exact, not merely closer.
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('a structural steer that arrives mid-morph rebuilds the live child instead of leaving stale entities', () => {
+    // Regression: the morph branch replaces the whole lerped spec every frame
+    // via a paint-only hot-swap that skips SpecInstance.rebuild(). canMorph
+    // only guarantees specA/specB share structure BEFORE the retained set is
+    // applied — a structural delta (`layers.0.count` here) can validate and
+    // change effSpec, but the child's actual built entities (baked at the
+    // last rebuild) stay behind unless the swap re-checks structuralSignature.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // already mid-morph, chain-root child built at count 3
+    const child = (inst as unknown as {
+      children: Array<{ effSpec: SaverSpec; layers: Array<{ entities: unknown[] }> } | null>;
+    }).children[0]!;
+    // Entity count is scaled by viewport (400×640 here, well under the 1080
+    // reference), so the built count isn't the raw spec count — 3 scales to
+    // 1 entity, 5 scales to 2. What matters is that it MOVES when the fix
+    // rebuilds; a stale hot-swap leaves it at 1 regardless of effSpec.count.
+    const before = child.layers[0]!.entities.length;
+    steer(inst, 'layers.0.count', 5); // reachable only via the morph's own hot-swap, not the plain active-child path
+    expect(child.effSpec.layers[0]!.count).toBe(5);
+    expect(child.layers[0]!.entities.length).not.toBe(before);
+    expect(child.layers[0]!.entities.length).toBe(2);
+    inst.dispose();
+  });
+
+  it('a freshly created child with retained deltas paints a full warm-up frame, not a ghosted blend of the pre-steer scene', () => {
+    // Regression: SpecInstance's own mount does one stray paint at t=0 (it
+    // starts paused, like every sequence child) using the PRE-steer spec —
+    // applyDeltasNow updates effSpec afterward but (before this fix) left
+    // lastRenderT at that stray 0. With `ghosting` on, the child's first
+    // real frame then read as "contiguous" with that stray paint and
+    // composited over it at partial alpha instead of clearing, briefly
+    // showing a ghost of the un-steered scene.
+    //
+    // The sprite is `circle` (draws via arc/fill, never fillRect) so every
+    // fillRect call in this test is unambiguously the background paint —
+    // one per paintFrame, in order.
+    const GHOST_SCENE: SaverSpec = {
+      schemaVersion: 1,
+      id: 'ghost',
+      label: 'Ghost',
+      ghosting: 0.9,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    const s = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 }, // no `background` field — the delta is a no-op here, only retained
+        { key: 'b', scene: GHOST_SCENE, duration: 4000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(1000, 1); // segment 0
+    steer(inst, 'background.color', '#ff0000');
+    const bgAlphas: number[] = [];
+    (mockCtx as unknown as { fillRect: (...args: number[]) => void }).fillRect = vi.fn(() => {
+      bgAlphas.push((mockCtx as unknown as { globalAlpha: number }).globalAlpha);
+    });
+    inst.renderFrame!(5100, 1); // segment 1 created fresh, localT=100ms — well inside the 250ms contiguity window
+    // bgAlphas[0] is the child's own construction-time stray paint (t=0, the
+    // pre-steer spec, always a full clear). bgAlphas[1] is the first paint of
+    // the real localT=100 frame: it must also be a full-alpha clear (the
+    // warm-up's first step), not a `1 - g^k` blend over that stale paint.
+    expect(bgAlphas[0]).toBe(1);
+    expect(bgAlphas[1]).toBe(1);
+    inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Discrete advance — the clicker.
 //
 // These began life as characterization tests pinning two gaps (a steer that
