@@ -26,6 +26,8 @@ carry named artistic styles.
 | `eval-registry.ts` | the canonical eval list — ids, visibility, channel eligibility |
 | `public-identity.ts` | research identity vs public identity; owns every spec `label` |
 | `agent-panel.ts` | Agent run modal + `runAgentEvalInteractive` (OpenRouter progress UI) |
+| `schema-allowlist.ts` | compact per-style format reference derived from `saver-spec.schema.json` (`schemaMode: 'allowlist'`) |
+| `agent-switches.ts` | the two experiment selects (tools / format reference) shared by both run dialogs |
 | `agent-bridge.ts` | folds agent artifacts into timeline runs (authored specs as evidence) |
 
 ### New run modes
@@ -36,6 +38,22 @@ carry named artistic styles.
 | **Re-score** | none | Scores against today's static catalog only |
 | `write-baseline.test.ts` | headless runner → `runs/<runId>/` + `index.json` |
 | `runs/` | append-only run artifacts for the next cycle |
+
+### Agent-loop experiment switches
+
+Two options on `runAgentScreen` / `runAgentBatch` (and two selects next to
+*Max tool calls* in both run dialogs). Both default to the historical
+behaviour, so existing runs stay byte-comparable; the artifact, the run
+record, `training.jsonl` provenance and the timeline provenance
+(`agentLoop`) all record which were on.
+
+| Option | Default | Experiment |
+| --- | --- | --- |
+| `tools` | `submit_spec, perceive, score, finish` | Drop `score` for an **honest baseline** — the loop still scores every version locally, the model just never sees the number, so it cannot climb the analytic scorer. `submit_spec` and `finish` are required. |
+| `schemaMode` | `full` (inline all of FORMAT.md, ~40 KB) | `allowlist` — a ~100-line reference derived from the JSON schema: top-level fields, backgrounds, layer fields, and only the sprite kinds / motion types in the style's DNA (+ `circle`, `drift`). Roughly 15 % of the full prompt. |
+
+Both come from the mono's `docs/training-a-saverspec-author.md` (items TR1
+allowlist and TR2 honest baseline).
 
 ## Counts
 

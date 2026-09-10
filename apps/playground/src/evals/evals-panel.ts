@@ -413,6 +413,8 @@ export function buildEvalsPanel(mount: HTMLElement, opts: EvalsPanelOptions = {}
         },
         model: req.modelName,
         maxToolCalls: req.maxToolCalls ?? 20,
+        tools: req.agentTools,
+        schemaMode: req.schemaMode,
         scope: req.agentScope ?? 'benchmark',
         operator: req.operator,
         runId,

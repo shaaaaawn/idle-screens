@@ -6,6 +6,7 @@ import {
   type OpenRouterModel,
 } from './openrouter';
 import { mountAgentScopeControls, type EvalCatalog } from './agent-targets';
+import { agentSwitchesMarkup, readAgentSwitches } from './agent-switches';
 import { getRunDefaults } from './run-defaults';
 import type { VersionField } from './provenance';
 import { nextCycleBrief } from './run-store';
@@ -376,7 +377,7 @@ export function promptRunRequest(defaults: {
           <div data-role="scope-controls"></div>
           <label class="evals-field">Max tool calls / screen
             <input name="maxToolCalls" type="number" min="1" max="100" value="20" />
-          </label>
+          </label>${agentSwitchesMarkup()}
         </div>
 
         <details class="evals-conn">
@@ -468,6 +469,7 @@ export function promptRunRequest(defaults: {
         return;
       }
       const targets = scopeControls.read();
+      const switches = readAgentSwitches(form);
       close({
         label: String(fd.get('label') ?? '').trim() || 'playground run',
         note: String(fd.get('note') ?? '').trim(),
@@ -478,6 +480,8 @@ export function promptRunRequest(defaults: {
         targetBenchmarkId: targets.benchmarkId,
         targetScreenId: targets.screenId ?? undefined,
         maxToolCalls: Math.min(100, Math.max(1, Number(fd.get('maxToolCalls')) || 20)),
+        agentTools: switches.tools,
+        schemaMode: switches.schemaMode,
         modelName,
         modelProvider: String(fd.get('provider') ?? '').trim() || undefined,
         operator: String(fd.get('operator') ?? '').trim() || undefined,
