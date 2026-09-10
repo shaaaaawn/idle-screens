@@ -50,6 +50,8 @@ final class TVAppState {
     var currentSpecJSON: JSONValue?
     var compiledScene: [CompiledLayer] = []
     var specBackground: SpecSubset.Background?
+    /// 0…1 frame persistence declared by the scene (motion smear).
+    var specGhosting: Double = 0
     /// True when the channel runs a non-schema spec (e.g. classic saver
     /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
     var isClassicSpec = false
@@ -73,6 +75,8 @@ final class TVAppState {
 
     let machine: String
     let detectedTier: CapabilityTier
+    /// How hard this box may be pushed at whatever tier it renders on.
+    let renderClass: RenderClass
     /// Set by ThumbStreamView after repeated thumb failures — forces the t0 floor.
     var thumbFailed = false
     private(set) var watchdogDowngraded = false
@@ -107,6 +111,12 @@ final class TVAppState {
     /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
     /// thumb-stream and schema-scene verdicts, and a broken server thumb
     /// must not veto a fully local renderer.
+    /// Compile ceiling for a fullscreen scene on this box.
+    var sceneBudget: (layers: Int, entities: Int) {
+        (layers: SpecSubset.Budget.fullscreen.layers,
+         entities: renderClass.fullscreenEntityBudget)
+    }
+
     var hardwareTier: CapabilityTier {
         tierOverride ?? detectedTier
     }
@@ -134,6 +144,7 @@ final class TVAppState {
         self.baseURL = baseURL
         self.machine = CapabilityDetector.machine
         self.detectedTier = CapabilityDetector.tier(forMachine: machine)
+        self.renderClass = CapabilityDetector.renderClass(forMachine: machine)
         self.tierOverride = UserDefaults.standard
             .string(forKey: Self.tierOverrideKey)
             .flatMap(CapabilityTier.init(rawValue:))
@@ -218,6 +229,7 @@ final class TVAppState {
         currentSpecJSON = nil
         compiledScene = []
         specBackground = nil
+        specGhosting = 0
         isClassicSpec = false
         classicSaverId = nil
         thumbFailed = false
@@ -231,9 +243,10 @@ final class TVAppState {
         // (and classic channels have no decodable inline spec, so they keep
         // the spinner until the snapshot routes them to the thumb stream).
         if let cached = channels.first(where: { $0.id == channelId })?.spec {
-            compiledScene = cached.compile(seed: cached.seed ?? 0)
+            compiledScene = cached.compile(seed: cached.seed ?? 0, budget: sceneBudget)
             specBackground = cached.background
-            complexityCap = SceneComplexity.precap(for: compiledScene)
+            specGhosting = cached.ghosting ?? 0
+            complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
     }
@@ -388,15 +401,17 @@ final class TVAppState {
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
             specBackground = nil
+            specGhosting = 0
             return
         }
         // A valid schema spec clears the classic flag (re-publish scenario).
         isClassicSpec = false
         classicSaverId = nil
         let seed = spec.seed ?? fallbackSeed ?? 0
-        compiledScene = spec.compile(seed: seed)
+        compiledScene = spec.compile(seed: seed, budget: sceneBudget)
         specBackground = spec.background
-        complexityCap = SceneComplexity.precap(for: compiledScene)
+        specGhosting = spec.ghosting ?? 0
+        complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
     }
 
     // MARK: Sequence playback
@@ -438,9 +453,10 @@ final class TVAppState {
         sequenceSegmentKey = segment.key ?? "segment-\(resolved.index)"
         let scene = segment.scene
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
-        compiledScene = scene.compile(seed: seed)
+        compiledScene = scene.compile(seed: seed, budget: sceneBudget)
         specBackground = scene.background
-        complexityCap = SceneComplexity.precap(for: compiledScene)
+        specGhosting = scene.ghosting ?? 0
+        complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {

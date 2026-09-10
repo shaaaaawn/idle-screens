@@ -12,13 +12,18 @@ enum SceneComplexity {
     /// the GPU sprite tier renders the same scene comfortably; the Canvas
     /// tier would grind. Numbers derive from the t2 load-shed budget (150
     /// drawn entities) and the cost of per-frame radial gradients.
-    static let maxEntitiesForCanvas = 900
-    static let maxSoftCirclesForCanvas = 220
+    /// Defaults for the A12–A15 boxes these numbers were tuned on. A newer
+    /// box raises them (see RenderClass) instead of being held to silicon it
+    /// isn't — leaving these fixed is what would quietly deny a faster Apple
+    /// TV the renderer it can actually drive.
+    static let maxEntitiesForCanvas = RenderClass.standard.maxCanvasEntities
+    static let maxSoftCirclesForCanvas = RenderClass.standard.maxCanvasSoftCircles
 
     /// Suggested cap for a compiled scene, or nil when no cap is needed.
     /// Only ever suggests t2 — the GPU tier renders arbitrary entity counts;
     /// tiers below it are quality floors, not performance escapes.
-    static func precap(for layers: [CompiledLayer]) -> CapabilityTier? {
+    static func precap(for layers: [CompiledLayer],
+                       renderClass: RenderClass = .standard) -> CapabilityTier? {
         var entities = 0
         var soft = 0
         for layer in layers {
@@ -27,7 +32,8 @@ enum SceneComplexity {
                 soft += layer.entities.count
             }
         }
-        if entities > maxEntitiesForCanvas || soft > maxSoftCirclesForCanvas {
+        if entities > renderClass.maxCanvasEntities
+            || soft > renderClass.maxCanvasSoftCircles {
             return .t2
         }
         return nil

@@ -56,6 +56,7 @@ struct SettingsView: View {
                 Section("Diagnostics") {
                     LabeledContent("Hardware", value: app.machine)
                     LabeledContent("Rendering at", value: tierLabel(app.effectiveTier))
+                    LabeledContent("Graphics budget", value: classLabel(app.renderClass))
                     LabeledContent("Server", value: app.serverHost)
                     // The id a paired phone addresses switch pushes to —
                     // the first thing to compare when pairing misbehaves.
@@ -82,6 +83,17 @@ struct SettingsView: View {
         case .t2: return "Balanced — 30fps scenes"
         case .t1: return "Light — streamed stills"
         case .t0: return "Minimal — text only"
+        }
+    }
+
+    /// What the box is allowed to spend, as opposed to which renderer it
+    /// uses — worth showing because it is the number that changes on newer
+    /// hardware.
+    private func classLabel(_ renderClass: RenderClass) -> String {
+        switch renderClass {
+        case .high: return "High — newer Apple TV"
+        case .standard: return "Standard — Apple TV 4K"
+        case .legacy: return "Reduced — pre-4K Apple TV"
         }
     }
 
