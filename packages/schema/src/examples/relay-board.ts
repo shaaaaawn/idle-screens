@@ -4,7 +4,7 @@ import type { SaverSpec } from '../types';
  * Relay Board — a six-row status chart in five layers instead of twenty-five.
  * One `list` of labels, one `list` of `bar`s whose lengths are the numbers,
  * one `list` of readouts, a title block, and a slow dust field behind so the
- * board reads as a live wall, not a document. Steer `bars.values` and the
+ * board reads as a live wall, not a document. Steer `bars.sprite.values` and the
  * bars glide to the new figures; the labels never move.
  */
 export const RELAY_BOARD_SPEC: SaverSpec = {

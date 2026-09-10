@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, steerablePaths, structuralSignature } from './steer';
+import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, sequenceSteerablePaths, steerablePaths, structuralSignature } from './steer';
 import type { SaverSpec } from './types';
 
 const spec: SaverSpec = {
@@ -168,5 +168,34 @@ describe('easeSmooth', () => {
     expect(easeSmooth(2)).toBe(1);
     expect(easeSmooth(0.5)).toBeCloseTo(0.5);
     expect(easeSmooth(0.25)).toBeLessThan(easeSmooth(0.75));
+  });
+});
+
+describe('sequenceSteerablePaths', () => {
+  const scene = (color: string, extra: Record<string, unknown> = {}) => ({
+    schemaVersion: 1 as const, id: 's', label: 'S',
+    layers: [{ count: 1, sprite: { kind: 'circle' as const, radius: [1, 2] as [number, number], color }, motion: { type: 'static' as const }, ...extra }],
+  });
+  it('lists the clicker, the union of segment paths, and bed paths under the bed. prefix', () => {
+    const paths = sequenceSteerablePaths({
+      format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false,
+      bed: { ...scene('#111'), ghosting: 0.5 },
+      segments: [
+        { key: 'a', scene: scene('#222'), duration: 2000 },
+        { key: 'b', scene: scene('#333', { alpha: [0.5, 1] }), duration: 2000 },
+      ],
+    });
+    expect(paths[0]).toBe('sequence.segment');
+    expect(paths).toContain('bed.layers.0.sprite.color');
+    expect(paths).toContain('bed.ghosting');
+    expect(paths).toContain('layers.0.sprite.color');
+    expect(paths).toContain('layers.0.alpha'); // only segment b has it — the union
+    expect(paths.filter((p) => p === 'layers.0.sprite.color')).toHaveLength(1); // deduplicated
+    expect(paths.some((p) => p.startsWith('segments'))).toBe(false);
+  });
+  it('has no bed. paths without a bed', () => {
+    const paths = sequenceSteerablePaths({ format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, segments: [{ key: 'a', scene: scene('#222') }] });
+    expect(paths.some((p) => p.startsWith('bed.'))).toBe(false);
+    expect(paths).toContain('sequence.segment');
   });
 });

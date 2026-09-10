@@ -36,7 +36,10 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
 (2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
 (2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
-(2026-09-05 — data layout).
+(2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
+`maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
+the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
+`morph` (2026-09-08 — ambient presentations).
 
 ## Safety invariants
 
@@ -156,7 +159,7 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
-| `key` | string | none | addressable name → `setParam("key.field", …)` |
+| `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
@@ -170,10 +173,12 @@ with distance, removing pop-in at the cutoff.
 
 - `{ "kind": "emoji", "glyphs": ["🐟", "🐠"], "cycle": { "period": 800 } }` —
   glyph picked per entity (seeded); optional `cycle` rotates variants over time
-- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ... }`
+- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
   viewport (verbatim only under `units: "px"`); a family/weight only
-  (`"bold monospace"`) composes with the seeded per-entity `size`
+  (`"bold monospace"`) composes with the seeded per-entity `size`; `role` is
+  the legibility opt-in described under `textBlock` below (same field, same
+  meaning on both text sprites)
 - `{ "kind": "circle", "radius": [0.001, 0.003], "color": "#ffffff", "soft": true }` —
   `soft` renders a radial-falloff glow orb instead of a hard disc
 - `{ "kind": "ring", "radius": [0.002, 0.005], "color": "#d8f6ff", "width": 0.001 }` —
@@ -188,8 +193,9 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
   a data bar: entity *i* draws `length × values[i] / max` (viewport units),
   `thickness` thick, growing from its position toward `direction` (`right`
-  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.values", […])`
-  glides every bar. With `layout: { type: "list" }` a chart is one layer and
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.sprite.values", […])`
+  glides every bar (the field lives under `sprite`, so the path does too —
+  `bars.values` resolves nothing). With `layout: { type: "list" }` a chart is one layer and
   its labels another — the dashboard genre stops needing one layer per number
 - `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
   regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
@@ -206,18 +212,78 @@ with distance, removing pop-in at the cutoff.
   than a line); `orient: true` turns the path's +x along the entity's heading,
   like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
   O'Keeffe's petal, Basquiat's scrawl
-- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
+- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef", "anchor": "top-left", "font": "system-ui, sans-serif", "opacity": 1 }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
-  textBlock sprites at validation time. `position` is always the block's
-  **top-left corner** regardless of `align` (align moves text within the box,
-  not the box itself — different from the `text` sprite where `align`/`baseline`
-  shift the meaning of `position`). Line breaks are computed from a fixed
-  character-class metrics table so wrapping is identical across platforms; note
-  that the table is approximate — a painted line may slightly exceed `maxWidth`
-  when the real font is wider than the table estimates, so `maxWidth` is a
-  layout target, not a hard clip.
+  textBlock sprites at validation time. Without `anchor`, `position` is the
+  **top-left corner of the `maxWidth` layout box** regardless of `align`
+  (align moves text within the box, not the box itself — different from the
+  `text` sprite where `align`/`baseline` shift the meaning of `position`).
+  `maxWidth` may reach `2.0` — wider than the frame is legal (a wide caption
+  on a portrait screen); the `text-off-screen` advisory reports what runs
+  out. Line breaks are computed from a fixed character-class metrics table so
+  wrapping is identical across platforms; note that the table is approximate
+  — a painted line may slightly exceed `maxWidth` when the real font is wider
+  than the table estimates, so `maxWidth` is a layout target, not a hard clip.
   Use with `count: 1`, `motion: { type: "static" }`, and `position`.
+
+  `anchor` (one of nine compass points: `top-left`, `top`, `top-right`,
+  `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`) says
+  which point of the **rendered text** `position` names — the widest line
+  wide, as `align` lays it inside `maxWidth`, and `lines × lineHeight` tall,
+  measured after line-breaking. With `anchor: "center"` and
+  `position: { "x": 0.5, "y": 0.5 }` the block is centred on **every** aspect
+  ratio — `position` is in viewport fractions while `maxWidth` is in
+  `min(w,h)`, so hand-computing a centred `x` for one screen misses on the
+  next; the anchor removes the arithmetic. Under an anchor `align` only
+  shapes the ragged edge (shorter lines sit left/centre/right of the widest);
+  it no longer moves the ink. Anchor is placement, so it is part of the
+  structural signature (a change rebuilds); rotation stays about the anchor
+  point. The perception boxes (`text-overlap`, `text-off-screen`) follow the
+  same rule. Absent ⇒ exactly the pre-anchor behaviour above. **Native
+  clients that do not read `anchor` render as absent (layout-box top-left).**
+
+  `font` is a CSS family and/or weight/style — `"bold monospace"`,
+  `"300 'Inter', sans-serif"` — composed with the scaled `fontSize` the way
+  the `text` sprite composes a size-less font; a **size inside it is
+  rejected** (`fontSize` owns size, so the block keeps scaling with the
+  viewport). A monospace family (`monospace`, `ui-monospace`, Menlo, Courier,
+  SF Mono, Fira Code, …) switches the line-breaker to a uniform 0.6 em
+  advance so mono wraps land where the real face puts them; every other
+  family uses the proportional table. Default `system-ui, sans-serif`.
+  **Native clients fall back to the system face** until a face table exists.
+
+  `opacity` (0–1, default 1) multiplies the block's paint alpha — the whole
+  block, on top of the layer's per-entity `alpha`. It is **paint**, not
+  carpentry: excluded from the structural signature, so
+  `setParam("h.sprite.opacity", 0, { dur: 1500 })` glides the block out
+  without a rebuild (and back in with `1`). Declare `"opacity": 1` on the
+  block to make the path steerable (a `setParam` cannot create a field that
+  is not there). Scales perceived ink in the luminance grid. **Native clients
+  without `opacity` render at 1.**
+
+  `role` (`"read"` | `"atmosphere"`, on `textBlock` **and** `text`) declares
+  what the words are *for*, and is the only thing that turns legibility
+  checking on. Absent, or `"atmosphere"`, the layer is texture — a haiku
+  fading in a corner, dim labels on a wall board, the `dev-dashboard`'s
+  2.6:1 telemetry — and `adviseSpec` says nothing about how readable it is,
+  exactly as before the field existed; keep atmospheric text undeclared, the
+  advisories would only nag. `"read"` says the words must be read from
+  across the room, and opts that layer into two advisories:
+  `text-legibility` fires when the text colour's WCAG ratio falls below
+  **4.5:1** against the background sampled at the box centre (gradient stops
+  interpolated at rest, `band` honoured) **or** against the brightest
+  additive layer (`blend: lighter` / `screen`) whose entities can reach the
+  box and are at least a glyph tall, taken at its peak alpha (base + pulse)
+  composited over that background — a glow parked under a caption is
+  measured, dust is not; both ratios appear in the message when an additive layer is beneath — a plate-less read reports only the background ratio. `text-safe-area`
+  fires when the box (a `list`'s whole extent) lies within **5 %** of any
+  viewport edge, where bezels and overscan hide it. Each is judged at the
+  viewport passed to `adviseSpec` — check the portrait one too. `role` is a
+  declaration only: it changes **no pixel anywhere, on any client**, is not
+  in the structural signature, and native players ignore it with nothing to
+  fall back to. The shipped `lobby-talk` example declares it on every text
+  layer and produces zero advisories, landscape and portrait.
 
   textBlock also accepts `reveal` — animated typing/deleting:
   `{ "reveal": { "progress": 1, "mode": "typewriter", "speed": 0, "caret": true } }`.
@@ -241,9 +307,13 @@ with distance, removing pop-in at the cutoff.
   blink is in full cycles/sec, capped at 3 for flash safety, and is a square
   wave of `t` like every other animation). With `align: "center"`/`"right"`
   the revealing line stays anchored to its alignment as it types — only
-  left-aligned text reads as a classic typewriter. To "edit" text live:
-  glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
-  back to 1.
+  left-aligned text reads as a classic typewriter. `text` itself is paint
+  that **steps**: a `setParam` swap or a sequence `morph` switches the string
+  whole on the first frame — nothing interpolates a string — so to "edit"
+  text live: glide `reveal.progress` to 0, swap `text` while nothing is
+  visible, glide back to 1 (or fade the block via its `color`). Inside a
+  sequence, a morph declared `text: 'crossfade'` cross-fades the old words
+  under the new ones instead (see **Transitions** below).
 
 `circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
 `colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
@@ -461,8 +531,10 @@ fixed-step warm-up (≤ 120 frames) from a full clear on any non-contiguous seek
 ## Steering
 
 Compiled specs accept live parameter changes via dot-paths —
-`layers.0.count`, `background.stops.0.color`, or `key`-based paths like
-`cpu-gauge.color` when layers declare `key`. Changes interpolate over a
+`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`, or
+`key`-based paths like `cpu-gauge.count` / `cpu-gauge.sprite.color` when
+layers declare `key` (the key replaces `layers.N`; everything after it
+mirrors the JSON, so a sprite field keeps its `sprite.` segment). Changes interpolate over a
 control-track (`step` | `linear` | `smooth`). Placement/motion changes trigger
 a deterministic rebuild (same seed → same stream). See `@idle-screens/core`
 for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
@@ -482,6 +554,13 @@ interpolation, and background drift is sampled at rest. These are documented
 trade-offs for a zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
+- `perceiveSequenceFrame(seq, T, {viewport?, seed?, releasedBelow?})` — the
+  same bundle for one frame of a **sequence** at global time `T`: resolves the
+  segment (reported as `segment: {index, key, localT, held?}`) and, when the
+  sequence has a `bed`, composes the bed at `T` under the segment's ink at
+  `localT` with the segment's background dropped, as the renderer stacks
+  them — the grids add, dominance ranks both by raw weight with bed layers
+  keyed `bed:<key|index>`, and text/motion/form list bed layers first.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
   (background gradient + entities + link lines, blend-aware), with coverage,
   visual-mass centroid, and **row/column deviation profiles** (1D transects of
@@ -520,10 +599,16 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   `perceiveScene().advisories`). Two of them are **spatial**, for static text:
   `text-off-screen` (a text/textBlock box crosses the viewport edge by more
   than 1%) and `text-overlap` (two static text layers share more than 10% of
-  the smaller box). Boxes come from the same character-class width table the
-  textBlock line-breaker uses, so they are estimates of the renderer's own
-  layout — a caption that fails these will look wrong on the wall; one that
-  passes may still sit a few px off.
+  the smaller box; it carries both boxes as `boxes: [{x, y, w, h}]` in
+  viewport fractions so the fix needs no re-derivation). Boxes come from the
+  same character-class width table the textBlock line-breaker uses, so they
+  are estimates of the renderer's own layout — a caption that fails these
+  will look wrong on the wall; one that passes may still sit a few px off.
+  Two more are **opt-in** through the text sprite's `role: "read"` (see the
+  `textBlock` sprite): `text-legibility` (WCAG ratio below 4.5:1 against the
+  background at the box centre or under the brightest additive layer that can
+  sit beneath the line) and `text-safe-area` (the box within 5 % of an edge,
+  with its box in `boxes`). Undeclared text is never measured for either.
   `overlap-seams` catches the trap the other channels are blind to: a layer
   whose entities bury each other (so it was drawn as one shape) but whose paint
   settings make every overlap visible. It is gated to stay off deliberate
@@ -562,6 +647,8 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "label": "My Sequence",
   "seed": 42,           // optional; forwarded to children without their own seed
   "loop": false,
+  "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
+  "bed": { /* SaverSpec */ },  // optional; the ground under every segment — see **Bed**
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -582,13 +669,61 @@ the presenter never freezes. A durationless final segment holds regardless of
 `advance`.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
-`{ type: 'morph', dur: number }` smoothly interpolates paint properties
-(colors, opacity values) over `dur` ms when crossing into the next segment.
-Morph requires structurally identical adjacent segments (same
-`structuralSignature`); if they differ, the engine falls back to cut and the
-validator emits a `morph-structural-mismatch` warning. During a morph, entity
-placement inherits the outgoing segment's seed — the incoming segment's own
-seed is unused. `dur` must be between 200 and 5000 ms.
+`{ type: 'morph', dur: number, text?: 'step' | 'crossfade' }` interpolates
+**numbers and hex colours** (colour, alpha, pulse, `reveal.progress`, …) over
+`dur` ms when crossing into the next segment; **every other value — strings,
+and `textBlock.text` above all — switches on the first morph frame** under
+the default `text: 'step'`. A caption change therefore does not cross-fade
+under a plain morph: fade text via its colour (glide it into the background
+and back), via `reveal.progress` — or declare **`text: 'crossfade'`**, which
+draws each `text` / `textBlock` layer whose string(s) differ between the two
+segments **twice** for the window: the outgoing words at alpha `1 − k` under
+the incoming at `k`, where `k` is the morph's eased progress, both in the
+lerped frame's paint (colour, `opacity` and layer alpha glide as usual). Only
+the differing text layers cost a second draw, and only for `dur`; layers
+whose words match, and every non-text layer, are untouched. It is an
+internal paint pass, not a spec field — no `opacity` appears on the `text`
+sprite. `text` is a morph option only (a `fade` already cross-fades whole
+frames; a `cut` has no window) and the validator rejects it elsewhere.
+**Default `step` is today's behaviour byte for byte** — the sequence
+baseline pins it — and a flip to `crossfade` by default would be a major
+change, with the baseline regenerated. **Native:** tvOS **steps** the words (it
+ignores `text`) but already cross-fades whole frames on every segment
+change using the transition's `dur`, so the result on the Apple TV is
+close to the web's. Morph requires structurally
+identical adjacent segments (same `structuralSignature`); if they differ, the
+engine falls back to cut and the validator emits a `morph-structural-mismatch`
+warning. When the segments are structural twins whose only differences are
+values morph steps (a text-only change), the morph runs but every frame of it
+shows the incoming segment — it reads as a cut — and the validator emits a
+`morph-nothing-morphable` warning (never an error; stored sequences stay
+valid) — unless the transition declared `text: 'crossfade'` and the words
+differ, in which case the words are the thing that morphs and the warning is
+withheld. During a morph, entity placement inherits the outgoing segment's
+seed — the incoming segment's own seed is unused. `dur` must be between 200
+and 5000 ms.
+
+`{ type: 'fade', dur: number }` is the general cross-fade, for segments that
+have nothing in common: the outgoing segment stays alive on a canvas of its
+own for `dur` ms and is composited over the incoming one at
+`1 − easeSmooth(localT / dur)`, so both keep animating through the window. The
+outgoing segment renders at `duration + localT` — it continues rather than
+freezing (and if it was an `advance: 'input'` hold, it resumes from its
+`duration`, not from wherever the hold had reached). A fade is always from the
+previous segment in the list; under `loop: true` the **last** segment's `fade`
+is the wrap's transition into segment 0. It works through the clicker too — a
+`sequence.segment` steer lands at `localT` 0 of the fade. Same `dur` bounds
+as morph, no structural requirement, and a fade only smooths luminance, so the
+flash gate is untouched; it is the remedy for a `boundary-luminance-jump`
+advisory. **Tier gate:** two live segments for `dur` is over the budget of the
+lowest tiers, so a host on the `basic` (canvas2d only) or `minimal` capability
+tier — passed as `capabilityTier` on the `SequenceMountContext`, the tier
+`computeTier` from `@idle-screens/capabilities` reports — renders `fade` as
+`cut`; absent ⇒ fade enabled. `adviseSequence` says so once per sequence with
+the informational `fade-degrades-on-low-tier`. **Native:** tvOS already
+cross-fades on every segment change using the transition's `dur`, so `fade`
+matches the native player rather than diverging from it; native reads
+`fade.dur` where it reads the morph `dur` today.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
@@ -596,15 +731,102 @@ sums of durations. Half-open segments: `[start, start+duration)`. With
 a durationless final segment). An unreleased `advance: 'input'` hold blocks the
 wrap; after a wrap every hold is armed again.
 
+**Sync:** `sync` names what the sequence clock is anchored to. `mount`
+(the default, and today's behaviour for every stored sequence) starts `T` at
+0 when the viewer mounts — every joiner sees segment 0, which is what makes a
+pre-roll a pre-roll. `epoch` lets the host seed the clock: the viewer passes
+`sequenceBaseT` (ms already elapsed on the shared clock — idlescreens.com
+passes `Date.now() − scene.epoch`) on the mount context
+(`SequenceMountContext`, a `SaverContext` plus that one field), and the
+instance starts at that `T` instead of 0, so every screen in a room resolves
+the same segment. The trade-off: a viewer joining an `epoch` sequence lands
+**mid-loop**, wherever the room is; `mount` keeps pre-roll semantics. Holds
+are the same under both — `advance: 'input'` is armed for every viewer, so a
+late joiner whose seeded clock is already past an unreleased hold lands **on**
+the held segment (still animating), not past it, and the clicker releases it
+from there. `epoch` without a `sequenceBaseT` starts at 0 (a host that does
+not pass the hint loses nothing). **Native clients that anchor at their own
+mount behave as `mount`** until they read the field and seed from the channel
+epoch. The default is never flipped: pre-roll depends on `mount`.
+
+**Bed:** `bed` is one SaverSpec drawn **under every segment on the
+sequence's global clock** — the ground that does not reset. Every segment still
+starts at its own `localT` 0 (builds replay, `emit` phases and `reveal.speed`
+key off segment time exactly as before), but the bed's `T` runs from mount (or
+from `sequenceBaseT` under `sync: 'epoch'`) straight through every boundary,
+and a `sequence.segment` steer displaces the *segments'* clock only — the
+clicker rewinds a slide, never the bed. That is the fix for the boundary
+rewind every ambient reviewer flagged: put the motion that must be continuous
+(the drifting field, the runner-orb, the slow gradient) in the bed and the
+slide content in the segments. Rules:
+
+- **The bed owns the ground.** Segments render over it *transparently*: a
+  segment's `background` is never painted while a bed exists (the validator
+  warns `bed-hides-segment-background` on each segment that declares one), and
+  a segment's `ghosting` is ignored (a smear needs an opaque ground to decay
+  into; the bed may declare its own `ghosting`, and it works as usual). A
+  segment's ink composites over the bed with its own `blend`/`alpha`.
+- **Clock:** bed at `T`, segment at `localT`, in the same frame. Under
+  `loop: true` the bed does not wrap with the segments — it keeps counting.
+- **Steering:** `bed.<path>` routes to the bed with the prefix stripped
+  (`setParam("bed.field.sprite.color", …)`, `bed.ghosting`, …);
+  `sequenceSteerablePaths(seq)` lists them. Without a bed, `bed.*` reaches the
+  segments unchanged, so a layer keyed `bed` keeps working. Bed steers are
+  not part of the retained segment track — the bed is never re-created.
+- **Seed:** the bed uses its own `seed`, else `seq.seed + 24` (past every
+  segment's `seq.seed + index`, so it never shares a stream with segment 0 and
+  adding a segment does not re-seat it).
+- **Perf accounting:** the bed is live alongside whichever segment is up, so
+  its entities count **together with the largest segment's** toward the 800
+  cap (`validateSequence` errors on `bed` when the sum is over) and toward the
+  manifest's `costTier`. A `fade` over a bed puts both segments on canvases of
+  their own for `dur` (incoming at k, outgoing at 1 − k, both over the bed):
+  three live instances on the lowest tier, which is why fade is tier-gated.
+- **Perception:** `perceiveSequenceFrame(seq, T)` composes bed + segment (see
+  the perception API above). Bed and segments are assumed to share `units` /
+  `referenceViewport`.
+- **Native:** tvOS **ignores `bed` initially** and renders segments with their
+  own backgrounds, exactly as it does today — so a sequence authored with a bed
+  should still carry sensible segment backgrounds until the native player
+  draws the bed (a second compiled scene drawn first, which its layer model
+  already supports). Web viewers hide those backgrounds; native shows them.
+- **Not a default.** The "cheap form" — rendering a morph chain's root child at
+  `T − segmentStart(chainRoot)` so twins keep one continuous clock — is **not**
+  implemented and never will be as a default: stored morph-chained sequences
+  pin their per-segment `t = 0` frames (`sequence-baseline.test.ts`). A bed is
+  the supported way to keep motion continuous across segments; if a per-segment
+  `timebase: 'sequence'` is ever wanted it will be opt-in, after this.
+
+Absent `bed` ⇒ the code path is byte for byte what it was (the sequence
+baseline proves it): every segment paints its own ground.
+
 **Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
-viewer needs zero changes. All children share a single canvas; only the active
-segment's `SpecInstance` is alive at any time. `workerReady` is `false` (the
-worker compile-hook does not dispatch sequences).
+viewer needs zero changes (a host that wants `sync: 'epoch'` passes a
+`SequenceMountContext`; a plain `SaverContext` still mounts). All children
+share a single canvas; only the active segment's `SpecInstance` is alive at
+any time — plus the `bed`'s, when one is declared, and for the `dur` of a
+`fade` the outgoing segment on an offscreen canvas of its own. `workerReady`
+is `false` (the worker compile-hook does not dispatch sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
 `applyTrack` (`setParam("sequence.segment", n)` over MCP). The
-`SequenceInstance` intercepts this path before delegation; remaining deltas are
-forwarded to the active child's `applyTrack`.
+`SequenceInstance` intercepts this path before delegation, and `bed.<path>`
+deltas go to the bed (see **Bed**); every other delta
+is forwarded to the active segment's `applyTrack` **and retained** (last wins
+per path, merged across calls). Segment instances are created lazily and
+disposed at each boundary, so the retained set is re-applied to every segment
+as it comes up: **a steer persists across segment changes and lands on the
+segment that owns the path.** `bars.sprite.values` steered while the title
+slide is up takes effect the moment the chart slide appears (by timer or by
+clicker), and stays if the show leaves and returns; on segments without a
+`bars` key the delta is simply a no-op, as is any delta whose value does not
+validate on that particular segment (the rest of the set still applies). A
+morph's two lerp endpoints carry the retained set too, so a steered colour
+rides through the glide instead of vanishing for `dur` — but a steer that
+lands while the morph itself is in progress takes effect immediately rather
+than gliding over its own `dur`, since the morph's cross-fade is already the
+active transition on that child. Pinned by `sequence.test.ts` →
+"SequenceInstance — retained track".
 
 The steer **moves the clock, not the frame**: it displaces the timeline so the
 target segment starts at its own `localT` 0 (its `life.enter` build replays)
@@ -633,5 +855,7 @@ showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
 `pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
 and feathered rect) and `relay-board` (list layout + bar: a chart in five
-layers). See [`src/examples/`](./src/examples/). The dashboard exercises the
+layers); and `lobby-talk` (one screen of a quarter-in-review, every text
+layer `role: "read"`, zero advisories — readable copy over additive
+atmosphere). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).

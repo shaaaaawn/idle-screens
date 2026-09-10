@@ -5,7 +5,7 @@
  * changes existing values only — unknown paths are ignored (the server
  * validates and rejects them; the runtime stays lenient).
  */
-import type { SaverSpec } from './types';
+import type { IdleSequence, SaverSpec, SpriteSpec } from './types';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -105,6 +105,90 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
 }
 
 /**
+ * The string(s) a text layer paints — `strings` of a `text` sprite, `text`
+ * of a `textBlock` — or null for every other sprite.
+ */
+export function textStringsOf(sprite: SpriteSpec): string[] | null {
+  if (sprite.kind === 'text') return sprite.strings;
+  if (sprite.kind === 'textBlock') return [sprite.text];
+  return null;
+}
+
+/**
+ * Whether the text layer at index `i` paints different words in `a` and
+ * `b` — the layers a morph `text: 'crossfade'` draws twice. False for
+ * non-text layers and when the strings match.
+ */
+export function textStringsDiffer(a: SaverSpec, b: SaverSpec, i: number): boolean {
+  const sa = a.layers[i]?.sprite;
+  const sb = b.layers[i]?.sprite;
+  if (!sa || !sb) return false;
+  const ta = textStringsOf(sa);
+  const tb = textStringsOf(sb);
+  if (!ta || !tb) return false;
+  return ta.length !== tb.length || ta.some((s, j) => s !== tb[j]);
+}
+
+/**
+ * True when a morph from `a` to `b` has nothing to interpolate: the two specs
+ * differ, yet every difference is a value lerpSpec steps (strings such as
+ * `textBlock.text`, mismatched arrays) rather than a number or hex colour it
+ * glides. Such a morph looks exactly like a cut. Identical specs return
+ * false: a no-op morph is continuity, not a cut. Under `textCrossfade`
+ * (the transition declared `text: 'crossfade'`) differing text is something
+ * to morph — the words cross-fade — so such twins return false too.
+ *
+ * Walks `a`/`b` directly rather than sampling `lerpSpec(a, b, 0.5)`: two hex
+ * colours a single 8-bit step apart (`#000000` → `#010101`) round their
+ * midpoint to the target channel-for-channel, which would make a genuine
+ * (if subtle) colour glide look identical to a step. `id`/`label`/
+ * `schemaVersion`/layer `key` are identification metadata, never rendered
+ * (excluded from `structuralSignature`/`steerablePaths` for the same reason)
+ * — a segment pair that differs only there renders identically and is not a
+ * morph at all.
+ */
+const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion', 'key']);
+
+export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCrossfade?: boolean } = {}): boolean {
+  if (opts.textCrossfade && a.layers.some((_, i) => textStringsDiffer(a, b, i))) return false;
+  let hasDiff = false;
+  let hasGlide = false;
+  const walk = (x: unknown, y: unknown, key?: string): void => {
+    if (key !== undefined && NON_RENDERED_KEYS.has(key)) return;
+    if (x === y) return;
+    if (typeof x === 'number' && typeof y === 'number') {
+      hasDiff = true;
+      hasGlide = true;
+      return;
+    }
+    if (typeof x === 'string' && typeof y === 'string' && HEX.test(x) && HEX.test(y)) {
+      const ca = hexToRgb(x);
+      const cb = hexToRgb(y);
+      if (ca.some((v, i) => v !== cb[i])) {
+        hasDiff = true;
+        hasGlide = true;
+      }
+      // else: same colour under a different spelling (case, 3- vs 6-digit) — a no-op, not a difference.
+      return;
+    }
+    if (Array.isArray(x) && Array.isArray(y) && x.length === y.length) {
+      for (let i = 0; i < y.length; i++) walk(x[i], y[i]);
+      return;
+    }
+    if (x && y && typeof x === 'object' && typeof y === 'object' && !Array.isArray(x) && !Array.isArray(y)) {
+      const keys = new Set([...Object.keys(x as Record<string, unknown>), ...Object.keys(y as Record<string, unknown>)]);
+      for (const k of keys) {
+        walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], k);
+      }
+      return;
+    }
+    hasDiff = true; // non-interpolable → steps to target
+  };
+  walk(a, b);
+  return hasDiff && !hasGlide;
+}
+
+/**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
  * like "layers.0.count", "background.stops.1.color", etc. Metadata fields
  * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
@@ -138,6 +222,20 @@ export function steerablePaths(spec: unknown): string[] {
   };
   walk(spec, '', '');
   return out;
+}
+
+/**
+ * Every path a sequence accepts on its track: `sequence.segment` (the
+ * clicker), the bed's paths under the `bed.` prefix, and the union of every
+ * segment's paths (a segment path lands on whichever segment owns it — see
+ * `SequenceInstance.applyTrack`). Deduplicated, numeric layer indices as in
+ * `steerablePaths`.
+ */
+export function sequenceSteerablePaths(seq: IdleSequence): string[] {
+  const out = new Set<string>(['sequence.segment']);
+  if (seq.bed) for (const p of steerablePaths(seq.bed)) out.add(`bed.${p}`);
+  for (const seg of seq.segments) for (const p of steerablePaths(seg.scene)) out.add(p);
+  return [...out];
 }
 
 /** Smooth (ease-in-out) progress curve used for glides. */
@@ -184,7 +282,10 @@ export function structuralSignature(spec: SaverSpec): string {
           : l.sprite.kind === 'text'
             ? [l.sprite.strings.length, l.sprite.cycle?.period]
             : l.sprite.kind === 'textBlock'
-              ? [l.sprite.fontSize]
+              // `anchor` is placement (in); `font`/`opacity`/`text` are paint
+              // (out — opacity must glide). Appended only when set so every
+              // existing spec's signature string is byte-identical.
+              ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
               : undefined,
       ];
     }),

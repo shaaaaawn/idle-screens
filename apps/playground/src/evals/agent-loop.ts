@@ -8,11 +8,18 @@
  * `openrouter.ts`, tests pass a scripted fake. This file never touches the
  * network or the API key, and every score in the artifact is computed locally
  * with `scoreScreen` — the model's self-assessment is never a label.
+ *
+ * Two experiment switches, both defaulting to the behaviour above so old runs
+ * stay comparable: `tools` (drop `score` and the model can no longer climb the
+ * scorer — the honest baseline) and `schemaMode` (`allowlist` swaps the inlined
+ * FORMAT.md for a compact schema-derived subset). Both are recorded on the
+ * artifact.
  */
 import FORMAT_MD from '../../../../packages/schema/FORMAT.md?raw';
 import specSchemaJson from '../../../../packages/schema/saver-spec.schema.json';
 import { adviseSpec, perceiveScene, validateSpec, type SaverSpec } from '@idle-screens/schema';
 import { explainIntentFit, scoreScreen } from './score';
+import { buildSchemaAllowlist } from './schema-allowlist';
 import type {
   ChatMessage,
   ChatRequest,
@@ -25,7 +32,13 @@ import type {
   AgentScreenArtifact,
   AgentSpecVersion,
 } from './agent-artifact';
-import type { ArtistStyleProfile, BenchmarkIntent, EvalScreen } from './types';
+import type {
+  AgentToolName,
+  ArtistStyleProfile,
+  BenchmarkIntent,
+  EvalScreen,
+  SchemaMode,
+} from './types';
 
 export type ChatTransport = (req: ChatRequest) => Promise<ChatResponse>;
 
@@ -46,6 +59,38 @@ export interface RunAgentScreenOptions {
   signal?: AbortSignal;
   /** 0-based repeat index, recorded on the artifact. Defaults to 0. */
   trial?: number;
+  /**
+   * Which tools the model gets. Default: all four (today's behaviour).
+   * `submit_spec` and `finish` are the loop and cannot be dropped. Dropping
+   * `score` is the TR2 "honest baseline": the artifact's scores are still
+   * computed locally, the model just never sees them, so the number is its
+   * own answer and not a climb of the scorer.
+   */
+  tools?: ReadonlyArray<AgentToolName>;
+  /**
+   * `full` (default) inlines FORMAT.md as before; `allowlist` swaps in the
+   * compact per-profile reference from `schema-allowlist.ts` (TR1).
+   */
+  schemaMode?: SchemaMode;
+}
+
+export const ALL_AGENT_TOOLS: readonly AgentToolName[] = ['submit_spec', 'perceive', 'score', 'finish'];
+const REQUIRED_TOOLS: readonly AgentToolName[] = ['submit_spec', 'finish'];
+
+/**
+ * The tool set a run uses, in canonical order, with the two load-bearing
+ * tools checked. Throws rather than silently running a loop that can never
+ * submit or never end.
+ */
+export function resolveAgentTools(tools?: ReadonlyArray<AgentToolName>): AgentToolName[] {
+  const wanted = new Set<AgentToolName>(tools ?? ALL_AGENT_TOOLS);
+  for (const t of wanted) {
+    if (!ALL_AGENT_TOOLS.includes(t)) throw new Error(`agent-loop: unknown tool "${t}"`);
+  }
+  for (const t of REQUIRED_TOOLS) {
+    if (!wanted.has(t)) throw new Error(`agent-loop: tools must include "${t}" (got ${[...wanted].join(', ') || 'none'})`);
+  }
+  return ALL_AGENT_TOOLS.filter((t) => wanted.has(t));
 }
 
 const DEFAULT_VIEWPORT = { width: 1920, height: 1080 };
@@ -59,64 +104,111 @@ const SPEC_PARAMS = (() => {
   return copy;
 })();
 
-const TOOLS: ChatToolDef[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'submit_spec',
-      description:
-        'Submit a candidate SaverSpec. Invalid specs come back with validation errors — fix and resubmit. Each valid submission is versioned (v1, v2, …).',
-      parameters: {
-        type: 'object',
-        properties: { spec: SPEC_PARAMS },
-        required: ['spec'],
+/**
+ * `schemaMode: 'allowlist'` swaps the system prompt's FORMAT.md for a ~100-line
+ * reference, but `submit_spec`'s `parameters` is JSON Schema sent on every
+ * request regardless of prompt text — if it stayed the full ~40 KB
+ * `SPEC_PARAMS`, the model would still see the complete format and the
+ * experiment would not be testing what it claims to. This loose stand-in
+ * carries no nested schema of its own; `validateSpec` still enforces the real
+ * one at `submit_spec` time; same trade the compact prompt already makes
+ * ("leaves the long tail to the validator").
+ */
+const ALLOWLIST_SPEC_PARAMS = {
+  type: 'object',
+  description: 'A candidate SaverSpec matching the "## SaverSpec v1 format" reference above. Validated on submit; errors come back with the field path.',
+};
+
+function specParamsFor(schemaMode: SchemaMode): Record<string, unknown> {
+  return schemaMode === 'allowlist' ? ALLOWLIST_SPEC_PARAMS : SPEC_PARAMS;
+}
+
+function buildTools(schemaMode: SchemaMode): ChatToolDef[] {
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'submit_spec',
+        description:
+          'Submit a candidate SaverSpec. Invalid specs come back with validation errors — fix and resubmit. Each valid submission is versioned (v1, v2, …).',
+        parameters: {
+          type: 'object',
+          properties: { spec: specParamsFor(schemaMode) },
+          required: ['spec'],
+        },
       },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'perceive',
-      description:
-        'SEE the current candidate: a braille luminance picture plus coverage, luminance, balance, dominance and advisories. Always perceive after submitting.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'perceive',
+        description:
+          'SEE the current candidate: a braille luminance picture plus coverage, luminance, balance, dominance and advisories. Always perceive after submitting.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'score',
-      description:
-        'Grade the current candidate against the style rubric and the benchmark rubric. Returns failing checks with measured vs wanted values.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'score',
+        description:
+          'Grade the current candidate against the style rubric and the benchmark rubric. Returns failing checks with measured vs wanted values.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'finish',
-      description: 'End the session. Your last submitted spec becomes the final artifact.',
-      parameters: { type: 'object', properties: {} },
+    {
+      type: 'function',
+      function: {
+        name: 'finish',
+        description: 'End the session. Your last submitted spec becomes the final artifact.',
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  },
-];
+  ];
+}
 
-function systemPrompt(profile: ArtistStyleProfile, maxToolCalls: number): string {
+const TOOL_LINES: Record<AgentToolName, string> = {
+  submit_spec: '- submit_spec: submit a candidate spec. Validation errors come back as the result — fix and resubmit.',
+  perceive: '- perceive: SEE the current candidate (braille luminance map + coverage/luminance/balance/advisories).',
+  score: '- score: grade the current candidate against the style and benchmark rubrics (failing checks, measured vs wanted).',
+  finish: '- finish: end the session; your last submitted spec is the final artifact.',
+};
+
+/** The "good rhythm" sentence, mentioning only tools that exist. */
+function rhythm(tools: ReadonlySet<AgentToolName>): string {
+  const steps = ['submit v1 early'];
+  if (tools.has('perceive')) steps.push('perceive');
+  if (tools.has('score')) steps.push('score', 'fix the worst failing check');
+  else steps.push(tools.has('perceive') ? 'fix what you see' : 'refine');
+  steps.push('resubmit', 'finish');
+  return steps.join(' → ');
+}
+
+interface PromptSwitches {
+  tools: ReadonlySet<AgentToolName>;
+  schemaMode: SchemaMode;
+}
+
+function systemPrompt(
+  profile: ArtistStyleProfile,
+  benchmark: BenchmarkIntent | null,
+  maxToolCalls: number,
+  sw: PromptSwitches,
+): string {
+  const toolLines = ALL_AGENT_TOOLS.filter((t) => sw.tools.has(t)).map((t) => TOOL_LINES[t]);
+  const format = sw.schemaMode === 'allowlist' ? buildSchemaAllowlist(profile, benchmark) : FORMAT_MD;
   return `You are an artist-engineer authoring a screensaver in SaverSpec v1 as ${profile.artist} (${profile.movement}).
 
 A SaverSpec is DATA — a background plus layers of moving sprites — compiled into a seeded, deterministic, flash-safe saver. There is no code in a spec: no scripting, no network, no DOM.
 
 ## Tools
-- submit_spec: submit a candidate spec. Validation errors come back as the result — fix and resubmit.
-- perceive: SEE the current candidate (braille luminance map + coverage/luminance/balance/advisories).
-- score: grade the current candidate against the style and benchmark rubrics (failing checks, measured vs wanted).
-- finish: end the session; your last submitted spec is the final artifact.
+${toolLines.join('\n')}
 
 ## Budget
-You have at most ${maxToolCalls} tool calls (finish is free). A good rhythm: submit v1 early → perceive → score → fix the worst failing check → resubmit → finish. Do not narrate your plans; call tools.
+You have at most ${maxToolCalls} tool calls (finish is free). A good rhythm: ${rhythm(sw.tools)}. Do not narrate your plans; call tools.
 
 ## SaverSpec v1 format
-${FORMAT_MD}`;
+${format}`;
 }
 
 function rubricLines(c: BenchmarkIntent['checks']): string[] {
@@ -135,6 +227,7 @@ function userPrompt(
   screen: EvalScreen,
   profile: ArtistStyleProfile,
   benchmark: BenchmarkIntent | null,
+  tools: ReadonlySet<AgentToolName>,
 ): string {
   const p = profile;
   const lines = [
@@ -159,7 +252,7 @@ function userPrompt(
       `## Benchmark — ${benchmark.title}`,
       benchmark.intent,
       '',
-      '## Rubric (what score() checks)',
+      tools.has('score') ? '## Rubric (what score() checks)' : '## Rubric',
       ...rubricLines(benchmark.checks).map((x) => `• ${x}`),
     );
   } else {
@@ -180,10 +273,13 @@ export function buildAgentPrompt(
   profile: ArtistStyleProfile,
   benchmark: BenchmarkIntent | null,
   maxToolCalls: number,
+  switches: { tools?: ReadonlyArray<AgentToolName>; schemaMode?: SchemaMode } = {},
 ): { system: string; user: string } {
+  const tools = new Set(resolveAgentTools(switches.tools));
+  const sw: PromptSwitches = { tools, schemaMode: switches.schemaMode ?? 'full' };
   return {
-    system: systemPrompt(profile, maxToolCalls),
-    user: userPrompt(screen, profile, benchmark),
+    system: systemPrompt(profile, benchmark, maxToolCalls, sw),
+    user: userPrompt(screen, profile, benchmark, tools),
   };
 }
 
@@ -229,11 +325,23 @@ function bestOf(versions: AgentSpecVersion[]): AgentSpecVersion | null {
 
 export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<AgentScreenArtifact> {
   const { screen, profile, benchmark, model, maxToolCalls, chat, onEvent, signal } = opts;
+  const tools = resolveAgentTools(opts.tools);
+  const toolSet = new Set(tools);
+  const schemaMode: SchemaMode = opts.schemaMode ?? 'full';
+  const toolDefs = buildTools(schemaMode).filter((t) => toolSet.has(t.function.name as AgentToolName));
   const startedAt = new Date().toISOString();
   const prompt = {
-    system: systemPrompt(profile, maxToolCalls),
-    user: userPrompt(screen, profile, benchmark),
+    system: systemPrompt(profile, benchmark, maxToolCalls, { tools: toolSet, schemaMode }),
+    user: userPrompt(screen, profile, benchmark, toolSet),
   };
+  // Tool-result hints and the no-tool-call nudge name only the tools that exist.
+  const nextHint = (() => {
+    const parts: string[] = [];
+    if (toolSet.has('perceive')) parts.push('perceive to see it');
+    if (toolSet.has('score')) parts.push('score to grade it');
+    return parts.length ? `call ${parts.join(', ')}, or finish to end` : 'resubmit to refine, or call finish to end';
+  })();
+  const nudgeText = `Continue with tools (${tools.filter((t) => t !== 'finish').join(' / ')}), or call finish to end.`;
   const messages: ChatMessage[] = [
     { role: 'system', content: prompt.system },
     { role: 'user', content: prompt.user },
@@ -248,6 +356,9 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
   let served: ChatServed | undefined;
 
   const execTool = (name: string, argsJson: string): { result: string; ok: boolean; summary: string } => {
+    if (!toolSet.has(name as AgentToolName)) {
+      return { result: `{"ok":false,"error":"unknown tool ${name}"}`, ok: false, summary: 'unknown tool' };
+    }
     if (name === 'finish') return { result: '{"ok":true}', ok: true, summary: 'finish' };
     if (name === 'submit_spec') {
       let spec: unknown;
@@ -289,7 +400,7 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
           version: version.n,
           advisoryCount: advisories.length,
           advisories: advisories.slice(0, 6),
-          next: 'call perceive to see it, score to grade it, or finish to end',
+          next: nextHint,
         }),
         ok: true,
         summary: `v${version.n} accepted · score ${scored.score.toFixed(3)}`,
@@ -356,7 +467,7 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
     rounds++;
     let res: ChatResponse;
     try {
-      res = await chat({ model, messages, tools: TOOLS, signal });
+      res = await chat({ model, messages, tools: toolDefs, signal });
     } catch (err) {
       if (isAbort(err, signal)) outcome = 'aborted';
       else {
@@ -376,10 +487,7 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
     if (res.content) onEvent?.({ type: 'assistant', text: res.content.slice(0, 500) });
 
     if (!res.toolCalls.length) {
-      const nudge: ChatMessage = {
-        role: 'user',
-        content: 'Continue with tools (submit_spec / perceive / score), or call finish to end.',
-      };
+      const nudge: ChatMessage = { role: 'user', content: nudgeText };
       messages.push(nudge);
       trajectory.push(nudge);
       continue;
@@ -413,6 +521,8 @@ export async function runAgentScreen(opts: RunAgentScreenOptions): Promise<Agent
     ...(served ? { served } : {}),
     trial: opts.trial ?? 0,
     maxToolCalls,
+    tools,
+    schemaMode,
     toolCallsUsed: callsUsed,
     startedAt,
     finishedAt: new Date().toISOString(),

@@ -5,8 +5,9 @@ wlr-layer-shell (Hyprland, Sway, river, …), built for
 [Omarchy](https://omarchy.org). One overlay surface per monitor, each hosting a
 WebKitGTK 6 webview showing either a live **idlescreens.com channel**
 (WebSocket-steered — publish to the channel and the saver morphs in real time)
-or the **bundled offline saver engine** (the same 22-saver web build the Mac
-app ships). Exits on user input (overlay mode only).
+or the **bundled offline saver engine** (the same web build the Mac app ships —
+32 savers as of today; `apps/mac/web/src/savers.ts` is the source of truth).
+Exits on user input (overlay mode only).
 
 > **Branch:** the Linux app lives on the `develop` branch today (`apps/linux/`).
 

@@ -44,7 +44,7 @@ pnpm typecheck              # tsc --noEmit across all packages
 pnpm lint                   # eslint
 pnpm test                   # vitest run (NOT what CI runs — see preflight)
 pnpm test:coverage          # vitest + coverage thresholds (what CI runs)
-pnpm dev                    # Vite playground at localhost:5173
+pnpm dev                    # Vite playground at localhost:5177 (PLAYGROUND_PORT overrides)
 pnpm test:e2e               # Playwright (element + savers + determinism + config menu)
 pnpm test:all               # build + typecheck + lint + test + e2e (missing coverage!)
 ```
@@ -83,7 +83,8 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 **Control track.** Implemented with `step`/`linear`/`smooth` eases and `number`/`color`/`bool`/`enum` param types. `applyTrack(state, track, t)` interpolates params at time `t`. The determinism proof is exercised by Playwright e2e tests on the black hole saver.
 
-**Passthrough savers.** A saver with `manifest.passthrough: true` renders with a transparent canvas (`alpha: true`) — either compositing `destination-out` to punch a hole through a dark mask, or simply drawing translucently — letting the live page show through, and may transform the page's own blocks via `ctx.page.victims()`. Black hole, tide, limelight, slipstream, and spotlight are the passthrough savers.
+**Passthrough savers.** A saver with `manifest.passthrough: true` renders with a transparent canvas (`alpha: true`) — either compositing `destination-out` to punch a hole through a dark mask, or simply drawing translucently — letting the live page show through, and may transform the page's own blocks via `ctx.page.victims()`. Black hole, tide, limelight, slipstream, catwalk, and spotlight are the passthrough
+savers (`grep -rn 'passthrough: true' packages/*/src` is the truth).
 
 **The `<idle-screen>` custom element.** Defined by `core`, it owns the dialog overlay, idle detection, plugin mount/unmount, and fade transitions. Consumers hand it an engine instance imperatively (`el.engine = engine`).
 

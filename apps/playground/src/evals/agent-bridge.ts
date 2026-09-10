@@ -7,6 +7,7 @@
  */
 import type { SaverSpec } from '@idle-screens/schema';
 import type { AgentRun } from './agent-run';
+import { ALL_AGENT_TOOLS } from './agent-loop';
 import { buildProvenance, computeDelta, fingerprintScreens, suggestedActionsFrom, toIndexEntry } from './provenance';
 import type {
   ArtistStyleProfile,
@@ -138,10 +139,17 @@ export function bridgeAgentRunToTimeline(
     note:
       req.note ||
       `OpenRouter agent-loop authored ${results.filter((r) => r.valid).length}/${results.length} screens` +
-        ` (maxToolCalls=${agent.maxToolCalls}).`,
+        ` (maxToolCalls=${agent.maxToolCalls}, tools=${(agent.tools ?? ALL_AGENT_TOOLS).join('+')}, schema=${agent.schemaMode ?? 'full'}).`,
   });
   // Prefer the live StyleDNA hash from the agent run when present.
   provenance.versions.styleDnaHash = agent.styleDnaHash || provenance.versions.styleDnaHash;
+  // The switches the loop actually ran with, from the run itself rather than
+  // the request — older runs without them ran with the defaults.
+  provenance.agentLoop = {
+    maxToolCalls: agent.maxToolCalls,
+    tools: [...(agent.tools ?? ALL_AGENT_TOOLS)],
+    schemaMode: agent.schemaMode ?? 'full',
+  };
 
   const summary: RunSummary = {
     runId: agent.runId,

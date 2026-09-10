@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
 import schema from '../saver-spec.schema.json';
 import { EXAMPLE_SPECS } from './examples';
-import { validateSpec } from './validate';
+import { validateSequence, validateSpec } from './validate';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 const check = ajv.compile(schema);
@@ -148,19 +148,122 @@ describe('saver-spec.schema.json', () => {
     expect(check.errors ?? []).toEqual([]);
   });
 
-  it('rejects idle-sequence with fade transition (v1 is cut-only)', () => {
+  // Flipped deliberately in plan 1c: this used to assert "rejects
+  // idle-sequence with fade transition (v1 is cut-only)".
+  it('agrees with the runtime validator on fade transitions (1c)', () => {
     const scene = {
       schemaVersion: 1, id: 's', label: 'S',
       layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['⭐'] }, motion: { type: 'static' } }],
     };
-    const seq = {
+    const seq = (transition: Record<string, unknown>) => ({
       format: 'idle-sequence',
       schemaVersion: 1,
       id: 'seq',
       label: 'Seq',
       loop: false,
-      segments: [{ key: 'a', scene, duration: 2000, transition: { type: 'fade' } }],
+      segments: [{ key: 'a', scene, duration: 2000, transition }],
+    });
+    for (const good of [{ type: 'fade', dur: 600 }, { type: 'fade', dur: 200 }, { type: 'fade', dur: 5000 }]) {
+      expect(validateSequence(seq(good)).valid).toBe(true);
+      expect(check(seq(good))).toBe(true);
+    }
+    for (const bad of [{ type: 'fade' }, { type: 'fade', dur: 100 }, { type: 'fade', dur: 6000 }, { type: 'dissolve', dur: 600 }]) {
+      expect(validateSequence(seq(bad)).valid).toBe(false);
+      expect(check(seq(bad))).toBe(false);
+    }
+  });
+
+  it('agrees with the runtime validator on textBlock anchor / font / opacity / maxWidth (1a)', () => {
+    const block = (sprite: Record<string, unknown>) => ({
+      schemaVersion: 1, id: 'x', label: 'X',
+      layers: [{
+        count: 1,
+        sprite: { kind: 'textBlock', text: 'hi', maxWidth: 1.5, fontSize: 0.04, ...sprite },
+        motion: { type: 'static' },
+        position: { x: 0.5, y: 0.5 },
+      }],
+    });
+    const good = [block({ anchor: 'center', font: 'bold monospace', opacity: 0.5 }), block({ font: "300 'Inter', sans-serif" })];
+    const bad = [block({ font: 'bold 14px monospace' }), block({ font: '50% monospace' }), block({ font: '50%monospace' }), block({ anchor: 'middle' }), block({ maxWidth: 2.5 }), block({ opacity: 1.5 })];
+    for (const spec of good) {
+      expect(validateSpec(spec).valid).toBe(true);
+      expect(check(spec)).toBe(true);
+    }
+    for (const spec of bad) {
+      expect(validateSpec(spec).valid).toBe(false);
+      expect(check(spec)).toBe(false);
+    }
+  });
+
+  it('agrees with the runtime validator on a sequence bed (1d)', () => {
+    const scene = { schemaVersion: 1, id: 'x', label: 'X', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['🔵'] }, motion: { type: 'static' } }] };
+    const seq = (bed?: unknown) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      ...(bed !== undefined ? { bed } : {}),
+      segments: [{ key: 'a', scene, duration: 2000 }],
+    });
+    for (const good of [seq(), seq({ ...scene, id: 'bed', background: { type: 'solid', color: '#101020' } })]) {
+      expect(validateSequence(good).valid).toBe(true);
+      expect(check(good)).toBe(true);
+    }
+    for (const bad of [seq('ground'), seq({ ...scene, layers: [] }), seq({ ...scene, bogus: 1 })]) {
+      expect(check(bad)).toBe(false);
+    }
+    expect(validateSequence(seq({ ...scene, layers: [] })).valid).toBe(false);
+  });
+
+  it("agrees with the runtime validator on sequence sync (1b)", () => {
+    const scene = { schemaVersion: 1, id: 'x', label: 'X', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['🔵'] }, motion: { type: 'static' } }] };
+    const seq = (sync?: string) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      ...(sync ? { sync } : {}),
+      segments: [{ key: 'a', scene, duration: 2000 }],
+    });
+    for (const s of [seq(), seq('mount'), seq('epoch')]) {
+      expect(validateSequence(s).valid).toBe(true);
+      expect(check(s)).toBe(true);
+    }
+    expect(validateSequence(seq('server')).valid).toBe(false);
+    expect(check(seq('server'))).toBe(false);
+  });
+  it("agrees with the runtime validator on text role (1e): 'read' | 'atmosphere', nothing else", () => {
+    const withRole = (kind: 'text' | 'textBlock', role: unknown) => ({
+      schemaVersion: 1, id: 'role', label: 'Role',
+      layers: [{
+        count: 1,
+        sprite: kind === 'text'
+          ? { kind, strings: ['Read me'], color: '#fff', role }
+          : { kind, text: 'Read me', maxWidth: 0.5, fontSize: 0.04, role },
+        motion: { type: 'static' },
+        position: { x: 0.3, y: 0.3 },
+      }],
+    });
+    for (const kind of ['text', 'textBlock'] as const) {
+      for (const role of ['read', 'atmosphere']) {
+        expect(validateSpec(withRole(kind, role)).valid).toBe(true);
+        expect(check(withRole(kind, role))).toBe(true);
+        expect(check.errors ?? []).toEqual([]);
+      }
+      expect(validateSpec(withRole(kind, 'shout')).valid).toBe(false);
+      expect(check(withRole(kind, 'shout'))).toBe(false);
+    }
+  });
+  it("agrees with the runtime validator on morph text: 'step' | 'crossfade' (1f)", () => {
+    const scene = {
+      schemaVersion: 1, id: 's', label: 'S',
+      layers: [{ count: 1, sprite: { kind: 'textBlock', text: 'Hi', maxWidth: 0.5, fontSize: 0.05 }, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } }],
     };
-    expect(check(seq)).toBe(false);
+    const seq = (transition: Record<string, unknown>) => ({
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false,
+      segments: [{ key: 'a', scene, duration: 2000, transition }, { key: 'b', scene: { ...scene, layers: [{ ...scene.layers[0], sprite: { ...scene.layers[0]!.sprite, text: 'Bye' } }] }, duration: 2000 }],
+    });
+    for (const good of [{ type: 'morph', dur: 600 }, { type: 'morph', dur: 600, text: 'step' }, { type: 'morph', dur: 600, text: 'crossfade' }]) {
+      expect(validateSequence(seq(good)).valid).toBe(true);
+      expect(check(seq(good))).toBe(true);
+    }
+    for (const bad of [{ type: 'morph', dur: 600, text: 'dissolve' }, { type: 'fade', dur: 600, text: 'crossfade' }, { type: 'cut', text: 'step' }]) {
+      expect(validateSequence(seq(bad)).valid).toBe(false);
+      expect(check(seq(bad))).toBe(false);
+    }
   });
 });

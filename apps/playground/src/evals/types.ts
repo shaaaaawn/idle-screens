@@ -242,6 +242,16 @@ export interface RunProvenance {
     minLuminanceVar: number;
     weights: { perception: number; styleFit: number; intentFit: number };
   };
+  /**
+   * Which experiment switches the agent loop ran with. Optional: only
+   * `agent-loop` runs have it, and runs recorded before the switches existed
+   * ran with all four tools and the full FORMAT.md.
+   */
+  agentLoop?: {
+    maxToolCalls: number;
+    tools: AgentToolName[];
+    schemaMode: SchemaMode;
+  };
 }
 
 /** Slim index row for the timeline rail (always loaded). */
@@ -319,6 +329,22 @@ export type RunMode =
 
 export type AgentScope = 'screen' | 'benchmark' | 'artist' | 'suite';
 
+/**
+ * The agent loop's tool vocabulary. `submit_spec` and `finish` are the loop
+ * itself and can never be removed; `perceive` and `score` are experiment
+ * switches (mono `docs/training-a-saverspec-author.md` TR2: a run without
+ * `score` is the model's own answer, not a climb of the analytic scorer).
+ */
+export type AgentToolName = 'submit_spec' | 'perceive' | 'score' | 'finish';
+
+/**
+ * What the system prompt says about the format. `full` inlines all of
+ * FORMAT.md (the historical behaviour, ~54k prompt tokens per call);
+ * `allowlist` inlines a compact per-profile subset derived from the JSON
+ * schema (TR1) and leaves the rest to the validator's error messages.
+ */
+export type SchemaMode = 'full' | 'allowlist';
+
 /** Dialog / CLI inputs when starting a new run. */
 export interface RunRequest {
   label: string;
@@ -333,6 +359,10 @@ export interface RunRequest {
   targetBenchmarkId?: string;
   targetScreenId?: string;
   maxToolCalls?: number;
+  /** Agent-loop tool subset; absent = all four (today's behaviour). */
+  agentTools?: readonly AgentToolName[];
+  /** Agent-loop format reference; absent = `full` (today's behaviour). */
+  schemaMode?: SchemaMode;
   modelName?: string;
   modelProvider?: string;
   operator?: string;

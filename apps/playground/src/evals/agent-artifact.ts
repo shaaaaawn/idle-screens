@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatServed } from './openrouter';
 import type { SaverSpec } from '@idle-screens/schema';
-import type { ScreenScore } from './types';
+import type { AgentToolName, SchemaMode, ScreenScore } from './types';
 
 /** One accepted candidate: v1 is the initial artifact, the last is the final. */
 export interface AgentSpecVersion {
@@ -55,6 +55,14 @@ export interface AgentScreenArtifact {
   /** 0-based repeat index when a target is run more than once. */
   trial: number;
   maxToolCalls: number;
+  /**
+   * Experiment switches this screen ran with (mono
+   * `docs/training-a-saverspec-author.md` TR1/TR2). Optional so artifacts
+   * recorded before the switches existed still parse; absent means all four
+   * tools and the full FORMAT.md, which is what those runs used.
+   */
+  tools?: AgentToolName[];
+  schemaMode?: SchemaMode;
   toolCallsUsed: number;
   startedAt: string;
   finishedAt: string;
