@@ -63,6 +63,40 @@ enum SceneVisibility {
                     let maxWPx = maxWidth * dim
                     let lineCount = breakTextBlock(text: text, maxWidthEm: maxWPx / fsPx).count
                     area = maxWPx * lh * Double(lineCount)
+                case .polygon(_, _, _, let sides, let points, _):
+                    let r = entity.size * dim
+                    guard r >= 0.5 else { continue }
+                    // Shoelace of the actual facet — a thin shard is not a disc.
+                    let verts = NativeSceneView.polygonPoints(sides: sides, points: points, radius: r)
+                    guard verts.count >= 3 else { continue }
+                    var doubleArea = 0.0
+                    for i in verts.indices {
+                        let a = verts[i], b = verts[(i + 1) % verts.count]
+                        doubleArea += a.x * b.y - b.x * a.y
+                    }
+                    area = abs(doubleArea) / 2
+                case .stroke(_, let points, _, _, let width, let smooth, _, _):
+                    let length = entity.size * dim
+                    guard length >= 0.5 else { continue }
+                    // Ink is the sampled path's real length × its width, so a
+                    // curled mark counts for more than its bounding box.
+                    let samples = NativeSceneView.strokeSamples(points: points,
+                                                                halfSize: length / 2,
+                                                                smooth: smooth)
+                    var pathLength = 0.0
+                    for i in 1..<max(1, samples.count) {
+                        pathLength += hypot(samples[i].x - samples[i - 1].x,
+                                            samples[i].y - samples[i - 1].y)
+                    }
+                    guard pathLength > 0 else { continue }
+                    area = pathLength * max(1, (width ?? (layer.units == .px ? 2 : 0.002)) * dim)
+                case .bar(let values, _, _, _, _, let maxValue, _):
+                    let len = entity.size * dim
+                        * NativeSceneView.barFraction(values: values, max: maxValue,
+                                                      index: entity.barIndex)
+                    guard len >= 0.5 else { continue }
+                    let thick = entity.thickness > 0 ? entity.thickness * dim : entity.size * dim * 0.2
+                    area = len * max(1, thick)
                 case .unknown:
                     continue
                 }

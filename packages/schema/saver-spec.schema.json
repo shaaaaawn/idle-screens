@@ -682,6 +682,9 @@
             },
             "cycle": {
               "$ref": "#/definitions/cycle"
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           }
         },
@@ -924,8 +927,8 @@
             "maxWidth": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "maximum": 1.0,
-              "description": "Block width as a viewport fraction of min(w,h)."
+              "maximum": 2.0,
+              "description": "Wrap width as a viewport fraction of min(w,h), up to 2.0 (wider than the frame is legal; the text-off-screen advisory reports overflow)."
             },
             "fontSize": {
               "type": "number",
@@ -952,11 +955,47 @@
             },
             "reveal": {
               "$ref": "#/definitions/textReveal"
+            },
+            "anchor": {
+              "enum": [
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right"
+              ],
+              "description": "Which point of the rendered text (widest line × lines·lineHeight, as align lays it out) position names. Absent: position is the top-left of the maxWidth layout box (today's behaviour). 'center' centres the block at position on every aspect ratio. Placement (structural). Native clients without anchor render as absent."
+            },
+            "font": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!.*\\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)).*$",
+              "description": "CSS font family and/or weight/style only, e.g. 'bold monospace' or \"300 'Inter', sans-serif\" — a size inside it is rejected (fontSize owns size). A monospace family switches the line-breaker to a uniform advance. Default 'system-ui, sans-serif'; native clients fall back to the system face."
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Paint-level alpha multiplier for the block (default 1). Not structural — steer it with dur to fade the block in or out without a rebuild. Declare it to make the path steerable. Native clients without it render at 1."
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           },
-          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
+          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
         }
       ]
+    },
+    "textRole": {
+      "enum": [
+        "read",
+        "atmosphere"
+      ],
+      "description": "What the text is for. 'read' opts the layer into the legibility advisories (text-legibility: WCAG ratio below 4.5:1 against the background at the box centre or against the brightest additive layer over it; text-safe-area: box within 5% of an edge). 'atmosphere' (or absent) keeps it silent. A declaration only — changes no pixel on any client."
     },
     "colorWeights": {
       "type": "array",
@@ -1423,6 +1462,17 @@
           "type": "boolean",
           "description": "When true, global time wraps over the sum of segment durations. Requires every segment to have a duration."
         },
+        "sync": {
+          "enum": [
+            "mount",
+            "epoch"
+          ],
+          "description": "What the sequence clock is anchored to. 'mount' (default): every viewer starts at T = 0 when it mounts — a joiner sees segment 0 (pre-roll semantics). 'epoch': a viewer handed sequenceBaseT on its mount context (the host's Date.now() − epoch) starts its clock there, so every screen shows the same segment; a late joiner lands mid-loop. advance: 'input' holds stay armed under either. Native clients that anchor at their own mount behave as 'mount'."
+        },
+        "bed": {
+          "$ref": "#/definitions/saverSpec",
+          "description": "A scene drawn under every segment on the sequence's global clock — the ground that does not reset at a boundary or under a sequence.segment steer. Segments render over it transparently (their background and ghosting are ignored; validateSequence warns bed-hides-segment-background). Its entities plus the largest segment's must stay within the 800 cap (enforced by validateSequence). Steer it with bed.<path>. Native clients that ignore it render segments with their own backgrounds."
+        },
         "segments": {
           "type": "array",
           "minItems": 1,
@@ -1463,7 +1513,7 @@
             "input",
             "either"
           ],
-          "description": "How the segment advances. Validated; runtime drivers planned for a follow-up."
+          "description": "How the segment advances. 'auto' (default) and 'either' advance on the timer; 'input' holds a timed segment at the end of its duration (the scene keeps animating) until a sequence.segment steer releases it — the clicker. A durationless final segment holds regardless."
         },
         "transition": {
           "type": "object",
@@ -1485,6 +1535,23 @@
                   "minimum": 200,
                   "maximum": 5000,
                   "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
+                },
+                "text": {
+                  "enum": ["step", "crossfade"],
+                  "description": "How text / textBlock strings change during the morph. 'step' (default, today's behaviour): the incoming string shows from the first frame. 'crossfade': each text layer whose string(s) differ is drawn twice for dur — the outgoing words at 1 − k, the incoming at k (k = the eased progress). Native clients step (tvOS already cross-fades whole frames on a segment change)."
+                }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "fade" },
+                "dur": {
+                  "type": "number",
+                  "minimum": 200,
+                  "maximum": 5000,
+                  "description": "Cross-fade duration in ms: the outgoing segment keeps animating on its own canvas and is composited over the incoming one at 1 − easeSmooth(localT / dur). No structural requirement. Hosts on the 'basic' or 'minimal' capability tier render it as cut."
                 }
               },
               "required": ["type", "dur"],

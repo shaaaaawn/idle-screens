@@ -48,6 +48,89 @@ enum CapabilityDetector {
     }
 }
 
+/// How much work this box can be asked to do, independent of WHICH renderer
+/// it uses. The tier picks the renderer; the class sizes its budgets.
+///
+/// Splitting the two is what lets a new Apple TV actually gain something: the
+/// ceilings that decide "this scene is too heavy for the Canvas tier" were
+/// derived on A12-class silicon, and left fixed they would kick a rich scene
+/// down to the sprite renderer on hardware that could drive it comfortably.
+enum RenderClass: String, Sendable, CaseIterable {
+    /// A8 / A10X — the pre-4K boxes.
+    case legacy
+    /// A12 through A15 — the 4K generations the ceilings were tuned on.
+    case standard
+    /// A17 and newer. Same renderers, higher ceilings.
+    case high
+
+    /// Entities a scene may compile to before the Canvas tier gives way to
+    /// the GPU sprite tier.
+    var maxCanvasEntities: Int {
+        switch self {
+        case .legacy: return 600
+        case .standard: return 900
+        case .high: return 2_400
+        }
+    }
+
+    /// Per-frame radial gradients are the Canvas renderer's dearest path, so
+    /// soft circles get their own ceiling.
+    var maxCanvasSoftCircles: Int {
+        switch self {
+        case .legacy: return 150
+        case .standard: return 220
+        case .high: return 600
+        }
+    }
+
+    /// Total entities a fullscreen scene compiles to before thinning.
+    var fullscreenEntityBudget: Int {
+        switch self {
+        case .legacy: return 2_500
+        case .standard: return 4_000
+        case .high: return 9_000
+        }
+    }
+
+    /// Entity-draws available to ghost echoes (see NativeSceneView).
+    var ghostDrawBudget: Int {
+        switch self {
+        case .legacy: return 0        // no echoes below the Canvas tier anyway
+        case .standard: return 1_500
+        case .high: return 4_500
+        }
+    }
+}
+
+extension CapabilityDetector {
+    /// Performance class for a machine identifier, with RAM as a second
+    /// opinion. Model numbers only move forward on this platform, so an
+    /// identifier newer than anything known is treated as the best class
+    /// rather than the worst — the same "default up" rule the tier map uses,
+    /// and the watchdog plus the learned per-channel caps still catch it if
+    /// a scene turns out heavier than the ceiling assumed.
+    static func renderClass(forMachine machine: String,
+                            memoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory)
+        -> RenderClass {
+        // Simulators run on the Mac's silicon; treat them as current, not new.
+        if machine == "arm64" || machine == "x86_64" { return .standard }
+        guard machine.hasPrefix("AppleTV") else { return .standard }
+        let major = machine.dropFirst("AppleTV".count)
+            .split(separator: ",").first.flatMap { Int($0) }
+        guard let major else { return .standard }
+        switch major {
+        case ..<7: return .legacy          // AppleTV5,3 (A8), 6,x (A10X)
+        case 7...14:
+            // A 4K-generation identifier with more RAM than any shipped
+            // A12–A15 box is new silicon under an old-looking number.
+            return memoryBytes > 5_000_000_000 ? .high : .standard
+        default: return .high              // AppleTV15,x and anything after
+        }
+    }
+
+    static var renderClass: RenderClass { renderClass(forMachine: machine) }
+}
+
 /// Samples frame durations; if the p90 frame time exceeds 2× the frame budget
 /// for a sustained window, it fires once so the app can downgrade a tier.
 final class FrameWatchdog: @unchecked Sendable {

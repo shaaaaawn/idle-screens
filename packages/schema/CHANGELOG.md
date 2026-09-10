@@ -1,5 +1,25 @@
 # @idle-screens/schema
 
+## 3.7.0
+
+### Minor Changes
+
+- 02b8f60: Presentation stack: sequence bed, fade between unlike segments, `sync`
+  mount/epoch, textBlock anchor/font/opacity, `role: 'read'` advisories,
+  morph `text: 'crossfade'`, and the phase-0 pins (`morph-nothing-morphable`).
+
+## 3.6.1
+
+### Patch Changes
+
+- acd6078: FORMAT.md: a measured scale section. `radius`, text/emoji size, `speed` and
+  `links.maxDist` each get a ladder of landmarks at 1920×1080 — px figures,
+  `perceiveScene` coverage, and how long a given speed takes to cross the frame —
+  plus four named recipes (parallax depth, glow stacking, graph web, focal pin).
+  Scale intuition was the biggest blind spot for agents authoring against this
+  format; every number is measured rather than estimated. Docs only, no
+  behaviour change.
+
 ## 3.6.0
 
 ### Minor Changes

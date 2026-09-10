@@ -312,7 +312,7 @@ export function scoreScreen(
 
   const advisories = adviseSpec(screen.spec, viewport);
   const high = advisories.filter((a) =>
-    /clump|contrast|flash|empty|degenerate|full-coherence|density-mismatch/i.test(`${a.code} ${a.message}`),
+    /clump|contrast|legibility|flash|empty|degenerate|full-coherence|density-mismatch/i.test(`${a.code} ${a.message}`),
   );
   const perception = perceiveScene(screen.spec, { viewport, t, seed: screen.spec.seed });
   const entityCount = screen.spec.layers.reduce((n, l) => n + l.count, 0);

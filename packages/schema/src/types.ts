@@ -243,6 +243,8 @@ export type SpriteSpec =
       baseline?: 'top' | 'middle' | 'bottom';
       maxWidth?: number;
       cycle?: CycleSpec;
+      /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
+      role?: TextRole;
     }
   /** `soft` renders a radial falloff (glow orb) instead of a hard disc.
    *  `colorWeights` (same length as `colors`) biases the seeded per-entity pick —
@@ -323,13 +325,54 @@ export type SpriteSpec =
   | {
       kind: 'textBlock';
       text: string;
+      /** Wrap width as a fraction of `min(w,h)` (up to 2.0 — `text-off-screen` catches overflow). */
       maxWidth: number;
       fontSize: number;
       lineHeight?: number;
+      /** Moves the painted lines inside the wrap width (ragged edge); never the block. */
       align?: 'left' | 'center' | 'right';
       color?: string;
       reveal?: TextRevealSpec;
+      /**
+       * Which point of the rendered text (widest line × lines·lineHeight, as
+       * `align` lays it out) `position` names. Absent: today's behaviour —
+       * `position` is the top-left of the `maxWidth` layout box. With
+       * `'center'` the block is centred at `position` on every aspect ratio.
+       * Placement, so it is in the structural signature.
+       */
+      anchor?: TextBlockAnchor;
+      /**
+       * CSS font family and/or weight/style only (`"bold monospace"`,
+       * `"300 'Inter', sans-serif"`). A size inside it is rejected —
+       * `fontSize` owns size. Absent: `system-ui, sans-serif`.
+       */
+      font?: string;
+      /**
+       * 0..1 multiplier on the block's paint alpha (default 1). Paint, not
+       * carpentry: excluded from the structural signature, so steering it
+       * with `dur` glides the block in or out without a rebuild. Declare it
+       * (`"opacity": 1`) to make the path steerable.
+       */
+      opacity?: number;
+      /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
+      role?: TextRole;
     };
+
+/**
+ * What a text layer is *for* — a declaration, not a pixel. `read` says the
+ * words must be readable from across the room and opts the layer into
+ * `adviseSpec`'s legibility advisories (`text-legibility`, `text-safe-area`).
+ * `atmosphere` says the text is texture (a haiku fading in a corner, dim
+ * labels on a wall board) and is the same as absent: silent. Changes no
+ * pixel anywhere, on any client; never part of the structural signature.
+ */
+export type TextRole = 'read' | 'atmosphere';
+
+/** Compass points of a `textBlock`'s rendered box that `position` may name. */
+export type TextBlockAnchor =
+  | 'top-left' | 'top' | 'top-right'
+  | 'left' | 'center' | 'right'
+  | 'bottom-left' | 'bottom' | 'bottom-right';
 
 /**
  * Animated typing/deleting for `textBlock`. Layout always runs on the FULL
@@ -455,6 +498,21 @@ export interface SpecWarning {
   path: string;
   code: string;
   message: string;
+  /**
+   * Viewport-fraction boxes (`x`, `y`, `w`, `h` of `width`/`height`) the
+   * warning is about — `text-overlap` carries the two text boxes so an agent
+   * can move one without re-deriving the layout. Present only where a
+   * warning has geometry to report.
+   */
+  boxes?: WarningBox[];
+}
+
+/** A rectangle in viewport fractions (x/w of width, y/h of height). */
+export interface WarningBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /** Perf/safety caps enforced by `validateSpec`. */
@@ -487,7 +545,7 @@ export const LIMITS = {
   maxTextBlockLength: 2000,
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
-  maxTextBlockMaxWidth: 1.0,
+  maxTextBlockMaxWidth: 2.0, // of min(w,h) — wider than the frame is legal; text-off-screen reports the overflow
   maxRevealSpeed: 120, // graphemes/sec — faster than any readable typing
   maxCaretBlinkHz: 3, // full blink cycles/sec — WCAG 2.3.1 flash-safety cap
   maxSegments: 24,
@@ -516,7 +574,23 @@ export const LIMITS = {
 
 export type SequenceTransition =
   | { type: 'cut' }
-  | { type: 'morph'; dur: number };
+  /**
+   * Interpolate numbers and hex colours into the next (structurally
+   * identical) segment over `dur` ms. Strings step on the first frame —
+   * unless `text: 'crossfade'`, which draws each `text` / `textBlock` layer
+   * whose string(s) differ twice for the window: the outgoing string at
+   * `1 − k`, the incoming at `k` (k = the morph's eased progress). Default
+   * `'step'`, today's behaviour, byte for byte.
+   */
+  | { type: 'morph'; dur: number; text?: 'step' | 'crossfade' }
+  /**
+   * Cross-fade into the next segment over `dur` ms: the outgoing segment
+   * stays alive on its own canvas and is composited over the incoming one
+   * at `1 − easeSmooth(localT / dur)`. Works between unlike segments (no
+   * structural requirement). Hosts on the `basic`/`minimal` capability tier
+   * render it as `cut` (see `SequenceMountContext.capabilityTier`).
+   */
+  | { type: 'fade'; dur: number };
 
 export interface SequenceSegment {
   key: string;
@@ -535,5 +609,24 @@ export interface IdleSequence {
   label: string;
   seed?: number;
   loop: boolean;
+  /**
+   * What the sequence clock is anchored to. `mount` (default — today's
+   * behaviour): every viewer starts at T = 0 when it mounts, so a joiner sees
+   * segment 0 (pre-roll semantics). `epoch`: a viewer handed `sequenceBaseT`
+   * on its mount context (the host's `Date.now() − epoch`) starts its clock
+   * there, so every screen in a room shows the same segment — a late joiner
+   * lands mid-loop. `advance: 'input'` holds stay armed under either mode.
+   */
+  sync?: 'mount' | 'epoch';
+  /**
+   * A scene drawn under every segment on the sequence's **global** clock —
+   * the ground that does not reset at a boundary or under a `sequence.segment`
+   * steer. Segments render over it transparently (their `background` and
+   * `ghosting` are ignored; the bed may declare its own). Its entities count
+   * toward the perf cap together with the largest segment's, since the two
+   * are live at once. Steer it with `bed.<path>`. Absent ⇒ every segment
+   * paints its own ground, exactly as before the field existed.
+   */
+  bed?: SaverSpec;
   segments: SequenceSegment[];
 }

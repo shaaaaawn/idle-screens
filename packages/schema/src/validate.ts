@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
-import { structuralSignature } from './steer';
+import { morphNothingMorphable, structuralSignature } from './steer';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -23,8 +23,20 @@ const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'ma
 const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
-const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
+const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
+const TEXT_ROLES = new Set(['read', 'atmosphere']);
+const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
+/**
+ * A CSS length inside a textBlock `font` — size belongs to `fontSize`. No
+ * trailing boundary check: a `\b`-based (or lookahead-based) version misses
+ * "50% monospace" (`%` isn't a word character, so there is no boundary after
+ * it when the next char is whitespace) and "14pxmonospace" (glued straight
+ * onto the family name, so the word boundary between two word characters
+ * passes it through). The leading `\d` immediately before the unit is enough
+ * to identify an embedded size regardless of what follows it.
+ */
+const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
@@ -491,6 +503,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
       err(`${path}.maxWidth`, 'must be a positive number');
     }
+    validateTextRole(sprite, path, err);
     validateCycle(sprite, path, err);
   } else if (sprite.kind === 'circle') {
     knownSet = KNOWN_CIRCLE;
@@ -577,6 +590,20 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.align`, "must be 'left' | 'center' | 'right'");
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.anchor !== undefined && !TEXT_BLOCK_ANCHORS.has(sprite.anchor as string)) {
+      err(`${path}.anchor`, "must be 'top-left' | 'top' | 'top-right' | 'left' | 'center' | 'right' | 'bottom-left' | 'bottom' | 'bottom-right'");
+    }
+    if (sprite.font !== undefined) {
+      if (!isStr(sprite.font) || sprite.font.trim() === '') {
+        err(`${path}.font`, 'must be a non-empty string (family and/or weight)');
+      } else if (FONT_SIZE_RE.test(sprite.font)) {
+        err(`${path}.font`, 'must name a family and/or weight only — fontSize owns the size');
+      }
+    }
+    if (sprite.opacity !== undefined && (!isNum(sprite.opacity) || sprite.opacity < 0 || sprite.opacity > 1)) {
+      err(`${path}.opacity`, 'must be a number between 0 and 1');
+    }
+    validateTextRole(sprite, path, err);
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
@@ -644,6 +671,13 @@ function validatePalette(sprite: Record<string, unknown>, path: string, err: (p:
     } else if (!sprite.colorWeights.every((v: unknown) => isNum(v) && v >= 0) || !sprite.colorWeights.some((v: unknown) => isNum(v) && v > 0)) {
       err(`${path}.colorWeights`, 'weights must be >= 0 with at least one > 0');
     }
+  }
+}
+
+/** `role` on `text` / `textBlock`: a declaration of intent, one of two words. */
+function validateTextRole(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (sprite.role !== undefined && !TEXT_ROLES.has(sprite.role as string)) {
+    err(`${path}.role`, "must be 'read' | 'atmosphere'");
   }
 }
 
@@ -835,6 +869,7 @@ export function validateSequence(seq: unknown): ValidationResult {
       }
     }
   }
+  if (isObj(seq) && isObj(seq.bed)) normalizeColors(seq.bed);
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -847,6 +882,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (!isStr(seq.label) || seq.label.trim() === '') err('label', 'must be a non-empty string');
   if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
   if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
+  if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');
@@ -894,12 +930,19 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
-      } else if (s.transition.type === 'morph') {
+      } else if (s.transition.type === 'morph' || s.transition.type === 'fade') {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut' or 'morph'");
+        err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
+      }
+      if (isObj(s.transition) && s.transition.text !== undefined) {
+        if (s.transition.type !== 'morph') {
+          err(`${p}.transition.text`, 'is a morph option (fade already cross-fades whole frames; cut has no window)');
+        } else if (s.transition.text !== 'step' && s.transition.text !== 'crossfade') {
+          err(`${p}.transition.text`, "must be 'step' | 'crossfade'");
+        }
       }
     }
 
@@ -918,6 +961,38 @@ export function validateSequence(seq: unknown): ValidationResult {
     err('loop', 'loop: true requires all segments to have a duration');
   }
 
+  // The bed: a full SaverSpec, live alongside whichever segment is up.
+  if (seq.bed !== undefined) {
+    if (!isObj(seq.bed)) {
+      err('bed', 'must be a SaverSpec object');
+    } else {
+      const bedResult = validateSpec(seq.bed);
+      for (const e of bedResult.errors) errors.push({ path: `bed.${e.path}`, message: e.message });
+      for (const w of bedResult.warnings ?? []) warnings.push({ path: `bed.${w.path}`, code: w.code, message: w.message });
+      if (bedResult.valid) {
+        const entityTotal = (spec: unknown): number =>
+          isObj(spec) && Array.isArray(spec.layers)
+            ? spec.layers.reduce<number>((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0)
+            : 0;
+        const bedTotal = entityTotal(seq.bed);
+        const largest = seq.segments.reduce<number>((m, s) => Math.max(m, isObj(s) ? entityTotal(s.scene) : 0), 0);
+        if (bedTotal + largest > LIMITS.maxTotal) {
+          err('bed', `bed entities ${bedTotal} + largest segment ${largest} = ${bedTotal + largest} exceeds cap ${LIMITS.maxTotal} (the two are live at once)`);
+        }
+        // The bed owns the ground: a segment background is never painted over it.
+        seq.segments.forEach((s, i) => {
+          if (isObj(s) && isObj(s.scene) && s.scene.background !== undefined) {
+            warnings.push({
+              path: `segments[${i}].scene.background`,
+              code: 'bed-hides-segment-background',
+              message: `segment ${i} declares a background but the sequence has a bed — segments render transparently over the bed, so this background is never painted`,
+            });
+          }
+        });
+      }
+    }
+  }
+
   // Warn when morph is requested but signatures differ (will fall back to cut)
   if (errors.length === 0 && Array.isArray(seq.segments)) {
     for (let i = 0; i < seq.segments.length; i++) {
@@ -932,6 +1007,16 @@ export function validateSequence(seq: unknown): ValidationResult {
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      } else if (morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec, { textCrossfade: s.transition.text === 'crossfade' })) {
+        // Structural twins whose only differences are values lerpSpec steps
+        // (strings — textBlock.text above all). The morph runs, but every
+        // frame of it shows segment i+1: it reads as a cut. A warning, never
+        // an error, so every stored sequence stays valid.
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-nothing-morphable',
+          message: `segments ${i}→${i + 1} differ only in values morph cannot interpolate (strings such as textBlock.text step on the first frame): the morph will look like a cut — fade text via colour or reveal.progress`,
         });
       }
     }

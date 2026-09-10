@@ -1,0 +1,1601 @@
+{
+  "format": "idle-sequence",
+  "schemaVersion": 1,
+  "id": "deck-idle-screens-in-5",
+  "label": "idle-screens in 5 slides",
+  "seed": 7,
+  "loop": false,
+  "segments": [
+    {
+      "key": "title",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "deck-title",
+        "label": "idle-screens",
+        "seed": 7,
+        "motionIntensity": "calm",
+        "background": {
+          "type": "gradient",
+          "stops": [
+            {
+              "at": 0,
+              "color": "#070b16"
+            },
+            {
+              "at": 0.55,
+              "color": "#0c1626"
+            },
+            {
+              "at": 1,
+              "color": "#060912"
+            }
+          ],
+          "drift": {
+            "period": 40000,
+            "amount": 0.1
+          }
+        },
+        "layers": [
+          {
+            "key": "haze",
+            "count": 6,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.13,
+                0.21
+              ],
+              "soft": true,
+              "color": "#1b3a5c",
+              "colors": [
+                "#1b3a5c",
+                "#153d4b",
+                "#28285a"
+              ],
+              "colorWeights": [
+                2,
+                2,
+                1
+              ]
+            },
+            "alpha": [
+              0.1,
+              0.18
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "wander",
+              "speed": [
+                0.002,
+                0.004
+              ],
+              "meander": 0.03,
+              "coherence": 0.6
+            },
+            "pulse": {
+              "amp": 0.15,
+              "period": 9000
+            }
+          },
+          {
+            "key": "dust",
+            "count": 70,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0012,
+                0.003
+              ],
+              "soft": true,
+              "color": "#cfe3ff"
+            },
+            "alpha": [
+              0.12,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "rise",
+              "speed": [
+                0.003,
+                0.01
+              ],
+              "sway": 0.01
+            },
+            "pulse": {
+              "amp": 0.3,
+              "period": 5000
+            }
+          },
+          {
+            "key": "pings",
+            "count": 2,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.02,
+                0.03
+              ],
+              "width": 0.0015,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              0.3,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.002
+              ],
+              "angle": 0
+            },
+            "emit": {
+              "every": 14000,
+              "life": 6000,
+              "jitter": 0,
+              "grow": [
+                0.2,
+                6
+              ]
+            },
+            "region": {
+              "x": [
+                0.55,
+                0.95
+              ],
+              "y": [
+                0.2,
+                0.8
+              ]
+            }
+          },
+          {
+            "key": "title",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "idle-screens",
+              "fontSize": 0.12,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#e8eef7",
+              "reveal": {
+                "progress": 1,
+                "mode": "glyphFade",
+                "speed": 10,
+                "fade": 0.5,
+                "caret": false
+              }
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2469,
+              "y": 0.36
+            }
+          },
+          {
+            "key": "sub",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Ambient screens your AI can steer.",
+              "fontSize": 0.036,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2469,
+              "y": 0.53
+            },
+            "life": {
+              "enter": 1800,
+              "fade": 900
+            }
+          }
+        ]
+      },
+      "duration": 8000,
+      "advance": "input"
+    },
+    {
+      "key": "contract",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "deck-contract",
+        "label": "One contract, no code",
+        "seed": 7,
+        "motionIntensity": "calm",
+        "background": {
+          "type": "gradient",
+          "stops": [
+            {
+              "at": 0,
+              "color": "#070b16"
+            },
+            {
+              "at": 0.55,
+              "color": "#0c1626"
+            },
+            {
+              "at": 1,
+              "color": "#060912"
+            }
+          ],
+          "drift": {
+            "period": 40000,
+            "amount": 0.1
+          }
+        },
+        "layers": [
+          {
+            "key": "haze",
+            "count": 6,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.13,
+                0.21
+              ],
+              "soft": true,
+              "color": "#1b3a5c",
+              "colors": [
+                "#1b3a5c",
+                "#153d4b",
+                "#28285a"
+              ],
+              "colorWeights": [
+                2,
+                2,
+                1
+              ]
+            },
+            "alpha": [
+              0.1,
+              0.18
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "wander",
+              "speed": [
+                0.002,
+                0.004
+              ],
+              "meander": 0.03,
+              "coherence": 0.6
+            },
+            "pulse": {
+              "amp": 0.15,
+              "period": 9000
+            }
+          },
+          {
+            "key": "dust",
+            "count": 70,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0012,
+                0.003
+              ],
+              "soft": true,
+              "color": "#cfe3ff"
+            },
+            "alpha": [
+              0.12,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "rise",
+              "speed": [
+                0.003,
+                0.01
+              ],
+              "sway": 0.01
+            },
+            "pulse": {
+              "amp": 0.3,
+              "period": 5000
+            }
+          },
+          {
+            "key": "pings",
+            "count": 2,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.02,
+                0.03
+              ],
+              "width": 0.0015,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              0.3,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.002
+              ],
+              "angle": 0
+            },
+            "emit": {
+              "every": 14000,
+              "life": 6000,
+              "jitter": 0,
+              "grow": [
+                0.2,
+                6
+              ]
+            },
+            "region": {
+              "x": [
+                0.55,
+                0.95
+              ],
+              "y": [
+                0.2,
+                0.8
+              ]
+            }
+          },
+          {
+            "key": "head",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "One contract. No code.",
+              "fontSize": 0.07,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#e8eef7",
+              "reveal": {
+                "progress": 1,
+                "mode": "glyphFade",
+                "speed": 30,
+                "fade": 0.35,
+                "caret": false
+              }
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.14
+            }
+          },
+          {
+            "key": "b1",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "A scene is JSON: sprites, motion, a painted ground.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.42
+            },
+            "life": {
+              "enter": 1500,
+              "fade": 900
+            }
+          },
+          {
+            "key": "b2",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Validated, flash-safe, bounded — by construction.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.54
+            },
+            "life": {
+              "enter": 3500,
+              "fade": 900
+            }
+          },
+          {
+            "key": "b3",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Published to every screen with one tool call.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.66
+            },
+            "life": {
+              "enter": 5500,
+              "fade": 900
+            }
+          }
+        ]
+      },
+      "duration": 12000,
+      "advance": "input",
+      "transition": {
+        "type": "morph",
+        "dur": 1500
+      }
+    },
+    {
+      "key": "determinism",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "deck-determinism",
+        "label": "Same seed, same frame",
+        "seed": 7,
+        "motionIntensity": "calm",
+        "background": {
+          "type": "gradient",
+          "stops": [
+            {
+              "at": 0,
+              "color": "#070b16"
+            },
+            {
+              "at": 0.55,
+              "color": "#0c1626"
+            },
+            {
+              "at": 1,
+              "color": "#060912"
+            }
+          ],
+          "drift": {
+            "period": 40000,
+            "amount": 0.1
+          }
+        },
+        "layers": [
+          {
+            "key": "haze",
+            "count": 6,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.13,
+                0.21
+              ],
+              "soft": true,
+              "color": "#1b3a5c",
+              "colors": [
+                "#1b3a5c",
+                "#153d4b",
+                "#28285a"
+              ],
+              "colorWeights": [
+                2,
+                2,
+                1
+              ]
+            },
+            "alpha": [
+              0.1,
+              0.18
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "wander",
+              "speed": [
+                0.002,
+                0.004
+              ],
+              "meander": 0.03,
+              "coherence": 0.6
+            },
+            "pulse": {
+              "amp": 0.15,
+              "period": 9000
+            }
+          },
+          {
+            "key": "dust",
+            "count": 70,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0012,
+                0.003
+              ],
+              "soft": true,
+              "color": "#cfe3ff"
+            },
+            "alpha": [
+              0.12,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "rise",
+              "speed": [
+                0.003,
+                0.01
+              ],
+              "sway": 0.01
+            },
+            "pulse": {
+              "amp": 0.3,
+              "period": 5000
+            }
+          },
+          {
+            "key": "pings",
+            "count": 2,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.02,
+                0.03
+              ],
+              "width": 0.0015,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              0.3,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.002
+              ],
+              "angle": 0
+            },
+            "emit": {
+              "every": 14000,
+              "life": 6000,
+              "jitter": 0,
+              "grow": [
+                0.2,
+                6
+              ]
+            },
+            "region": {
+              "x": [
+                0.55,
+                0.95
+              ],
+              "y": [
+                0.2,
+                0.8
+              ]
+            }
+          },
+          {
+            "key": "head",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Same seed. Same time. Same frame.",
+              "fontSize": 0.07,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#e8eef7",
+              "reveal": {
+                "progress": 1,
+                "mode": "glyphFade",
+                "speed": 30,
+                "fade": 0.35,
+                "caret": false
+              }
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.14
+            }
+          },
+          {
+            "key": "b1",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "positionAt(entity, t) → { x, y }.  Pure. No state.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#5fd3c0"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.42
+            },
+            "life": {
+              "enter": 1500,
+              "fade": 900
+            }
+          },
+          {
+            "key": "b2",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Seek to any frame instantly.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.54
+            },
+            "life": {
+              "enter": 3500,
+              "fade": 900
+            }
+          },
+          {
+            "key": "b3",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Identical on every device on the channel.",
+              "fontSize": 0.036,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.66
+            },
+            "life": {
+              "enter": 5500,
+              "fade": 900
+            }
+          }
+        ]
+      },
+      "duration": 12000,
+      "advance": "input",
+      "transition": {
+        "type": "cut"
+      }
+    },
+    {
+      "key": "channel",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "deck-channel",
+        "label": "The channel model",
+        "seed": 7,
+        "motionIntensity": "calm",
+        "background": {
+          "type": "gradient",
+          "stops": [
+            {
+              "at": 0,
+              "color": "#070b16"
+            },
+            {
+              "at": 0.55,
+              "color": "#0c1626"
+            },
+            {
+              "at": 1,
+              "color": "#060912"
+            }
+          ],
+          "drift": {
+            "period": 40000,
+            "amount": 0.1
+          }
+        },
+        "layers": [
+          {
+            "key": "haze",
+            "count": 6,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.13,
+                0.21
+              ],
+              "soft": true,
+              "color": "#1b3a5c",
+              "colors": [
+                "#1b3a5c",
+                "#153d4b",
+                "#28285a"
+              ],
+              "colorWeights": [
+                2,
+                2,
+                1
+              ]
+            },
+            "alpha": [
+              0.1,
+              0.18
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "wander",
+              "speed": [
+                0.002,
+                0.004
+              ],
+              "meander": 0.03,
+              "coherence": 0.6
+            },
+            "pulse": {
+              "amp": 0.15,
+              "period": 9000
+            }
+          },
+          {
+            "key": "dust",
+            "count": 70,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0012,
+                0.003
+              ],
+              "soft": true,
+              "color": "#cfe3ff"
+            },
+            "alpha": [
+              0.12,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "rise",
+              "speed": [
+                0.003,
+                0.01
+              ],
+              "sway": 0.01
+            },
+            "pulse": {
+              "amp": 0.3,
+              "period": 5000
+            }
+          },
+          {
+            "key": "pings",
+            "count": 2,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.02,
+                0.03
+              ],
+              "width": 0.0015,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              0.3,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.002
+              ],
+              "angle": 0
+            },
+            "emit": {
+              "every": 14000,
+              "life": 6000,
+              "jitter": 0,
+              "grow": [
+                0.2,
+                6
+              ]
+            },
+            "region": {
+              "x": [
+                0.55,
+                0.95
+              ],
+              "y": [
+                0.2,
+                0.8
+              ]
+            }
+          },
+          {
+            "key": "head",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "The channel model",
+              "fontSize": 0.07,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "left",
+              "color": "#e8eef7",
+              "reveal": {
+                "progress": 1,
+                "mode": "glyphFade",
+                "speed": 30,
+                "fade": 0.35,
+                "caret": false
+              }
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.08,
+              "y": 0.14
+            }
+          },
+          {
+            "key": "tv-glow",
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.11,
+                0.11
+              ],
+              "soft": true,
+              "color": "#1f5f7a"
+            },
+            "alpha": [
+              0.35,
+              0.35
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.22,
+              "y": 0.5
+            },
+            "blend": "lighter",
+            "pulse": {
+              "amp": 0.12,
+              "period": 6000
+            },
+            "life": {
+              "enter": 0,
+              "fade": 700
+            }
+          },
+          {
+            "key": "tv-body",
+            "count": 1,
+            "sprite": {
+              "kind": "rect",
+              "width": [
+                0.17,
+                0.17
+              ],
+              "aspect": [
+                0.62,
+                0.62
+              ],
+              "color": "#26364f"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.22,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 0,
+              "fade": 700
+            }
+          },
+          {
+            "key": "tv-screen",
+            "count": 1,
+            "sprite": {
+              "kind": "rect",
+              "width": [
+                0.1496,
+                0.1496
+              ],
+              "aspect": [
+                0.6,
+                0.6
+              ],
+              "color": "#0e2f40"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.22,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 0,
+              "fade": 700
+            }
+          },
+          {
+            "key": "tv-stand",
+            "count": 1,
+            "sprite": {
+              "kind": "rect",
+              "width": [
+                0.05,
+                0.05
+              ],
+              "aspect": [
+                0.24,
+                0.24
+              ],
+              "color": "#26364f"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.22,
+              "y": 0.5587
+            },
+            "life": {
+              "enter": 0,
+              "fade": 700
+            }
+          },
+          {
+            "key": "ws-arrow",
+            "count": 1,
+            "sprite": {
+              "kind": "stroke",
+              "length": [
+                0.24,
+                0.24
+              ],
+              "points": [
+                [
+                  -0.7,
+                  -0.3
+                ],
+                [
+                  -1,
+                  0
+                ],
+                [
+                  -0.7,
+                  0.3
+                ],
+                [
+                  -1,
+                  0
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  0.7,
+                  -0.3
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  0.7,
+                  0.3
+                ]
+              ],
+              "width": 0.004,
+              "curve": "linear",
+              "taper": false,
+              "color": "#8fa3bf"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.36,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 1200,
+              "fade": 700
+            }
+          },
+          {
+            "key": "ws-cap",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "WebSocket",
+              "fontSize": 0.022,
+              "maxWidth": 0.3,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2756,
+              "y": 0.415
+            },
+            "life": {
+              "enter": 1200,
+              "fade": 900
+            }
+          },
+          {
+            "key": "do-hex",
+            "count": 1,
+            "sprite": {
+              "kind": "polygon",
+              "sides": 6,
+              "radius": [
+                0.085,
+                0.085
+              ],
+              "color": "#2a416f"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 1200,
+              "fade": 700
+            }
+          },
+          {
+            "key": "do-core",
+            "count": 1,
+            "sprite": {
+              "kind": "polygon",
+              "sides": 6,
+              "radius": [
+                0.058,
+                0.058
+              ],
+              "color": "#16233f"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 1200,
+              "fade": 700
+            }
+          },
+          {
+            "key": "mcp-arrow",
+            "count": 1,
+            "sprite": {
+              "kind": "stroke",
+              "length": [
+                0.24,
+                0.24
+              ],
+              "points": [
+                [
+                  1,
+                  0
+                ],
+                [
+                  -1,
+                  0
+                ],
+                [
+                  -0.7,
+                  -0.3
+                ],
+                [
+                  -1,
+                  0
+                ],
+                [
+                  -0.7,
+                  0.3
+                ]
+              ],
+              "width": 0.004,
+              "curve": "linear",
+              "taper": false,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.64,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 2800,
+              "fade": 700
+            }
+          },
+          {
+            "key": "mcp-cap",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "MCP tools",
+              "fontSize": 0.022,
+              "maxWidth": 0.3,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5556,
+              "y": 0.415
+            },
+            "life": {
+              "enter": 2800,
+              "fade": 900
+            }
+          },
+          {
+            "key": "agent-glow",
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.075,
+                0.075
+              ],
+              "soft": true,
+              "color": "#f0b35a"
+            },
+            "alpha": [
+              0.55,
+              0.55
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.78,
+              "y": 0.5
+            },
+            "blend": "lighter",
+            "pulse": {
+              "amp": 0.15,
+              "period": 4000
+            },
+            "life": {
+              "enter": 2800,
+              "fade": 700
+            }
+          },
+          {
+            "key": "agent-core",
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.024,
+                0.024
+              ],
+              "color": "#f7d08a"
+            },
+            "alpha": [
+              1,
+              1
+            ],
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.78,
+              "y": 0.5
+            },
+            "life": {
+              "enter": 2800,
+              "fade": 700
+            }
+          },
+          {
+            "key": "l-tv",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "TV",
+              "fontSize": 0.03,
+              "maxWidth": 0.3,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#e8eef7"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.1356,
+              "y": 0.62
+            },
+            "life": {
+              "enter": 0,
+              "fade": 900
+            }
+          },
+          {
+            "key": "l-do",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Durable Object",
+              "fontSize": 0.03,
+              "maxWidth": 0.3,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#e8eef7"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.4156,
+              "y": 0.62
+            },
+            "life": {
+              "enter": 1200,
+              "fade": 900
+            }
+          },
+          {
+            "key": "l-ag",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Agent",
+              "fontSize": 0.03,
+              "maxWidth": 0.3,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#e8eef7"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.6956,
+              "y": 0.62
+            },
+            "life": {
+              "enter": 2800,
+              "fade": 900
+            }
+          },
+          {
+            "key": "sub",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "One tool call from the agent; every screen on the channel repaints.",
+              "fontSize": 0.03,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2188,
+              "y": 0.8
+            },
+            "life": {
+              "enter": 4500,
+              "fade": 900
+            }
+          }
+        ]
+      },
+      "duration": 14000,
+      "advance": "input"
+    },
+    {
+      "key": "cta",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "deck-cta",
+        "label": "Try it",
+        "seed": 7,
+        "motionIntensity": "calm",
+        "background": {
+          "type": "gradient",
+          "stops": [
+            {
+              "at": 0,
+              "color": "#070b16"
+            },
+            {
+              "at": 0.55,
+              "color": "#0c1626"
+            },
+            {
+              "at": 1,
+              "color": "#060912"
+            }
+          ],
+          "drift": {
+            "period": 40000,
+            "amount": 0.1
+          }
+        },
+        "layers": [
+          {
+            "key": "haze",
+            "count": 6,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.13,
+                0.21
+              ],
+              "soft": true,
+              "color": "#1b3a5c",
+              "colors": [
+                "#1b3a5c",
+                "#153d4b",
+                "#28285a"
+              ],
+              "colorWeights": [
+                2,
+                2,
+                1
+              ]
+            },
+            "alpha": [
+              0.1,
+              0.18
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "wander",
+              "speed": [
+                0.002,
+                0.004
+              ],
+              "meander": 0.03,
+              "coherence": 0.6
+            },
+            "pulse": {
+              "amp": 0.15,
+              "period": 9000
+            }
+          },
+          {
+            "key": "dust",
+            "count": 70,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0012,
+                0.003
+              ],
+              "soft": true,
+              "color": "#cfe3ff"
+            },
+            "alpha": [
+              0.12,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "rise",
+              "speed": [
+                0.003,
+                0.01
+              ],
+              "sway": 0.01
+            },
+            "pulse": {
+              "amp": 0.3,
+              "period": 5000
+            }
+          },
+          {
+            "key": "pings",
+            "count": 2,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.02,
+                0.03
+              ],
+              "width": 0.0015,
+              "color": "#5fd3c0"
+            },
+            "alpha": [
+              0.3,
+              0.45
+            ],
+            "blend": "lighter",
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.002
+              ],
+              "angle": 0
+            },
+            "emit": {
+              "every": 14000,
+              "life": 6000,
+              "jitter": 0,
+              "grow": [
+                0.2,
+                6
+              ]
+            },
+            "region": {
+              "x": [
+                0.55,
+                0.95
+              ],
+              "y": [
+                0.2,
+                0.8
+              ]
+            }
+          },
+          {
+            "key": "cta",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "idlescreens.com/mcp",
+              "fontSize": 0.085,
+              "maxWidth": 1.0,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#5fd3c0",
+              "reveal": {
+                "progress": 1,
+                "mode": "typewriter",
+                "speed": 14,
+                "caret": {
+                  "blink": 1.2,
+                  "color": "#5fd3c0"
+                }
+              }
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2188,
+              "y": 0.38
+            }
+          },
+          {
+            "key": "sub",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "Add the MCP to your agent. Steer a wall.",
+              "fontSize": 0.036,
+              "maxWidth": 0.9,
+              "lineHeight": 1.3,
+              "align": "center",
+              "color": "#8fa3bf"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.2469,
+              "y": 0.55
+            },
+            "life": {
+              "enter": 2200,
+              "fade": 900
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -63,6 +63,8 @@ struct ScreenSaverView: View {
                         NativeSceneView(
                             layers: app.compiledScene,
                             background: app.specBackground,
+                            ghosting: app.specGhosting,
+                            renderClass: app.renderClass,
                             tier: .t3,
                             watchdog: app.watchdog,
                             onDowngrade: { app.watchdogDidTrigger() }

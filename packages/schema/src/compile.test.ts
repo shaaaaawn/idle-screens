@@ -619,3 +619,141 @@ describe('bar sprites draw (#49)', () => {
     inst.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// textBlock anchor / font / opacity (ambient presentations 1a)
+// ---------------------------------------------------------------------------
+
+import { breakTextBlock } from './simulate';
+
+describe('textBlock anchor / font / opacity draw (1a)', () => {
+  const TEXT = 'Centred on every aspect ratio';
+
+  function anchoredSpec(overrides: Record<string, unknown> = {}): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'anchored',
+      label: 'Anchored',
+      background: { type: 'solid', color: '#05050a' },
+      layers: [
+        {
+          key: 'h',
+          count: 1,
+          sprite: { kind: 'textBlock', text: TEXT, maxWidth: 0.9, fontSize: 0.05, ...overrides },
+          motion: { type: 'static' },
+          position: { x: 0.5, y: 0.5 },
+        },
+      ],
+    } as SaverSpec;
+  }
+
+  /** Render one frame; return the summed translate (the block origin) and every fillText. */
+  function renderBlock(spec: SaverSpec, width: number, height: number, t = 0, inst?: SaverInstance) {
+    const translates: Array<[number, number]> = [];
+    const fills: Array<{ text: string; x: number; y: number; alpha: number; font: string }> = [];
+    (mockCtx as { translate: unknown }).translate = vi.fn((x: number, y: number) => translates.push([x, y]));
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string, x: number, y: number) => {
+      const c = mockCtx as { globalAlpha: number; font: string };
+      fills.push({ text, x, y, alpha: c.globalAlpha, font: c.font });
+    });
+    const own = inst ?? mountSync(compileSaver(spec), saverCtx({ width, height }));
+    own.renderFrame!(t, 42);
+    if (!inst) own.dispose();
+    const origin = translates.reduce<[number, number]>((acc, [x, y]) => [acc[0] + x, acc[1] + y], [0, 0]);
+    return { origin, fills };
+  }
+
+  for (const [w, h] of [[1920, 1080], [1080, 1080]] as const) {
+    it(`anchor: 'center' centres the rendered block at position on ${w}×${h}`, () => {
+      const { origin, fills } = renderBlock(anchoredSpec({ anchor: 'center' }), w, h);
+      const unit = Math.min(w, h);
+      const fsPx = 0.05 * unit;
+      const lines = breakTextBlock(TEXT, (0.9 * unit) / fsPx);
+      const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+      const totalH = lines.length * 1.4 * fsPx;
+      // Left-aligned: the first fillText sits at the origin's x, so the ink
+      // spans [origin.x, origin.x + maxLineW] — its centre must be the frame's.
+      expect(fills.length).toBe(lines.length);
+      expect(fills[0]!.x).toBe(0);
+      expect(origin[0] + maxLineW / 2).toBeCloseTo(w / 2, 6);
+      expect(origin[1] + totalH / 2).toBeCloseTo(h / 2, 6);
+    });
+  }
+
+  it('absent anchor keeps position as the layout top-left (one translate, as before)', () => {
+    const { origin } = renderBlock(anchoredSpec(), 1920, 1080);
+    expect(origin).toEqual([960, 540]);
+    expect((mockCtx.translate as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it("anchor: 'bottom-right' puts the ink's bottom-right corner on position", () => {
+    const { origin } = renderBlock(anchoredSpec({ anchor: 'bottom-right' }), 1920, 1080);
+    const fsPx = 0.05 * 1080;
+    const lines = breakTextBlock(TEXT, (0.9 * 1080) / fsPx);
+    const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+    expect(origin[0] + maxLineW).toBeCloseTo(960, 6);
+    expect(origin[1] + lines.length * 1.4 * fsPx).toBeCloseTo(540, 6);
+  });
+
+  it("anchor: 'center' with align: 'right' still centres the ink (align only shapes the ragged edge)", () => {
+    const { origin, fills } = renderBlock(anchoredSpec({ anchor: 'center', align: 'right' }), 1920, 1080);
+    // Right-aligned lines draw at xOff = maxWPx with textAlign right, so the
+    // ink's right edge is origin.x + maxWPx — and it must sit maxLineW/2 past centre.
+    const fsPx = 0.05 * 1080;
+    const maxWPx = 0.9 * 1080;
+    const lines = breakTextBlock(TEXT, maxWPx / fsPx);
+    const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+    expect(fills[0]!.x).toBe(maxWPx);
+    expect(origin[0] + maxWPx).toBeCloseTo(960 + maxLineW / 2, 6);
+  });
+
+  it('font composes family/weight with the scaled size; absent keeps system-ui', () => {
+    const { fills } = renderBlock(anchoredSpec({ font: 'bold monospace' }), 640, 400);
+    expect(fills[0]!.font).toBe('bold 20px monospace');
+    const plain = renderBlock(anchoredSpec(), 640, 400);
+    expect(plain.fills[0]!.font).toBe('20px system-ui, sans-serif');
+  });
+
+  it('opacity multiplies the block alpha and glides via applyTrack without a rebuild', () => {
+    const inst = mountSync(compileSaver(anchoredSpec({ opacity: 1 })), saverCtx({ width: 640, height: 400 }));
+    expect(renderBlock(anchoredSpec(), 640, 400, 0, inst).fills[0]!.alpha).toBe(1);
+    inst.applyTrack!({ deltas: [{ t: 0, path: 'h.sprite.opacity', value: 0, dur: 1000 }] } as never);
+    // Mid-glide: a paint lerp, so the block is partly transparent — a rebuild
+    // would have snapped it to the target.
+    const mid = renderBlock(anchoredSpec(), 640, 400, 500, inst).fills[0]!.alpha;
+    expect(mid).toBeGreaterThan(0.2);
+    expect(mid).toBeLessThan(0.8);
+    expect(renderBlock(anchoredSpec(), 640, 400, 2000, inst).fills[0]!.alpha).toBe(0);
+    inst.dispose();
+  });
+});
+
+describe('textBlock font selects the line-breaker metrics class (1a)', () => {
+  function spec(font?: string): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'mono',
+      label: 'Mono',
+      layers: [{
+        count: 1,
+        // 4 narrow words: 6.5 em proportional (one line at 8 em), 11.4 em mono (wraps).
+        sprite: { kind: 'textBlock', text: 'iiii iiii iiii iiii', maxWidth: 0.4, fontSize: 0.05, ...(font ? { font } : {}) },
+        motion: { type: 'static' },
+        position: { x: 0.1, y: 0.1 },
+      }],
+    } as SaverSpec;
+  }
+  function lineCount(s: SaverSpec): number {
+    const fills: string[] = [];
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string) => fills.push(text));
+    const inst = mountSync(compileSaver(s), saverCtx({ width: 640, height: 400 }));
+    inst.renderFrame!(0, 42);
+    inst.dispose();
+    return fills.length;
+  }
+  it('wraps a monospace block by the uniform advance and a default block by the proportional table', () => {
+    expect(lineCount(spec())).toBe(1);
+    expect(lineCount(spec('bold sans-serif'))).toBe(1);
+    expect(lineCount(spec('monospace'))).toBeGreaterThan(1);
+  });
+});
