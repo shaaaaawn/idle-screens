@@ -400,6 +400,29 @@ describe('adviseSequence', () => {
     expect(warnings.some((w) => w.code === 'morph-structural-mismatch')).toBe(true);
   });
 
+  it('warns morph-nothing-morphable for text-only twins, and only then', () => {
+    const caption = (text: string, color: string): SaverSpec => ({
+      ...scene,
+      units: undefined,
+      layers: [{
+        count: 1,
+        sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.04, color },
+        motion: { type: 'static' },
+        position: { x: 0.2, y: 0.2 },
+      }],
+    });
+    const morph = (a: SaverSpec, b: SaverSpec, type: 'morph' | 'cut' = 'morph') => adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene: a, duration: 5000, transition: type === 'morph' ? { type, dur: 1000 } : { type } },
+        { key: 'b', scene: b, duration: 5000 },
+      ],
+    })).filter((w) => w.code === 'morph-nothing-morphable');
+
+    expect(morph(caption('Act I', '#e6e8ef'), caption('Act II', '#e6e8ef'))).toHaveLength(1);
+    expect(morph(caption('Act I', '#e6e8ef'), caption('Act II', '#808080'))).toHaveLength(0);
+    expect(morph(caption('Act I', '#e6e8ef'), caption('Act II', '#e6e8ef'), 'cut')).toHaveLength(0);
+  });
+
   it('propagates per-segment advisories', () => {
     const camoScene: SaverSpec = {
       ...scene,

@@ -105,6 +105,62 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
 }
 
 /**
+ * True when a morph from `a` to `b` has nothing to interpolate: the two specs
+ * differ, yet every difference is a value lerpSpec steps (strings such as
+ * `textBlock.text`, mismatched arrays) rather than a number or hex colour it
+ * glides. Such a morph looks exactly like a cut. Identical specs return
+ * false: a no-op morph is continuity, not a cut.
+ *
+ * Walks `a`/`b` directly rather than sampling `lerpSpec(a, b, 0.5)`: two hex
+ * colours a single 8-bit step apart (`#000000` → `#010101`) round their
+ * midpoint to the target channel-for-channel, which would make a genuine
+ * (if subtle) colour glide look identical to a step. `id`/`label`/
+ * `schemaVersion`/layer `key` are identification metadata, never rendered
+ * (excluded from `structuralSignature`/`steerablePaths` for the same reason)
+ * — a segment pair that differs only there renders identically and is not a
+ * morph at all.
+ */
+const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion', 'key']);
+
+export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
+  let hasDiff = false;
+  let hasGlide = false;
+  const walk = (x: unknown, y: unknown, key?: string): void => {
+    if (key !== undefined && NON_RENDERED_KEYS.has(key)) return;
+    if (x === y) return;
+    if (typeof x === 'number' && typeof y === 'number') {
+      hasDiff = true;
+      hasGlide = true;
+      return;
+    }
+    if (typeof x === 'string' && typeof y === 'string' && HEX.test(x) && HEX.test(y)) {
+      const ca = hexToRgb(x);
+      const cb = hexToRgb(y);
+      if (ca.some((v, i) => v !== cb[i])) {
+        hasDiff = true;
+        hasGlide = true;
+      }
+      // else: same colour under a different spelling (case, 3- vs 6-digit) — a no-op, not a difference.
+      return;
+    }
+    if (Array.isArray(x) && Array.isArray(y) && x.length === y.length) {
+      for (let i = 0; i < y.length; i++) walk(x[i], y[i]);
+      return;
+    }
+    if (x && y && typeof x === 'object' && typeof y === 'object' && !Array.isArray(x) && !Array.isArray(y)) {
+      const keys = new Set([...Object.keys(x as Record<string, unknown>), ...Object.keys(y as Record<string, unknown>)]);
+      for (const k of keys) {
+        walk((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], k);
+      }
+      return;
+    }
+    hasDiff = true; // non-interpolable → steps to target
+  };
+  walk(a, b);
+  return hasDiff && !hasGlide;
+}
+
+/**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
  * like "layers.0.count", "background.stops.1.color", etc. Metadata fields
  * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
