@@ -668,7 +668,7 @@ export function adviseSequence(
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
         });
-      } else if (morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene)) {
+      } else if (morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' })) {
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-nothing-morphable',

@@ -937,6 +937,13 @@ export function validateSequence(seq: unknown): ValidationResult {
       } else if (s.transition.type !== 'cut') {
         err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
       }
+      if (isObj(s.transition) && s.transition.text !== undefined) {
+        if (s.transition.type !== 'morph') {
+          err(`${p}.transition.text`, 'is a morph option (fade already cross-fades whole frames; cut has no window)');
+        } else if (s.transition.text !== 'step' && s.transition.text !== 'crossfade') {
+          err(`${p}.transition.text`, "must be 'step' | 'crossfade'");
+        }
+      }
     }
 
     if (isObj(s.scene)) {
@@ -1001,7 +1008,7 @@ export function validateSequence(seq: unknown): ValidationResult {
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
         });
-      } else if (morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec)) {
+      } else if (morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec, { textCrossfade: s.transition.text === 'crossfade' })) {
         // Structural twins whose only differences are values lerpSpec steps
         // (strings — textBlock.text above all). The morph runs, but every
         // frame of it shows segment i+1: it reads as a cut. A warning, never

@@ -15,9 +15,10 @@ import {
   lerpSpec,
   resolveSpecPath,
   structuralSignature,
+  textStringsDiffer,
   type SteerDelta,
 } from './steer';
-import type { IdleSequence, LayerSpec, SaverSpec } from './types';
+import type { IdleSequence, LayerSpec, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
 import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
@@ -120,6 +121,24 @@ interface Built {
   entities: Entity[];
 }
 
+/**
+ * Internal, per-layer: paint the layer twice for a window — the `outgoing`
+ * sprite (the same sprite with the previous words) at `1 − k`, the layer's
+ * own sprite at `k`. Set by a `SequenceInstance` for the `text` / `textBlock`
+ * layers of a morph declared `text: 'crossfade'`; never from a spec field.
+ * Only text sprites are ever drawn this way.
+ */
+interface LayerPaintOverride {
+  outgoing: SpriteSpec;
+  k: number;
+}
+
+/** One draw's paint override: which sprite to paint, and an alpha multiplier on top of the entity's own. */
+interface PaintPass {
+  sprite?: SpriteSpec;
+  alpha: number;
+}
+
 /** Per-instance options a host (today: `SequenceInstance`) sets; a plain compileSaver mount sets none. */
 interface SpecInstanceOptions {
   /**
@@ -130,6 +149,16 @@ interface SpecInstanceOptions {
    * A sequence's segment children over a `bed` render this way.
    */
   transparent?: boolean;
+  /**
+   * Skip the constructor's own eager paused-mount paint. For a transparent
+   * instance whose owner is about to call `renderFrame` again immediately
+   * with paint overrides already set (a morph chain-root child, mounted
+   * mid-morph) — the constructor's plain paint would otherwise leave a
+   * stray full-opacity frame on the shared surface underneath, which a
+   * partial-alpha override pass (`text: 'crossfade'`) then composites over
+   * rather than replaces.
+   */
+  skipInitialPaint?: boolean;
 }
 
 class SpecInstance implements SaverInstance {
@@ -155,6 +184,8 @@ class SpecInstance implements SaverInstance {
   /** Active glide between two resolved specs (live setParam/applyTrack). */
   private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null = null;
   private lastStructural = '';
+  /** See `LayerPaintOverride`; null (the default, and every plain mount) draws every layer once. */
+  private paintOverrides: ReadonlyMap<number, LayerPaintOverride> | null = null;
 
   constructor(
     private readonly spec: SaverSpec,
@@ -193,8 +224,11 @@ class SpecInstance implements SaverInstance {
     this.rebuild();
 
     this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderFrame(0, this.seed);
-    else this.start();
+    if (this.paused) {
+      if (!opts.skipInitialPaint) this.renderFrame(0, this.seed);
+    } else {
+      this.start();
+    }
   }
 
   /** Viewport factor for absolute px sizes — 1 for `units: 'px'` specs. */
@@ -352,14 +386,14 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null): void {
+  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass): void {
     const { ctx } = this;
     const p = this.entityPos(e, t, parentE);
-    const sprite = built.layer.sprite;
+    const sprite = paint?.sprite ?? built.layer.sprite;
     const sz = sizeAt(e, t);
     const rot = rotationAt(e, t);
     const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
-    ctx.globalAlpha = alphaAt(e, t) * lifeA;
+    ctx.globalAlpha = alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
     if (sprite.kind === 'ring') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
@@ -759,15 +793,25 @@ class SpecInstance implements SaverInstance {
       this.drawBackground(t);
     }
     ctx.globalAlpha = 1;
-    for (const built of this.layers) {
+    for (let li = 0; li < this.layers.length; li++) {
+      const built = this.layers[li]!;
       const lifeA = lifeAlphaAt(built.layer.life, t);
       if (lifeA <= 0) continue;
       const parentE = this.parentEntityFor(built);
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       this.drawLinks(built, t, lifeA, parentE);
+      const override = this.paintOverrides?.get(li) ?? null;
       for (const e of built.entities) {
         this.drawTrail(built, e, t, lifeA, parentE);
-        this.drawEntity(built, e, t, lifeA, parentE);
+        if (override === null) {
+          this.drawEntity(built, e, t, lifeA, parentE);
+          continue;
+        }
+        // A text cross-fade: the previous words fading out under the new
+        // ones fading in. Either pass at alpha 0 is skipped, so k = 0 and
+        // k = 1 each cost exactly one draw, like a plain frame.
+        if (override.k < 1) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: 1 - override.k });
+        if (override.k > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: override.k });
       }
     }
     ctx.globalAlpha = 1;
@@ -840,6 +884,16 @@ class SpecInstance implements SaverInstance {
   hotSwapPaint(spec: SaverSpec): void {
     this.effSpec = spec;
     this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
+  /**
+   * Internal (see `LayerPaintOverride`): draw the listed layers twice —
+   * outgoing sprite at `1 − k`, own sprite at `k` — until cleared with
+   * `null`. Keyed by layer index. A `SequenceInstance` sets it per morph
+   * frame under `text: 'crossfade'`; nothing else does.
+   */
+  setLayerPaintOverrides(overrides: ReadonlyMap<number, LayerPaintOverride> | null): void {
+    this.paintOverrides = overrides && overrides.size > 0 ? overrides : null;
   }
 
   dispose(): void {
@@ -1050,6 +1104,36 @@ class SequenceInstance implements SaverInstance {
     return tr?.type === 'morph' ? tr.dur : 0;
   }
 
+  /** Whether the morph out of `from` cross-fades its text (default `step`: strings switch at k > 0). */
+  private morphTextCrossfades(from: number): boolean {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'morph' && tr.text === 'crossfade';
+  }
+
+  /**
+   * The paint overrides for one crossfade frame: every text layer whose
+   * words differ between the outgoing and incoming specs, painting the
+   * outgoing words (in the lerped frame's paint — colour and alpha glide as
+   * usual) at `1 − k` under the incoming at `k`. Null when nothing differs,
+   * so a crossfade between same-worded twins is a plain morph frame.
+   */
+  private crossfadeOverrides(specA: SaverSpec, specB: SaverSpec, lerped: SaverSpec, k: number): Map<number, LayerPaintOverride> | null {
+    let map: Map<number, LayerPaintOverride> | null = null;
+    for (let i = 0; i < lerped.layers.length; i++) {
+      if (!textStringsDiffer(specA, specB, i)) continue;
+      const from = specA.layers[i]!.sprite;
+      const now = lerped.layers[i]!.sprite;
+      const outgoing: SpriteSpec = from.kind === 'text' && now.kind === 'text'
+        ? { ...now, strings: from.strings }
+        : from.kind === 'textBlock' && now.kind === 'textBlock'
+          ? { ...now, text: from.text }
+          : now;
+      if (outgoing === now) continue;
+      (map ??= new Map()).set(i, { outgoing, k });
+    }
+    return map;
+  }
+
   /** Length of the fade out of segment `from`, or 0 (no fade, or a tier that plays it as cut). */
   private fadeDur(from: number): number {
     const tr = this.seq.segments[from]?.transition;
@@ -1139,13 +1223,15 @@ class SequenceInstance implements SaverInstance {
    * with the root's scene so its seed and entity placement are continuous
    * with the chain, then hot-swaps to the segment's own spec. Either way the
    * retained track is applied last, so a steer made while another segment
-   * was up is already in effect on this child's first frame.
+   * was up is already in effect on this child's first frame. `skipInitialPaint`
+   * is for a caller (the morph branch) that is about to render a real frame,
+   * paint overrides included, in this same call — see `SpecInstanceOptions`.
    */
-  private ensureChild(index: number, rootScene?: SaverSpec): SpecInstance {
+  private ensureChild(index: number, rootScene?: SaverSpec, skipInitialPaint?: boolean): SpecInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null });
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
@@ -1227,7 +1313,14 @@ class SequenceInstance implements SaverInstance {
         if (i !== chainRoot) this.releaseChild(i);
       }
 
-      const child = this.ensureChild(chainRoot);
+      // A fresh mount here is about to be repainted for real a few lines
+      // down (hotSwapPaint + overrides + renderFrame) within this same call.
+      // Only `text: 'crossfade'` needs the constructor's own paint skipped —
+      // its partial-alpha passes would otherwise composite over a stray
+      // full-opacity frame underneath; `step` (the common case) is left to
+      // paint at construction as it always has, so a fresh mount's ghosting
+      // contiguity (`lastRenderT`) is unaffected.
+      const child = this.ensureChild(chainRoot, undefined, this.morphTextCrossfades(prevIdx));
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
       // The lerp endpoints carry the retained track, so without this a
@@ -1241,7 +1334,11 @@ class SequenceInstance implements SaverInstance {
       // steer actually takes effect instead of leaving stale entities.
       const specA = this.steeredScene(this.childScene(prevIdx));
       const specB = this.steeredScene(this.childScene(index));
-      child.hotSwapSpec(lerpSpec(specA, specB, k));
+      const lerped = lerpSpec(specA, specB, k);
+      child.hotSwapSpec(lerped);
+      // Default (`step`): no overrides, the frame is what it always was —
+      // strings already switched inside `lerped` at k > 0.
+      child.setLayerPaintOverrides(this.morphTextCrossfades(prevIdx) ? this.crossfadeOverrides(specA, specB, lerped, k) : null);
       child.renderFrame(localT, this.childSeed(chainRoot, seed));
     } else {
       // No morph (or morph complete). If we were morphing, finalize.

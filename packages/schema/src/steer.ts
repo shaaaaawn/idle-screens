@@ -5,7 +5,7 @@
  * changes existing values only — unknown paths are ignored (the server
  * validates and rejects them; the runtime stays lenient).
  */
-import type { IdleSequence, SaverSpec } from './types';
+import type { IdleSequence, SaverSpec, SpriteSpec } from './types';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -105,11 +105,38 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
 }
 
 /**
+ * The string(s) a text layer paints — `strings` of a `text` sprite, `text`
+ * of a `textBlock` — or null for every other sprite.
+ */
+export function textStringsOf(sprite: SpriteSpec): string[] | null {
+  if (sprite.kind === 'text') return sprite.strings;
+  if (sprite.kind === 'textBlock') return [sprite.text];
+  return null;
+}
+
+/**
+ * Whether the text layer at index `i` paints different words in `a` and
+ * `b` — the layers a morph `text: 'crossfade'` draws twice. False for
+ * non-text layers and when the strings match.
+ */
+export function textStringsDiffer(a: SaverSpec, b: SaverSpec, i: number): boolean {
+  const sa = a.layers[i]?.sprite;
+  const sb = b.layers[i]?.sprite;
+  if (!sa || !sb) return false;
+  const ta = textStringsOf(sa);
+  const tb = textStringsOf(sb);
+  if (!ta || !tb) return false;
+  return ta.length !== tb.length || ta.some((s, j) => s !== tb[j]);
+}
+
+/**
  * True when a morph from `a` to `b` has nothing to interpolate: the two specs
  * differ, yet every difference is a value lerpSpec steps (strings such as
  * `textBlock.text`, mismatched arrays) rather than a number or hex colour it
  * glides. Such a morph looks exactly like a cut. Identical specs return
- * false: a no-op morph is continuity, not a cut.
+ * false: a no-op morph is continuity, not a cut. Under `textCrossfade`
+ * (the transition declared `text: 'crossfade'`) differing text is something
+ * to morph — the words cross-fade — so such twins return false too.
  *
  * Walks `a`/`b` directly rather than sampling `lerpSpec(a, b, 0.5)`: two hex
  * colours a single 8-bit step apart (`#000000` → `#010101`) round their
@@ -122,7 +149,8 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  */
 const NON_RENDERED_KEYS = new Set(['id', 'label', 'schemaVersion', 'key']);
 
-export function morphNothingMorphable(a: SaverSpec, b: SaverSpec): boolean {
+export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCrossfade?: boolean } = {}): boolean {
+  if (opts.textCrossfade && a.layers.some((_, i) => textStringsDiffer(a, b, i))) return false;
   let hasDiff = false;
   let hasGlide = false;
   const walk = (x: unknown, y: unknown, key?: string): void => {
