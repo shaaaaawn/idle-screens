@@ -135,6 +135,23 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'sparse-scene')).toBe(true);
   });
 
+  it('a near-invisible textBlock does not count as coverage (sparse-scene still fires)', () => {
+    // A big block would normally cover plenty of the frame (well above the
+    // 0.05% sparse threshold) — but opacity 0.001 means almost nothing is
+    // actually painted, so it should still read as sparse. Before the fix,
+    // coverage ignored textBlock opacity and this scene registered ~4%
+    // covered, well clear of sparse.
+    const faded: SaverSpec = {
+      ...base,
+      units: undefined,
+      layers: [
+        { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'barely there', maxWidth: 0.9, fontSize: 0.1, opacity: 0.001 }, motion: { type: 'static' } },
+      ],
+    };
+    const w = adviseSpec(faded);
+    expect(w.some((x) => x.code === 'sparse-scene')).toBe(true);
+  });
+
   it('withholds sparse-scene when the spec declares density: sparse — the emptiness is the point', () => {
     const sparse: SaverSpec = {
       ...base,
@@ -650,6 +667,29 @@ describe('adviseSequence', () => {
       const w = adviseSequence(mkSeq({ segments: [{ key: 'a', scene, duration: 5000, transition }, { key: 'b', scene, duration: 5000 }] }));
       expect(w.filter((x) => x.code === 'fade-degrades-on-low-tier')).toHaveLength(0);
     }
+  });
+
+  it('fade-degrades-on-low-tier: not raised for a fade on the last segment without loop (it never runs)', () => {
+    const w = adviseSequence(mkSeq({
+      loop: false,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(0);
+  });
+
+  it("fade-degrades-on-low-tier: raised for the last segment's fade under loop (it's the wrap's transition)", () => {
+    const w = adviseSequence(mkSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene, duration: 5000 },
+        { key: 'b', scene, duration: 5000, transition: { type: 'fade', dur: 800 } },
+      ],
+    })).filter((x) => x.code === 'fade-degrades-on-low-tier');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe('segments[1].transition');
   });
 
   it('warns on large luminance jump at boundary', () => {

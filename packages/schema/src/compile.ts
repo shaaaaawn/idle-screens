@@ -20,7 +20,7 @@ import {
 } from './steer';
 import type { IdleSequence, LayerSpec, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
-import { resolveSegment, segmentStart } from './sequence';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -195,7 +195,7 @@ class SpecInstance implements SaverInstance {
     this.effSpec = spec;
     this.saverCtx = ctx;
     this.transparent = opts.transparent === true;
-    this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
+    this.seed = normalizeSeed(spec.seed ?? ctx.seed);
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
       canvas = ctx.surface;
@@ -209,7 +209,12 @@ class SpecInstance implements SaverInstance {
       this.ownsCanvas = true;
     }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    // Transparent instances (a bed's own offscreen fade canvas) never paint a
+    // background, so their cleared/unpainted pixels must stay actually
+    // transparent for `composite()`'s drawImage to blend only the ink onto
+    // the bed — an opaque (alpha: false) context turns those pixels solid
+    // black instead. Opaque instances keep alpha: false (unchanged).
+    const c2d = canvas.getContext('2d', { alpha: this.transparent }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('schema saver: no 2d context');
     this.ctx = c2d;
 
@@ -713,12 +718,19 @@ class SpecInstance implements SaverInstance {
    * made while another segment was active lands on the segment that owns the
    * path. Not painting matters: a child is created inside the parent's
    * renderFrame, and a stray t=0 paint here would make the real frame that
-   * follows look "contiguous" to the ghosting warm-up.
+   * follows look "contiguous" to the ghosting warm-up — but the constructor
+   * already painted ONE stray t=0 frame of the pre-steer spec (SpecInstance's
+   * own mount does an immediate render when paused, which every sequence
+   * child is), so `lastRenderT` must be reset too: otherwise, with `ghosting`
+   * on, the real frame that follows still finds itself "contiguous" with
+   * that stray paint and composites over it at partial alpha, briefly
+   * showing a ghost of the un-steered scene.
    */
   applyDeltasNow(deltas: Iterable<SteerDelta>): void {
     const next = applyRetainedDeltas(this.effSpec, deltas);
     if (next === this.effSpec) return;
     this.transition = null;
+    this.lastRenderT = Number.NEGATIVE_INFINITY;
     this.effSpec = next;
     if (structuralSignature(this.effSpec) !== this.lastStructural) this.rebuild();
     else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
@@ -858,8 +870,8 @@ class SpecInstance implements SaverInstance {
 
   /**
    * Replace the rendered spec without triggering a transition glide.
-   * Checks structural signature — use `hotSwapPaint` when the caller
-   * already knows the signature is unchanged (e.g. mid-morph lerp).
+   * Checks structural signature — use `hotSwapPaint` only when the caller
+   * already knows the signature is unchanged.
    */
   hotSwapSpec(spec: SaverSpec): void {
     this.effSpec = spec;
@@ -969,6 +981,16 @@ class SequenceInstance implements SaverInstance {
   private clockOffset = 0;
   private releasedBelow = 0;
   /**
+   * Set by a `sequence.segment` steer that targets segment 0 under `loop:
+   * true`: the steer resets the clock to segment 0's own start (localT 0),
+   * so `renderFrame`'s wrap check (which compares the raw, ever-increasing
+   * clock against `timedTotal()`) can no longer recognize the jump as a
+   * wrap. This flag lets the clicker's jump to 0 still count as one, so the
+   * last segment's fade plays instead of a hard cut. Cleared once the wrap
+   * window (if any) has passed.
+   */
+  private pendingWrapFade = false;
+  /**
    * Every non-`sequence.segment` delta this instance has been handed, last
    * wins per path, merged across `applyTrack` calls. Children are created
    * lazily and disposed on every segment switch, so a steer forwarded only
@@ -1069,18 +1091,12 @@ class SequenceInstance implements SaverInstance {
 
   /** Whether the boundary from `from` to `from+1` should morph. */
   private canMorph(from: number): boolean {
-    const seg = this.seq.segments[from];
-    if (!seg || seg.transition?.type !== 'morph') return false;
-    const next = this.seq.segments[from + 1];
-    if (!next) return false;
-    return structuralSignature(seg.scene) === structuralSignature(next.scene);
+    return canMorph(this.seq, from);
   }
 
   /** Walk back through consecutive morph boundaries to find the chain origin. */
   private morphChainRoot(index: number): number {
-    let i = index;
-    while (i > 0 && this.canMorph(i - 1)) i--;
-    return i;
+    return morphChainRoot(this.seq, index);
   }
 
   private morphDur(from: number): number {
@@ -1275,10 +1291,15 @@ class SequenceInstance implements SaverInstance {
     // last segment's `fade` is the wrap's transition. Cut and morph paths
     // are untouched: fadeDur is 0 for them.
     const lastIdx = this.seq.segments.length - 1;
-    const wrapped = this.seq.loop && index === 0 && lastIdx > 0 && T + this.clockOffset >= this.timedTotal();
+    const wrapped = this.seq.loop && index === 0 && lastIdx > 0
+      && (T + this.clockOffset >= this.timedTotal() || this.pendingWrapFade);
     const fadeFrom = prevIdx >= 0 ? prevIdx : wrapped ? lastIdx : -1;
     const fadeActive = fadeFrom >= 0 && localT < this.fadeDur(fadeFrom);
     if (!fadeActive && this.fading) this.releaseFading();
+    // The flag only needs to survive the frames still inside the wrap fade
+    // window; once that ends (or the clock moves off segment 0) it has done
+    // its job.
+    if (this.pendingWrapFade && (index !== 0 || !fadeActive)) this.pendingWrapFade = false;
 
     if (morphActive) {
       // Morph in progress: keep the child keyed to the chain root
@@ -1302,13 +1323,19 @@ class SequenceInstance implements SaverInstance {
       const child = this.ensureChild(chainRoot, undefined, this.morphTextCrossfades(prevIdx));
       const dur = this.morphDur(prevIdx);
       const k = easeSmooth(localT / dur);
-      // The lerp endpoints carry the retained track: hotSwapPaint replaces the
-      // child's whole effSpec every morph frame, so without this a steered
-      // colour would vanish for `dur` and snap back when the morph finalises.
+      // The lerp endpoints carry the retained track, so without this a
+      // steered colour would vanish for `dur` and snap back when the morph
+      // finalises. `canMorph` only guarantees specA/specB share structure
+      // BEFORE the retained set is applied — a structural delta (`layers.0.
+      // count`, a motion change) could validate on one endpoint and not the
+      // other, or change both identically but differ from what this child
+      // was last built with. hotSwapSpec (not hotSwapPaint) re-checks the
+      // signature every frame and rebuilds when it moved, so a structural
+      // steer actually takes effect instead of leaving stale entities.
       const specA = this.steeredScene(this.childScene(prevIdx));
       const specB = this.steeredScene(this.childScene(index));
       const lerped = lerpSpec(specA, specB, k);
-      child.hotSwapPaint(lerped);
+      child.hotSwapSpec(lerped);
       // Default (`step`): no overrides, the frame is what it always was —
       // strings already switched inside `lerped` at k > 0.
       child.setLayerPaintOverrides(this.morphTextCrossfades(prevIdx) ? this.crossfadeOverrides(specA, specB, lerped, k) : null);
@@ -1415,8 +1442,13 @@ class SequenceInstance implements SaverInstance {
       if (d.path !== 'sequence.segment' && typeof d.path === 'string') this.retainedDeltas.set(d.path, d);
     }
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
+    let switchedSegment = false;
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
+      // A steer to segment 0 under loop is the clicker doing the same jump
+      // the wall clock does on a natural lap wrap — it should trigger the
+      // last segment's fade the same way (see `pendingWrapFade`).
+      this.pendingWrapFade = this.seq.loop && idx === 0 && this.seq.segments.length > 1;
       // Displace the clock so T + offset == the target segment's start: the
       // segment begins at localT 0 (its `life.enter` build replays) and the
       // next animation frame resolves to the same segment instead of snapping
@@ -1426,18 +1458,38 @@ class SequenceInstance implements SaverInstance {
       this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
       this.releasedBelow = idx;
       this.renderFrame(this.renderedT, this.seed);
+      switchedSegment = true;
     }
 
-    // The active child still gets the track directly, as before retention:
-    // a steer to a path it owns applies on this call, not at the next boundary.
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
-    if (childDeltas.length > 0 && this.activeIndex >= 0) {
-      const child = this.children[this.activeIndex];
-      child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
-      // Offscreen children of a live fade are not in `children`; hand them the
-      // set directly so a steer during the window is not held until it ends.
-      this.fading?.child.applyDeltasNow(childDeltas);
-      this.fadingIn?.child.applyDeltasNow(childDeltas);
+    if (childDeltas.length > 0) {
+      if (this.morphFromIndex >= 0) {
+        // Mid-morph, the rendered child lives at the chain-root slot, not
+        // `children[activeIndex]` — forwarding a child.applyTrack() there
+        // would silently no-op AND get overwritten by the morph's own
+        // hotSwapSpec on the very next frame regardless, so a transition
+        // glide on this path can't coexist with the morph's own cross-fade.
+        // The delta is already retained above, so a re-render is all that's
+        // needed to reach it via steeredScene: it takes effect this frame,
+        // immediately rather than gliding over its own `dur`. Skip only when
+        // the segDelta branch above already re-rendered with these deltas
+        // retained.
+        if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);
+      } else if (this.activeIndex >= 0) {
+        // Not mid-morph: the active child still gets the track directly, as
+        // before retention — a steer to a path it owns glides on this call
+        // rather than snapping at the next boundary.
+        const child = this.children[this.activeIndex];
+        child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      }
+      // The outgoing segment during a fade — and, over a bed, the incoming
+      // one too, since both are standalone offscreen SpecInstances, not
+      // `this.children` — would otherwise freeze at whatever they last
+      // rendered instead of picking up a mid-fade steer like the active
+      // child does. Independent of the morph/active branching above: fade
+      // and morph are mutually exclusive per-frame states.
+      this.fading?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      this.fadingIn?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
     }
   }
 

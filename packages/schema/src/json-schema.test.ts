@@ -184,7 +184,7 @@ describe('saver-spec.schema.json', () => {
       }],
     });
     const good = [block({ anchor: 'center', font: 'bold monospace', opacity: 0.5 }), block({ font: "300 'Inter', sans-serif" })];
-    const bad = [block({ font: 'bold 14px monospace' }), block({ anchor: 'middle' }), block({ maxWidth: 2.5 }), block({ opacity: 1.5 })];
+    const bad = [block({ font: 'bold 14px monospace' }), block({ font: '50% monospace' }), block({ font: '50%monospace' }), block({ anchor: 'middle' }), block({ maxWidth: 2.5 }), block({ opacity: 1.5 })];
     for (const spec of good) {
       expect(validateSpec(spec).valid).toBe(true);
       expect(check(spec)).toBe(true);

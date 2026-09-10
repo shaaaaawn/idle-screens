@@ -27,8 +27,16 @@ const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseli
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
 const TEXT_ROLES = new Set(['read', 'atmosphere']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
-/** A CSS length inside a textBlock `font` — size belongs to `fontSize`. */
-const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)\b/i;
+/**
+ * A CSS length inside a textBlock `font` — size belongs to `fontSize`. No
+ * trailing boundary check: a `\b`-based (or lookahead-based) version misses
+ * "50% monospace" (`%` isn't a word character, so there is no boundary after
+ * it when the next char is whitespace) and "14pxmonospace" (glued straight
+ * onto the family name, so the word boundary between two word characters
+ * passes it through). The leading `\d` immediately before the unit is enough
+ * to identify an embedded size regardless of what follows it.
+ */
+const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);

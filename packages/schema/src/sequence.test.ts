@@ -753,6 +753,8 @@ describe('validateSequence — morph', () => {
         { key: 'b', scene: caption('Act I', '#e6e8ef'), duration: 5000 },
       ],
     }));
+    // layers[0].life only exists on the outgoing side: still a genuine
+    // (non-interpolable) difference, so this must not read as identical twins.
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(1);
   });
 
@@ -763,6 +765,8 @@ describe('validateSequence — morph', () => {
         { key: 'b', scene: caption('Act I', '#000000'), duration: 5000 },
       ],
     }));
+    // Same colour under a different spelling is a no-op, not a difference — the
+    // documented contract is that identical (rendered) specs return false.
     expect((r.warnings ?? []).filter((x) => x.code === 'morph-nothing-morphable')).toHaveLength(0);
   });
 
@@ -1062,6 +1066,89 @@ describe('SequenceInstance — retained track', () => {
     expect(childSpec(inst, 2)).toBe(BARS);
     inst.dispose();
   });
+
+  it('a steer that arrives while a morph is already in progress takes effect immediately, not on the next natural frame', () => {
+    // Regression: the chain-root child (the one actually rendering mid-morph)
+    // is never keyed at children[activeIndex], so forwarding a plain
+    // child.applyTrack() there was silently a no-op. Without an explicit
+    // re-render, the retained delta would sit un-painted until some other
+    // caller happened to render the next frame.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // mid-morph: hotSwapPaint(lerp(A, B, k)) already blending toward B
+    expect(childSpec(inst, 0)!.background).not.toEqual({ type: 'solid', color: '#ff0000' });
+    steer(inst, 'background.color', '#ff0000'); // no further renderFrame call follows
+    // Both lerp endpoints now carry the same steered colour, so the lerp is a
+    // no-op regardless of progress k — the value is exact, not merely closer.
+    expect(childSpec(inst, 0)!.background).toEqual({ type: 'solid', color: '#ff0000' });
+    inst.dispose();
+  });
+
+  it('a structural steer that arrives mid-morph rebuilds the live child instead of leaving stale entities', () => {
+    // Regression: the morph branch replaces the whole lerped spec every frame
+    // via a paint-only hot-swap that skips SpecInstance.rebuild(). canMorph
+    // only guarantees specA/specB share structure BEFORE the retained set is
+    // applied — a structural delta (`layers.0.count` here) can validate and
+    // change effSpec, but the child's actual built entities (baked at the
+    // last rebuild) stay behind unless the swap re-checks structuralSignature.
+    const inst = mountSync(compileSequence(morphSeq()));
+    inst.renderFrame!(5500, 1); // already mid-morph, chain-root child built at count 3
+    const child = (inst as unknown as {
+      children: Array<{ effSpec: SaverSpec; layers: Array<{ entities: unknown[] }> } | null>;
+    }).children[0]!;
+    // Entity count is scaled by viewport (400×640 here, well under the 1080
+    // reference), so the built count isn't the raw spec count — 3 scales to
+    // 1 entity, 5 scales to 2. What matters is that it MOVES when the fix
+    // rebuilds; a stale hot-swap leaves it at 1 regardless of effSpec.count.
+    const before = child.layers[0]!.entities.length;
+    steer(inst, 'layers.0.count', 5); // reachable only via the morph's own hot-swap, not the plain active-child path
+    expect(child.effSpec.layers[0]!.count).toBe(5);
+    expect(child.layers[0]!.entities.length).not.toBe(before);
+    expect(child.layers[0]!.entities.length).toBe(2);
+    inst.dispose();
+  });
+
+  it('a freshly created child with retained deltas paints a full warm-up frame, not a ghosted blend of the pre-steer scene', () => {
+    // Regression: SpecInstance's own mount does one stray paint at t=0 (it
+    // starts paused, like every sequence child) using the PRE-steer spec —
+    // applyDeltasNow updates effSpec afterward but (before this fix) left
+    // lastRenderT at that stray 0. With `ghosting` on, the child's first
+    // real frame then read as "contiguous" with that stray paint and
+    // composited over it at partial alpha instead of clearing, briefly
+    // showing a ghost of the un-steered scene.
+    //
+    // The sprite is `circle` (draws via arc/fill, never fillRect) so every
+    // fillRect call in this test is unambiguously the background paint —
+    // one per paintFrame, in order.
+    const GHOST_SCENE: SaverSpec = {
+      schemaVersion: 1,
+      id: 'ghost',
+      label: 'Ghost',
+      ghosting: 0.9,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    const s = seq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000 }, // no `background` field — the delta is a no-op here, only retained
+        { key: 'b', scene: GHOST_SCENE, duration: 4000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(s));
+    inst.renderFrame!(1000, 1); // segment 0
+    steer(inst, 'background.color', '#ff0000');
+    const bgAlphas: number[] = [];
+    (mockCtx as unknown as { fillRect: (...args: number[]) => void }).fillRect = vi.fn(() => {
+      bgAlphas.push((mockCtx as unknown as { globalAlpha: number }).globalAlpha);
+    });
+    inst.renderFrame!(5100, 1); // segment 1 created fresh, localT=100ms — well inside the 250ms contiguity window
+    // bgAlphas[0] is the child's own construction-time stray paint (t=0, the
+    // pre-steer spec, always a full clear). bgAlphas[1] is the first paint of
+    // the real localT=100 frame: it must also be a full-alpha clear (the
+    // warm-up's first step), not a `1 - g^k` blend over that stale paint.
+    expect(bgAlphas[0]).toBe(1);
+    expect(bgAlphas[1]).toBe(1);
+    inst.dispose();
+  });
 });
 
 interface Rec { fills: string[]; drawAlphas: number[]; clears: number; ctx: CanvasRenderingContext2D }
@@ -1208,6 +1295,35 @@ describe('SequenceInstance — fade transition', () => {
     inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'background.color', value: '#00ff00', ease: 'step', dur: 0 }] });
     inst.renderFrame!(5300, 1);
     expect(offscreenOf(recs, host)[0]!.fills).toContain('#00ff00');
+    inst.dispose();
+  });
+
+  it('a live steer mid-fade also reaches the already-fading outgoing child', () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq()), saverCtx({ host }));
+    inst.renderFrame!(5300, 1); // 300 ms into the fade — the outgoing child already exists
+    expect(fadingOf(inst)).not.toBeNull();
+    inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path: 'background.color', value: '#00ff00', ease: 'step', dur: 0 }] });
+    expect(offscreenOf(recs, host)[0]!.fills).toContain('#00ff00');
+    inst.dispose();
+  });
+
+  it("the clicker's steer to segment 0 under loop plays the last segment's wrap fade, not a cut", () => {
+    const recs = perCanvasContexts();
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(fadeSeq({
+      loop: true,
+      segments: [
+        { key: 'a', scene: SCENE_A, duration: 5000 },
+        { key: 'b', scene: SCENE_STRUCTURAL_DIFF, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+      ],
+    })), saverCtx({ host }));
+    inst.renderFrame!(9000, 1); // segment b, well past any fade window
+    steerTo(inst, 0);
+    expect(activeIndexOf(inst)).toBe(0);
+    expect(fadingOf(inst)?.index).toBe(1); // segment b fading out, per the wrap rule
+    expect(mainOf(recs, host).drawAlphas.at(-1)).toBeCloseTo(1, 5); // k = 0 → fully covers
     inst.dispose();
   });
 
@@ -1429,6 +1545,41 @@ describe('SequenceInstance — bed', () => {
     expect(fadingOf(inst)).toBeNull();
     expect(host.querySelectorAll('canvas')).toHaveLength(1);
     inst.dispose();
+  });
+
+  it('offscreen fade canvases over a bed get an alpha-enabled context, so a clear is real transparency, not opaque black', () => {
+    // A `{ alpha: false }` 2D context can't clear to transparent — clearRect
+    // on it fills with opaque black, so drawImage-ing it over the bed at any
+    // alpha would paint a black wash instead of just the ink. Only the
+    // transparent (bed-fade) offscreen canvases need alpha: true; the shared
+    // surface stays alpha: false, matching pre-bed behaviour exactly.
+    const calls: Array<{ canvas: HTMLCanvasElement; opts: unknown }> = [];
+    const orig = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, _type: string, opts?: unknown) {
+      calls.push({ canvas: this, opts });
+      return mockCtx;
+    } as never;
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(bedSeq({
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, transition: { type: 'fade', dur: 1000 } },
+        { key: 'b', scene: SCENE, duration: 5000 },
+      ],
+    })), saverCtx({ host }));
+    inst.renderFrame!(4000, 1);
+    inst.renderFrame!(5300, 1); // mid-fade: both the incoming and outgoing offscreen canvases exist
+    // Only a canvas's FIRST getContext call establishes its options in a real
+    // browser — later calls (e.g. renderOffscreen's plain getContext('2d'))
+    // return the existing context regardless of what they pass.
+    const firstCallPerCanvas = new Map<HTMLCanvasElement, unknown>();
+    for (const c of calls) if (!firstCallPerCanvas.has(c.canvas)) firstCallPerCanvas.set(c.canvas, c.opts);
+    const mainCanvas = host.querySelector('canvas')!;
+    expect(firstCallPerCanvas.get(mainCanvas)).toEqual({ alpha: false });
+    const offscreenFirstCalls = [...firstCallPerCanvas].filter(([canvas]) => canvas !== mainCanvas);
+    expect(offscreenFirstCalls.length).toBeGreaterThan(0);
+    for (const [, opts] of offscreenFirstCalls) expect(opts).toEqual({ alpha: true });
+    inst.dispose();
+    HTMLCanvasElement.prototype.getContext = orig;
   });
 
   it('costTier counts the bed together with the largest segment', () => {

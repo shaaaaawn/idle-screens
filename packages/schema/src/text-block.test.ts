@@ -464,7 +464,7 @@ describe('textBlock anchor / font / opacity validation', () => {
   it('accepts a family/weight font and rejects one carrying a size', () => {
     expect(validateSpec(textBlockSpec({ font: 'bold monospace' })).valid).toBe(true);
     expect(validateSpec(textBlockSpec({ font: "300 'Inter', sans-serif" })).valid).toBe(true);
-    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '']) {
+    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '50% monospace', '50%monospace', '14pxmonospace', '']) {
       const res = validateSpec(textBlockSpec({ font }));
       expect(res.valid).toBe(false);
       expect(res.errors.some((e) => e.path.endsWith('.font'))).toBe(true);
@@ -549,7 +549,7 @@ describe('textBlock anchor in perception and steering', () => {
 
 describe('monospace metrics class (textBlock.font)', () => {
   it('selects mono for monospace families and proportional otherwise', () => {
-    for (const f of ['monospace', 'bold monospace', "'SF Mono', monospace", 'Menlo', 'Courier New', 'ui-monospace', 'Fira Code', 'JetBrains Mono']) {
+    for (const f of ['monospace', 'bold monospace', "'SF Mono', monospace", 'Menlo', 'Courier New', 'ui-monospace', 'Fira Code', 'JetBrains Mono', 'SFMono-Regular', '-apple-system, BlinkMacSystemFont, "SFMono-Regular", Menlo, monospace']) {
       expect(textMetricsClassFor(f)).toBe('mono');
     }
     for (const f of [undefined, 'bold sans-serif', "300 'Inter', sans-serif", 'serif', 'Monotype Corsiva']) {
@@ -561,6 +561,12 @@ describe('monospace metrics class (textBlock.font)', () => {
     expect(textWidthEm('iiii', 'mono')).toBe(textWidthEm('mmmm', 'mono'));
     expect(textWidthEm('a b', 'mono')).toBeCloseTo(1.8, 9);
     expect(textWidthEm('iiii')).toBeLessThan(textWidthEm('mmmm'));
+  });
+
+  it('mono counts grapheme clusters, not UTF-16 code units — an emoji is one cell', () => {
+    // '😀' is a surrogate pair (2 UTF-16 units) but one grapheme / one advance cell.
+    expect(textWidthEm('a😀b', 'mono')).toBeCloseTo(3 * 0.6, 9);
+    expect(textWidthEm('a😀b', 'mono')).toBe(textWidthEm('abc', 'mono'));
   });
 
   it('breaks differ from the proportional table for narrow-heavy text; default is unchanged', () => {
