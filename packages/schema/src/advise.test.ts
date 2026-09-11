@@ -422,7 +422,11 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
     expect(asIfBackgroundSeeded(1, 2)).not.toEqual(asIfBackgroundSeeded(1, 6));
     // Omitting backgroundSeed falls back to seed, unchanged for every caller
     // with one scene and one seed (every caller but a sequence's inkOverBed).
-    expect(legibility(fieldSpec)).toEqual(asIfBackgroundSeeded(42, 42));
+    // Passes `seed` explicitly (backgroundSeed omitted) so the fallback
+    // itself is exercised, not just `spec.seed ?? 42` coincidentally landing
+    // on the same value as an all-defaults call would.
+    expect(adviseSpec(fieldSpec, { width: 1920, height: 1080 }, { seed: 42 }).filter((w) => LEGIBILITY_CODES.has(w.code)))
+      .toEqual(asIfBackgroundSeeded(42, 42));
   });
 
   it('judges against the brightest additive layer that can sit under a line, at its peak pulse', () => {

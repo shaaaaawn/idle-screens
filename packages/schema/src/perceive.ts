@@ -1196,7 +1196,12 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
       // background is the bed's (seq.bed.background) — a field there must be
       // sampled with the bed's own seed, or a `role: 'read'` legibility
       // advisory checks terrain that isn't what's actually behind the ink.
-      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed, backgroundSeed: bedOpts.seed }),
+      // `?? 42`: inkOverBed.seed is the SEGMENT's raw seed field (it's `ink`
+      // spread first), so adviseSpec's own `backgroundSeed ?? seed` fallback
+      // would substitute the segment's seed, not the bed's, if bedOpts.seed
+      // were left undefined — 42 is the same default `luminanceGrid` (and
+      // every other field seed fallback) converges on.
+      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed, backgroundSeed: bedOpts.seed ?? 42 }),
     ],
     segment,
     bed: true,
