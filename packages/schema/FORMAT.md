@@ -39,16 +39,20 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 (2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
 `maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
 the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
-`morph` (2026-09-08 — ambient presentations).
+`morph` (2026-09-08 — ambient presentations); `background: { type: 'field' }`
+(seeded, warped noise quantised into bands), the static per-entity
+`rotate`, and the print `finish` (grain + dither screen, spec- and
+sequence-level) (2026-09-10 — the print look).
 
 ## Safety invariants
 
 These hold **by construction** — no spec can violate them:
 
-1. **No flash primitive.** The background is static (drift is floored at 10 s)
-   and entities are bounded sprites, so a compiled spec cannot strobe the full
-   field. Provable by sampling any compiled spec through
-   `@idle-screens/validator`.
+1. **No flash primitive.** The background is static (drift is floored at 10 s
+   — for a gradient's stop positions and for a `field`'s domain travel alike,
+   the only way either changes over time) and entities are bounded sprites,
+   so a compiled spec cannot strobe the full field. Provable by sampling any
+   compiled spec through `@idle-screens/validator`.
 2. **Pulse/grow/cycle are bounded.** Breathing amplitude is capped and periods
    floored at 500 ms (2 Hz — under the WCAG 3 Hz flash threshold). Every entity
    gets its own seeded phase — and with `pulse.wave`, a position-derived phase —
@@ -101,6 +105,7 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "units": "viewport",           // optional: viewport (default) | px
   "referenceViewport": 1080,     // optional; design resolution for density scaling
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
+  "finish": { "grain": 0.5, "dither": 0.3 },  // optional; print screen over the finished frame
   "background": { ... },         // optional; defaults to black
   "layers": [ { ... }, ... ]     // 1..36, rendered back-to-front
 }
@@ -136,6 +141,123 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   bottom (e.g. an aquarium seafloor); optional `drift` slowly oscillates the
   stop positions (period ≥ 10 s) so the background breathes. All colours are
   hex (`#rgb` / `#rrggbb`).
+- `{ "type": "field", "scale": 2.2, "octaves": 3, "warp": 0.4, "quantize": 6, "bands": ["#1b1a3a", "#0078bf", "#00a99d", "#ffe800", "#ff6c2f", "#ff48b0"], "drift": { "period": 40000, "amount": 0.3 } }`
+  — a **scalar field**: seeded value noise, optionally domain-warped, read
+  through a colour ramp. Thermal maps, contour terrain, sonar landmasses,
+  riso washes; the ground under ten of the playgrnd looks. Knobs:
+
+  | Knob | Range | Default | Meaning |
+  |---|---|---|---|
+  | `scale` | 0.5..8 | — | noise features across the **short side** of the viewport (so a 16:9 frame shows more of the same field than a square one) |
+  | `octaves` | int 1..4 | 2 | layers of detail; each halves in amplitude and doubles in frequency |
+  | `warp` | 0..1 | 0 | domain warp: 0 round blobs, 1 the folded, smeared contours of a weather chart |
+  | `quantize` | 0 or int 2..8 | `bands.length` | posterise into that many levels, one read off the `bands` ramp per level — hard, crisp contours (Terrain, Sonar). `bands.length` is exactly one band per level; more levels step through the ramp. `0` interpolates the ramp smoothly (Aura, Mist) |
+  | `bands` | 2..8 hex | — | the ramp, low end of the field to high |
+  | `drift` | `{ period ≥ 10000, amount 0..1 }` | none | the field's slow **animate**: the sample domain travels a circle of radius `amount` feature units once per `period` ms, so the contours crawl and the field loops exactly. `amount` defaults to 0.3 |
+  | `seed` | number | the spec seed | the field's own seed — change it to get a different field without re-seating an entity |
+
+  **Analytic guarantee.** The field is a pure function of `(x, y, t, seed)`
+  with its own hash — it never draws from the entity RNG, so adding, steering
+  or reseeding a field leaves every entity exactly where it was, and
+  `luminanceGrid` samples the same function the renderer paints (per cell,
+  at the same bucketed time), so perception and paint agree by construction.
+  A field's own contours are *ground*, not ink: the grid's `coverage`,
+  centroid and profiles deviate from the field's per-cell value
+  (`backgroundCells`), so a bright field scores no coverage and the
+  `sparse-scene` / `low-contrast-layer` advisories judge entities against the
+  field's mean band exactly as they judge them against a gradient's stops.
+
+  **Raster and cache.** The renderer samples the field into a low-res raster
+  — 96 px on the short side, the long side by aspect; 48 px on the `basic` /
+  `minimal` capability tiers (`capabilityTier` on the mount context) — and
+  draws it scaled to the canvas, nearest-neighbour for quantised bands so the
+  contours stay crisp and smoothed for `quantize: 0`. A static field is
+  sampled **once per mount**; a drifting one is resampled only when `t`
+  crosses a 100 ms bucket, so ten times a second at most, however high the
+  frame rate. Steering any knob recomputes on the next frame.
+
+  **Flash safety.** `drift` is the only way a field changes over time, and
+  its `period` is floored at 10 s like the gradient's: the domain moves at
+  most 2π·`amount` feature units per period, so no region's mean luminance
+  can oscillate anywhere near the 3 Hz WCAG threshold (`field.test.ts` pins
+  the extreme — `scale: 0.5`, `amount: 1` at the floor — under one opposing
+  10 % transition per second). Taste, not safety: at `scale` below 1 the
+  whole frame breathes as one; keep `amount` ≤ 0.5 there, or the wall pulses.
+
+  **Steering.** Every numeric knob and every band is a paint path —
+  `background.scale`, `background.warp`, `background.quantize`,
+  `background.bands.2`, `background.drift.amount` — and glides (a fractional
+  `quantize` or `octaves` mid-glide rounds). `background.seed` is not
+  steerable. The background is paint, not structure, so a `morph` between
+  two field segments glides the field; a gradient → field morph steps
+  (different shape).
+
+  **Native:** tvOS ignores the field and paints a **vertical gradient through
+  `bands` in order** (first band at the top, last at the bottom), so a field
+  scene still carries its palette on the Apple TV until the native player
+  rasters the same sampler.
+
+### `finish`
+
+`{ "grain": 0.5, "dither": 0.3, "animate": false }` — the print pass, composited
+over the **finished** frame as the last step of every render, after every
+layer and after `ghosting` has done its work. It is what turns flat inks
+into paper: riso speckle, gold-leaf tooth, an impasto's grain. Every knob is
+optional; an absent `finish` presents the frame exactly as drawn.
+
+| Knob | Range | Meaning |
+|---|---|---|
+| `grain` | 0..1 | a **seeded, zero-mean noise tile** (256², generated once per mount from the spec seed) screened over the frame at `grain × 0.35` alpha |
+| `dither` | 0..1 | an **8×8 ordered Bayer tile** screened at `dither × 0.25` alpha. A *stylistic screen* — the dot pattern of a halftone print — not true per-pixel dithering of the image (nothing is thresholded; the tile is simply composited) |
+| `animate` | boolean | steps the grain tile's offset once per 1/12 s from the frame's **time bucket**, seeded — never `Math.random` — so two viewers at the same `t` show the same grain and a seek is exact. Default false: the tile sits still. The `basic` / `minimal` capability tiers ignore it (static tile) |
+
+**Seeding rule.** The grain tile is a pure function of the spec seed (the
+same lattice hash the `field` background uses); the offset is a pure
+function of `(t, seed)`. Same spec + seed ⇒ the same grain on every
+display, every time.
+
+**Flash safety and perception.** Both tiles are centred on mid grey and
+composited with `overlay` — what every shipping canvas2d implements — so
+the frame's **mean luminance is unchanged** at every strength: `overlay`'s
+split at the backdrop's midpoint is exactly what makes a zero-mean,
+symmetric source average back to the backdrop. A finish can neither
+brighten nor darken a wall, and `animate`'s 12 Hz step moves a zero-mean
+texture whose regional mean is constant. The context-rejects-`overlay`
+fallback chain (`soft-light`, then `multiply` as the last resort) is not
+mean-preserving the same way — for the odd context that takes it, the
+luminance-neutral guarantee narrows to "no worse than a very small, bounded
+shift at `finish`'s already-small alpha," not exact invariance. The
+analytic tools treat it as luminance-neutral:
+`luminanceGrid` ignores it entirely (`finish.test.ts` pins the mean
+identical with and without), `adviseSpec` says nothing about it, and
+`describeScene` lists it under `spec.finish` so an agent knows the screen is
+there.
+
+**Never fed back into persistence.** With a `finish`, the scene — every
+layer, and the frame `ghosting` decays into — is drawn on an offscreen
+scene canvas; each frame ends by copying it to the visible canvas and
+screening the finish over the *copy*. Screened into the persistence loop
+instead, a static tile would reinforce itself every frame into mud;
+`finish.test.ts` runs `ghosting: 0.9` with `grain: 1` for 120 frames and
+asserts the scene canvas never sees a screen op and the visible one gets
+exactly one copy and one screen per frame.
+
+**Sequences.** A sequence applies the finish **once per composed frame** —
+bed, segment and any `fade` composite together — on its own presentation
+canvas; children never apply their own (a transparent child over a bed has
+nothing to screen). Which finish: the sequence-level `finish` (a new field
+on the envelope) when set; else the **active segment's** (the incoming one
+during a fade) when it declares one; a bed's `finish` is ignored — the bed
+is ground, finish the sequence. Absent everywhere ⇒ children draw straight
+onto the visible surface as they always have.
+
+**Steering.** `finish.grain` and `finish.dither` are numeric paint paths and
+glide (`setParam("finish.grain", 0.8, { dur: 2000 })`); `finish.animate`
+steps. Declare the block (`"finish": { "grain": 0 }`) to make the paths
+exist — a steer cannot add a `finish` to a spec without one. A sequence's
+own `finish` is not steerable; steer a segment's, or republish.
+
+**Native:** tvOS **ignores `finish`** — the frame is presented as drawn.
 
 ### `layers[]`
 
@@ -151,7 +273,8 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
 | `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing; `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
-| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris) |
+| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
+| `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** tvOS reads `spin` only ⇒ 0 |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
@@ -531,7 +654,8 @@ fixed-step warm-up (≤ 120 frames) from a full clear on any non-contiguous seek
 ## Steering
 
 Compiled specs accept live parameter changes via dot-paths —
-`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`, or
+`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`,
+`background.bands.2` (a field's band), or
 `key`-based paths like `cpu-gauge.count` / `cpu-gauge.sprite.color` when
 layers declare `key` (the key replaces `layers.N`; everything after it
 mirrors the JSON, so a sprite field keeps its `sprite.` segment). Changes interpolate over a
@@ -649,6 +773,7 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "loop": false,
   "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
   "bed": { /* SaverSpec */ },  // optional; the ground under every segment — see **Bed**
+  "finish": { "grain": 0.4 },  // optional; one print pass over the composed frame — see `finish` above
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -880,5 +1005,7 @@ showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 and feathered rect) and `relay-board` (list layout + bar: a chart in five
 layers); and `lobby-talk` (one screen of a quarter-in-review, every text
 layer `role: "read"`, zero advisories — readable copy over additive
-atmosphere). See [`src/examples/`](./src/examples/). The dashboard exercises the
+atmosphere); and `thermal-field` (a `field` background in six riso inks,
+`quantize: 6`, warped and drifting, under a handful of screened motes, with
+a grain-and-dither `finish` — the ground is the piece and the paper shows). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).

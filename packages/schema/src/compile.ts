@@ -18,9 +18,11 @@ import {
   textStringsDiffer,
   type SteerDelta,
 } from './steer';
-import type { IdleSequence, LayerSpec, SaverSpec, SpriteSpec } from './types';
+import type { FieldBackground, IdleSequence, LayerSpec, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
-import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart, sequenceSwapCompatible } from './sequence';
+import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
+import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -139,8 +141,49 @@ interface PaintPass {
   alpha: number;
 }
 
+/**
+ * The device's compute tier (`computeTier` from `@idle-screens/capabilities`;
+ * the string union is repeated here so schema does not depend on that
+ * package). Hosts pass it on the mount context; a compiled scene reads it to
+ * step down work that a `basic` / `minimal` device cannot afford.
+ */
+export type CapabilityTier = 'minimal' | 'basic' | 'standard' | 'high';
+
+/**
+ * Mount context for a compiled spec. A plain `SaverContext` works — every
+ * field here is optional. `capabilityTier` `basic` / `minimal` halves a
+ * `field` background's raster resolution (48 px short side instead of 96).
+ * Absent ⇒ full resolution.
+ */
+export interface SpecMountContext extends SaverContext {
+  capabilityTier?: CapabilityTier;
+}
+
+/**
+ * A `field` background's cached raster: the field sampled once per cell at
+ * the bucketed time, kept until the bucket, the config or the canvas size
+ * changes. Drawing a frame is one `drawImage` of this, scaled to the canvas.
+ */
+interface FieldRaster {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  cols: number;
+  rows: number;
+  /** `JSON.stringify` of the config plus dims plus the sample time it was painted for. */
+  key: string;
+}
+
 /** Per-instance options a host (today: `SequenceInstance`) sets; a plain compileSaver mount sets none. */
 interface SpecInstanceOptions {
+  /** See `SpecMountContext.capabilityTier`. */
+  capabilityTier?: CapabilityTier;
+  /**
+   * The host presents the frame and applies any `finish` itself (a
+   * `SequenceInstance` does, once per composed frame), so this instance
+   * never opens a presentation pass of its own — its spec's `finish` is the
+   * host's to honour. A plain compileSaver mount presents itself.
+   */
+  hostPresents?: boolean;
   /**
    * Draw over whatever is already on the surface: `drawBackground` is skipped,
    * the frame is not cleared to a colour, and `ghosting` is ignored (a smear
@@ -186,6 +229,23 @@ class SpecInstance implements SaverInstance {
   private lastStructural = '';
   /** See `LayerPaintOverride`; null (the default, and every plain mount) draws every layer once. */
   private paintOverrides: ReadonlyMap<number, LayerPaintOverride> | null = null;
+  /** Raster short side for a `field` background — halved on the low tiers. */
+  private readonly fieldShortSide: number;
+  /** The `field` background's cached raster; null until a field is first painted. */
+  private field: FieldRaster | null = null;
+  /**
+   * The presentation pass when this instance applies a `finish`: the
+   * visible canvas plus the cached screen tiles. When set, `this.canvas` is
+   * an offscreen SCENE canvas — the surface every layer (and `ghosting`'s
+   * persistence) draws into — and each frame ends by copying it to the
+   * visible canvas and screening the finish over the copy. The finish thus
+   * never enters the persistence loop. Null (every plain mount without a
+   * finish, every sequence child) draws straight onto the visible canvas,
+   * exactly as before the field existed.
+   */
+  private finishPass: FinishPass | null = null;
+  /** False on the `basic`/`minimal` tiers — `finish.animate` renders as a static tile. */
+  private readonly animateFinish: boolean;
 
   constructor(
     private readonly spec: SaverSpec,
@@ -195,6 +255,9 @@ class SpecInstance implements SaverInstance {
     this.effSpec = spec;
     this.saverCtx = ctx;
     this.transparent = opts.transparent === true;
+    const tier = opts.capabilityTier;
+    this.fieldShortSide = tier === 'basic' || tier === 'minimal' ? FIELD_RASTER_SHORT_SIDE_LOW : FIELD_RASTER_SHORT_SIDE;
+    this.animateFinish = tier !== 'basic' && tier !== 'minimal';
     this.seed = normalizeSeed(spec.seed ?? ctx.seed);
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
@@ -207,6 +270,16 @@ class SpecInstance implements SaverInstance {
       ctx.host.appendChild(el);
       canvas = el;
       this.ownsCanvas = true;
+    }
+    if (spec.finish !== undefined && !this.transparent && !opts.hostPresents) {
+      // Present through a pass: the visible canvas becomes the pass's, and
+      // the scene draws offscreen. Decided once, from the mounted spec — a
+      // steer can only change a `finish` that already exists.
+      const pass = createFinishPass(canvas, this.seed);
+      if (pass) {
+        this.finishPass = pass;
+        canvas = createSceneCanvas(ctx.width, ctx.height);
+      }
     }
     this.canvas = canvas;
     // Transparent instances (a bed's own offscreen fade canvas) never paint a
@@ -242,6 +315,12 @@ class SpecInstance implements SaverInstance {
     this.canvas.width = Math.max(1, Math.round(this.w * dpr));
     this.canvas.height = Math.max(1, Math.round(this.h * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.finishPass) {
+      // The visible canvas mirrors the scene canvas, same size and transform.
+      this.finishPass.canvas.width = this.canvas.width;
+      this.finishPass.canvas.height = this.canvas.height;
+      this.finishPass.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
     // Resizing clears the canvas — force a ghosting warm-up on the next frame.
     this.lastRenderT = Number.NEGATIVE_INFINITY;
   }
@@ -290,6 +369,10 @@ class SpecInstance implements SaverInstance {
       ctx.fillRect(0, 0, w, h);
       return;
     }
+    if (bg.type === 'field') {
+      this.drawField(bg, t);
+      return;
+    }
     const g = ctx.createLinearGradient(0, 0, 0, h);
     const drift = bg.drift;
     for (let i = 0; i < bg.stops.length; i++) {
@@ -309,6 +392,65 @@ class SpecInstance implements SaverInstance {
       const bh = bg.band.height * (this.effSpec.units === 'px' ? 1 : Math.min(w, h));
       ctx.fillRect(0, h - bh, w, bh);
     }
+  }
+
+  /**
+   * Paint a `field` background: sample the field into a low-res raster (short
+   * side `fieldShortSide`, the long side by aspect) and draw it scaled to the
+   * canvas — nearest-neighbour for quantised bands so contours stay crisp,
+   * smoothed for `quantize: 0`. The raster is recomputed only when its key
+   * changes: the config (steering glides it), the canvas size, or — while
+   * drifting — the 100 ms bucket `t` falls in (`fieldSampleTime`); a static
+   * field is sampled exactly once per mount. `luminanceGrid` samples the same
+   * function at the same bucketed time, so perception and paint agree.
+   */
+  private drawField(bg: FieldBackground, t: number): void {
+    const { ctx, w, h } = this;
+    const short = Math.max(1, Math.min(w, h));
+    const cols = Math.max(1, Math.round((this.fieldShortSide * w) / short));
+    const rows = Math.max(1, Math.round((this.fieldShortSide * h) / short));
+    const ft = fieldSampleTime(bg, t);
+    // `w`x`h`, not just the rounded `cols`x`rows`: a resize that changes the
+    // aspect ratio without moving the rounded raster size would otherwise
+    // reuse a raster sampled for the old aspect ratio.
+    const key = `${JSON.stringify(bg)}|${w}x${h}|${cols}x${rows}|${ft}`;
+    let raster = this.field;
+    if (!raster || raster.key !== key) {
+      if (!raster || raster.cols !== cols || raster.rows !== rows) {
+        const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
+          ? document.createElement('canvas')
+          : new OffscreenCanvas(cols, rows);
+        canvas.width = cols;
+        canvas.height = rows;
+        const rctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+        if (!rctx) return;
+        raster = { canvas, ctx: rctx, cols, rows, key: '' };
+      }
+      const img = raster.ctx.createImageData(cols, rows);
+      const data = img.data;
+      const seed = this.seed;
+      let i = 0;
+      for (let r = 0; r < rows; r++) {
+        // Cell centres in short-side units — the same normalisation perceive uses.
+        const v = ((r + 0.5) * h) / rows / short;
+        for (let c = 0; c < cols; c++) {
+          const u = ((c + 0.5) * w) / cols / short;
+          const rgb = fieldRgbAt(u, v, ft, bg, seed);
+          data[i++] = rgb[0];
+          data[i++] = rgb[1];
+          data[i++] = rgb[2];
+          data[i++] = 255;
+        }
+      }
+      raster.ctx.putImageData(img, 0, 0);
+      raster.key = key;
+      this.field = raster;
+    }
+    const smooth = Math.round(bg.quantize ?? bg.bands.length) < 2;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = smooth;
+    ctx.drawImage(raster.canvas, 0, 0, w, h);
+    ctx.imageSmoothingEnabled = prev;
   }
 
   /** Position with parent-orbit resolution: a layer-parented orbit entity's
@@ -848,6 +990,10 @@ class SpecInstance implements SaverInstance {
       this.paintFrame(t, 1);
     }
     this.lastRenderT = t;
+    // Presentation, last of all: the finished scene (ghosting included) is
+    // copied to the visible canvas and the finish screened over the copy —
+    // after persistence has done its work, and never into it.
+    if (this.finishPass) presentWithFinish(this.finishPass, this.canvas, this.w, this.h, t, this.effSpec.finish, this.animateFinish);
   }
 
   setPaused(paused: boolean): void {
@@ -898,7 +1044,12 @@ class SpecInstance implements SaverInstance {
 
   dispose(): void {
     this.stop();
-    if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
+    this.field = null; // the raster canvas was never attached; dropping the reference frees it
+    // With a finish, the visible canvas is the pass's and `this.canvas` is
+    // the offscreen scene (never attached) — drop the pass and its tiles.
+    const visible = this.finishPass?.canvas ?? this.canvas;
+    this.finishPass = null;
+    if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && visible instanceof HTMLCanvasElement) visible.remove();
   }
 }
 
@@ -911,7 +1062,7 @@ export function compileSaver(spec: unknown): SaverPlugin {
   const valid = assertValidSpec(spec);
   return {
     manifest: manifestFor(valid),
-    mount: (ctx: SaverContext) => new SpecInstance(valid, ctx),
+    mount: (ctx: SaverContext) => new SpecInstance(valid, ctx, { capabilityTier: (ctx as SpecMountContext).capabilityTier }),
     spec: valid,
   };
 }
@@ -927,17 +1078,17 @@ export function compileSaver(spec: unknown): SaverPlugin {
  * clock's elapsed ms (idlescreens.com: `Date.now() − scene.epoch`) so every
  * viewer of that sequence resolves the same segment.
  */
-export interface SequenceMountContext extends SaverContext {
+export interface SequenceMountContext extends SpecMountContext {
   /** ms already elapsed on the shared sequence clock. Ignored unless `sync: 'epoch'`. */
   sequenceBaseT?: number;
   /**
-   * The device's compute tier (`computeTier` from `@idle-screens/capabilities`;
-   * the string union is repeated here so schema does not depend on that
-   * package). A `fade` transition keeps two segments live for `dur`, which
-   * `basic` (canvas2d only) and `minimal` cannot afford: on those tiers fade
-   * renders as `cut`. Absent ⇒ fade enabled.
+   * See `SpecMountContext.capabilityTier`. A `fade` transition keeps two
+   * segments live for `dur`, which `basic` (canvas2d only) and `minimal`
+   * cannot afford: on those tiers fade renders as `cut`. The tier is also
+   * handed to every child and the bed (a `field` background's raster steps
+   * down with it). Absent ⇒ fade enabled, full resolution.
    */
-  capabilityTier?: 'minimal' | 'basic' | 'standard' | 'high';
+  capabilityTier?: CapabilityTier;
 }
 
 /** A segment child on a canvas of its own, composited onto the shared surface during a `fade`. */
@@ -1054,6 +1205,19 @@ class SequenceInstance implements SequenceSaverInstance {
   private fadingIn: OffscreenChild | null = null;
   /** False on the `basic`/`minimal` capability tiers — fade renders as cut. */
   private readonly fadeEnabled: boolean;
+  /** The mount's tier, handed to every child and the bed. */
+  private readonly capabilityTier: CapabilityTier | undefined;
+  /**
+   * The sequence's presentation pass when it — or any segment — declares a
+   * `finish`: children and the bed draw into an offscreen scene canvas
+   * (`childCtx.surface`), and every frame ends by copying it to the visible
+   * surface with the finish screened over the copy — once per composed
+   * frame, bed + segment + fade together. Null when no finish is declared
+   * anywhere: children draw straight onto the visible surface, as before.
+   */
+  private readonly finishPass: FinishPass | null = null;
+  /** False on the `basic`/`minimal` tiers — `finish.animate` renders as a static tile. */
+  private readonly animateFinish: boolean;
   /**
    * The sequence's `bed`: one scene on the shared surface, drawn first every
    * frame at the sequence clock — WITHOUT `clockOffset`, so a
@@ -1065,6 +1229,7 @@ class SequenceInstance implements SequenceSaverInstance {
   constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
     const { sequenceBaseT, capabilityTier, ...plainCtx } = ctx;
+    this.capabilityTier = capabilityTier;
     this.fadeEnabled = capabilityTier !== 'basic' && capabilityTier !== 'minimal';
     // `sync: 'epoch'`: seed the clock from the host's shared time, the same
     // way `baseT` carries SpecInstance's clock across pause/resume — the first
@@ -1092,12 +1257,26 @@ class SequenceInstance implements SequenceSaverInstance {
     // Prefer the sequence's own seed (same precedence SpecInstance uses for
     // scene.seed ?? ctx.seed). Children still resolve per-segment via childSeed.
     this.seed = ((seq.seed ?? ctx.seed ?? 0) >>> 0) || 1;
+    this.animateFinish = capabilityTier !== 'basic' && capabilityTier !== 'minimal';
+    // A finish anywhere in the sequence moves the children onto an offscreen
+    // scene canvas for the sequence's lifetime; which finish applies is
+    // decided per frame (see `frameFinish`).
+    const wantsFinish = seq.finish !== undefined || seq.segments.some((s) => s.scene.finish !== undefined);
+    if (wantsFinish && surface) {
+      const pass = createFinishPass(surface, this.seed);
+      if (pass) {
+        this.finishPass = pass;
+        surface = createSceneCanvas(ctx.width, ctx.height);
+      }
+    }
     // Children are always parent-driven: reducedMotion:true keeps SpecInstance
     // from starting its own rAF. SequenceInstance.loop is the only clock.
+    // `hostPresents`: a child's own `finish` is this instance's to apply.
     this.childCtx = { ...plainCtx, surface: surface!, reducedMotion: true };
+    this.sizeVisible();
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
     if (seq.bed) {
-      this.bed = new SpecInstance(this.bedScene(seq.bed), this.childCtx);
+      this.bed = new SpecInstance(this.bedScene(seq.bed), this.childCtx, { capabilityTier, hostPresents: true });
       this.bed.setPaused(true);
     } else {
       this.bed = null;
@@ -1208,7 +1387,7 @@ class SequenceInstance implements SequenceSaverInstance {
     const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
       ? document.createElement('canvas')
       : new OffscreenCanvas(Math.max(1, this.childCtx.width), Math.max(1, this.childCtx.height));
-    const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas }, { transparent: this.bed !== null });
+    const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas }, { transparent: this.bed !== null, capabilityTier: this.capabilityTier, hostPresents: true });
     child.setPaused(true);
     if (root !== index) child.hotSwapSpec(this.childScene(index));
     if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
@@ -1272,7 +1451,7 @@ class SequenceInstance implements SequenceSaverInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint });
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint, capabilityTier: this.capabilityTier, hostPresents: true });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
@@ -1312,7 +1491,54 @@ class SequenceInstance implements SequenceSaverInstance {
     this.renderFrame(this.lastT, this.seed);
   }
 
+  /**
+   * With a presentation pass, size the visible surface like a child sizes
+   * the scene canvas (children never touch the visible surface then).
+   */
+  private sizeVisible(): void {
+    const fp = this.finishPass;
+    if (!fp) return;
+    const dpr = Math.min(this.childCtx.dpr, 2);
+    fp.canvas.width = Math.max(1, Math.round(this.childCtx.width * dpr));
+    fp.canvas.height = Math.max(1, Math.round(this.childCtx.height * dpr));
+    fp.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /**
+   * The finish this frame applies: the sequence's own overrides; else the
+   * active segment's (the incoming one during a fade) — read through
+   * `steeredScene` so a retained steer to `finish.grain`/`finish.dither`
+   * takes effect immediately instead of the authored value; a bed's is
+   * ignored.
+   */
+  private frameFinish(): SaverSpec['finish'] {
+    if (this.seq.finish !== undefined) return this.seq.finish;
+    if (this.activeIndex < 0) return undefined;
+    return this.steeredScene(this.childScene(this.activeIndex)).finish;
+  }
+
+  /**
+   * The seed `frameFinish()`'s grain resolves against — the sequence's own
+   * for a sequence-level finish, else the active segment's actual render
+   * seed (`segmentRenderSeed`: chain-root-aware and normalized exactly like
+   * `SpecInstance`, so it agrees with what that segment's entities render
+   * with, morph or not).
+   */
+  private frameFinishSeed(): number {
+    if (this.seq.finish !== undefined) return this.seed;
+    if (this.activeIndex < 0) return this.seed;
+    return segmentRenderSeed(this.seq, this.activeIndex) ?? this.seed;
+  }
+
   renderFrame(T: number, seed: number): void {
+    this.renderScene(T, seed);
+    // Once per composed frame, after bed, segment and any fade composite.
+    if (this.finishPass) {
+      presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish, this.frameFinishSeed());
+    }
+  }
+
+  private renderScene(T: number, seed: number): void {
     this.renderedT = T;
     const resolved = resolveSegment(this.seq, T + this.clockOffset, { releasedBelow: this.releasedBelow });
     const { index, localT } = resolved;
@@ -1460,6 +1686,7 @@ class SequenceInstance implements SequenceSaverInstance {
     this.childCtx.width = width;
     this.childCtx.height = height;
     if (dpr !== undefined) this.childCtx.dpr = dpr;
+    this.sizeVisible();
     for (const child of this.children) {
       child?.resize(width, height, dpr);
     }
@@ -1578,6 +1805,12 @@ class SequenceInstance implements SequenceSaverInstance {
       this.releaseChild(i);
     }
     this.bed?.dispose();
+    if (this.finishPass) {
+      // The scene canvas was never attached; the pass's visible canvas is
+      // `this.canvas` (removed below) or the host's surface.
+      this.finishPass.grain = null;
+      this.finishPass.dither = null;
+    }
     if (this.canvas) this.canvas.remove();
   }
 }

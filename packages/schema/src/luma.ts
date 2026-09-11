@@ -9,7 +9,25 @@
 
 import type { Entity } from './simulate';
 import { isShapedSprite } from './shapes';
-import type { LayerSpec, SaverSpec } from './types';
+import { fieldRgb, fieldRgbAt, hexToRgb255, rgb255Luma } from './field';
+import type { FieldBackground, LayerSpec, SaverSpec } from './types';
+
+/**
+ * The distinct 0..255 RGB colours a field background actually paints: one
+ * per quantize level, not the raw `bands` declarations — `quantize` short of
+ * `bands.length` never lands on every band (a `quantize: 2` field only ever
+ * paints its two end levels, however many bands are declared). `quantize: 0`
+ * (smooth) interpolates continuously through every band, so declaration
+ * averaging is representative there.
+ */
+function fieldRenderedRgbs(bg: FieldBackground): Array<readonly [number, number, number]> {
+  const n = bg.bands.length;
+  const q = Math.round(bg.quantize ?? n);
+  if (q < 2) return bg.bands.map((hex) => hexToRgb255(hex));
+  const out: Array<readonly [number, number, number]> = [];
+  for (let level = 0; level < q; level++) out.push(fieldRgb((level + 0.5) / q, bg.bands, q));
+  return out;
+}
 
 /** Perceptual luma (0..1) of a hex colour. */
 export function hexLuma(hex: string): number {
@@ -41,10 +59,18 @@ export function spriteHex(layer: LayerSpec, e: Entity): string | null {
   return null; // emoji carry their own palette
 }
 
-/** Mean luma of the background plate a layer is drawn against. */
+/**
+ * Mean luma of the background plate a layer is drawn against. A gradient
+ * averages its stops; a field averages the colours it actually renders
+ * (`fieldRenderedRgbs` — one per quantize level, not every declared band).
+ */
 export function backgroundLuma(spec: SaverSpec): number {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexLuma(bg?.color ?? '#05050a');
+  if (bg.type === 'field') {
+    const rgbs = fieldRenderedRgbs(bg);
+    return rgbs.reduce((s, c) => s + rgb255Luma(c), 0) / rgbs.length;
+  }
   return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
 }
 
@@ -56,18 +82,25 @@ export function hexRgb(hex: string): { r: number; g: number; b: number } {
   return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
 }
 
-/** Mean RGB of the background plate. */
+/** Mean RGB of the background plate — a field averages the colours it
+ *  actually renders (`fieldRenderedRgbs`), like `backgroundLuma`. */
 export function backgroundRgb(spec: SaverSpec): { r: number; g: number; b: number } {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
-  const acc = bg.stops.reduce(
-    (s, st) => {
-      const c = hexRgb(st.color);
+  if (bg.type === 'field') {
+    const rgbs = fieldRenderedRgbs(bg);
+    const acc = rgbs.reduce((s, c) => ({ r: s.r + c[0], g: s.g + c[1], b: s.b + c[2] }), { r: 0, g: 0, b: 0 });
+    return { r: acc.r / rgbs.length / 255, g: acc.g / rgbs.length / 255, b: acc.b / rgbs.length / 255 };
+  }
+  const colours = bg.stops.map((st) => st.color);
+  const acc = colours.reduce(
+    (s, hex) => {
+      const c = hexRgb(hex);
       return { r: s.r + c.r, g: s.g + c.g, b: s.b + c.b };
     },
     { r: 0, g: 0, b: 0 },
   );
-  const n = bg.stops.length || 1;
+  const n = colours.length || 1;
   return { r: acc.r / n, g: acc.g / n, b: acc.b / n };
 }
 
@@ -142,10 +175,21 @@ export function legibilityRatio(a: Rgb, b: Rgb): number {
  * rest positions (`drift` moves them ±`amount` over time — the rest position
  * is the mean); a `band` wins where the point falls inside it. `unit` is the
  * spec's dimensional unit (1 for `px`, `min(w,h)` otherwise), for the band.
+ * A field is sampled at the point when `xPx`/`w` are given (at `t` 0 — a
+ * drifting field's rest), else it reads as its mean band, like the gradient.
+ * `seed` is the effective seed the caller is perceiving with (`opts.seed ??
+ * spec.seed`) — pass it through rather than defaulting to `spec.seed` here,
+ * or a caller perceiving a specific seed samples the wrong field.
  */
-export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number): Rgb {
+export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number, xPx?: number, w?: number, seed?: number): Rgb {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
+  if (bg.type === 'field') {
+    if (xPx === undefined || w === undefined) return backgroundRgb(spec);
+    const short = Math.max(1, Math.min(w, h));
+    const c = fieldRgbAt(xPx / short, yPx / short, 0, bg, seed ?? spec.seed ?? 42);
+    return { r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 };
+  }
   if (bg.band) {
     const bh = bg.band.height * unit;
     if (yPx >= h - bh) return hexRgb(bg.band.color);
