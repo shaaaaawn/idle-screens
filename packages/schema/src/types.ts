@@ -39,6 +39,12 @@ export interface SaverSpec {
    * `renderFrame(t)` stays deterministic for seeks via a fixed-step warm-up replay.
    */
   ghosting?: number;
+  /**
+   * The print finish — grain and a dither screen composited over the
+   * finished frame as the last step of every render. See `FinishSpec`.
+   * Absent ⇒ the frame is presented exactly as drawn.
+   */
+  finish?: FinishSpec;
   /** Dimensional unit system. 'viewport' (default) = all sizes/speeds/distances are fractions of min(w,h). */
   units?: 'viewport' | 'px';
   /**
@@ -47,6 +53,26 @@ export interface SaverSpec {
    * Set to your design resolution so a spec authored at 4K doesn't over-densify.
    */
   referenceViewport?: number;
+}
+
+/**
+ * A print finish over the finished frame: `grain` (0..1) screens a seeded
+ * zero-mean noise tile at up to 35 % alpha; `dither` (0..1) screens an 8×8
+ * ordered Bayer tile at up to 25 % — a stylistic screen, not per-pixel
+ * dithering of the image. Both composite with a symmetric blend (`overlay`)
+ * so the frame's mean luminance is unchanged: flash-safe by construction,
+ * and invisible to `luminanceGrid`. The grain tile is generated once per
+ * mount from the spec seed and sits still; `animate: true` steps its offset
+ * deterministically from the frame's time bucket (12 Hz), never randomly —
+ * ignored on the `basic` / `minimal` capability tiers (static tile). The
+ * finish is applied on a presentation canvas, never fed back into
+ * `ghosting`'s persistence. `grain` and `dither` are numeric paint paths
+ * (`finish.grain`) and glide.
+ */
+export interface FinishSpec {
+  grain?: number;
+  dither?: number;
+  animate?: boolean;
 }
 
 export type BackgroundSpec =
@@ -688,5 +714,13 @@ export interface IdleSequence {
    * paints its own ground, exactly as before the field existed.
    */
   bed?: SaverSpec;
+  /**
+   * A print finish applied once per composed frame — over bed, segment and
+   * any fade together, on the sequence's presentation canvas. Overrides
+   * every segment's own `finish` while set; absent, the active segment's
+   * `finish` applies when it declares one (a bed's is ignored — the bed is
+   * ground, finish the sequence). Children never apply their own.
+   */
+  finish?: FinishSpec;
   segments: SequenceSegment[];
 }
