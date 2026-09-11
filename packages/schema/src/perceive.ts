@@ -17,6 +17,7 @@ import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
+import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
 import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 import {
   alphaAt,
@@ -214,8 +215,15 @@ export interface LuminanceGrid {
   rows: number;
   /** Row-major luminance 0..1 including the background. */
   cells: number[];
-  /** Per-row background luminance (what an empty scene would be). */
+  /** Per-row background luminance (what an empty scene would be). For a `field` background: each row's mean. */
   background: number[];
+  /**
+   * Per-cell background luminance, present only for a `field` background
+   * (a solid or gradient varies by row alone, and `background` says it all).
+   * Coverage, centroid and the profiles deviate from THIS, so the field's own
+   * contours never count as content — a bright field is ground, not ink.
+   */
+  backgroundCells?: number[];
   meanLuminance: number;
   /** Fraction of cells deviating perceptibly (> 0.03) from the background. */
   coverage: number;
@@ -252,11 +260,28 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   const cellW = w / cols;
   const cellH = h / rows;
 
-  // Background: vertical gradient (or solid) + optional bottom band.
+  // Background: vertical gradient (or solid) + optional bottom band — or a
+  // field, sampled per cell with the renderer's own function at the same
+  // bucketed time, so the grid's ground IS what the raster paints.
   const bg = spec.background;
   const bgRow: number[] = new Array(rows).fill(0);
+  let bgCells: number[] | undefined;
   if (!bg || bg.type === 'solid') {
     bgRow.fill(hexLuma(bg?.color ?? '#05050a'));
+  } else if (bg.type === 'field') {
+    bgCells = new Array<number>(cols * rows);
+    const short = Math.max(1, Math.min(w, h));
+    const seed = opts.seed ?? spec.seed ?? 42;
+    const ft = fieldSampleTime(bg, t);
+    for (let r = 0; r < rows; r++) {
+      let rowSum = 0;
+      for (let c = 0; c < cols; c++) {
+        const lum = rgb255Luma(fieldRgbAt(((c + 0.5) * cellW) / short, ((r + 0.5) * cellH) / short, ft, bg, seed));
+        bgCells[r * cols + c] = lum;
+        rowSum += lum;
+      }
+      bgRow[r] = rowSum / cols;
+    }
   } else {
     const stops = [...bg.stops].sort((a, b) => a.at - b.at);
     for (let r = 0; r < rows; r++) {
@@ -282,7 +307,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   }
 
   const cells = new Array<number>(cols * rows);
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells[r * cols + c] = bgRow[r]!;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells[r * cols + c] = bgCells ? bgCells[r * cols + c]! : bgRow[r]!;
 
   const compose = (idx: number, lum: number, a: number, blend: LayerSpec['blend']): void => {
     const cur = cells[idx]!;
@@ -538,11 +563,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   splatPass(t, 1);
 
   // Deviation stats
-  return finishGrid(cols, rows, cells, bgRow);
+  return finishGrid(cols, rows, cells, bgRow, bgCells);
 }
 
-/** The stats every grid carries, from its cells and per-row background. */
-function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]): LuminanceGrid {
+/**
+ * The stats every grid carries, from its cells and per-row background —
+ * or, for a field, its per-cell background (`bgCells`), which deviation is
+ * measured against instead so the field's own contours read as ground.
+ */
+function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[], bgCells?: number[]): LuminanceGrid {
   let sum = 0;
   let covered = 0;
   let devSum = 0;
@@ -554,7 +583,7 @@ function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]
     for (let c = 0; c < cols; c++) {
       const v = cells[r * cols + c]!;
       sum += v;
-      const dev = Math.abs(v - bgRow[r]!);
+      const dev = Math.abs(v - (bgCells ? bgCells[r * cols + c]! : bgRow[r]!));
       if (dev > 0.03) covered++;
       devSum += dev;
       cxAcc += dev * (c + 0.5);
@@ -571,6 +600,7 @@ function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]
     rows,
     cells,
     background: bgRow,
+    ...(bgCells ? { backgroundCells: bgCells } : {}),
     meanLuminance: sum / (cols * rows),
     coverage: covered / (cols * rows),
     centroid: devSum > 1e-6 ? { x: cxAcc / devSum / cols, y: cyAcc / devSum / rows } : null,
@@ -1133,7 +1163,7 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
   const bedGrid = luminanceGrid(seq.bed, bedOpts);
   const inkGrid = luminanceGrid(ink, segOpts);
   const cells = bedGrid.cells.map((v, i) => Math.min(1, v + inkGrid.cells[i]!));
-  const grid = finishGrid(bedGrid.cols, bedGrid.rows, cells, bedGrid.background);
+  const grid = finishGrid(bedGrid.cols, bedGrid.rows, cells, bedGrid.background, bedGrid.backgroundCells);
 
   const bedLayers = seq.bed.layers.length;
   const dominance = rankDominance([

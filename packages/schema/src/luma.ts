@@ -9,6 +9,7 @@
 
 import type { Entity } from './simulate';
 import { isShapedSprite } from './shapes';
+import { fieldRgbAt } from './field';
 import type { LayerSpec, SaverSpec } from './types';
 
 /** Perceptual luma (0..1) of a hex colour. */
@@ -41,10 +42,16 @@ export function spriteHex(layer: LayerSpec, e: Entity): string | null {
   return null; // emoji carry their own palette
 }
 
-/** Mean luma of the background plate a layer is drawn against. */
+/**
+ * Mean luma of the background plate a layer is drawn against. A gradient
+ * averages its stops; a field averages its bands — the field's value
+ * distribution is symmetric about 0.5 (see `field.ts`), so the mean band is
+ * the mean plate.
+ */
 export function backgroundLuma(spec: SaverSpec): number {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexLuma(bg?.color ?? '#05050a');
+  if (bg.type === 'field') return bg.bands.reduce((s, c) => s + hexLuma(c), 0) / bg.bands.length;
   return bg.stops.reduce((s, st) => s + hexLuma(st.color), 0) / bg.stops.length;
 }
 
@@ -60,14 +67,15 @@ export function hexRgb(hex: string): { r: number; g: number; b: number } {
 export function backgroundRgb(spec: SaverSpec): { r: number; g: number; b: number } {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
-  const acc = bg.stops.reduce(
-    (s, st) => {
-      const c = hexRgb(st.color);
+  const colours = bg.type === 'field' ? bg.bands : bg.stops.map((st) => st.color);
+  const acc = colours.reduce(
+    (s, hex) => {
+      const c = hexRgb(hex);
       return { r: s.r + c.r, g: s.g + c.g, b: s.b + c.b };
     },
     { r: 0, g: 0, b: 0 },
   );
-  const n = bg.stops.length || 1;
+  const n = colours.length || 1;
   return { r: acc.r / n, g: acc.g / n, b: acc.b / n };
 }
 
@@ -142,10 +150,18 @@ export function legibilityRatio(a: Rgb, b: Rgb): number {
  * rest positions (`drift` moves them ±`amount` over time — the rest position
  * is the mean); a `band` wins where the point falls inside it. `unit` is the
  * spec's dimensional unit (1 for `px`, `min(w,h)` otherwise), for the band.
+ * A field is sampled at the point when `xPx`/`w` are given (at `t` 0 — a
+ * drifting field's rest), else it reads as its mean band, like the gradient.
  */
-export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number): Rgb {
+export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number, xPx?: number, w?: number): Rgb {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
+  if (bg.type === 'field') {
+    if (xPx === undefined || w === undefined) return backgroundRgb(spec);
+    const short = Math.max(1, Math.min(w, h));
+    const c = fieldRgbAt(xPx / short, yPx / short, 0, bg, spec.seed ?? 42);
+    return { r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 };
+  }
   if (bg.band) {
     const bh = bg.band.height * unit;
     if (yPx >= h - bh) return hexRgb(bg.band.color);
