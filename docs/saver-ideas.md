@@ -48,21 +48,21 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 
 | slug | title | bucket | route | latest status |
 | --- | --- | --- | --- | --- |
-| `klimt-der-kuss` | Klimt — Der Kuss | fine-art-homage | spec | triaged |
-| `hokusai-great-wave` | Hokusai — The Great Wave, deconstructed | nature-atmosphere | spec | triaged |
+| `klimt-der-kuss` | Klimt — Der Kuss | fine-art-homage | spec | shipped |
+| `hokusai-great-wave` | Hokusai — The Great Wave, deconstructed | nature-atmosphere | spec | shipped |
 | `hilma-af-klint-ten-largest` | Hilma af Klint — The Ten Largest | geometric-op-art | spec | shipped |
 | `nostalghia-candle` | Tarkovsky — Nostalghia's candle | minimal-ambient | spec | shipped |
 | `deep-sea-bioluminescence` | Deep-sea bioluminescence | nature-atmosphere | spec | shipped |
-| `mondrian-broadway-boogie-woogie` | Mondrian — Broadway Boogie Woogie | geometric-op-art | spec | triaged |
-| `turner-fighting-temeraire` | Turner — The Fighting Temeraire | nature-atmosphere | spec | triaged |
+| `mondrian-broadway-boogie-woogie` | Mondrian — Broadway Boogie Woogie | geometric-op-art | spec | shipped |
+| `turner-fighting-temeraire` | Turner — The Fighting Temeraire | nature-atmosphere | spec | shipped |
 | `kusama-infinity-nets` | Kusama — Infinity Nets | geometric-op-art | spec | shipped |
-| `okeeffe-flower-at-night` | O'Keeffe — a flower at night | fine-art-homage | spec | triaged |
-| `voyager-pale-blue-dot` | Voyager — the Pale Blue Dot | minimal-ambient | spec | triaged |
+| `okeeffe-flower-at-night` | O'Keeffe — a flower at night | fine-art-homage | spec | shipped |
+| `voyager-pale-blue-dot` | Voyager — the Pale Blue Dot | minimal-ambient | spec | shipped |
 | `gpgpu-particle-flow` | GPGPU Particle Flow | flow-particle | native | candidate |
 | `webgl-water-caustics` | WebGL Water Caustics | organic-simulation | native | candidate |
-| `css-doodle-grid-art` | CSS Doodle Grid Art | geometric-op-art | spec | candidate |
+| `css-doodle-grid-art` | CSS Doodle Grid Art | geometric-op-art | spec | shipped |
 | `css-3d-wireframes` | CSS 3D Wireframes | geometric-op-art | native | candidate |
-| `phosphor-terminal` | Phosphor Terminal | data-typographic | spec | triaged |
+| `phosphor-terminal` | Phosphor Terminal | data-typographic | spec | shipped |
 | `apple-ii-television` | Apple II Television | canonical-retro | spec-blocked: crt-scanline-color-bleed-overlay | triaged |
 | `arabesque-shell` | Arabesque & Shell | geometric-op-art | native | candidate |
 | `three-d-maze` | 3D Maze | canonical-retro | native | triaged |
@@ -89,6 +89,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec klimt-der-kuss (Der Kuss, Gilded) — field bg + finish grain showcase; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/klimt-der-kuss.json
 
 ### hokusai-great-wave
 - title: Hokusai — The Great Wave, deconstructed
@@ -98,6 +99,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec hokusai-great-wave — posterised field sea + stroke claw marks; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/hokusai-great-wave.json
 
 ### hilma-af-klint-ten-largest
 - title: Hilma af Klint — The Ten Largest
@@ -135,6 +137,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec mondrian-broadway — lane traffic on implied grid; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/mondrian-broadway.json
 
 ### turner-fighting-temeraire
 - title: Turner — The Fighting Temeraire
@@ -144,6 +147,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec turner-temeraire — smooth field atmosphere + finish; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/turner-temeraire.json
 
 ### kusama-infinity-nets
 - title: Kusama — Infinity Nets
@@ -163,6 +167,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec okeeffe-flower-night — stroke petals + parented-orbit dew; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/okeeffe-flower-night.json
 
 ### voyager-pale-blue-dot
 - title: Voyager — the Pale Blue Dot
@@ -172,6 +177,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
+  - 2026-09-11 shipped — shipped as spec voyager-pale-blue-dot — first live density sparse declaration + emit glint; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/voyager-pale-blue-dot.json
 
 ### gpgpu-particle-flow
 - title: GPGPU Particle Flow
@@ -199,6 +205,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 candidate — imported from screensaver research; concept only, no library code
+  - 2026-09-11 shipped — shipped as spec doodle-grid-riso (Doodle Wall, Riso) — grid layout + polygon rotate + pulse.wave ripple + finish; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/doodle-grid-riso.json
 
 ### css-3d-wireframes
 - title: CSS 3D Wireframes
@@ -218,6 +225,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - status:
   - 2026-08-31 candidate — imported from screensaver research; deterministic corpus required
   - 2026-08-31 triaged — route: spec confirmed; `sprite.kind: "text"` + `trail`/`ghosting` gives the typing-and-decay mechanic that is this idea's whole identity (FORMAT.md `## layers[]`, `## Determinism contract`) — no live network needed, corpus is fixed at author time. Soft scanlines are a nice-to-have finish, not core to the brief, so they don't block the route.
+  - 2026-09-11 shipped — shipped as spec phosphor-terminal — textBlock reveal typewriter + anchor/font/opacity + ghosting; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/phosphor-terminal.json
 
 ### apple-ii-television
 - title: Apple II Television
