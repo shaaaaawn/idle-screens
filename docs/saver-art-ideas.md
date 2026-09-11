@@ -1,3 +1,5 @@
+> Deprecated: imported into the canonical [Saver Idea Registry](./saver-ideas.md). Keep this file as source history; update lifecycle state in the registry.
+
 # Saver Art Ideas — 10 High-Level Briefs
 
 Fine-art briefs. Consumer aesthetics — the design languages of malls, software
