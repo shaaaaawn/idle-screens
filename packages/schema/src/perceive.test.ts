@@ -57,6 +57,22 @@ describe('luminanceGrid', () => {
     const grid = luminanceGrid(POLYGONS_SPEC);
     expect(grid.coverage).toBeGreaterThan(0.005);
   });
+
+  it('a static streak (headingAt null) orients along `rotate`, matching the renderer, instead of painting the same heading regardless', () => {
+    const streak = (rotate: number): SaverSpec => spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'streak', length: [300, 300], color: '#ffffff', width: 20 }, motion: { type: 'static' }, rotate },
+    ]);
+    const viewport = { width: 1600, height: 900 };
+    const horizontal = luminanceGrid(streak(0), { viewport });
+    const vertical = luminanceGrid(streak(90), { viewport });
+    expect(horizontal.cells).not.toEqual(vertical.cells);
+    // A horizontal streak (rotate: 0) spreads its mass across columns at
+    // roughly one row; rotated 90° it spreads down roughly one column — so
+    // the row/col spread should swap.
+    const spread = (profile: number[]): number => profile.filter((v) => v > 0).length;
+    expect(spread(vertical.rowProfile)).toBeGreaterThan(spread(horizontal.rowProfile));
+    expect(spread(horizontal.colProfile)).toBeGreaterThan(spread(vertical.colProfile));
+  });
 });
 
 describe('additive-glow calibration (G1)', () => {

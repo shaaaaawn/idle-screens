@@ -445,7 +445,7 @@ export function adviseSpec(
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const cx = (box.x0 + box.x1) / 2;
-      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed);
+      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
       const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
       const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
       const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
