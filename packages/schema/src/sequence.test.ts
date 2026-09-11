@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createRng, type SaverContext, type SaverInstance } from '@idle-screens/core';
-import { resolveSegment, segmentStart } from './sequence';
+import { resolveSegment, segmentStart, sequenceSwapCompatible } from './sequence';
 import { validateSequence } from './validate';
 import { adviseSequence } from './advise';
-import { compileSaver, compileSequence, type SequenceMountContext } from './compile';
+import { compileSaver, compileSequence, hasHotSwapSequence, type SequenceMountContext } from './compile';
 import { lerpSpec } from './steer';
 import type { IdleSequence, SaverSpec } from './types';
 
@@ -929,7 +929,8 @@ describe('SequenceInstance — morph segue', () => {
 
   it('preserves paint steering after a completed morph', () => {
     const inst = mountSync(compileSequence(morphSeq()));
-    inst.renderFrame!(7000, 1);
+    inst.renderFrame!(5500, 1); // mid-morph (localT 500 < dur 1000): enters the morph state
+    inst.renderFrame!(7000, 1); // past the morph window: triggers finalization
     inst.applyTrack!({
       program: 'test',
       seed: 1,
@@ -2234,5 +2235,247 @@ describe("morph text: 'crossfade' (1f)", () => {
     // adviseSequence agrees.
     expect(adviseSequence(twins('crossfade', same('Omega'))).map((w) => w.code)).not.toContain('morph-nothing-morphable');
     expect(adviseSequence(twins('step', same('Omega'))).map((w) => w.code)).toContain('morph-nothing-morphable');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hotSwapSequence — publish-without-remount (plan 2.6b)
+// ---------------------------------------------------------------------------
+
+describe('SequenceInstance — hotSwapSequence', () => {
+  /** A slide: one drifting circle (the `arc` caller) under a headline. */
+  const slide = (text: string, extra: Partial<SaverSpec> = {}): SaverSpec => ({
+    schemaVersion: 1, id: 'slide', label: 'Slide',
+    background: { type: 'solid', color: '#05050a' },
+    layers: [
+      { key: 'dot', count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'drift', speed: [0.2, 0.2], angle: 0 } },
+      { key: 'h', count: 1, sprite: { kind: 'textBlock', text, maxWidth: 0.6, fontSize: 0.05, color: '#ffffff' }, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } },
+    ],
+    ...extra,
+  });
+  const bed = (color: string): SaverSpec => ({
+    schemaVersion: 1, id: 'bed', label: 'Bed',
+    background: { type: 'solid', color: '#0a0a1a' },
+    layers: [{ key: 'orb', count: 1, sprite: { kind: 'circle', radius: [0.03, 0.03], color }, motion: { type: 'drift', speed: [0.1, 0.1], angle: 90 } }],
+  });
+  const show = (headline = 'Alpha', bedColor = '#ffffff', extra: Partial<IdleSequence> = {}): IdleSequence => seq({
+    bed: bed(bedColor),
+    segments: [
+      { key: 'a', scene: slide(headline), duration: 5000 },
+      { key: 'b', scene: slide('Beta'), duration: 3000, advance: 'input' },
+      { key: 'c', scene: slide('Gamma'), duration: 4000, transition: { type: 'morph', dur: 1000 } },
+    ],
+    ...extra,
+  });
+  type Priv = { seq: IdleSequence; activeIndex: number; clockOffset: number; releasedBelow: number; renderedT: number; children: Array<{ effSpec: SaverSpec } | null>; bed: { effSpec: SaverSpec } | null };
+  const priv = (inst: SaverInstance): Priv => inst as unknown as Priv;
+  const headlineOf = (spec: SaverSpec | undefined): unknown => (spec?.layers[1]?.sprite as { text?: unknown } | undefined)?.text;
+  const bedColorOf = (inst: SaverInstance): unknown => (priv(inst).bed?.effSpec.layers[0]?.sprite as { color?: unknown } | undefined)?.color;
+  /** Where the clock stands: the `(segment, localT)` the next frame resolves to. */
+  const where = (inst: SaverInstance) => {
+    const p = priv(inst);
+    const r = resolveSegment(p.seq, p.renderedT + p.clockOffset, { releasedBelow: p.releasedBelow });
+    return { index: r.index, localT: r.localT, held: r.held ?? false };
+  };
+
+  /** Paused mount whose context records every fillText string and every arc's (x, y). */
+  function mountRecording(s: IdleSequence) {
+    const texts: string[] = [];
+    const arcs: Array<[number, number]> = [];
+    const ctx = stub2dContext();
+    (ctx as unknown as { fillText: unknown }).fillText = vi.fn((text: string) => { texts.push(text); });
+    (ctx as unknown as { arc: unknown }).arc = vi.fn((x: number, y: number) => { arcs.push([+x.toFixed(6), +y.toFixed(6)]); });
+    (ctx as unknown as { measureText: unknown }).measureText = vi.fn(() => ({ width: 10 }));
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as any;
+    const inst = mountSync(compileSequence(s), saverCtx({ reducedMotion: true }));
+    return { inst, texts, arcs };
+  }
+  const swap = (inst: SaverInstance, next: IdleSequence): boolean => {
+    expect(hasHotSwapSequence(inst)).toBe(true);
+    if (!hasHotSwapSequence(inst)) throw new Error('unreachable');
+    return inst.hotSwapSequence(next);
+  };
+
+  it('is typed on the plugin and feature-detectable on the instance; a plain scene has none', () => {
+    const plugin = compileSequence(show());
+    const inst = plugin.mount(saverCtx({ reducedMotion: true }));
+    expect(typeof inst.hotSwapSequence).toBe('function');
+    expect(hasHotSwapSequence(inst)).toBe(true);
+    inst.dispose();
+    const scene = compileSaver(SCENE).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    expect(hasHotSwapSequence(scene)).toBe(false);
+    scene.dispose();
+  });
+
+  /**
+   * The arcs a never-swapped twin paints at `T + 20` after the same clicker
+   * steer and a frame at `T`: what "continuous" means below. Sequential, not
+   * side by side — the recorder installs one context per mount, and children
+   * are created lazily, so two live recorders would cross-talk.
+   */
+  function controlArcs(s: IdleSequence, T: number): Array<[number, number]> {
+    const control = mountRecording(s);
+    steerTo(control.inst, 2);
+    control.inst.renderFrame!(T, 1);
+    control.arcs.length = 0;
+    control.inst.renderFrame!(T + 20, 1);
+    control.inst.dispose();
+    return control.arcs.slice();
+  }
+
+  it('(a) a paint-only republish swaps in place: same (segment, localT), new words painted, entities continuous', () => {
+    const T = 990; // renderedT is 0 after the steer below; 990 ms into slide c
+    const expectedArcs = controlArcs(show(), T);
+    const { inst, texts, arcs } = mountRecording(show());
+    // The clicker has released slide b and the show is ~1 s into slide c.
+    steerTo(inst, 2);
+    inst.renderFrame!(T, 1);
+    const before = where(inst);
+    expect(before.index).toBe(2);
+    const state = { clockOffset: priv(inst).clockOffset, releasedBelow: priv(inst).releasedBelow, renderedT: priv(inst).renderedT, activeIndex: priv(inst).activeIndex };
+
+    const fixed = show('Alpha', '#ff8800', {
+      segments: show().segments.map((sg, i) => (i === 2 ? { ...sg, scene: slide('Gamma (fixed)') } : sg)),
+    });
+    texts.length = 0;
+    expect(swap(inst, fixed)).toBe(true);
+
+    // The clock did not move, the hold stays released, the same segment is up.
+    expect(where(inst)).toEqual(before);
+    expect({ clockOffset: priv(inst).clockOffset, releasedBelow: priv(inst).releasedBelow, renderedT: priv(inst).renderedT, activeIndex: priv(inst).activeIndex }).toEqual(state);
+    expect(priv(inst).seq).toBe(fixed);
+    // The live child and the bed took their new paint; the paused instance repainted at once.
+    expect(headlineOf(priv(inst).children[2]?.effSpec)).toBe('Gamma (fixed)');
+    expect(bedColorOf(inst)).toBe('#ff8800');
+    expect(texts).toContain('Gamma (fixed)');
+    expect(texts).not.toContain('Gamma');
+
+    // 10 ms before and 10 ms after the swap: the bed orb and the slide's dot
+    // are exactly where the never-swapped twin has them, and the next frame
+    // is still slide c, 20 ms on.
+    arcs.length = 0;
+    inst.renderFrame!(T + 20, 1);
+    expect(arcs).toHaveLength(2);
+    expect(arcs).toEqual(expectedArcs);
+    expect(where(inst)).toEqual({ ...before, localT: before.localT + 20 });
+    inst.dispose();
+  });
+
+  it('(b) a structural edit (an extra layer in one segment) returns false and leaves the instance untouched', () => {
+    const inst = mountSync(compileSequence(show()));
+    inst.renderFrame!(1000, 1);
+    const seqBefore = priv(inst).seq;
+    const childBefore = priv(inst).children[0]!.effSpec;
+    const bedBefore = priv(inst).bed!.effSpec;
+    const before = where(inst);
+    const grown = show('Alpha', '#ffffff', {
+      segments: show().segments.map((sg, i) => (i === 1 ? { ...sg, scene: { ...sg.scene, layers: [...sg.scene.layers, SCENE.layers[0]!] } } : sg)),
+    });
+    expect(swap(inst, grown)).toBe(false);
+    expect(priv(inst).seq).toBe(seqBefore);
+    expect(priv(inst).children[0]!.effSpec).toBe(childBefore);
+    expect(priv(inst).bed!.effSpec).toBe(bedBefore);
+    expect(where(inst)).toEqual(before);
+    inst.renderFrame!(1016, 1);
+    expect(activeIndexOf(inst)).toBe(0);
+    inst.dispose();
+  });
+
+  it('(c) swapping in the identical sequence changes nothing a viewer could see', () => {
+    const expectedArcs = controlArcs(show(), 2000);
+    const { inst, arcs } = mountRecording(show());
+    steerTo(inst, 2);
+    inst.renderFrame!(2000, 1);
+    const twin = JSON.parse(JSON.stringify(show())) as IdleSequence;
+    expect(swap(inst, twin)).toBe(true);
+    expect(priv(inst).children[2]!.effSpec).toEqual({ ...slide('Gamma'), seed: 3 }); // seq.seed + index, as at mount
+    arcs.length = 0;
+    inst.renderFrame!(2020, 1);
+    expect(arcs).toEqual(expectedArcs);
+    inst.dispose();
+  });
+
+  it('(d) retained applyTrack deltas survive the swap — on the segments and on the bed', () => {
+    const inst = mountSync(compileSequence(show()));
+    inst.renderFrame!(1000, 1);
+    const steer = (path: string, value: unknown): void =>
+      inst.applyTrack!({ program: 'test', seed: 1, deltas: [{ t: 0, path, value, ease: 'step', dur: 0 }] } as never);
+    steer('dot.sprite.color', '#00ff00'); // every slide owns `dot`
+    steer('bed.orb.sprite.color', '#0000ff');
+    expect((priv(inst).children[0]!.effSpec.layers[0]!.sprite as { color: string }).color).toBe('#00ff00');
+    expect(bedColorOf(inst)).toBe('#0000ff');
+
+    expect(swap(inst, show('Alpha (fixed)', '#ff8800'))).toBe(true);
+    const child = priv(inst).children[0]!.effSpec;
+    expect(headlineOf(child)).toBe('Alpha (fixed)'); // the republish landed…
+    expect((child.layers[0]!.sprite as { color: string }).color).toBe('#00ff00'); // …and the steer is still on it
+    expect(bedColorOf(inst)).toBe('#0000ff'); // the bed steer wins over the republished bed colour
+    // A child created after the swap (next slide) is built from the NEW sequence with the same retained set.
+    inst.renderFrame!(6000, 1);
+    expect(activeIndexOf(inst)).toBe(1);
+    expect(headlineOf(priv(inst).children[1]!.effSpec)).toBe('Beta');
+    expect((priv(inst).children[1]!.effSpec.layers[0]!.sprite as { color: string }).color).toBe('#00ff00');
+    inst.dispose();
+  });
+
+  it('mid-fade, both offscreen children take the republished scenes too', () => {
+    const fading = show('Alpha', '#ffffff', {
+      segments: [
+        { key: 'a', scene: slide('Alpha'), duration: 5000, transition: { type: 'fade', dur: 1000 } },
+        { key: 'b', scene: slide('Beta'), duration: 5000 },
+      ],
+    });
+    const inst = mountSync(compileSequence(fading));
+    inst.renderFrame!(5300, 1); // 300 ms into the fade, over a bed: two offscreen children
+    expect(fadingOf(inst)?.index).toBe(0);
+    expect(fadingInOf(inst)?.index).toBe(1);
+    const fixed: IdleSequence = { ...fading, segments: [
+      { ...fading.segments[0]!, scene: slide('Alpha!') },
+      { ...fading.segments[1]!, scene: slide('Beta!') },
+    ] };
+    expect(swap(inst, fixed)).toBe(true);
+    expect(headlineOf((fadingOf(inst)!.child as unknown as { effSpec: SaverSpec }).effSpec)).toBe('Alpha!');
+    expect(headlineOf((fadingInOf(inst)!.child as unknown as { effSpec: SaverSpec }).effSpec)).toBe('Beta!');
+    inst.renderFrame!(5400, 1);
+    expect(fadingOf(inst)?.index).toBe(0);
+    inst.dispose();
+  });
+
+  describe('sequenceSwapCompatible', () => {
+    const base = () => show();
+    const edit = (i: number, patch: Partial<IdleSequence['segments'][number]>): IdleSequence =>
+      show('Alpha', '#ffffff', { segments: show().segments.map((sg, j) => (j === i ? { ...sg, ...patch } : sg)) });
+
+    it('paint, ids, labels and segment keys are free', () => {
+      expect(sequenceSwapCompatible(base(), show('Zeta', '#123456'))).toBe(true);
+      expect(sequenceSwapCompatible(base(), { ...base(), id: 'other', label: 'Other' })).toBe(true);
+      expect(sequenceSwapCompatible(base(), edit(0, { key: 'renamed' }))).toBe(true);
+      expect(sequenceSwapCompatible(base(), edit(0, { scene: slide('Alpha', { background: { type: 'solid', color: '#ff0000' } }) }))).toBe(true);
+    });
+
+    it('defaults compare equal to their explicit spellings', () => {
+      expect(sequenceSwapCompatible(base(), { ...base(), sync: 'mount' })).toBe(true);
+      expect(sequenceSwapCompatible(base(), edit(0, { advance: 'auto', transition: { type: 'cut' } }))).toBe(true);
+      expect(sequenceSwapCompatible(base(), edit(2, { transition: { type: 'morph', dur: 1000, text: 'step' } }))).toBe(true);
+    });
+
+    it('structure, timing, seed, loop, sync and the bed are pinned', () => {
+      expect(sequenceSwapCompatible(base(), { ...base(), segments: base().segments.slice(0, 2) })).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(1, { scene: { ...slide('Beta'), layers: [...slide('Beta').layers, SCENE.layers[0]!] } }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(0, { duration: 6000 }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(1, { advance: 'auto' }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(2, { transition: { type: 'fade', dur: 1000 } }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(2, { transition: { type: 'morph', dur: 800 } }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(2, { transition: { type: 'morph', dur: 1000, text: 'crossfade' } }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), { ...base(), loop: true })).toBe(false);
+      expect(sequenceSwapCompatible(base(), { ...base(), sync: 'epoch' })).toBe(false);
+      expect(sequenceSwapCompatible(base(), { ...base(), seed: 2 })).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(0, { scene: { ...slide('Alpha'), seed: 9 } }))).toBe(false);
+      const noBed: IdleSequence = { ...base(), bed: undefined };
+      expect(sequenceSwapCompatible(base(), noBed)).toBe(false);
+      expect(sequenceSwapCompatible(noBed, base())).toBe(false);
+      expect(sequenceSwapCompatible(base(), { ...base(), bed: { ...bed('#ffffff'), seed: 3 } })).toBe(false);
+      expect(sequenceSwapCompatible(base(), { ...base(), bed: { ...bed('#ffffff'), layers: [...bed('#ffffff').layers, SCENE.layers[0]!] } })).toBe(false);
+    });
   });
 });

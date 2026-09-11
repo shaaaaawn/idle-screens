@@ -151,7 +151,7 @@ deterministic, Node-safe, and testable.
 relative to mean entity spacing, plus the four named recipes (parallax depth,
 glow stacking, graph web, focal pin). Every figure is a `perceiveScene` /
 `describeScene` measurement at 1920×1080, not an estimate. `SCHEMA_REFERENCE`
-in idle-server needs the same section (mono-sweep detector 2).
+in idle-server needs the same section.
 
 Remaining from the
 lists above: depth-as-a-knob (7 — superseded by warp for true depth),

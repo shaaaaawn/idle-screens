@@ -9,11 +9,12 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish']);
+const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life', 'emit', 'clock',
+  'layout', 'life', 'emit', 'clock', 'rotate',
 ]);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
@@ -49,9 +50,11 @@ const KNOWN_WARP = new Set(['type', 'speed', 'center']);
 const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
+const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 'bands', 'drift', 'seed']);
+const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -127,6 +130,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
+  if (spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
 
   if (!Array.isArray(spec.layers) || spec.layers.length === 0) {
     err('layers', 'must be a non-empty array');
@@ -148,6 +152,24 @@ function color(v: unknown, path: string, err: (p: string, m: string) => void): v
 }
 
 type WarnFn = (path: string, code: string, message: string) => void;
+
+/**
+ * A `finish` block (spec- or sequence-level). `grain` / `dither` are bounded
+ * to 0..1: at 1 they composite at their fixed maximum alphas (35 % / 25 %),
+ * which is as strong as a zero-mean screen can be before it reads as the
+ * subject; both stay mean-luminance-neutral at every value, so nothing here
+ * is a flash bound — the finish cannot flash at any setting.
+ */
+function validateFinish(f: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isObj(f)) return err(path, 'must be an object');
+  for (const k of ['grain', 'dither'] as const) {
+    if (f[k] !== undefined && (!isNum(f[k]) || (f[k] as number) < 0 || (f[k] as number) > 1)) err(`${path}.${k}`, 'must be a number 0..1');
+  }
+  if (f.animate !== undefined && typeof f.animate !== 'boolean') err(`${path}.animate`, 'must be a boolean');
+  for (const k of unknownKeys(f, KNOWN_FINISH)) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown finish property '${k}' — will be ignored`);
+  }
+}
 
 function validateBackground(bg: unknown, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(bg)) return err('background', 'must be an object');
@@ -186,8 +208,61 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
       warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
     }
+  } else if (bg.type === 'field') {
+    validateFieldBackground(bg, err, warn);
   } else {
-    err('background.type', 'must be solid | gradient');
+    err('background.type', 'must be solid | gradient | field');
+  }
+}
+
+/**
+ * A `field` background. Every bound here is a rendering or safety limit:
+ * `scale` is capped so a raster cell never spans more than a feature (the
+ * upscaled raster would alias), `octaves` so a 96×54 raster stays cheap to
+ * recompute ten times a second, and `drift.period` is floored at
+ * LIMITS.minDriftPeriod — the same 10 s guard the gradient's drift carries —
+ * because the drift is the ONLY way a field changes over time: with the
+ * domain travelling a bounded circle once per period, no point of the field
+ * can change faster than that, so a field can never strobe.
+ */
+function validateFieldBackground(bg: Record<string, unknown>, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isNum(bg.scale) || bg.scale < LIMITS.minFieldScale || bg.scale > LIMITS.maxFieldScale) {
+    err('background.scale', `must be a number ${LIMITS.minFieldScale}..${LIMITS.maxFieldScale} (features across the short side)`);
+  }
+  if (bg.octaves !== undefined && (!isNum(bg.octaves) || !Number.isInteger(bg.octaves) || bg.octaves < 1 || bg.octaves > LIMITS.maxFieldOctaves)) {
+    err('background.octaves', `must be an integer 1..${LIMITS.maxFieldOctaves}`);
+  }
+  if (bg.warp !== undefined && (!isNum(bg.warp) || bg.warp < 0 || bg.warp > 1)) {
+    err('background.warp', 'must be a number 0..1');
+  }
+  if (bg.quantize !== undefined && (!isNum(bg.quantize) || !Number.isInteger(bg.quantize) || bg.quantize < 0 || bg.quantize === 1 || bg.quantize > LIMITS.maxFieldQuantize)) {
+    err('background.quantize', `must be 0 (smooth) or an integer 2..${LIMITS.maxFieldQuantize}`);
+  }
+  if (!Array.isArray(bg.bands) || bg.bands.length < LIMITS.minFieldBands || bg.bands.length > LIMITS.maxFieldBands) {
+    err('background.bands', `must be ${LIMITS.minFieldBands}..${LIMITS.maxFieldBands} hex colours`);
+  } else {
+    // Indexed, not forEach: forEach skips holes in a sparse array, which
+    // would let a hole through validation and crash the renderer later on
+    // an undefined colour.
+    for (let i = 0; i < bg.bands.length; i++) color(bg.bands[i], `background.bands[${i}]`, err);
+  }
+  if (bg.drift !== undefined) {
+    if (!isObj(bg.drift)) err('background.drift', 'must be an object');
+    else {
+      if (!isNum(bg.drift.period) || bg.drift.period < LIMITS.minDriftPeriod) {
+        err('background.drift.period', `must be >= ${LIMITS.minDriftPeriod} ms`);
+      }
+      if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount < 0 || bg.drift.amount > LIMITS.maxFieldDriftAmount)) {
+        err('background.drift.amount', `must be a number 0..${LIMITS.maxFieldDriftAmount}`);
+      }
+      for (const k of unknownKeys(bg.drift, KNOWN_FIELD_DRIFT)) {
+        warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (bg.seed !== undefined && !isNum(bg.seed)) err('background.seed', 'must be a number');
+  for (const k of unknownKeys(bg, KNOWN_BG_FIELD)) {
+    warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
   }
 }
 
@@ -277,6 +352,17 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       err(`${path}.spin`, 'must be a number or a [min,max] range (degrees/sec)');
     } else if (Math.abs(layer.spin) > LIMITS.maxSpin) {
       err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+    }
+  }
+  if (layer.rotate !== undefined) {
+    if (isRange(layer.rotate)) {
+      if (Math.abs(layer.rotate[0]) > LIMITS.maxRotate || Math.abs(layer.rotate[1]) > LIMITS.maxRotate) {
+        err(`${path}.rotate`, `each end of the range must be within ±${LIMITS.maxRotate} degrees`);
+      }
+    } else if (!isNum(layer.rotate)) {
+      err(`${path}.rotate`, 'must be a number or a [min,max] range (degrees)');
+    } else if (Math.abs(layer.rotate) > LIMITS.maxRotate) {
+      err(`${path}.rotate`, `must be within ±${LIMITS.maxRotate} degrees`);
     }
   }
   if (layer.grow !== undefined) {
@@ -883,6 +969,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
   if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
   if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
+  if (seq.finish !== undefined) validateFinish(seq.finish, 'finish', err, (p, code, message) => void warnings.push({ path: p, code, message }));
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');

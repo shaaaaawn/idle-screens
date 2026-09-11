@@ -5,7 +5,7 @@
  * changes existing values only — unknown paths are ignored (the server
  * validates and rejects them; the runtime stays lenient).
  */
-import type { IdleSequence, SaverSpec, SpriteSpec } from './types';
+import { LIMITS, type IdleSequence, type SaverSpec, type SpriteSpec } from './types';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -13,7 +13,7 @@ interface PathTarget {
 }
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport']);
+const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport', 'finish']);
 
 /** Resolve a dot-path (key-aware) to its parent + final key; null if absent. */
 export function resolveSpecPath(spec: unknown, path: string): PathTarget | null {
@@ -21,10 +21,16 @@ export function resolveSpecPath(spec: unknown, path: string): PathTarget | null 
   const parts = path.split('.');
   if (parts.some((p) => UNSAFE_KEYS.has(p))) return null;
   const s = spec as { layers?: Array<Record<string, unknown>> };
-  if (parts[0] !== 'layers' && parts[0] !== 'background' && !STEERABLE_ROOT_KEYS.has(parts[0]!) && Array.isArray(s.layers)) {
+  if (parts[0] !== 'layers' && parts[0] !== 'background' && Array.isArray(s.layers)) {
+    // A layer's own key wins over a root field of the same name — a layer
+    // named "ghosting" or "referenceViewport" must still resolve to itself,
+    // not get shadowed by the identically-named root scalar.
     const idx = s.layers.findIndex((l) => l && l.key === parts[0]);
-    if (idx === -1) return null;
-    parts.splice(0, 1, 'layers', String(idx));
+    if (idx !== -1) {
+      parts.splice(0, 1, 'layers', String(idx));
+    } else if (!STEERABLE_ROOT_KEYS.has(parts[0]!)) {
+      return null;
+    }
   }
   let node: unknown = spec;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -190,7 +196,7 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 
 /**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
- * like "layers.0.count", "background.stops.1.color", etc. Metadata fields
+ * like "layers.0.count", "background.stops.1.color", "background.bands.2", etc. Metadata fields
  * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
  * they describe structure, not tuneable values.
  *
@@ -200,7 +206,20 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
   const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer']);
-  const INDEXED = new Set(['layers', 'stops']);
+  // `bands` (a field background's palette) is indexed like `stops`, so
+  // `background.bands.2` is a hex paint path that glides.
+  const INDEXED = new Set(['layers', 'stops', 'bands']);
+  // Mirror resolveSpecPath's layer-key precedence: a root field named the
+  // same as a layer's key resolves to that layer, not the scalar, so don't
+  // advertise a root path we can't actually deliver a delta to.
+  const layers = (spec as { layers?: unknown }).layers;
+  const shadowedRootKeys = new Set(
+    Array.isArray(layers)
+      ? layers
+          .map((l) => (l && typeof l === 'object' ? (l as Record<string, unknown>).key : undefined))
+          .filter((k): k is string => typeof k === 'string' && STEERABLE_ROOT_KEYS.has(k))
+      : [],
+  );
   const out: string[] = [];
   const walk = (node: unknown, prefix: string, key: string): void => {
     if (Array.isArray(node) && INDEXED.has(key)) {
@@ -214,6 +233,7 @@ export function steerablePaths(spec: unknown): string[] {
     if (node && typeof node === 'object') {
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
         if (SKIP.has(k)) continue;
+        if (!prefix && shadowedRootKeys.has(k)) continue;
         walk(v, prefix ? `${prefix}.${k}` : k, k);
       }
       return;
@@ -251,7 +271,10 @@ export function easeSmooth(k: number): number {
 export function structuralSignature(spec: SaverSpec): string {
   return JSON.stringify([
     spec.units,
-    spec.referenceViewport,
+    // Normalized against the same default every renderer uses — an omitted
+    // referenceViewport and an explicit 1080 render identically, so they must
+    // hash identically or a same-sizing morph gets rejected as structural.
+    spec.referenceViewport ?? LIMITS.referenceViewport,
     spec.layers.map((l) => {
       const s = l.sprite as Record<string, unknown>;
       return [
@@ -287,6 +310,9 @@ export function structuralSignature(spec: SaverSpec): string {
               // existing spec's signature string is byte-identical.
               ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
               : undefined,
+        // Static rotation is baked into entities (a range draws a seeded
+        // angle). Appended only when set — same rule as `anchor` above.
+        ...(l.rotate !== undefined ? [l.rotate] : []),
       ];
     }),
   ]);
