@@ -184,9 +184,12 @@ export function bedRenderSeed(seq: IdleSequence): number | undefined {
  *   running, and `clockOffset`/`releasedBelow` on the instance are measured
  *   in that timeline — so a timing edit is a remount for now.
  *
- * Paint stays free: colours, words, alpha, `background`, `ghosting`, ids and
- * labels, segment keys. Mirrors idle-server's `sequenceSignaturesEqual`
- * precondition and adds the timing terms.
+ * Paint stays free: colours, words, `background`, `ghosting`, ids and
+ * labels, segment keys. Layer `alpha` is a per-entity range baked at build
+ * time (like `size`), so it is already covered by the structural twin check
+ * above and is not free — an alpha-only edit correctly falls back to a
+ * remount. Mirrors idle-server's `sequenceSignaturesEqual` precondition and
+ * adds the timing terms.
  */
 export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): boolean {
   if (prev.segments.length !== next.segments.length) return false;

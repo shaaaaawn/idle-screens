@@ -856,9 +856,10 @@ every live segment child and the bed take their new scene, the clock, the
 active segment, every released hold and the retained track stay exactly
 where they were (steered paint is re-applied on top of the republished
 scene), and the next frame resolves to the same `(segment, localT)` with
-every entity where it was a frame ago. Paint is free: words, colours, alpha,
+every entity where it was a frame ago. Paint is free: words, colours,
 `background`, ids, labels, segment keys. A structural edit (a layer added,
-a count or motion changed), a timing edit (a duration — it would move every
+a count or motion changed, a layer's `alpha` range — baked per entity at
+build time, like `size`), a timing edit (a duration — it would move every
 later boundary under a clock that keeps running — an `advance`, a
 transition's type or `dur`), a seed, `loop` or `sync` change, or a bed added
 or removed returns `false` and changes nothing; the host remounts then, as
