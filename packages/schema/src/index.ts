@@ -8,5 +8,6 @@ export * from './cohesion';
 export * from './describe';
 export * from './perceive';
 export * from './field';
+export * from './finish';
 export * from './sequence';
 export * from './examples';
