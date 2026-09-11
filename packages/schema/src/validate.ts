@@ -221,7 +221,10 @@ function validateFieldBackground(bg: Record<string, unknown>, err: (p: string, m
   if (!Array.isArray(bg.bands) || bg.bands.length < LIMITS.minFieldBands || bg.bands.length > LIMITS.maxFieldBands) {
     err('background.bands', `must be ${LIMITS.minFieldBands}..${LIMITS.maxFieldBands} hex colours`);
   } else {
-    bg.bands.forEach((c, i) => color(c, `background.bands[${i}]`, err));
+    // Indexed, not forEach: forEach skips holes in a sparse array, which
+    // would let a hole through validation and crash the renderer later on
+    // an undefined colour.
+    for (let i = 0; i < bg.bands.length; i++) color(bg.bands[i], `background.bands[${i}]`, err);
   }
   if (bg.drift !== undefined) {
     if (!isObj(bg.drift)) err('background.drift', 'must be an object');

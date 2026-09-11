@@ -98,13 +98,16 @@ export function fieldOctaves(cfg: Pick<FieldBackground, 'octaves'>): number {
 }
 
 /**
- * The time the field is sampled at for scene time `t`: with `drift`, the
- * start of the 100 ms bucket `t` falls in (the renderer recomputes its raster
- * once per bucket and holds it, so the perception grid samples the same
- * instant); without `drift` the field is static and the answer is always 0.
+ * The time the field is sampled at for scene time `t`: with `drift` at a
+ * nonzero `amount`, the start of the 100 ms bucket `t` falls in (the renderer
+ * recomputes its raster once per bucket and holds it, so the perception grid
+ * samples the same instant); without `drift`, or with `drift.amount: 0` (the
+ * domain never moves), the field is static and the answer is always 0 — so a
+ * legally-static drift config isn't rebucketed, and re-rastered, ten times a
+ * second for nothing.
  */
 export function fieldSampleTime(cfg: Pick<FieldBackground, 'drift'>, t: number): number {
-  return cfg.drift ? Math.floor(t / FIELD_BUCKET_MS) * FIELD_BUCKET_MS : 0;
+  return cfg.drift && cfg.drift.amount !== 0 ? Math.floor(t / FIELD_BUCKET_MS) * FIELD_BUCKET_MS : 0;
 }
 
 /**

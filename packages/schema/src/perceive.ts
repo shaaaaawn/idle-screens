@@ -966,8 +966,12 @@ function regionMeans(grid: LuminanceGrid): number[] {
   const cnt = new Array<number>(9).fill(0);
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
+      const idx = r * grid.cols + c;
       const region = Math.min(2, Math.floor((r / grid.rows) * 3)) * 3 + Math.min(2, Math.floor((c / grid.cols) * 3));
-      out[region]! += Math.abs(grid.cells[r * grid.cols + c]! - grid.background[r]!);
+      // A field's own contours are ground, not content (see `backgroundCells`
+      // on `LuminanceGrid`): deviate against the per-cell background where
+      // one exists, the same rule `finishGrid` applies to coverage/centroid.
+      out[region]! += Math.abs(grid.cells[idx]! - (grid.backgroundCells ? grid.backgroundCells[idx]! : grid.background[r]!));
       cnt[region]!++;
     }
   }

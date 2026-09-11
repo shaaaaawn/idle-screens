@@ -372,7 +372,10 @@ class SpecInstance implements SaverInstance {
     const cols = Math.max(1, Math.round((this.fieldShortSide * w) / short));
     const rows = Math.max(1, Math.round((this.fieldShortSide * h) / short));
     const ft = fieldSampleTime(bg, t);
-    const key = `${JSON.stringify(bg)}|${cols}x${rows}|${ft}`;
+    // `w`x`h`, not just the rounded `cols`x`rows`: a resize that changes the
+    // aspect ratio without moving the rounded raster size would otherwise
+    // reuse a raster sampled for the old aspect ratio.
+    const key = `${JSON.stringify(bg)}|${w}x${h}|${cols}x${rows}|${ft}`;
     let raster = this.field;
     if (!raster || raster.key !== key) {
       if (!raster || raster.cols !== cols || raster.rows !== rows) {
