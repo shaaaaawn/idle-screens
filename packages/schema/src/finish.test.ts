@@ -467,6 +467,32 @@ describe('SequenceInstance — finish', () => {
     inst.dispose();
   });
 
+  it("steering a segment-level finish.grain updates the composite immediately", () => {
+    const host = document.createElement('div');
+    const inst = mountSeq(twoSeq({}, GRAIN_B), saverCtx({ host }));
+    const v = visibleOf(host);
+    inst.renderFrame!(7000, 1); // segment b active: grain 0.8
+    expect(Math.abs(v.fills.at(-1)!.alpha - 0.8 * GRAIN_ALPHA)).toBeLessThan(1e-9);
+    inst.applyTrack!({ deltas: [{ t: 0, path: 'finish.grain', value: 1, dur: 0 }] } as never);
+    inst.renderFrame!(7100, 1);
+    expect(Math.abs(v.fills.at(-1)!.alpha - GRAIN_ALPHA)).toBeLessThan(1e-9);
+    inst.dispose();
+  });
+
+  it("a segment-level finish generates grain from that segment's own seed, not the sequence's", () => {
+    const host = document.createElement('div');
+    const seq = twoSeq({}, GRAIN_B);
+    seq.segments[1]!.scene.seed = 99; // sequence seed is 3 (twoSeq); segment b's own seed differs
+    const inst = mountSeq(seq, saverCtx({ host }));
+    inst.renderFrame!(7000, 1); // segment b active
+    const tiles = offscreenOf(host).filter(([c]) => c.width === GRAIN_TILE);
+    expect(tiles).toHaveLength(1);
+    const img = (tiles[0]![1].ctx.putImageData as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0] as ImageData;
+    expect(img.data).toEqual(grainTilePixels(99));
+    expect(img.data).not.toEqual(grainTilePixels(3));
+    inst.dispose();
+  });
+
   it('a sequence-level finish overrides every segment finish', () => {
     const host = document.createElement('div');
     const inst = mountSeq(twoSeq({ finish: { dither: 1 } }, GRAIN_B), saverCtx({ host }));

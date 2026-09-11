@@ -217,11 +217,17 @@ function of `(t, seed)`. Same spec + seed ⇒ the same grain on every
 display, every time.
 
 **Flash safety and perception.** Both tiles are centred on mid grey and
-composited with a symmetric blend (`overlay`; a context that rejects it
-gets `soft-light`, then `multiply`), so the frame's **mean luminance is
-unchanged** at every strength — a finish can neither brighten nor darken a
-wall, and `animate`'s 12 Hz step moves a zero-mean texture whose regional
-mean is constant. The analytic tools treat it as luminance-neutral:
+composited with `overlay` — what every shipping canvas2d implements — so
+the frame's **mean luminance is unchanged** at every strength: `overlay`'s
+split at the backdrop's midpoint is exactly what makes a zero-mean,
+symmetric source average back to the backdrop. A finish can neither
+brighten nor darken a wall, and `animate`'s 12 Hz step moves a zero-mean
+texture whose regional mean is constant. The context-rejects-`overlay`
+fallback chain (`soft-light`, then `multiply` as the last resort) is not
+mean-preserving the same way — for the odd context that takes it, the
+luminance-neutral guarantee narrows to "no worse than a very small, bounded
+shift at `finish`'s already-small alpha," not exact invariance. The
+analytic tools treat it as luminance-neutral:
 `luminanceGrid` ignores it entirely (`finish.test.ts` pins the mean
 identical with and without), `adviseSpec` says nothing about it, and
 `describeScene` lists it under `spec.finish` so an agent knows the screen is

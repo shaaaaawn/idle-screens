@@ -1462,16 +1462,29 @@ class SequenceInstance implements SaverInstance {
 
   /**
    * The finish this frame applies: the sequence's own overrides; else the
-   * active segment's (the incoming one during a fade); a bed's is ignored.
+   * active segment's (the incoming one during a fade) — read through
+   * `steeredScene` so a retained steer to `finish.grain`/`finish.dither`
+   * takes effect immediately instead of the authored value; a bed's is
+   * ignored.
    */
   private frameFinish(): SaverSpec['finish'] {
-    return this.seq.finish ?? this.seq.segments[this.activeIndex]?.scene.finish;
+    if (this.seq.finish !== undefined) return this.seq.finish;
+    if (this.activeIndex < 0) return undefined;
+    return this.steeredScene(this.childScene(this.activeIndex)).finish;
+  }
+
+  /** The seed `frameFinish()`'s grain resolves against — the sequence's own for a sequence-level finish, else the active segment's. */
+  private frameFinishSeed(seed: number): number {
+    if (this.seq.finish !== undefined) return this.seed;
+    return this.activeIndex >= 0 ? this.childSeed(this.activeIndex, seed) : this.seed;
   }
 
   renderFrame(T: number, seed: number): void {
     this.renderScene(T, seed);
     // Once per composed frame, after bed, segment and any fade composite.
-    if (this.finishPass) presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish);
+    if (this.finishPass) {
+      presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish, this.frameFinishSeed(seed));
+    }
   }
 
   private renderScene(T: number, seed: number): void {

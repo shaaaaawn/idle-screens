@@ -185,7 +185,11 @@ export function createFinishPass(visible: AnyCanvas, seed: number): FinishPass |
 
 /** A fresh scene canvas for the instance to draw into (never attached to the DOM). */
 export function createSceneCanvas(width: number, height: number): AnyCanvas {
-  return typeof document !== 'undefined' ? document.createElement('canvas') : new OffscreenCanvas(Math.max(1, width), Math.max(1, height));
+  if (typeof document === 'undefined') return new OffscreenCanvas(Math.max(1, width), Math.max(1, height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+  return canvas;
 }
 
 function pattern(fp: FinishPass, size: number, pixels: Uint8ClampedArray): CanvasPattern | null {
@@ -199,7 +203,12 @@ function pattern(fp: FinishPass, size: number, pixels: Uint8ClampedArray): Canva
  * grain at `grain × 0.35` (tile offset per `grainOffset`), then dither at
  * `dither × 0.25`, both with the pass's blend op and no image smoothing (a
  * crisp screen). With nothing to apply it is a plain copy. `w`/`h` are the
- * logical size the context transform maps to the canvas.
+ * logical size the context transform maps to the canvas. `seed` is the
+ * effective seed the *current* finish resolves to — a sequence with a
+ * segment-level finish can present a different seed per frame (one segment
+ * to the next); it defaults to the pass's own seed, so a single-scene
+ * caller (whose seed never changes) can omit it. The cached grain pattern
+ * is rebuilt whenever the seed changes.
  */
 export function presentWithFinish(
   fp: FinishPass,
@@ -209,11 +218,16 @@ export function presentWithFinish(
   t: number,
   finish: FinishSpec | undefined,
   animateAllowed: boolean,
+  seed: number = fp.seed,
 ): void {
   const p = fp.ctx;
   p.globalAlpha = 1;
   p.globalCompositeOperation = 'source-over';
   p.drawImage(scene as CanvasImageSource, 0, 0, w, h);
+  if (seed !== fp.seed) {
+    fp.seed = seed;
+    fp.grain = null;
+  }
   const { grain, dither } = finishStrength(finish);
   if (grain > 0) {
     fp.grain ??= pattern(fp, GRAIN_TILE, grainTilePixels(fp.seed));
