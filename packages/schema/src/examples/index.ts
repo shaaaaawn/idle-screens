@@ -18,6 +18,7 @@ import { RAIN_SPEC } from './rain';
 import { RELAY_BOARD_SPEC } from './relay-board';
 import { SAKURA_SPEC } from './sakura';
 import { SNOWFALL_SPEC } from './snowfall';
+import { THERMAL_FIELD_SPEC } from './thermal-field';
 import { WARP_TUNNEL_SPEC } from './warp-tunnel';
 
 export { AQUARIUM_SPEC } from './aquarium';
@@ -40,6 +41,7 @@ export { RELAY_BOARD_SPEC } from './relay-board';
 export { POLYGONS_SPEC } from './polygons';
 export { PROCESSION_SPEC } from './procession';
 export { WARP_TUNNEL_SPEC } from './warp-tunnel';
+export { THERMAL_FIELD_SPEC } from './thermal-field';
 
 /** Catalog entry for a bundled schema example. */
 export interface SchemaExample {
@@ -70,6 +72,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'facets', label: 'Facets', spec: FACETS_SPEC },
   { id: 'relay-board', label: 'Relay Board', spec: RELAY_BOARD_SPEC },
   { id: 'lobby-talk', label: 'Lobby Talk', spec: LOBBY_TALK_SPEC },
+  { id: 'thermal-field', label: 'Thermal Field', spec: THERMAL_FIELD_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */

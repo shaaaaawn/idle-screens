@@ -38,6 +38,11 @@ function stub2dContext(): CanvasRenderingContext2D {
     setTransform: vi.fn(),
     createLinearGradient: vi.fn(() => stubGradient()),
     createRadialGradient: vi.fn(() => stubGradient()),
+    // A `field` background rasters into ImageData and draws it scaled.
+    createImageData: vi.fn((w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })),
+    putImageData: vi.fn(),
+    drawImage: vi.fn(),
+    imageSmoothingEnabled: true,
     fillStyle: '',
     strokeStyle: '',
     globalAlpha: 1,
