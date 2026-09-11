@@ -163,6 +163,17 @@ export function bedRenderSeed(seq: IdleSequence): number | undefined {
 }
 
 /**
+ * Whether any scene in the sequence — the sequence itself or any segment —
+ * declares a `finish`. Mirrors `SequenceInstance`'s construction-time check:
+ * a finish anywhere allocates the presentation pass for the instance's whole
+ * lifetime, so this is also what `sequenceSwapCompatible` must agree on
+ * before and after a swap.
+ */
+export function sequenceWantsFinish(seq: IdleSequence): boolean {
+  return seq.finish !== undefined || seq.segments.some((s) => s.scene.finish !== undefined);
+}
+
+/**
  * Whether a republished sequence can be swapped into a live
  * `SequenceInstance` in place of `prev` without a remount
  * (`SequenceInstance.hotSwapSequence`). True only when every part of the
@@ -177,6 +188,14 @@ export function bedRenderSeed(seq: IdleSequence): number | undefined {
  *   the next boundary, leaving the room half-swapped;
  * - a `bed` on both sides or neither, structural twins with the same seed
  *   when present;
+ * - the same top-level `seq.seed` — even when every segment and the bed
+ *   resolve their own seed (so `segmentRenderSeed`/`bedRenderSeed` are
+ *   unaffected), a sequence-level `finish` grain resolves against the
+ *   instance's mount-time seed (`frameFinishSeed`), which a swap cannot
+ *   update;
+ * - the same finish presence (`sequenceWantsFinish`) — the presentation
+ *   pass is allocated once at construction, so a swap that adds or removes
+ *   every `finish` in the sequence cannot (de)allocate it;
  * - the same `loop` and `sync` (absent `sync` is `'mount'`);
  * - the same `duration`, `advance` (absent is `'auto'`) and `transition`
  *   (absent is `cut`; `text` on a morph defaults to `'step'`) on every
@@ -193,6 +212,8 @@ export function bedRenderSeed(seq: IdleSequence): number | undefined {
  */
 export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): boolean {
   if (prev.segments.length !== next.segments.length) return false;
+  if (prev.seed !== next.seed) return false;
+  if (sequenceWantsFinish(prev) !== sequenceWantsFinish(next)) return false;
   if (prev.loop !== next.loop) return false;
   if ((prev.sync ?? 'mount') !== (next.sync ?? 'mount')) return false;
   if (!!prev.bed !== !!next.bed) return false;
