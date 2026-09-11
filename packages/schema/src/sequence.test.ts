@@ -2490,6 +2490,14 @@ describe('SequenceInstance — hotSwapSequence', () => {
       expect(sequenceSwapCompatible(ownSeeds, { ...ownSeeds, seed: (ownSeeds.seed ?? 0) + 1 })).toBe(false);
     });
 
+    it('a seq.seed change of an exact multiple of 2**32 is free — the mount-time seed normalizes (>>> 0) to the same value', () => {
+      const withSeed: IdleSequence = { ...base(), seed: 7 };
+      expect(sequenceSwapCompatible(withSeed, { ...withSeed, seed: 7 + 2 ** 32 })).toBe(true);
+      // undefined vs. defined must still be pinned even when the defined
+      // side normalizes to what undefined would fall back to elsewhere.
+      expect(sequenceSwapCompatible({ ...withSeed, seed: undefined }, withSeed)).toBe(false);
+    });
+
     it('adding or removing every finish in the sequence is pinned — the presentation pass is allocated once at mount', () => {
       expect(sequenceSwapCompatible(base(), { ...base(), finish: { grain: 0.3 } })).toBe(false);
       expect(sequenceSwapCompatible(base(), edit(0, { scene: { ...slide('Alpha'), finish: { grain: 0.3 } } }))).toBe(false);
