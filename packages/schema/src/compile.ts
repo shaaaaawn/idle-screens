@@ -20,7 +20,7 @@ import {
 } from './steer';
 import type { IdleSequence, LayerSpec, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
-import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart } from './sequence';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart, sequenceSwapCompatible } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -950,8 +950,42 @@ interface OffscreenChild {
 /** `bed.<path>` routes a steer to the sequence's bed when one exists. */
 const BED_PREFIX = 'bed.';
 
-class SequenceInstance implements SaverInstance {
-  private readonly seq: IdleSequence;
+/**
+ * What `compileSequence().mount()` returns: a `SaverInstance` that can also
+ * take a republished sequence in place. Hosts feature-detect it with
+ * `hasHotSwapSequence` (an older engine's instance simply lacks the method)
+ * and fall through to a remount when it returns `false`.
+ */
+export interface SequenceSaverInstance extends SaverInstance {
+  renderFrame(t: number, seed: number): void;
+  applyTrack(track: ControlTrack): void;
+  /**
+   * Swap `next` in for the running sequence without remounting, when the
+   * two are `sequenceSwapCompatible`: every live segment child (and the bed)
+   * hot-swaps to its new scene, the clock, the active segment, every
+   * released hold and the retained track stay exactly where they were, and
+   * the next frame resolves to the same `(segment, localT)` as if nothing
+   * had happened — a mid-show caption fix that does not send the room back
+   * to segment 0. Returns `false` and changes nothing when the sequences are
+   * not compatible (a structural or timing edit); the host remounts then.
+   */
+  hotSwapSequence(next: IdleSequence): boolean;
+}
+
+/** `compileSequence`'s plugin: `mount` is typed to the sequence instance and `spec` to the validated sequence. */
+export interface SequenceSaverPlugin extends SaverPlugin {
+  mount(ctx: SequenceMountContext): SequenceSaverInstance;
+  spec: IdleSequence;
+}
+
+/** Feature-detect `hotSwapSequence` on any mounted instance (false for a plain scene, or a sequence from an older engine). */
+export function hasHotSwapSequence(inst: SaverInstance): inst is SequenceSaverInstance {
+  return typeof (inst as { hotSwapSequence?: unknown }).hotSwapSequence === 'function';
+}
+
+class SequenceInstance implements SequenceSaverInstance {
+  /** Replaced wholesale by `hotSwapSequence`; every per-segment lookup (`segmentStart`, `canMorph`, `childScene`) reads it live, so there are no derived tables to refresh. */
+  private seq: IdleSequence;
   private readonly childCtx: SaverContext;
   private readonly canvas: HTMLCanvasElement | null;
   private readonly children: (SpecInstance | null)[];
@@ -1001,6 +1035,13 @@ class SequenceInstance implements SaverInstance {
    * resolve on it (see `applyRetainedDeltas`).
    */
   private readonly retainedDeltas = new Map<string, SteerDelta>();
+  /**
+   * Every `bed.<path>` delta (prefix stripped, last wins per path). The bed
+   * is never re-created, so these are applied to it once on arrival — the
+   * map exists only so `hotSwapSequence` can put a steered bed colour back
+   * after the bed takes its republished scene. Absent a swap it is never read.
+   */
+  private readonly retainedBedDeltas = new Map<string, SteerDelta>();
   /** The outgoing segment while a `fade` runs; null otherwise. */
   private fading: OffscreenChild | null = null;
   /**
@@ -1434,7 +1475,10 @@ class SequenceInstance implements SaverInstance {
     // `bed` keeps working).
     const isBedPath = (d: SteerDelta): boolean => this.bed !== null && typeof d.path === 'string' && d.path.startsWith(BED_PREFIX);
     const bedDeltas = all.filter(isBedPath).map((d) => ({ ...d, path: d.path.slice(BED_PREFIX.length) }));
-    if (bedDeltas.length > 0) this.bed!.applyTrack({ ...track, deltas: bedDeltas as unknown as ParamDelta[] });
+    if (bedDeltas.length > 0) {
+      for (const d of bedDeltas) this.retainedBedDeltas.set(d.path, d);
+      this.bed!.applyTrack({ ...track, deltas: bedDeltas as unknown as ParamDelta[] });
+    }
     const deltas = all.filter((d) => !isBedPath(d));
     // Retain first: a `sequence.segment` steer in the same track creates the
     // target child inside renderFrame below, and it must see these deltas.
@@ -1493,6 +1537,40 @@ class SequenceInstance implements SaverInstance {
     }
   }
 
+  /**
+   * See `SequenceSaverInstance.hotSwapSequence`. Nothing that positions the
+   * show is touched: `clockOffset`, `releasedBelow`, `activeIndex`,
+   * `morphFromIndex`, `pendingWrapFade`, `renderedT` and the retained deltas
+   * all keep their values, and the timing terms `sequenceSwapCompatible`
+   * pins (durations, advance, transitions, loop) are the same on both sides,
+   * so `resolveSegment` at the next frame lands where it would have anyway.
+   * Each live child takes its new scene with the retained track re-applied
+   * (`steeredScene` — the same routing a fresh child gets), so steered paint
+   * survives the swap; `hotSwapSpec` keeps the entities (the signatures
+   * match) and does not reset ghosting contiguity, so a drifting entity is
+   * where it was 1 ms ago. Children are always paused, so none of them has a
+   * glide in flight for the swap to interrupt (`SpecInstance.applyTrack`
+   * snaps when paused). A morph in progress is untouched here: its chain-root
+   * child is re-lerped from the new endpoints on the very next frame.
+   */
+  hotSwapSequence(next: IdleSequence): boolean {
+    if (!sequenceSwapCompatible(this.seq, next)) return false;
+    this.seq = next;
+    // Routed like a child's retained set (`applyRetainedDeltas`, not
+    // `applyDeltasNow`): the latter resets ghosting contiguity, and the bed's
+    // trails must not restart on a swap.
+    if (this.bed && next.bed) this.bed.hotSwapSpec(applyRetainedDeltas(this.bedScene(next.bed), this.retainedBedDeltas.values()));
+    for (let i = 0; i < this.children.length; i++) {
+      this.children[i]?.hotSwapSpec(this.steeredScene(this.childScene(i)));
+    }
+    if (this.fading) this.fading.child.hotSwapSpec(this.steeredScene(this.childScene(this.fading.index)));
+    if (this.fadingIn) this.fadingIn.child.hotSwapSpec(this.steeredScene(this.childScene(this.fadingIn.index)));
+    // A paused instance (reducedMotion, or a sleeping host) has no next frame
+    // to paint the new words with; a running one repaints on its own tick.
+    if (this.paused) this.renderFrame(this.renderedT, this.seed);
+    return true;
+  }
+
   dispose(): void {
     this.stop();
     this.releaseFading();
@@ -1527,11 +1605,11 @@ function sequenceManifest(seq: IdleSequence): SaverManifest {
   };
 }
 
-export function compileSequence(spec: unknown): SaverPlugin {
+export function compileSequence(spec: unknown): SequenceSaverPlugin {
   const valid = assertValidSequence(spec);
   return {
     manifest: sequenceManifest(valid),
-    mount: (ctx: SaverContext) => new SequenceInstance(valid, ctx),
+    mount: (ctx: SequenceMountContext) => new SequenceInstance(valid, ctx),
     spec: valid,
   };
 }
