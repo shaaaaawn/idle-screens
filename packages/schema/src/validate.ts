@@ -49,6 +49,8 @@ const KNOWN_WARP = new Set(['type', 'speed', 'center']);
 const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
+const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 'bands', 'drift', 'seed']);
+const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
 const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout']);
@@ -186,8 +188,58 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
       warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
     }
+  } else if (bg.type === 'field') {
+    validateFieldBackground(bg, err, warn);
   } else {
-    err('background.type', 'must be solid | gradient');
+    err('background.type', 'must be solid | gradient | field');
+  }
+}
+
+/**
+ * A `field` background. Every bound here is a rendering or safety limit:
+ * `scale` is capped so a raster cell never spans more than a feature (the
+ * upscaled raster would alias), `octaves` so a 96×54 raster stays cheap to
+ * recompute ten times a second, and `drift.period` is floored at
+ * LIMITS.minDriftPeriod — the same 10 s guard the gradient's drift carries —
+ * because the drift is the ONLY way a field changes over time: with the
+ * domain travelling a bounded circle once per period, no point of the field
+ * can change faster than that, so a field can never strobe.
+ */
+function validateFieldBackground(bg: Record<string, unknown>, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isNum(bg.scale) || bg.scale < LIMITS.minFieldScale || bg.scale > LIMITS.maxFieldScale) {
+    err('background.scale', `must be a number ${LIMITS.minFieldScale}..${LIMITS.maxFieldScale} (features across the short side)`);
+  }
+  if (bg.octaves !== undefined && (!isNum(bg.octaves) || !Number.isInteger(bg.octaves) || bg.octaves < 1 || bg.octaves > LIMITS.maxFieldOctaves)) {
+    err('background.octaves', `must be an integer 1..${LIMITS.maxFieldOctaves}`);
+  }
+  if (bg.warp !== undefined && (!isNum(bg.warp) || bg.warp < 0 || bg.warp > 1)) {
+    err('background.warp', 'must be a number 0..1');
+  }
+  if (bg.quantize !== undefined && (!isNum(bg.quantize) || !Number.isInteger(bg.quantize) || bg.quantize < 0 || bg.quantize === 1 || bg.quantize > LIMITS.maxFieldQuantize)) {
+    err('background.quantize', `must be 0 (smooth) or an integer 2..${LIMITS.maxFieldQuantize}`);
+  }
+  if (!Array.isArray(bg.bands) || bg.bands.length < LIMITS.minFieldBands || bg.bands.length > LIMITS.maxFieldBands) {
+    err('background.bands', `must be ${LIMITS.minFieldBands}..${LIMITS.maxFieldBands} hex colours`);
+  } else {
+    bg.bands.forEach((c, i) => color(c, `background.bands[${i}]`, err));
+  }
+  if (bg.drift !== undefined) {
+    if (!isObj(bg.drift)) err('background.drift', 'must be an object');
+    else {
+      if (!isNum(bg.drift.period) || bg.drift.period < LIMITS.minDriftPeriod) {
+        err('background.drift.period', `must be >= ${LIMITS.minDriftPeriod} ms`);
+      }
+      if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount < 0 || bg.drift.amount > LIMITS.maxFieldDriftAmount)) {
+        err('background.drift.amount', `must be a number 0..${LIMITS.maxFieldDriftAmount}`);
+      }
+      for (const k of unknownKeys(bg.drift, KNOWN_FIELD_DRIFT)) {
+        warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (bg.seed !== undefined && !isNum(bg.seed)) err('background.seed', 'must be a number');
+  for (const k of unknownKeys(bg, KNOWN_BG_FIELD)) {
+    warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
   }
 }
 

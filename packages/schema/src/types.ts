@@ -51,7 +51,48 @@ export interface SaverSpec {
 
 export type BackgroundSpec =
   | { type: 'solid'; color: string }
-  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec; drift?: BackgroundDrift };
+  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec; drift?: BackgroundDrift }
+  | FieldBackground;
+
+/**
+ * A scalar-field background: seeded, warped value noise quantised into
+ * `bands` — thermal maps, contour terrain, sonar landmasses, riso washes.
+ * Pure in `(x, y, t, seed)`: the renderer paints it as a low-res raster
+ * (short side 96 px; 48 on the `basic` / `minimal` tiers) scaled to the
+ * canvas, recomputed once per 100 ms bucket while drifting and once ever
+ * otherwise, and the perception grid samples the same function directly.
+ * The sampler uses its own hash, never the entity RNG, so adding a field to
+ * a spec leaves every entity where it was.
+ */
+export interface FieldBackground {
+  type: 'field';
+  /** Noise features across the short side, 0.5..8 (LIMITS.minFieldScale / maxFieldScale). */
+  scale: number;
+  /** Octaves of detail, integer 1..4 (default 2). */
+  octaves?: number;
+  /** Domain-warp amount 0..1 (default 0) — folds round blobs into smeared contours. */
+  warp?: number;
+  /**
+   * Levels to posterise the field into, integer 2..8, or 0 for smooth
+   * interpolation between bands (Aura, Mist). Default `bands.length`: one
+   * hard band per level.
+   */
+  quantize?: number;
+  /** 2..8 hex colours, darkest-to-lightest or whatever ramp the look wants. */
+  bands: string[];
+  /** Slow domain travel — the field's "animate". Period floored at 10 s (flash guard). */
+  drift?: FieldDrift;
+  /** Field seed; defaults to the spec seed. Independent of the entity stream. */
+  seed?: number;
+}
+
+/** Slow travel of a field's sample domain: a circle of radius `amount` feature units per `period`. */
+export interface FieldDrift {
+  /** Full loop period in ms. Floor: LIMITS.minDriftPeriod (10 s) — the flash guard. */
+  period: number;
+  /** Radius of the domain travel in feature units, 0..1. Default 0.3. */
+  amount?: number;
+}
 
 /** A vertical gradient stop (`at` 0 = top, 1 = bottom). */
 export interface GradientStop {
@@ -532,7 +573,7 @@ export const LIMITS = {
   referenceViewport: 1080, // for validating viewport-unit dimensional caps
   maxTrailLength: 5000, // ms — cap trail duration
   maxTrailSamples: 24, // dots per trail
-  minDriftPeriod: 10000, // ms — background drift floor (10 s)
+  minDriftPeriod: 10000, // ms — background drift floor (10 s), gradient and field alike
   maxDriftAmount: 0.3, // fraction of gradient stop shift
   maxGhosting: 0.95, // frame persistence cap — bounds the seek warm-up replay
   maxGhostReplayFrames: 120, // fixed-step frames replayed on a non-contiguous seek
@@ -546,6 +587,13 @@ export const LIMITS = {
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
   maxTextBlockMaxWidth: 2.0, // of min(w,h) — wider than the frame is legal; text-off-screen reports the overflow
+  minFieldScale: 0.5, // features per short side — below this the field is one flat blob
+  maxFieldScale: 8, // above this a 96 px raster cell spans more than one feature
+  maxFieldOctaves: 4,
+  minFieldBands: 2,
+  maxFieldBands: 8,
+  maxFieldQuantize: 8,
+  maxFieldDriftAmount: 1, // feature units of domain travel
   maxRevealSpeed: 120, // graphemes/sec — faster than any readable typing
   maxCaretBlinkHz: 3, // full blink cycles/sec — WCAG 2.3.1 flash-safety cap
   maxSegments: 24,
