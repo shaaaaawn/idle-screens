@@ -929,7 +929,8 @@ describe('SequenceInstance — morph segue', () => {
 
   it('preserves paint steering after a completed morph', () => {
     const inst = mountSync(compileSequence(morphSeq()));
-    inst.renderFrame!(7000, 1);
+    inst.renderFrame!(5500, 1); // mid-morph (localT 500 < dur 1000): enters the morph state
+    inst.renderFrame!(7000, 1); // past the morph window: triggers finalization
     inst.applyTrack!({
       program: 'test',
       seed: 1,

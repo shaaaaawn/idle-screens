@@ -22,6 +22,12 @@ describe('LogicalClock', () => {
     expect(clock.sample(50_000)).toBe(20_000);
     expect(clock.sample(51_000)).toBe(21_000);
   });
+
+  it('stays frozen at 0 if sampled before the first resume', () => {
+    const clock = new LogicalClock();
+    expect(clock.sample(1_000)).toBe(0);
+    expect(clock.sample(6_000)).toBe(0);
+  });
 });
 
 describe('rateOffset', () => {
