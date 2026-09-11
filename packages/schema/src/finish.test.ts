@@ -255,6 +255,13 @@ const visibleOf = (host: HTMLElement): Rec => recs.get(host.querySelector('canva
 const offscreenOf = (host: HTMLElement): Array<[HTMLCanvasElement, Rec]> => [...recs.entries()].filter(([c]) => !host.contains(c));
 const sceneOf = (host: HTMLElement): Rec | undefined => offscreenOf(host).find(([c]) => c.width !== GRAIN_TILE && c.width !== DITHER_TILE)?.[1];
 const SCREEN_OPS = ['overlay', 'soft-light', 'multiply'];
+/**
+ * Byte-for-byte equality without vitest's deep-equal diff: on a MISMATCH,
+ * `toEqual()` pretty-prints a diff of two 256×256×4-byte arrays, which is
+ * slow enough on a full-suite run to look like a hang. A plain boolean
+ * assertion never builds that diff.
+ */
+const sameBytes = (a: Uint8ClampedArray, b: Uint8ClampedArray): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
 
 describe('SpecInstance — finish presentation', () => {
   it('absent finish: one canvas, drawn directly — no scene canvas, no copy, no screen (the path before the field existed)', () => {
@@ -488,8 +495,35 @@ describe('SequenceInstance — finish', () => {
     const tiles = offscreenOf(host).filter(([c]) => c.width === GRAIN_TILE);
     expect(tiles).toHaveLength(1);
     const img = (tiles[0]![1].ctx.putImageData as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0] as ImageData;
-    expect(img.data).toEqual(grainTilePixels(99));
-    expect(img.data).not.toEqual(grainTilePixels(3));
+    expect(sameBytes(img.data, grainTilePixels(99))).toBe(true);
+    expect(sameBytes(img.data, grainTilePixels(3))).toBe(false);
+    inst.dispose();
+  });
+
+  it("a segment-level finish without its own seed matches the segment's actual render seed (seq.seed + index), not the raw sequence seed", () => {
+    const host = document.createElement('div');
+    const seq = twoSeq({}, GRAIN_B);
+    seq.segments[1]!.scene.seed = undefined; // `spec()` defaults to seed 5 — clear it so this segment truly has none of its own
+    const inst = mountSeq(seq, saverCtx({ host })); // sequence seed 3; segment b is index 1
+    inst.renderFrame!(7000, 1); // segment b active
+    const tiles = offscreenOf(host).filter(([c]) => c.width === GRAIN_TILE);
+    expect(tiles).toHaveLength(1);
+    const img = (tiles[0]![1].ctx.putImageData as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0] as ImageData;
+    expect(sameBytes(img.data, grainTilePixels(4))).toBe(true); // segmentRenderSeed: normalizeSeed(seq.seed(3) + index(1))
+    expect(sameBytes(img.data, grainTilePixels(3))).toBe(false);
+    inst.dispose();
+  });
+
+  it('a segment-level finish with `seed: 0` normalizes the grain seed the same way SpecInstance normalizes the scene seed', () => {
+    const host = document.createElement('div');
+    const seq = twoSeq({}, GRAIN_B);
+    seq.segments[1]!.scene.seed = 0;
+    const inst = mountSeq(seq, saverCtx({ host }));
+    inst.renderFrame!(7000, 1); // segment b active
+    const tiles = offscreenOf(host).filter(([c]) => c.width === GRAIN_TILE);
+    expect(tiles).toHaveLength(1);
+    const img = (tiles[0]![1].ctx.putImageData as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0] as ImageData;
+    expect(sameBytes(img.data, grainTilePixels(1))).toBe(true); // normalizeSeed(0) === 1, same as SpecInstance
     inst.dispose();
   });
 

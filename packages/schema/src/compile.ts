@@ -22,7 +22,7 @@ import type { FieldBackground, IdleSequence, LayerSpec, SaverSpec, SpriteSpec } 
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
-import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentStart } from './sequence';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -1473,17 +1473,24 @@ class SequenceInstance implements SaverInstance {
     return this.steeredScene(this.childScene(this.activeIndex)).finish;
   }
 
-  /** The seed `frameFinish()`'s grain resolves against — the sequence's own for a sequence-level finish, else the active segment's. */
-  private frameFinishSeed(seed: number): number {
+  /**
+   * The seed `frameFinish()`'s grain resolves against — the sequence's own
+   * for a sequence-level finish, else the active segment's actual render
+   * seed (`segmentRenderSeed`: chain-root-aware and normalized exactly like
+   * `SpecInstance`, so it agrees with what that segment's entities render
+   * with, morph or not).
+   */
+  private frameFinishSeed(): number {
     if (this.seq.finish !== undefined) return this.seed;
-    return this.activeIndex >= 0 ? this.childSeed(this.activeIndex, seed) : this.seed;
+    if (this.activeIndex < 0) return this.seed;
+    return segmentRenderSeed(this.seq, this.activeIndex) ?? this.seed;
   }
 
   renderFrame(T: number, seed: number): void {
     this.renderScene(T, seed);
     // Once per composed frame, after bed, segment and any fade composite.
     if (this.finishPass) {
-      presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish, this.frameFinishSeed(seed));
+      presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish, this.frameFinishSeed());
     }
   }
 

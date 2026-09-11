@@ -224,8 +224,13 @@ export function presentWithFinish(
   p.globalAlpha = 1;
   p.globalCompositeOperation = 'source-over';
   p.drawImage(scene as CanvasImageSource, 0, 0, w, h);
-  if (seed !== fp.seed) {
-    fp.seed = seed;
+  // Same normalization SpecInstance applies to every seed it renders with
+  // (0 is falsy, so a valid `seed: 0` lands on 1) — callers may pass a raw,
+  // un-normalized seed, and the comparison below needs both sides in the
+  // same space or a `seed: 0` scene would never match `fp.seed`.
+  const normalizedSeed = (seed >>> 0) || 1;
+  if (normalizedSeed !== fp.seed) {
+    fp.seed = normalizedSeed;
     fp.grain = null;
   }
   const { grain, dither } = finishStrength(finish);
