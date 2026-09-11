@@ -20,10 +20,12 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
     per-pixel feedback — anything declarative sprite fields can't do)
   - `spec-blocked` — ONE named schema feature away; name the feature (it
     becomes a candidate for the spec-feature-pipeline backlog)
-- Every entry has a **bucket**, one of: `fine-art-homage`, `nature-atmosphere`,
+- Every entry has a **bucket**: `fine-art-homage`, `nature-atmosphere`,
   `geometric-op-art`, `minimal-ambient`, `flow-particle`, `organic-simulation`,
-  `data-typographic`, `canonical-retro`. A new idea that doesn't fit any of
-  these adds a bucket here at triage time, rather than picking the closest fit.
+  `data-typographic`, `canonical-retro` — or, for a candidate that fits none
+  of these, a new bucket name proposed at candidate time rather than forced
+  into the closest existing fit. A new bucket is appended to this list once
+  the entry is triaged and the name is confirmed.
 - Entry format (canonical):
 
 ```markdown

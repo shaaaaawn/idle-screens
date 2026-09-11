@@ -1,4 +1,4 @@
-> Deprecated: imported into the canonical [Saver Idea Registry](../saver-ideas.md). Keep this file as source history; update lifecycle state in the registry.
+> Selected entries imported into the canonical [Saver Idea Registry](../saver-ideas.md); update lifecycle state there, not here. Remaining entries below are still an untriaged candidate source.
 
 # Screensaver Research & Implementation Guide
 
