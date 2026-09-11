@@ -1192,7 +1192,11 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
     text: [...textSprites(seq.bed, bedOpts).map(prefix), ...textSprites(ink, segOpts).map(shift)],
     advisories: [
       ...adviseSpec(seq.bed, viewport, { t: T, seed: bedOpts.seed }).map((w) => ({ ...w, path: `bed.${w.path}` })),
-      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed }),
+      // inkOverBed's layers are the segment's (seed: segOpts.seed) but its
+      // background is the bed's (seq.bed.background) — a field there must be
+      // sampled with the bed's own seed, or a `role: 'read'` legibility
+      // advisory checks terrain that isn't what's actually behind the ink.
+      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed, backgroundSeed: bedOpts.seed }),
     ],
     segment,
     bed: true,

@@ -406,6 +406,25 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
     expect(codes[0]).toMatch(/`bottom`/);
   });
 
+  it("a field background samples opts.backgroundSeed, not opts.seed — the seed a sequence's inkOverBed advisory needs", () => {
+    // scale 8 / octaves 1 at (0.5, 0.5): seed 2 reads near-white, seed 6 near-black
+    // (picked empirically — any pair with a legible/illegible split would do).
+    const fieldSpec: SaverSpec = {
+      ...vp,
+      background: { type: 'field', scale: 8, octaves: 1, bands: ['#000000', '#ffffff'] },
+      layers: [block('Caption', 0.5, 0.5, { color: '#808080', role: 'read', anchor: 'center' })],
+    };
+    const asIfBackgroundSeeded = (seed: number, backgroundSeed: number) =>
+      adviseSpec(fieldSpec, { width: 1920, height: 1080 }, { seed, backgroundSeed }).filter((w) => LEGIBILITY_CODES.has(w.code));
+    // seed varies, backgroundSeed fixed ⇒ same ground (only the background changed methods).
+    expect(asIfBackgroundSeeded(1, 2)).toEqual(asIfBackgroundSeeded(99, 2));
+    // backgroundSeed varies ⇒ different ground (2 reads white, 6 reads black at this point).
+    expect(asIfBackgroundSeeded(1, 2)).not.toEqual(asIfBackgroundSeeded(1, 6));
+    // Omitting backgroundSeed falls back to seed, unchanged for every caller
+    // with one scene and one seed (every caller but a sequence's inkOverBed).
+    expect(legibility(fieldSpec)).toEqual(asIfBackgroundSeeded(42, 42));
+  });
+
   it('judges against the brightest additive layer that can sit under a line, at its peak pulse', () => {
     // Bright text on a dark plate: fine on its own. A big static `lighter`
     // glow parked under it, pulsing up to alpha 0.95, lifts the plate until

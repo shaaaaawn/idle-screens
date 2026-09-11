@@ -48,8 +48,15 @@ export function adviseSpec(
    * describe the same scene its other channels do — without them a caller
    * perceiving at t = 30 s would get `form` for that instant beside an
    * `overlap-seams` advisory computed for a different one.
+   *
+   * `backgroundSeed` is separate from `seed` because a sequence's
+   * `inkOverBed` (the segment's ink layers judged against the bed's
+   * background — see `perceiveSequenceFrame`) mixes two scenes with
+   * potentially different seeds: `seed` drives the ink layers' own entity
+   * stream, `backgroundSeed` samples the bed's field. Defaults to `seed` —
+   * every other caller has one scene and one seed for both.
    */
-  opts: { t?: number; seed?: number } = {},
+  opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
 ): SpecWarning[] {
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
@@ -438,7 +445,7 @@ export function adviseSpec(
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const cx = (box.x0 + box.x1) / 2;
-      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.seed);
+      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed);
       const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
       const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
       const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
