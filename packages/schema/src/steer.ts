@@ -310,6 +310,9 @@ export function structuralSignature(spec: SaverSpec): string {
               // existing spec's signature string is byte-identical.
               ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
               : undefined,
+        // Static rotation is baked into entities (a range draws a seeded
+        // angle). Appended only when set — same rule as `anchor` above.
+        ...(l.rotate !== undefined ? [l.rotate] : []),
       ];
     }),
   ]);

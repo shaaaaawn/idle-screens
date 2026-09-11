@@ -161,6 +161,17 @@ export interface LayerSpec {
    */
   spin?: number | [number, number];
   /**
+   * Static per-entity rotation in degrees (positive = clockwise), ±360. A
+   * scalar turns every entity the same way; a `[min, max]` range gives each
+   * entity a seeded angle — thrown blades, scattered glyphs, a tilted grid.
+   * Composes with `spin` (added to its seeded start angle). Note that `spin:
+   * [0, 0]` does NOT do this: a zero spin speed renders at angle 0, its
+   * seeded phase unused. Structural (baked into entities). The range form
+   * draws one seeded value per entity, only when declared, so existing
+   * specs keep identical streams.
+   */
+  rotate?: number | [number, number];
+  /**
    * Sinusoidal size breathing, parallel to `pulse` for opacity. `amp` is a
    * fraction of base size (0.3 = ±30 %). `period` in ms with the same
    * flash-safety floor as pulse. Per-entity seeded phase.
@@ -565,6 +576,7 @@ export const LIMITS = {
   maxPulseAmp: 0.5, // opacity breathing amplitude cap
   minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)
   maxSpin: 360, // degrees/sec — one full revolution per second
+  maxRotate: 360, // degrees — static per-entity rotation, one turn either way
   maxGrowAmp: 0.8, // size breathing amplitude cap (fraction of base size)
   maxOrbitSpeed: 180, // degrees/sec — half a revolution per second
   maxLinksK: 8,
@@ -575,6 +587,13 @@ export const LIMITS = {
   maxTrailSamples: 24, // dots per trail
   minDriftPeriod: 10000, // ms — background drift floor (10 s), gradient and field alike
   maxDriftAmount: 0.3, // fraction of gradient stop shift
+  minFieldScale: 0.5, // features per short side — below this the field is one flat blob
+  maxFieldScale: 8, // above this a 96 px raster cell spans more than one feature
+  maxFieldOctaves: 4,
+  minFieldBands: 2,
+  maxFieldBands: 8,
+  maxFieldQuantize: 8,
+  maxFieldDriftAmount: 1, // feature units of domain travel
   maxGhosting: 0.95, // frame persistence cap — bounds the seek warm-up replay
   maxGhostReplayFrames: 120, // fixed-step frames replayed on a non-contiguous seek
   maxMeander: 500, // px — wander harmonic amplitude cap (viewport cap: /referenceViewport)
@@ -587,13 +606,6 @@ export const LIMITS = {
   minTextBlockFontSize: 0.01,
   maxTextBlockFontSize: 0.2,
   maxTextBlockMaxWidth: 2.0, // of min(w,h) — wider than the frame is legal; text-off-screen reports the overflow
-  minFieldScale: 0.5, // features per short side — below this the field is one flat blob
-  maxFieldScale: 8, // above this a 96 px raster cell spans more than one feature
-  maxFieldOctaves: 4,
-  minFieldBands: 2,
-  maxFieldBands: 8,
-  maxFieldQuantize: 8,
-  maxFieldDriftAmount: 1, // feature units of domain travel
   maxRevealSpeed: 120, // graphemes/sec — faster than any readable typing
   maxCaretBlinkHz: 3, // full blink cycles/sec — WCAG 2.3.1 flash-safety cap
   maxSegments: 24,

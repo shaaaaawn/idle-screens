@@ -621,6 +621,26 @@
           },
           "description": "Sparse events: each entity appears, expands and fades in place for `life` ms every `every` ms, dark in between. The one-ping primitive; a pure function of t."
         },
+        "rotate": {
+          "description": "Static per-entity rotation in degrees (positive = clockwise). A scalar turns every entity the same way; a [min,max] range gives each entity a seeded angle. Composes with spin (added to its seeded start angle). spin: [0, 0] does NOT hold a seeded angle — a zero spin speed renders at 0. Native clients that read spin only render it as 0.",
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": -360,
+              "maximum": 360
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -360,
+                "maximum": 360
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
         "clock": {
           "type": "object",
           "additionalProperties": false,

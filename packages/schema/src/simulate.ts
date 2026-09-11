@@ -69,6 +69,8 @@ export interface Entity {
   cyclePhase?: number;
   /** Velocity easing. Only set when the motion declares `ease`. */
   ease?: { type: 'settle' | 'buoyant'; tau: number };
+  /** Static rotation (radians), added to any spin. Only set when `layer.rotate` is declared. */
+  rotate?: number;
   /** Spline params (pts in px, shared per layer). Only set for path motion. */
   path?: {
     pts: Array<{ x: number; y: number }>;
@@ -443,6 +445,13 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       // Time-structure fields (2026-09): ease draws nothing; emit's one draw
       // per entity happens in a pass AFTER this loop (see below).
       ...(ease ? { ease: { type: ease.type, tau: ease.tau } } : {}),
+      // Static rotation (2026-09-10): a scalar draws nothing; the range form
+      // draws one value here, last, only when declared.
+      ...(typeof layer.rotate === 'number'
+        ? { rotate: (layer.rotate * Math.PI) / 180 }
+        : Array.isArray(layer.rotate)
+          ? { rotate: (rng.range(layer.rotate[0], layer.rotate[1]) * Math.PI) / 180 }
+          : {}),
     });
 
     if (layer.clock) {
@@ -554,10 +563,17 @@ export function sizeAt(e: Entity, t: number): number {
   return s > 0 ? s : 0.1;
 }
 
-/** Analytic rotation angle at time `t` (ms) in radians. Pure. */
+/**
+ * Analytic rotation angle at time `t` (ms) in radians. Pure. A static
+ * `rotate` is the base; a spinning entity adds its seeded start angle and
+ * speed × t on top. With neither, 0 — and with `spin: [0, 0]` also 0: a zero
+ * spin speed never rotates, so its seeded phase is not applied (that is what
+ * `rotate` is for).
+ */
 export function rotationAt(e: Entity, t: number): number {
-  if (!e.spinSpeed) return 0;
-  return e.spinPhase + e.spinSpeed * (t / 1000);
+  const base = e.rotate ?? 0;
+  if (!e.spinSpeed) return base;
+  return base + e.spinPhase + e.spinSpeed * (t / 1000);
 }
 
 /** Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is unset. */

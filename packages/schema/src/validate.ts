@@ -13,7 +13,7 @@ const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntens
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life', 'emit', 'clock',
+  'layout', 'life', 'emit', 'clock', 'rotate',
 ]);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
@@ -53,7 +53,7 @@ const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 
 const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -329,6 +329,17 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       err(`${path}.spin`, 'must be a number or a [min,max] range (degrees/sec)');
     } else if (Math.abs(layer.spin) > LIMITS.maxSpin) {
       err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
+    }
+  }
+  if (layer.rotate !== undefined) {
+    if (isRange(layer.rotate)) {
+      if (Math.abs(layer.rotate[0]) > LIMITS.maxRotate || Math.abs(layer.rotate[1]) > LIMITS.maxRotate) {
+        err(`${path}.rotate`, `each end of the range must be within ±${LIMITS.maxRotate} degrees`);
+      }
+    } else if (!isNum(layer.rotate)) {
+      err(`${path}.rotate`, 'must be a number or a [min,max] range (degrees)');
+    } else if (Math.abs(layer.rotate) > LIMITS.maxRotate) {
+      err(`${path}.rotate`, `must be within ±${LIMITS.maxRotate} degrees`);
     }
   }
   if (layer.grow !== undefined) {
