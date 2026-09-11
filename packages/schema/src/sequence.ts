@@ -1,5 +1,5 @@
 import { structuralSignature } from './steer';
-import { LIMITS, type IdleSequence } from './types';
+import { LIMITS, type IdleSequence, type SequenceTransition } from './types';
 
 export interface ResolvedSegment {
   index: number;
@@ -160,4 +160,61 @@ export function bedRenderSeed(seq: IdleSequence): number | undefined {
   if (!seq.bed) return undefined;
   const raw = seq.bed.seed ?? (seq.seed !== undefined ? seq.seed + LIMITS.maxSegments : undefined);
   return raw === undefined ? undefined : normalizeSeed(raw);
+}
+
+/**
+ * Whether a republished sequence can be swapped into a live
+ * `SequenceInstance` in place of `prev` without a remount
+ * (`SequenceInstance.hotSwapSequence`). True only when every part of the
+ * running instance that is fixed at mount — or that a running clock is
+ * measured against — is unchanged:
+ *
+ * - the same number of segments;
+ * - every segment's scene is a structural twin (`structuralSignature`) of
+ *   its counterpart, so the live child's entities survive a `hotSwapSpec`;
+ * - the same render seed per segment (`segmentRenderSeed`) — a child's seed
+ *   is fixed at construction, so a changed seed could only take effect at
+ *   the next boundary, leaving the room half-swapped;
+ * - a `bed` on both sides or neither, structural twins with the same seed
+ *   when present;
+ * - the same `loop` and `sync` (absent `sync` is `'mount'`);
+ * - the same `duration`, `advance` (absent is `'auto'`) and `transition`
+ *   (absent is `cut`; `text` on a morph defaults to `'step'`) on every
+ *   segment. Durations move segment boundaries under a clock that keeps
+ *   running, and `clockOffset`/`releasedBelow` on the instance are measured
+ *   in that timeline — so a timing edit is a remount for now.
+ *
+ * Paint stays free: colours, words, `background`, `ghosting`, ids and
+ * labels, segment keys. Layer `alpha` is a per-entity range baked at build
+ * time (like `size`), so it is already covered by the structural twin check
+ * above and is not free — an alpha-only edit correctly falls back to a
+ * remount. Mirrors idle-server's `sequenceSignaturesEqual` precondition and
+ * adds the timing terms.
+ */
+export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): boolean {
+  if (prev.segments.length !== next.segments.length) return false;
+  if (prev.loop !== next.loop) return false;
+  if ((prev.sync ?? 'mount') !== (next.sync ?? 'mount')) return false;
+  if (!!prev.bed !== !!next.bed) return false;
+  if (prev.bed && next.bed) {
+    if (structuralSignature(prev.bed) !== structuralSignature(next.bed)) return false;
+    if (bedRenderSeed(prev) !== bedRenderSeed(next)) return false;
+  }
+  for (let i = 0; i < prev.segments.length; i++) {
+    const a = prev.segments[i]!;
+    const b = next.segments[i]!;
+    if (a.duration !== b.duration) return false;
+    if ((a.advance ?? 'auto') !== (b.advance ?? 'auto')) return false;
+    if (transitionKey(a.transition) !== transitionKey(b.transition)) return false;
+    if (structuralSignature(a.scene) !== structuralSignature(b.scene)) return false;
+    if (segmentRenderSeed(prev, i) !== segmentRenderSeed(next, i)) return false;
+  }
+  return true;
+}
+
+/** A transition's shape with its defaults filled in, so `undefined` and `{ type: 'cut' }` compare equal. */
+function transitionKey(tr: SequenceTransition | undefined): string {
+  if (!tr || tr.type === 'cut') return 'cut';
+  if (tr.type === 'morph') return `morph:${tr.dur}:${tr.text ?? 'step'}`;
+  return `fade:${tr.dur}`;
 }

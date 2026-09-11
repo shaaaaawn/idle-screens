@@ -968,6 +968,30 @@ whose slides carry `advance: 'input'`, and "next" is one `setParam`. Pinned by
 (offset by segment index for independence). Children with their own seed are
 unaffected.
 
+**Hot-swapping a republished sequence:** the instance `compileSequence().mount()`
+returns is a `SequenceSaverInstance` with `hotSwapSequence(next): boolean`
+(feature-detect with `hasHotSwapSequence(inst)`; an older engine's instance
+has no such method). When the republished sequence is
+`sequenceSwapCompatible` with the running one — the same number of
+segments, every segment's scene a structural twin (`structuralSignature`) of
+its counterpart with the same render seed, a `bed` on both sides or neither
+(twins, same seed), the same `loop` and `sync`, and the same `duration`,
+`advance` and `transition` on every segment — the swap happens in place:
+every live segment child and the bed take their new scene, the clock, the
+active segment, every released hold and the retained track stay exactly
+where they were (steered paint is re-applied on top of the republished
+scene), and the next frame resolves to the same `(segment, localT)` with
+every entity where it was a frame ago. Paint is free: words, colours,
+`background`, ids, labels, segment keys. A structural edit (a layer added,
+a count or motion changed, a layer's `alpha` range — baked per entity at
+build time, like `size`), a timing edit (a duration — it would move every
+later boundary under a clock that keeps running — an `advance`, a
+transition's type or `dur`), a seed, `loop` or `sync` change, or a bed added
+or removed returns `false` and changes nothing; the host remounts then, as
+it always has. idle-server's viewer wires this so a mid-talk caption fix does
+not send every screen in the room back to segment 0. Pinned by
+`sequence.test.ts` → "SequenceInstance — hotSwapSequence".
+
 ## Examples
 
 Shipped working specs (also exposed as `EXAMPLE_SPECS` /
