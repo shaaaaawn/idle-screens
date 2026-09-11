@@ -37,15 +37,18 @@ describe('finish tiles', () => {
     expect(a).toEqual(b);
     expect(a).not.toEqual(c);
     expect(a.length).toBe(GRAIN_TILE * GRAIN_TILE * 4);
+    // One expect() per channel per pixel (196,608 of them) is what pushed this
+    // test past the default 5s timeout under CI's coverage-instrumented,
+    // parallel run — fold the per-pixel checks into a single flag instead.
     let sum = 0;
     let n = 0;
+    let greyAndOpaque = true;
     for (let i = 0; i < a.length; i += 4) {
-      expect(a[i]).toBe(a[i + 1]);
-      expect(a[i]).toBe(a[i + 2]);
-      expect(a[i + 3]).toBe(255);
+      if (a[i] !== a[i + 1] || a[i] !== a[i + 2] || a[i + 3] !== 255) greyAndOpaque = false;
       sum += a[i]!;
       n++;
     }
+    expect(greyAndOpaque).toBe(true);
     expect(Math.abs(sum / n - 128)).toBeLessThan(0.5); // zero-mean about overlay's neutral point
   });
 
