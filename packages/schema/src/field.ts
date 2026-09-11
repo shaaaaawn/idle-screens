@@ -49,7 +49,7 @@ const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
  * arithmetic stays in int32 and the result is identical on every platform
  * (a float multiply of large ints would drift by ULPs across engines).
  */
-function latticeHash(ix: number, iy: number, seed: number): number {
+export function latticeHash(ix: number, iy: number, seed: number): number {
   let h = Math.imul(ix | 0, 0x27d4eb2d) ^ Math.imul(iy | 0, 0x165667b1) ^ Math.imul(seed | 0, 0x9e3779b1);
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);

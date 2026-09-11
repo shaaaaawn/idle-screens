@@ -42,6 +42,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     createImageData: vi.fn((w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })),
     putImageData: vi.fn(),
     drawImage: vi.fn(),
+    createPattern: vi.fn(() => ({})), // a `finish` screens repeat-pattern tiles
     imageSmoothingEnabled: true,
     fillStyle: '',
     strokeStyle: '',

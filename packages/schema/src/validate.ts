@@ -9,7 +9,8 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish']);
+const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
@@ -129,6 +130,7 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
+  if (spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
 
   if (!Array.isArray(spec.layers) || spec.layers.length === 0) {
     err('layers', 'must be a non-empty array');
@@ -150,6 +152,24 @@ function color(v: unknown, path: string, err: (p: string, m: string) => void): v
 }
 
 type WarnFn = (path: string, code: string, message: string) => void;
+
+/**
+ * A `finish` block (spec- or sequence-level). `grain` / `dither` are bounded
+ * to 0..1: at 1 they composite at their fixed maximum alphas (35 % / 25 %),
+ * which is as strong as a zero-mean screen can be before it reads as the
+ * subject; both stay mean-luminance-neutral at every value, so nothing here
+ * is a flash bound — the finish cannot flash at any setting.
+ */
+function validateFinish(f: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isObj(f)) return err(path, 'must be an object');
+  for (const k of ['grain', 'dither'] as const) {
+    if (f[k] !== undefined && (!isNum(f[k]) || (f[k] as number) < 0 || (f[k] as number) > 1)) err(`${path}.${k}`, 'must be a number 0..1');
+  }
+  if (f.animate !== undefined && typeof f.animate !== 'boolean') err(`${path}.animate`, 'must be a boolean');
+  for (const k of unknownKeys(f, KNOWN_FINISH)) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown finish property '${k}' — will be ignored`);
+  }
+}
 
 function validateBackground(bg: unknown, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(bg)) return err('background', 'must be an object');
@@ -949,6 +969,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
   if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
   if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
+  if (seq.finish !== undefined) validateFinish(seq.finish, 'finish', err, (p, code, message) => void warnings.push({ path: p, code, message }));
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');

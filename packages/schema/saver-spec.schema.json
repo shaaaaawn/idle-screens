@@ -100,6 +100,26 @@
       },
       "description": "Animated reveal controls for a text block."
     },
+    "finish": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Print finish over the finished frame, applied last. grain (0..1): a seeded zero-mean noise tile screened at up to 35% alpha; dither (0..1): an 8x8 ordered Bayer tile at up to 25% - a stylistic screen, not per-pixel dithering. Both composite with a symmetric blend (overlay), so mean luminance is unchanged: flash-safe, and ignored by luminanceGrid. The grain tile is generated once per mount from the spec seed; animate: true steps its offset from the frame's time bucket (12 Hz, seeded), ignored on the basic/minimal tiers. Never fed back into ghosting. grain/dither are steerable paint paths (finish.grain). Native clients ignore finish.",
+      "properties": {
+        "grain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dither": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "animate": {
+          "type": "boolean"
+        }
+      }
+    },
     "background": {
       "oneOf": [
         {
@@ -1503,6 +1523,9 @@
         "background": {
           "$ref": "#/definitions/background"
         },
+        "finish": {
+          "$ref": "#/definitions/finish"
+        },
         "layers": {
           "type": "array",
           "minItems": 1,
@@ -1566,6 +1589,10 @@
         "bed": {
           "$ref": "#/definitions/saverSpec",
           "description": "A scene drawn under every segment on the sequence's global clock — the ground that does not reset at a boundary or under a sequence.segment steer. Segments render over it transparently (their background and ghosting are ignored; validateSequence warns bed-hides-segment-background). Its entities plus the largest segment's must stay within the 800 cap (enforced by validateSequence). Steer it with bed.<path>. Native clients that ignore it render segments with their own backgrounds."
+        },
+        "finish": {
+          "$ref": "#/definitions/finish",
+          "description": "A print finish applied once per composed frame (bed + segment + fade) on the sequence's presentation canvas. Overrides every segment's own finish while set; absent, the active segment's finish applies. A bed's finish is ignored. Native clients ignore it."
         },
         "segments": {
           "type": "array",

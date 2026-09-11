@@ -40,8 +40,9 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
 the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
 `morph` (2026-09-08 — ambient presentations); `background: { type: 'field' }`
-(seeded, warped noise quantised into bands) and the static per-entity
-`rotate` (2026-09-10 — the print look).
+(seeded, warped noise quantised into bands), the static per-entity
+`rotate`, and the print `finish` (grain + dither screen, spec- and
+sequence-level) (2026-09-10 — the print look).
 
 ## Safety invariants
 
@@ -104,6 +105,7 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "units": "viewport",           // optional: viewport (default) | px
   "referenceViewport": 1080,     // optional; design resolution for density scaling
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
+  "finish": { "grain": 0.5, "dither": 0.3 },  // optional; print screen over the finished frame
   "background": { ... },         // optional; defaults to black
   "layers": [ { ... }, ... ]     // 1..36, rendered back-to-front
 }
@@ -194,6 +196,68 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   `bands` in order** (first band at the top, last at the bottom), so a field
   scene still carries its palette on the Apple TV until the native player
   rasters the same sampler.
+
+### `finish`
+
+`{ "grain": 0.5, "dither": 0.3, "animate": false }` — the print pass, composited
+over the **finished** frame as the last step of every render, after every
+layer and after `ghosting` has done its work. It is what turns flat inks
+into paper: riso speckle, gold-leaf tooth, an impasto's grain. Every knob is
+optional; an absent `finish` presents the frame exactly as drawn.
+
+| Knob | Range | Meaning |
+|---|---|---|
+| `grain` | 0..1 | a **seeded, zero-mean noise tile** (256², generated once per mount from the spec seed) screened over the frame at `grain × 0.35` alpha |
+| `dither` | 0..1 | an **8×8 ordered Bayer tile** screened at `dither × 0.25` alpha. A *stylistic screen* — the dot pattern of a halftone print — not true per-pixel dithering of the image (nothing is thresholded; the tile is simply composited) |
+| `animate` | boolean | steps the grain tile's offset once per 1/12 s from the frame's **time bucket**, seeded — never `Math.random` — so two viewers at the same `t` show the same grain and a seek is exact. Default false: the tile sits still. The `basic` / `minimal` capability tiers ignore it (static tile) |
+
+**Seeding rule.** The grain tile is a pure function of the spec seed (the
+same lattice hash the `field` background uses); the offset is a pure
+function of `(t, seed)`. Same spec + seed ⇒ the same grain on every
+display, every time.
+
+**Flash safety and perception.** Both tiles are centred on mid grey and
+composited with `overlay` — what every shipping canvas2d implements — so
+the frame's **mean luminance is unchanged** at every strength: `overlay`'s
+split at the backdrop's midpoint is exactly what makes a zero-mean,
+symmetric source average back to the backdrop. A finish can neither
+brighten nor darken a wall, and `animate`'s 12 Hz step moves a zero-mean
+texture whose regional mean is constant. The context-rejects-`overlay`
+fallback chain (`soft-light`, then `multiply` as the last resort) is not
+mean-preserving the same way — for the odd context that takes it, the
+luminance-neutral guarantee narrows to "no worse than a very small, bounded
+shift at `finish`'s already-small alpha," not exact invariance. The
+analytic tools treat it as luminance-neutral:
+`luminanceGrid` ignores it entirely (`finish.test.ts` pins the mean
+identical with and without), `adviseSpec` says nothing about it, and
+`describeScene` lists it under `spec.finish` so an agent knows the screen is
+there.
+
+**Never fed back into persistence.** With a `finish`, the scene — every
+layer, and the frame `ghosting` decays into — is drawn on an offscreen
+scene canvas; each frame ends by copying it to the visible canvas and
+screening the finish over the *copy*. Screened into the persistence loop
+instead, a static tile would reinforce itself every frame into mud;
+`finish.test.ts` runs `ghosting: 0.9` with `grain: 1` for 120 frames and
+asserts the scene canvas never sees a screen op and the visible one gets
+exactly one copy and one screen per frame.
+
+**Sequences.** A sequence applies the finish **once per composed frame** —
+bed, segment and any `fade` composite together — on its own presentation
+canvas; children never apply their own (a transparent child over a bed has
+nothing to screen). Which finish: the sequence-level `finish` (a new field
+on the envelope) when set; else the **active segment's** (the incoming one
+during a fade) when it declares one; a bed's `finish` is ignored — the bed
+is ground, finish the sequence. Absent everywhere ⇒ children draw straight
+onto the visible surface as they always have.
+
+**Steering.** `finish.grain` and `finish.dither` are numeric paint paths and
+glide (`setParam("finish.grain", 0.8, { dur: 2000 })`); `finish.animate`
+steps. Declare the block (`"finish": { "grain": 0 }`) to make the paths
+exist — a steer cannot add a `finish` to a spec without one. A sequence's
+own `finish` is not steerable; steer a segment's, or republish.
+
+**Native:** tvOS **ignores `finish`** — the frame is presented as drawn.
 
 ### `layers[]`
 
@@ -709,6 +773,7 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "loop": false,
   "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
   "bed": { /* SaverSpec */ },  // optional; the ground under every segment — see **Bed**
+  "finish": { "grain": 0.4 },  // optional; one print pass over the composed frame — see `finish` above
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -918,6 +983,6 @@ and feathered rect) and `relay-board` (list layout + bar: a chart in five
 layers); and `lobby-talk` (one screen of a quarter-in-review, every text
 layer `role: "read"`, zero advisories — readable copy over additive
 atmosphere); and `thermal-field` (a `field` background in six riso inks,
-`quantize: 6`, warped and drifting, under a handful of screened motes — the
-ground is the piece). See [`src/examples/`](./src/examples/). The dashboard exercises the
+`quantize: 6`, warped and drifting, under a handful of screened motes, with
+a grain-and-dither `finish` — the ground is the piece and the paper shows). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).
