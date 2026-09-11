@@ -13,7 +13,7 @@ interface PathTarget {
 }
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport']);
+const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport', 'finish']);
 
 /** Resolve a dot-path (key-aware) to its parent + final key; null if absent. */
 export function resolveSpecPath(spec: unknown, path: string): PathTarget | null {
