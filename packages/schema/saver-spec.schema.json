@@ -193,6 +193,80 @@
               "description": "Slow oscillation of gradient stop positions \u2014 makes the background feel alive."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "scale",
+            "bands"
+          ],
+          "additionalProperties": false,
+          "description": "A scalar-field background: seeded, warped value noise quantised into bands (thermal maps, contour terrain, riso washes). Pure in (x, y, t, seed): rendered as a low-res raster (short side 96 px, 48 on basic/minimal tiers) scaled to the canvas, recomputed once per 100 ms while drifting; the perception grid samples the same function. Never touches the entity RNG. Native clients that ignore the field paint a vertical gradient through bands in order.",
+          "properties": {
+            "type": {
+              "const": "field"
+            },
+            "scale": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 8,
+              "description": "Noise features across the short side of the viewport."
+            },
+            "octaves": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "description": "Octaves of detail. Default 2."
+            },
+            "warp": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Domain-warp amount: 0 (default) round blobs, 1 smeared, folded contours."
+            },
+            "quantize": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8,
+              "not": { "const": 1 },
+              "description": "Levels to posterise into (2..8; hard bands), or 0 for smooth interpolation between bands. Default bands.length."
+            },
+            "bands": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "2..8 colours, read as a ramp from the field's low end to its high end."
+            },
+            "drift": {
+              "type": "object",
+              "required": [
+                "period"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "period": {
+                  "type": "number",
+                  "minimum": 10000,
+                  "description": "Full loop period in ms. Floor of 10 s (flash guard: drift is the only way a field changes over time)."
+                },
+                "amount": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Radius of the sample domain's slow circle, in feature units. Default 0.3."
+                }
+              },
+              "description": "Slow travel of the sample domain \u2014 the field's animate. The field loops exactly every period."
+            },
+            "seed": {
+              "type": "number",
+              "description": "Field seed. Defaults to the spec seed; independent of the entity stream either way."
+            }
+          }
         }
       ]
     },

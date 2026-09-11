@@ -39,16 +39,19 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 (2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
 `maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
 the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
-`morph` (2026-09-08 — ambient presentations).
+`morph` (2026-09-08 — ambient presentations); `background: { type: 'field' }`
+(seeded, warped noise quantised into bands) and the static per-entity
+`rotate` (2026-09-10 — the print look).
 
 ## Safety invariants
 
 These hold **by construction** — no spec can violate them:
 
-1. **No flash primitive.** The background is static (drift is floored at 10 s)
-   and entities are bounded sprites, so a compiled spec cannot strobe the full
-   field. Provable by sampling any compiled spec through
-   `@idle-screens/validator`.
+1. **No flash primitive.** The background is static (drift is floored at 10 s
+   — for a gradient's stop positions and for a `field`'s domain travel alike,
+   the only way either changes over time) and entities are bounded sprites,
+   so a compiled spec cannot strobe the full field. Provable by sampling any
+   compiled spec through `@idle-screens/validator`.
 2. **Pulse/grow/cycle are bounded.** Breathing amplitude is capped and periods
    floored at 500 ms (2 Hz — under the WCAG 3 Hz flash threshold). Every entity
    gets its own seeded phase — and with `pulse.wave`, a position-derived phase —
@@ -136,6 +139,61 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   bottom (e.g. an aquarium seafloor); optional `drift` slowly oscillates the
   stop positions (period ≥ 10 s) so the background breathes. All colours are
   hex (`#rgb` / `#rrggbb`).
+- `{ "type": "field", "scale": 2.2, "octaves": 3, "warp": 0.4, "quantize": 6, "bands": ["#1b1a3a", "#0078bf", "#00a99d", "#ffe800", "#ff6c2f", "#ff48b0"], "drift": { "period": 40000, "amount": 0.3 } }`
+  — a **scalar field**: seeded value noise, optionally domain-warped, read
+  through a colour ramp. Thermal maps, contour terrain, sonar landmasses,
+  riso washes; the ground under ten of the playgrnd looks. Knobs:
+
+  | Knob | Range | Default | Meaning |
+  |---|---|---|---|
+  | `scale` | 0.5..8 | — | noise features across the **short side** of the viewport (so a 16:9 frame shows more of the same field than a square one) |
+  | `octaves` | int 1..4 | 2 | layers of detail; each halves in amplitude and doubles in frequency |
+  | `warp` | 0..1 | 0 | domain warp: 0 round blobs, 1 the folded, smeared contours of a weather chart |
+  | `quantize` | 0 or int 2..8 | `bands.length` | posterise into that many levels, one read off the `bands` ramp per level — hard, crisp contours (Terrain, Sonar). `bands.length` is exactly one band per level; more levels step through the ramp. `0` interpolates the ramp smoothly (Aura, Mist) |
+  | `bands` | 2..8 hex | — | the ramp, low end of the field to high |
+  | `drift` | `{ period ≥ 10000, amount 0..1 }` | none | the field's slow **animate**: the sample domain travels a circle of radius `amount` feature units once per `period` ms, so the contours crawl and the field loops exactly. `amount` defaults to 0.3 |
+  | `seed` | number | the spec seed | the field's own seed — change it to get a different field without re-seating an entity |
+
+  **Analytic guarantee.** The field is a pure function of `(x, y, t, seed)`
+  with its own hash — it never draws from the entity RNG, so adding, steering
+  or reseeding a field leaves every entity exactly where it was, and
+  `luminanceGrid` samples the same function the renderer paints (per cell,
+  at the same bucketed time), so perception and paint agree by construction.
+  A field's own contours are *ground*, not ink: the grid's `coverage`,
+  centroid and profiles deviate from the field's per-cell value
+  (`backgroundCells`), so a bright field scores no coverage and the
+  `sparse-scene` / `low-contrast-layer` advisories judge entities against the
+  field's mean band exactly as they judge them against a gradient's stops.
+
+  **Raster and cache.** The renderer samples the field into a low-res raster
+  — 96 px on the short side, the long side by aspect; 48 px on the `basic` /
+  `minimal` capability tiers (`capabilityTier` on the mount context) — and
+  draws it scaled to the canvas, nearest-neighbour for quantised bands so the
+  contours stay crisp and smoothed for `quantize: 0`. A static field is
+  sampled **once per mount**; a drifting one is resampled only when `t`
+  crosses a 100 ms bucket, so ten times a second at most, however high the
+  frame rate. Steering any knob recomputes on the next frame.
+
+  **Flash safety.** `drift` is the only way a field changes over time, and
+  its `period` is floored at 10 s like the gradient's: the domain moves at
+  most 2π·`amount` feature units per period, so no region's mean luminance
+  can oscillate anywhere near the 3 Hz WCAG threshold (`field.test.ts` pins
+  the extreme — `scale: 0.5`, `amount: 1` at the floor — under one opposing
+  10 % transition per second). Taste, not safety: at `scale` below 1 the
+  whole frame breathes as one; keep `amount` ≤ 0.5 there, or the wall pulses.
+
+  **Steering.** Every numeric knob and every band is a paint path —
+  `background.scale`, `background.warp`, `background.quantize`,
+  `background.bands.2`, `background.drift.amount` — and glides (a fractional
+  `quantize` or `octaves` mid-glide rounds). `background.seed` is not
+  steerable. The background is paint, not structure, so a `morph` between
+  two field segments glides the field; a gradient → field morph steps
+  (different shape).
+
+  **Native:** tvOS ignores the field and paints a **vertical gradient through
+  `bands` in order** (first band at the top, last at the bottom), so a field
+  scene still carries its palette on the Apple TV until the native player
+  rasters the same sampler.
 
 ### `layers[]`
 
@@ -531,7 +589,8 @@ fixed-step warm-up (≤ 120 frames) from a full clear on any non-contiguous seek
 ## Steering
 
 Compiled specs accept live parameter changes via dot-paths —
-`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`, or
+`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`,
+`background.bands.2` (a field's band), or
 `key`-based paths like `cpu-gauge.count` / `cpu-gauge.sprite.color` when
 layers declare `key` (the key replaces `layers.N`; everything after it
 mirrors the JSON, so a sprite field keeps its `sprite.` segment). Changes interpolate over a
@@ -857,5 +916,7 @@ showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 and feathered rect) and `relay-board` (list layout + bar: a chart in five
 layers); and `lobby-talk` (one screen of a quarter-in-review, every text
 layer `role: "read"`, zero advisories — readable copy over additive
-atmosphere). See [`src/examples/`](./src/examples/). The dashboard exercises the
+atmosphere); and `thermal-field` (a `field` background in six riso inks,
+`quantize: 6`, warped and drifting, under a handful of screened motes — the
+ground is the piece). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).
