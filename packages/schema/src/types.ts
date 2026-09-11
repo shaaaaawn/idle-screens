@@ -51,7 +51,48 @@ export interface SaverSpec {
 
 export type BackgroundSpec =
   | { type: 'solid'; color: string }
-  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec; drift?: BackgroundDrift };
+  | { type: 'gradient'; stops: GradientStop[]; band?: BandSpec; drift?: BackgroundDrift }
+  | FieldBackground;
+
+/**
+ * A scalar-field background: seeded, warped value noise quantised into
+ * `bands` — thermal maps, contour terrain, sonar landmasses, riso washes.
+ * Pure in `(x, y, t, seed)`: the renderer paints it as a low-res raster
+ * (short side 96 px; 48 on the `basic` / `minimal` tiers) scaled to the
+ * canvas, recomputed once per 100 ms bucket while drifting and once ever
+ * otherwise, and the perception grid samples the same function directly.
+ * The sampler uses its own hash, never the entity RNG, so adding a field to
+ * a spec leaves every entity where it was.
+ */
+export interface FieldBackground {
+  type: 'field';
+  /** Noise features across the short side, 0.5..8 (LIMITS.minFieldScale / maxFieldScale). */
+  scale: number;
+  /** Octaves of detail, integer 1..4 (default 2). */
+  octaves?: number;
+  /** Domain-warp amount 0..1 (default 0) — folds round blobs into smeared contours. */
+  warp?: number;
+  /**
+   * Levels to posterise the field into, integer 2..8, or 0 for smooth
+   * interpolation between bands (Aura, Mist). Default `bands.length`: one
+   * hard band per level.
+   */
+  quantize?: number;
+  /** 2..8 hex colours, darkest-to-lightest or whatever ramp the look wants. */
+  bands: string[];
+  /** Slow domain travel — the field's "animate". Period floored at 10 s (flash guard). */
+  drift?: FieldDrift;
+  /** Field seed; defaults to the spec seed. Independent of the entity stream. */
+  seed?: number;
+}
+
+/** Slow travel of a field's sample domain: a circle of radius `amount` feature units per `period`. */
+export interface FieldDrift {
+  /** Full loop period in ms. Floor: LIMITS.minDriftPeriod (10 s) — the flash guard. */
+  period: number;
+  /** Radius of the domain travel in feature units, 0..1. Default 0.3. */
+  amount?: number;
+}
 
 /** A vertical gradient stop (`at` 0 = top, 1 = bottom). */
 export interface GradientStop {
@@ -119,6 +160,17 @@ export interface LayerSpec {
    * form draws one extra seeded value, only when present).
    */
   spin?: number | [number, number];
+  /**
+   * Static per-entity rotation in degrees (positive = clockwise), ±360. A
+   * scalar turns every entity the same way; a `[min, max]` range gives each
+   * entity a seeded angle — thrown blades, scattered glyphs, a tilted grid.
+   * Composes with `spin` (added to its seeded start angle). Note that `spin:
+   * [0, 0]` does NOT do this: a zero spin speed renders at angle 0, its
+   * seeded phase unused. Structural (baked into entities). The range form
+   * draws one seeded value per entity, only when declared, so existing
+   * specs keep identical streams.
+   */
+  rotate?: number | [number, number];
   /**
    * Sinusoidal size breathing, parallel to `pulse` for opacity. `amp` is a
    * fraction of base size (0.3 = ±30 %). `period` in ms with the same
@@ -524,6 +576,7 @@ export const LIMITS = {
   maxPulseAmp: 0.5, // opacity breathing amplitude cap
   minPulsePeriod: 500, // ms — caps pulse at 2 Hz (WCAG flash threshold is 3 Hz)
   maxSpin: 360, // degrees/sec — one full revolution per second
+  maxRotate: 360, // degrees — static per-entity rotation, one turn either way
   maxGrowAmp: 0.8, // size breathing amplitude cap (fraction of base size)
   maxOrbitSpeed: 180, // degrees/sec — half a revolution per second
   maxLinksK: 8,
@@ -532,8 +585,15 @@ export const LIMITS = {
   referenceViewport: 1080, // for validating viewport-unit dimensional caps
   maxTrailLength: 5000, // ms — cap trail duration
   maxTrailSamples: 24, // dots per trail
-  minDriftPeriod: 10000, // ms — background drift floor (10 s)
+  minDriftPeriod: 10000, // ms — background drift floor (10 s), gradient and field alike
   maxDriftAmount: 0.3, // fraction of gradient stop shift
+  minFieldScale: 0.5, // features per short side — below this the field is one flat blob
+  maxFieldScale: 8, // above this a 96 px raster cell spans more than one feature
+  maxFieldOctaves: 4,
+  minFieldBands: 2,
+  maxFieldBands: 8,
+  maxFieldQuantize: 8,
+  maxFieldDriftAmount: 1, // feature units of domain travel
   maxGhosting: 0.95, // frame persistence cap — bounds the seek warm-up replay
   maxGhostReplayFrames: 120, // fixed-step frames replayed on a non-contiguous seek
   maxMeander: 500, // px — wander harmonic amplitude cap (viewport cap: /referenceViewport)

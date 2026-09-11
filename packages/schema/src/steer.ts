@@ -196,7 +196,7 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 
 /**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
- * like "layers.0.count", "background.stops.1.color", etc. Metadata fields
+ * like "layers.0.count", "background.stops.1.color", "background.bands.2", etc. Metadata fields
  * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
  * they describe structure, not tuneable values.
  *
@@ -206,7 +206,9 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
   const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer']);
-  const INDEXED = new Set(['layers', 'stops']);
+  // `bands` (a field background's palette) is indexed like `stops`, so
+  // `background.bands.2` is a hex paint path that glides.
+  const INDEXED = new Set(['layers', 'stops', 'bands']);
   // Mirror resolveSpecPath's layer-key precedence: a root field named the
   // same as a layer's key resolves to that layer, not the scalar, so don't
   // advertise a root path we can't actually deliver a delta to.
@@ -308,6 +310,9 @@ export function structuralSignature(spec: SaverSpec): string {
               // existing spec's signature string is byte-identical.
               ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
               : undefined,
+        // Static rotation is baked into entities (a range draws a seeded
+        // angle). Appended only when set — same rule as `anchor` above.
+        ...(l.rotate !== undefined ? [l.rotate] : []),
       ];
     }),
   ]);
