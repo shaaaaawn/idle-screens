@@ -1,4 +1,4 @@
-> Selected entries imported into the canonical [Saver Idea Registry](../saver-ideas.md); update lifecycle state there, not here. Remaining entries below are still an untriaged candidate source.
+> Selected entries imported into the canonical [Saver Idea Registry](../saver-ideas.md); update lifecycle state there, not here. The remaining entries below stay a candidate source in this file until carried into the registry.
 
 # Screensaver Research & Implementation Guide
 

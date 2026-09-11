@@ -33,7 +33,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - title: <name>
 - brief: <2-3 sentences — mood, palette, motion; agent-consumable>
 - source: <URL or file ref — REQUIRED, no unsourced ideas>
-- bucket: <one of the buckets above>
+- bucket: <one of the buckets above, or a new name proposed at candidate time>
 - route: spec | native | spec-blocked: <feature-name>
 - status:
   - 2026-07-25 candidate — found via <source>
