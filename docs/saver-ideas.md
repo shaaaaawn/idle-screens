@@ -20,6 +20,10 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
     per-pixel feedback — anything declarative sprite fields can't do)
   - `spec-blocked` — ONE named schema feature away; name the feature (it
     becomes a candidate for the spec-feature-pipeline backlog)
+- Every entry has a **bucket**, one of: `fine-art-homage`, `nature-atmosphere`,
+  `geometric-op-art`, `minimal-ambient`, `flow-particle`, `organic-simulation`,
+  `data-typographic`, `canonical-retro`. A new idea that doesn't fit any of
+  these adds a bucket here at triage time, rather than picking the closest fit.
 - Entry format (canonical):
 
 ```markdown
@@ -27,7 +31,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - title: <name>
 - brief: <2-3 sentences — mood, palette, motion; agent-consumable>
 - source: <URL or file ref — REQUIRED, no unsourced ideas>
-- bucket: <one of the buckets below>
+- bucket: <one of the buckets above>
 - route: spec | native | spec-blocked: <feature-name>
 - status:
   - 2026-07-25 candidate — found via <source>
