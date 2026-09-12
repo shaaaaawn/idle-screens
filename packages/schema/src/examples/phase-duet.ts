@@ -1,4 +1,4 @@
-import type { SaverSpec } from '../types';
+import type { SaverSpec } from "../types";
 
 /**
  * Phase Duet — three layers on one clock.
@@ -13,53 +13,63 @@ import type { SaverSpec } from '../types';
  */
 export const PHASE_DUET_SPEC: SaverSpec = {
   schemaVersion: 1,
-  id: 'phase-duet',
-  label: 'Phase Duet',
+  id: "phase-duet",
+  label: "Phase Duet",
   seed: 88,
-  motionIntensity: 'calm',
+  motionIntensity: "calm",
   background: {
-    type: 'gradient',
+    type: "gradient",
     stops: [
-      { at: 0, color: '#0a0f1c' },
-      { at: 0.6, color: '#101b2e' },
-      { at: 1, color: '#07141a' },
+      { at: 0, color: "#0a0f1c" },
+      { at: 0.6, color: "#101b2e" },
+      { at: 1, color: "#07141a" },
     ],
   },
   layers: [
     {
-      key: 'ripple',
+      key: "ripple",
       count: 60,
       sprite: {
-        kind: 'circle',
+        kind: "circle",
         radius: [0.0018, 0.003],
-        color: '#6fd3c7',
-        colors: ['#6fd3c7', '#9fb8d8'],
+        color: "#6fd3c7",
+        colors: ["#6fd3c7", "#9fb8d8"],
         colorWeights: [2, 1],
       },
-      motion: { type: 'static' },
-      layout: { type: 'grid', columns: 10, jitter: 0 },
+      motion: { type: "static" },
+      layout: { type: "grid", columns: 10, jitter: 0 },
       alpha: [0.3, 0.55],
       pulse: { amp: 0.35, period: 6000, wave: { wavelength: 0.7, angle: 25 } },
       clock: { phase: 0, rate: 1 },
     },
     {
-      key: 'rings',
+      key: "rings",
       count: 3,
-      sprite: { kind: 'ring', radius: [0.05, 0.09], width: 0.0012, color: '#6fd3c7' },
-      motion: { type: 'static' },
+      sprite: {
+        kind: "ring",
+        radius: [0.05, 0.09],
+        width: 0.0012,
+        color: "#6fd3c7",
+      },
+      motion: { type: "static" },
       alpha: [0.25, 0.35],
-      blend: 'lighter',
+      blend: "lighter",
       grow: { amp: 0.5, period: 6000 },
       clock: { phase: 0, rate: 1 },
     },
     {
-      key: 'heart',
+      key: "heart",
       count: 1,
-      sprite: { kind: 'circle', radius: [0.11, 0.11], color: '#9fb8d8', soft: true },
-      motion: { type: 'static' },
+      sprite: {
+        kind: "circle",
+        radius: [0.11, 0.11],
+        color: "#9fb8d8",
+        soft: true,
+      },
+      motion: { type: "static" },
       position: { x: 0.5, y: 0.5 },
       alpha: [0.22, 0.22],
-      blend: 'lighter',
+      blend: "lighter",
       grow: { amp: 0.25, period: 6000 },
       clock: { phase: 0, rate: 1 },
     },
