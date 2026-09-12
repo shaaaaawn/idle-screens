@@ -4,6 +4,7 @@ import { AURORA_SPEC } from './aurora';
 import { COMETS_SPEC } from './comets';
 import { CONSTELLATION_SPEC } from './constellation';
 import { DASHBOARD_SPEC } from './dev-dashboard';
+import { SPARSE_NIGHT_SPEC } from './sparse-night';
 import { FACETS_SPEC } from './facets';
 import { HAIKU_SPEC } from './haiku';
 import { LANTERNS_SPEC } from './lanterns';
@@ -20,6 +21,7 @@ import { SAKURA_SPEC } from './sakura';
 import { SNOWFALL_SPEC } from './snowfall';
 import { THERMAL_FIELD_SPEC } from './thermal-field';
 import { WARP_TUNNEL_SPEC } from './warp-tunnel';
+import { TYPED_CUE_SPEC } from './typed-cue';
 
 export { AQUARIUM_SPEC } from './aquarium';
 export { COMETS_SPEC } from './comets';
@@ -42,6 +44,8 @@ export { POLYGONS_SPEC } from './polygons';
 export { PROCESSION_SPEC } from './procession';
 export { WARP_TUNNEL_SPEC } from './warp-tunnel';
 export { THERMAL_FIELD_SPEC } from './thermal-field';
+export { SPARSE_NIGHT_SPEC } from './sparse-night';
+export { TYPED_CUE_SPEC } from './typed-cue';
 
 /** Catalog entry for a bundled schema example. */
 export interface SchemaExample {
@@ -73,6 +77,8 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'relay-board', label: 'Relay Board', spec: RELAY_BOARD_SPEC },
   { id: 'lobby-talk', label: 'Lobby Talk', spec: LOBBY_TALK_SPEC },
   { id: 'thermal-field', label: 'Thermal Field', spec: THERMAL_FIELD_SPEC },
+  { id: 'sparse-night', label: 'Sparse Night', spec: SPARSE_NIGHT_SPEC },
+  { id: 'typed-cue', label: 'Typed Cue', spec: TYPED_CUE_SPEC },
 ] as const;
 
 /** All example specs in catalog order (tests, batch compile). */
