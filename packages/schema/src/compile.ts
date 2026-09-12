@@ -22,7 +22,7 @@ import type { FieldBackground, IdleSequence, LayerSpec, SaverSpec, SpriteSpec } 
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
-import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible } from './sequence';
+import { canMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
 import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -548,7 +548,7 @@ class SpecInstance implements SaverInstance {
     }
     if (sprite.kind === 'streak') {
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      const heading = headingAt(e, t, this.w, this.h) ?? 0;
+      const heading = (headingAt(e, t, this.w, this.h) ?? 0) + rot;
       const tailX = p.x - Math.cos(heading) * sz;
       const tailY = p.y - Math.sin(heading) * sz;
       const g = ctx.createLinearGradient(tailX, tailY, p.x, p.y);
@@ -1261,8 +1261,7 @@ class SequenceInstance implements SequenceSaverInstance {
     // A finish anywhere in the sequence moves the children onto an offscreen
     // scene canvas for the sequence's lifetime; which finish applies is
     // decided per frame (see `frameFinish`).
-    const wantsFinish = seq.finish !== undefined || seq.segments.some((s) => s.scene.finish !== undefined);
-    if (wantsFinish && surface) {
+    if (sequenceWantsFinish(seq) && surface) {
       const pass = createFinishPass(surface, this.seed);
       if (pass) {
         this.finishPass = pass;

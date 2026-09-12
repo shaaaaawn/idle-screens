@@ -171,6 +171,13 @@ describe('fieldRgb — bands and quantise', () => {
     expect(rgb255Luma([0, 255, 0])).toBeCloseTo(0.7152, 9);
   });
 
+  it('hexToRgb255 falls back to mid grey for malformed input, including a valid hex prefix `parseInt` would otherwise accept', () => {
+    expect(hexToRgb255('#zzzzzz')).toEqual([128, 128, 128]);
+    // A truncated 6-digit string: parseInt('12', 16) silently succeeds on the
+    // leading valid digits unless the full string is validated first.
+    expect(hexToRgb255('#12zzzz')).toEqual([128, 128, 128]);
+  });
+
   it('fieldRgbAt composes the two', () => {
     const cfg = field();
     expect(fieldRgbAt(0.2, 0.7, 0, cfg, 4)).toEqual(fieldRgb(fieldAt(0.2, 0.7, 0, cfg, 4), BANDS, undefined));
@@ -316,6 +323,16 @@ describe('luminanceGrid — field background', () => {
     expect(g.meanLuminance).toBeLessThan(0.8);
   });
 
+  it('normalizes seed 0 to 1 for a field background, matching the renderer\'s normalizeSeed(spec.seed ?? ctx.seed)', () => {
+    const bg = field({ quantize: 6 });
+    const zero = luminanceGrid(spec({ seed: 0, background: bg, layers: [] }), { viewport: { width: 1920, height: 1080 } });
+    const one = luminanceGrid(spec({ seed: 1, background: bg, layers: [] }), { viewport: { width: 1920, height: 1080 } });
+    // Before the fix, `seed: 0` sampled the field with the raw seed 0 — a
+    // different (and renderer-mismatched) stream from the normalized seed 1
+    // `SpecInstance` actually renders with.
+    expect(zero.cells).toEqual(one.cells);
+  });
+
   it('solid and gradient grids carry no backgroundCells (their output is byte-identical to before)', () => {
     expect('backgroundCells' in luminanceGrid(spec({ background: { type: 'solid', color: '#000000' } }))).toBe(false);
     expect('backgroundCells' in luminanceGrid(spec({ background: { type: 'gradient', stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#404040' }] } }))).toBe(false);
@@ -351,6 +368,19 @@ describe('luma helpers — field background', () => {
     expect([at.r, at.g, at.b]).toEqual([expected[0] / 255, expected[1] / 255, expected[2] / 255]);
     expect(backgroundRgbAt(s, 540, 1080, 1080)).toEqual(backgroundRgb(s));
   });
+
+  it('backgroundRgbAt samples a drifting field at the bucketed `t` given, not always its rest position at t 0', () => {
+    const s = spec({ background: field({ quantize: 6, drift: { amount: 1, period: 20000 } }) });
+    const bg = s.background as FieldBackground;
+    const t = 12345;
+    const rest = backgroundRgbAt(s, 540, 1080, 1080, 960, 1920, undefined, 0);
+    const atT = backgroundRgbAt(s, 540, 1080, 1080, 960, 1920, undefined, t);
+    expect(atT).not.toEqual(rest); // the domain has visibly moved by t
+    const expected = fieldRgbAt(960 / 1080, 540 / 1080, fieldSampleTime(bg, t), bg, 9);
+    expect([atT.r, atT.g, atT.b]).toEqual([expected[0] / 255, expected[1] / 255, expected[2] / 255]);
+    // Omitting `t` still defaults to the rest position, unchanged.
+    expect(backgroundRgbAt(s, 540, 1080, 1080, 960, 1920)).toEqual(rest);
+  });
 });
 
 describe('adviseSpec — field background', () => {
@@ -377,6 +407,19 @@ describe('adviseSpec — field background', () => {
       layers: [{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'READ ME', maxWidth: 0.5, fontSize: 0.05, color: '#202020', role: 'read', anchor: 'center' }, motion: { type: 'static' } }],
     });
     expect(adviseSpec(s).map((w) => w.code)).toContain('text-legibility');
+  });
+
+  it('text-legibility over a drifting field reacts to opts.t (the perceived frame), not always the field\'s rest position', () => {
+    const s = spec({
+      background: field({ bands: ['#000000', '#ffffff'], quantize: 2, drift: { amount: 1, period: 4000 } }),
+      layers: [{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'READ ME', maxWidth: 0.5, fontSize: 0.05, color: '#808080', role: 'read', anchor: 'center' }, motion: { type: 'static' } }],
+    });
+    const codesAt = (t: number): string[] => adviseSpec(s, undefined, { t }).map((w) => w.code);
+    const samples = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500].map(codesAt);
+    // Before the fix, every sample used the field's rest position (t 0) regardless
+    // of opts.t, so they were all identical. The drift must move the sampled
+    // colour enough over one period to flip the verdict at least once.
+    expect(new Set(samples.map((c) => JSON.stringify(c))).size).toBeGreaterThan(1);
   });
 });
 

@@ -125,7 +125,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
-  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:92-97` (second non-vision authoring session, round 3: "Midnight Zone" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
+  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:72-74` (second non-vision authoring session, round 3: "Midnight Zone" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
 
 ### mondrian-broadway-boogie-woogie
 - title: Mondrian — Broadway Boogie Woogie
@@ -153,7 +153,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 triaged — route: spec; imported from saver-art-ideas and clears hard filters
-  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:92-97` (second non-vision authoring session, round 3: "Infinity Net" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
+  - 2026-08-31 shipped — corroborated by `docs/future-ideas.md:72-74` (second non-vision authoring session, round 3: "Infinity Net" is this brief, one of four savers shipped via MCP + live-canvas pixel-read)
 
 ### okeeffe-flower-at-night
 - title: O'Keeffe — a flower at night
@@ -227,7 +227,7 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec-blocked: crt-scanline-color-bleed-overlay
 - status:
   - 2026-08-31 candidate — imported from screensaver research; clean-room assets required
-  - 2026-08-31 triaged — route corrected native → spec-blocked; the boot-text typing itself is already `spec` (textBlock `reveal: {mode: "typewriter"}`, shipped G6 per `docs/future-ideas.md`), but this brief's identity is centered on the CRT distortion — color bleed, scanlines, cheap-TV warp — and FORMAT.md has no screen-space post-process/overlay concept (background is solid/gradient+band+drift only). Naming the missing feature: a screen-space scanline/color-bleed overlay filter, for the spec-feature-pipeline backlog.
+  - 2026-08-31 triaged — route corrected native → spec-blocked; the boot-text typing itself is already `spec` (textBlock `reveal: {mode: "typewriter"}`, tracked as G6 in `docs/future-ideas.md`, still Open cross-platform), but this brief's identity is centered on the CRT distortion — color bleed, scanlines, cheap-TV warp — and FORMAT.md has no screen-space post-process/overlay concept (background is solid/gradient+band+drift only). Naming the missing feature: a screen-space scanline/color-bleed overlay filter, for the spec-feature-pipeline backlog.
 
 ### arabesque-shell
 - title: Arabesque & Shell

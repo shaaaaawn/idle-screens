@@ -626,6 +626,32 @@ describe('bar sprites draw (#49)', () => {
   });
 });
 
+describe('streak sprite orientation (#169 review)', () => {
+  it('a static streak (no motion, headingAt null) orients along `rotate` instead of always defaulting to heading 0', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'streak-rotate', label: 'Streak', units: 'px',
+      layers: [{
+        count: 1,
+        sprite: { kind: 'streak', length: [50, 50], color: '#ffffff', width: 2 },
+        motion: { type: 'static' },
+        position: { x: 0.5, y: 0.5 },
+        rotate: 90,
+      }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const moveCalls = (mockCtx.moveTo as unknown as { mock: { calls: number[][] } }).mock.calls;
+    const lineCalls = (mockCtx.lineTo as unknown as { mock: { calls: number[][] } }).mock.calls;
+    const [tailX, tailY] = moveCalls.at(-1)!;
+    const [headX, headY] = lineCalls.at(-1)!;
+    // heading = rotate (90° = π/2): the tail sits directly above the head
+    // (same x, smaller y) — the pre-fix heading of 0 would instead put the
+    // tail to the left of the head at the same y.
+    expect(tailX).toBeCloseTo(headX, 5);
+    expect(tailY).toBeLessThan(headY - 1);
+    inst.dispose();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // textBlock anchor / font / opacity (ambient presentations 1a)
 // ---------------------------------------------------------------------------
