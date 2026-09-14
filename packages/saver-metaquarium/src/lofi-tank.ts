@@ -172,8 +172,12 @@ class LofiTank implements SaverInstance {
     }
     for (const id of nextIds) {
       if (this.heldIds.has(id)) continue;
-      void loadIcon(id).then((bmp) => {
-        if (this.disposed) return;
+      const p = loadIcon(id);
+      void p.then((bmp) => {
+        // Stale if this id was released (and possibly reloaded) before this
+        // settled: ICONS no longer points at the promise we started with.
+        // Installing bmp here would race releaseIcon's own close() of it.
+        if (this.disposed || ICONS.get(id) !== p) return;
         if (bmp) this.icons.set(id, bmp);
         this.updateFishCount();
         if (this.paused) this.renderStill();
