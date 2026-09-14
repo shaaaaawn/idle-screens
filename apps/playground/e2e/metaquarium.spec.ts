@@ -262,10 +262,12 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
-  // Hermetic: every transparent icon is an 8x8 PNG served from here, so the
-  // test proves the backend, not a gateway's mood.
+  // Hermetic: every transparent icon is the same 8x8 PNG served from here, so
+  // the test proves the backend, not a gateway's mood. Solid opaque magenta —
+  // a colour the tank's own palette/gradients never produce — so a fish's
+  // presence in the pixels is verifiable, not just its icon being decoded.
   const icon = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR4nGP4H3DiPz7MMDIUAADN88WBmLN9eQAAAABJRU5ErkJggg==',
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR4nGP4z/D/Pz7MMDIUAACD5r9BB2dd7wAAAABJRU5ErkJggg==',
     'base64',
   );
   await page.route('**/*_transparent_icon.png', (route) =>
@@ -281,25 +283,42 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
   await expect
     .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
     .toBe('lofi');
+  // Standard tier (this CI's Chromium has no WebGPU, so lofiRich() is false):
+  // the lean tank's exact fish count, like MQ9's WebGL parity check.
   await expect
     .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
-    .toBeGreaterThanOrEqual(1);
+    .toBe(8);
 
-  // A 2d canvas, and one a thumbnail can read: blob-decoded icons never taint.
+  // A 2d canvas, one a thumbnail can read (blob-decoded icons never taint),
+  // and — the actual point of "icons" — at least one drawn magenta pixel.
   const surface = await page.evaluate(() => {
     const canvas = document
       .querySelector('idle-screen')
       ?.shadowRoot?.querySelector<HTMLCanvasElement>('.surface canvas');
-    if (!canvas) return { twoD: false, readable: false };
+    if (!canvas) return { twoD: false, readable: false, fishVisible: false };
     let readable = false;
     try {
       readable = canvas.toDataURL('image/jpeg').startsWith('data:image/jpeg');
     } catch {
       readable = false;
     }
-    return { twoD: !!canvas.getContext('2d'), readable };
+    let fishVisible = false;
+    const g2d = canvas.getContext('2d');
+    if (g2d) {
+      // Fish draw at globalAlpha 0.55-1 over a dark tank, so a near fish
+      // reads as pure magenta and a far one as magenta blended into the
+      // background — check the blend, not an exact (255,0,255) match.
+      const { data } = g2d.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i]! > 150 && data[i + 1]! < 100 && data[i + 2]! > 150) {
+          fishVisible = true;
+          break;
+        }
+      }
+    }
+    return { twoD: !!g2d, readable, fishVisible };
   });
-  expect(surface).toEqual({ twoD: true, readable: true });
+  expect(surface).toEqual({ twoD: true, readable: true, fishVisible: true });
 
   // The WebGL tank's chunk (and with it three.js) never loads on this path.
   expect(chunks.filter((u) => /saver-metaquarium\/src\/tank\.ts|\/tank-[\w-]+\.js|node_modules\/.*three/.test(u))).toEqual([]);

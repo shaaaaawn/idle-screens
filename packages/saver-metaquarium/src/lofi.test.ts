@@ -71,6 +71,14 @@ describe('lofi tank — parity with the Apple TV aquarium', () => {
     expect(lofiPaletteOf('nowhere')).toEqual(lofiPaletteOf(undefined));
   });
 
+  it('never resolves an inherited Object.prototype key as a palette', () => {
+    // A scene's `environment` is untrusted string input; PALETTES is a plain
+    // object literal, so a lookup must not fall through to `constructor` et al.
+    expect(lofiPaletteOf('constructor')).toEqual(lofiPaletteOf(undefined));
+    expect(lofiPaletteOf('toString')).toEqual(lofiPaletteOf(undefined));
+    expect(lofiPaletteOf('hasOwnProperty')).toEqual(lofiPaletteOf(undefined));
+  });
+
   it('writes palette colours as css rgba', () => {
     expect(css({ r: 1, g: 0.5, b: 0 })).toBe('rgba(255,128,0,1)');
     expect(css({ r: 0, g: 0, b: 0 }, 0.25)).toBe('rgba(0,0,0,0.25)');

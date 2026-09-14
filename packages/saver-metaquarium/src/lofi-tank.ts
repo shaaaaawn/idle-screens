@@ -27,21 +27,34 @@ import { LogicalClock } from './runtime';
 
 const ICON_TIMEOUT_MS = 8_000;
 const ICONS = new Map<number, Promise<ImageBitmap | null>>();
+const ICON_REFCOUNTS = new Map<number, number>();
+const ICON_CONTROLLERS = new Map<number, Set<AbortController>>();
 
 /**
  * One icon through the gateway ladder, decoded from a Blob. Blob-sourced
  * bitmaps never taint the canvas, so thumbnails (`toDataURL`) keep working
  * whichever gateway answered. A fish whose icon never arrives just isn't
  * drawn — the TV does the same with a missing asset.
+ *
+ * Ref-counted: every call must be matched by one {@link releaseIcon}. A
+ * bitmap (or a failed lookup) stays cached only while at least one tank
+ * holds it, so a session that cycles through many `fishMix`/`environment`
+ * ids doesn't pin every icon it has ever shown, and a persistently failing
+ * id isn't re-walked on every field rebuild — only when it leaves the tank
+ * and comes back.
  */
 function loadIcon(id: number): Promise<ImageBitmap | null> {
+  ICON_REFCOUNTS.set(id, (ICON_REFCOUNTS.get(id) ?? 0) + 1);
   let p = ICONS.get(id);
   if (p) return p;
+  const controllers = new Set<AbortController>();
+  ICON_CONTROLLERS.set(id, controllers);
   p = (async () => {
     const url = fishAsset(id, 'transparent_icon');
     if (!url || typeof fetch === 'undefined' || typeof createImageBitmap === 'undefined') return null;
     for (const candidate of resolveIpfsUrls(url)) {
       const ctl = new AbortController();
+      controllers.add(ctl);
       const timer = setTimeout(() => ctl.abort(), ICON_TIMEOUT_MS);
       try {
         const res = await fetch(candidate, { signal: ctl.signal });
@@ -51,14 +64,33 @@ function loadIcon(id: number): Promise<ImageBitmap | null> {
         // next gateway
       } finally {
         clearTimeout(timer);
+        controllers.delete(ctl);
       }
     }
-    // Forget the failure so a later mount can retry.
-    ICONS.delete(id);
     return null;
   })();
   ICONS.set(id, p);
   return p;
+}
+
+/**
+ * Release one hold on an icon. Once nothing holds it, abort any in-flight
+ * fetch for it and drop the cache entry — closing the bitmap so it isn't
+ * pinned for the rest of the page's life.
+ */
+function releaseIcon(id: number): void {
+  const n = ICON_REFCOUNTS.get(id);
+  if (n === undefined) return;
+  if (n > 1) {
+    ICON_REFCOUNTS.set(id, n - 1);
+    return;
+  }
+  ICON_REFCOUNTS.delete(id);
+  const p = ICONS.get(id);
+  ICONS.delete(id);
+  for (const ctl of ICON_CONTROLLERS.get(id) ?? []) ctl.abort();
+  ICON_CONTROLLERS.delete(id);
+  void p?.then((bmp) => bmp?.close());
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +105,10 @@ class LofiTank implements SaverInstance {
   private readonly g: Ctx2D;
   private readonly clock = new LogicalClock();
   private readonly icons = new Map<number, ImageBitmap>();
+  /** Ids this instance currently holds a {@link loadIcon} ref on — the set
+   *  {@link releaseIcon} must be called with, once each, on the next field
+   *  change or on dispose. */
+  private readonly heldIds = new Set<number>();
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
   private field: LofiField;
@@ -128,16 +164,33 @@ class LofiTank implements SaverInstance {
     if (key === this.fieldKey && this.field) return this.field;
     this.fieldKey = key;
     this.field = buildLofiField(this.ctx.seed, this.rich, env, mix);
-    for (const id of new Set(this.field.fish.map((f) => f.id))) {
-      if (this.icons.has(id)) continue;
+    const nextIds = new Set(this.field.fish.map((f) => f.id));
+    for (const id of this.heldIds) {
+      if (nextIds.has(id)) continue;
+      releaseIcon(id);
+      this.icons.delete(id);
+    }
+    for (const id of nextIds) {
+      if (this.heldIds.has(id)) continue;
       void loadIcon(id).then((bmp) => {
-        if (!bmp || this.disposed) return;
-        this.icons.set(id, bmp);
-        this.ctx.host.dataset.mqFish = String(this.icons.size);
+        if (this.disposed) return;
+        if (bmp) this.icons.set(id, bmp);
+        this.updateFishCount();
         if (this.paused) this.renderStill();
       });
     }
+    this.heldIds.clear();
+    for (const id of nextIds) this.heldIds.add(id);
+    this.updateFishCount();
     return this.field;
+  }
+
+  /** `mqFish` is a QA-facing count of the CURRENT field's drawable fish —
+   *  recomputed on every rebuild and icon arrival so it never reports a
+   *  previous field's population. */
+  private updateFishCount(): void {
+    const drawn = this.field.fish.filter((f) => this.icons.has(f.id)).length;
+    this.ctx.host.dataset.mqFish = String(drawn);
   }
 
   private applySize(): void {
@@ -357,6 +410,8 @@ class LofiTank implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.stop();
+    for (const id of this.heldIds) releaseIcon(id);
+    this.heldIds.clear();
     this.icons.clear();
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctx.host.dataset.mqFish;

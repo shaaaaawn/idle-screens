@@ -77,7 +77,9 @@ const BASE_PALETTE: LofiPalette = {
 };
 
 export function lofiPaletteOf(environment: string | undefined): LofiPalette {
-  return (environment && PALETTES[environment]) || BASE_PALETTE;
+  return environment !== undefined && Object.prototype.hasOwnProperty.call(PALETTES, environment)
+    ? PALETTES[environment]!
+    : BASE_PALETTE;
 }
 
 export function css(c: Rgb, alpha = 1): string {
