@@ -47,9 +47,11 @@ export default defineConfig({
         'packages/saver-slipstream/src/index.ts',
         'packages/saver-catwalk/src/index.ts',
         'packages/saver-metaquarium/src/index.ts',
-        // WebGL renderer + async mount wiring — unit-hostile; covered by
-        // playground e2e (metaquarium.spec.ts) in a real browser.
+        // WebGL renderer, the lofi Canvas2D renderer + async mount wiring —
+        // unit-hostile; covered by playground e2e (metaquarium.spec.ts MQ1,
+        // MQ10) in a real browser. lofi.ts (its pure layout) stays gated.
         'packages/saver-metaquarium/src/tank.ts',
+        'packages/saver-metaquarium/src/lofi-tank.ts',
         'packages/saver-metaquarium/src/metaquarium.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',

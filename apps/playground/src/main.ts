@@ -61,9 +61,14 @@ const LOCAL_FISH_URL = asset('/assets/metaquarium/fish-257-angelfish.glb');
 const LOCAL_CATALOG = [...FISH_CATALOG, ...NPC_CATALOG].map((f) =>
   f.localGlb ? { ...f, ipfs3d: asset(f.localGlb) } : f,
 );
+/** `?lofi=1` swaps the tank for the Apple TV's 2D aquarium — transparent-icon
+ *  fish on a Canvas2D, no three.js — for QA against the TV and for nostalgia.
+ *  Icons come from IPFS, so it stays opt-in here (the gallery mounts this). */
+const LOFI = ['1', 'true', 'on', ''].includes(new URLSearchParams(location.search).get('lofi') ?? 'off');
 const playgroundMetaquarium = createMetaquarium({
   params: { fishUrl: LOCAL_FISH_URL },
   catalog: LOCAL_CATALOG,
+  ...(LOFI ? { backend: 'lofi' as const } : {}),
 });
 
 const SAVER_GROUPS: SaverGroup[] = [

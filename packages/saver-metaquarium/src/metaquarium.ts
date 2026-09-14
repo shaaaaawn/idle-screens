@@ -16,6 +16,14 @@ export function createMetaquarium(opts: MetaquariumOptions = {}): SaverPlugin {
       paramSpace: space,
     },
     async mount(ctx: SaverContext): Promise<SaverInstance> {
+      if (opts.backend === 'lofi') {
+        // Its own lazy chunk: the lofi tank never pulls three.js.
+        const [{ mountLofi }, caps] = await Promise.all([
+          import('./lofi-tank'),
+          detectCapabilities(),
+        ]);
+        return mountLofi(ctx, space, computeTier(caps));
+      }
       const [{ mountTank }, caps] = await Promise.all([
         import('./tank'),
         detectCapabilities(),

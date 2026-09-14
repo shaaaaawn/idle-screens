@@ -257,3 +257,60 @@ test('MQ9: the whole unminted NPC cast mounts — all eight breeds, no errors', 
 
   expect(pageErrors).toEqual([]);
 });
+
+test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturable', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  // Hermetic: every transparent icon is an 8x8 PNG served from here, so the
+  // test proves the backend, not a gateway's mood.
+  const icon = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR4nGP4H3DiPz7MMDIUAADN88WBmLN9eQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await page.route('**/*_transparent_icon.png', (route) =>
+    route.fulfill({ body: icon, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' } }),
+  );
+  const chunks: string[] = [];
+  page.on('request', (r) => chunks.push(r.url()));
+
+  await page.goto('/?saver=metaquarium&lofi=1');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('lofi');
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
+    .toBeGreaterThanOrEqual(1);
+
+  // A 2d canvas, and one a thumbnail can read: blob-decoded icons never taint.
+  const surface = await page.evaluate(() => {
+    const canvas = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLCanvasElement>('.surface canvas');
+    if (!canvas) return { twoD: false, readable: false };
+    let readable = false;
+    try {
+      readable = canvas.toDataURL('image/jpeg').startsWith('data:image/jpeg');
+    } catch {
+      readable = false;
+    }
+    return { twoD: !!canvas.getContext('2d'), readable };
+  });
+  expect(surface).toEqual({ twoD: true, readable: true });
+
+  // The WebGL tank's chunk (and with it three.js) never loads on this path.
+  expect(chunks.filter((u) => /saver-metaquarium\/src\/tank\.ts|\/tank-[\w-]+\.js|node_modules\/.*three/.test(u))).toEqual([]);
+
+  await page.evaluate(() => window.__idleScreens!.wake());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => !!document.querySelector('idle-screen')?.shadowRoot?.querySelector('.surface canvas'),
+      ),
+    )
+    .toBe(false);
+  expect(pageErrors).toEqual([]);
+});
