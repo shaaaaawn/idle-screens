@@ -14,8 +14,21 @@ export function createMetaquarium(opts: MetaquariumOptions = {}): SaverPlugin {
       id: opts.id ?? metaquariumManifest.id,
       label: opts.label ?? metaquariumManifest.label,
       paramSpace: space,
+      // The lofi backend only ever touches a 2d canvas, at a fraction of the
+      // WebGL tank's cost — capability gating (evaluateSaver/eligibleSavers)
+      // must see that, or it blocks lofi on exactly the hardware it targets.
+      minBackend: opts.backend === 'lofi' ? 'canvas2d' : metaquariumManifest.minBackend,
+      costTier: opts.backend === 'lofi' ? 'low' : metaquariumManifest.costTier,
     },
     async mount(ctx: SaverContext): Promise<SaverInstance> {
+      if (opts.backend === 'lofi') {
+        // Its own lazy chunk: the lofi tank never pulls three.js.
+        const [{ mountLofi }, caps] = await Promise.all([
+          import('./lofi-tank'),
+          detectCapabilities(),
+        ]);
+        return mountLofi(ctx, space, computeTier(caps));
+      }
       const [{ mountTank }, caps] = await Promise.all([
         import('./tank'),
         detectCapabilities(),

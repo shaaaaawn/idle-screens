@@ -196,6 +196,11 @@ export interface MetaquariumOptions {
    *  playground uses to point ids at bundled local GLBs (offline e2e), and
    *  the future farm/pack extension point. */
   catalog?: import('./ipfs').FishEntry[];
+  /** Renderer. `webgl` (default) is the three.js tank. `lofi` is the Apple
+   *  TV's 2D aquarium — transparent-icon fish, kelp and bubbles on a Canvas2D,
+   *  never loading three.js — for QA against the TV and for nostalgia. A host
+   *  choice, not a scene param: the same channel publishes either way. */
+  backend?: 'webgl' | 'lofi';
   id?: string;
   label?: string;
   params?: Partial<Record<keyof typeof METAQUARIUM_PARAMS, ParamValue>>;
