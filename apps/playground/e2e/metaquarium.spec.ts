@@ -283,11 +283,12 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
   await expect
     .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
     .toBe('lofi');
-  // Standard tier (this CI's Chromium has no WebGPU, so lofiRich() is false):
-  // the lean tank's exact fish count, like MQ9's WebGL parity check.
+  // Exact parity count, like MQ9's WebGL check — but lofiRich() ties fish
+  // count to the runner's capability tier (8 lean, 13 on 'high'), so accept
+  // either rather than assuming this Chromium always resolves 'standard'.
   await expect
-    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 15_000 })
-    .toBe(8);
+    .poll(async () => [8, 13].includes((await surfaceDataset(page)).fish), { timeout: 15_000 })
+    .toBe(true);
 
   // A 2d canvas, one a thumbnail can read (blob-decoded icons never taint),
   // and — the actual point of "icons" — at least one drawn magenta pixel.
