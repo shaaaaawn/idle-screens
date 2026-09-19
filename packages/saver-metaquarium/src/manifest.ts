@@ -164,6 +164,8 @@ export const METAQUARIUM_PARAMS = {
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
   /** Faceted boulders, mineral seams, a ridge and an open arch. Opt-in. */
+  bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   skyShards: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },

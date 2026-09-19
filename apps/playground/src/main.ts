@@ -162,10 +162,10 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
   createMetaquarium({
     id: 'metaquarium-world-mineral-garden', label: 'Metaquarium (mineral garden)',
-    params: { rockDensity: 0.8, geodeHomes: 3, floraDensity: 0.7, skyShards: 0.7, propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple',
+    params: { rockDensity: 0.8, geodeHomes: 3, floraDensity: 0.7, skyShards: 0.7, bubbleVents: 0.65, marineSnow: 0.7, propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple',
       fishCount: 6, fishUrl: LOCAL_FISH_URL, swimStyle: 'drift', crystalTint: 0.5,
       fogColor: '#040916', floorColor: '#0b1525', cameraDistance: 240, cameraElevation: 12,
-      cameraAzimuth: 0, autoRotate: 0, moteDensity: 0.35 }, catalog: LOCAL_CATALOG,
+      cameraAzimuth: 0, autoRotate: 0, moteDensity: 0 }, catalog: LOCAL_CATALOG,
   }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
   // so the props are judged without waiting on a gateway.

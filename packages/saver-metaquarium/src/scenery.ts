@@ -2,17 +2,19 @@
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
   BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, DoubleSide, Group, IcosahedronGeometry, Matrix4,
-  OctahedronGeometry,
+  OctahedronGeometry, Points, PointsMaterial, Vector4,
   Mesh, MeshBasicMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { Cluster, CrystalRng } from './crystals';
+import { emittersOf, type Cluster, type CrystalRng } from './crystals';
 
 export interface SceneryOptions {
   rocks: number;
   homes: number;
   flora: number;
   sky: number;
+  bubbles: number;
+  snow: number;
   cap: number;
   scale: number;
 }
@@ -240,6 +242,77 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     stars.frustumCulled = false;
   }
   counts.skyShards = skyCount;
+  // Both particle layers are one draw each; positions are pure in t, including
+  // wraps. Bubble fade at either end hides the reset back to its vent.
+  const particleRng = rng.fork(6);
+  const sources = [...vents, ...anchors.map(a => ({ ...a, y: a.y + 6 * s }))];
+  const emitters = emittersOf(clusters);
+  const lightPositions = Array.from({ length: 12 }, (_, i) => {
+    const e = emitters[i]; return e ? new Vector4(e.x, e.y, e.z, e.reach) : new Vector4(0, 0, 0, 1);
+  });
+  const lightColors = Array.from({ length: 12 }, (_, i) => {
+    const e = emitters[i]; return e ? new Vector3(e.r, e.g, e.b) : new Vector3();
+  });
+  const particles = (bubble: boolean, n: number): void => {
+    if (!n) return;
+    const positions = new Float32Array(n * 3), colors = new Float32Array(n * 3), phases = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const source = sources[i % sources.length]!;
+      positions.set(bubble ? [source.x, source.y, source.z] : [particleRng.range(-170, 170) * s, 0, particleRng.range(-150, 150) * s], i * 3);
+      const color = new Color(bubble ? source.color : '#abc9dc');
+      colors.set([color.r, color.g, color.b], i * 3);
+      phases.set([particleRng.next(), particleRng.range(0.7, 1.3)], i * 2);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new BufferAttribute(colors, 3));
+    geometry.setAttribute('aParticle', new BufferAttribute(phases, 2));
+    geometry.userData.mqOwned = true;
+    const material = new PointsMaterial({ vertexColors: true, size: bubble ? 1.5 * s : 0.65 * s,
+      transparent: true, opacity: bubble ? 0.55 : 0.5, depthWrite: false });
+    material.userData.mqOwned = true;
+    const clock = { value: 0 }; clocks.push(clock);
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uParticleTime = clock;
+      shader.uniforms.uMineralPosition = { value: lightPositions };
+      shader.uniforms.uMineralColor = { value: lightColors };
+      shader.vertexShader = `uniform float uParticleTime;
+        attribute vec2 aParticle; varying float vLife;
+        uniform vec4 uMineralPosition[12]; uniform vec3 uMineralColor[12];
+      ` + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        float life = fract(aParticle.x + uParticleTime * aParticle.y * ${bubble ? '0.045' : '0.007'});
+        transformed.y += ${bubble ? 'life * 76.0' : '(1.0 - life) * 150.0'};
+        transformed.x += sin(life * 9.0 + aParticle.x * 30.0) * ${bubble ? '1.8' : '7.0'};
+        transformed.z += cos(life * 6.0 + aParticle.x * 20.0) * 2.0;
+        vLife = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.78, 1.0, life));
+        vec3 light = vec3(0.22);
+        for (int i = 0; i < 12; i++) {
+          vec3 delta = transformed - uMineralPosition[i].xyz;
+          float reach = uMineralPosition[i].w;
+          light += uMineralColor[i] / (1.0 + dot(delta, delta) / (reach * reach));
+        }
+        vColor.rgb *= min(vec3(1.8), light);
+      `);
+      shader.fragmentShader = 'varying float vLife;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+        #include <color_fragment>
+        float r = length(gl_PointCoord - 0.5) * 2.0;
+        float mask = ${bubble ? 'smoothstep(0.5, 0.72, r) * (1.0 - smoothstep(0.8, 1.0, r))' : '1.0 - smoothstep(0.0, 1.0, r)'};
+        diffuseColor.a *= mask * vLife;
+      `);
+    };
+    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v1' : 'mineral-snow-v1';
+    const points = new Points(geometry, material);
+    points.name = bubble ? 'bubble-vents' : 'illuminated-marine-snow';
+    points.frustumCulled = false;
+    group.add(points);
+  };
+  counts.bubbles = Math.round(opts.bubbles * opts.cap * 12);
+  counts.snow = Math.round(opts.snow * opts.cap * 25);
+  particles(true, counts.bubbles);
+  particles(false, counts.snow);
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings');
   batch(group, stones, 'rock-formations');
