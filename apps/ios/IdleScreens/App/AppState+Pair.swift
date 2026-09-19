@@ -8,8 +8,14 @@ struct PairedScreen: Codable, Equatable, Identifiable, Sendable {
     /// Last channel this screen was known to be watching.
     var channelId: String?
     let pairedAt: Date
-    /// Server's last-seen stamp (epoch ms) — drives the live online dot.
+    /// Server's last-seen stamp (epoch ms). Stamped when the screen's socket
+    /// CONNECTS and never again — so it says "reached us once", not "is here".
     var lastSeenAt: Int?
+    /// When a push last actually landed on this screen (`delivered >= 1`).
+    /// The only real proof of presence the pairing API offers.
+    var lastDeliveredAt: Date?
+    /// When a push last found nobody home (HTTP 409, `delivered: 0`).
+    var lastUnansweredAt: Date?
 
     var id: String { deviceId }
 
@@ -57,12 +63,64 @@ struct PairedScreen: Codable, Equatable, Identifiable, Sendable {
     /// (the screen isn't running, or is too old to hold a control socket).
     var hasRegistered: Bool { lastSeenAt != nil }
 
-    /// Human status line for the card.
+    /// What we can honestly say about whether the screen is there.
+    ///
+    /// The card used to show a green dot for any screen that had EVER
+    /// connected: `GET /api/pair/status` returns the same body for a screen
+    /// that is up and one that was switched off last week (verified against
+    /// production — the response is byte-identical before and after the socket
+    /// closes). So green now needs evidence, and everything else says only
+    /// what is known.
+    enum Presence: Equatable {
+        /// Never reached the server. Pairing probably didn't take.
+        case never
+        /// Proof within the window: a push landed, or it has only just connected.
+        case connected
+        /// We pushed and nobody answered. It is off, asleep, or offline.
+        case notAnswering
+        /// It connected once, some time ago. It may or may not be on.
+        case unknown
+    }
+
+    /// How long a proof of presence is believed. A screen that took a push ten
+    /// minutes ago is very likely still on; one from yesterday says nothing.
+    static let presenceWindow: TimeInterval = 10 * 60
+    /// A connect stamp this fresh counts as presence on its own.
+    static let freshConnect: TimeInterval = 2 * 60
+
+    func presence(now: Date = Date()) -> Presence {
+        guard lastSeenAt != nil else { return .never }
+        let delivered = lastDeliveredAt.map { now.timeIntervalSince($0) }
+        let unanswered = lastUnansweredAt.map { now.timeIntervalSince($0) }
+        // The most recent piece of evidence wins.
+        if let unanswered, unanswered < Self.presenceWindow, unanswered < (delivered ?? .infinity) {
+            return .notAnswering
+        }
+        if let delivered, delivered < Self.presenceWindow { return .connected }
+        // Measured against the SAME clock as the rest — not `lastSeenAge`, which
+        // reads the wall clock and would disagree with an injected `now`. A
+        // stamp from the future (clock skew) is not evidence of anything.
+        if let lastSeenAt {
+            let age = now.timeIntervalSince1970 - Double(lastSeenAt) / 1000
+            if age >= 0, age < Self.freshConnect { return .connected }
+        }
+        return .unknown
+    }
+
+    /// Human status line for the card. Never claims more than `presence` knows.
     var statusText: String {
-        guard let age = lastSeenAge else { return "not connected yet" }
-        if let channelId, !channelId.isEmpty { return "▸ \(channelId)" }
-        if age < 90 { return "connected" }
-        return "seen \(Self.ago(age))"
+        switch presence() {
+        case .never:
+            return "not connected yet"
+        case .connected:
+            if let channelId, !channelId.isEmpty { return "on · \(channelId)" }
+            return "connected"
+        case .notAnswering:
+            return "not answering — is it on?"
+        case .unknown:
+            let seen = lastSeenAge.map { "last seen \(Self.ago($0))" } ?? "not seen lately"
+            return seen
+        }
     }
 
     static func ago(_ seconds: TimeInterval) -> String {
@@ -206,12 +264,23 @@ extension AppState {
             try await pairClient.push(pairToken: token, channelId: channelId)
             if let index = pairedScreens.firstIndex(where: { $0.deviceId == screen.deviceId }) {
                 pairedScreens[index].channelId = channelId
+                // A delivered push is the one real proof the screen is there.
+                pairedScreens[index].lastDeliveredAt = Date()
                 savePairedScreens()
             }
             pairPushError = nil
             return true
         } catch {
-            pairPushError = error.localizedDescription
+            // 409 = the pairing is fine but no socket took the push: the screen
+            // is off or asleep. Remember that, so the card stops implying it's up.
+            if case PairError.httpError(let status, _) = error, status == 409,
+               let index = pairedScreens.firstIndex(where: { $0.deviceId == screen.deviceId }) {
+                pairedScreens[index].lastUnansweredAt = Date()
+                savePairedScreens()
+                pairPushError = "\(screen.kind.label) isn't answering — open idle screens on it and try again."
+            } else {
+                pairPushError = error.localizedDescription
+            }
             return false
         }
     }

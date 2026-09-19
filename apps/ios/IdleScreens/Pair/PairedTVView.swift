@@ -375,9 +375,7 @@ struct PairedTVView: View {
                         .font(.title3)
                         .foregroundStyle(Color.textPrimary)
                     Spacer()
-                    Circle()
-                        .fill(screen.hasRegistered ? Color.appSuccess : Color.textTertiary)
-                        .frame(width: 8, height: 8)
+                    presenceDot(screen.presence())
                 }
                 Spacer(minLength: 0)
                 Text(screen.kind.label)
@@ -385,8 +383,11 @@ struct PairedTVView: View {
                     .foregroundStyle(Color.textPrimary)
                 Text(screen.statusText)
                     .font(.caption)
-                    .foregroundStyle(screen.hasRegistered ? Color.textSecondary : Color.textTertiary)
-                    .lineLimit(1)
+                    .foregroundStyle(screen.presence() == .notAnswering ? Color.appWarning
+                                     : screen.presence() == .connected ? Color.textSecondary
+                                     : Color.textTertiary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
             }
             .padding(14)
             .frame(width: 148, height: 118, alignment: .leading)
@@ -400,6 +401,25 @@ struct PairedTVView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Unpair \(screen.kind.label)", role: .destructive) { app.unpair(screen) }
+        }
+    }
+
+    /// Green means PROOF, not history. A filled dot only for a screen that has
+    /// just answered; amber for one that just didn't; a hollow ring when all we
+    /// know is that it connected once — which is most of the time, and is not
+    /// the same as being on.
+    @ViewBuilder
+    private func presenceDot(_ presence: PairedScreen.Presence) -> some View {
+        switch presence {
+        case .connected:
+            Circle().fill(Color.appSuccess).frame(width: 8, height: 8)
+                .accessibilityLabel("Connected")
+        case .notAnswering:
+            Circle().fill(Color.appWarning).frame(width: 8, height: 8)
+                .accessibilityLabel("Not answering")
+        case .unknown, .never:
+            Circle().strokeBorder(Color.textTertiary, lineWidth: 1.5).frame(width: 8, height: 8)
+                .accessibilityLabel(presence == .never ? "Never connected" : "Status unknown")
         }
     }
 
