@@ -158,7 +158,7 @@ never changes because a dependency was bumped.
 
 ## Mineral worlds
 
-The WebGL tank now has five independent, opt-in world parameters. They work with
+The WebGL tank now has six independent, opt-in world parameters. They work with
 `createMetaquarium({ params })`, the normal control track, and the playground's
 **World** controls. They do not change the 2D SaverSpec format or the lofi renderer.
 All default to zero, so existing scenes retain their composition.
@@ -166,9 +166,10 @@ All default to zero, so existing scenes retain their composition.
 | Parameter | Range | Effect |
 | --- | --- | --- |
 | `rockDensity` | 0–1 | Crystal-root boulders, sparse satellite rocks, a distant ridge and an open arch. Any positive value provides foundations; density adds satellites. |
-| `geodeHomes` | 0–3 | Rounded count of cut-open geode homes, with warm round doors, voxel lamps, stools, steps and chimneys. Weak devices retain at most two. |
-| `floraDensity` | 0–1 | Voxel kelp near crystal roots, tinted by the nearest crystal, with slow rooted sway and luminous tips. |
-| `bubbleVents` | 0–1 | Bubble streams from geode chimneys and crystal bases, fading before each wrap. |
+| `rockVeins` | 0–1 (0.7) | How fractured the stone is. Fissures are cut from the rock's own facets (so they always lie on the surface), fork, carry a white-hot core, and sprout small crystals. 0 is plain stone. |
+| `geodeHomes` | 0–3 | Geode homes: a broken boulder with an agate rind and a throat of crystal teeth, and a voxel house recessed inside — round door, lit window, lamp, steps, a chimney that vents bubbles. Habits cycle cottage / hall / tower; each home lights the floor at its door. Weak devices retain at most two. |
+| `floraDensity` | 0–1 | Three voxel species — kelp, reed clumps, lantern bulbs — that lean toward and take the colour of the nearest crystal; sway grows with height, a gust travels across the field, tips breathe. |
+| `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
 | `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |
 
 Minerals are faceted; living flora and the inhabitants' furnishings are voxel.

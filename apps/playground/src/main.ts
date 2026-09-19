@@ -160,12 +160,17 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // THE ROCK WORLD: fractured stone is the subject — a field of boulders, the
+  // arch and the ridge all split by light, one home tucked among them.
   createMetaquarium({
     id: 'metaquarium-world-mineral-garden', label: 'Metaquarium (mineral garden)',
-    params: { rockDensity: 0.8, geodeHomes: 3, floraDensity: 0.7, bubbleVents: 0.65, marineSnow: 0.7, propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple',
-      fishCount: 6, fishUrl: LOCAL_FISH_URL, swimStyle: 'drift', crystalTint: 0.5,
-      fogColor: '#040916', floorColor: '#0b1525', cameraDistance: 240, cameraElevation: 12,
-      cameraAzimuth: 0, autoRotate: 0, moteDensity: 0 }, catalog: LOCAL_CATALOG,
+    params: {
+      rockDensity: 1, rockVeins: 1, geodeHomes: 1, floraDensity: 0.3, bubbleVents: 0.55, marineSnow: 0.5,
+      propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple,crystal:1@lotus/blue',
+      fishMix: '100:3,257:3', swimStyle: 'patrol', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#040916', floorColor: '#0b1525', fogNear: 120, fogFar: 700,
+      cameraDistance: 215, cameraElevation: 13, cameraAzimuth: 14, autoRotate: 0.5, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
   }),
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
@@ -196,29 +201,30 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 150, cameraElevation: 9, cameraAzimuth: 6, autoRotate: 1.2,
     }, catalog: LOCAL_CATALOG,
   }),
+  // THE HOME WORLD: the village is the subject — three geode homes in a
+  // crescent, chimneys going, a few rocks and a little flora around them.
   createMetaquarium({
     id: 'metaquarium-world-geode-harbor', label: 'Metaquarium (geode harbor)',
     params: {
-      rockDensity: 0.55, geodeHomes: 3, floraDensity: 0.35,
-      bubbleVents: 0.85, marineSnow: 0.6,
+      geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45,
       propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange,crystal:1@druse/purple',
       fishMix: '100:2,257:1,glowfish:2,crab:1', dracoPath: asset('/draco/'),
       swimStyle: 'auto', swimVariance: 0.5, swimSpeed: 0.55, bodyWiggle: 0.25,
       crystalTint: 0.65, crystalGlow: 0.65, fogColor: '#080718', floorColor: '#10182b',
-      cameraDistance: 220, cameraElevation: 11, cameraAzimuth: 8, autoRotate: 0,
+      cameraDistance: 185, cameraElevation: 10, cameraAzimuth: 6, autoRotate: 0.5,
       fogNear: 110, fogFar: 650,
     }, catalog: LOCAL_CATALOG,
   }),
+  // THE FLORA WORLD: the grove is the subject — kelp, reeds and lantern bulbs
+  // crowding the crystals they feed on, snow falling through the glow.
   createMetaquarium({
     id: 'metaquarium-world-moonlit-grove', label: 'Metaquarium (moonlit grove)',
     params: {
-      rockDensity: 0.4, geodeHomes: 2, floraDensity: 0.85,
-      bubbleVents: 0.35, marineSnow: 0.8,
-      propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan',
-      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5,
-      crystalTint: 0.4, crystalGlow: 0.5, fogColor: '#03171d', floorColor: '#102c30',
-      cameraDistance: 245, cameraElevation: 14, cameraAzimuth: -16, autoRotate: 0,
-      fogNear: 110, fogFar: 650,
+      floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85,
+      propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: -14, autoRotate: 0.5,
     }, catalog: LOCAL_CATALOG,
   }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
