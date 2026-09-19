@@ -56,12 +56,17 @@ import {
   clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
   type Cluster, type Emitter,
 } from './crystals';
-import { buildCrystalField, emptyPoolUniforms, installFloorPools, type CrystalField } from './crystal-mesh';
+import {
+  buildCrystalField, buildGlowCards, emptyPoolUniforms, installFloorPools, MAX_POOLS, writePoolSlots,
+  type CrystalField, type GlowCards,
+} from './crystal-mesh';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  collectFishGlow,
+  type FishGlow,
   eyeNoseSign,
   forceOpaque,
   isGlow,
@@ -87,6 +92,7 @@ import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
+const Y_AXIS = new Vector3(0, 1, 0);
 const GLB_CONCURRENCY = 3;
 
 // ---------------------------------------------------------------------------
@@ -444,6 +450,8 @@ interface Fish {
   tail: Object3D | null;
   /** Materials this fish owns for crystal tinting, with their untinted
    *  colours. Created on the first tinted frame — never, by default. */
+  /** What this fish's GLOW parts add up to; null when nothing on it glows. */
+  glow: FishGlow | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -522,6 +530,12 @@ class TankInstance implements SaverInstance {
   private warnedProps = '';
   private readonly poolUniforms = emptyPoolUniforms();
   private readonly lightScratch: [number, number, number] = [0, 0, 0];
+  // Fish glow: built on the first glowing fish, never for a cast without one.
+  private glowCards: GlowCards | null = null;
+  private readonly glowPos = new Vector3();
+  private readonly fishEmitters: Emitter[] = [];
+  private tintEmitters: Emitter[] = [];
+  private poolsInstalled = false;
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
@@ -819,6 +833,8 @@ class TankInstance implements SaverInstance {
     }
     this.room = group;
     this.scene.add(group);
+    // A rebuilt terrain is a new material: it must learn the light field too.
+    if (this.poolsInstalled) this.installPools();
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
@@ -884,19 +900,91 @@ class TankInstance implements SaverInstance {
       this.clusters, variants, this.emitters, { halo: budget.halo }, this.poolUniforms,
     );
     this.scene.add(this.crystals.group);
-    installFloorPools(this.floorMat, this.poolUniforms);
-    if (this.terrainMat) installFloorPools(this.terrainMat, this.poolUniforms);
+    this.installPools();
     // Floor-huggers ride over a cluster instead of through it.
     const clusters = this.clusters;
     this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
     this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
   }
 
+  /**
+   * One glowing fish, one frame: place its bloom card, breathe its core, and
+   * enter it in the light field. The fish's GLOW parts are SOURCES — that is
+   * what the original renders say and what a flat unlit colour never did.
+   */
+  private glowFish(f: Fish, n: number, amount: number, pulse: number, tSec: number): number {
+    const g = f.glow!;
+    const body = f.body!;
+    const phase = f.index * 1.7;
+    const beat = 1 - pulse * 0.15 * (0.5 + 0.5 * Math.sin(tSec * 0.754 + phase));
+    // White-hot core: emissive without HDR. The halo and card stay saturated,
+    // so the part reads as brighter than its own colour.
+    const hot = 0.34 * amount;
+    for (const c of g.cores) {
+      c.mat.color.setRGB(
+        (c.base.r + (1 - c.base.r) * hot) * beat,
+        (c.base.g + (1 - c.base.g) * hot) * beat,
+        (c.base.b + (1 - c.base.b) * hot) * beat,
+      );
+    }
+    if (amount <= 0) return n;
+    // Body-local centre → world, by hand: the scene graph's matrices are a
+    // frame stale here, and updating 24 skinned hierarchies to read one point
+    // would cost more than the glow.
+    const scale = body.scale.x * f.group.scale.x;
+    const p = this.glowPos.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
+    p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
+    p.applyQuaternion(f.group.quaternion).add(f.group.position);
+    const size = Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 2.9;
+    if (!this.glowCards) {
+      this.glowCards = buildGlowCards(MAX_FISH);
+      this.scene.add(this.glowCards.mesh);
+    }
+    this.glowCards.set(n, p.x, p.y, p.z, size, g.r * g.gain, g.g * g.gain, g.b * g.gain, phase);
+    this.fishEmitters.push({
+      x: p.x, y: p.y, z: p.z, r: g.r * 0.7 * g.gain, g: g.g * 0.7 * g.gain, b: g.b * 0.7 * g.gain,
+      reach: size * 0.62, phase, owner: f.index,
+    });
+    return n + 1;
+  }
+
+  /** After the cast: the cards in use, and the glowing fish nearest the floor
+   *  into the pool slots the clusters left free. */
+  private commitGlow(n: number, amount: number, pulse: number, tSec: number): void {
+    const fog = this.scene.fog as Fog;
+    this.glowCards?.commit(n, tSec, amount, pulse, { color: this.fogColor, near: fog.near, far: fog.far });
+    this.tintEmitters = this.fishEmitters.length ? [...this.emitters, ...this.fishEmitters] : this.emitters;
+    const clusterSlots = Math.min(this.emitters.length, MAX_POOLS);
+    if (!this.fishEmitters.length || amount <= 0) {
+      if (this.poolsInstalled) this.poolUniforms.uMqPoolN!.value = clusterSlots;
+      return;
+    }
+    if (!this.poolsInstalled) this.installPools();
+    const floorAt = this.terrainAt;
+    const low = this.fishEmitters
+      .map((e) => ({ e, h: e.y - (floorAt ? floorAt(e.x, e.z) : 0) }))
+      .filter((c) => c.h < c.e.reach * 2.2)
+      .sort((a, b) => a.h - b.h)
+      .map((c) => c.e);
+    writePoolSlots(this.poolUniforms, low, clusterSlots);
+    if (!this.crystals) {
+      this.poolUniforms.uMqPoolGain!.value = 0.4 * amount;
+      this.poolUniforms.uMqPoolTime!.value = tSec;
+      this.poolUniforms.uMqPoolPulse!.value = pulse;
+    }
+  }
+
+  private installPools(): void {
+    this.poolsInstalled = true;
+    installFloorPools(this.floorMat, this.poolUniforms);
+    if (this.terrainMat) installFloorPools(this.terrainMat, this.poolUniforms);
+  }
+
   /** Opt-in (`crystalTint` > 0): a fish near a cluster picks up its colour.
    *  The fish's materials are cloned on its first tinted frame so clones of
    *  one template never share a tint; at 0 nothing here ever runs. */
   private tintFish(f: Fish, amount: number, tSec: number, pulse: number): void {
-    if (amount <= 0 || !this.emitters.length) {
+    if (amount <= 0 || !this.tintEmitters.length) {
       if (f.tinted && f.tint) {
         for (const t of f.tint) t.mat.color.copy(t.base);
         f.tinted = false;
@@ -939,7 +1027,7 @@ class TankInstance implements SaverInstance {
       f.tint = list;
     }
     const p = f.group.position;
-    const l = sampleLight(this.emitters, p.x, p.y, p.z, tSec, pulse, this.lightScratch);
+    const l = sampleLight(this.tintEmitters, p.x, p.y, p.z, tSec, pulse, this.lightScratch, f.index);
     const k = amount * 1.8 * this.num('crystalGlow');
     for (const t of f.tint) {
       t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
@@ -1180,13 +1268,15 @@ class TankInstance implements SaverInstance {
     let tail: Object3D | null = null;
     let bodyNode: Object3D | null = null;
     let clipDuration = 0;
+    let fishGlow: FishGlow | null = null;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off');
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      fishGlow = collectFishGlow(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
@@ -1236,6 +1326,7 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
+      glow: fishGlow,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
     if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
@@ -1459,7 +1550,13 @@ class TankInstance implements SaverInstance {
     // no fish changes epicentre mid-flinch.
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
-    const tintAmount = this.emitters.length ? this.num('crystalTint') : 0;
+    const fishGlow = this.num('fishGlow');
+    const glowPulse = this.num('crystalPulse');
+    let glowN = 0;
+    this.fishEmitters.length = 0;
+    // Tint reads LAST frame's fish emitters (this frame's are still being
+    // gathered) — one frame of lag on a 0.12 Hz light is invisible.
+    const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const tintPulse = this.num('crystalPulse');
     for (const f of this.fish) {
       if (!f) continue;
@@ -1744,6 +1841,7 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+      if (f.glow && f.body) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
@@ -1781,6 +1879,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
       });
     }
+    this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.lastFish = report;
     this.lastFrameT = t;
     this.rendered = true;
@@ -1820,6 +1919,12 @@ class TankInstance implements SaverInstance {
         waterY: this.ceiling ? (this.num('waterY') >= 0 ? this.num('waterY') : this.presetWaterY) : null,
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
+      },
+      glow: {
+        fishGlow: this.num('fishGlow'),
+        fishMetal: this.str('fishMetal'),
+        glowing: this.fish.filter((f) => f?.glow && f.group.visible).length,
+        floorPools: Number(this.poolUniforms.uMqPoolN!.value) - Math.min(this.emitters.length, MAX_POOLS),
       },
       props: {
         propMix: this.str('propMix'),

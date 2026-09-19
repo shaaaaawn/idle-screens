@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
+import { Group, Mesh, MeshBasicMaterial, MeshMatcapMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  chromeMatcap,
+  collectFishGlow,
   eyeNoseSign,
   forceOpaque,
   glowColorOf,
@@ -260,12 +262,33 @@ describe('glow halos — selective bloom without a composer', () => {
     const b = new Mesh(geo, soft);
     const root = new Group();
     root.add(a, b);
-    applyNpcMaterials(root, createRng(3));
+    applyNpcMaterials(root, createRng(3), false);
     const ra = a.material as unknown as MeshBasicMaterial;
     expect(ra).toBeInstanceOf(MeshBasicMaterial);
     expect(ra.map).toBe(tex); // same texture, unlit
     expect(ra.userData.mqOwned).toBe(true);
     expect(b.material).toBe(soft); // non-metal atlas untouched
+  });
+
+  it('reflective (default): metallic atlases wear the shared chrome matcap, never black', () => {
+    const geo = new SphereGeometry(1, 4, 4);
+    const tex = new Texture();
+    const a = new Mesh(geo, new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1 }));
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3));
+    const m = a.material as unknown as MeshMatcapMaterial;
+    expect(m).toBeInstanceOf(MeshMatcapMaterial);
+    expect(m.map).toBe(tex);
+    expect(m.matcap).toBe(chromeMatcap()); // one texture for every fish
+    expect(m.userData.mqOwned).toBe(true);
+    // Shared across tanks: must never be disposed with a fish.
+    expect(chromeMatcap().userData.mqOwned).toBeUndefined();
+    const px = chromeMatcap().image.data as Uint8Array;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < px.length; i += 4) { lo = Math.min(lo, px[i + 1]!); hi = Math.max(hi, px[i + 1]!); }
+    expect(lo).toBeGreaterThan(40); // no face ever goes black
+    expect(hi).toBeGreaterThan(235); // and there is a real highlight
   });
 
   it('the halo shader pushes along normals via one shared program key', () => {
@@ -297,5 +320,47 @@ describe('glow halos — selective bloom without a composer', () => {
     const g = new Group();
     g.add(multi);
     expect(addGlowHalos(g, createRng(1))).toBe(0);
+  });
+});
+
+describe('fish glow — GLOW parts as light sources', () => {
+  const fin = (r: number, x: number, name = 'GLOW-HotPink'): Mesh => {
+    const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name }));
+    m.material.name = name;
+    m.position.x = x;
+    return m;
+  };
+
+  it('an accent fin earns full bloom, its own colour, and a repaintable core', () => {
+    const root = new Group();
+    const body = new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' }));
+    const f = fin(1, 5);
+    root.add(body, f);
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.cores).toHaveLength(1);
+    expect(g.cores[0]!.mat).toBe(f.material);
+    expect(g.cx).toBeCloseTo(5, 5); // centred on the fin, not the fish
+    expect(g.gain).toBeGreaterThan(0.8);
+    // The bloom is the colour the part actually wears — never a second guess.
+    expect(g.r).toBeCloseTo(g.cores[0]!.base.r, 6);
+    expect(g.g).toBeCloseTo(g.cores[0]!.base.g, 6);
+  });
+
+  it('a glow part that IS the silhouette is a coat: never whitened, fainter bloom', () => {
+    const root = new Group();
+    const body = new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' }));
+    root.add(body, fin(4, 0, 'GLOW-Seafoam'));
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.cores).toHaveLength(0);
+    expect(g.gain).toBeLessThan(0.5);
+  });
+
+  it('a fish with nothing that glows has no glow', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));
+    applyNpcMaterials(root, createRng(2));
+    expect(collectFishGlow(root, createRng(2))).toBeNull();
   });
 });

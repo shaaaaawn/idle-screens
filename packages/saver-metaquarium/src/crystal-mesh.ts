@@ -24,11 +24,15 @@ import {
   PlaneGeometry,
   Quaternion,
   ShaderMaterial,
+  Vector2,
   Vector3,
   type IUniform,
   type Material,
 } from 'three';
 import { MAX_CLUSTERS, type Cluster, type Emitter, type ShardGeometry } from './crystals';
+
+/** Floor-pool slots: every cluster, plus the glowing fish nearest the floor. */
+export const MAX_POOLS = MAX_CLUSTERS + 6;
 
 const FOG_PARS = /* glsl */ `
   uniform vec3 uFogColor;
@@ -133,6 +137,7 @@ const CARD_VERT = /* glsl */ `
   varying vec3 vColor;
   varying vec2 vLook;
   varying vec2 vUv;
+  uniform float uLift;
   varying float vDepth;
   void main() {
     // Billboard: take the instance's translation and uniform scale, spend
@@ -140,6 +145,10 @@ const CARD_VERT = /* glsl */ `
     vec4 c = viewMatrix * modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
     float s = length(instanceMatrix[0].xyz);
     c.xy += position.xy * s;
+    // Lifted toward the lens by a fraction of its size, a depth-tested card
+    // clears the body it surrounds — so the glow spills OVER the fish, the
+    // way bloom does — while anything genuinely nearer still occludes it.
+    c.z += s * uLift;
     vUv = position.xy * 2.0;
     vColor = aColor;
     vLook = aLook;
@@ -155,6 +164,7 @@ const CARD_FRAG = /* glsl */ `
   uniform float uPulse;
   varying vec3 vColor;
   varying vec2 vLook;
+  uniform vec2 uNear;
   varying vec2 vUv;
   varying float vDepth;
   void main() {
@@ -167,7 +177,7 @@ const CARD_FRAG = /* glsl */ `
     // cluster the camera orbits past would fill the lens: normalise by the
     // colour's own brightness and let the card die away up close.
     float lum = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
-    float near = smoothstep(45.0, 150.0, vDepth);
+    float near = smoothstep(uNear.x, uNear.y, vDepth);
     gl_FragColor = vec4(vColor * fall * sqrt(fall) * (0.3 / (0.55 + 1.6 * lum)) * uGlow * beat * near
       * (1.0 - 0.75 * vLook.x) * (1.0 - fog), 1.0);
     #include <colorspace_fragment>
@@ -292,7 +302,8 @@ export function buildCrystalField(
     const quad = new PlaneGeometry(1, 1);
     quad.userData.mqOwned = true;
     const cardMat = owned(new ShaderMaterial({
-      uniforms: shared,
+      // A cluster the camera orbits past would fill the lens: fade 45→150.
+      uniforms: { ...shared, uLift: { value: 0 }, uNear: { value: new Vector2(45, 150) } },
       vertexShader: CARD_VERT,
       fragmentShader: CARD_FRAG,
       transparent: true,
@@ -350,31 +361,35 @@ export function buildCrystalField(
 export function emptyPoolUniforms(): Uniforms {
   return {
     uMqPoolN: { value: 0 },
-    uMqPoolPos: { value: new Float32Array(MAX_CLUSTERS * 4) },
-    uMqPoolCol: { value: new Float32Array(MAX_CLUSTERS * 3) },
-    uMqPoolPhase: { value: new Float32Array(MAX_CLUSTERS) },
+    uMqPoolPos: { value: new Float32Array(MAX_POOLS * 4) },
+    uMqPoolCol: { value: new Float32Array(MAX_POOLS * 3) },
+    uMqPoolPhase: { value: new Float32Array(MAX_POOLS) },
     uMqPoolGain: { value: 0 },
     uMqPoolTime: { value: 0 },
     uMqPoolPulse: { value: 0 },
   };
 }
 
-export function fillPoolUniforms(u: Uniforms, emitters: readonly Emitter[]): void {
+/** Write emitters into slots [from, from + n). Returns the slot after the last. */
+export function writePoolSlots(u: Uniforms, emitters: readonly Emitter[], from: number): number {
   const pos4 = u.uMqPoolPos!.value as Float32Array;
   const col3 = u.uMqPoolCol!.value as Float32Array;
   const phases = u.uMqPoolPhase!.value as Float32Array;
-  const n = Math.min(emitters.length, MAX_CLUSTERS);
-  for (let i = 0; i < n; i += 1) {
-    const e = emitters[i]!;
-    // The floor pool is tighter than the volume light a fish swims through.
-    pos4.set([e.x, e.y, e.z, e.reach * 0.55], i * 4);
-    // Same brightness normalisation as the glow card: a white-cyan ice
-    // cluster would otherwise flood the floor where a hot-pink one pools.
+  let i = from;
+  for (const e of emitters) {
+    if (i >= MAX_POOLS) break;
     const k = 1 / (0.55 + 1.6 * (0.2126 * e.r + 0.7152 * e.g + 0.0722 * e.b));
+    pos4.set([e.x, e.y, e.z, e.reach * 0.55], i * 4);
     col3.set([e.r * k, e.g * k, e.b * k], i * 3);
     phases[i] = e.phase;
+    i += 1;
   }
-  u.uMqPoolN!.value = n;
+  u.uMqPoolN!.value = i;
+  return i;
+}
+
+export function fillPoolUniforms(u: Uniforms, emitters: readonly Emitter[]): void {
+  writePoolSlots(u, emitters, 0);
 }
 
 /**
@@ -397,16 +412,16 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
     shader.fragmentShader = `
       varying vec3 vMqW;
       uniform int uMqPoolN;
-      uniform vec4 uMqPoolPos[${MAX_CLUSTERS}];
-      uniform vec3 uMqPoolCol[${MAX_CLUSTERS}];
-      uniform float uMqPoolPhase[${MAX_CLUSTERS}];
+      uniform vec4 uMqPoolPos[${MAX_POOLS}];
+      uniform vec3 uMqPoolCol[${MAX_POOLS}];
+      uniform float uMqPoolPhase[${MAX_POOLS}];
       uniform float uMqPoolGain;
       uniform float uMqPoolTime;
       uniform float uMqPoolPulse;
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        for (int i = 0; i < ${MAX_CLUSTERS}; i++) {
+        for (int i = 0; i < ${MAX_POOLS}; i++) {
           if (i >= uMqPoolN) break;
           vec3 dv = vMqW - uMqPoolPos[i].xyz;
           float q = dot(dv, dv) / (uMqPoolPos[i].w * uMqPoolPos[i].w);
@@ -421,4 +436,68 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
   };
   mat.customProgramCacheKey = () => 'mq-floor-pools';
   mat.needsUpdate = true;
+}
+
+/**
+ * Glow cards for MOVING sources — one instanced quad per glowing fish, the
+ * same soft additive card a crystal cluster wears. This is the fish's bloom:
+ * no composer, no render target, one draw call for the whole cast.
+ */
+export interface GlowCards {
+  mesh: InstancedMesh;
+  /** Place card `i`. Colour is linear RGB. */
+  set(i: number, x: number, y: number, z: number, size: number, r: number, g: number, b: number, phase: number): void;
+  /** Cards in use this frame, then the shared look. */
+  commit(count: number, tSec: number, glow: number, pulse: number, fog: { color: Color; near: number; far: number }): void;
+}
+
+export function buildGlowCards(capacity: number): GlowCards {
+  const quad = new PlaneGeometry(1, 1);
+  quad.userData.mqOwned = true;
+  const uniforms: Uniforms = {
+    uTime: { value: 0 }, uGlow: { value: 1 }, uPulse: { value: 0 },
+    uFogColor: { value: new Color() }, uFogNear: { value: 60 }, uFogFar: { value: 500 },
+    uLift: { value: 0.42 },
+    // A fish is small and SUPPOSED to be seen close; only fade at the lens.
+    uNear: { value: new Vector2(10, 34) },
+  };
+  const mat = owned(new ShaderMaterial({
+    uniforms,
+    vertexShader: CARD_VERT,
+    fragmentShader: CARD_FRAG,
+    transparent: true,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  }));
+  const mesh = new InstancedMesh(quad, mat, capacity);
+  const colors = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+  const looks = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2);
+  quad.setAttribute('aColor', colors);
+  quad.setAttribute('aLook', looks);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 3;
+  mesh.count = 0;
+  const m = new Matrix4();
+  return {
+    mesh,
+    set(i, x, y, z, size, r, g, b, phase) {
+      m.makeScale(size, size, size).setPosition(x, y, z);
+      mesh.setMatrixAt(i, m);
+      colors.setXYZ(i, r, g, b);
+      looks.setXY(i, 0, phase);
+    },
+    commit(count, tSec, glow, pulse, fog) {
+      mesh.count = count;
+      mesh.visible = count > 0 && glow > 0;
+      mesh.instanceMatrix.needsUpdate = true;
+      colors.needsUpdate = true;
+      looks.needsUpdate = true;
+      uniforms.uTime!.value = tSec;
+      uniforms.uGlow!.value = glow;
+      uniforms.uPulse!.value = pulse;
+      (uniforms.uFogColor!.value as Color).copy(fog.color);
+      uniforms.uFogNear!.value = fog.near;
+      uniforms.uFogFar!.value = fog.far;
+    },
+  };
 }

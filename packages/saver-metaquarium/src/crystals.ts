@@ -495,6 +495,8 @@ export interface Emitter {
   /** Distance at which the light has halved. */
   reach: number;
   phase: number;
+  /** A moving source's fish slot — so a fish is never lit by itself. */
+  owner?: number;
 }
 
 /** Slow enough (0.12 Hz) and shallow enough (≤15 %) to sit far inside the
@@ -534,10 +536,11 @@ export function emittersOf(clusters: readonly Cluster[]): Emitter[] {
  */
 export function sampleLight(
   emitters: readonly Emitter[], x: number, y: number, z: number,
-  tSec: number, pulse: number, out: [number, number, number] = [0, 0, 0],
+  tSec: number, pulse: number, out: [number, number, number] = [0, 0, 0], skipOwner = -1,
 ): [number, number, number] {
   let r = 0, g = 0, b = 0;
   for (const e of emitters) {
+    if (e.owner === skipOwner) continue;
     const dx = x - e.x, dy = y - e.y, dz = z - e.z;
     const q = (dx * dx + dy * dy + dz * dz) / (e.reach * e.reach);
     const w = pulseAt(tSec, e.phase, pulse) / (1 + q);

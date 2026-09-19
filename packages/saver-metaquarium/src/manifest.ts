@@ -139,6 +139,14 @@ export const METAQUARIUM_PARAMS = {
    *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
    *  to a fifth. Only ever expands, so the spacing guarantee holds. */
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** How strongly the fish's own `GLOW-*` parts glow: a soft bloom card
+   *  around the glowing fins, a white-hot breathing core, and colour thrown on
+   *  the floor beneath a low swimmer. 0 is the flat glow colour + thin halo
+   *  the tank had before. No composer — one instanced draw for the whole cast. */
+  fishGlow: { type: 'number', default: 0.6, min: 0, max: 1, ease: 'smooth' },
+  /** Metallic plates read as metal (a generated chrome matcap — reflection
+   *  with no environment map and no lights). `off` is the flat unlit atlas. */
+  fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.
    *  One kind so far — `crystal`, generated from the seed (nothing is
    *  fetched), habits `lotus · spire · druse · scatter · coral`, palettes `env`

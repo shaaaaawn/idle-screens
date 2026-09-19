@@ -146,6 +146,20 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // Fish glow QA: GLOW parts as light sources, in the dark where it shows —
+  // bloom card, breathing core, colour on the floor under low swimmers, and
+  // chrome plates. ?saver=metaquarium-glow-dark (local NPC models).
+  createMetaquarium({
+    id: 'metaquarium-glow-dark',
+    label: 'Metaquarium (glow in the dark)',
+    params: {
+      fishMix: 'glowfish:2,hackerfish:1,blowfish:1,jellyfish:1,crab:1,dori:1',
+      dracoPath: asset('/draco/'), swimStyle: 'bottom', swimVariance: 0.6, bodyWiggle: 0.35,
+      fishGlow: 1, propMix: 'crystal:3@coral', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 130, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
   // so the props are judged without waiting on a gateway.
   createMetaquarium({

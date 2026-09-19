@@ -101,6 +101,8 @@ never changes because a dependency was bumped.
 | maneuverIntensity | number | 0.7 | How hard — scales the surge, the kick and the tail flurry together, 0–1 |
 | lightSeek | number | 0 | Free fish drawn toward the room's light shafts, each to its own pool, 0–1 (needs rays) |
 | formationBreathe | number | 0 | The school relaxes outward and back on a ~15 s cycle, 0–1; only ever expands |
+| fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
+| fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
 | propMix | string | `''` | Scenery, `kind[#id][:count][@habit][/palette]`. Kind `crystal` (generated, never fetched); habits `lotus · spire · druse · scatter · coral`; palettes `env · rainbow · glass ·` a named colour. Empty builds nothing |
 | envProps | enum | off | `on` lets a named environment bring its own crystals when `propMix` is empty |
 | crystalScale | number | 1 | Cluster size, 0.4–2.5 (rebuilds the layout) |
