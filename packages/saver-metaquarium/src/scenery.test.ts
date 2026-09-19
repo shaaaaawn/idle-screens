@@ -45,8 +45,8 @@ describe('mineral world', () => {
   it('reduces population on weak devices while keeping each visual layer', () => {
     const world = build({ ...full, cap: 4 });
     expect(world.counts.homes).toBe(2);
-    expect(world.counts.flora).toBeGreaterThan(16); // 4 × 6, less any rooted where a home stands
-    expect(world.counts.flora).toBeLessThanOrEqual(24);
+    expect(world.counts.flora).toBeGreaterThan(24); // 4 × 9, less any rooted where a home stands
+    expect(world.counts.flora).toBeLessThanOrEqual(36);
     expect(world.counts.bubbles).toBe(48);
     expect(world.counts.snow).toBe(100);
     expect(world.counts.arches).toBe(1);

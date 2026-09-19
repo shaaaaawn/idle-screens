@@ -1,50 +1,56 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
-import { buildFlora, FLORA_COLOR, FLORA_VERTEX, type FloraOptions } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_SPECIES, FLORA_VERTEX, type FloraOptions } from './flora';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
 const opts: FloraOptions = { density: 1, cap: 8, scale: 1, blocked: () => false };
 const flat = (): number => 0;
+const arr = (g: { getAttribute(n: string): { array: ArrayLike<number> } }, n: string): number[] => Array.from(g.getAttribute(n).array);
 
 describe('flora', () => {
-  it('grows the asked number of plants across all three species, seeded', () => {
+  it('plants a garden of all five species, seeded, in two draws', () => {
     const a = buildFlora(anchors, flat, createRng(3), opts);
-    expect(a.plants).toBe(48);
-    expect(a.bySpecies.kelp).toBeGreaterThan(8);
-    expect(a.bySpecies.reed).toBeGreaterThan(5);
-    expect(a.bySpecies.bulb).toBeGreaterThan(2);
+    expect(a.plants).toBe(72);
+    for (const sp of FLORA_SPECIES) expect(a.bySpecies[sp], sp).toBeGreaterThan(2);
+    expect(a.bySpecies.grass).toBeGreaterThan(a.bySpecies.tube); // ground cover outnumbers the features
+    expect(a.parts).toHaveLength(1);
+    expect(a.lamps).toHaveLength(1);
     const b = buildFlora(anchors, flat, createRng(3), opts);
-    expect(b.parts.length).toBe(a.parts.length);
-    expect(Array.from(b.parts[7]!.getAttribute('position').array)).toEqual(Array.from(a.parts[7]!.getAttribute('position').array));
+    expect(arr(b.parts[0]!, 'position')).toEqual(arr(a.parts[0]!, 'position'));
+    expect(arr(buildFlora(anchors, flat, createRng(4), opts).parts[0]!, 'position')).not.toEqual(arr(a.parts[0]!, 'position'));
+  });
+
+  it('is made of cubes on a grid: axis-aligned faces, six to a voxel, finite, budgeted', () => {
+    const f = buildFlora(anchors, flat, createRng(5), opts);
+    for (const g of [...f.parts, ...f.lamps]) {
+      const n = g.getAttribute('position').count;
+      expect(n % 36).toBe(0);
+      for (const name of ['normal', 'color', 'aSway', 'aGlow']) expect(g.getAttribute(name).count).toBe(n);
+      expect(arr(g, 'position').every(Number.isFinite)).toBe(true);
+      const nor = arr(g, 'normal');
+      for (let i = 0; i < nor.length; i += 3) expect(Math.abs(nor[i]!) + Math.abs(nor[i + 1]!) + Math.abs(nor[i + 2]!)).toBe(1);
+    }
+    expect(f.voxels * 12).toBeLessThan(60_000);
   });
 
   it('never roots inside something solid, and nothing grows with no light to feed on', () => {
-    const blocked = (x: number, z: number): boolean => Math.hypot(x, z) < 30;
-    const f = buildFlora(anchors, flat, createRng(3), { ...opts, blocked });
-    for (const g of f.parts) {
-      const sway = g.getAttribute('aSway');
-      expect(sway.getX(0)).toBe(0); // rooted on the floor it was given
-    }
+    const blocked = (x: number, z: number): boolean => Math.hypot(x, z) < 60;
+    const f = buildFlora([anchors[0]!], flat, createRng(3), { ...opts, blocked });
+    expect(f.plants).toBe(0); // every habitat is inside the blocked disc
     expect(buildFlora([], flat, createRng(3), opts).plants).toBe(0);
     expect(buildFlora(anchors, flat, createRng(3), { ...opts, density: 0 }).parts).toHaveLength(0);
   });
 
-  it('every vertex carries its sway and glow; lights are split out as lamps', () => {
+  it('stems never glow; lights always do', () => {
     const f = buildFlora(anchors, flat, createRng(5), opts);
-    for (const g of [...f.parts, ...f.lamps]) {
-      const n = g.getAttribute('position').count;
-      expect(g.getAttribute('aSway').count).toBe(n);
-      expect(g.getAttribute('aGlow').count).toBe(n);
-    }
-    expect(f.parts.every((g) => g.getAttribute('aGlow').getX(0) === 0)).toBe(true);
-    expect(f.lamps.every((g) => g.getAttribute('aGlow').getX(0) === 1)).toBe(true);
-    expect(f.lamps.length).toBeGreaterThan(f.plants * 0.8); // every plant carries a light
-    expect(f.lamps.length).toBeLessThan(f.parts.length * 0.5);
+    expect(arr(f.parts[0]!, 'aGlow').every((v) => v === 0)).toBe(true);
+    expect(arr(f.lamps[0]!, 'aGlow').every((v) => v === 1)).toBe(true);
   });
 
-  it('motion is a pure function of the tank clock and zero at the root', () => {
+  it('motion is gentle, pure in the tank clock, and zero at the root', () => {
     for (const src of [FLORA_VERTEX, FLORA_COLOR]) expect(src).toMatch(/uSwayTime/);
-    expect(FLORA_VERTEX).toMatch(/h \* h/); // displacement scales with height² — the root never moves
+    expect(FLORA_VERTEX).toMatch(/h \* h/); // grows with height² — a root never moves
+    expect(FLORA_VERTEX).toMatch(/min\(/); //   and is capped — water, not wind
     expect(FLORA_VERTEX).not.toMatch(/random|noise\(/);
   });
 });
