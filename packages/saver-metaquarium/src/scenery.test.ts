@@ -1,12 +1,14 @@
 import { createRng } from '@idle-screens/core';
-import { Mesh, Points, ShaderLib, type WebGLRenderer, type Material } from 'three';
+import { Color, Mesh, Points, ShaderLib, type WebGLRenderer, type Material } from 'three';
 import { describe, expect, it } from 'vitest';
+import type { Cluster } from './crystals';
 import { buildScenery, type SceneryOptions } from './scenery';
 
 const off: SceneryOptions = { rocks: 0, veins: 0.7, homes: 0, flora: 0, bubbles: 0, snow: 0, cap: 8, scale: 1 };
 const full: SceneryOptions = { ...off, rocks: 1, homes: 3, flora: 1, bubbles: 1, snow: 1 };
 const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
-const build = (options = full, seed = 42) => buildScenery([], createRng(seed), terrain, options);
+const build = (options = full, seed = 42, clusters: readonly Cluster[] = []) =>
+  buildScenery(clusters, createRng(seed), terrain, options);
 const buffers = (world: ReturnType<typeof build>) => world.group.children.map(o => {
   const mesh = o as Mesh;
   return [o.name, ...Array.from(mesh.geometry.getAttribute('position').array)];
@@ -76,6 +78,44 @@ describe('mineral world', () => {
     world.setFrame(0);
     expect(clocks.every(c => c.value === 0)).toBe(true);
     expect(buffers(world)).toEqual(before);
+  });
+
+  it('steps a home back from a crystal cluster that would overlap it', () => {
+    // Sits on top of the middle home's naive spawn point (t=0 → x≈0, z≈-38),
+    // with a radius wide enough that the ±5u seeded jitter can't dodge it —
+    // every pass through the homes loop must displace it.
+    const cluster: Cluster = {
+      id: null, habit: 'lotus', x: 0, y: 0, z: -38, color: '#49cfff', accent: '#49cfff',
+      glass: false, radius: 60, height: 30, phase: 0, shards: [],
+    };
+    const clear = build(full, 42, []);
+    const blocked = build(full, 42, [cluster]);
+    expect(blocked.counts.homes).toBe(3);
+    expect(buffers(blocked)).not.toEqual(buffers(clear));
+    for (const object of blocked.group.children) {
+      const mesh = object as Mesh;
+      for (const attr of Object.values(mesh.geometry.attributes)) {
+        expect(Array.from(attr.array).every(Number.isFinite)).toBe(true);
+      }
+    }
+  });
+
+  it('builds the room behind a geode door instead of an outdoor scene', () => {
+    const world = build({ ...full, interior: true });
+    expect(world.counts.interior).toBe(1);
+    expect(world.counts.furniture).toBeGreaterThan(0);
+    expect(world.emitters.length).toBeGreaterThan(0);
+    const cards = world.group.children.find(o => o.userData.mqLights !== undefined);
+    expect(cards).toBeDefined();
+    for (const object of world.group.children) {
+      const mesh = object as Mesh;
+      if (!mesh.geometry) continue;
+      for (const attr of Object.values(mesh.geometry.attributes)) {
+        expect(Array.from(attr.array).every(Number.isFinite)).toBe(true);
+      }
+    }
+    // setFrame's fog-driven glow-card commit only runs with a fog argument.
+    expect(() => world.setFrame(12, { color: new Color('#000'), near: 10, far: 100 }, 0.6)).not.toThrow();
   });
 
 });

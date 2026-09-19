@@ -114,7 +114,10 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     const f = band - Math.floor(band);
     // The wall itself stays dark and quietly banded: it is the ground the
     // crystals grow from, and they — not it — carry the light.
-    const lit = (0.34 + 0.4 * (1 - up) ** 1.5) * srng.range(0.85, 1.12);
+    // `up` is nominally 0..1, but the per-vertex bump jitter (± up to 6%,
+    // see `at()`) can push a near-apex triangle's midpoint just past 1 —
+    // and a fractional power of a negative base is NaN in JS.
+    const lit = (0.34 + 0.4 * Math.max(0, 1 - up) ** 1.5) * srng.range(0.85, 1.12);
     const wall = lo.clone().lerp(hi, f * f * (3 - 2 * f)).lerp(deep, 0.45).multiplyScalar(lit);
     for (const p of [a, c, b]) put(shellP, shellC, p, wall); // wound inward
     if (up > 0) faces.push([a.clone(), b.clone(), c.clone(), up]);
@@ -142,8 +145,12 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     const great = trng.next() < 0.012;
     const len = (great ? trng.range(30, 52) : (up < 0.2 ? trng.range(8, 19) : trng.range(4.5, 12))) * s;
     const wid = len * trng.range(0.26, 0.42);
-    side.crossVectors(axis, Y_UP).normalize();
-    if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+    // `axis` occasionally lands parallel to Y_UP (near the dome's poles),
+    // where the cross product is the zero vector — normalize() of THAT is
+    // NaN, and a lengthSq() check after normalizing never catches it (NaN
+    // comparisons are always false). Check before normalizing instead.
+    side.crossVectors(axis, Y_UP);
+    if (side.lengthSq() < 0.01) side.set(1, 0, 0); else side.normalize();
     fwd.crossVectors(axis, side).normalize();
     const spin = trng.next() * 6.28;
     const foot: Vector3[] = [];
