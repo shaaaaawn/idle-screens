@@ -88,7 +88,14 @@ test('MQ2: school variant spawns at least 6 fish', async ({ page }) => {
  * cycles crash unless dispose() force-releases via forceContextLoss().
  */
 test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ page }) => {
-  test.setTimeout(90_000);
+  // fishLighting defaults to 'lit' (studio.ts), so every one of the 18 mounts
+  // now also builds a fresh PMREMGenerator environment — real per-mount GPU
+  // work that cannot be cached across cycles (each cycle gets its own
+  // WebGLRenderer/context, which is the whole point of this test). Measured
+  // ~60-70s for the loop alone on an idle runner; under a loaded CI runner
+  // running other WebGL-heavy specs concurrently that leaves too little
+  // margin against the old 90s budget.
+  test.setTimeout(150_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   const contextErrors: string[] = [];
