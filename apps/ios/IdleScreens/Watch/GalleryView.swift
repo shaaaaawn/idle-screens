@@ -47,7 +47,7 @@ struct GalleryView: View {
                     }
                 }
             }
-            .navigationTitle("watch")
+            .navigationTitle("channels")
             .refreshable { await app.loadGallery() }
         }
         .task {
@@ -96,8 +96,8 @@ private struct HeroBillboard: View {
     var peers: [PublicChannel] = []
 
     var body: some View {
-        NavigationLink(destination: ChannelPager(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
+        NavigationLink(destination: ChannelFeedView(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
             ChannelPreviewTile(channel: channel)
                 .aspectRatio(compact ? 4.0 / 5.0 : 21.0 / 9.0, contentMode: .fit)
                 .overlay(alignment: .bottom) {
@@ -216,8 +216,8 @@ private struct ChannelCard: View {
     }
 
     var body: some View {
-        NavigationLink(destination: ChannelPager(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
+        NavigationLink(destination: ChannelFeedView(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
             VStack(alignment: .leading, spacing: 8) {
                 ChannelPreviewTile(channel: channel)
                     .frame(width: width, height: width * 9 / 16)
