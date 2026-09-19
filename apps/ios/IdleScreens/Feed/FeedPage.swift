@@ -316,31 +316,60 @@ struct FeedPage: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            if showsBack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline)
-                        .foregroundStyle(Color.primary)
-                        .frame(width: 38, height: 38)
-                        .glassCapsule(shape: Circle())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                if showsBack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline)
+                            .foregroundStyle(Color.primary)
+                            .frame(width: 38, height: 38)
+                            .glassCapsule(shape: Circle())
+                    }
+                    .accessibilityLabel("Back")
                 }
-                .accessibilityLabel("Back")
-            }
 
+                channelButton
+                Spacer(minLength: 8)
+
+                if isLive, let viewers = session.viewers, viewers > 0 {
+                    Label("\(viewers)", systemImage: "eye.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .glassCapsule(shape: Capsule())
+                        .accessibilityLabel("\(viewers) watching")
+                }
+            }
+            // Under the name rather than beside it: a long channel title and a
+            // "3 of 19 · 7h ago" pill do not fit on one line of a phone.
             momentPill
-            Spacer()
-
-            if isLive, let viewers = session.viewers, viewers > 0 {
-                Label("\(viewers)", systemImage: "eye.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .glassCapsule(shape: Capsule())
-                    .accessibilityLabel("\(viewers) watching")
-            }
         }
+    }
+
+    /// Which channel this is — top-left, where a title lives — and the way out
+    /// to its zoomed-out timeline.
+    private var channelButton: some View {
+        Button { showOverview = true } label: {
+            HStack(spacing: 6) {
+                if channel.isProtected == true {
+                    Image(systemName: "lock.fill").font(.caption2)
+                }
+                Text(channel.displayLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Image(systemName: "square.grid.3x3.fill")
+                    .font(.caption2)
+                    .opacity(0.8)
+            }
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .glassCapsule(shape: Capsule())
+        }
+        .accessibilityLabel("\(channel.displayLabel), show timeline")
+        .accessibilityHint("Zooms out to everything this channel has shown")
     }
 
     /// Where you are in time — and, on the live page, that there is a past to
@@ -390,8 +419,8 @@ struct FeedPage: View {
     }
 
     /// Bottom-left, where a feed puts what you are looking at: the scene's
-    /// name largest, then who made it and on what, then the channel — which is
-    /// also the way out to the zoomed-out timeline.
+    /// name largest, then who made it and on what. (The channel itself lives
+    /// top-left, with the time pill under it.)
     private var caption: some View {
         let event = currentStop?.event ?? liveEvent
         return VStack(alignment: .leading, spacing: 8) {
@@ -411,24 +440,6 @@ struct FeedPage: View {
                     .lineLimit(3)
             }
 
-            Button { showOverview = true } label: {
-                HStack(spacing: 6) {
-                    if channel.isProtected == true {
-                        Image(systemName: "lock.fill").font(.caption2)
-                    }
-                    Text(channel.displayLabel)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Image(systemName: "square.grid.3x3.fill")
-                        .font(.caption2)
-                        .opacity(0.8)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .glassCapsule(shape: Capsule())
-            }
-            .accessibilityLabel("\(channel.displayLabel), show timeline")
-            .accessibilityHint("Zooms out to everything this channel has shown")
         }
         .foregroundStyle(Color.primary)
         .multilineTextAlignment(.leading)
