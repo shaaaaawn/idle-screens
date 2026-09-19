@@ -72,7 +72,7 @@ export interface Vignette {
 
 const ACTOR = 'abc';
 const CRUISE = 17; // units / second — an unhurried fish
-const STANDOFF = 15; // how far apart actors sharing a mark hold
+const STANDOFF = 20; // how far apart actors sharing a mark hold — a fish is 18 long
 
 /** An actor's own spot AT a mark: a ring round it, so two fish "at the table"
  *  sit either side of it instead of inside each other. */
@@ -204,10 +204,10 @@ function placeOf(v: Vignette, actor: number, tSec: number, depth = 0): Mark {
   const from = bi === 0 ? me.to : prev.to;
   const u = (t - beat.t0) / beat.dur;
   if (me.follow !== null && depth < 2) {
-    // Behind the leader, a beat late: where they were 1.1 s ago, a little low.
-    const lead = placeOf(v, me.follow, tSec - 1.1, depth + 1);
+    // Behind the leader, a beat late: where they were a moment ago, a little low.
+    const lead = placeOf(v, me.follow, tSec - 1.7, depth + 1); // a body length and a half behind
     const k = smoother(Math.min(1, u * 2)), land = smoother((u - 0.72) / 0.28);
-    const tx = from.x + (lead.x - from.x) * k, ty = from.y + (lead.y - 2 - from.y) * k, tz = from.z + (lead.z + 4 - from.z) * k;
+    const tx = from.x + (lead.x - from.x) * k, ty = from.y + (lead.y - 3 - from.y) * k, tz = from.z + (lead.z - from.z) * k;
     return { x: tx + (me.to.x - tx) * land, y: ty + (me.to.y - ty) * land, z: tz + (me.to.z - tz) * land };
   }
   if (me.circle && depth < 2) {

@@ -185,7 +185,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       id: `metaquarium-vignette-${name}`, label: `Metaquarium (vignette ${name} — ${what})`,
       params: {
         interior: 'geode', vignette: name, fishMix: cast, dracoPath: asset('/draco/'),
-        bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalTint: 0.7, bodyWiggle: 0.25,
+        bubbleVents: 0.5, crystalTint: 0.7, bodyWiggle: 0.25,
         fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
         cameraDistance: dist, cameraElevation: 14, cameraAzimuth: az, autoRotate: 0.6,
       }, catalog: LOCAL_CATALOG,
@@ -194,7 +194,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-study-geode-interior', label: 'Metaquarium (study geode interior)',
     params: {
-      interior: 'geode', vignette: 'tea', bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalScale: 1, crystalTint: 0.7,
+      interior: 'geode', vignette: 'tea', bubbleVents: 0.5, crystalTint: 0.7,
       fishMix: '100:1,257:1', bodyWiggle: 0.25,
       fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
       cameraDistance: 100, cameraElevation: 12, cameraAzimuth: 300, autoRotate: 1.4,

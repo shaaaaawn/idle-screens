@@ -153,10 +153,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const shellParts: BufferGeometry[] = [];
   let cards: GlowCards | null = null;
   if (opts.interior) {
-    const room = buildGeodeInterior(rng.fork(7), { tint: anchors[0]!.color, scale: s, floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
-    shellParts.push(...room.shell);
-    interiors.push(...room.glow);
-    details.push(...room.voxels);
+    const room = buildGeodeInterior(rng.fork(7), { tint: clusters.length ? anchors[0]!.color : '#8a4dff', scale: s, floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
+    shellParts.push(...room.room);
     vents.push(...room.vents);
     homeLights.push(...room.emitters);
     obstacles.push(...room.obstacles);
@@ -215,7 +213,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
   const particleRng = rng.fork(6);
-  const sources = [...vents, ...seeps, ...anchors.map(a => ({ ...a, y: a.y + 6 * s }))];
+  // Indoors only the kettle and the teapot bubble; with no crystals the
+  // fallback anchors are placement hints, not things that vent.
+  const sources = opts.interior ? [...vents] : [...vents, ...seeps, ...anchors.map(a => ({ ...a, y: a.y + 6 * s }))];
   const emitters = emittersOf(clusters);
   const lightPositions = Array.from({ length: 12 }, (_, i) => {
     const e = emitters[i]; return e ? new Vector4(e.x, e.y, e.z, e.reach) : new Vector4(0, 0, 0, 1);

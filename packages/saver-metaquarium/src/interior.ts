@@ -25,11 +25,9 @@
  * Seeded, generated, batched: four draw calls, nothing per frame on the CPU.
  */
 
-import {
-  BoxGeometry, BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Quaternion, Vector3,
-} from 'three';
+import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Vector3 } from 'three';
 import type { CrystalRng, Emitter } from './crystals';
-import { painted } from './scenery-paint';
+import { CubeWriter } from './scenery-paint';
 
 export interface InteriorOptions {
   /** Hex — the geode's crystal colour. */
@@ -43,11 +41,12 @@ export interface InteriorOptions {
 export interface InteriorLight { x: number; y: number; z: number; size: number; color: string }
 
 export interface InteriorParts {
-  /** The dome, wound to face INWARD (draw front faces). */
-  shell: BufferGeometry[];
-  /** Unshaded: crystal teeth, lamps, fire, window. */
-  glow: BufferGeometry[];
-  voxels: BufferGeometry[];
+  /** The WHOLE room — dome, crystal lining, floor, furniture, lamps — as one
+   *  geometry, every triangle wound to face the viewer inside, so it is a
+   *  single front-face draw call. (It was three meshes and a DoubleSide.) */
+  room: BufferGeometry[];
+  crystals: number;
+  boxes: number;
   emitters: Emitter[];
   lights: InteriorLight[];
   vents: Array<{ x: number; y: number; z: number; color: string }>;
@@ -123,81 +122,81 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     if (up > 0) faces.push([a.clone(), b.clone(), c.clone(), up]);
   }
 
-  // The druse: thousands of small three-sided points carpeting the wall, NOT
-  // one per facet — a geode's lining is far finer than the stone it lines.
-  // Each leans its own way, is dark at the root and catches the room's light at
-  // the tip, and its three faces take three values so it reads as cut. Coarse
-  // and dense at the skirting, finer toward the apex; a few great points and
-  // the odd water-clear one for sparkle.
-  faces.sort((p, q) => p[3] - q[3]); // floor first, so the bias below means LOW
-  const side = new Vector3(), fwd = new Vector3(), axis = new Vector3(), base = new Vector3();
-  const FACE = [1, 0.66, 0.4];
-  const crystals = Math.round(5200 * Math.min(1, opts.detail ?? 1));
+  // The lining. A geode's inside is not shards stuck to a wall — the first
+  // pass looked like confetti — it is a PACKED crust of stubby points, all
+  // facing the hollow, neighbours alike in size and shade because they grew
+  // together. So: four-sided points on short bodies, only a little lean, and
+  // both size and colour driven by a slow patch function over the wall, which
+  // is what makes druzy read as patches of larger and finer crystal. Coarse
+  // at the skirting, finer toward the apex; a few great points; the odd
+  // water-clear one. Each point is wound outward from its own axis, so the
+  // room stays one front-face draw.
+  const side = new Vector3(), fwd = new Vector3(), axis = new Vector3(), base = new Vector3(), tmp = new Vector3();
+  const FACE4 = [1, 0.74, 0.46, 0.62];
+  const crystals = Math.round(4200 * Math.min(1, opts.detail ?? 1));
+  const tri = (p: Vector3, q: Vector3, r: Vector3, cp: Color, cq: Color, cr: Color, about: Vector3): void => {
+    // Face away from the crystal's own axis point.
+    tmp.crossVectors(q.clone().sub(p), r.clone().sub(p));
+    const out = tmp.dot(p.clone().add(q).add(r).multiplyScalar(1 / 3).sub(about)) >= 0;
+    if (out) { put(glowP, glowC, p, cp); put(glowP, glowC, q, cq); put(glowP, glowC, r, cr); }
+    else { put(glowP, glowC, p, cp); put(glowP, glowC, r, cr); put(glowP, glowC, q, cq); }
+  };
   for (let n = 0; n < crystals; n += 1) {
-    // Bias toward the lower wall, where the eye is.
-    const face = faces[Math.floor(trng.next() ** 1.35 * faces.length)]!;
+    const face = faces[Math.floor(trng.next() ** 1.25 * faces.length)]!;
     const [a, b, c, up] = face;
     let u = trng.next(), v = trng.next();
     if (u + v > 1) { u = 1 - u; v = 1 - v; }
     base.copy(a).addScaledVector(side.subVectors(b, a), u).addScaledVector(fwd.subVectors(c, a), v);
     inward.copy(centre).sub(base).normalize();
-    axis.copy(inward).add(new Vector3(trng.range(-0.5, 0.5), trng.range(-0.5, 0.5), trng.range(-0.5, 0.5))).normalize();
-    const great = trng.next() < 0.012;
-    const len = (great ? trng.range(30, 52) : (up < 0.2 ? trng.range(8, 19) : trng.range(4.5, 12))) * s;
-    const wid = len * trng.range(0.26, 0.42);
-    // `axis` occasionally lands parallel to Y_UP (near the dome's poles),
-    // where the cross product is the zero vector — normalize() of THAT is
-    // NaN, and a lengthSq() check after normalizing never catches it (NaN
-    // comparisons are always false). Check before normalizing instead.
-    side.crossVectors(axis, Y_UP);
-    if (side.lengthSq() < 0.01) side.set(1, 0, 0); else side.normalize();
+    // Patches: neighbours share a size and a shade.
+    const ang2 = Math.atan2(base.z, base.x);
+    const patch = 0.5 + 0.5 * Math.sin(ang2 * 4 + up * 9 + wob) * Math.sin(ang2 * 9 - up * 5 + wob * 2);
+    const great = trng.next() < 0.01;
+    const len = (great ? trng.range(30, 50) : (up < 0.2 ? 9 : 5.5) * (0.6 + patch * 1.3) * trng.range(0.8, 1.25)) * s;
+    const wid = len * (great ? 0.3 : trng.range(0.42, 0.6));
+    axis.copy(inward).add(new Vector3(trng.range(-0.22, 0.22), trng.range(-0.22, 0.22), trng.range(-0.22, 0.22))).normalize();
+    side.crossVectors(axis, Y_UP).normalize();
+    if (side.lengthSq() < 0.01) side.set(1, 0, 0);
     fwd.crossVectors(axis, side).normalize();
     const spin = trng.next() * 6.28;
-    const foot: Vector3[] = [];
-    for (let k = 0; k < 3; k += 1) {
-      const ang2 = spin + (k / 3) * Math.PI * 2;
-      foot.push(base.clone().addScaledVector(side, Math.cos(ang2) * wid).addScaledVector(fwd, Math.sin(ang2) * wid)
-        .addScaledVector(inward, -1.5 * s)); // sunk into the wall
+    const foot: Vector3[] = [], shoulder: Vector3[] = [];
+    for (let k = 0; k < 4; k += 1) {
+      const t = spin + (k / 4) * Math.PI * 2;
+      const dir = side.clone().multiplyScalar(Math.cos(t)).addScaledVector(fwd, Math.sin(t));
+      foot.push(base.clone().addScaledVector(dir, wid).addScaledVector(inward, -1.5 * s));
+      shoulder.push(base.clone().addScaledVector(dir, wid * 0.82).addScaledVector(axis, len * 0.45));
     }
     const tip = base.clone().addScaledVector(axis, len);
-    const clear = trng.next() < 0.1;
-    const glowUp = 0.5 + 0.5 * (1 - up);
-    const rootC = (clear ? quartz : tint).clone().multiplyScalar(0.2 * glowUp);
-    const tipBase = clear ? white.clone() : tint.clone().lerp(white, great ? 0.55 : 0.3);
-    for (let k = 0; k < 3; k += 1) {
-      const p = foot[k]!, q = foot[(k + 1) % 3]!;
-      const tipC = tipBase.clone().multiplyScalar(FACE[k]! * glowUp * (great ? 1.25 : 1.05));
-      const rc = rootC.clone().multiplyScalar(FACE[k]! + 0.4);
-      put(glowP, glowC, p, rc); put(glowP, glowC, tip, tipC); put(glowP, glowC, q, rc);
+    const mid2 = base.clone().addScaledVector(axis, len * 0.4);
+    const clear = trng.next() < 0.08;
+    const glowUp = 0.55 + 0.45 * (1 - up);
+    const hue = (clear ? quartz : tint).clone().lerp(white, clear ? 0.5 : 0.12 + patch * 0.3);
+    for (let k = 0; k < 4; k += 1) {
+      const k2 = (k + 1) % 4, f = FACE4[k]! * glowUp;
+      const rootC = hue.clone().multiplyScalar(0.22 * f), bodyC = hue.clone().multiplyScalar(0.7 * f);
+      const tipC = hue.clone().lerp(white, 0.35).multiplyScalar(1.15 * f);
+      tri(foot[k]!, foot[k2]!, shoulder[k2]!, rootC, rootC, bodyC, mid2);
+      tri(foot[k]!, shoulder[k2]!, shoulder[k]!, rootC, bodyC, bodyC, mid2);
+      tri(shoulder[k]!, shoulder[k2]!, tip, bodyC, bodyC, tipC, mid2);
     }
   }
   ico.dispose();
-  const soup = (pos: number[], col: number[]): BufferGeometry => {
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
-    g.computeVertexNormals();
-    return g;
-  };
-  const shell = [soup(shellP, shellC)];
-  const glow: BufferGeometry[] = [soup(glowP, glowC)];
-
   // ---- what the inhabitants made (voxels) ---------------------------------
-  const voxels: BufferGeometry[] = [];
+  const cubes = new CubeWriter();
   const emitters: Emitter[] = [], lights: InteriorLight[] = [];
   const vents: InteriorParts['vents'] = [];
   const obstacles: InteriorParts['obstacles'] = [];
-  const Y = new Vector3(0, 1, 0);
   /** A piece of furniture stood at polar (angle, radius), facing the centre.
    *  Local space: +x along the wall, +y up, +z toward the middle of the room. */
   const piece = (angleDeg: number, radius: number) => {
     const a = (angleDeg * Math.PI) / 180;
     const ox = Math.cos(a) * radius * s, oz = Math.sin(a) * radius * s;
-    const yaw = new Quaternion().setFromAxisAngle(Y, Math.atan2(-ox, -oz));
+    const yaw = Math.atan2(-ox, -oz), cs = Math.cos(yaw), sn = Math.sin(yaw);
     const world = (lx: number, ly: number, lz: number): Vector3 =>
-      new Vector3(lx * s, 0, lz * s).applyQuaternion(yaw).add(new Vector3(ox, y0 + ly * s, oz));
+      new Vector3(ox + (lx * cs + lz * sn) * s, y0 + ly * s, oz + (-lx * sn + lz * cs) * s);
     const vox = (lx: number, ly: number, lz: number, w: number, h: number, d: number, color: string, lit = false): void => {
-      (lit ? glow : voxels).push(painted(new BoxGeometry(1, 1, 1), color, world(lx, ly, lz), new Vector3(w * s, h * s, d * s), yaw, !lit));
+      const p = world(lx, ly, lz);
+      cubes.cube(p.x, p.y, p.z, w * s, h * s, d * s, new Color(color), yaw, lit);
     };
     const lamp = (lx: number, ly: number, lz: number, size: number, color: string, power = 1): void => {
       const p = world(lx, ly, lz);
@@ -214,7 +213,7 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
   const fr = R * 0.97 / s;
   for (let k = 0, z = -fr + 6; z < fr; z += 12, k += 1) {
     const half = Math.sqrt(Math.max(1, fr * fr - z * z));
-    voxels.push(painted(new BoxGeometry(1, 1, 1), planks[k % 4]!, new Vector3(0, y0 + 0.4 * s, z * s), new Vector3(half * 2 * s, 1.2 * s, 11.6 * s)));
+    cubes.cube(0, y0 + 0.4 * s, z * s, half * 2 * s, 1.2 * s, 11.6 * s, new Color(planks[k % 4]!));
   }
   // Round rug, in rings, slightly off-centre the way a rug is.
   const rugC = [`#${tint.clone().lerp(white, 0.55).getHexString()}`, '#f4ead2', `#${tint.clone().multiplyScalar(0.8).getHexString()}`, '#f4ead2'];
@@ -223,8 +222,7 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     for (let gz = -rugR; gz <= rugR; gz += cell) {
       const d = Math.hypot(gx, gz);
       if (d > rugR) continue;
-      voxels.push(painted(new BoxGeometry(1, 1, 1), rugC[Math.floor(d / 14) % 4]!,
-        new Vector3((gx + 6) * s, y0 + 1.3 * s, (gz - 4) * s), new Vector3(cell * s, 0.7 * s, cell * s)));
+      cubes.cube((gx + 6) * s, y0 + 1.3 * s, (gz - 4) * s, cell * s, 0.7 * s, cell * s, new Color(rugC[Math.floor(d / 14) % 4]!));
     }
   }
 
@@ -373,23 +371,35 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
   {
     const top = y0 + H * 0.98, hang = y0 + 96 * s;
     for (let y = hang + 6 * s; y < top; y += 5 * s) {
-      voxels.push(painted(new BoxGeometry(1, 1, 1), '#2e3440', new Vector3(0, y, 0), new Vector3(1.6 * s, 3.4 * s, 1.6 * s)));
+      cubes.cube(0, y, 0, 1.6 * s, 3.4 * s, 1.6 * s, new Color('#2e3440'));
     }
-    voxels.push(painted(new BoxGeometry(1, 1, 1), '#3d4656', new Vector3(0, hang + 3 * s, 0), new Vector3(6 * s, 4 * s, 6 * s)));
+    cubes.cube(0, hang + 3 * s, 0, 6 * s, 4 * s, 6 * s, new Color('#3d4656'));
     for (let k = 0; k < 6; k += 1) {
       const a = (k / 6) * Math.PI * 2, rr = 17 * s;
       const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
-      voxels.push(painted(new BoxGeometry(1, 1, 1), '#3d4656', new Vector3(x * 0.5, hang + 2 * s, z * 0.5),
-        new Vector3(Math.abs(Math.cos(a)) * rr + 1.4 * s, 1.4 * s, Math.abs(Math.sin(a)) * rr + 1.4 * s)));
-      voxels.push(painted(new BoxGeometry(1, 1, 1), '#3d4656', new Vector3(x, hang - 1 * s, z), new Vector3(1.2 * s, 5 * s, 1.2 * s)));
-      glow.push(painted(new BoxGeometry(1, 1, 1), `#${tint.clone().lerp(new Color('#ffe9c4'), 0.6).getHexString()}`,
-        new Vector3(x, hang - 6 * s, z), new Vector3(4.6 * s, 6 * s, 4.6 * s), new Quaternion(), false));
+      // An arm out to each lantern, turned to point at it.
+      cubes.cube(x * 0.5, hang + 2 * s, z * 0.5, rr, 1.4 * s, 1.4 * s, new Color('#3d4656'), -a);
+      cubes.cube(x, hang - 1 * s, z, 1.2 * s, 5 * s, 1.2 * s, new Color('#3d4656'));
+      // A little crystal lantern: a warm core in a brass cage, not a white box.
+      cubes.cube(x, hang - 6 * s, z, 3.4 * s, 5 * s, 3.4 * s, tint.clone().lerp(new Color('#ffd9a0'), 0.7), -a, true);
+      cubes.cube(x, hang - 3.2 * s, z, 4.6 * s, 0.8 * s, 4.6 * s, new Color('#8a6a3a'), -a);
+      cubes.cube(x, hang - 8.8 * s, z, 4.6 * s, 0.8 * s, 4.6 * s, new Color('#8a6a3a'), -a);
     }
     const [r, g, b] = linear('#ffdca0');
     emitters.push({ x: 0, y: hang - 8 * s, z: 0, r, g, b, reach: 120 * s, phase: 0 });
     lights.push({ x: 0, y: hang - 5 * s, z: 0, size: 70 * s, color: '#ffdca0' });
   }
 
-  const triangles = (shellP.length + glowP.length) / 9 + (voxels.length + glow.length - 1) * 12;
-  return { shell, glow, voxels, emitters, lights, vents, obstacles, radius: R, height: H, triangles };
+  // One geometry for the whole room.
+  const pos = new Float32Array(shellP.length + glowP.length + cubes.pos.length);
+  const col = new Float32Array(pos.length);
+  pos.set(shellP, 0); pos.set(glowP, shellP.length); pos.set(cubes.pos, shellP.length + glowP.length);
+  col.set(shellC, 0); col.set(glowC, shellP.length); col.set(cubes.col, shellP.length + glowP.length);
+  const room = new BufferGeometry();
+  room.setAttribute('position', new BufferAttribute(pos, 3));
+  room.setAttribute('color', new BufferAttribute(col, 3));
+  return {
+    room: [room], crystals, boxes: cubes.count,
+    emitters, lights, vents, obstacles, radius: R, height: H, triangles: pos.length / 9,
+  };
 }

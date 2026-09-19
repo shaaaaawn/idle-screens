@@ -38,4 +38,40 @@ export function batch(group: Group, parts: BufferGeometry[], name: string, side:
 }
 
 
+/**
+ * Cubes written straight into arrays, with voxel-art face values (top
+ * brightest, side pairs apart, underside dark). A furnished room is hundreds of
+ * boxes; cloning, transforming and merging a BoxGeometry for each was the slow
+ * way. `yaw` turns a piece about Y (furniture facing the middle of a room).
+ */
+const CUBE_FACES: ReadonlyArray<readonly [number, number, number, number]> = [
+  [0, 1, 0, 1], [0, -1, 0, 0.42], [1, 0, 0, 0.8], [-1, 0, 0, 0.62], [0, 0, 1, 0.72], [0, 0, -1, 0.55],
+];
+export class CubeWriter {
+  readonly pos: number[] = [];
+  readonly col: number[] = [];
+  count = 0;
+  cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, color: Color, yaw = 0, flat = false): void {
+    const hx = sx / 2, hy = sy / 2, hz = sz / 2, cs = Math.cos(yaw), sn = Math.sin(yaw);
+    for (const [nx, ny, nz, shade] of CUBE_FACES) {
+      const a = ny !== 0 ? [1, 0, 0] : nx !== 0 ? [0, 0, 1] : [1, 0, 0];
+      const b = ny !== 0 ? [0, 0, 1] : [0, 1, 0];
+      const flip = (nx + ny + nz) * (ny !== 0 || nx !== 0 ? -1 : 1) < 0;
+      const corner = (u: number, v: number): [number, number, number] => {
+        const lx = nx * hx + a[0]! * u * hx + b[0]! * v * hx;
+        const ly = ny * hy + a[1]! * u * hy + b[1]! * v * hy;
+        const lz = nz * hz + a[2]! * u * hz + b[2]! * v * hz;
+        return [cx + lx * cs + lz * sn, cy + ly, cz - lx * sn + lz * cs];
+      };
+      const q = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+      const k = flat ? 1 : shade;
+      for (const i of flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]) {
+        this.pos.push(...q[i]!);
+        this.col.push(color.r * k, color.g * k, color.b * k);
+      }
+    }
+    this.count += 1;
+  }
+}
+
 export { FrontSide };
