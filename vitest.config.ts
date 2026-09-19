@@ -53,6 +53,10 @@ export default defineConfig({
         'packages/saver-metaquarium/src/tank.ts',
         'packages/saver-metaquarium/src/lofi-tank.ts',
         'packages/saver-metaquarium/src/metaquarium.ts',
+        // Instanced three.js meshes, shaders, and shader-patching — same
+        // unit-hostile shape as tank.ts; the geometry/layout math it consumes
+        // stays in crystals.ts (gated). Covered by playground e2e (MQ40).
+        'packages/saver-metaquarium/src/crystal-mesh.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
