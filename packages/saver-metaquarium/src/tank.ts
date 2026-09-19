@@ -921,7 +921,8 @@ class TankInstance implements SaverInstance {
 
   private buildScenery(): void {
     const rocks = this.num('rockDensity');
-    const key = `${this.propsKey}|${rocks}`;
+    const homes = this.num('geodeHomes');
+    const key = `${this.propsKey}|${rocks}|${homes}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -930,9 +931,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0) {
+    if (rocks > 0 || homes > 0) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, homes, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
@@ -975,10 +976,17 @@ class TankInstance implements SaverInstance {
       p.set(part.x, part.y, part.z).multiplyScalar(body.scale.x);
       p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
       p.applyQuaternion(f.group.quaternion).add(f.group.position);
-      const size = Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
-      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * g.gain, part.g * g.gain, part.b * g.gain, phase);
+      // A COAT (a glow part that is most of the silhouette — the angelfish's
+      // whole fin outline) is not a lamp. Sized and lit like an accent it
+      // washed a quarter of the frame in its colour, in every scene, from a
+      // single fish: it keeps a close, faint rim and casts nothing.
+      const size = part.coat
+        ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
+        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
+      const k = g.gain * (part.coat ? 0.5 : 1);
+      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
       n += 1;
-      if (this.studio?.lights.length) {
+      if (this.studio?.lights.length && !part.coat) {
         this.lightBids.push({
           d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
           x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
@@ -989,7 +997,9 @@ class TankInstance implements SaverInstance {
     p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
     p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
     p.applyQuaternion(f.group.quaternion).add(f.group.position);
-    const reach = Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8;
+    // The floor takes light from accents only, over a fish-sized reach.
+    if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
+    const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
     this.fishEmitters.push({
       x: p.x, y: p.y, z: p.z, r: g.r * 0.7 * g.gain, g: g.g * 0.7 * g.gain, b: g.b * 0.7 * g.gain,
       reach, phase, owner: f.index,

@@ -160,6 +160,7 @@ export const METAQUARIUM_PARAMS = {
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
   /** Faceted boulders, mineral seams, a ridge and an open arch. Opt-in. */
+  geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   propMix: { type: 'string', default: '', ease: 'step' },
   /** `on` lets a named environment bring its own crystals when `propMix` is
