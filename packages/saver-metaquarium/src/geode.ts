@@ -90,7 +90,7 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   );
 
   // ---- the stone --------------------------------------------------------
-  const ico = new IcosahedronGeometry(1, 2).toNonIndexed();
+  const ico = new IcosahedronGeometry(1, 2);
   const src = ico.getAttribute('position');
   // One displacement per UNIQUE vertex (keyed by position), or the facets
   // tear apart where their corners disagree.

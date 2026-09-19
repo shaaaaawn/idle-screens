@@ -42,7 +42,7 @@ export interface RockParts {
 
 /** A unit boulder: displaced icosphere, flat-bottomed, never the same twice. */
 export function boulder(rng: CrystalRng, detail = 1): Tri[] {
-  const ico = new IcosahedronGeometry(1, detail).toNonIndexed();
+  const ico = new IcosahedronGeometry(1, detail);
   const src = ico.getAttribute('position');
   const bump = new Map<string, number>();
   const tris: Tri[] = [];

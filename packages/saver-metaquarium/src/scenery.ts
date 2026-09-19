@@ -174,21 +174,26 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   });
   const particles = (bubble: boolean, n: number): void => {
     if (!n) return;
-    const positions = new Float32Array(n * 3), colors = new Float32Array(n * 3), phases = new Float32Array(n * 2);
+    const positions = new Float32Array(n * 3), colors = new Float32Array(n * 3), phases = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       const source = sources[i % sources.length]!;
       positions.set(bubble ? [source.x, source.y, source.z] : [particleRng.range(-170, 170) * s, 0, particleRng.range(-150, 150) * s], i * 3);
       const color = new Color(bubble ? source.color : '#abc9dc');
       colors.set([color.r, color.g, color.b], i * 3);
-      phases.set([particleRng.next(), particleRng.range(0.7, 1.3)], i * 2);
+      // Bubbles leave in PUFFS: every bubble of a vent belongs to one of three
+      // bursts, so a chimney coughs a little cloud, rests, coughs again —
+      // where a uniform phase gave a dripping tap. Snow stays uniform.
+      const src = i % sources.length;
+      const burst = bubble ? ((i / sources.length | 0) % 3) / 3 + src * 0.137 + particleRng.range(0, 0.07) : particleRng.next();
+      phases.set([burst % 1, particleRng.range(0.75, 1.25), bubble ? particleRng.range(0.55, 1.9) ** 1.4 : 1], i * 3);
     }
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(positions, 3));
     geometry.setAttribute('color', new BufferAttribute(colors, 3));
-    geometry.setAttribute('aParticle', new BufferAttribute(phases, 2));
+    geometry.setAttribute('aParticle', new BufferAttribute(phases, 3));
     geometry.userData.mqOwned = true;
-    const material = new PointsMaterial({ vertexColors: true, size: bubble ? 1.5 * s : 0.65 * s,
-      transparent: true, opacity: bubble ? 0.55 : 0.5, depthWrite: false });
+    const material = new PointsMaterial({ vertexColors: true, size: bubble ? 2.6 * s : 0.65 * s,
+      transparent: true, opacity: bubble ? 0.8 : 0.5, depthWrite: false });
     material.userData.mqOwned = true;
     const clock = { value: 0 }; clocks.push(clock);
     material.onBeforeCompile = shader => {
@@ -196,16 +201,24 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       shader.uniforms.uMineralPosition = { value: lightPositions };
       shader.uniforms.uMineralColor = { value: lightColors };
       shader.vertexShader = `uniform float uParticleTime;
-        attribute vec2 aParticle; varying float vLife;
+        attribute vec3 aParticle; varying float vLife;
         uniform vec4 uMineralPosition[12]; uniform vec3 uMineralColor[12];
       ` + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
         #include <begin_vertex>
         float life = fract(aParticle.x + uParticleTime * aParticle.y * ${bubble ? '0.045' : '0.007'});
-        transformed.y += ${bubble ? 'life * 76.0' : '(1.0 - life) * 150.0'};
-        transformed.x += sin(life * 9.0 + aParticle.x * 30.0) * ${bubble ? '1.8' : '7.0'};
-        transformed.z += cos(life * 6.0 + aParticle.x * 20.0) * 2.0;
-        vLife = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.78, 1.0, life));
+        ${bubble ? `
+        // Buoyancy: slow off the vent, quicker as it grows. The wobble widens
+        // with height into a loose helix, and small bubbles wander more.
+        float rise = life * (0.55 + 0.45 * life);
+        transformed.y += rise * 118.0;
+        float wob = (0.6 + rise * 5.5) / (0.6 + aParticle.z);
+        transformed.x += sin(life * 17.0 + aParticle.x * 40.0) * wob + rise * 9.0;
+        transformed.z += cos(life * 13.0 + aParticle.x * 31.0) * wob;` : `
+        transformed.y += (1.0 - life) * 150.0;
+        transformed.x += sin(life * 9.0 + aParticle.x * 30.0) * 7.0;
+        transformed.z += cos(life * 6.0 + aParticle.x * 20.0) * 2.0;`}
+        vLife = smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.8, 1.0, life));
         vec3 light = vec3(0.22);
         for (int i = 0; i < 12; i++) {
           vec3 delta = transformed - uMineralPosition[i].xyz;
@@ -214,15 +227,25 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
         }
         vColor.rgb *= min(vec3(1.8), light);
       `);
+      // Per-bubble size, and they swell as the pressure drops.
+      if (bubble) shader.vertexShader = shader.vertexShader.replace('gl_PointSize = size;',
+        'gl_PointSize = size * aParticle.z * (0.7 + 0.8 * fract(aParticle.x + uParticleTime * aParticle.y * 0.045));');
       shader.fragmentShader = 'varying float vLife;\n' + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
         #include <color_fragment>
         float r = length(gl_PointCoord - 0.5) * 2.0;
-        float mask = ${bubble ? 'smoothstep(0.5, 0.72, r) * (1.0 - smoothstep(0.8, 1.0, r))' : '1.0 - smoothstep(0.0, 1.0, r)'};
+        ${bubble ? `
+        // A bubble, not a ring: bright rim, faint fill, one highlight up-left.
+        float rim = smoothstep(0.62, 0.86, r) * (1.0 - smoothstep(0.9, 1.0, r));
+        float fill = (1.0 - smoothstep(0.0, 0.9, r)) * 0.13;
+        float spec = 1.0 - smoothstep(0.0, 0.2, length(gl_PointCoord - vec2(0.34, 0.32)) * 2.0);
+        float mask = clamp(rim + fill + spec * 0.9, 0.0, 1.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), spec * 0.85);` : `
+        float mask = 1.0 - smoothstep(0.0, 1.0, r);`}
         diffuseColor.a *= mask * vLife;
       `);
     };
-    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v1' : 'mineral-snow-v1';
+    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v2' : 'mineral-snow-v2';
     const points = new Points(geometry, material);
     points.name = bubble ? 'bubble-vents' : 'illuminated-marine-snow';
     points.frustumCulled = false;
