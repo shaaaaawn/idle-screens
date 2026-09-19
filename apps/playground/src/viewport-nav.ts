@@ -1,26 +1,18 @@
 /**
- * Viewport navigation — the 3D-app muscle memory, for any saver with a camera.
+ * Viewport navigation — orbit, dolly, an axis gizmo and Reset view, for any
+ * saver with a camera. Mouse only, like an OrbitControls viewport.
  *
  * A saver opts in by declaring the camera rig in its paramSpace:
  * `cameraAzimuth`, `cameraElevation`, `cameraDistance` (and optionally
  * `autoRotate`). Nothing here knows about three.js or metaquarium — the rig IS
- * the params, so navigation is just a very fast way to set three numbers, and
- * the next 3D saver gets it for free by using the same names.
+ * the params, so the next 3D saver gets this by using the same names.
  *
- * It is FREE LOOK: the values ride the timeline's view override, so orbiting
- * never writes a keyframe and never stops playback. "Key view" is the explicit
- * act that commits where you are looking to the track (Blender's
- * camera-to-view), and `0` hands the view back to the scene's own camera.
+ * It is FREE LOOK: the values ride the timeline's view override, so looking
+ * around never writes a keyframe and never stops playback. Reset view (or a
+ * double-click) hands the viewport back to the scene's own camera.
  *
- *   drag (left or middle)   orbit          wheel / pinch     dolly
- *   1 / 3 / 7               front / right / top     Ctrl+1/3/7   the opposite side
- *   9                       flip to the other side
- *   4 6 / 8 2               orbit 15° left right / up down
- *   + −                     dolly           Home or .        reset distance
- *   0                       back to the scene camera         K   key this view
- *
- * Panning is not offered because the rig has no target param — the tank always
- * looks at its centre. Faking it would show a view the wall can never have.
+ * No pan: the rig has no target param — the tank always looks at its centre,
+ * and faking one would show a view a wall can never have.
  */
 
 import { sampleTrack, type ParamSpace, type ParamValue, type SaverPlugin } from '@idle-screens/core';
@@ -45,7 +37,6 @@ export function buildViewportNav(
   let space: ParamSpace | null = null;
   /** null = the scene camera is driving; a View = free look. */
   let free: View | null = null;
-  let hovering = false;
 
   // ---- chrome -------------------------------------------------------------
   const root = document.createElement('div');
@@ -129,28 +120,7 @@ export function buildViewportNav(
   };
   const look = (az: number, el: number): void => apply({ ...current(), cameraAzimuth: az, cameraElevation: el });
 
-  const keyView = (): void => {
-    if (!free) return;
-    const v = free;
-    // Order matters: clear the override first so the panel and the preview
-    // read the track the keys are about to land in.
-    free = null;
-    timeline.setViewOverride(null);
-    for (const k of RIG) timeline.setParam(k, Math.round(v[k] * 10) / 10);
-    paint();
-    onViewChange();
-  };
-
-  const sceneBtn = button('Scene cam', 'Back to the scene’s own camera (0)', () => apply(null));
-  const keyBtn = button('Key view', 'Write this view to the track at the playhead (K)', keyView);
-  button('Keys ?', [
-    'drag — orbit          wheel / pinch — dolly',
-    '1 / 3 / 7 — front / right / top   (Ctrl: the opposite side)',
-    '9 — flip     4 6 8 2 — orbit 15°     + − — dolly',
-    'Home or . — reset distance',
-    '0 — scene camera     K — key this view',
-    'Hover the viewport for keys. No pan: the rig has no target param.',
-  ].join('\n'), () => {});
+  const resetBtn = button('Reset view', 'Back to the scene’s own camera (or double-click the viewport)', () => apply(null));
 
   // ---- paint ----------------------------------------------------------------
   const NAMED: ReadonlyArray<readonly [string, number, number]> = [
@@ -161,11 +131,11 @@ export function buildViewportNav(
     const top = v.cameraElevation >= def('cameraElevation').max - 0.5;
     const named = top ? 'Top'
       : NAMED.find(([, az, el]) => Math.abs(v.cameraAzimuth - az) < 0.5 && Math.abs(v.cameraElevation - el) < 0.5)?.[0];
-    title.textContent = free ? `${named ?? 'User'} Perspective` : 'Scene Camera';
+    title.textContent = `${named ?? 'User'} Perspective`;
+    hud.hidden = !free;
     readout.textContent = `az ${v.cameraAzimuth.toFixed(0)}°  el ${v.cameraElevation.toFixed(0)}°  d ${v.cameraDistance.toFixed(0)}`;
     root.classList.toggle('free', !!free);
-    sceneBtn.disabled = !free;
-    keyBtn.disabled = !free;
+    resetBtn.hidden = !free;
 
     // Axis gizmo: project the world axes through the rig's own view basis.
     const az = (v.cameraAzimuth * Math.PI) / 180;
@@ -253,35 +223,8 @@ export function buildViewportNav(
     // ctrlKey is how a trackpad pinch arrives; it carries small deltas.
     nudge({ cameraDistance: Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)) });
   }, { passive: false });
-  surface.addEventListener('pointerenter', () => { hovering = true; });
-  surface.addEventListener('pointerleave', () => { hovering = false; });
 
-  window.addEventListener('keydown', (e) => {
-    if (!space || !hovering || e.altKey || e.metaKey) return;
-    const t = e.target as HTMLElement | null;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    const flip = e.ctrlKey ? 180 : 0;
-    const key = e.code.startsWith('Numpad') ? e.code.slice(6) : e.key;
-    const v = current();
-    let handled = true;
-    switch (key) {
-      case '1': look(flip, 0); break;
-      case '3': look(90 + flip, 0); break;
-      case '7': look(v.cameraAzimuth, flip ? def('cameraElevation').min : def('cameraElevation').max); break;
-      case '9': look(v.cameraAzimuth + 180, v.cameraElevation); break;
-      case '4': nudge({ cameraAzimuth: -15 }); break;
-      case '6': nudge({ cameraAzimuth: 15 }); break;
-      case '8': nudge({ cameraElevation: 15 }); break;
-      case '2': nudge({ cameraElevation: -15 }); break;
-      case '+': case '=': case 'Add': nudge({ cameraDistance: 1 / 1.2 }); break;
-      case '-': case '_': case 'Subtract': nudge({ cameraDistance: 1.2 }); break;
-      case 'Home': case '.': case 'Decimal': apply({ ...v, cameraDistance: def('cameraDistance').default }); break;
-      case '0': apply(null); break;
-      case 'k': case 'K': keyView(); break;
-      default: handled = false;
-    }
-    if (handled) e.preventDefault();
-  });
+  surface.addEventListener('dblclick', () => { if (space && free) apply(null); });
 
   return {
     select(saver) {
