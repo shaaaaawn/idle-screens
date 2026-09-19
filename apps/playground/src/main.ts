@@ -160,6 +160,13 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  createMetaquarium({
+    id: 'metaquarium-world-mineral-garden', label: 'Metaquarium (mineral garden)',
+    params: { rockDensity: 0.8, propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple',
+      fishCount: 6, fishUrl: LOCAL_FISH_URL, swimStyle: 'drift', crystalTint: 0.5,
+      fogColor: '#040916', floorColor: '#0b1525', cameraDistance: 240, cameraElevation: 12,
+      cameraAzimuth: 0, autoRotate: 0, moteDensity: 0.35 }, catalog: LOCAL_CATALOG,
+  }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
   // so the props are judged without waiting on a gateway.
   createMetaquarium({
@@ -423,6 +430,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
  * know its `?saver=` id.
  */
 const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['metaquarium-world-', 'worlds'],
   ['metaquarium-crystal-', 'crystals'],
   ['metaquarium-env-', 'environments'],
   ['metaquarium-swim-', 'swim styles'],

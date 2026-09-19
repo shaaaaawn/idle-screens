@@ -1,3 +1,4 @@
+import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
@@ -524,6 +525,8 @@ class TankInstance implements SaverInstance {
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
+  private scenery: Scenery | null = null;
+  private sceneryKey = "";
   private crystals: CrystalField | null = null;
   private clusters: Cluster[] = [];
   private emitters: Emitter[] = [];
@@ -865,7 +868,7 @@ class TankInstance implements SaverInstance {
     const scale = this.num('crystalScale');
     const wild = this.num('crystalWild');
     const budget = this.quality.props;
-    const key = `${mix}|${scale}|${wild}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    const key = `${mix}|${scale}|${wild}|${this.num('rockDensity')}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
     if (key === this.propsKey) return;
     this.propsKey = key;
 
@@ -901,7 +904,7 @@ class TankInstance implements SaverInstance {
     if (!layout.clusters.length) return;
 
     const terrain = this.terrainAt;
-    for (const c of layout.clusters) c.y = terrain ? terrain(c.x, c.z) : 0;
+    for (const c of layout.clusters) c.y = (terrain ? terrain(c.x, c.z) : 0) + (this.num('rockDensity') > 0 ? 6 * scale : 0);
     this.clusters = layout.clusters;
     this.emitters = emittersOf(this.clusters);
     const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
@@ -914,6 +917,25 @@ class TankInstance implements SaverInstance {
     const clusters = this.clusters;
     this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
     this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
+  }
+
+  private buildScenery(): void {
+    const rocks = this.num('rockDensity');
+    const key = `${this.propsKey}|${rocks}`;
+    if (key === this.sceneryKey) return;
+    this.sceneryKey = key;
+    if (this.scenery) {
+      this.scene.remove(this.scenery.group);
+      disposeOwned(this.scenery.group);
+      this.scenery = null;
+    }
+    const terrain = this.terrainAt ?? (() => 0);
+    if (rocks > 0) {
+      this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
+        { rocks, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+      this.scene.add(this.scenery.group);
+    }
+    this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
   }
 
   /**
@@ -1514,6 +1536,8 @@ class TankInstance implements SaverInstance {
     // everything else so it stays pure in t.
     this.buildRoom();
     this.buildProps();
+    this.buildScenery();
+    this.scenery?.setFrame(tSec);
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,
@@ -1997,6 +2021,7 @@ class TankInstance implements SaverInstance {
         floorPools: Number(this.poolUniforms.uMqPoolN!.value) - Math.min(this.emitters.length, MAX_POOLS),
       },
       props: {
+        scenery: this.scenery?.counts ?? {},
         propMix: this.str('propMix'),
         envProps: this.str('envProps'),
         budget: this.quality.props,

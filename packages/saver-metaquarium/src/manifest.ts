@@ -159,6 +159,8 @@ export const METAQUARIUM_PARAMS = {
    *  (the room's colours) · `rainbow` · a named colour · `glass`.
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
+  /** Faceted boulders, mineral seams, a ridge and an open arch. Opt-in. */
+  rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   propMix: { type: 'string', default: '', ease: 'step' },
   /** `on` lets a named environment bring its own crystals when `propMix` is
    *  empty. Off by default: a room never changes on a wall by itself. */
