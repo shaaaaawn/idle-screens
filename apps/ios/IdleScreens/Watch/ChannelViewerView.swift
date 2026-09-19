@@ -1,12 +1,16 @@
 import SwiftUI
 import WebKit
 
-/// Full-screen channel viewer, rendered natively from the scene JSON.
+/// Full-screen channel viewer: the web engine draws, native UI controls.
 ///
-/// Mirrors the hosted viewer's control bar (back · live status · actions) with
-/// native equivalents: the web's "QR / Remote" become "play on your screens"
-/// and live steering, because the phone *is* the remote. A RenderGuard steps
-/// the renderer down under load instead of letting a heavy scene kill the app.
+/// The scene is the channel's own page in its bare mode (`WebSceneView`), so it
+/// renders exactly as it does on idlescreens.com. Everything around it — back,
+/// live status, compose, history, push to a screen, share — is SwiftUI, and the
+/// web layer cannot be touched at all. The web's "QR / Remote" become "play on
+/// your screens" and live steering, because the phone *is* the remote.
+///
+/// `-native-render` swaps in the native renderer (shared with tvOS, which has
+/// no WebKit); there a RenderGuard steps quality down under load.
 struct ChannelViewerView: View {
     let channelId: String
     var label: String?
@@ -26,6 +30,13 @@ struct ChannelViewerView: View {
     @State private var pulse = false
     @State private var showComposer = false
     @State private var showTimeline = false
+    @State private var reloadCount = 0
+
+    /// The web engine draws channels unless QA asks for the native renderer
+    /// (`-native-render`) — kept reachable for side-by-side comparison, and
+    /// because tvOS, which has no WebKit, shares it.
+    static let usesWebEngine = !ProcessInfo.processInfo.arguments.contains("-native-render")
+    private var sessionSource: ChannelSession.Source { Self.usesWebEngine ? .host : .socket }
 
     private var seedSpec: SpecSubset? {
         app.channels.first { $0.id == channelId }?.spec
@@ -93,7 +104,7 @@ struct ChannelViewerView: View {
             // big canvas that deserves the whole device — nothing animating
             // offscreen behind it earns its memory.
             PreviewBudget.shared.enterFullscreen()
-            if isActive { session.start(channelId: channelId, seedSpec: seedSpec) }
+            if isActive { session.start(channelId: channelId, seedSpec: seedSpec, source: sessionSource) }
             revealChrome()
         }
         // A paging TabView builds the neighbouring pages before you reach them.
@@ -101,7 +112,7 @@ struct ChannelViewerView: View {
         // swiping through ten channels would leave ten live connections behind.
         .onChange(of: isActive) { _, nowActive in
             if nowActive {
-                session.start(channelId: channelId, seedSpec: seedSpec)
+                session.start(channelId: channelId, seedSpec: seedSpec, source: sessionSource)
                 revealChrome()
             } else {
                 chromeTask?.cancel()
@@ -125,7 +136,31 @@ struct ChannelViewerView: View {
         Color(hex: session.backdrop ?? "0A0A0F")
             .ignoresSafeArea()
 
-        if session.isClassicSpec {
+        if Self.usesWebEngine {
+            // Every channel draws on the real web engine; every control is
+            // native. Only the page you are looking at owns a web view — a
+            // pager neighbour holds a still, so swiping past ten channels
+            // never means ten web processes.
+            if isActive {
+                WebSceneView(
+                    channelId: channelId,
+                    baseURL: URL(string: Config.baseURL)!,
+                    token: app.token(for: channelId),
+                    reloadCount: reloadCount,
+                    onFrame: { session.ingest($0) },
+                    onFailure: { session.hostFailed() }
+                )
+                .ignoresSafeArea()
+                // Invisible until the first frame proves the page is live, so
+                // a slow load shows the channel's colour, not a blank sheet.
+                .opacity(session.phase == .live && !session.sleeping ? 1 : 0)
+                .animation(.easeInOut(duration: 0.6), value: session.sleeping)
+            } else if let seedSpec {
+                ScenePreviewView(spec: seedSpec, fallbackSeed: channelId, live: false)
+                    .ignoresSafeArea()
+            }
+            hostedStateLayer
+        } else if session.isClassicSpec {
             // Classic savers live only on the web engine.
             HostedViewer(url: app.gallery.viewerURL(for: channelId))
                 .ignoresSafeArea()
@@ -164,6 +199,43 @@ struct ChannelViewerView: View {
         } else {
             // Connecting: no spinner. The backdrop is already the channel's
             // colour, so a quiet pulse beats a spinner that flashes for 200ms.
+            Circle()
+                .fill(Color.textPrimary.opacity(0.18))
+                .frame(width: 10, height: 10)
+                .scaleEffect(pulse ? 1.6 : 0.8)
+                .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
+                .onAppear { pulse = true }
+                .transition(.opacity)
+        }
+    }
+
+    /// Connecting and failure, for the web-drawn path. Native on purpose: the
+    /// page has its own fallback, but a web error card inside a native app is
+    /// exactly the seam this design exists to remove.
+    @ViewBuilder
+    private var hostedStateLayer: some View {
+        if isActive, session.phase == .unreachable {
+            VStack(spacing: 14) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 32))
+                    .foregroundStyle(Color.textSecondary)
+                Text("can't reach this channel")
+                    .font(.headline)
+                    .foregroundStyle(Color.textPrimary)
+                Button("Try again") {
+                    session.retry()
+                    reloadCount += 1
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.appBackground)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Color.textPrimary, in: Capsule())
+            }
+            .padding(28)
+            .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
+            .transition(.opacity)
+        } else if isActive, session.phase == .connecting {
             Circle()
                 .fill(Color.textPrimary.opacity(0.18))
                 .frame(width: 10, height: 10)
@@ -443,7 +515,7 @@ private struct SceneInfoSheet: View {
                 }
                 Section("rendering") {
                     LabeledContent("mode", value: guardrail.level.rawValue)
-                    LabeledContent("engine", value: "native")
+                    LabeledContent("engine", value: ChannelViewerView.usesWebEngine ? "web (native controls)" : "native")
                     if let reason = guardrail.reason {
                         LabeledContent("stepped down", value: reason)
                     }
