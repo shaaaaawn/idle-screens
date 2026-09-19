@@ -141,7 +141,10 @@ export function parsePropMix(input: string): PropMixResult {
       else problems.push(`unknown palette "${paletteRaw}" — using env (known: ${CRYSTAL_PALETTES.join(', ')})`);
     }
     let count = countRaw ? Number(countRaw) : 1;
-    if (count < 1) continue;
+    if (count < 1) {
+      problems.push(`"${token}" has a count under 1 — dropped`);
+      continue;
+    }
     if (total + count > MAX_CLUSTERS) {
       const kept = MAX_CLUSTERS - total;
       problems.push(`"${token}" clamped to ${kept} — a scene holds ${MAX_CLUSTERS} clusters`);
@@ -416,8 +419,13 @@ export function growCluster(
       }
     }
   }
-  // Budget: the trunk rings came first, so trimming the tail sheds branches.
-  const cap = Math.max(full, Math.round(opts.shardCap * 1.25));
+  // Budget, with slack for branches: `full` is the UN-thinned ring count
+  // (32 for lotus, whatever the tier), so flooring the cap at it let a wild
+  // colony on a 12- or 20-shard tier grow every ring back out to 32 once
+  // enough branches sprouted — the device budget in name only. The thinned
+  // trunk (ring counts already scaled by `keep`, above) never gets anywhere
+  // near shardCap * 1.25 on its own, so this only ever trims branches.
+  const cap = Math.round(opts.shardCap * 1.25);
   if (shards.length > cap) shards.length = cap;
 
   let radius = 0;
