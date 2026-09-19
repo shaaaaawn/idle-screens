@@ -3,11 +3,12 @@
 import {
   BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
-  Mesh, type MeshBasicMaterial, Quaternion, TorusGeometry, Vector3,
+  Mesh, type MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
@@ -185,6 +186,30 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     };
     (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v2';
     plants.frustumCulled = false;
+  }
+  // The lights on the flora are polished metal: they take the studio
+  // environment and the key like the fish's plates do, and emit their colour
+  // on top, so a bead is a bright bead in a flat tank and a gleaming one in a
+  // lit tank. Same sway, same clock, one more draw call.
+  if (field.lamps.length) {
+    const geometry = mergeGeometries(field.lamps)!;
+    field.lamps.forEach(g => g.dispose());
+    geometry.userData.mqOwned = true;
+    const metal = new MeshStandardMaterial({ vertexColors: true, metalness: 1, roughness: 0.2, envMapIntensity: 1.7 });
+    metal.userData.mqOwned = true;
+    const clock = { value: 0 }; clocks.push(clock);
+    metal.onBeforeCompile = shader => {
+      shader.uniforms.uSwayTime = clock;
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
+        .replace('#include <color_vertex>', FLORA_COLOR);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', FLORA_LAMP_EMISSIVE);
+    };
+    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v1';
+    const lampMesh = new Mesh(geometry, metal);
+    lampMesh.name = 'flora-lamps';
+    lampMesh.frustumCulled = false;
+    group.add(lampMesh);
   }
   counts.flora = field.plants;
   // Both particle layers are one draw each; positions are pure in t, including

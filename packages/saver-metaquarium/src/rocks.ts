@@ -62,6 +62,15 @@ export function boulder(rng: CrystalRng, detail = 1): Tri[] {
 /**
  * Cut fissures into a surface. `tris` are in the space the wobble is tuned
  * for (roughly unit). Returns loose coloured triangles.
+ *
+ * A crack is a GAP first and a light second. The first version drew a bright
+ * even tube right round the stone — neon wire wrapped on a rock. A real
+ * fracture starts somewhere (here: the crown, where the crystal broke out),
+ * runs down a flank or two, narrows, and dies away; what you see is a dark
+ * split with light deep inside it, strongest at the source. So each fissure is
+ * a dark bed, a glow that fades with distance from the crown, and a hot core
+ * only near the source — and its two arms are different lengths. Forks are
+ * short hairlines. The few crystals that pushed out stay near the crown.
  */
 export function fissures(
   tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number,
@@ -69,77 +78,86 @@ export function fissures(
   const positions: number[] = [], colors: number[] = [];
   if (amount <= 0) return { positions, colors, seep: null };
   const band = new Color(tint);
-  const core = band.clone().lerp(new Color('#ffffff'), 0.8);
-  const tipC = band.clone().multiplyScalar(1.1);
-  const root = band.clone().lerp(new Color('#ffffff'), 0.4);
-  const put = (p: Vector3, c: Color): void => { positions.push(p.x, p.y, p.z); colors.push(c.r, c.g, c.b); };
-  const quad = (a: Vector3, b: Vector3, side: Vector3, w: number, lift: Vector3, c: Color): void => {
-    const o = side.clone().multiplyScalar(w);
-    const a0 = a.clone().sub(o).add(lift), a1 = a.clone().add(o).add(lift);
-    const b0 = b.clone().sub(o).add(lift), b1 = b.clone().add(o).add(lift);
-    for (const p of [a0, b0, b1, a0, b1, a1]) put(p, c);
-  };
+  const core = band.clone().lerp(new Color('#ffffff'), 0.75);
+  const bed = new Color('#05070b');
+  const put = (p: Vector3, c: Color, k = 1): void => { positions.push(p.x, p.y, p.z); colors.push(c.r * k, c.g * k, c.b * k); };
 
-  // The main fracture crosses the top; forks hang off one side of it.
-  const planes: Array<{ n: Vector3; d: number; phase: number; gate: Vector3 | null }> = [];
-  const yaw = rng.next() * Math.PI;
-  const main = new Vector3(Math.cos(yaw), rng.range(-0.25, 0.25), Math.sin(yaw)).normalize();
-  planes.push({ n: main, d: rng.range(-0.12, 0.12), phase: rng.next() * 6.28, gate: null });
-  const forks = Math.round(amount * 2);
-  for (let f = 0; f < forks; f += 1) {
-    const a = yaw + rng.range(0.5, 1.1) * (f % 2 ? 1 : -1);
-    planes.push({
-      n: new Vector3(Math.cos(a), rng.range(-0.3, 0.3), Math.sin(a)).normalize(),
-      d: rng.range(-0.2, 0.2), phase: rng.next() * 6.28,
-      gate: main.clone().multiplyScalar(f % 2 ? 1 : -1),
-    });
-  }
-
-  let seep: Vector3 | null = null;
-  const width = 0.028 + amount * 0.03;
-  const ab = new Vector3(), ac = new Vector3(), normal = new Vector3(), dir = new Vector3(), side = new Vector3();
-  for (const plane of planes) {
-    const dist = (p: Vector3): number =>
-      p.dot(plane.n) - plane.d + Math.sin(p.x * 6.5 + plane.phase) * 0.07 + Math.sin(p.z * 8 + p.y * 5 + plane.phase * 2) * 0.05;
+  interface Seg { p: Vector3; q: Vector3; normal: Vector3; side: Vector3 }
+  const ab = new Vector3(), ac = new Vector3();
+  const cut = (n: Vector3, d: number, phase: number): Seg[] => {
+    const dist = (v: Vector3): number =>
+      v.dot(n) - d + Math.sin(v.x * 6.5 + phase) * 0.07 + Math.sin(v.z * 8 + v.y * 5 + phase * 2) * 0.05;
+    const out: Seg[] = [];
     for (const [a, b, c] of tris) {
       const da = dist(a), db = dist(b), dc = dist(c);
       const hits: Vector3[] = [];
-      for (const [p, q, dp, dq] of [[a, b, da, db], [b, c, db, dc], [c, a, dc, da]] as const) {
-        if ((dp < 0) !== (dq < 0)) hits.push(p.clone().lerp(q, dp / (dp - dq)));
+      for (const [u, v, du, dv] of [[a, b, da, db], [b, c, db, dc], [c, a, dc, da]] as const) {
+        if ((du < 0) !== (dv < 0)) hits.push(u.clone().lerp(v, du / (du - dv)));
       }
       if (hits.length !== 2) continue;
       const [p, q] = hits as [Vector3, Vector3];
-      const mid = p.clone().add(q).multiplyScalar(0.5);
-      if (mid.y < -0.18) continue; // nothing glows underground
-      if (plane.gate && mid.dot(plane.gate) < 0.05) continue;
-      normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
-      dir.subVectors(q, p);
-      if (dir.lengthSq() < 1e-6) continue;
-      side.crossVectors(normal, dir).normalize();
-      // Wider on the crown, a hairline down the flanks.
-      const w = width * (0.45 + 0.75 * Math.max(0, mid.y + 0.2));
-      quad(p, q, side, w, normal.clone().multiplyScalar(0.012), band);
-      quad(p, q, side, w * 0.36, normal.clone().multiplyScalar(0.02), core);
-      if (!seep || mid.y > seep.y) seep = mid.clone();
-      // Crystals that have pushed out through the crack.
-      if (rng.next() < 0.22 * amount + 0.06) {
-        const len = rng.range(0.1, 0.26) * (0.6 + amount * 0.6);
-        const tip = mid.clone().add(normal.clone().multiplyScalar(len))
-          .add(new Vector3(rng.range(-0.04, 0.04), rng.range(0, 0.05), rng.range(-0.04, 0.04)));
-        const base = [
-          mid.clone().add(side.clone().multiplyScalar(w * 1.6)),
-          mid.clone().sub(side.clone().multiplyScalar(w * 1.6)),
-          mid.clone().add(dir.clone().normalize().multiplyScalar(w * 1.8)),
-        ];
-        for (let k = 0; k < 3; k += 1) {
-          put(base[k]!.clone().add(normal.clone().multiplyScalar(0.01)), root);
-          put(base[(k + 1) % 3]!.clone().add(normal.clone().multiplyScalar(0.01)), root);
-          put(tip, tipC);
-        }
-      }
+      if ((p.y + q.y) * 0.5 < -0.2 || p.distanceToSquared(q) < 1e-6) continue; // nothing glows underground
+      const normal = new Vector3().crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
+      out.push({ p, q, normal, side: new Vector3().crossVectors(normal, q.clone().sub(p)).normalize() });
     }
+    return out;
+  };
+
+  const yaw = rng.next() * Math.PI;
+  const mainN = new Vector3(Math.cos(yaw), rng.range(-0.2, 0.2), Math.sin(yaw)).normalize();
+  const mainSegs = cut(mainN, rng.range(-0.1, 0.1), rng.next() * 6.28);
+  if (!mainSegs.length) return { positions, colors, seep: null };
+  // The source: the highest point of the fracture.
+  const crown = mainSegs.reduce((best, sg) => (sg.p.y > best.y ? sg.p : best), mainSegs[0]!.p).clone();
+  const armDir = new Vector3().crossVectors(mainN, new Vector3(0, 1, 0)).normalize();
+
+  const lay = (segs: Seg[], origin: Vector3, reachA: number, reachB: number, width: number, hot: boolean): void => {
+    for (const sg of segs) {
+      // Which arm, and how far along it. Arms differ: cracks are not symmetric.
+      const mid = sg.p.clone().add(sg.q).multiplyScalar(0.5).sub(origin);
+      const reach = mid.dot(armDir) >= 0 ? reachA : reachB;
+      const fade = (v: Vector3): number => Math.max(0, 1 - v.distanceTo(origin) / reach);
+      const fp = fade(sg.p), fq = fade(sg.q);
+      if (fp <= 0 && fq <= 0) continue;
+      const jag = rng.range(0.7, 1.3);
+      const quad = (w: number, lift: number, c: Color, kp: number, kq: number): void => {
+        const wp = w * jag * fp ** 0.7, wq = w * jag * fq ** 0.7;
+        const l = sg.normal.clone().multiplyScalar(lift);
+        const p0 = sg.p.clone().addScaledVector(sg.side, -wp).add(l), p1 = sg.p.clone().addScaledVector(sg.side, wp).add(l);
+        const q0 = sg.q.clone().addScaledVector(sg.side, -wq).add(l), q1 = sg.q.clone().addScaledVector(sg.side, wq).add(l);
+        put(p0, c, kp); put(q0, c, kq); put(q1, c, kq); put(p0, c, kp); put(q1, c, kq); put(p1, c, kp);
+      };
+      quad(width * 1.9, 0.008, bed, 1, 1); //                       the split
+      quad(width, 0.014, band, 0.15 + 0.85 * fp * fp, 0.15 + 0.85 * fq * fq); // light inside it, fading
+      if (hot && (fp > 0.62 || fq > 0.62)) quad(width * 0.38, 0.02, core, Math.max(0, fp - 0.55) * 2.2, Math.max(0, fq - 0.55) * 2.2);
+    }
+  };
+
+  const width = 0.02 + amount * 0.022;
+  lay(mainSegs, crown, rng.range(0.95, 1.5) * (0.6 + amount * 0.5), rng.range(0.4, 0.8) * (0.6 + amount * 0.5), width, true);
+  // Hairline forks leaving the main crack part-way down.
+  const forks = Math.round(amount * 2);
+  for (let f = 0; f < forks; f += 1) {
+    const from = mainSegs[Math.floor(rng.next() * mainSegs.length)]!.p;
+    if (from.distanceTo(crown) > 0.9) continue;
+    const a = yaw + rng.range(0.6, 1.2) * (f % 2 ? 1 : -1);
+    const n = new Vector3(Math.cos(a), rng.range(-0.3, 0.3), Math.sin(a)).normalize();
+    const segs = cut(n, from.dot(n), rng.next() * 6.28).filter((sg) => sg.p.y < from.y + 0.05);
+    const r = rng.range(0.3, 0.55);
+    lay(segs, from, r, r * 0.4, width * 0.5, false);
   }
-  return { positions, colors, seep };
+  // A few small crystals where the stone first gave way.
+  const root = band.clone().lerp(new Color('#ffffff'), 0.4);
+  for (const sg of mainSegs) {
+    const mid = sg.p.clone().add(sg.q).multiplyScalar(0.5);
+    if (mid.distanceTo(crown) > 0.38 || rng.next() > 0.3 + amount * 0.3) continue;
+    const len = rng.range(0.07, 0.17);
+    const tip = mid.clone().addScaledVector(sg.normal, len).add(new Vector3(rng.range(-0.03, 0.03), rng.range(0, 0.04), rng.range(-0.03, 0.03)));
+    const along = sg.q.clone().sub(sg.p).normalize();
+    const foot = [mid.clone().addScaledVector(sg.side, width * 2), mid.clone().addScaledVector(sg.side, -width * 2), mid.clone().addScaledVector(along, width * 2.4)];
+    for (let k = 0; k < 3; k += 1) { put(foot[k]!, root); put(foot[(k + 1) % 3]!, root); put(tip, band, 1.1); }
+  }
+  return { positions, colors, seep: crown };
 }
 
 /** Stone colouring: slate, darker toward the buried base, a little different

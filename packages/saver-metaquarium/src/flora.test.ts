@@ -29,17 +29,17 @@ describe('flora', () => {
     expect(buildFlora(anchors, flat, createRng(3), { ...opts, density: 0 }).parts).toHaveLength(0);
   });
 
-  it('every vertex carries its sway and glow; only tips and lanterns glow', () => {
+  it('every vertex carries its sway and glow; lights are split out as lamps', () => {
     const f = buildFlora(anchors, flat, createRng(5), opts);
-    let glowing = 0;
-    for (const g of f.parts) {
+    for (const g of [...f.parts, ...f.lamps]) {
       const n = g.getAttribute('position').count;
       expect(g.getAttribute('aSway').count).toBe(n);
       expect(g.getAttribute('aGlow').count).toBe(n);
-      if (g.getAttribute('aGlow').getX(0) === 1) glowing += 1;
     }
-    expect(glowing).toBeGreaterThan(f.plants * 0.8);
-    expect(glowing).toBeLessThan(f.parts.length * 0.4);
+    expect(f.parts.every((g) => g.getAttribute('aGlow').getX(0) === 0)).toBe(true);
+    expect(f.lamps.every((g) => g.getAttribute('aGlow').getX(0) === 1)).toBe(true);
+    expect(f.lamps.length).toBeGreaterThan(f.plants * 0.8); // every plant carries a light
+    expect(f.lamps.length).toBeLessThan(f.parts.length * 0.5);
   });
 
   it('motion is a pure function of the tank clock and zero at the root', () => {

@@ -28,7 +28,7 @@ describe('mineral world', () => {
   });
   it('batches every layer with finite geometry and owned resources', () => {
     const world = build();
-    expect(world.group.children.length).toBeLessThanOrEqual(7);
+    expect(world.group.children.length).toBeLessThanOrEqual(8);
     for (const object of world.group.children) {
       expect(object instanceof Mesh || object instanceof Points).toBe(true);
       const mesh = object as Mesh;
@@ -70,7 +70,7 @@ describe('mineral world', () => {
       }
       if (object instanceof Points) particlePrograms.push(material.customProgramCacheKey());
     }
-    expect(clocks).toHaveLength(3);
+    expect(clocks).toHaveLength(4);
     expect(new Set(particlePrograms).size).toBe(2);
     const before = buffers(world);
     world.setFrame(73.5);

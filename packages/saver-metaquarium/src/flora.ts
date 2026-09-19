@@ -35,6 +35,8 @@ export interface FloraOptions {
 
 export interface FloraField {
   parts: BufferGeometry[];
+  /** The lights — tips, beads, lantern heads: drawn as polished metal. */
+  lamps: BufferGeometry[];
   plants: number;
   bySpecies: Record<FloraSpecies, number>;
 }
@@ -46,10 +48,11 @@ export function buildFlora(
   rng: CrystalRng, opts: FloraOptions,
 ): FloraField {
   const parts: BufferGeometry[] = [];
+  const lamps: BufferGeometry[] = [];
   const bySpecies: Record<FloraSpecies, number> = { kelp: 0, reed: 0, bulb: 0 };
   const s = opts.scale;
   const want = Math.round(opts.density * opts.cap * 6);
-  if (!want || !anchors.length) return { parts, plants: 0, bySpecies };
+  if (!want || !anchors.length) return { parts, lamps, plants: 0, bySpecies };
 
   let plants = 0;
   for (let i = 0; i < want * 2 && plants < want; i += 1) {
@@ -70,14 +73,14 @@ export function buildFlora(
     const lx = dx / dl, lz = dz / dl;
     const phase = rng.range(0, Math.PI * 2);
     const gust = x * 0.021 + z * 0.015;
-    const from = parts.length;
+    const from = parts.length, lampFrom = lamps.length;
 
     const box = (px: number, py: number, pz: number, w: number, h: number, d: number, c: Color, glow: number, shade = true): void => {
       const g = painted(new BoxGeometry(1, 1, 1), `#${c.getHexString()}`, new Vector3(px, py, pz), new Vector3(w, h, d), Q, shade);
       const n = g.getAttribute('position').count;
       const glows = new Float32Array(n).fill(glow);
       g.setAttribute('aGlow', new BufferAttribute(glows, 1));
-      parts.push(g);
+      (glow ? lamps : parts).push(g);
     };
     // A stalk of stacked voxels that curves toward the light.
     const stalk = (ox: number, oz: number, height: number, segs: number, girth: number, lean: number, tip: number): [number, number, number] => {
@@ -117,13 +120,17 @@ export function buildFlora(
       const [tx, ty, tz] = stalk(x, z, height, 3, 1.1 * s, 0.08, 0);
       const head = rng.range(2.4, 3.4) * s;
       box(tx, ty + head * 0.75, tz, head, head, head, light.clone().lerp(new Color('#ffffff'), 0.35), 1, false);
+      // A lantern, not a cube: a cap and a collar in darker metal.
+      const brass = light.clone().lerp(new Color('#c9a15a'), 0.6).multiplyScalar(0.55);
+      box(tx, ty + head * 1.32, tz, head * 1.25, head * 0.16, head * 1.25, brass, 1, false);
+      box(tx, ty + head * 1.5, tz, head * 0.45, head * 0.22, head * 0.45, brass, 1, false);
+      box(tx, ty + head * 0.2, tz, head * 1.15, head * 0.14, head * 1.15, brass, 1, false);
       for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         box(tx + ax * head * 0.72, ty + head * 0.45, tz + az * head * 0.72, head * 0.45, head * 0.7, head * 0.45, stem.clone().multiplyScalar(0.7), 0);
       }
     }
     // Every vertex of this plant shares its root, phase and place in the gust.
-    for (let p = from; p < parts.length; p += 1) {
-      const g = parts[p]!;
+    for (const g of [...parts.slice(from), ...lamps.slice(lampFrom)]) {
       const n = g.getAttribute('position').count;
       const sway = new Float32Array(n * 3);
       for (let v = 0; v < n; v += 1) sway.set([root, phase, gust], v * 3);
@@ -132,7 +139,7 @@ export function buildFlora(
     bySpecies[species] += 1;
     plants += 1;
   }
-  return { parts, plants, bySpecies };
+  return { parts, lamps, plants, bySpecies };
 }
 
 /** The sway, as shader text. Exported so the test can hold it to "pure in t". */
@@ -147,4 +154,11 @@ export const FLORA_VERTEX = /* glsl */ `
 export const FLORA_COLOR = /* glsl */ `
   #include <color_vertex>
   vColor.rgb *= 1.0 + aGlow * 0.3 * sin(uSwayTime * 0.75 + aSway.y);
+`;
+
+/** Lamps are lit metal: their vertex colour is both the metal's tint and what
+ *  it emits, so a bead is anodised in its crystal's colour AND glows in it. */
+export const FLORA_LAMP_EMISSIVE = /* glsl */ `
+  #include <emissivemap_fragment>
+  totalEmissiveRadiance += vColor.rgb * 0.5;
 `;
