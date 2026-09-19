@@ -33,7 +33,7 @@ describe('fissured rocks', () => {
 
   it('nothing glows underground, and veins 0 is plain stone', () => {
     const cut = fissures(boulder(createRng(2)), createRng(2), '#ff3f9e', 1);
-    for (let i = 1; i < cut.positions.length; i += 3) expect(cut.positions[i]!).toBeGreaterThan(-0.3);
+    for (let i = 1; i < cut.positions.length; i += 3) expect(cut.positions[i]!).toBeGreaterThan(-0.42); // a segment may dip to the buried rim, never below the stone
     const plain = buildRock({ ...spec, veins: 0 }, createRng(4));
     expect(plain.glow).toBeNull();
     expect(plain.seep).toBeNull();

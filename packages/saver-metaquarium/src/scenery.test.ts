@@ -70,7 +70,7 @@ describe('mineral world', () => {
       }
       if (object instanceof Points) particlePrograms.push(material.customProgramCacheKey());
     }
-    expect(clocks).toHaveLength(4);
+    expect(clocks).toHaveLength(5);
     expect(new Set(particlePrograms).size).toBe(2);
     const before = buffers(world);
     world.setFrame(73.5);

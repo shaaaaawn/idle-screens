@@ -12,7 +12,7 @@ import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_VERTEX } from './fl
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
-import { buildRock, fissures, glowGeometry, paintStone, type Tri } from './rocks';
+import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
   rocks: number;
@@ -103,7 +103,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const archPlace = new Matrix4().compose(new Vector3(x, y, z), new Quaternion(), new Vector3(24 * s, 35 * s, 24 * s));
     stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
     const archCut = fissures(archTris, archRng.fork(2), '#947cff', opts.veins);
-    const archGlow = glowGeometry(archCut.positions, archCut.colors, archPlace);
+    const archGlow = glowGeometry(archCut.positions, archCut.colors, archPlace, archCut.flow);
     if (archGlow) veins.push(archGlow);
     counts.arches = 1;
     for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, '#947cff');
@@ -312,7 +312,15 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
   batch(group, stones, 'rock-formations', FrontSide);
-  batch(group, veins, 'crystal-veins');
+  const lava = batch(group, veins, 'crystal-veins');
+  if (lava) {
+    const clock = { value: 0 }; clocks.push(clock);
+    (lava.material as MeshBasicMaterial).onBeforeCompile = shader => {
+      shader.uniforms.uFlowTime = clock;
+      shader.vertexShader = 'uniform float uFlowTime; attribute float aFlow;\n' + shader.vertexShader.replace('#include <color_vertex>', FISSURE_FLOW);
+    };
+    (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
+  }
   return {
     group, counts, vents, emitters: homeLights,
     drawCalls: group.children.length,
