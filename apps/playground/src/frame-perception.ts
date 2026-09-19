@@ -310,6 +310,10 @@ export function wirePerceptionHarness(savers: SaverPlugin[]): void {
 }
 
 export interface PerceiveFrameOptions {
+  /** Keep the mounted instance for the next sample of the same saver/size/seed
+   *  instead of mounting fresh. For repeat samplers (the Dev Tools panel); the
+   *  harness and conformance leave it off and stay isolated. */
+  reuse?: boolean;
   width?: number;
   height?: number;
   seed?: number;
@@ -336,7 +340,38 @@ export interface PerceiveFrameOptions {
  * Mount `saver` off-screen, sample one frame, and read it back.
  * Always disposes the instance and removes the host, including on failure.
  */
-export async function perceiveSaverFrame(
+/**
+ * One kept perception instance, for callers that sample the SAME saver over
+ * and over (the Dev Tools panel, four times a second while the timeline
+ * plays). Mounting fresh per sample was invisible while savers were cheap 2D
+ * canvases; for a WebGL tank it is a new GL context, every shader compiled, a
+ * prefiltered environment and a full scenery build — per sample. That, not
+ * the scene, is what dragged the workbench to 30 fps. A frame-addressable
+ * saver renders any `t` on demand, so one hidden instance serves every sample.
+ */
+let kept: { key: string; inst: SaverInstance; host: HTMLElement } | null = null;
+let queue: Promise<unknown> = Promise.resolve();
+
+export function releasePerceptionInstance(): void {
+  if (!kept) return;
+  try { kept.inst.dispose(); } catch { /* must not break the panel */ }
+  kept.host.remove();
+  kept = null;
+}
+
+export function perceiveSaverFrame(
+  saver: SaverPlugin,
+  opts: PerceiveFrameOptions = {},
+): Promise<FramePerception> {
+  if (!opts.reuse) return perceiveOnce(saver, opts);
+  // Serialised: two samples interleaving renderFrame on one instance would
+  // read each other's frame.
+  const run = queue.then(() => perceiveOnce(saver, opts));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function perceiveOnce(
   saver: SaverPlugin,
   opts: PerceiveFrameOptions = {},
 ): Promise<FramePerception> {
@@ -365,13 +400,19 @@ export async function perceiveSaverFrame(
   // this one renders on the main thread, so its canvas is readable. Whether a
   // canvas was actually transferred is discovered below by trying to read it,
   // rather than assumed from the manifest.
-  const host = document.createElement('div');
-  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;height:${height}px;pointer-events:none;`;
-  document.body.append(host);
+  const keepKey = `${saver.manifest.id}|${width}x${height}|${seed}|${opts.dpr ?? 1}`;
+  const reusing = opts.reuse === true && kept?.key === keepKey;
+  if (opts.reuse && kept && !reusing) releasePerceptionInstance();
+  const host = reusing ? kept!.host : document.createElement('div');
+  if (!reusing) {
+    host.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;height:${height}px;pointer-events:none;`;
+    document.body.append(host);
+  }
 
-  let inst: SaverInstance | null = null;
+  let inst: SaverInstance | null = reusing ? kept!.inst : null;
+  let keep = reusing;
   try {
-    inst = await Promise.resolve(
+    if (!inst) inst = await Promise.resolve(
       saver.mount({
         host,
         dpr: opts.dpr ?? 1,
@@ -387,6 +428,8 @@ export async function perceiveSaverFrame(
     );
 
     const addressable = typeof inst.renderFrame === 'function';
+    // Only an addressable saver can be kept: a sampled one must run live.
+    if (opts.reuse && addressable && !kept) { kept = { key: keepKey, inst, host }; keep = true; }
     if (addressable) {
       inst.setPaused(true);
       inst.renderFrame!(t, seed);
@@ -494,11 +537,13 @@ export async function perceiveSaverFrame(
   } catch (err) {
     return empty('unsupported', `Mount failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
-    try {
-      inst?.dispose();
-    } catch {
-      /* a saver that throws on dispose must not break perception */
+    if (!keep) {
+      try {
+        inst?.dispose();
+      } catch {
+        /* a saver that throws on dispose must not break perception */
+      }
+      host.remove();
     }
-    host.remove();
   }
 }
