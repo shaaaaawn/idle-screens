@@ -59,7 +59,7 @@ import {
   type Cluster, type Emitter,
 } from './crystals';
 import {
-  buildCrystalField, buildGlowCards, emptyPoolUniforms, installFloorPools, MAX_POOLS, writePoolSlots,
+  buildCrystalField, buildGlowCards, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePoolSlots,
   type CrystalField, type GlowCards,
 } from './crystal-mesh';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
@@ -938,6 +938,15 @@ class TankInstance implements SaverInstance {
         { rocks, homes, flora, bubbles, snow, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
+    // Homes are light sources too: their doors and windows join the same
+    // field the crystals feed, so they pool on the floor and tint a fish
+    // that swims past the door.
+    const lights = this.scenery?.emitters ?? [];
+    this.emitters = [...emittersOf(this.clusters), ...lights];
+    if (this.emitters.length) {
+      fillPoolUniforms(this.poolUniforms, this.emitters);
+      this.installPools();
+    }
     this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
   }
 
@@ -1037,6 +1046,13 @@ class TankInstance implements SaverInstance {
     }
     this.tintEmitters = this.fishEmitters.length ? [...this.emitters, ...this.fishEmitters] : this.emitters;
     const clusterSlots = Math.min(this.emitters.length, MAX_POOLS);
+    // Without crystals nobody else drives the pool look — homes alone, or
+    // glowing fish alone, must still light the floor.
+    if (!this.crystals && this.poolsInstalled) {
+      this.poolUniforms.uMqPoolGain!.value = 0.4 * Math.max(amount, this.emitters.length ? this.num('crystalGlow') : 0);
+      this.poolUniforms.uMqPoolTime!.value = tSec;
+      this.poolUniforms.uMqPoolPulse!.value = pulse;
+    }
     if (!this.fishEmitters.length || amount <= 0) {
       if (this.poolsInstalled) this.poolUniforms.uMqPoolN!.value = clusterSlots;
       return;
@@ -1049,11 +1065,6 @@ class TankInstance implements SaverInstance {
       .sort((a, b) => a.h - b.h)
       .map((c) => c.e);
     writePoolSlots(this.poolUniforms, low, clusterSlots);
-    if (!this.crystals) {
-      this.poolUniforms.uMqPoolGain!.value = 0.4 * amount;
-      this.poolUniforms.uMqPoolTime!.value = tSec;
-      this.poolUniforms.uMqPoolPulse!.value = pulse;
-    }
   }
 
   /**

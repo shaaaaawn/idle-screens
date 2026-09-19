@@ -1,12 +1,13 @@
 /** Seeded mineral scenery. Minerals are faceted; living/inhabited details are voxels.
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, CylinderGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix4,
-  OctahedronGeometry, Points, PointsMaterial, Vector4,
-  Mesh, MeshBasicMaterial, Quaternion, Ray, TorusGeometry, Vector3,
+  BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, Group, IcosahedronGeometry,
+  Points, PointsMaterial, Vector4,
+  Mesh, type MeshBasicMaterial, Quaternion, Ray, TorusGeometry, Vector3,
 } from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { emittersOf, type Cluster, type CrystalRng } from './crystals';
+import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
+import { batch, FrontSide, painted } from './scenery-paint';
+import { buildGeode, GEODE_HABITS } from './geode';
 
 export interface SceneryOptions {
   rocks: number;
@@ -22,6 +23,8 @@ export interface Scenery {
   group: Group;
   counts: Record<string, number>;
   vents: SceneryAnchor[];
+  /** Light the scenery adds to the field: home windows and doors. */
+  emitters: Emitter[];
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -38,37 +41,6 @@ export function sceneryAnchors(clusters: readonly Cluster[], rng: CrystalRng,
     const x = Math.sin(a) * r, z = Math.cos(a) * r;
     return { x, y: terrain(x, z), z, color: ['#49cfff', '#a17bff', '#ff67bc'][i % 3]! };
   });
-}
-
-/** Bake faceted directional shading into vertex colours: works in flat and lit tanks. */
-function painted(geometry: BufferGeometry, color: string, position: Vector3, scale: Vector3,
-  rotation = new Quaternion(), shade = true): BufferGeometry {
-  const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
-  geometry.dispose();
-  g.deleteAttribute('uv');
-  g.computeVertexNormals();
-  g.applyMatrix4(new Matrix4().compose(position, rotation, scale));
-  const normals = g.getAttribute('normal');
-  const colors = new Float32Array(g.getAttribute('position').count * 3);
-  const base = new Color(color);
-  for (let i = 0; i < normals.count; i++) {
-    const k = shade ? 0.34 + 0.66 * Math.max(0, normals.getX(i) * -0.45 + normals.getY(i) * 0.78 + normals.getZ(i) * -0.43) : 1;
-    colors.set([base.r * k, base.g * k, base.b * k], i * 3);
-  }
-  g.setAttribute('color', new BufferAttribute(colors, 3));
-  return g;
-}
-function batch(group: Group, parts: BufferGeometry[], name: string): Mesh | null {
-  if (!parts.length) return null;
-  const geometry = mergeGeometries(parts)!;
-  parts.forEach(g => g.dispose());
-  geometry.userData.mqOwned = true;
-  const material = new MeshBasicMaterial({ vertexColors: true, side: DoubleSide });
-  material.userData.mqOwned = true;
-  const mesh = new Mesh(geometry, material);
-  mesh.name = name;
-  group.add(mesh);
-  return mesh;
 }
 
 export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
@@ -135,52 +107,40 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, '#567fae');
     }
   }
+  // Homes: a loose crescent opening toward the default camera, habits cycled
+  // so a village of three is a cottage, a hall and a tower.
   const interiors: BufferGeometry[] = [], details: BufferGeometry[] = [];
+  const homeLights: Emitter[] = [];
   const homeRng = rng.fork(3);
   const homeCount = Math.min(Math.round(opts.homes), opts.cap >= 8 ? 3 : 2);
   for (let i = 0; i < homeCount; i++) {
-    const x = (i - (homeCount - 1) / 2) * 39 * s;
-    const z = (-25 - (i % 2) * 14) * s;
-    const y = terrain(x, z), r = homeRng.range(13, 16) * s;
-    const tint = anchors[i % anchors.length]!.color;
-    // Cut actual triangles away from the front of the shell. The warm inner
-    // bowl is visible through the opening, and fish can occlude either rim.
-    const shell = new IcosahedronGeometry(1, 2);
-    const src = shell.getAttribute('position');
-    const pos: number[] = [];
-    for (let j = 0; j < src.count; j += 3) {
-      if ((src.getZ(j) + src.getZ(j + 1) + src.getZ(j + 2)) / 3 > 0.48) continue;
-      for (let k = 0; k < 3; k++) pos.push(src.getX(j + k), src.getY(j + k), src.getZ(j + k));
+    const t = homeCount === 1 ? 0 : i / (homeCount - 1) - 0.5;
+    const habit = GEODE_HABITS[(i + (homeCount === 1 ? 0 : 1)) % GEODE_HABITS.length]!;
+    let x = t * 132 * s + homeRng.range(-5, 5) * s;
+    let z = (-38 + Math.abs(t) * 30) * s + homeRng.range(-4, 4) * s;
+    // A home never grows through a crystal: step it back from any cluster
+    // whose footprint it would share.
+    for (let pass = 0; pass < 3; pass++) {
+      for (const c of clusters) {
+        const d = Math.hypot(x - c.x, z - c.z), need = 40 * s + c.radius;
+        if (d < need) {
+          const k = (need - d) / Math.max(1, d);
+          x += (x - c.x) * k; z += (z - c.z) * k;
+        }
+      }
     }
-    shell.dispose();
-    const cut = new BufferGeometry();
-    cut.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-    cut.computeVertexNormals();
-    stones.push(painted(cut.clone(), '#465066', new Vector3(x, y + r * 0.82, z), new Vector3(r, r, r * 0.85)));
-    interiors.push(painted(cut, '#aa6347', new Vector3(x, y + r * 0.82, z), new Vector3(r * 0.88, r * 0.88, r * 0.73)));
-    for (let j = 0; j < 11; j++) {
-      const a = j / 11 * Math.PI * 2;
-      const q = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), a);
-      veins.push(painted(new OctahedronGeometry(1), tint,
-        new Vector3(x + Math.cos(a) * r * 0.85, y + r * 0.82 + Math.sin(a) * r * 0.85, z + r * 0.42),
-        new Vector3(1.2 * s, 2.5 * s, 1.5 * s), q));
-    }
-    // Round recessed door; a voxel lintel, lamp, stool and steps show the
-    // inhabitants working with the mineral shell rather than another rock.
-    interiors.push(painted(new CircleGeometry(r * 0.4, 16), '#ffca7c', new Vector3(x, y + r * 0.5, z - r * 0.55), new Vector3(1, 1, 1), new Quaternion(), false));
-    const box = (dx: number, dy: number, dz: number, sx: number, sy: number, sz: number, color: string): void => {
-      details.push(painted(new BoxGeometry(1, 1, 1), color, new Vector3(x + dx * s, y + dy * s, z + dz * s), new Vector3(sx * s, sy * s, sz * s)));
-    };
-    box(0, 1, 8, 10, 2, 8, '#646479');
-    box(0, 0.3, 13, 13, 0.8, 4, '#424e64');
-    box(6, 4, 0, 5, 1.5, 3, '#ac7658');
-    box(5, 2, 0, 1, 4, 1, '#75504b');
-    box(7, 2, 0, 1, 4, 1, '#75504b');
-    box(-6, 7, 1, 0.8, 9, 0.8, '#a88372');
-    box(-6, 12, 1, 3, 3, 3, '#ffe1a0');
-    box(5, r / s * 1.75, -2, 3, 8, 3, '#485468');
-    vents.push({ x: x + 5 * s, y: y + r * 1.75 + 4 * s, z: z - 2 * s, color: '#ffd69a' });
-    obstacles.push({ x, y: y + r * 0.82, z, r, h: r });
+    const home = buildGeode({
+      x, y: terrain(x, z), z, habit, scale: s,
+      // Turned in toward the middle of the crescent, never square-on.
+      facing: -t * 0.75 + homeRng.range(-0.12, 0.12),
+      tint: anchors[i % anchors.length]!.color,
+    }, homeRng.fork(20 + i));
+    stones.push(...home.stone);
+    details.push(...home.voxels);
+    interiors.push(...home.glow);
+    vents.push(home.vent);
+    homeLights.push(home.emitter);
+    obstacles.push(home.obstacle);
     counts.homes!++;
   }
   const flora: BufferGeometry[] = [];
@@ -301,12 +261,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   counts.snow = Math.round(opts.snow * opts.cap * 25);
   particles(true, counts.bubbles);
   particles(false, counts.snow);
+  // Closed solids draw front faces only — half the fragment work of the
+  // DoubleSide everything used to wear; only the open geode throat needs both.
   batch(group, interiors, 'geode-interiors');
-  batch(group, details, 'voxel-furnishings');
-  batch(group, stones, 'rock-formations');
-  batch(group, veins, 'crystal-veins');
+  batch(group, details, 'voxel-furnishings', FrontSide);
+  batch(group, stones, 'rock-formations', FrontSide);
+  batch(group, veins, 'crystal-veins', FrontSide);
   return {
-    group, counts, vents,
+    group, counts, vents, emitters: homeLights,
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),

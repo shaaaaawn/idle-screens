@@ -167,6 +167,17 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       fogColor: '#040916', floorColor: '#0b1525', cameraDistance: 240, cameraElevation: 12,
       cameraAzimuth: 0, autoRotate: 0, moteDensity: 0 }, catalog: LOCAL_CATALOG,
   }),
+  // Study scenes: one subject each, close, slowly orbiting — where a layer is
+  // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
+  createMetaquarium({
+    id: 'metaquarium-study-geode', label: 'Metaquarium (study geode)',
+    params: {
+      geodeHomes: 3, bubbleVents: 0.6, propMix: 'crystal:3@druse/rainbow', crystalScale: 1,
+      fishMix: '100:2,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#05060f', floorColor: '#0c1220', fogNear: 120, fogFar: 700,
+      cameraDistance: 150, cameraElevation: 9, cameraAzimuth: 6, autoRotate: 1.2,
+    }, catalog: LOCAL_CATALOG,
+  }),
   createMetaquarium({
     id: 'metaquarium-world-geode-harbor', label: 'Metaquarium (geode harbor)',
     params: {
@@ -458,6 +469,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = [
  */
 const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ['metaquarium-world-', 'worlds'],
+  ['metaquarium-study-', 'studies'],
   ['metaquarium-crystal-', 'crystals'],
   ['metaquarium-env-', 'environments'],
   ['metaquarium-swim-', 'swim styles'],
