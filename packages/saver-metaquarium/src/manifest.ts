@@ -141,7 +141,7 @@ export const METAQUARIUM_PARAMS = {
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.
    *  One kind so far — `crystal`, generated from the seed (nothing is
-   *  fetched), habits `lotus · spire · druse · scatter`, palettes `env`
+   *  fetched), habits `lotus · spire · druse · scatter · coral`, palettes `env`
    *  (the room's colours) · `rainbow` · a named colour · `glass`.
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
@@ -151,6 +151,11 @@ export const METAQUARIUM_PARAMS = {
   envProps: { type: 'enum', default: 'off', options: ['off', 'on'], ease: 'step' },
   /** Cluster size multiplier. Rebuilds the layout, so it steps. */
   crystalScale: { type: 'number', default: 1, min: 0.4, max: 2.5, ease: 'step' },
+  /** How individual each cluster is. 0 is the measured rosette, perfectly
+   *  regular; toward 1 every cluster leans, goes bald on one side, grows
+   *  lopsided, varies shard to shard and BRANCHES, the way no two coral heads
+   *  match. Rebuilds the layout, so it steps. */
+  crystalWild: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
   /** How much the crystals glow: halo, glow card and the light pools they
    *  throw on the floor. 0 leaves faceted, unlit-looking stone. */
   crystalGlow: { type: 'number', default: 0.8, min: 0, max: 1, ease: 'smooth' },

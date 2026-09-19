@@ -244,6 +244,7 @@ export function buildCrystalField(
   const pos = new Vector3();
   const scl = new Vector3();
   const col = new Color();
+  const accent = new Color();
   let drawCalls = 0;
   let triangles = 0;
 
@@ -263,8 +264,11 @@ export function buildCrystalField(
       pos.set(c.x + s.x, c.y + s.y, c.z + s.z);
       scl.set(s.length * s.girth, s.length, s.length * s.girth);
       mesh.setMatrixAt(i, m.compose(pos, q, scl));
-      col.set(c.color);
-      colors.set([col.r, col.g, col.b], i * 3);
+      // Two-tone: a shard drifts toward the cluster's accent by its tone and
+      // varies in brightness, so no two shards are the same paint.
+      col.set(c.color).lerp(accent.set(c.accent), Math.max(0, s.tone) * 0.55);
+      const gain = 1 + 0.16 * s.tone;
+      colors.set([col.r * gain, col.g * gain, col.b * gain], i * 3);
       looks.set([c.glass ? 1 : 0, c.phase], i * 2);
     });
     geo.setAttribute('aColor', new InstancedBufferAttribute(colors, 3));

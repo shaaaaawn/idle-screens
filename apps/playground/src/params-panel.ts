@@ -24,6 +24,54 @@ const IPFS_FISH: { label: string; url: string }[] = [
 
 const ALL_FISH = [...LOCAL_FISH, ...IPFS_FISH];
 
+/**
+ * Metaquarium grew from 8 params to 40; a flat alphabet-less list of 40 rows
+ * is where a new param goes to be forgotten. Sections are an ORDER and a
+ * heading only — anything the manifest adds that is not named here still
+ * renders, under "other", so the panel can never fall behind the spec again.
+ */
+const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
+  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath']],
+  ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
+  ['formation', ['formationShape', 'formationBreathe']],
+  ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
+  ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
+  ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
+  ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'floorColor', 'moteDensity', 'moteColor']],
+];
+
+/** Starting points for the DSL strings — a text box with no examples is a
+ *  param nobody tries. Offered as suggestions; anything may be typed. */
+const DSL_PRESETS: Readonly<Record<string, readonly string[]>> = {
+  propMix: [
+    'crystal#hero:1@lotus/hotpink',
+    'crystal:6@lotus/rainbow',
+    'crystal#hero:1@coral/hotpink,crystal:4@coral',
+    'crystal:3@spire/white,crystal:2@druse/cyan',
+    'crystal:1@lotus/glass,crystal:5@druse',
+    'crystal:8@scatter/purple',
+  ],
+  fishMix: [
+    '257:2,100:1',
+    'angelfish:6@school',
+    'angelfish:4@school,betafish:2@drift,seahorse:2@hover,seaturtle:1@surface',
+    '100:6@bottom',
+    '457:3@hover,497:2@surface',
+  ],
+};
+
+function sectioned(keys: readonly string[]): Array<[string, string[]]> {
+  const left = new Set(keys);
+  const out: Array<[string, string[]]> = [];
+  for (const [label, names] of PARAM_SECTIONS) {
+    const mine = names.filter((n) => left.delete(n));
+    if (mine.length) out.push([label, mine]);
+  }
+  if (left.size) out.push([out.length ? 'other' : '', [...left]]);
+  return out;
+}
+
 function buildControl(
   path: string,
   def: ParamDef,
@@ -170,6 +218,17 @@ function buildControl(
     inp.value = String(value);
     inp.addEventListener('change', () => onChange(inp.value));
     dd.append(inp);
+    const presets = DSL_PRESETS[path];
+    if (presets) {
+      const list = document.createElement('datalist');
+      list.id = `wb-presets-${path}`;
+      for (const p of presets) list.append(Object.assign(document.createElement('option'), { value: p }));
+      inp.setAttribute('list', list.id);
+      inp.placeholder = presets[0] ?? '';
+      // A datalist only filters by what is typed; clearing on focus shows all.
+      inp.addEventListener('focus', () => inp.select());
+      dd.append(list);
+    }
     update = (v) => { inp.value = String(v); };
   }
 
@@ -208,13 +267,47 @@ export function buildParamsPanel(
       ? sampleTrack(space, track, t)
       : Object.fromEntries(Object.entries(space).map(([k, def]) => [k, def.default]));
 
-    for (const [path, def] of Object.entries(space)) {
-      const value = sampled[path] ?? def.default;
-      const { row, update } = buildControl(path, def, value, (v) => {
-        timeline.setParam(path, v);
+    const sections = sectioned(Object.keys(space));
+    const rows: Array<{ path: string; row: HTMLElement; head: HTMLElement | null }> = [];
+    for (const [label, paths] of sections) {
+      let head: HTMLElement | null = null;
+      if (label && sections.length > 1) {
+        head = document.createElement('div');
+        head.className = 'wb-param-section';
+        head.textContent = label;
+        dl.append(head);
+      }
+      for (const path of paths) {
+        const def = space[path]!;
+        const value = sampled[path] ?? def.default;
+        const { row, update } = buildControl(path, def, value, (v) => {
+          timeline.setParam(path, v);
+        });
+        dl.append(row);
+        controls.push({ path, update });
+        rows.push({ path, row, head });
+      }
+    }
+
+    // Past a dozen params, finding one by scrolling is the slow way.
+    if (rows.length > 12) {
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'wb-input wb-param-filter';
+      search.placeholder = `Filter ${rows.length} params…`;
+      search.setAttribute('aria-label', 'Filter parameters by name');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        const live = new Set<HTMLElement>();
+        for (const r of rows) {
+          const hit = q === '' || r.path.toLowerCase().includes(q)
+            || (r.head?.textContent ?? '').includes(q);
+          r.row.hidden = !hit;
+          if (hit && r.head) live.add(r.head);
+        }
+        for (const r of rows) if (r.head) r.head.hidden = !live.has(r.head);
       });
-      dl.append(row);
-      controls.push({ path, update });
+      panel.append(search);
     }
 
     panel.append(dl);

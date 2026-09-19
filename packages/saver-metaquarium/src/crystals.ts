@@ -11,7 +11,9 @@
  * The layout law is lifted from `crystal-expanded.glb`, the one file that
  * still carries its node transforms: a lotus of 1 spire, then rings of 6, 9
  * and 16 at ≈30°, 55° and 85° of tilt, every shard radiating from one root
- * and shortening as it leans (3.85 → 1.4).
+ * and shortening as it leans (3.85 → 1.4). That is `wild` 0. Above it each
+ * cluster becomes an individual — leaning, bald on one side, branching — and
+ * the `coral` habit is built almost entirely out of the branching.
  *
  * Zero-dep on purpose, like `ipfs.ts` and `environments.ts`: the server
  * validates `propMix` through `./manifest` without pulling three.js, and
@@ -31,8 +33,8 @@ export interface CrystalRng {
 // propMix DSL
 // ---------------------------------------------------------------------------
 
-export type CrystalHabit = 'lotus' | 'spire' | 'druse' | 'scatter';
-export const CRYSTAL_HABITS: readonly CrystalHabit[] = ['lotus', 'spire', 'druse', 'scatter'];
+export type CrystalHabit = 'lotus' | 'spire' | 'druse' | 'scatter' | 'coral';
+export const CRYSTAL_HABITS: readonly CrystalHabit[] = ['lotus', 'spire', 'druse', 'scatter', 'coral'];
 
 /** Named colours are the originals' `GLOW-*` materials; `glass` is the dark
  *  transmission crystal (`crystal-expanded`); `env` follows the room. */
@@ -50,6 +52,12 @@ export const CRYSTAL_COLORS: Readonly<Record<string, string>> = {
 export const CRYSTAL_PALETTES: readonly string[] = [
   'env', 'rainbow', ...Object.keys(CRYSTAL_COLORS),
 ];
+
+/** Each colour's neighbour — where its branch tips drift. */
+const ACCENT: Readonly<Record<string, string>> = {
+  blue: 'cyan', hotpink: 'orange', purple: 'hotpink', seafoam: 'cyan', yellow: 'orange',
+  orange: 'yellow', cyan: 'seafoam', white: 'cyan', glass: 'cyan',
+};
 
 const RAINBOW = ['hotpink', 'orange', 'yellow', 'seafoam', 'cyan', 'blue', 'purple'];
 
@@ -239,10 +247,12 @@ const HABIT_RINGS: Readonly<Record<CrystalHabit, ReadonlyArray<readonly [number,
   spire: [[1, 0], [3, 7], [5, 17]],
   druse: [[7, 20], [11, 46], [14, 72]],
   scatter: [[1, 0], [6, 30], [9, 55], [16, 85]],
+  // A few trunks; the colony is made by what branches off them.
+  coral: [[1, 0], [4, 22], [6, 46]],
 };
 /** Spire length in world units at crystalScale 1 (a fish is 18 long). */
 const HABIT_LENGTH: Readonly<Record<CrystalHabit, number>> = {
-  lotus: 40, spire: 58, druse: 22, scatter: 32,
+  lotus: 40, spire: 58, druse: 22, scatter: 32, coral: 46,
 };
 
 export interface Shard {
@@ -255,6 +265,9 @@ export interface Shard {
   length: number;
   /** Width relative to the measured 4:1 shard — a spire is drawn out thin. */
   girth: number;
+  /** -1..1 — where this shard sits between the cluster's colour and its
+   *  accent, and how bright. 0 at `wild` 0. Branch tips run toward the accent. */
+  tone: number;
   /** Which of the scene's shard-geometry variants this one wears. */
   variant: number;
 }
@@ -264,8 +277,10 @@ export interface Cluster {
   habit: CrystalHabit;
   /** Root on the floor (y is filled in by the host from its terrain). */
   x: number; y: number; z: number;
-  /** Hex colour. */
+  /** Hex colour, and the second colour its shards drift toward (two-tone,
+   *  the way a coral's growing tips are paler than its base). */
   color: string;
+  accent: string;
   glass: boolean;
   /** Footprint radius and standing height — what fish steer around and what
    *  the light field uses as the emitter's reach. */
@@ -282,23 +297,55 @@ export interface ClusterOptions {
   /** Geometry variants available to pick from. */
   variants: number;
   scale: number;
+  /** 0 = the measured rosette exactly; 1 = every cluster its own organism. */
+  wild?: number;
 }
 
-/** One cluster's shards from the habit's ring table. Thins each ring
- *  proportionally when the tier cannot afford the full 32. */
+/** How often a shard of this habit sprouts a branch, at wild = 1. */
+const HABIT_BRANCH: Readonly<Record<CrystalHabit, number>> = {
+  lotus: 0.16, spire: 0.22, druse: 0.1, scatter: 0.18, coral: 0.85,
+};
+
+/**
+ * One cluster's shards.
+ *
+ * At `wild` 0 this is the measured rosette, ring for ring — the law the tests
+ * hold it to. `wild` is what makes each cluster an individual, the way no two
+ * coral heads match: the whole colony LEANS (as if into a current), one side is
+ * BALD, the far side grows LONGER, shards vary in girth, and some BRANCH —
+ * a child shard sprouting part-way up its parent, which is the single feature
+ * that reads as "grown" rather than "arranged". `coral` is mostly branch.
+ *
+ * Rings thin proportionally when the tier cannot afford the full count, and
+ * branches are the first thing a tight budget loses.
+ */
 export function growCluster(
   habit: CrystalHabit, rng: CrystalRng, opts: ClusterOptions,
 ): { shards: Shard[]; radius: number; height: number } {
+  const wild = Math.max(0, Math.min(1, opts.wild ?? 0));
   const rings = HABIT_RINGS[habit];
   const full = rings.reduce((a, [c]) => a + c, 0);
   const keep = Math.min(1, opts.shardCap / full);
   const size = HABIT_LENGTH[habit] * opts.scale * rng.range(0.8, 1.2);
   // Spires stand as a stand of columns, not petals from one point.
-  const spread = habit === 'scatter' ? size * 0.9 : habit === 'spire' ? size * 0.13 : 0;
-  const girth = habit === 'spire' ? 0.62 : 1;
+  const spread = habit === 'scatter' ? size * 0.9
+    : habit === 'spire' ? size * 0.13 : habit === 'coral' ? size * 0.1 : 0;
+  const baseGirth = habit === 'spire' ? 0.62 : habit === 'coral' ? 0.5 : 1;
+
+  // The colony's character — drawn once, so every shard agrees on it. Drawn
+  // from a FORK so wild = 0 consumes exactly what it always did.
+  const crng = rng.fork(0xc07a1);
+  const leanAz = crng.next() * Math.PI * 2;
+  const lean = wild * crng.range(0.06, 0.26);
+  const gapAz = crng.next() * Math.PI * 2;
+  const gapHalf = wild * crng.range(0.3, 1.05);
+  const skewAz = gapAz + Math.PI + crng.range(-0.6, 0.6);
+  const skew = wild * crng.range(0.15, 0.45);
+
   const shards: Shard[] = [];
-  let radius = 0;
-  let height = 0;
+  const angDist = (p: number, q: number): number => Math.abs(((p - q + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+  const push = (sh: Shard): void => { shards.push(sh); };
+
   for (const [count, tiltDeg] of rings) {
     const c = count === 1 ? 1 : Math.max(3, Math.round(count * keep));
     const offset = rng.next() * Math.PI * 2;
@@ -308,27 +355,76 @@ export function growCluster(
       // The measured law: length falls ≈linearly with tilt, 3.85 → 1.4.
       // A druse is a crust: stubby and uneven, where a lotus is graded.
       const vary = habit === 'druse' ? rng.range(0.5, 1.3)
-        : habit === 'spire' && count > 1 ? rng.range(0.45, 1.05) : rng.range(0.85, 1.12);
-      const length = size * (1 - 0.64 * Math.min(1, tilt / 1.69)) * vary;
-      const ax = Math.sin(tilt) * Math.cos(az);
-      const az3 = Math.sin(tilt) * Math.sin(az);
-      // Never below the horizon: the originals' 97° skirt dips into a flat
-      // Blender floor; on terrain that reads as a shard stabbed into a hill.
-      const ay = Math.max(0.1, Math.cos(tilt));
-      const al = Math.hypot(ax, ay, az3);
+        : (habit === 'spire' || habit === 'coral') && count > 1 ? rng.range(0.45, 1.05) : rng.range(0.85, 1.12);
       const sr = spread ? Math.sqrt(rng.next()) * spread : 0;
       const sa = rng.next() * Math.PI * 2;
-      shards.push({
+      const roll = rng.next() * Math.PI * 2;
+      const variant = Math.floor(rng.next() * opts.variants) % Math.max(1, opts.variants);
+
+      const wrng = crng.fork(shards.length + 1);
+      // The bald side: inside the gap most shards simply never grew.
+      if (count > 1 && angDist(az, gapAz) < gapHalf && wrng.next() < 0.78) continue;
+      const lopsided = 1 + skew * Math.cos(az - skewAz) + wild * wrng.range(-0.22, 0.22);
+      const length = size * (1 - 0.64 * Math.min(1, tilt / 1.69)) * vary * Math.max(0.45, lopsided);
+      let ax = Math.sin(tilt) * Math.cos(az) + Math.cos(leanAz) * lean;
+      let az3 = Math.sin(tilt) * Math.sin(az) + Math.sin(leanAz) * lean;
+      // Never below the horizon: the originals' 97° skirt dips into a flat
+      // Blender floor; on terrain that reads as a shard stabbed into a hill.
+      let ay = Math.max(0.1, Math.cos(tilt));
+      const al = Math.hypot(ax, ay, az3);
+      ax /= al; ay /= al; az3 /= al;
+      const girth = baseGirth * (1 + wild * wrng.range(-0.3, 0.35));
+      const tone = wild * wrng.range(-1, 1);
+      const parent: Shard = {
         x: Math.cos(sa) * sr, y: -length * 0.08, z: Math.sin(sa) * sr,
-        ax: ax / al, ay: ay / al, az: az3 / al,
-        roll: rng.next() * Math.PI * 2,
-        length,
-        girth,
-        variant: Math.floor(rng.next() * opts.variants) % Math.max(1, opts.variants),
-      });
-      radius = Math.max(radius, sr + Math.hypot(ax, az3) / al * length);
-      height = Math.max(height, (ay / al) * length);
+        ax, ay, az: az3, roll, length, girth, tone, variant,
+      };
+      push(parent);
+
+      // Branches: up to two generations, each rooted part-way up its parent
+      // and bent away from it. Coral is this, mostly.
+      let from = parent;
+      const generations = habit === 'coral' ? 2 : 1;
+      for (let g = 0; g < generations; g += 1) {
+        if (wrng.next() >= HABIT_BRANCH[habit] * wild) break;
+        const twigs = habit === 'coral' && wrng.next() < 0.5 ? 2 : 1;
+        let last = from;
+        for (let k = 0; k < twigs; k += 1) {
+          const t = wrng.range(0.42, 0.72);
+          const bendAz = wrng.next() * Math.PI * 2;
+          const bend = wrng.range(0.45, 0.95);
+          let bx = from.ax + Math.cos(bendAz) * bend;
+          let by = Math.max(0.15, from.ay + wrng.range(-0.1, 0.35));
+          let bz = from.az + Math.sin(bendAz) * bend;
+          const bl = Math.hypot(bx, by, bz);
+          bx /= bl; by /= bl; bz /= bl;
+          const twig: Shard = {
+            x: from.x + from.ax * from.length * t,
+            y: from.y + from.ay * from.length * t,
+            z: from.z + from.az * from.length * t,
+            ax: bx, ay: by, az: bz,
+            roll: wrng.next() * Math.PI * 2,
+            length: from.length * wrng.range(0.38, 0.62),
+            girth: from.girth * wrng.range(0.8, 1.05),
+            tone: Math.max(-1, Math.min(1, from.tone + wrng.range(0.1, 0.6))),
+            variant: Math.floor(wrng.next() * opts.variants) % Math.max(1, opts.variants),
+          };
+          push(twig);
+          last = twig;
+        }
+        from = last;
+      }
     }
+  }
+  // Budget: the trunk rings came first, so trimming the tail sheds branches.
+  const cap = Math.max(full, Math.round(opts.shardCap * 1.25));
+  if (shards.length > cap) shards.length = cap;
+
+  let radius = 0;
+  let height = 0;
+  for (const sh of shards) {
+    radius = Math.max(radius, Math.hypot(sh.x + sh.ax * sh.length, sh.z + sh.az * sh.length));
+    height = Math.max(height, sh.y + sh.ay * sh.length);
   }
   return { shards, radius, height };
 }
@@ -378,6 +474,7 @@ export function layoutCrystals(
         habit: e.habit,
         x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r,
         color: CRYSTAL_COLORS[name] ?? CRYSTAL_COLORS.hotpink!,
+        accent: CRYSTAL_COLORS[ACCENT[name] ?? name] ?? CRYSTAL_COLORS.hotpink!,
         glass: name === 'glass',
         phase: crng.next() * Math.PI * 2,
         ...grown,

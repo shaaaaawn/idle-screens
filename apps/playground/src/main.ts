@@ -168,6 +168,29 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     catalog: LOCAL_CATALOG,
   }),
   createMetaquarium({
+    id: 'metaquarium-crystal-coral',
+    label: 'Metaquarium (crystal coral)',
+    params: {
+      propMix: 'crystal#hero:1@coral/hotpink,crystal:2@coral/seafoam,crystal:2@coral/orange,crystal:2@druse/purple',
+      crystalWild: 1, fishCount: 4, fishUrl: LOCAL_FISH_URL, swimStyle: 'drift', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 150, cameraElevation: 16, autoRotate: 2,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  // The same lotus garden twice — `crystalWild` 0 (the measured, regular
+  // rosette) against 1 — so the dial can be judged side by side.
+  ...([0, 1] as const).map((wild) =>
+    createMetaquarium({
+      id: `metaquarium-crystal-wild-${wild}`,
+      label: `Metaquarium (crystal wild ${wild})`,
+      params: {
+        propMix: 'crystal:6@lotus/rainbow', crystalWild: wild, fishCount: 2, fishUrl: LOCAL_FISH_URL,
+        fogColor: '#020108', floorColor: '#070a12', cameraDistance: 200, cameraElevation: 24,
+      },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
+  createMetaquarium({
     id: 'metaquarium-crystal-tint',
     label: 'Metaquarium (crystal tint, opt-in)',
     params: {
@@ -378,6 +401,28 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
   g.savers.map((saver) => ({ saver, pkg: g.label })),
 );
 
+/**
+ * Dev Tools only: the metaquarium QA scenes, filed under the metaquarium group
+ * in the palette. They stay out of SAVER_GROUPS (the gallery live-mounts every
+ * grouped saver), which used to mean the only way to reach one was to already
+ * know its `?saver=` id.
+ */
+const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['metaquarium-crystal-', 'crystals'],
+  ['metaquarium-env-', 'environments'],
+  ['metaquarium-swim-', 'swim styles'],
+  ['metaquarium-choreo-', 'choreography'],
+  ['metaquarium-', 'scenes'],
+];
+const PALETTE_SHELVES: Record<string, Array<{ label: string; savers: SaverPlugin[] }>> = {
+  'saver-metaquarium': VARIANT_SHELVES.map(([prefix, label], i) => ({
+    label,
+    savers: METAQUARIUM_VARIANTS.filter((v) =>
+      v.manifest.id.startsWith(prefix)
+      && !VARIANT_SHELVES.slice(0, i).some(([earlier]) => v.manifest.id.startsWith(earlier))),
+  })).filter((shelf) => shelf.savers.length > 0),
+};
+
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
   // Same filter affordance as the gallery's — 36 savers is too many to scan.
   const filter = document.createElement('div');
@@ -405,7 +450,7 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     const items = document.createElement('div');
     items.className = 'palette-group-items';
 
-    for (const s of group.savers) {
+    const addItem = (s: SaverPlugin, into: HTMLElement, open: () => void): void => {
       const item = document.createElement('button');
       item.className = 'palette-item';
       item.dataset.id = s.manifest.id;
@@ -426,10 +471,31 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
       }
 
       item.addEventListener('click', () => {
-        details.open = true;
+        open();
         onSelect(s.manifest.id);
       });
-      items.append(item);
+      into.append(item);
+    };
+    for (const s of group.savers) addItem(s, items, () => { details.open = true; });
+
+    // Shelves of variants: closed until wanted, open when one is the selection.
+    for (const shelf of PALETTE_SHELVES[group.id] ?? []) {
+      const sub = document.createElement('details');
+      sub.className = 'palette-group palette-shelf';
+      sub.open = shelf.savers.some((s) => s.manifest.id === activeId);
+      const head = document.createElement('summary');
+      head.className = 'palette-group-head';
+      head.textContent = `${shelf.label} · ${shelf.savers.length}`;
+      const list = document.createElement('div');
+      list.className = 'palette-group-items';
+      for (const s of shelf.savers) {
+        addItem(s, list, () => { details.open = true; sub.open = true; });
+        const lbl = list.lastElementChild?.querySelector('.palette-label');
+        // "Metaquarium (crystal lotus)" → "crystal lotus": the shelf says the rest.
+        if (lbl) lbl.textContent = /\((.+)\)\s*$/.exec(s.manifest.label)?.[1] ?? s.manifest.label;
+      }
+      sub.append(head, list);
+      items.append(sub);
     }
 
     details.append(summary, items);
@@ -447,6 +513,9 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
       }
       details.hidden = shown === 0;
       if (q !== '') details.open = true;
+      else if (details.classList.contains('palette-shelf')) {
+        details.open = details.querySelector('.palette-item.active') !== null;
+      }
     }
   });
 
@@ -455,9 +524,11 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
 
 /** Derived from the group a saver was registered in, so a new package can't
  *  silently show up attributed to savers-classic. */
-const PACKAGE_BY_ID = new Map<string, string>(
-  SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
-);
+const PACKAGE_BY_ID = new Map<string, string>([
+  ...SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
+  // Variants live outside the groups but are still their package's savers.
+  ...METAQUARIUM_VARIANTS.map((s) => [s.manifest.id, '@idle-screens/saver-metaquarium'] as [string, string]),
+]);
 
 function packageFor(saver: SaverPlugin): string {
   const id = saver.manifest.id;
@@ -664,7 +735,10 @@ function liveMode(): void {
   const toEngineConfig = (c: LiveConfig): Partial<IdleScreensConfig> => ({
     timeoutMs: c.timeoutMs,
     sleepOnBlur: c.sleepOnBlur,
-    suppress: () => previewIsOpen,
+    // Dev Tools is a workbench: you sit still reading a panel for a minute and
+    // the idle screensaver used to take the whole window. The inline viewport
+    // IS the saver there. The Idle demo button force-sleeps, so it still works.
+    suppress: () => previewIsOpen || currentView === 'dev',
     disableOnLocalhost: false,
     defaultPluginId: c.saver,
     selection: c.selection,

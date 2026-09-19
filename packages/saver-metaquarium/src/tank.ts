@@ -839,8 +839,9 @@ class TankInstance implements SaverInstance {
       mix = ENV_PROP_MIX[environmentOf(envName).name] ?? '';
     }
     const scale = this.num('crystalScale');
+    const wild = this.num('crystalWild');
     const budget = this.quality.props;
-    const key = `${mix}|${scale}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    const key = `${mix}|${scale}|${wild}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
     if (key === this.propsKey) return;
     this.propsKey = key;
 
@@ -866,6 +867,7 @@ class TankInstance implements SaverInstance {
       shardCap: budget.shards,
       variants: VARIANTS,
       scale,
+      wild,
     });
     const problems = [...parsed.problems, ...layout.problems];
     if (problems.length > 0 && mix !== this.warnedProps) {

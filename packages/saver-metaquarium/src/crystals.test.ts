@@ -103,7 +103,7 @@ describe('growCluster', () => {
   });
 
   it('no shard ever points below the horizon, and axes are unit', () => {
-    for (const habit of ['lotus', 'spire', 'druse', 'scatter'] as const) {
+    for (const habit of ['lotus', 'spire', 'druse', 'scatter', 'coral'] as const) {
       for (const s of growCluster(habit, createRng(5), OPTS).shards) {
         expect(s.ay).toBeGreaterThan(0);
         expect(Math.hypot(s.ax, s.ay, s.az)).toBeCloseTo(1, 5);
@@ -117,6 +117,52 @@ describe('growCluster', () => {
     const { shards } = growCluster('lotus', createRng(11), { ...OPTS, shardCap: 12 });
     expect(shards.length).toBeLessThanOrEqual(14);
     expect(shards[0]!.ay).toBeGreaterThan(0.99);
+  });
+});
+
+describe('wild — every cluster its own organism', () => {
+  const WILD = { ...OPTS, wild: 1 };
+
+  it('wild 0 is the regular rosette; wild 1 differs cluster to cluster', () => {
+    const counts = new Set<number>();
+    for (let seed = 1; seed <= 12; seed += 1) counts.add(growCluster('lotus', createRng(seed), WILD).shards.length);
+    expect(counts.size).toBeGreaterThan(4);
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const tame = growCluster('lotus', createRng(seed), OPTS).shards;
+      expect(tame).toHaveLength(32);
+      expect(tame.every((s) => s.tone === 0 && s.girth === 1)).toBe(true);
+    }
+  });
+
+  it('goes bald on one side: the skirt is no longer evenly spread', () => {
+    let lopsided = 0;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { shards } = growCluster('lotus', createRng(seed), WILD);
+      const mx = shards.reduce((a, s) => a + s.ax * s.length, 0) / shards.length;
+      const mz = shards.reduce((a, s) => a + s.az * s.length, 0) / shards.length;
+      if (Math.hypot(mx, mz) > 1.5) lopsided += 1;
+    }
+    expect(lopsided).toBeGreaterThan(14);
+  });
+
+  it('coral is mostly branches — twigs rooted up their parents, never underground', () => {
+    const { shards, height } = growCluster('coral', createRng(4), WILD);
+    const twigs = shards.filter((s) => s.y > 1);
+    expect(twigs.length).toBeGreaterThan(5);
+    expect(twigs.length).toBeGreaterThan(shards.length * 0.35);
+    for (const s of shards) {
+      expect(s.ay).toBeGreaterThan(0);
+      expect(Math.hypot(s.ax, s.ay, s.az)).toBeCloseTo(1, 5);
+      expect(s.y + s.ay * s.length).toBeLessThanOrEqual(height + 1e-9);
+    }
+  });
+
+  it('stays inside the budget and stays deterministic', () => {
+    for (const habit of ['lotus', 'spire', 'druse', 'scatter', 'coral'] as const) {
+      const a = growCluster(habit, createRng(8), { ...WILD, shardCap: 12 });
+      expect(a.shards.length).toBeLessThanOrEqual(40);
+      expect(a).toEqual(growCluster(habit, createRng(8), { ...WILD, shardCap: 12 }));
+    }
   });
 });
 

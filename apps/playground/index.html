@@ -1420,8 +1420,15 @@
       .wb-stack-right > .wb-panel:last-child { border-bottom: none; }
       /* Perception carries a 12-line braille map; an even quarter-share of the
          column clips it to a couple of rows. Give it double weight. */
+      /* Parameters is the panel you WORK in, and metaquarium alone brings 36
+         rows; an even share showed three of them. It takes the largest share,
+         and scrolls in the panel body (no inner max-height: two nested
+         scrollers made the sticky section heads stick to the wrong box). */
+      .wb-stack-right > .wb-panel-props[open] { flex: 0.7 1 0; }
+      .wb-stack-right > .wb-panel-params[open] { flex: 3.4 1 0; }
+      .wb-stack-right .wb-params-panel { max-height: none; overflow: visible; }
       .wb-stack-right > .wb-panel-layers[open] { flex: 0.6 1 0; }
-      .wb-stack-right > .wb-panel-perception[open] { flex: 2.2 1 0; }
+      .wb-stack-right > .wb-panel-perception[open] { flex: 1.8 1 0; }
       .wb-stack-right > .wb-panel-debug[open] { flex: 0.8 1 0; }
       .wb-panel:not([open]) .wb-panel-head { border-bottom: none; }
       .wb-panel-head {
@@ -1584,7 +1591,19 @@
         font: 10px/1 ui-monospace, monospace; color: var(--wb-text-muted);
       }
       .wb-param-check { accent-color: var(--wb-accent); margin: 0; cursor: pointer; }
-      .wb-params-panel { max-height: 360px; overflow-y: auto; }
+      .wb-params-panel { max-height: min(62vh, 680px); overflow-y: auto; }
+      .wb-param[hidden], .wb-param-section[hidden] { display: none; }
+      .wb-param-section {
+        position: sticky; top: 0; z-index: 1;
+        padding: 5px 10px 3px; font: 9px/1 ui-monospace, monospace;
+        letter-spacing: .12em; text-transform: uppercase;
+        color: var(--wb-accent); background: var(--wb-bg-deep);
+        border-bottom: 1px solid var(--wb-border);
+      }
+      .wb-param-filter {
+        display: block; width: calc(100% - 20px); margin: 6px 10px; box-sizing: border-box;
+        font: 10px/1 ui-monospace, monospace; padding: 4px 6px;
+      }
 
       /* Primary actions pin to the bottom of their panel — they used to scroll
          out of reach as soon as the Engine panel shared height with its
