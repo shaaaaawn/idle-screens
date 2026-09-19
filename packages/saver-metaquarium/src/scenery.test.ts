@@ -3,7 +3,7 @@ import { Mesh, Points, ShaderLib, type WebGLRenderer, type Material } from 'thre
 import { describe, expect, it } from 'vitest';
 import { buildScenery, type SceneryOptions } from './scenery';
 
-const off: SceneryOptions = { rocks: 0, homes: 0, flora: 0, bubbles: 0, snow: 0, cap: 8, scale: 1 };
+const off: SceneryOptions = { rocks: 0, veins: 0.7, homes: 0, flora: 0, bubbles: 0, snow: 0, cap: 8, scale: 1 };
 const full: SceneryOptions = { ...off, rocks: 1, homes: 3, flora: 1, bubbles: 1, snow: 1 };
 const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
 const build = (options = full, seed = 42) => buildScenery([], createRng(seed), terrain, options);

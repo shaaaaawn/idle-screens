@@ -1,16 +1,19 @@
 /** Seeded mineral scenery. Minerals are faceted; living/inhabited details are voxels.
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, Group, IcosahedronGeometry,
-  Points, PointsMaterial, Vector4,
-  Mesh, type MeshBasicMaterial, Quaternion, Ray, TorusGeometry, Vector3,
+  BoxGeometry, BufferAttribute, BufferGeometry, Color, Group,
+  Matrix4, Points, PointsMaterial, Vector4,
+  Mesh, type MeshBasicMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
 import { batch, FrontSide, painted } from './scenery-paint';
 import { buildGeode, GEODE_HABITS } from './geode';
+import { buildRock, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
   rocks: number;
+  /** 0..1 — how fractured the stone is: fissure width, forks, crystals in the crack. */
+  veins: number;
   homes: number;
   flora: number;
   bubbles: number;
@@ -55,35 +58,15 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const counts: Record<string, number> = { rocks: 0, arches: 0, homes: 0 };
   const rockRng = rng.fork(2);
   const s = opts.scale;
+  let rockIndex = 0;
+  const seeps: SceneryAnchor[] = [];
   const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string): void => {
-    const stone = painted(new IcosahedronGeometry(1, 1), '#334559', new Vector3(x, y, z), new Vector3(rx, ry, rz));
-    stones.push(stone);
-    // Project the seam onto the actual faceted surface. A spherical estimate
-    // hides parts of it inside the flat triangles and reads as dotted lights.
-    const surface = stone.getAttribute('position');
-    const a = new Vector3(), b = new Vector3(), c = new Vector3(), hit = new Vector3();
-    const ray = new Ray(new Vector3(), new Vector3(0, -1, 0));
-    let previous: Vector3 | null = null;
-    for (let j = 0; j < 17; j++) {
-      const u = (j / 16 - 0.5) * 1.65;
-      const px = x + u * rx, pz = z + Math.sin(j * 0.8) * rz * 0.16;
-      ray.origin.set(px, y + ry * 2, pz);
-      let top = -Infinity;
-      for (let k = 0; k < surface.count; k += 3) {
-        a.fromBufferAttribute(surface, k); b.fromBufferAttribute(surface, k + 1); c.fromBufferAttribute(surface, k + 2);
-        if (ray.intersectTriangle(a, b, c, false, hit)) top = Math.max(top, hit.y);
-      }
-      if (!Number.isFinite(top)) { previous = null; continue; }
-      const point = new Vector3(px, top + 0.24 * s, pz);
-      if (previous) {
-        const delta = point.clone().sub(previous);
-        veins.push(painted(new CylinderGeometry(0.17 * s, 0.17 * s, delta.length(), 4), color,
-          point.clone().add(previous).multiplyScalar(0.5), new Vector3(1, 1, 1),
-          new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), delta.normalize()), false));
-      }
-      previous = point;
-    }
-    obstacles.push({ x, y, z, r: Math.max(rx, rz), h: ry });
+    const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins }, rockRng.fork(100 + rockIndex++));
+    stones.push(built.stone);
+    if (built.glow) veins.push(built.glow);
+    // The widest part of a big rock's fissure seeps bubbles.
+    if (built.seep && rx > 15 * s) seeps.push({ x: built.seep.x, y: built.seep.y, z: built.seep.z, color });
+    obstacles.push({ x, y, z, r: Math.max(rx, rz), h: ry * 1.3 });
     counts.rocks!++;
   };
   if (opts.rocks > 0) {
@@ -97,8 +80,25 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     }
     // A real open arch: its opening remains empty depth space for passing fish.
     const x = -48 * s, z = -65 * s, y = terrain(x, z);
-    const arch = new TorusGeometry(24 * s, 6 * s, 5, 11, Math.PI);
-    stones.push(painted(arch, '#384960', new Vector3(x, y, z), new Vector3(1, 1.45, 1)));
+    // The arch is the same stone: displaced, painted and fissured like a boulder.
+    const torus = new TorusGeometry(1, 0.26, 6, 14, Math.PI).toNonIndexed();
+    const tp = torus.getAttribute('position');
+    const archRng = rockRng.fork(900);
+    const archTris: Tri[] = [];
+    const wobble = new Map<string, number>();
+    const av = (i: number): Vector3 => {
+      const k = `${tp.getX(i).toFixed(3)},${tp.getY(i).toFixed(3)},${tp.getZ(i).toFixed(3)}`;
+      let v = wobble.get(k);
+      if (v === undefined) { v = archRng.range(0.9, 1.12); wobble.set(k, v); }
+      return new Vector3(tp.getX(i) * v, tp.getY(i) * v, tp.getZ(i) * v);
+    };
+    for (let i = 0; i < tp.count; i += 3) archTris.push([av(i), av(i + 1), av(i + 2)]);
+    torus.dispose();
+    const archPlace = new Matrix4().compose(new Vector3(x, y, z), new Quaternion(), new Vector3(24 * s, 35 * s, 24 * s));
+    stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
+    const archCut = fissures(archTris, archRng.fork(2), '#947cff', opts.veins);
+    const archGlow = glowGeometry(archCut.positions, archCut.colors, archPlace);
+    if (archGlow) veins.push(archGlow);
     counts.arches = 1;
     for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, '#947cff');
     // Low back ridge frames the settlement without sealing off its centre.
@@ -193,7 +193,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
   const particleRng = rng.fork(6);
-  const sources = [...vents, ...anchors.map(a => ({ ...a, y: a.y + 6 * s }))];
+  const sources = [...vents, ...seeps, ...anchors.map(a => ({ ...a, y: a.y + 6 * s }))];
   const emitters = emittersOf(clusters);
   const lightPositions = Array.from({ length: 12 }, (_, i) => {
     const e = emitters[i]; return e ? new Vector4(e.x, e.y, e.z, e.reach) : new Vector4(0, 0, 0, 1);
@@ -266,7 +266,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
   batch(group, stones, 'rock-formations', FrontSide);
-  batch(group, veins, 'crystal-veins', FrontSide);
+  batch(group, veins, 'crystal-veins');
   return {
     group, counts, vents, emitters: homeLights,
     drawCalls: group.children.length,

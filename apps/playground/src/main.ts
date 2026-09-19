@@ -170,6 +170,15 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
   createMetaquarium({
+    id: 'metaquarium-study-rocks', label: 'Metaquarium (study rocks)',
+    params: {
+      rockDensity: 1, rockVeins: 1, bubbleVents: 0.5, propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink',
+      fishMix: '100:2,257:2', swimStyle: 'patrol', swimSpeed: 0.5,
+      fogColor: '#04070f', floorColor: '#0a101c', fogNear: 120, fogFar: 700,
+      cameraDistance: 170, cameraElevation: 14, cameraAzimuth: 20, autoRotate: 1.2,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
     id: 'metaquarium-study-geode', label: 'Metaquarium (study geode)',
     params: {
       geodeHomes: 3, bubbleVents: 0.6, propMix: 'crystal:3@druse/rainbow', crystalScale: 1,

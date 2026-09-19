@@ -160,6 +160,9 @@ export const METAQUARIUM_PARAMS = {
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** How fractured the rocks are: fissure width, forks, and crystals pushing
+   *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
+  rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
