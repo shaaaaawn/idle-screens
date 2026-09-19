@@ -1091,11 +1091,15 @@ class TankInstance implements SaverInstance {
       }
       return;
     }
-    if (!f.body) return;
     if (!f.tint) {
       const list: NonNullable<Fish['tint']> = [];
       const cloned = new Map<MeshBasicMaterial, MeshBasicMaterial>();
-      f.body.traverse((o) => {
+      // The GROUP, not f.body: f.body is null BY DESIGN for a fallback
+      // (non-GLB) fish — it gates the GLB-only wiggle animation, not "has a
+      // paintable body" — so gating tint on it silently skipped every
+      // fallback fish. The fallback's sphere+cone share one material and are
+      // both direct children of the group, so traversing it tints them too.
+      f.group.traverse((o) => {
         const mesh = o as Mesh;
         if (!mesh.isMesh || mesh.userData.mqHalo) return;
         const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
