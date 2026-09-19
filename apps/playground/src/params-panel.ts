@@ -156,7 +156,7 @@ function buildControl(
     range.className = 'wb-param-slider';
     range.min = String(def.min ?? 0);
     range.max = String(def.max ?? 100);
-    range.step = (def.max ?? 100) - (def.min ?? 0) > 10 ? '1' : '0.01';
+    range.step = path === 'geodeHomes' || (def.max ?? 100) - (def.min ?? 0) > 10 ? '1' : '0.01';
     range.value = String(value);
 
     const num = document.createElement('input');
@@ -235,6 +235,7 @@ function buildControl(
     update = (v) => { inp.value = String(v); };
   }
 
+  for (const input of dd.querySelectorAll('input, select')) input.setAttribute('aria-label', path);
   row.append(dt, dd);
   return { row, update };
 }

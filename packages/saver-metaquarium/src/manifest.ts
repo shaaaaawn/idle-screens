@@ -157,19 +157,20 @@ export const METAQUARIUM_PARAMS = {
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is the flat unlit atlas. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+  /** Independent mineral-world layers. Zero preserves legacy scenes; counts
+   * are reduced by the device's existing prop budget. All motion is analytic. */
+  rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
+  floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  skyShards: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.
    *  One kind so far — `crystal`, generated from the seed (nothing is
    *  fetched), habits `lotus · spire · druse · scatter · coral`, palettes `env`
    *  (the room's colours) · `rainbow` · a named colour · `glass`.
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
-  /** Faceted boulders, mineral seams, a ridge and an open arch. Opt-in. */
-  bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  skyShards: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
-  rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   propMix: { type: 'string', default: '', ease: 'step' },
   /** `on` lets a named environment bring its own crystals when `propMix` is
    *  empty. Off by default: a room never changes on a wall by itself. */

@@ -1,9 +1,9 @@
 /** Seeded mineral scenery. Minerals are faceted; living/inhabited details are voxels.
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, DoubleSide, Group, IcosahedronGeometry, Matrix4,
+  BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, CylinderGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix4,
   OctahedronGeometry, Points, PointsMaterial, Vector4,
-  Mesh, MeshBasicMaterial, Quaternion, TorusGeometry, Vector3,
+  Mesh, MeshBasicMaterial, Quaternion, Ray, TorusGeometry, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { emittersOf, type Cluster, type CrystalRng } from './crystals';
@@ -23,6 +23,8 @@ export interface Scenery {
   group: Group;
   counts: Record<string, number>;
   vents: SceneryAnchor[];
+  drawCalls: number;
+  triangles: number;
   clearance(x: number, z: number): number;
   setFrame(t: number): void;
 }
@@ -51,7 +53,7 @@ function painted(geometry: BufferGeometry, color: string, position: Vector3, sca
   const colors = new Float32Array(g.getAttribute('position').count * 3);
   const base = new Color(color);
   for (let i = 0; i < normals.count; i++) {
-    const k = shade ? 0.34 + 0.66 * Math.max(0, normals.getX(i) * -0.45 + normals.getY(i) * 0.78 + normals.getZ(i) * 0.43) : 1;
+    const k = shade ? 0.34 + 0.66 * Math.max(0, normals.getX(i) * -0.45 + normals.getY(i) * 0.78 + normals.getZ(i) * -0.43) : 1;
     colors.set([base.r * k, base.g * k, base.b * k], i * 3);
   }
   g.setAttribute('color', new BufferAttribute(colors, 3));
@@ -83,13 +85,32 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const rockRng = rng.fork(2);
   const s = opts.scale;
   const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string): void => {
-    stones.push(painted(new IcosahedronGeometry(1, 1), '#334559', new Vector3(x, y, z), new Vector3(rx, ry, rz)));
-    // A broken mineral seam follows the exposed upper surface, rather than a floating ring.
-    for (let j = 0; j < 5; j++) {
-      const u = (j - 2) * 0.28;
-      veins.push(painted(new IcosahedronGeometry(1, 0), color,
-        new Vector3(x + u * rx, y + ry * Math.sqrt(1 - u * u) * 0.94, z + Math.sin(j * 1.8) * rz * 0.12),
-        new Vector3(rx * 0.18, 0.18 * s, 0.35 * s), new Quaternion(), false));
+    const stone = painted(new IcosahedronGeometry(1, 1), '#334559', new Vector3(x, y, z), new Vector3(rx, ry, rz));
+    stones.push(stone);
+    // Project the seam onto the actual faceted surface. A spherical estimate
+    // hides parts of it inside the flat triangles and reads as dotted lights.
+    const surface = stone.getAttribute('position');
+    const a = new Vector3(), b = new Vector3(), c = new Vector3(), hit = new Vector3();
+    const ray = new Ray(new Vector3(), new Vector3(0, -1, 0));
+    let previous: Vector3 | null = null;
+    for (let j = 0; j < 17; j++) {
+      const u = (j / 16 - 0.5) * 1.65;
+      const px = x + u * rx, pz = z + Math.sin(j * 0.8) * rz * 0.16;
+      ray.origin.set(px, y + ry * 2, pz);
+      let top = -Infinity;
+      for (let k = 0; k < surface.count; k += 3) {
+        a.fromBufferAttribute(surface, k); b.fromBufferAttribute(surface, k + 1); c.fromBufferAttribute(surface, k + 2);
+        if (ray.intersectTriangle(a, b, c, false, hit)) top = Math.max(top, hit.y);
+      }
+      if (!Number.isFinite(top)) { previous = null; continue; }
+      const point = new Vector3(px, top + 0.24 * s, pz);
+      if (previous) {
+        const delta = point.clone().sub(previous);
+        veins.push(painted(new CylinderGeometry(0.17 * s, 0.17 * s, delta.length(), 4), color,
+          point.clone().add(previous).multiplyScalar(0.5), new Vector3(1, 1, 1),
+          new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), delta.normalize()), false));
+      }
+      previous = point;
     }
     obstacles.push({ x, y, z, r: Math.max(rx, rz), h: ry });
     counts.rocks!++;
@@ -171,11 +192,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const angle = floraRng.range(0, Math.PI * 2), radius = floraRng.range(17, 29) * s;
     const x = a.x + Math.cos(angle) * radius, z = a.z + Math.sin(angle) * radius;
     const root = terrain(x, z), height = floraRng.range(17, 43) * s;
-    const tint = new Color(a.color).lerp(new Color('#369a81'), 0.5);
+    const nearest = anchors.reduce((best, c) => Math.hypot(x - c.x, z - c.z) < Math.hypot(x - best.x, z - best.z) ? c : best, a);
+    const tint = new Color(nearest.color).lerp(new Color('#369a81'), 0.5);
     for (let j = 0; j < 9; j++) {
       const h = j / 8;
       const color = tint.clone().multiplyScalar(0.28 + h * 0.5).getHexString();
-      const p = painted(new BoxGeometry(1, 1, 1), j === 8 ? a.color : `#${color}`,
+      const p = painted(new BoxGeometry(1, 1, 1), j === 8 ? nearest.color : `#${color}`,
         new Vector3(x + Math.sin(h * 3 + angle) * h * 3 * s, root + h * height, z),
         new Vector3((j === 8 ? 1.7 : 1) * s, height / 8 + 0.2, 0.9 * s), new Quaternion(), j !== 8);
       const roots = new Float32Array(p.getAttribute('position').count * 2);
@@ -319,6 +341,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, veins, 'crystal-veins');
   return {
     group, counts, vents,
+    drawCalls: group.children.length,
+    triangles: group.children.reduce((n, o) => o instanceof Mesh
+      ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
     clearance(x, z) {
       let h = -Infinity;
       for (const o of obstacles) {

@@ -2038,8 +2038,8 @@ class TankInstance implements SaverInstance {
         propMix: this.str('propMix'),
         envProps: this.str('envProps'),
         budget: this.quality.props,
-        drawCalls: this.crystals?.drawCalls ?? 0,
-        triangles: this.crystals?.triangles ?? 0,
+        drawCalls: (this.crystals?.drawCalls ?? 0) + (this.scenery?.drawCalls ?? 0),
+        triangles: (this.crystals?.triangles ?? 0) + (this.scenery?.triangles ?? 0),
         clusters: this.clusters.map((c) => ({
           id: c.id, kind: 'crystal', habit: c.habit, color: c.color, glass: c.glass,
           x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z),

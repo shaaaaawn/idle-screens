@@ -155,3 +155,50 @@ never changes because a dependency was bumped.
 | manifest.ts | Param space, palettes, manifest metadata (zero-dep subpath) |
 | quality.ts | Device-tier quality caps |
 | metaquarium.ts | Plugin factory + demo track |
+
+## Mineral worlds
+
+The WebGL tank now has six independent, opt-in world parameters. They work with
+`createMetaquarium({ params })`, the normal control track, and the playground's
+**World** controls. They do not change the 2D SaverSpec format or the lofi renderer.
+All default to zero, so existing scenes retain their composition.
+
+| Parameter | Range | Effect |
+| --- | --- | --- |
+| `rockDensity` | 0–1 | Crystal-root boulders, sparse satellite rocks, a distant ridge and an open arch. Any positive value provides foundations; density adds satellites. |
+| `geodeHomes` | 0–3 | Rounded count of cut-open geode homes, with warm round doors, voxel lamps, stools, steps and chimneys. Weak devices retain at most two. |
+| `floraDensity` | 0–1 | Voxel kelp near crystal roots, tinted by the nearest crystal, with slow rooted sway and luminous tips. |
+| `skyShards` | 0–1 | A repeated canopy of slowly drifting faceted mineral shards. |
+| `bubbleVents` | 0–1 | Bubble streams from geode chimneys and crystal bases, fading before each wrap. |
+| `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |
+
+Minerals are faceted; living flora and the inhabitants' furnishings are voxel.
+`crystalScale` also scales the world geometry. The layers work without crystals,
+using a seeded set of fallback anchors. With crystals, their layout supplies the
+anchors and palette. Rock foundations lift crystal roots; floor-hugging fish use
+scenery clearance in addition to terrain and crystal clearance. Normal depth
+buffering lets fish pass behind the scenery; this is not a general solid-body
+collision simulation.
+
+```ts
+createMetaquarium({ params: {
+  propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange',
+  rockDensity: 0.55, geodeHomes: 3, floraDensity: 0.35,
+  skyShards: 0.85, bubbleVents: 0.85, marineSnow: 0.6,
+  cameraDistance: 220, cameraElevation: 11, cameraAzimuth: 8,
+  fogColor: '#080718', floorColor: '#10182b',
+} });
+```
+
+In the playground, **Metaquarium → Worlds** offers **mineral garden**, **geode
+harbor**, and **moonlit grove**. Direct link suffixes are
+`?saver=metaquarium-world-mineral-garden#dev`,
+`?saver=metaquarium-world-geode-harbor#dev`, and
+`?saver=metaquarium-world-moonlit-grove#dev`.
+
+All animation is analytic in the scene clock (pause/seek/replay safe), with
+independent seeded forks per layer. Geometry is built only when structural
+parameters change. The complete world adds at most eight batched draws, no
+textures, downloads, shadow maps or additional lights. Flora, shards, snow and
+bubbles scale with the existing device prop budget. `inspect().props.scenery`
+reports actual populations; prop draw-call/triangle totals include the world.

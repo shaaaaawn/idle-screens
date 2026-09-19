@@ -167,6 +167,31 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       fogColor: '#040916', floorColor: '#0b1525', cameraDistance: 240, cameraElevation: 12,
       cameraAzimuth: 0, autoRotate: 0, moteDensity: 0 }, catalog: LOCAL_CATALOG,
   }),
+  createMetaquarium({
+    id: 'metaquarium-world-geode-harbor', label: 'Metaquarium (geode harbor)',
+    params: {
+      rockDensity: 0.55, geodeHomes: 3, floraDensity: 0.35, skyShards: 0.85,
+      bubbleVents: 0.85, marineSnow: 0.6,
+      propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange,crystal:1@druse/purple',
+      fishMix: '100:2,257:1,glowfish:2,crab:1', dracoPath: asset('/draco/'),
+      swimStyle: 'auto', swimVariance: 0.5, swimSpeed: 0.55, bodyWiggle: 0.25,
+      crystalTint: 0.65, crystalGlow: 0.65, fogColor: '#080718', floorColor: '#10182b',
+      cameraDistance: 220, cameraElevation: 11, cameraAzimuth: 8, autoRotate: 0,
+      fogNear: 110, fogFar: 650,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-world-moonlit-grove', label: 'Metaquarium (moonlit grove)',
+    params: {
+      rockDensity: 0.4, geodeHomes: 2, floraDensity: 0.85, skyShards: 0.65,
+      bubbleVents: 0.35, marineSnow: 0.8,
+      propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan',
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5,
+      crystalTint: 0.4, crystalGlow: 0.5, fogColor: '#03171d', floorColor: '#102c30',
+      cameraDistance: 245, cameraElevation: 14, cameraAzimuth: -16, autoRotate: 0,
+      fogNear: 110, fogFar: 650,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
   // so the props are judged without waiting on a gateway.
   createMetaquarium({
@@ -419,9 +444,11 @@ const GALLERY_GROUPS: GalleryGroup[] = SAVER_GROUPS.map((g) => ({
   savers: g.savers,
 }));
 
-const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
-  g.savers.map((saver) => ({ saver, pkg: g.label })),
-);
+// Variants belong in the on-demand viewer, but not the gallery's live tiles.
+const PREVIEW_ENTRIES: PreviewEntry[] = [
+  ...SAVER_GROUPS.flatMap((g) => g.savers.map((saver) => ({ saver, pkg: g.label }))),
+  ...METAQUARIUM_VARIANTS.map((saver) => ({ saver, pkg: '@idle-screens/saver-metaquarium' })),
+];
 
 /**
  * Dev Tools only: the metaquarium QA scenes, filed under the metaquarium group
