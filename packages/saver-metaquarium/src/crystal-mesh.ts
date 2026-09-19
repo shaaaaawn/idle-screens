@@ -411,7 +411,11 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
           vec3 dv = vMqW - uMqPoolPos[i].xyz;
           float q = dot(dv, dv) / (uMqPoolPos[i].w * uMqPoolPos[i].w);
           float beat = 1.0 - uMqPoolPulse * 0.15 * (0.5 + 0.5 * sin(uMqPoolTime * 0.754 + uMqPoolPhase[i]));
-          diffuseColor.rgb += uMqPoolCol[i] * (uMqPoolGain * beat / (1.0 + q * q));
+          // Same falloff as sampleLight() (crystals.ts): 1/(1+q), not 1/(1+q^2)
+          // — squaring q a second time made the floor pools disagree with the
+          // fish tint they are supposed to match (too bright at the core,
+          // gone well inside the emitter's own reach).
+          diffuseColor.rgb += uMqPoolCol[i] * (uMqPoolGain * beat / (1.0 + q));
         }`,
       )}`;
   };

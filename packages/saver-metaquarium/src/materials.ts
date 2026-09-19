@@ -22,7 +22,7 @@ function isEyes(m: Material): boolean {
   return m.name.startsWith('EYES-') || /eye/i.test(m.name);
 }
 
-function isGlow(m: Material): boolean {
+export function isGlow(m: Material): boolean {
   return m.name.startsWith('GLOW-') || /glow/i.test(m.name);
 }
 
