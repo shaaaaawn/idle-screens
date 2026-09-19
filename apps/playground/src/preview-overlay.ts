@@ -319,7 +319,7 @@ export function createPreviewOverlay(
     open: openAt,
     close,
     isOpen: () => open,
-    current: () => currentEntry?.saver.manifest.id ?? null,
+    current: () => (open ? currentEntry?.saver.manifest.id ?? null : null),
   };
 }
 

@@ -81,17 +81,20 @@ describe('mineral world', () => {
   });
 
   it('steps a home back from a crystal cluster that would overlap it', () => {
-    // Sits on top of the middle home's naive spawn point (t=0 → x≈0, z≈-38),
-    // with a radius wide enough that the ±5u seeded jitter can't dodge it —
-    // every pass through the homes loop must displace it.
+    // Sits on top of the lone home's naive spawn point (homeCount=1 → t=0 →
+    // x≈0, z≈-38), with a radius wide enough that the ±5u seeded jitter
+    // can't dodge it — every pass through the homes loop must displace it.
+    // Isolated to `homes: 1` with everything else off so the only obstacle
+    // in play is the home itself: if the step-back loop were deleted, the
+    // home would stay at its spawn point and clearance there would be
+    // finite (its own footprint), not -Infinity.
     const cluster: Cluster = {
       id: null, habit: 'lotus', x: 0, y: 0, z: -38, color: '#49cfff', accent: '#49cfff',
       glass: false, radius: 60, height: 30, phase: 0, shards: [],
     };
-    const clear = build(full, 42, []);
-    const blocked = build(full, 42, [cluster]);
-    expect(blocked.counts.homes).toBe(3);
-    expect(buffers(blocked)).not.toEqual(buffers(clear));
+    const blocked = build({ ...off, homes: 1 }, 42, [cluster]);
+    expect(blocked.counts.homes).toBe(1);
+    expect(blocked.clearance(0, -38)).toBe(-Infinity);
     for (const object of blocked.group.children) {
       const mesh = object as Mesh;
       for (const attr of Object.values(mesh.geometry.attributes)) {
@@ -100,8 +103,14 @@ describe('mineral world', () => {
     }
   });
 
-  it('builds the room behind a geode door instead of an outdoor scene', () => {
-    const world = build({ ...full, interior: true });
+  it('builds the room behind a geode door INSTEAD of the outdoor scene', () => {
+    // All outdoor layers off (`off`) plus interior — if `interior` stopped
+    // suppressing the unconditional boulder/arch/home/flora builds, this
+    // would catch it via the counts, not just "something got added".
+    const world = build({ ...off, interior: true });
+    expect(world.counts.rocks).toBe(0);
+    expect(world.counts.homes).toBe(0);
+    expect(world.counts.flora).toBe(0);
     expect(world.counts.interior).toBe(1);
     expect(world.counts.furniture).toBeGreaterThan(0);
     expect(world.emitters.length).toBeGreaterThan(0);
