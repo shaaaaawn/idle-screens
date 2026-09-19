@@ -479,23 +479,38 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     for (const s of group.savers) addItem(s, items, () => { details.open = true; });
 
     // Shelves of variants: closed until wanted, open when one is the selection.
-    for (const shelf of PALETTE_SHELVES[group.id] ?? []) {
+    const shelves = PALETTE_SHELVES[group.id] ?? [];
+    const shelfRail = document.createElement('div');
+    shelfRail.className = 'palette-shelves';
+    if (shelves.length) items.append(shelfRail);
+    for (const shelf of shelves) {
       const sub = document.createElement('details');
       sub.className = 'palette-group palette-shelf';
       sub.open = shelf.savers.some((s) => s.manifest.id === activeId);
       const head = document.createElement('summary');
       head.className = 'palette-group-head';
-      head.textContent = `${shelf.label} · ${shelf.savers.length}`;
+      const name = document.createElement('span');
+      name.className = 'palette-shelf-name';
+      name.textContent = shelf.label;
+      const count = document.createElement('span');
+      count.className = 'palette-shelf-count';
+      count.textContent = String(shelf.savers.length);
+      head.append(name, count);
       const list = document.createElement('div');
       list.className = 'palette-group-items';
       for (const s of shelf.savers) {
         addItem(s, list, () => { details.open = true; sub.open = true; });
         const lbl = list.lastElementChild?.querySelector('.palette-label');
         // "Metaquarium (crystal lotus)" → "crystal lotus": the shelf says the rest.
-        if (lbl) lbl.textContent = /\((.+)\)\s*$/.exec(s.manifest.label)?.[1] ?? s.manifest.label;
+        // …and inside "crystals", "crystal lotus" → "lotus": say it once.
+        if (lbl) {
+          const inner = /\((.+)\)\s*$/.exec(s.manifest.label)?.[1] ?? s.manifest.label;
+          const single = shelf.label.replace(/s$/, '');
+          lbl.textContent = inner.startsWith(`${single} `) ? inner.slice(single.length + 1) : inner;
+        }
       }
       sub.append(head, list);
-      items.append(sub);
+      shelfRail.append(sub);
     }
 
     details.append(summary, items);

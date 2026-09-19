@@ -1689,7 +1689,52 @@
       }
       .palette-group-head::-webkit-details-marker { display: none; }
       .palette-group-head::before { content: '▸'; width: 12px; text-align: center; font-size: 9px; opacity: .5; }
-      .palette-group[open] .palette-group-head::before { content: '▾'; }
+      /* Child combinator: with a descendant selector an open PARENT turned every
+         closed shelf's caret to ▾ too, so nothing told you what was expanded. */
+      .palette-group[open] > .palette-group-head::before { content: '▾'; }
+      .palette-tree > .palette-group { margin-bottom: 4px; }
+      .palette-tree > .palette-group > .palette-group-head {
+        height: 24px; text-transform: uppercase; letter-spacing: .1em; font-size: 9.5px;
+      }
+
+      /* — Shelves: a group's second level. Indented under the saver they are
+         variants OF, joined to it by a guide rule, quieter than a group head. */
+      .palette-shelves {
+        position: relative; margin: 2px 0 6px 15px; padding-left: 0;
+        border-left: 1px solid var(--wb-border);
+      }
+      .palette-shelf { margin: 0; }
+      .palette-shelf > .palette-group-head {
+        position: static; height: 23px; padding: 0 8px 0 6px; gap: 2px;
+        font: 500 11px/1 system-ui, sans-serif; letter-spacing: 0;
+        color: var(--wb-text-muted); background: transparent; border-bottom: none;
+      }
+      .palette-shelf > .palette-group-head:hover { color: var(--wb-text); background: var(--wb-bg-hover); }
+      .palette-shelf[open] > .palette-group-head { color: var(--wb-text); }
+      .palette-shelf-name { flex: 1; }
+      .palette-shelf-count {
+        flex: 0 0 auto; min-width: 16px; padding: 1px 5px; text-align: center;
+        font: 600 9px/12px ui-monospace, monospace; color: var(--wb-text-muted);
+        background: rgba(255,255,255,.06); border-radius: 8px;
+      }
+      .palette-shelf:has(.palette-item.active) > .palette-group-head .palette-shelf-count {
+        color: var(--wb-accent); background: rgba(77,159,255,.16);
+      }
+      .palette-shelf > .palette-group-items {
+        margin: 0 0 4px 11px; border-left: 1px solid var(--wb-border-subtle);
+      }
+      .palette-shelf .palette-item {
+        position: relative; padding-left: 14px; min-height: 24px;
+        font-size: 11.5px; color: var(--wb-text-muted);
+      }
+      .palette-shelf .palette-item::before {
+        content: ''; position: absolute; left: 0; top: 50%; width: 8px;
+        border-top: 1px solid var(--wb-border-subtle);
+      }
+      .palette-shelf .palette-item:hover { color: var(--wb-text); }
+      .palette-shelf .palette-item.active {
+        color: #fff; box-shadow: inset 2px 0 0 var(--wb-accent);
+      }
       .palette-group-items { display: flex; flex-direction: column; }
       .palette-item {
         display: flex; align-items: center; gap: 6px; text-align: left;
