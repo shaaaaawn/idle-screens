@@ -37,6 +37,11 @@ import {
 export interface Studio {
   environment: Texture;
   lights: PointLight[];
+  /** The follow-spot's light on the fish; part of the fixed light count. */
+  follow: PointLight;
+  /** House lights, so a spot can bring them down. */
+  hemi: HemisphereLight;
+  key: DirectionalLight;
   /** Everything to add to the scene. */
   objects: Array<HemisphereLight | DirectionalLight | PointLight>;
   dispose(): void;
@@ -90,10 +95,11 @@ export function buildStudio(renderer: WebGLRenderer, pointLights: number): Studi
     const l = new PointLight(0xffffff, 0, 60, 2);
     return l;
   });
+  const follow = new PointLight(0xffffff, 0, 90, 2);
   return {
     environment: target.texture,
-    lights,
-    objects: [hemi, key, ...lights],
+    lights, follow, hemi, key,
+    objects: [hemi, key, ...lights, follow],
     dispose: () => target.dispose(),
   };
 }

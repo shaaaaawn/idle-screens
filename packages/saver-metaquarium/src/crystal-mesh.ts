@@ -17,15 +17,19 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  CylinderGeometry,
+  DoubleSide,
   Group,
   InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
+  Mesh,
   PlaneGeometry,
   Quaternion,
   ShaderMaterial,
   Vector2,
   Vector3,
+  Vector4,
   type IUniform,
   type Material,
 } from 'three';
@@ -371,6 +375,9 @@ export function emptyPoolUniforms(): Uniforms {
     uMqPoolGain: { value: 0 },
     uMqPoolTime: { value: 0 },
     uMqPoolPulse: { value: 0 },
+    // The follow-spot's pool: xz, radius, gain — and its colour.
+    uMqSpot: { value: new Vector4(0, 0, 1, 0) },
+    uMqSpotColor: { value: new Color('#fff2cf') },
   };
 }
 
@@ -422,6 +429,8 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform float uMqPoolGain;
       uniform float uMqPoolTime;
       uniform float uMqPoolPulse;
+      uniform vec4 uMqSpot;
+      uniform vec3 uMqSpotColor;
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -435,10 +444,24 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
           // fish tint they are supposed to match (too bright at the core,
           // gone well inside the emitter's own reach).
           diffuseColor.rgb += uMqPoolCol[i] * (uMqPoolGain * beat / (1.0 + q));
+        }
+        // Follow-spot: a soft-edged pool with a caustic web moving inside it —
+        // two warped sine fields multiplied and sharpened, so the bright lines
+        // are thin and the cells dark, the way light through a rippled surface
+        // lands. Nothing is evaluated when the gain is 0.
+        if (uMqSpot.w > 0.0) {
+          float sd = length(vMqW.xz - uMqSpot.xy) / uMqSpot.z;
+          float edge = 1.0 - smoothstep(0.62, 1.0, sd);
+          vec2 cw = vMqW.xz * 0.085;
+          float ct = uMqPoolTime;
+          float ca = sin(cw.x * 1.7 + ct * 0.9 + sin(cw.y * 2.3 - ct * 0.7));
+          float cb = sin(cw.y * 1.9 - ct * 0.8 + sin(cw.x * 2.1 + ct * 0.6));
+          float web = pow(1.0 - abs(ca * cb), 5.0);
+          diffuseColor.rgb += uMqSpotColor * (edge * uMqSpot.w * (0.2 + 1.5 * web));
         }`,
       )}`;
   };
-  mat.customProgramCacheKey = () => 'mq-floor-pools';
+  mat.customProgramCacheKey = () => 'mq-floor-pools-v2';
   mat.needsUpdate = true;
 }
 
@@ -503,6 +526,69 @@ export function buildGlowCards(capacity: number): GlowCards {
       (uniforms.uFogColor!.value as Color).copy(fog.color);
       uniforms.uFogNear!.value = fog.near;
       uniforms.uFogFar!.value = fog.far;
+    },
+  };
+}
+
+/**
+ * The follow-spot's beam: an open cone of light from a lamp in the rig down to
+ * the floor, soft at its edges (it fades where the surface turns away from the
+ * eye) and streaked along its length with slow caustic bands, so it reads as
+ * light in water rather than a solid. Additive, one draw, no depth write.
+ */
+export interface SpotBeam {
+  mesh: Mesh;
+  /** Aim from `lamp` to the floor point `hit`; `radius` is the pool's. */
+  aim(lamp: Vector3, hit: Vector3, radius: number, color: Color, gain: number, tSec: number): void;
+}
+
+export function buildSpotBeam(): SpotBeam {
+  const geo = new CylinderGeometry(0.06, 1, 1, 28, 1, true);
+  geo.translate(0, -0.5, 0); // apex at the origin, mouth at y = -1
+  geo.userData.mqOwned = true;
+  const uniforms: Uniforms = { uColor: { value: new Color() }, uGain: { value: 0 }, uTime: { value: 0 } };
+  const mat = owned(new ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vV; varying vec2 vUv2;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vUv2 = uv;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor; uniform float uGain; uniform float uTime;
+      varying vec3 vN; varying vec3 vV; varying vec2 vUv2;
+      void main() {
+        // Light in water, not a tube: strongly centre-weighted, and thinning
+        // toward the floor so the pool — not a hard-edged mouth — ends it.
+        float facing = pow(abs(dot(normalize(vN), normalize(vV))), 2.6);
+        float along = 1.0 - vUv2.y; // 0 at the lamp, 1 at the floor
+        float body = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.55, 1.0, along) * 0.85);
+        float bands = 0.75 + 0.25 * sin(vUv2.x * 38.0 + sin(along * 7.0 - uTime * 0.6) * 2.0 + uTime * 0.25);
+        gl_FragColor = vec4(uColor * (facing * body * bands * uGain * 0.085), 1.0);
+        #include <colorspace_fragment>
+      }`,
+  }));
+  const mesh = new Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 4;
+  mesh.visible = false;
+  const down = new Vector3(0, -1, 0), dir = new Vector3(), q = new Quaternion();
+  return {
+    mesh,
+    aim(lamp, hit, radius, color, gain, tSec) {
+      mesh.visible = gain > 0;
+      if (!mesh.visible) return;
+      dir.subVectors(hit, lamp);
+      const len = dir.length();
+      q.setFromUnitVectors(down, dir.normalize());
+      mesh.position.copy(lamp);
+      mesh.quaternion.copy(q);
+      mesh.scale.set(radius, len, radius);
+      (uniforms.uColor!.value as Color).copy(color);
+      uniforms.uGain!.value = gain;
+      uniforms.uTime!.value = tSec;
     },
   };
 }

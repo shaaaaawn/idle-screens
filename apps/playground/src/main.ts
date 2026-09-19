@@ -160,6 +160,29 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // THE STAGE: one performer, a follow-spot, the house lights down. The beam
+  // and its pool of caustics track slot 0 as it crosses; the rest of the cast
+  // waits in the dark. ?saver=metaquarium-stage-followspot
+  createMetaquarium({
+    id: 'metaquarium-stage-followspot', label: 'Metaquarium (stage — follow-spot)',
+    params: {
+      followSpot: 0, spotStrength: 0.9, fishMix: '257:1@patrol,100:4@drift', swimSpeed: 0.6, swimVariance: 0.4, bodyWiggle: 0.3,
+      pathShape: 'crossing', fishGlow: 0.5,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5,
+      cameraDistance: 190, cameraElevation: 14, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The same spot on a village: the performer swims the street at night.
+  createMetaquarium({
+    id: 'metaquarium-stage-spot-harbor', label: 'Metaquarium (stage — spot over the harbor)',
+    params: {
+      followSpot: 0, spotStrength: 0.8, spotColor: '#dff3ff', fishMix: 'glowfish:1@patrol,100:2,257:2', dracoPath: asset('/draco/'),
+      geodeHomes: 3, rockDensity: 0.35, floraDensity: 0.5, bubbleVents: 0.7, marineSnow: 0.5,
+      propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange', crystalGlow: 0.6, swimSpeed: 0.55,
+      fogColor: '#04040f', floorColor: '#0c1222', fogNear: 110, fogFar: 650,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 8, autoRotate: 0.3,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // THE BIG WORLD: crystals at castle scale. A keep and its towers stand out
   // past the swim space as a skyline; the village, rocks and gardens sit in
   // its shadow, and the fish are small in front of it. Tests the large end of
@@ -550,6 +573,7 @@ const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> =
   ['metaquarium-world-', 'worlds'],
   ['metaquarium-study-', 'studies'],
   ['metaquarium-vignette-', 'vignettes'],
+  ['metaquarium-stage-', 'stage'],
   ['metaquarium-crystal-', 'crystals'],
   ['metaquarium-env-', 'environments'],
   ['metaquarium-swim-', 'swim styles'],

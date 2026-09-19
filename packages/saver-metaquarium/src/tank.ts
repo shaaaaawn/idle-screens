@@ -60,8 +60,8 @@ import {
   type Cluster, type Emitter,
 } from './crystals';
 import {
-  buildCrystalField, buildGlowCards, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePoolSlots,
-  type CrystalField, type GlowCards,
+  buildCrystalField, buildGlowCards, buildSpotBeam, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePoolSlots,
+  type CrystalField, type GlowCards, type SpotBeam,
 } from './crystal-mesh';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
@@ -537,6 +537,13 @@ class TankInstance implements SaverInstance {
   private readonly lightScratch: [number, number, number] = [0, 0, 0];
   // Fish glow: built on the first glowing fish, never for a cast without one.
   private glowCards: GlowCards | null = null;
+  /** Follow-spot: the beam, and where its fish was this frame. */
+  private spotBeam: SpotBeam | null = null;
+  private readonly spotAt = new Vector3();
+  private spotSeen = false;
+  private readonly spotLamp = new Vector3();
+  private readonly spotHit = new Vector3();
+  private readonly spotTint = new Color();
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
   private vignetteKey = '';
@@ -1112,6 +1119,53 @@ class TankInstance implements SaverInstance {
       console.warn(`[metaquarium] vignette: ${parsed.problems.join('; ')}`);
     }
     if (parsed.actors > 0 && parsed.duration > 0) this.vignette = parsed;
+  }
+
+  /**
+   * The follow-spot. A lamp fixed high in the rig throws a cone through its
+   * fish to the floor, where it lands as a pool of moving caustics; a light
+   * rides with the fish so IT is lit, and the house lights come down by the
+   * spot's strength — a performer on a stage. All of it follows the fish's
+   * closed-form position, so it is as deterministic as the swim.
+   */
+  private aimSpot(tSec: number): void {
+    const gain = this.spotSeen ? this.num('spotStrength') : 0;
+    const spot = this.poolUniforms.uMqSpot!.value as { set(x: number, y: number, z: number, w: number): void };
+    if (this.studio) {
+      // House lights: down to 40 % at full strength.
+      this.studio.hemi.intensity = 1.15 * (1 - 0.6 * gain);
+      this.studio.key.intensity = 2.1 * (1 - 0.6 * gain);
+      this.studio.follow.intensity = 0;
+    }
+    if (gain <= 0) {
+      if (this.spotBeam) this.spotBeam.mesh.visible = false;
+      spot.set(0, 0, 1, 0);
+      return;
+    }
+    if (!this.spotBeam) {
+      this.spotBeam = buildSpotBeam();
+      this.scene.add(this.spotBeam.mesh);
+    }
+    if (!this.poolsInstalled) this.installPools();
+    const f = this.spotAt;
+    // The lamp hangs over the middle of the stage, a little toward the house.
+    this.spotLamp.set(f.x * 0.25, 210, f.z * 0.25 + 30);
+    const floorY = this.terrainAt ? this.terrainAt(f.x, f.z) : 0;
+    const k = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+    this.spotHit.set(this.spotLamp.x + (f.x - this.spotLamp.x) * k, floorY, this.spotLamp.z + (f.z - this.spotLamp.z) * k);
+    const radius = 30;
+    this.spotTint.set(this.str('spotColor'));
+    this.spotBeam.aim(this.spotLamp, this.spotHit, radius, this.spotTint, gain, tSec);
+    spot.set(this.spotHit.x, this.spotHit.z, radius, gain * 0.9);
+    (this.poolUniforms.uMqSpotColor!.value as Color).copy(this.spotTint);
+    if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
+    if (this.studio) {
+      // On the lamp's side of the fish, so the lit face is the one the beam hits.
+      this.studio.follow.position.set(f.x + (this.spotLamp.x - f.x) * 0.12, f.y + 16, f.z + (this.spotLamp.z - f.z) * 0.12 + 8);
+      this.studio.follow.color.copy(this.spotTint);
+      this.studio.follow.distance = 95;
+      this.studio.follow.intensity = 5200 * gain;
+    }
   }
 
   private installPools(): void {
@@ -1699,6 +1753,8 @@ class TankInstance implements SaverInstance {
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
+    const spotSlot = Math.round(this.num('followSpot'));
+    this.spotSeen = false;
     const glowPulse = this.num('crystalPulse');
     let glowN = 0;
     this.fishEmitters.length = 0;
@@ -1986,6 +2042,7 @@ class TankInstance implements SaverInstance {
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
       if (act) { px = act.x; y = act.y; pz = act.z; }
       f.group.position.set(px, y, pz);
+      if (f.index === spotSlot) { this.spotAt.set(px, y, pz); this.spotSeen = true; }
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
       if (act) {
         f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
@@ -2036,6 +2093,7 @@ class TankInstance implements SaverInstance {
       });
     }
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
+    this.aimSpot(tSec);
     this.lastFish = report;
     this.lastFrameT = t;
     this.rendered = true;

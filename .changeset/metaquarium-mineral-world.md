@@ -38,3 +38,8 @@ down to tea; lamps out and bed; hide and seek for three. Presets `tea`,
 walks everyone home), so it is frame-addressable like the rest of the tank;
 `inspect()` reports what each actor is doing. Zero-dep parser exported from
 `/manifest` for server-side validation.
+
+`followSpot` — a stage follow-spot on one fish: a soft beam from the rig, a pool
+of moving caustics where it lands, a light riding with the fish, and the house
+lights brought down by `spotStrength`. `propMix` tokens take `*size` (0.3–8) for
+castle-scale crystals planted past the swim space.

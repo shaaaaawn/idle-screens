@@ -164,6 +164,14 @@ export const METAQUARIUM_PARAMS = {
    *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
   rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
+  /** A follow-spot: a beam from the rig and a pool of moving caustics on the
+   *  floor that track ONE fish across the scene like a performer on a stage,
+   *  while the house lights come down. The value is the fish's slot (0 = first
+   *  of the cast); -1 (default) is off. */
+  followSpot: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
+  /** How hard the spot is on, and how far the house lights drop with it. */
+  spotStrength: { type: 'number', default: 0.85, min: 0, max: 1, ease: 'smooth' },
+  spotColor: { type: 'color', default: '#fff2cf', ease: 'smooth' },
   /** A small scene for the first two or three fish of the cast: a script of
    *  beats in which actors `a b c` go to the space's marks, face each other and
    *  take turns at gestures. A preset name (`tea · bedtime · seek`) or a script:
