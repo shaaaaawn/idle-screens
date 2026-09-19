@@ -25,6 +25,12 @@ struct FeedPage: View {
     /// attribution the live caption wants.
     @State private var liveEvent: ChannelEvent?
     @State private var showOverview = false
+    /// 0 at rest, rising to 0.5 halfway between two moments. Drives the
+    /// caption's dissolve, so it is tied to the finger rather than to a timer.
+    @State private var swipeProgress: CGFloat = 0
+    /// Flipped false→true whenever there is new text to present, which replays
+    /// the staggered entrance.
+    @State private var captionEntered = false
     /// `"live"`, or a stop's key. Optional only because `scrollPosition` binds one.
     @State private var moment: String? = FeedPage.liveKey
     @Binding var chromeHidden: Bool
@@ -70,6 +76,7 @@ struct FeedPage: View {
                 }
                 .scrollTargetLayout()
             }
+            .modifier(SwipeProgressReader(progress: $swipeProgress))
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $moment)
             .scrollIndicators(.hidden)
@@ -84,7 +91,10 @@ struct FeedPage: View {
                     if value.magnification < 0.82 { showOverview = true }
                 }
             )
-            .onChange(of: moment) { _, _ in prefetchAroundCurrent() }
+            .onChange(of: moment) { _, _ in
+                prefetchAroundCurrent()
+                replayCaptionEntrance()
+            }
 
             if !chromeHidden {
                 // The status bar is white and SwiftUI offers no per-view way to
@@ -130,6 +140,7 @@ struct FeedPage: View {
     // MARK: Lifecycle
 
     private func activate() {
+        replayCaptionEntrance()
         session.start(channelId: channelId, seedSpec: channel.spec, source: .host)
         guard stops.isEmpty else { return }
         Task {
@@ -310,13 +321,26 @@ struct FeedPage: View {
         }
         .animation(.easeInOut(duration: 0.35), value: topScheme)
         .animation(.easeInOut(duration: 0.35), value: footScheme)
+        // Flipping channels: the chrome belongs to its page, so it leaves and
+        // arrives with it — but faded and softened while in flight, so two
+        // channels' names are never legible at once.
+        .scrollTransition(.interactive, axis: .vertical) { content, phase in
+            content
+                .opacity(phase.isIdentity ? 1 : 0)
+                .blur(radius: phase.isIdentity ? 0 : 6)
+        }
         .padding(.horizontal, 16)
         .padding(.top, insets.top + 6)
         .padding(.bottom, insets.bottom + 14)
     }
 
+    /// The channel, the way a video app shows one: a face, a name, a Follow
+    /// button. No status words — live is a green ring on the avatar, and the
+    /// channel's past is the row of story segments above.
     private var topBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            if !stops.isEmpty { momentSegments }
+
             HStack(spacing: 10) {
                 if showsBack {
                     Button { dismiss() } label: {
@@ -329,107 +353,139 @@ struct FeedPage: View {
                     .accessibilityLabel("Back")
                 }
 
-                channelButton
-                Spacer(minLength: 8)
+                Button { showOverview = true } label: {
+                    HStack(spacing: 9) {
+                        avatar
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 4) {
+                                if channel.isProtected == true {
+                                    Image(systemName: "lock.fill").font(.system(size: 9))
+                                }
+                                Text(channel.displayLabel)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .foregroundStyle(Color.primary)
+                    .shadow(color: (topScheme == .light ? Color.white : Color.black).opacity(0.5), radius: 5, y: 1)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(channel.displayLabel), show timeline")
+                .accessibilityHint("Zooms out to everything this channel has shown")
 
-                if isLive, let viewers = session.viewers, viewers > 0 {
-                    Label("\(viewers)", systemImage: "eye.fill")
-                        .font(.caption.weight(.semibold))
+                followPill
+                Spacer(minLength: 6)
+
+                if isLive {
+                    if let viewers = session.viewers, viewers > 0 {
+                        Label("\(viewers)", systemImage: "eye.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .glassCapsule(shape: Capsule())
+                            .accessibilityLabel("\(viewers) watching")
+                            .transition(.opacity)
+                    }
+                } else {
+                    // In the past, the way back has to be one tap.
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.35)) { moment = Self.liveKey }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
+                            Text("Live").font(.caption.weight(.semibold))
+                        }
                         .foregroundStyle(Color.primary)
                         .padding(.horizontal, 11)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 7)
                         .glassCapsule(shape: Capsule())
-                        .accessibilityLabel("\(viewers) watching")
+                    }
+                    .accessibilityLabel("Back to live")
+                    .transition(.opacity)
                 }
             }
-            // Under the name rather than beside it: a long channel title and a
-            // "3 of 19 · 7h ago" pill do not fit on one line of a phone.
-            momentPill
+            .animation(.easeInOut(duration: 0.25), value: isLive)
         }
     }
 
-    /// Which channel this is — top-left, where a title lives — and the way out
-    /// to its zoomed-out timeline.
-    private var channelButton: some View {
-        Button { showOverview = true } label: {
-            HStack(spacing: 6) {
-                if channel.isProtected == true {
-                    Image(systemName: "lock.fill").font(.caption2)
-                }
-                Text(channel.displayLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Image(systemName: "square.grid.3x3.fill")
-                    .font(.caption2)
-                    .opacity(0.8)
+    /// The channel's face: its deterministic generative art, so every channel
+    /// has one without anyone uploading anything. A green ring while live.
+    private var avatar: some View {
+        ProceduralChannelArt(channelId: channelId)
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+            .overlay {
+                Circle().strokeBorder(
+                    isLive && !session.sleeping ? Color.appSuccess : Color.primary.opacity(0.35),
+                    lineWidth: 2)
             }
-            .foregroundStyle(Color.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .glassCapsule(shape: Capsule())
-        }
-        .accessibilityLabel("\(channel.displayLabel), show timeline")
-        .accessibilityHint("Zooms out to everything this channel has shown")
+            .animation(.easeInOut(duration: 0.25), value: isLive)
     }
 
-    /// Where you are in time — and, on the live page, that there is a past to
-    /// swipe into at all. An undiscoverable gesture is a missing feature.
-    @ViewBuilder
-    private var momentPill: some View {
-        if let index = currentIndex, let stop = currentStop {
-            Button {
-                withAnimation(.easeInOut(duration: 0.35)) { moment = Self.liveKey }
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chevron.left").font(.caption2.weight(.bold))
-                    Text("Live")
-                        .font(.caption.weight(.semibold))
-                    Text("· \(index + 1) of \(stops.count) · \(SteerLine.ago(Int(stop.event.at)))")
-                        .font(.caption)
-                        .opacity(0.75)
-                }
-                .foregroundStyle(Color.primary)
+    /// Story segments: one per moment, live first. Says "there is a past, and
+    /// you are here in it" with no words at all.
+    private var momentSegments: some View {
+        let count = stops.count + 1
+        let here = (currentIndex ?? -1) + 1
+        return HStack(spacing: 3) {
+            ForEach(0..<count, id: \.self) { index in
+                Capsule()
+                    .fill(Color.primary.opacity(index == here ? 0.95 : 0.3))
+                    .frame(height: 2.5)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: here)
+        .accessibilityElement()
+        .accessibilityLabel(here == 0 ? "Live. \(stops.count) earlier scenes" : "Scene \(here) of \(stops.count) earlier")
+    }
+
+    private var followPill: some View {
+        let following = app.follows.isFollowing(channelId)
+        return Button {
+            let now = app.follows.toggle(channelId)
+            UIImpactFeedbackGenerator(style: now ? .medium : .light).impactOccurred()
+        } label: {
+            Text(following ? "Following" : "Follow")
+                .font(.caption.weight(.semibold))
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .glassCapsule(shape: Capsule())
-            }
-            .accessibilityLabel("Back to live")
-        } else {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(session.sleeping ? Color.textTertiary : Color.appSuccess)
-                    .frame(width: 7, height: 7)
-                Text(session.sleeping ? "ASLEEP" : "LIVE")
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.1)
-                if !stops.isEmpty {
-                    Text("· \(stops.count) earlier")
-                        .font(.caption)
-                        .opacity(0.75)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.bold))
-                        .opacity(0.75)
+                .padding(.vertical, 7)
+                // Filled when it is an invitation, glass once accepted — the
+                // same visual grammar every video app uses.
+                .foregroundStyle(following ? Color.primary : Color(uiColor: .systemBackground))
+                .background {
+                    if following { Color.clear } else { Capsule().fill(Color.primary) }
                 }
-            }
-            .foregroundStyle(Color.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassPanel(shape: Capsule())
+                .modifier(GlassIf(active: following))
+                .contentTransition(.opacity)
         }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.2), value: following)
+        .accessibilityLabel(following ? "Following \(channel.displayLabel). Unfollow" : "Follow \(channel.displayLabel)")
     }
 
-    /// Bottom-left, where a feed puts what you are looking at: the scene's
-    /// name largest, then who made it and on what. (The channel itself lives
-    /// top-left, with the time pill under it.)
+    /// Bottom-left: the scene's name largest, then who made it and on what.
+    ///
+    /// Leaving is tied to the FINGER: by a quarter of the way into a swipe the
+    /// text has dissolved (fade + blur + a slight lift, like breath off glass),
+    /// so the words never ride across the screen attached to the wrong picture.
+    /// The content swaps while it is invisible. Arriving is a fast staggered
+    /// rise — title, then artist, then the small print — replayed for each new
+    /// moment and each new channel.
     private var caption: some View {
         let event = currentStop?.event ?? liveEvent
+        // 0 (gone) … 1 (fully present), from how far between pages we are.
+        let presence = 1 - min(1, swipeProgress / 0.24)
         return VStack(alignment: .leading, spacing: 8) {
             Text(sceneTitle)
                 .font(.title2.weight(.bold))
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
+                .captionEntrance(captionEntered, order: 0)
 
             credits(for: event)
+                .captionEntrance(captionEntered, order: 1)
 
             // The prompt behind the change: the one thing here a picture of
             // the same scene could not tell you.
@@ -438,8 +494,8 @@ struct FeedPage: View {
                     .font(.caption)
                     .opacity(0.8)
                     .lineLimit(3)
+                    .captionEntrance(captionEntered, order: 2)
             }
-
         }
         .foregroundStyle(Color.primary)
         .multilineTextAlignment(.leading)
@@ -447,6 +503,19 @@ struct FeedPage: View {
         // OPPOSITE tone to the text, or it just smudges it.
         .shadow(color: (footScheme == .light ? Color.white : Color.black).opacity(0.6), radius: 6, y: 1)
         .frame(maxWidth: 280, alignment: .leading)
+        .opacity(presence)
+        .blur(radius: (1 - presence) * 9)
+        .offset(y: (1 - presence) * -10)
+        .scaleEffect(0.97 + 0.03 * presence, anchor: .bottomLeading)
+    }
+
+    /// Reset without animation, then animate in — so the stagger replays even
+    /// when the text changed while the caption was already on screen.
+    private func replayCaptionEntrance() {
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) { captionEntered = false }
+        DispatchQueue.main.async { captionEntered = true }
     }
 
     private var sceneTitle: String {
@@ -506,7 +575,6 @@ struct FeedPage: View {
     /// Right-hand rail, under the thumb.
     private var actionRail: some View {
         VStack(spacing: 12) {
-            followButton
             if let stop = currentStop {
                 if canSteer {
                     railButton(recalling ? "hourglass" : "arrow.uturn.backward", label: "Bring back") {
@@ -516,6 +584,7 @@ struct FeedPage: View {
                 }
             } else {
                 railButton("slider.horizontal.3", label: "Compose") { showComposer = true }
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
             if !app.pairedScreens.isEmpty {
                 railButton("play.tv", label: "Play on your screens") {
@@ -536,25 +605,6 @@ struct FeedPage: View {
             }
             .accessibilityLabel("Share channel")
         }
-    }
-
-    private var followButton: some View {
-        let following = app.follows.isFollowing(channelId)
-        return Button {
-            let now = app.follows.toggle(channelId)
-            UIImpactFeedbackGenerator(style: now ? .medium : .light).impactOccurred()
-            flash(now ? "following \(channel.displayLabel)" : "unfollowed")
-        } label: {
-            Image(systemName: following ? "star.fill" : "star")
-                .font(.system(size: 17, weight: .medium))
-                // Gold when on: the one colour on the rail, because it is the
-                // one control that reports a state rather than doing a thing.
-                .foregroundStyle(following ? Color.appWarning : Color.primary)
-                .frame(width: 46, height: 46)
-                .glassCapsule(shape: Circle())
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .accessibilityLabel(following ? "Following. Unfollow" : "Follow \(channel.displayLabel)")
     }
 
     private func railButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
@@ -697,4 +747,48 @@ extension SpecSubset.Background {
     var headColor: String? { stops?.first?.color ?? color ?? primaryColor }
     /// Colour at the bottom — under the caption. Differs for a gradient.
     var footColor: String? { stops?.last?.color ?? color ?? primaryColor }
+}
+
+/// How far between two pages a horizontal pager is: 0 at rest, 0.5 halfway.
+///
+/// iOS 18 can read a scroll view's offset directly. iOS 17 cannot do it
+/// reliably from inside a lazy paging stack, so there the caption skips the
+/// finger-tied dissolve and only plays its entrance — still correct, less lush.
+private struct SwipeProgressReader: ViewModifier {
+    @Binding var progress: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                let width = max(1, geo.containerSize.width)
+                let pages = geo.contentOffset.x / width
+                // Quantised: the caption needs ~25 steps, not 120 a second.
+                return (abs(pages - pages.rounded()) * 50).rounded() / 50
+            } action: { _, now in
+                progress = now
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Glass only when asked — `glassCapsule` can't sit behind an `if` inside a
+/// modifier chain without changing the view's identity mid-animation.
+private struct GlassIf: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active { content.glassCapsule(shape: Capsule()) } else { content }
+    }
+}
+
+private extension View {
+    /// One line of the caption rising into place. `order` staggers the lines
+    /// by 55ms so the block reads top-down instead of popping in as a slab.
+    func captionEntrance(_ entered: Bool, order: Int) -> some View {
+        self
+            .opacity(entered ? 1 : 0)
+            .offset(y: entered ? 0 : 14)
+            .animation(.spring(duration: 0.38, bounce: 0.18).delay(Double(order) * 0.055), value: entered)
+    }
 }
