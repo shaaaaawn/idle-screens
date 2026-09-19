@@ -7,6 +7,8 @@ import { demoTrack as catwalkDemo } from '@idle-screens/saver-catwalk';
 import { demoTrack as metaquariumDemo } from '@idle-screens/saver-metaquarium';
 import { messagesDemoTrack, dvdDemoTrack, warpDemoTrack, globeDemoTrack, fadeOutDemoTrack, flurryDemoTrack, pipesDemoTrack, mystifyDemoTrack } from '@idle-screens/savers-classic';
 
+import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette } from '@idle-screens/saver-metaquarium';
+
 export const PREVIEW_DURATION_MS = 6000;
 
 /**
@@ -100,6 +102,28 @@ function profileFromTrack(
   };
 }
 
+/**
+ * How long a saver with no demo track holds before the timeline loops.
+ *
+ * Six seconds is right for a 2D loop and wrong for a world: the metaquarium
+ * scenes orbit at well under a degree a second and play scripted vignettes a
+ * minute long, so a 6 s loop snapped the camera back before it had moved and
+ * never let a scene past its first beat — the workbench could not show the
+ * thing it was built to tune. A vignette runs exactly its own length (so the
+ * loop point is the script's); any other tank holds two minutes.
+ */
+export function holdDurationFor(saver: SaverPlugin): number {
+  const space = saver.manifest.paramSpace;
+  const script = space?.vignette?.default;
+  if (typeof script === 'string' && script.trim()) {
+    const indoors = space?.interior?.default === 'geode';
+    const v = parseVignette(resolveVignette(script), indoors ? INTERIOR_MARKS : OPEN_MARKS);
+    if (v.duration > 0) return Math.ceil(v.duration * 1000);
+  }
+  if (saver.manifest.id.startsWith('metaquarium')) return 120_000;
+  return PREVIEW_DURATION_MS;
+}
+
 export function buildTimelineProfile(
   saver: SaverPlugin,
   seed: number,
@@ -131,7 +155,7 @@ export function buildTimelineProfile(
   if (saver.manifest.paramSpace) {
     return profileFromTrack(
       saver,
-      holdTrack(id, seed, PREVIEW_DURATION_MS, saver.manifest.paramSpace),
+      holdTrack(id, seed, holdDurationFor(saver), saver.manifest.paramSpace),
       seed,
       'track',
     );
