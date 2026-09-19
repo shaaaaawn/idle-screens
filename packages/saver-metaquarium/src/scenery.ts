@@ -1,12 +1,13 @@
 /** Seeded mineral scenery. Minerals are faceted; living/inhabited details are voxels.
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, Color, Group,
+  BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
   Mesh, type MeshBasicMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
-import { batch, FrontSide, painted } from './scenery-paint';
+import { batch, FrontSide } from './scenery-paint';
+import { buildFlora, FLORA_COLOR, FLORA_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildRock, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
@@ -143,53 +144,23 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     obstacles.push(home.obstacle);
     counts.homes!++;
   }
-  const flora: BufferGeometry[] = [];
-  const floraRng = rng.fork(4);
-  const strands = Math.round(opts.flora * opts.cap * 5);
-  for (let i = 0; i < strands; i++) {
-    const a = anchors[i % anchors.length]!;
-    const angle = floraRng.range(0, Math.PI * 2), radius = floraRng.range(17, 29) * s;
-    const x = a.x + Math.cos(angle) * radius, z = a.z + Math.sin(angle) * radius;
-    const root = terrain(x, z), height = floraRng.range(17, 43) * s;
-    const nearest = anchors.reduce((best, c) => Math.hypot(x - c.x, z - c.z) < Math.hypot(x - best.x, z - best.z) ? c : best, a);
-    const tint = new Color(nearest.color).lerp(new Color('#369a81'), 0.5);
-    for (let j = 0; j < 9; j++) {
-      const h = j / 8;
-      const color = tint.clone().multiplyScalar(0.28 + h * 0.5).getHexString();
-      const p = painted(new BoxGeometry(1, 1, 1), j === 8 ? nearest.color : `#${color}`,
-        new Vector3(x + Math.sin(h * 3 + angle) * h * 3 * s, root + h * height, z),
-        new Vector3((j === 8 ? 1.7 : 1) * s, height / 8 + 0.2, 0.9 * s), new Quaternion(), j !== 8);
-      const roots = new Float32Array(p.getAttribute('position').count * 2);
-      for (let k = 0; k < roots.length; k += 2) { roots[k] = root; roots[k + 1] = angle; }
-      p.setAttribute('aSway', new BufferAttribute(roots, 2));
-      flora.push(p);
-      if (j > 1 && j < 8 && j % 2 === 0) {
-        const leaf = painted(new BoxGeometry(1, 1, 1), `#${color}`,
-          new Vector3(x + (j % 4 === 0 ? 2 : -2) * s, root + h * height, z),
-          new Vector3(4 * s, 1.1 * s, 1 * s));
-        const lr = new Float32Array(leaf.getAttribute('position').count * 2);
-        for (let k = 0; k < lr.length; k += 2) { lr[k] = root; lr[k + 1] = angle; }
-        leaf.setAttribute('aSway', new BufferAttribute(lr, 2));
-        flora.push(leaf);
-      }
-    }
-  }
-  const plants = batch(group, flora, 'voxel-light-kelp');
+  const field = buildFlora(anchors, terrain, rng.fork(4), {
+    density: opts.flora, cap: opts.cap, scale: s,
+    blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s),
+  });
+  const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
   if (plants) {
     const clock = { value: 0 }; clocks.push(clock);
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec2 aSway;\n' + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-        #include <begin_vertex>
-        float h = max(0.0, position.y - aSway.x);
-        transformed.x += sin(uSwayTime * 0.55 + aSway.y + h * 0.07) * h * 0.13;
-        transformed.z += cos(uSwayTime * 0.38 + aSway.y + h * 0.06) * h * 0.055;
-      `);
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
+        .replace('#include <color_vertex>', FLORA_COLOR);
     };
+    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v2';
     plants.frustumCulled = false;
   }
-  counts.flora = strands;
+  counts.flora = field.plants;
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
   const particleRng = rng.fork(6);
