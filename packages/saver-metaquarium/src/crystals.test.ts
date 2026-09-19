@@ -13,8 +13,8 @@ describe('parsePropMix', () => {
     const r = parsePropMix('crystal#hero:1@lotus/hotpink, crystal:5@druse');
     expect(r.problems).toEqual([]);
     expect(r.entries).toEqual([
-      { kind: 'crystal', id: 'hero', count: 1, habit: 'lotus', palette: 'hotpink' },
-      { kind: 'crystal', id: null, count: 5, habit: 'druse', palette: 'env' },
+      { kind: 'crystal', id: 'hero', count: 1, habit: 'lotus', palette: 'hotpink', size: 1 },
+      { kind: 'crystal', id: null, count: 5, habit: 'druse', palette: 'env', size: 1 },
     ]);
   });
 
@@ -194,6 +194,19 @@ describe('layoutCrystals', () => {
     expect(new Set(ice.clusters.map((c) => c.color))).toEqual(new Set(['#dff6ff', '#4fe9ff']));
     const g = layoutCrystals(parsePropMix('crystal/glass').entries, createRng(2), OPTS);
     expect(g.clusters[0]!.glass).toBe(true);
+  });
+});
+
+describe('castle-scale crystals', () => {
+  it('*size parses, clamps, and giants stand outside the swim space, full size', () => {
+    const r = parsePropMix('crystal#keep:1@spire/cyan*6, crystal:3@druse, crystal:1@lotus*40');
+    expect(r.entries.map((e) => e.size)).toEqual([6, 1, 8]);
+    expect(r.problems.join(' ')).toMatch(/size clamped to 8/);
+    const { clusters } = layoutCrystals(r.entries, createRng(3), OPTS);
+    const keep = clusters[0]!;
+    expect(Math.hypot(keep.x, keep.z)).toBeGreaterThan(200); // past the 120-unit swim radius, with room for its foot
+    expect(keep.height).toBeGreaterThan(200); //                a tower, not a garden cluster
+    expect(clusters[1]!.height).toBeLessThan(40);
   });
 });
 

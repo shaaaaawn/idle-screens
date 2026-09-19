@@ -105,7 +105,7 @@ never changes because a dependency was bumped.
 | fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
 | fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
 | fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
-| propMix | string | `''` | Scenery, `kind[#id][:count][@habit][/palette]`. Kind `crystal` (generated, never fetched); habits `lotus · spire · druse · scatter · coral`; palettes `env · rainbow · glass ·` a named colour. Empty builds nothing |
+| propMix | string | `''` | Scenery, `kind[#id][:count][@habit][/palette][*size]` (`*6` = a tower-sized crystal, planted past the swim space). Kind `crystal` (generated, never fetched); habits `lotus · spire · druse · scatter · coral`; palettes `env · rainbow · glass ·` a named colour. Empty builds nothing |
 | envProps | enum | off | `on` lets a named environment bring its own crystals when `propMix` is empty |
 | crystalScale | number | 1 | Cluster size, 0.4–2.5 (rebuilds the layout) |
 | crystalWild | number | 0.7 | How individual each cluster is: 0 is the regular measured rosette; toward 1 clusters lean, go bald on one side, grow lopsided and branch like coral |

@@ -322,7 +322,9 @@ export function buildCrystalField(
       pos.set(c.x, c.y + c.height * 0.4, c.z);
       // Sized to where the falloff is still visible: every pixel past that is
       // additive overdraw that adds nothing (8 clusters cost 13 fps at 2.6).
-      scl.setScalar(Math.max(c.radius, c.height) * 1.9);
+      // …and capped: a tower-sized crystal would otherwise wear a 600-unit
+      // additive quad over half the frame.
+      scl.setScalar(Math.min(240, Math.max(c.radius, c.height) * 1.9));
       cards.setMatrixAt(i, m.compose(pos, q.identity(), scl));
       col.set(c.color);
       colors.set([col.r, col.g, col.b], i * 3);

@@ -50,6 +50,7 @@ const DSL_PRESETS: Readonly<Record<string, readonly string[]>> = {
   vignette: ['tea', 'bedtime', 'seek', 'a =table, b =door | b >table @a | a @b talk, b @a nod | b @a talk, a @b wiggle | a b circle rug'],
   propMix: [
     'crystal#hero:1@lotus/hotpink',
+    'crystal#keep:1@spire/cyan*6,crystal:3@spire/purple*3.5,crystal:4@druse',
     'crystal:6@lotus/rainbow',
     'crystal#hero:1@coral/hotpink,crystal:4@coral',
     'crystal:3@spire/white,crystal:2@druse/cyan',

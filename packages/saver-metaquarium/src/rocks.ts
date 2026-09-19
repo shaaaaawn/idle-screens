@@ -81,7 +81,7 @@ export function boulder(rng: CrystalRng, detail = 1): Tri[] {
  *   - and the light FLOWS: `flow` lets the shader send slow pulses downhill.
  */
 export function fissures(
-  tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number,
+  tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number, worldPerUnit = 12,
 ): { positions: number[]; colors: number[]; flow: number[]; seep: Vector3 | null } {
   const positions: number[] = [], colors: number[] = [], flow: number[] = [];
   if (amount <= 0) return { positions, colors, flow, seep: null };
@@ -151,7 +151,10 @@ export function fissures(
   // Rivulets off the summit, at uneven angles and of uneven length.
   const count = 2 + Math.round(amount * 3);
   const spin = rng.next() * Math.PI * 2;
-  const width = 0.03 + amount * 0.03;
+  // Width is a WORLD size: a channel on a 25-unit ridge rock is no wider than
+  // one on a 9-unit boulder. Scaled with the stone, big rocks wore flat stripes
+  // a fish-length across — decals, from close up.
+  const width = (0.03 + amount * 0.03) * Math.min(1.3, 12 / worldPerUnit);
   for (let i = 0; i < count; i += 1) {
     const az = spin + (i / count) * Math.PI * 2 + rng.range(-0.45, 0.45);
     const reach = rng.range(0.75, 1.55) * (0.65 + amount * 0.45);
@@ -232,7 +235,7 @@ export function buildRock(spec: RockSpec, rng: CrystalRng): RockParts {
     new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), rng.next() * Math.PI * 2),
     new Vector3(spec.rx, spec.ry, spec.rz),
   );
-  const cut = fissures(tris, rng.fork(2), spec.tint, spec.veins);
+  const cut = fissures(tris, rng.fork(2), spec.tint, spec.veins, (spec.rx + spec.ry + spec.rz) / 3);
   return {
     stone: paintStone(tris, place, rng.fork(3)),
     glow: glowGeometry(cut.positions, cut.colors, place, cut.flow),

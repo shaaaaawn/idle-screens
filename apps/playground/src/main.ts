@@ -160,6 +160,32 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // THE BIG WORLD: crystals at castle scale. A keep and its towers stand out
+  // past the swim space as a skyline; the village, rocks and gardens sit in
+  // its shadow, and the fish are small in front of it. Tests the large end of
+  // everything: fog depth, far plane, glow-card caps, prop budgets.
+  createMetaquarium({
+    id: 'metaquarium-world-crystal-citadel', label: 'Metaquarium (crystal citadel)',
+    params: {
+      propMix: 'crystal#keep:1@spire/cyan*6.5,crystal:3@spire/purple*3.6,crystal:2@lotus/blue*2.4,crystal:3@druse/cyan,crystal:2@coral/hotpink',
+      crystalWild: 0.8, crystalGlow: 0.9, rockDensity: 0.7, rockVeins: 0.9, geodeHomes: 3, floraDensity: 0.7,
+      bubbleVents: 0.6, marineSnow: 0.7,
+      fishMix: '100:4@school,257:3,glowfish:1', dracoPath: asset('/draco/'), swimStyle: 'auto', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#03071a', floorColor: '#0a1226', fogNear: 220, fogFar: 1100,
+      cameraDistance: 330, cameraElevation: 7, cameraAzimuth: 12, autoRotate: 0.35, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The same keep from among the houses: the low, close angle that shows scale.
+  createMetaquarium({
+    id: 'metaquarium-world-citadel-street', label: 'Metaquarium (citadel, street level)',
+    params: {
+      propMix: 'crystal#keep:1@spire/seafoam*7,crystal:2@spire/cyan*4,crystal:3@druse/seafoam,crystal:2@coral/yellow',
+      crystalWild: 0.8, crystalGlow: 0.85, rockDensity: 0.5, rockVeins: 0.8, geodeHomes: 3, floraDensity: 0.9, bubbleVents: 0.8, marineSnow: 0.8,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#021210', floorColor: '#07201c', fogNear: 180, fogFar: 1000,
+      cameraDistance: 165, cameraElevation: 2, cameraAzimuth: 24, autoRotate: 0.3, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // THE ROCK WORLD: fractured stone is the subject — a field of boulders, the
   // arch and the ridge all split by light, one home tucked among them.
   createMetaquarium({

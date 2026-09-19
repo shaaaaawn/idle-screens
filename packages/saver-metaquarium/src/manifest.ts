@@ -183,7 +183,8 @@ export const METAQUARIUM_PARAMS = {
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.
+  /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
+   *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).
    *  One kind so far — `crystal`, generated from the seed (nothing is
    *  fetched), habits `lotus · spire · druse · scatter · coral`, palettes `env`
    *  (the room's colours) · `rainbow` · a named colour · `glass`.

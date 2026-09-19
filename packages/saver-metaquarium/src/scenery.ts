@@ -102,7 +102,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     torus.dispose();
     const archPlace = new Matrix4().compose(new Vector3(x, y, z), new Quaternion(), new Vector3(24 * s, 35 * s, 24 * s));
     stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
-    const archCut = fissures(archTris, archRng.fork(2), '#947cff', opts.veins);
+    const archCut = fissures(archTris, archRng.fork(2), '#947cff', opts.veins, 28 * s);
     const archGlow = glowGeometry(archCut.positions, archCut.colors, archPlace, archCut.flow);
     if (archGlow) veins.push(archGlow);
     counts.arches = 1;

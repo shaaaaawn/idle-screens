@@ -93,6 +93,9 @@ export interface PropMixEntry {
   count: number;
   habit: CrystalHabit;
   palette: string;
+  /** Size multiplier, `*6` in the DSL. 1 is a garden cluster; 3–8 is
+   *  architecture — a tower, a keep — and is planted out past the swim space. */
+  size: number;
 }
 
 export interface PropMixResult {
@@ -104,11 +107,12 @@ export interface PropMixResult {
 export const MAX_CLUSTERS = 12;
 
 /**
- * `kind[#id][:count][@habit][/palette]`, comma separated.
+ * `kind[#id][:count][@habit][/palette][*size]`, comma separated.
  *
  *   crystal                      one lotus in the room's colours
  *   crystal#hero:1@lotus/hotpink
  *   crystal:6@druse, crystal:2@spire/glass
+ *   crystal#keep:1@spire/cyan*6      a tower-sized crystal, out past the fish
  *
  * Forgiving like `parseFishMix`: a bad token is dropped with a problem line,
  * never thrown — the classic lane can deliver anything.
@@ -120,12 +124,12 @@ export function parsePropMix(input: string): PropMixResult {
   for (const raw of String(input ?? '').split(',')) {
     const token = raw.trim();
     if (!token) continue;
-    const m = /^([a-z]+)(?:#([A-Za-z0-9_-]{1,24}))?(?::(\d{1,3}))?(?:@([a-z]+))?(?:\/([a-z]+))?$/.exec(token);
+    const m = /^([a-z]+)(?:#([A-Za-z0-9_-]{1,24}))?(?::(\d{1,3}))?(?:@([a-z]+))?(?:\/([a-z]+))?(?:\*(\d+(?:\.\d+)?))?$/.exec(token);
     if (!m) {
-      problems.push(`"${token}" is not kind[#id][:count][@habit][/palette]`);
+      problems.push(`"${token}" is not kind[#id][:count][@habit][/palette][*size]`);
       continue;
     }
-    const [, kind, id, countRaw, habitRaw, paletteRaw] = m;
+    const [, kind, id, countRaw, habitRaw, paletteRaw, sizeRaw] = m;
     if (kind !== 'crystal') {
       problems.push(`unknown prop kind "${kind}" — known: crystal`);
       continue;
@@ -156,7 +160,12 @@ export function parsePropMix(input: string): PropMixResult {
       continue;
     }
     total += count;
-    entries.push({ kind: 'crystal', id: id ?? null, count, habit, palette });
+    let size = sizeRaw ? Number(sizeRaw) : 1;
+    if (size < 0.3 || size > 8) {
+      problems.push(`"${token}" size clamped to ${Math.min(8, Math.max(0.3, size))} (0.3–8)`);
+      size = Math.min(8, Math.max(0.3, size));
+    }
+    entries.push({ kind: 'crystal', id: id ?? null, count, habit, palette, size });
   }
   return { entries, problems };
 }
@@ -469,14 +478,20 @@ export function layoutCrystals(
   for (const e of entries) {
     for (let i = 0; i < e.count && k < total; i += 1, k += 1) {
       const crng = rng.fork(0x5a0 + k);
-      const r = 24 + 100 * Math.sqrt(k / Math.max(1, total)) + crng.range(-8, 8);
+      // A giant is scenery, not furniture: it stands out past the swim space
+      // (radius 120) so it is a skyline the fish pass in front of, never a
+      // wall they swim inside.
+      const giant = Math.max(0, e.size - 1.5);
+      const r = 24 + 100 * Math.sqrt(k / Math.max(1, total)) + crng.range(-8, 8) + giant * 62;
       const a = spin + k * GOLDEN;
       const names = e.palette === 'env' ? envColors : e.palette === 'rainbow' ? RAINBOW : [e.palette];
       const name = names[(k + Math.floor(crng.next() * 2)) % names.length]!;
       // The camera orbits at 80–400 and looks at the centre, so an outer
       // cluster is the one that ends up between lens and fish: the hero
       // stands in the middle, the ring around it stays low.
-      const grown = growCluster(e.habit, crng, { ...opts, scale: opts.scale * (1 - 0.5 * Math.min(1, r / 124)) });
+      const grown = growCluster(e.habit, crng, {
+        ...opts, scale: opts.scale * e.size * (giant > 0 ? 1 : 1 - 0.5 * Math.min(1, r / 124)),
+      });
       clusters.push({
         id: e.id && e.count === 1 ? e.id : e.id ? `${e.id}.${i}` : null,
         habit: e.habit,
@@ -531,7 +546,9 @@ export function emittersOf(clusters: readonly Cluster[]): Emitter[] {
     return {
       x: c.x, y: c.y + c.height * 0.35, z: c.z,
       r: r * k, g: g * k, b: b * k,
-      reach: Math.max(c.radius, c.height) * 2.2,
+      // Capped: a tower-sized crystal is a bright thing far away, not a sun —
+      // uncapped, one keep washed the whole floor to its colour.
+      reach: Math.min(130, Math.max(c.radius, c.height) * 2.2),
       phase: c.phase,
     };
   });
