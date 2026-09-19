@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Group, Mesh, MeshBasicMaterial, MeshMatcapMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
+import { Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
@@ -323,6 +323,41 @@ describe('glow halos — selective bloom without a composer', () => {
   });
 });
 
+describe('lit mode — fish that take light', () => {
+  it('coats take light; glow and eyes stay unlit (they ARE the light)', () => {
+    const { root, body, glow, eyes } = npcFish();
+    applyNpcMaterials(root, createRng(7).fork(1), true, true);
+    expect(body.material).toBeInstanceOf(MeshLambertMaterial);
+    expect(glow.material).toBeInstanceOf(MeshBasicMaterial);
+    expect(eyes.material).toBeInstanceOf(MeshBasicMaterial);
+  });
+
+  it('lit and flat pick the SAME coat from the same fork', () => {
+    const a = npcFish();
+    const b = npcFish();
+    applyNpcMaterials(a.root, createRng(7).fork(3), true, true);
+    applyNpcMaterials(b.root, createRng(7).fork(3), true, false);
+    expect((a.body.material as MeshLambertMaterial).color.getHex())
+      .toBe((b.body.material as MeshBasicMaterial).color.getHex());
+  });
+
+  it('metal plates become an owned PBR clone: coloured, polished, never a black mirror', () => {
+    const tex = new Texture();
+    const src = new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1, roughness: 1 });
+    const a = new Mesh(new SphereGeometry(1, 4, 4), src);
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3), true, true);
+    const m = a.material as unknown as MeshStandardMaterial;
+    expect(m).toBeInstanceOf(MeshStandardMaterial);
+    expect(m).not.toBe(src); // the template's material is never edited
+    expect(m.map).toBe(tex);
+    expect(m.metalness).toBeLessThanOrEqual(0.35);
+    expect(m.roughness).toBeLessThanOrEqual(0.3);
+    expect(src.metalness).toBe(1);
+  });
+});
+
 describe('fish glow — GLOW parts as light sources', () => {
   const fin = (r: number, x: number, name = 'GLOW-HotPink'): Mesh => {
     const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name }));
@@ -341,6 +376,8 @@ describe('fish glow — GLOW parts as light sources', () => {
     expect(g.cores).toHaveLength(1);
     expect(g.cores[0]!.mat).toBe(f.material);
     expect(g.cx).toBeCloseTo(5, 5); // centred on the fin, not the fish
+    expect(g.parts).toHaveLength(1);
+    expect(g.parts[0]!.x).toBeCloseTo(5, 5);
     expect(g.gain).toBeGreaterThan(0.8);
     // The bloom is the colour the part actually wears — never a second guess.
     expect(g.r).toBeCloseTo(g.cores[0]!.base.r, 6);

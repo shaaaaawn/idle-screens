@@ -32,7 +32,7 @@ const ALL_FISH = [...LOCAL_FISH, ...IPFS_FISH];
  */
 const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
-  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'fishGlow', 'fishMetal']],
+  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'fishLighting', 'fishGlow', 'fishMetal']],
   ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
   ['formation', ['formationShape', 'formationBreathe']],
   ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],

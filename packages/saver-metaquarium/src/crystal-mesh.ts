@@ -165,6 +165,7 @@ const CARD_FRAG = /* glsl */ `
   varying vec3 vColor;
   varying vec2 vLook;
   uniform vec2 uNear;
+  uniform float uNorm;
   varying vec2 vUv;
   varying float vDepth;
   void main() {
@@ -176,7 +177,8 @@ const CARD_FRAG = /* glsl */ `
     // Pale palettes (ice) would sum to a white-out where cards overlap, and a
     // cluster the camera orbits past would fill the lens: normalise by the
     // colour's own brightness and let the card die away up close.
-    float lum = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
+    // uNorm 0 (fish): the colour arrives already weighted — do not undo it.
+    float lum = dot(vColor, vec3(0.2126, 0.7152, 0.0722)) * uNorm + (1.0 - uNorm) * 0.28;
     float near = smoothstep(uNear.x, uNear.y, vDepth);
     gl_FragColor = vec4(vColor * fall * sqrt(fall) * (0.3 / (0.55 + 1.6 * lum)) * uGlow * beat * near
       * (1.0 - 0.75 * vLook.x) * (1.0 - fog), 1.0);
@@ -303,7 +305,7 @@ export function buildCrystalField(
     quad.userData.mqOwned = true;
     const cardMat = owned(new ShaderMaterial({
       // A cluster the camera orbits past would fill the lens: fade 45→150.
-      uniforms: { ...shared, uLift: { value: 0 }, uNear: { value: new Vector2(45, 150) } },
+      uniforms: { ...shared, uLift: { value: 0 }, uNear: { value: new Vector2(45, 150) }, uNorm: { value: 1 } },
       vertexShader: CARD_VERT,
       fragmentShader: CARD_FRAG,
       transparent: true,
@@ -460,6 +462,7 @@ export function buildGlowCards(capacity: number): GlowCards {
     uLift: { value: 0.42 },
     // A fish is small and SUPPOSED to be seen close; only fade at the lens.
     uNear: { value: new Vector2(10, 34) },
+    uNorm: { value: 0 },
   };
   const mat = owned(new ShaderMaterial({
     uniforms,

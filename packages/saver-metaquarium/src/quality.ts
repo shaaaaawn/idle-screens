@@ -16,16 +16,19 @@ export interface TankQuality {
   /** Scenery budget: clusters in the scene, shards in one cluster, and
    *  whether shards get their halo shell (it doubles their draw calls). */
   props: { clusters: number; shards: number; halo: boolean };
+  /** Point lights that ride glow parts in lit mode. Every one is a term in
+   *  every lit fragment, so the weakest tier lights by key + fill alone. */
+  glowLights: number;
 }
 
 export function qualityFor(tier: CapabilityTier): TankQuality {
   switch (tier) {
     case 'high':
-      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400, envBudget: 3, props: { clusters: 12, shards: 32, halo: true } };
+      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400, envBudget: 3, props: { clusters: 12, shards: 32, halo: true }, glowLights: 4 };
     case 'standard':
-      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250, envBudget: 2, props: { clusters: 8, shards: 20, halo: true } };
+      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250, envBudget: 2, props: { clusters: 8, shards: 20, halo: true }, glowLights: 3 };
     default:
-      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120, envBudget: 1, props: { clusters: 4, shards: 12, halo: false } };
+      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120, envBudget: 1, props: { clusters: 4, shards: 12, halo: false }, glowLights: 0 };
   }
 }
 

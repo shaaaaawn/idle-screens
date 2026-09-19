@@ -144,6 +144,12 @@ export const METAQUARIUM_PARAMS = {
    *  the floor beneath a low swimmer. 0 is the flat glow colour + thin halo
    *  the tank had before. No composer — one instanced draw for the whole cast. */
   fishGlow: { type: 'number', default: 0.6, min: 0, max: 1, ease: 'smooth' },
+  /** `lit` (default): fish take light — a key and fill so every voxel face
+   *  shades by where it points, a generated studio environment for their metal
+   *  to reflect, and point lights riding the glow parts nearest the camera so
+   *  a glowing fin colours the body beside it. `flat` is the original unlit
+   *  look. Read at mount. */
+  fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is the flat unlit atlas. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
