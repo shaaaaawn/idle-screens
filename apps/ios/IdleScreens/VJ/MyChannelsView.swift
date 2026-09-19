@@ -7,7 +7,7 @@ struct MyChannelsView: View {
     @State private var showingAdd = false
     @State private var createdToken: String?
     @State private var path: [ChannelCredential] = []
-    @State private var handoff: TokenHandoff?
+    @State private var keysFor: ChannelCredential?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -108,8 +108,8 @@ struct MyChannelsView: View {
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
             }
-            .sheet(item: $handoff) { item in
-                TokenHandoffSheet(handoff: item)
+            .sheet(item: $keysFor) { credential in
+                ChannelKeysSheet(credential: credential)
             }
             // Remix stores its token server-side in the same call, so there's
             // nothing to reveal — only show the sheet for a real new token.
@@ -163,11 +163,20 @@ struct MyChannelsView: View {
                 .foregroundStyle(Color.textPrimary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(credential.channelId)
-                .font(.caption2)
-                .foregroundStyle(Color.textTertiary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 5) {
+                // What your key lets you do here. "Your channels" now holds
+                // channels shared WITH you too, and those are not the same.
+                if let role = app.role(for: credential.channelId) {
+                    Label(role.label, systemImage: role.icon)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.textSecondary)
+                }
+                Text(credential.channelId)
+                    .font(.caption2)
+                    .foregroundStyle(Color.textTertiary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         // The token is in the Keychain the whole time — refusing to show it
         // again just because its one-time sheet was dismissed strands the
@@ -185,16 +194,15 @@ struct MyChannelsView: View {
                 } label: {
                     Label("Copy steering token", systemImage: "key")
                 }
-                // Handing the token to someone else is DELEGATION, not backup —
-                // tokens already sync to your own devices via iCloud Keychain.
-                // Whoever holds this can publish to the channel, and there is no
-                // per-person revoke: the only undo is rotating the token, which
-                // cuts off every holder including you. Say that before sharing,
-                // not after.
+            }
+            // Sharing goes through the channel's keys: a labelled editor or
+            // viewer key that can be revoked on its own. Owners only — the
+            // server refuses createToken to anyone else.
+            if app.canAdminister(credential.channelId) {
                 Button {
-                    handoff = TokenHandoff(credential: credential, token: token)
+                    keysFor = credential
                 } label: {
-                    Label("Give someone control…", systemImage: "person.badge.key")
+                    Label("Share & keys…", systemImage: "person.badge.key")
                 }
             }
             ShareLink(item: app.gallery.viewerURL(for: credential.channelId)) {
