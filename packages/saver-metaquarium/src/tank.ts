@@ -64,6 +64,7 @@ import {
   applyNpcMaterials,
   eyeNoseSign,
   forceOpaque,
+  isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
 import {
@@ -790,8 +791,6 @@ class TankInstance implements SaverInstance {
       this.floorHeightAt = null;
       this.terrainAt = null;
     }
-    // Crystals stand ON this floor: a new room re-plants them.
-    this.propsKey = '';
     this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
@@ -912,14 +911,24 @@ class TankInstance implements SaverInstance {
         const mesh = o as Mesh;
         if (!mesh.isMesh || mesh.userData.mqHalo) return;
         const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
-          // Eyes stay pure; GLOW parts are sources, not receivers.
-          if (!m.color || /eye/i.test(m.name) || m.userData.mqGlowColor) return m;
+          // Eyes stay pure; GLOW parts are sources, not receivers — including
+          // the textured (betafish-generation) ones, which keep their
+          // template name but never get tagged mqGlowColor.
+          if (!m.color || /eye/i.test(m.name) || m.userData.mqGlowColor || isGlow(m)) return m;
           let own = cloned.get(m);
           if (!own) {
             own = m.clone();
             own.userData.mqOwned = true;
             cloned.set(m, own);
             list.push({ mat: own, base: own.color.clone() });
+            // `m` is either this fish's own material (applyNpcMaterials owns
+            // everything it creates) or the template's shared, untouched
+            // texture atlas. The clone above permanently replaces it on this
+            // mesh, so an owned `m` becomes unreachable from here on — dispose
+            // it now or its GPU program leaks until the tank tears down. The
+            // shared atlas case is never mqOwned, so it is left for the
+            // template's other clones.
+            if (m.userData.mqOwned) m.dispose();
           }
           return own;
         };
