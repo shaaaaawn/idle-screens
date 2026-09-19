@@ -35,6 +35,9 @@ export interface PreviewOverlayOptions {
   onExit?: (id: string) => void;
   /** "Open in Dev Tools" action; omitted = button hidden. */
   onOpenInDev?: (id: string) => void;
+  /** Openable by id (Dev Tools' Preview button) but never arrow-stepped
+   *  into from the gallery's own entries — e.g. metaquarium variants. */
+  extraEntries?: PreviewEntry[];
 }
 
 export interface PreviewOverlayHandle {
@@ -100,12 +103,18 @@ export function createPreviewOverlay(
   /** False for one frame after opening, so the opening click cannot dismiss. */
   let armed = false;
   let armFrame = 0;
+  /** -1 while an `extraEntries` saver is showing — it has no position in
+   *  `entries` to arrow-step from/to. */
   let index = -1;
+  /** The entry actually on screen. Independent of `index` so an extraEntries
+   *  saver (index -1) still has something for the Dev Tools button / current(). */
+  let currentEntry: PreviewEntry | undefined;
   let inst: SaverInstance | null = null;
   let mountToken = 0;
   let hideTimer = 0;
 
   const at = (i: number): PreviewEntry | undefined => entries[i];
+  const extra = opts.extraEntries ?? [];
 
   // ---- chrome auto-hide --------------------------------------------------
   const showChrome = (): void => {
@@ -134,10 +143,8 @@ export function createPreviewOverlay(
       Array.from(document.querySelectorAll<HTMLElement>(sel)).filter((el) => !stage.contains(el)),
   };
 
-  const show = (i: number): void => {
-    const entry = at(i);
-    if (!entry) return;
-    index = i;
+  const renderEntry = (entry: PreviewEntry, posLabel: string): void => {
+    currentEntry = entry;
     const { saver, pkg } = entry;
     const m = saver.manifest;
 
@@ -151,7 +158,7 @@ export function createPreviewOverlay(
     nameEl.textContent = m.label;
     pkgEl.textContent = pkg;
     attrEl.textContent = m.attribution ? `${m.attribution.source} · ${m.attribution.license}` : '';
-    posEl.textContent = `${i + 1} / ${entries.length}`;
+    posEl.textContent = posLabel;
     renderBadges(badges, saver);
     showChrome();
 
@@ -178,6 +185,20 @@ export function createPreviewOverlay(
       .catch((err) => console.warn(`[preview] ${m.id} failed to mount:`, err));
 
     opts.onShow?.(m.id);
+  };
+
+  const show = (i: number): void => {
+    const entry = at(i);
+    if (!entry) return;
+    index = i;
+    renderEntry(entry, `${i + 1} / ${entries.length}`);
+  };
+
+  /** A saver openable by id but not part of `entries` — no position to
+   *  arrow-step from. Stepping away from it re-enters the entries list. */
+  const showEntry = (entry: PreviewEntry): void => {
+    index = -1;
+    renderEntry(entry, entry.saver.manifest.label);
   };
 
   const step = (delta: number): void => {
@@ -228,7 +249,7 @@ export function createPreviewOverlay(
   // ---- lifecycle ---------------------------------------------------------
   function close(): void {
     if (!open) return;
-    const last = at(index)?.saver.manifest.id ?? null;
+    const last = currentEntry?.saver.manifest.id ?? null;
     open = false;
     armed = false;
     if (armFrame) cancelAnimationFrame(armFrame);
@@ -251,7 +272,10 @@ export function createPreviewOverlay(
 
   function openAt(id: string): void {
     const i = entries.findIndex((e) => e.saver.manifest.id === id);
-    if (i < 0) return;
+    // Not one of the gallery's own entries — e.g. a metaquarium variant,
+    // openable from Dev Tools but never arrow-stepped into from the gallery.
+    const fallback = i < 0 ? extra.find((e) => e.saver.manifest.id === id) : undefined;
+    if (i < 0 && !fallback) return;
 
     if (!stage.contains(surface)) stage.append(surface, chrome, hint);
     stage.hidden = false;
@@ -279,14 +303,14 @@ export function createPreviewOverlay(
       });
     });
 
-    show(i);
+    if (i >= 0) show(i); else showEntry(fallback!);
   }
 
   prevBtn.addEventListener('click', () => step(-1));
   nextBtn.addEventListener('click', () => step(1));
   closeBtn.addEventListener('click', () => close());
   devBtn.addEventListener('click', () => {
-    const id = at(index)?.saver.manifest.id;
+    const id = currentEntry?.saver.manifest.id;
     close();
     if (id) opts.onOpenInDev?.(id);
   });
@@ -295,7 +319,7 @@ export function createPreviewOverlay(
     open: openAt,
     close,
     isOpen: () => open,
-    current: () => at(index)?.saver.manifest.id ?? null,
+    current: () => currentEntry?.saver.manifest.id ?? null,
   };
 }
 

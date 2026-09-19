@@ -1025,6 +1025,9 @@ function liveMode(): void {
       gallery.setPlaying(currentView === 'gallery');
     },
     onOpenInDev: goToDev,
+    // Variants stay out of the gallery's arrow-cycle set, but Dev Tools'
+    // Preview button still needs to be able to open one by id.
+    extraEntries: METAQUARIUM_VARIANTS.map((saver) => ({ saver, pkg: '@idle-screens/saver-metaquarium' })),
   });
 
   function openPreview(id: string): void {
