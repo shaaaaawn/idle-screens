@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Public channel gallery, streaming-service style: a hero billboard for the
-/// featured channel, then horizontally scrolling shelves grouped by tag.
+/// channel that is live now, then the same shelves in the same order as the
+/// web home page (`HomeSections`).
 /// Every tile is a live native render of the channel's scene — the content
 /// showcases itself.
 struct GalleryView: View {
@@ -20,6 +21,8 @@ struct GalleryView: View {
                     ForEach(shelves) { shelf in
                         ChannelShelf(
                             title: shelf.title,
+                            subtitle: shelf.subtitle,
+                            ownedTags: shelf.ownedTags,
                             channels: shelf.channels,
                             cardWidth: sizeClass == .regular ? 224 : 148
                         )
@@ -76,38 +79,12 @@ struct GalleryView: View {
         return score
     }
 
-    private struct Shelf: Identifiable {
-        let title: String
-        let channels: [PublicChannel]
-        var id: String { title }
-    }
-
-    /// One shelf per primary tag (a channel lives on its first tag's shelf),
-    /// ordered by shelf size. Single-channel tags and untagged channels all
-    /// pool into a trailing "more" shelf — one-item rows read as broken.
-    private var shelves: [Shelf] {
-        var groups: [String: [PublicChannel]] = [:]
-        for channel in app.channels {
-            let key = channel.tags?.first ?? "more"
-            groups[key, default: []].append(channel)
-        }
-        var more = groups.removeValue(forKey: "more") ?? []
-        for (key, value) in groups where value.count == 1 && key != "featured" {
-            more.append(contentsOf: value)
-            groups.removeValue(forKey: key)
-        }
-        var result = groups
-            .sorted { lhs, rhs in
-                if lhs.key == "featured" { return true }
-                if rhs.key == "featured" { return false }
-                if lhs.value.count != rhs.value.count { return lhs.value.count > rhs.value.count }
-                return lhs.key < rhs.key
-            }
-            .map { Shelf(title: $0.key, channels: $0.value) }
-        if !more.isEmpty {
-            result.append(Shelf(title: "more", channels: more.sorted { $0.displayLabel < $1.displayLabel }))
-        }
-        return result
+    /// The same running order as the web home and the Apple TV — Featured,
+    /// Evals, the curated categories, Latest, then the tail — from the one
+    /// shared builder. The phone used to bucket by each channel's first tag,
+    /// which produced shelves the website has never had.
+    private var shelves: [HomeSection] {
+        HomeSections.build(channels: app.channels, categories: app.categories)
     }
 }
 
@@ -133,15 +110,31 @@ private struct HeroBillboard: View {
                 }
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 6) {
+                            Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
+                            Text("LIVE NOW")
+                                .font(.caption2.weight(.bold))
+                                .tracking(1.2)
+                                .foregroundStyle(Color.textSecondary)
+                        }
                         Text(channel.displayLabel)
                             .font(.system(size: compact ? 30 : 40, weight: .bold))
                             .foregroundStyle(Color.textPrimary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        if let tags = channel.tags, !tags.isEmpty {
-                            Text(tags.joined(separator: " · "))
+                        // The web hero leads with what the channel is DOING — its
+                        // last event, and who made it — rather than its tags.
+                        if let summary = channel.lastSteer?.summary, !summary.isEmpty {
+                            Text(summary)
                                 .font(.subheadline)
                                 .foregroundStyle(Color.textSecondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                        if let steered = SteerLine.text(for: channel) {
+                            Text(steered)
+                                .font(.caption)
+                                .foregroundStyle(Color.textTertiary)
                                 .lineLimit(1)
                         }
                         HStack(spacing: 12) {
@@ -174,20 +167,29 @@ private struct HeroBillboard: View {
 
 private struct ChannelShelf: View {
     let title: String
+    var subtitle: String?
+    var ownedTags: Set<String> = []
     let channels: [PublicChannel]
     let cardWidth: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(channels) { channel in
-                        ChannelCard(channel: channel, width: cardWidth, peers: channels)
+                        ChannelCard(channel: channel, width: cardWidth, peers: channels, ownedTags: ownedTags)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -204,6 +206,14 @@ private struct ChannelCard: View {
     /// The shelf this card sits in, so the viewer can page sideways through
     /// the row you actually entered from rather than the whole catalogue.
     var peers: [PublicChannel] = []
+    /// Tags the shelf title already says out loud. A "featured" chip on every
+    /// card of the Featured row is one word repeated four times.
+    var ownedTags: Set<String> = []
+
+    private var tagLine: String? {
+        let tags = (channel.tags ?? []).filter { !ownedTags.contains($0) }
+        return tags.isEmpty ? nil : tags.prefix(3).joined(separator: " · ")
+    }
 
     var body: some View {
         NavigationLink(destination: ChannelPager(
@@ -228,12 +238,43 @@ private struct ChannelCard: View {
                             .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
                     }
 
-                Text(channel.displayLabel)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: width, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        // Claimed channels answer only to their token holder.
+                        // A symbol, not the web's emoji: it takes the text
+                        // colour and scales with Dynamic Type.
+                        if channel.isProtected == true {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.textTertiary)
+                                .accessibilityLabel("Claimed")
+                        }
+                        Text(channel.displayLabel)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Color.textPrimary)
+                            .lineLimit(1)
+                        if channel.remixOf != nil {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.caption2)
+                                .foregroundStyle(Color.textTertiary)
+                                .accessibilityLabel(channel.remixOf.flatMap { $0.isEmpty ? nil : "Remixed from \($0)" } ?? "A remix")
+                        }
+                    }
+                    // The wall's liveliest fact: who touched this, and when.
+                    if let steered = SteerLine.text(for: channel) {
+                        Text(steered)
+                            .font(.caption2)
+                            .foregroundStyle(Color.textSecondary)
+                            .lineLimit(1)
+                    }
+                    if let tagLine {
+                        Text(tagLine)
+                            .font(.caption2)
+                            .foregroundStyle(Color.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: width, alignment: .leading)
             }
         }
         .buttonStyle(.plain)

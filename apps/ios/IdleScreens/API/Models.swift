@@ -23,6 +23,18 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     /// deliberately NOT `createdAt`: this one moves whenever anyone touches a
     /// channel, so ordering "Latest" by it would just re-list the busiest.
     let lastEventAt: Int?
+    /// Who last steered the channel, through what, on which model. This is the
+    /// wall's most interesting line — "steered 36m ago · curl" says the place
+    /// is alive in a way a viewer count never does.
+    let lastSteer: Steer?
+    /// Claimed: it answers only to whoever holds its token. Open channels
+    /// (lobby, default, studio) take anyone's agent.
+    let isProtected: Bool?
+    /// The channel this one was forked from. An empty string is meaningful:
+    /// "a remix, source unknown" — the web distinguishes it from nil too.
+    let remixOf: String?
+    /// `"public"` or `"private"`. A private channel gates every read.
+    let access: String?
     /// Inline scene spec (`scene.spec`) — powers live native previews.
     let spec: SpecSubset?
     /// Saver id when the channel publishes a classic saver (`{"id":"warp"}`)
@@ -41,10 +53,23 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
         case categoryId, categorySort, createdAt, lastEvent, saver
+        case protected, remixOf, access
+    }
+
+    /// The attribution on a channel's most recent change.
+    struct Steer: Decodable, Equatable, Sendable {
+        let actor: String?
+        let harness: String?
+        let model: String?
+        let summary: String?
     }
 
     private struct LastEvent: Decodable {
         let at: Int?
+        let actor: String?
+        let harness: String?
+        let model: String?
+        let summary: String?
     }
 
     /// Minimal probe for classic saver documents: `{"id": "warp"}`.
@@ -70,7 +95,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
          categoryId: String? = nil, categorySort: Int? = nil,
          classicSaverId: String? = nil,
          createdAt: Int? = nil, lastEventAt: Int? = nil,
-         saverLabel: String? = nil) {
+         saverLabel: String? = nil,
+         lastSteer: Steer? = nil, isProtected: Bool? = nil,
+         remixOf: String? = nil, access: String? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
@@ -84,6 +111,10 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.createdAt = createdAt
         self.lastEventAt = lastEventAt
         self.saverLabel = saverLabel
+        self.lastSteer = lastSteer
+        self.isProtected = isProtected
+        self.remixOf = remixOf
+        self.access = access
     }
 
     init(from decoder: Decoder) throws {
@@ -100,7 +131,14 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         categorySort = try? c.decodeIfPresent(Int.self, forKey: .categorySort)
         saverLabel = try? c.decodeIfPresent(String.self, forKey: .saver)
         createdAt = try? c.decodeIfPresent(Int.self, forKey: .createdAt)
-        lastEventAt = (try? c.decodeIfPresent(LastEvent.self, forKey: .lastEvent))??.at
+        let lastEvent = (try? c.decodeIfPresent(LastEvent.self, forKey: .lastEvent)) ?? nil
+        lastEventAt = lastEvent?.at
+        lastSteer = lastEvent.map {
+            Steer(actor: $0.actor, harness: $0.harness, model: $0.model, summary: $0.summary)
+        }
+        isProtected = try? c.decodeIfPresent(Bool.self, forKey: .protected)
+        remixOf = try? c.decodeIfPresent(String.self, forKey: .remixOf)
+        access = try? c.decodeIfPresent(String.self, forKey: .access)
         // Prefer the RESOLVED spec (base + all steering deltas applied) —
         // it's what the fullscreen viewer shows. The base `scene.spec` can be
         // a placeholder that renders nothing like the live channel, which

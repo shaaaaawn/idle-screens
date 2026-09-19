@@ -13,6 +13,9 @@ final class AppState {
     // MARK: Gallery (Watch)
 
     var channels: [PublicChannel] = []
+    /// Editorial shelves from `/api/categories` — the same catalog the web
+    /// home page groups on, so the two surfaces show the same wall.
+    var categories: [ChannelCategory] = []
     var isLoadingGallery = false
     var galleryError: String?
 
