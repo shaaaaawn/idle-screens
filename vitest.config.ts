@@ -57,6 +57,11 @@ export default defineConfig({
         // unit-hostile shape as tank.ts; the geometry/layout math it consumes
         // stays in crystals.ts (gated). Covered by playground e2e (MQ40).
         'packages/saver-metaquarium/src/crystal-mesh.ts',
+        // Same shape again: three.js Mesh/Group construction (mergeGeometries,
+        // BoxGeometry, etc.) for the rock/geode/flora scenery — no logic here
+        // survives being unit-tested apart from a scene graph. Covered by
+        // playground e2e.
+        'packages/saver-metaquarium/src/scenery.ts',
         // PMREMGenerator needs a real WebGLRenderer — same unit-hostile shape
         // as tank.ts/crystal-mesh.ts. Covered by playground e2e (fishLighting
         // scenes mount a real renderer).
