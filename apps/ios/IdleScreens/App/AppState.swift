@@ -16,6 +16,9 @@ final class AppState {
     /// Editorial shelves from `/api/categories` — the same catalog the web
     /// home page groups on, so the two surfaces show the same wall.
     var categories: [ChannelCategory] = []
+    /// Past scenes, fetched once and shared by the feed, its neighbours and
+    /// the channel timeline.
+    let scenes = RecordedSceneStore()
     var isLoadingGallery = false
     var galleryError: String?
 

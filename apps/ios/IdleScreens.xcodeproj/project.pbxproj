@@ -100,6 +100,7 @@
 		AB15733A41C56719B73B883A /* FallbackSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 509A862BA7882BBAF02B5774 /* FallbackSceneView.swift */; };
 		AB76FAD280B8EE48343D1993 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184174A6AF1FFAB56C9837B1 /* CrashReporter.swift */; };
 		AC000386E0E47C842C0FBF9A /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B5A0CBD688755360E23C34 /* NativeSceneView.swift */; };
+		B1AB82CB3AE4D9F59787540A /* ChannelOverviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131CF06414AB247D1E968AFF /* ChannelOverviewSheet.swift */; };
 		B39D9751769F3397C53C5EF0 /* LobbyFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */; };
 		B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */; };
 		BA040E0C8FB03735BF177BAD /* ChannelSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452F2484E3DAE7DC772CFC2A /* ChannelSearch.swift */; };
@@ -118,6 +119,7 @@
 		D0C146161293CCBE489D72F6 /* TextBlockHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD719448D47D15060E8247C6 /* TextBlockHelpers.swift */; };
 		D6191C6E8FB10818A14C2C3B /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
 		D6F231D14703E2A6127A2CD7 /* TVAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C853969A894483598A446E19 /* TVAppState.swift */; };
+		DA6D94C13D1A5DEF7C330339 /* ScreenPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 531B9959ADE76FA44B45FAEE /* ScreenPresenceTests.swift */; };
 		DAF53EE2FBE295964F3FD6C7 /* ChannelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAB9A024E1DD1E74FF1607B8 /* ChannelSession.swift */; };
 		DCD1BEC449A2A8D13CB856CC /* AquariumField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E10925C4120BAB0BA07888 /* AquariumField.swift */; };
 		DD03C6F087E55B9994741FB3 /* HomeSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71EDB676A59798A0FAB07300 /* HomeSections.swift */; };
@@ -125,6 +127,7 @@
 		E0B44B30A86B89BAE7187B4B /* PairClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9290BC579DBCC0BF2ED620D /* PairClient.swift */; };
 		E15E2D79437A5F96E7A145B0 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
 		E484C83AFB4224BB3482E1CA /* ChannelCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */; };
+		E499270D742E29F81E597D65 /* RecordedSceneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89005D7893267BAA3D3EF5E6 /* RecordedSceneStore.swift */; };
 		E49FAA2E35E836CDF04083F9 /* ContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445CFB48DB79AAE0CAAF8B78 /* ContentProvider.swift */; };
 		E4DFFA15F845C0BF20552AB2 /* IdleScreensTVTopShelf.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7822D79CA74B34F90F5AE612 /* IdleScreensTVTopShelf.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E5D119B5465B9195DE129CF4 /* SpecCoverageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A901E31607298040C25F564 /* SpecCoverageTests.swift */; };
@@ -194,6 +197,7 @@
 		0E393D04E499C2B42C170AC0 /* ChannelSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSearchTests.swift; sourceTree = "<group>"; };
 		0F1BDAE027051C919D382E88 /* SceneVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneVisibility.swift; sourceTree = "<group>"; };
 		0F528250DFE95CB117C8E225 /* ThumbStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbStreamView.swift; sourceTree = "<group>"; };
+		131CF06414AB247D1E968AFF /* ChannelOverviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelOverviewSheet.swift; sourceTree = "<group>"; };
 		184174A6AF1FFAB56C9837B1 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
 		193F27EA5CA4F1DF5743170E /* AppState+Pair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Pair.swift"; sourceTree = "<group>"; };
 		1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelCredential.swift; sourceTree = "<group>"; };
@@ -222,6 +226,7 @@
 		4E7F929E9D6DB9F6B7C78FA6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4ECFB44253D0D0EC22D67E8B /* ChannelFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
 		509A862BA7882BBAF02B5774 /* FallbackSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackSceneView.swift; sourceTree = "<group>"; };
+		531B9959ADE76FA44B45FAEE /* ScreenPresenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPresenceTests.swift; sourceTree = "<group>"; };
 		54E10925C4120BAB0BA07888 /* AquariumField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AquariumField.swift; sourceTree = "<group>"; };
 		5828A2F4795C7D4E960B4563 /* SequenceSubset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SequenceSubset.swift; sourceTree = "<group>"; };
 		5A1A9CB25DCED3A1D90BE51F /* TokenHandoffSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenHandoffSheet.swift; sourceTree = "<group>"; };
@@ -254,6 +259,7 @@
 		86B91FEC3CA3ACD9A83E05DA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		87EA16DECCBE319A1BBDEC0E /* PreviewBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewBudget.swift; sourceTree = "<group>"; };
 		88DE0542BC47C9CC2E295A36 /* TextBlockHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBlockHelpersTests.swift; sourceTree = "<group>"; };
+		89005D7893267BAA3D3EF5E6 /* RecordedSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordedSceneStore.swift; sourceTree = "<group>"; };
 		8D65D00811C93D1EB5088770 /* WebHostedViewerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebHostedViewerTests.swift; sourceTree = "<group>"; };
 		8EFD394EDF1FE3B7FB338B31 /* PerceptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerceptionView.swift; sourceTree = "<group>"; };
 		94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
@@ -349,6 +355,7 @@
 				0798A8407FEE982D655152D7 /* PreviewBudgetTests.swift */,
 				2226F884FD690065486D008D /* RenderBudgetTests.swift */,
 				7C9EEC88DE9E35806E6F624E /* RenderGuardTests.swift */,
+				531B9959ADE76FA44B45FAEE /* ScreenPresenceTests.swift */,
 				8D65D00811C93D1EB5088770 /* WebHostedViewerTests.swift */,
 			);
 			path = IdleScreensTests;
@@ -389,7 +396,9 @@
 			isa = PBXGroup;
 			children = (
 				5F07833614E4B7906248FB88 /* ChannelFeedView.swift */,
+				131CF06414AB247D1E968AFF /* ChannelOverviewSheet.swift */,
 				BB7CCE04A15329FC69EA8D34 /* FeedPage.swift */,
+				89005D7893267BAA3D3EF5E6 /* RecordedSceneStore.swift */,
 				DB9C30F162B64979C4B3F04E /* RecordedSceneView.swift */,
 				4CA5F14AE8A494C8BCC9293B /* SceneInfoSheet.swift */,
 				4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */,
@@ -716,6 +725,7 @@
 				224F15826E5164E5B8904937 /* ChannelFeed.swift in Sources */,
 				F2E2957AE2BFF6FE13569E81 /* ChannelFeedView.swift in Sources */,
 				8C79AFFEA230CACF8155DA4D /* ChannelHistory.swift in Sources */,
+				B1AB82CB3AE4D9F59787540A /* ChannelOverviewSheet.swift in Sources */,
 				DAF53EE2FBE295964F3FD6C7 /* ChannelSession.swift in Sources */,
 				768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */,
 				B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */,
@@ -743,6 +753,7 @@
 				3EF0AC464EDBC7A434553D5C /* PairedTVView.swift in Sources */,
 				C0CEE7C272851FC8C239F9BA /* PreviewBudget.swift in Sources */,
 				A6C866C7D63E623487C94777 /* ProceduralChannelArt.swift in Sources */,
+				E499270D742E29F81E597D65 /* RecordedSceneStore.swift in Sources */,
 				A7FEF522E56C9E1F4D26F706 /* RecordedSceneView.swift in Sources */,
 				E85B8629E778140281F0628E /* RenderGuard.swift in Sources */,
 				028C4499DEFFECEEBE7ED0D4 /* SceneComplexity.swift in Sources */,
@@ -864,6 +875,7 @@
 				1B72EE0A2C604408347F1BA9 /* PreviewBudgetTests.swift in Sources */,
 				8A3354029A46651E796874CB /* RenderBudgetTests.swift in Sources */,
 				08C54BD3F83CCB28409BCC34 /* RenderGuardTests.swift in Sources */,
+				DA6D94C13D1A5DEF7C330339 /* ScreenPresenceTests.swift in Sources */,
 				48EAD1116ADD5778FCFD709C /* WebHostedViewerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -893,7 +905,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -935,7 +947,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1018,7 +1030,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1039,7 +1051,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1060,7 +1072,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1100,7 +1112,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091901;
+				CURRENT_PROJECT_VERSION = 2026091902;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

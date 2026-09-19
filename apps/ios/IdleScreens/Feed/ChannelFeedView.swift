@@ -26,6 +26,9 @@ struct ChannelFeedView: View {
     /// view and socket running behind the Channels tab — the viewer count read
     /// 2 for one phone, and a hidden scene burned CPU.
     @State private var isOnScreen = false
+    /// One switch for the whole feed: hide the chrome on one channel and it
+    /// stays hidden as you flip, and the status bar goes with it.
+    @State private var chromeHidden = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(channels: [PublicChannel], start: String? = nil, showsBack: Bool = false) {
@@ -47,7 +50,8 @@ struct ChannelFeedView: View {
                                  // Exactly one page holds a web view and a socket.
                                  isActive: isOnScreen && scenePhase == .active
                                      && channel.id == selection,
-                                 showsBack: showsBack)
+                                 showsBack: showsBack,
+                                 chromeHidden: $chromeHidden)
                             .environment(\.viewerChromeInsets, insets)
                             .containerRelativeFrame([.horizontal, .vertical])
                             .id(channel.id)
@@ -61,6 +65,7 @@ struct ChannelFeedView: View {
             .ignoresSafeArea()
         }
         .background(Color.black.ignoresSafeArea())
+        .statusBarHidden(chromeHidden)
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {

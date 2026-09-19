@@ -20,9 +20,14 @@ struct FeedPage: View {
 
     @State private var session = ChannelSession()
     @State private var stops: [ChannelFeed.Stop] = []
+    /// The event that put the CURRENT scene on air — history's newest
+    /// scene-backed entry. It is what `stops` drops, and exactly the
+    /// attribution the live caption wants.
+    @State private var liveEvent: ChannelEvent?
+    @State private var showOverview = false
     /// `"live"`, or a stop's key. Optional only because `scrollPosition` binds one.
     @State private var moment: String? = FeedPage.liveKey
-    @State private var chromeHidden = false
+    @Binding var chromeHidden: Bool
     @State private var showComposer = false
     @State private var showInfo = false
     @State private var toast: String?
@@ -42,18 +47,22 @@ struct FeedPage: View {
 
     var body: some View {
         ZStack {
-            Color(hex: session.backdrop ?? channel.spec?.background?.primaryColor ?? "0A0A0F")
-                .ignoresSafeArea()
+            // Behind the cards while they travel: black, so the rounded frames
+            // read as frames. The channel's own colour lives INSIDE each card.
+            Color.black.ignoresSafeArea()
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     livePage
                         .containerRelativeFrame([.horizontal, .vertical])
+                        .momentCard()
                         .id(Self.liveKey)
                     ForEach(stops) { stop in
                         HistoryMomentPage(channelId: channelId, stop: stop,
-                                          isShowing: isActive && moment == Self.key(stop))
+                                          isShowing: isActive && moment == Self.key(stop),
+                                          holdingColor: backdropHex)
                             .containerRelativeFrame([.horizontal, .vertical])
+                            .momentCard()
                             .id(Self.key(stop))
                     }
                 }
@@ -66,8 +75,28 @@ struct FeedPage: View {
             // A still page is not a dead page: the past is a scroll away.
             .scrollDisabled(!isActive)
             .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { chromeHidden.toggle() } }
+            // Pinch in to zoom out — the same thing the channel name does, for
+            // people who reach for the gesture first.
+            .simultaneousGesture(
+                MagnifyGesture().onEnded { value in
+                    if value.magnification < 0.82 { showOverview = true }
+                }
+            )
+            .onChange(of: moment) { _, _ in prefetchAroundCurrent() }
 
             if !chromeHidden {
+                // The status bar is white and SwiftUI offers no per-view way to
+                // flip it. Over a pale scene it would vanish, so the top gets
+                // the scrim every photo app uses — only while chrome shows.
+                if topScheme == .light {
+                    LinearGradient(colors: [.black.opacity(0.34), .black.opacity(0)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: insets.top + 34)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
                 chrome.transition(.opacity)
             }
             toastLayer
@@ -77,6 +106,13 @@ struct FeedPage: View {
                 .presentationDetents([.height(150), .medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showOverview) {
+            ChannelOverviewSheet(channel: channel, stops: stops, liveEvent: liveEvent,
+                                 liveLabel: session.sceneLabel ?? channel.saverLabel,
+                                 current: moment) { key in
+                withAnimation(.easeInOut(duration: 0.4)) { moment = key }
+            }
         }
         .sheet(isPresented: $showInfo) {
             SceneInfoSheet(session: session, channelId: channelId)
@@ -98,8 +134,47 @@ struct FeedPage: View {
             // History is an enhancement. If it fails the channel still plays,
             // and the page simply has nothing to its right.
             let events = (try? await app.gallery.fetchHistory(channelId: channelId)) ?? []
+            liveEvent = events.filter { $0.sceneId != nil }.max { $0.at < $1.at }
             stops = ChannelFeed.stops(from: events)
+            prefetchAroundCurrent()
         }
+    }
+
+    /// The colour under the top bar / under the caption, for whichever moment
+    /// is showing. It is the scene's declared background, not sampled pixels —
+    /// a bright subject on a dark ground will still read as dark. That is the
+    /// right call far more often than not, and it costs nothing per frame.
+    private var topHex: String? {
+        if let stop = currentStop,
+           let bg = app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.spec?.background {
+            return bg.headColor
+        }
+        return session.backdrop ?? channel.spec?.background?.headColor
+    }
+
+    private var footHex: String? {
+        if let stop = currentStop,
+           let bg = app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.spec?.background {
+            return bg.footColor
+        }
+        return session.backdropBottom ?? channel.spec?.background?.footColor ?? topHex
+    }
+
+    private var topScheme: ColorScheme { Color.isLight(hex: topHex) ? .light : .dark }
+    private var footScheme: ColorScheme { Color.isLight(hex: footHex) ? .light : .dark }
+
+    private var backdropHex: String {
+        session.backdrop ?? channel.spec?.background?.primaryColor ?? "0A0A0F"
+    }
+
+    /// Paint the pages either side BEFORE the swipe reaches them. A page that
+    /// fetches only once it is current arrives as an empty dark slab sliding
+    /// in from the edge — the single worst moment in the old transition.
+    private func prefetchAroundCurrent() {
+        let here = currentIndex ?? -1          // -1 = the live page
+        let wanted = [here - 1, here + 1, here + 2].filter { stops.indices.contains($0) }
+        app.scenes.prefetch(channelId: channelId, sceneIds: wanted.map { stops[$0].sceneId },
+                            from: app.gallery)
     }
 
     private func deactivate() {
@@ -114,6 +189,7 @@ struct FeedPage: View {
     @ViewBuilder
     private var livePage: some View {
         ZStack {
+            Color(hex: backdropHex).ignoresSafeArea()
             if isActive {
                 // The web engine draws; nothing in it can be touched.
                 WebSceneView(
@@ -141,23 +217,27 @@ struct FeedPage: View {
 
     /// Connecting, unreachable, sleeping — all native. A web error card inside
     /// a native app is exactly the seam this design exists to remove.
-    @ViewBuilder
     private var liveStateLayer: some View {
+        liveStateContent.environment(\.colorScheme, topScheme)
+    }
+
+    @ViewBuilder
+    private var liveStateContent: some View {
         if !isActive {
             EmptyView()
         } else if session.sleeping {
             VStack(spacing: 14) {
                 Image(systemName: "moon.zzz")
                     .font(.system(size: 34))
-                    .foregroundStyle(Color.textSecondary)
+                    .foregroundStyle(Color.secondary)
                 Text("sleeping")
                     .font(.headline)
-                    .foregroundStyle(Color.textPrimary)
+                    .foregroundStyle(Color.primary)
                 if canSteer {
                     Button(action: wake) {
                         Group {
                             if waking {
-                                ProgressView().tint(Color.appBackground)
+                                ProgressView().tint(Color(uiColor: .systemBackground))
                             } else {
                                 Label("Wake it", systemImage: "sun.max.fill")
                                     .font(.subheadline.weight(.semibold))
@@ -166,14 +246,14 @@ struct FeedPage: View {
                         .frame(minWidth: 132, minHeight: 22)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 12)
-                        .foregroundStyle(Color.appBackground)
-                        .background(Color.textPrimary, in: Capsule())
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .background(Color.primary, in: Capsule())
                     }
                     .disabled(waking)
                 } else {
                     Text("It'll come back when its owner wakes it.")
                         .font(.footnote)
-                        .foregroundStyle(Color.textSecondary)
+                        .foregroundStyle(Color.secondary)
                 }
             }
             .padding(28)
@@ -182,25 +262,25 @@ struct FeedPage: View {
             VStack(spacing: 14) {
                 Image(systemName: "wifi.exclamationmark")
                     .font(.system(size: 32))
-                    .foregroundStyle(Color.textSecondary)
+                    .foregroundStyle(Color.secondary)
                 Text("can't reach this channel")
                     .font(.headline)
-                    .foregroundStyle(Color.textPrimary)
+                    .foregroundStyle(Color.primary)
                 Button("Try again") {
                     session.retry()
                     reloadCount += 1
                 }
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.appBackground)
+                .foregroundStyle(Color(uiColor: .systemBackground))
                 .padding(.horizontal, 18)
                 .padding(.vertical, 9)
-                .background(Color.textPrimary, in: Capsule())
+                .background(Color.primary, in: Capsule())
             }
             .padding(28)
             .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
         } else if session.phase == .connecting {
             Circle()
-                .fill(Color.textPrimary.opacity(0.18))
+                .fill(Color.primary.opacity(0.18))
                 .frame(width: 10, height: 10)
                 .scaleEffect(pulse ? 1.6 : 0.8)
                 .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
@@ -212,14 +292,22 @@ struct FeedPage: View {
 
     private var chrome: some View {
         VStack(spacing: 0) {
+            // A third of the wall has a LIGHT background, where white labels
+            // vanish. Each region takes the colour scheme of what it sits on,
+            // so text, icons and the glass itself flip together — the system's
+            // own light/dark machinery, pointed at the artwork.
             topBar
+                .environment(\.colorScheme, topScheme)
             Spacer()
             HStack(alignment: .bottom, spacing: 12) {
                 caption
                 Spacer(minLength: 0)
                 actionRail
             }
+            .environment(\.colorScheme, footScheme)
         }
+        .animation(.easeInOut(duration: 0.35), value: topScheme)
+        .animation(.easeInOut(duration: 0.35), value: footScheme)
         .padding(.horizontal, 16)
         .padding(.top, insets.top + 6)
         .padding(.bottom, insets.bottom + 14)
@@ -231,7 +319,7 @@ struct FeedPage: View {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
                         .font(.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.primary)
                         .frame(width: 38, height: 38)
                         .glassCapsule(shape: Circle())
                 }
@@ -244,7 +332,7 @@ struct FeedPage: View {
             if isLive, let viewers = session.viewers, viewers > 0 {
                 Label("\(viewers)", systemImage: "eye.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.primary)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 8)
                     .glassCapsule(shape: Capsule())
@@ -269,7 +357,7 @@ struct FeedPage: View {
                         .font(.caption)
                         .opacity(0.75)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .glassCapsule(shape: Capsule())
@@ -292,55 +380,106 @@ struct FeedPage: View {
                         .opacity(0.75)
                 }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .glassPanel(shape: Capsule())
         }
     }
 
-    /// Bottom-left, where a feed puts what you are looking at.
+    /// Bottom-left, where a feed puts what you are looking at: the scene's
+    /// name largest, then who made it and on what, then the channel — which is
+    /// also the way out to the zoomed-out timeline.
     private var caption: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                if channel.isProtected == true {
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
-                        .accessibilityLabel("Claimed")
-                }
-                Text(channel.displayLabel)
-                    .font(.title3.weight(.bold))
-                    .lineLimit(1)
+        let event = currentStop?.event ?? liveEvent
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(sceneTitle)
+                .font(.title2.weight(.bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            credits(for: event)
+
+            // The prompt behind the change: the one thing here a picture of
+            // the same scene could not tell you.
+            if let intent = currentStop?.event.intent, !intent.isEmpty {
+                Text(intent)
+                    .font(.caption)
+                    .opacity(0.8)
+                    .lineLimit(3)
             }
-            if let stop = currentStop {
-                Text(stop.event.summary ?? "an earlier scene")
-                    .font(.subheadline)
-                    .lineLimit(2)
-                // The prompt behind the change: the one thing here a picture
-                // of the same scene could not tell you.
-                if let intent = stop.event.intent, !intent.isEmpty {
-                    Text(intent)
-                        .font(.caption)
-                        .opacity(0.78)
-                        .lineLimit(3)
+
+            Button { showOverview = true } label: {
+                HStack(spacing: 6) {
+                    if channel.isProtected == true {
+                        Image(systemName: "lock.fill").font(.caption2)
+                    }
+                    Text(channel.displayLabel)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Image(systemName: "square.grid.3x3.fill")
+                        .font(.caption2)
+                        .opacity(0.8)
                 }
-                if let who = Self.attribution(stop.event) {
-                    Text(who).font(.caption2).opacity(0.65).lineLimit(1)
-                }
-            } else {
-                Text(session.sceneLabel ?? channel.saverLabel ?? "live")
-                    .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .glassCapsule(shape: Capsule())
+            }
+            .accessibilityLabel("\(channel.displayLabel), show timeline")
+            .accessibilityHint("Zooms out to everything this channel has shown")
+        }
+        .foregroundStyle(Color.primary)
+        .multilineTextAlignment(.leading)
+        // Scenes are arbitrary art, so the text carries its own halo — in the
+        // OPPOSITE tone to the text, or it just smudges it.
+        .shadow(color: (footScheme == .light ? Color.white : Color.black).opacity(0.6), radius: 6, y: 1)
+        .frame(maxWidth: 280, alignment: .leading)
+    }
+
+    private var sceneTitle: String {
+        if let stop = currentStop {
+            return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.label
+                ?? stop.event.summary ?? "an earlier scene"
+        }
+        return session.sceneLabel ?? channel.saverLabel ?? channel.displayLabel
+    }
+
+    /// The artist, then the small print.
+    ///
+    /// One credit, signed with a brush: whoever made this scene is its artist,
+    /// whether that is a named agent or — when nobody signed it — the model
+    /// itself. Everything else (model, harness, when) is one quiet line under
+    /// it. Four chips of equal weight read as a settings panel, not a credit.
+    @ViewBuilder
+    private func credits(for event: ChannelEvent?) -> some View {
+        let actor = SteerLine.namedActor(event?.actor ?? channel.lastSteer?.actor)
+        let model = SteerLine.distinct(event?.model ?? channel.lastSteer?.model, from: actor)
+        let harness = SteerLine.distinct(event?.harness ?? channel.lastSteer?.harness, from: actor, model)
+        let when: String? = {
+            if let event { return SteerLine.ago(Int(event.at)) }
+            return channel.lastEventAt.map { SteerLine.ago($0) }
+        }()
+        let artist = actor ?? model
+        // The model is small print only when someone else took the credit.
+        let small = [actor == nil ? nil : model, harness.map { "via \($0)" }, when].compactMap { $0 }
+
+        VStack(alignment: .leading, spacing: 5) {
+            if let artist {
+                Label(artist, systemImage: "paintbrush.pointed.fill")
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                if let steered = SteerLine.text(for: channel) {
-                    Text(steered).font(.caption2).opacity(0.65).lineLimit(1)
-                }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .glassPanel(shape: Capsule())
+                    .accessibilityLabel("Made by \(artist)")
+            }
+            if !small.isEmpty {
+                Text(small.joined(separator: " · "))
+                    .font(.caption)
+                    .opacity(0.78)
+                    .lineLimit(1)
             }
         }
-        .foregroundStyle(.white)
-        .multilineTextAlignment(.leading)
-        // Scenes are arbitrary art: white text needs its own contrast.
-        .shadow(color: .black.opacity(0.65), radius: 6, y: 1)
-        .frame(maxWidth: 270, alignment: .leading)
     }
 
     static func attribution(_ event: ChannelEvent) -> String? {
@@ -377,7 +516,7 @@ struct FeedPage: View {
             ShareLink(item: app.gallery.viewerURL(for: channelId)) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.primary)
                     .frame(width: 46, height: 46)
                     .glassCapsule(shape: Circle())
             }
@@ -389,7 +528,7 @@ struct FeedPage: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.primary)
                 .frame(width: 46, height: 46)
                 .glassCapsule(shape: Circle())
         }
@@ -403,7 +542,7 @@ struct FeedPage: View {
                 Spacer()
                 Text(toast)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color(white: 1))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(.black.opacity(0.7), in: Capsule())
@@ -456,52 +595,73 @@ struct FeedPage: View {
     }
 }
 
-/// One past scene. Fetches its recorded spec the first time it is needed, and
-/// only animates while it is the page on screen — a neighbour holds its colour.
+/// One past scene. Its spec comes from the shared store — usually already
+/// there, because the page before it prefetched it — so it slides in as a
+/// picture, not as a blank. It only ANIMATES while it is the page on screen.
 private struct HistoryMomentPage: View {
     let channelId: String
     let stop: ChannelFeed.Stop
     let isShowing: Bool
+    /// Held while the scene loads: the channel's own colour, never bare black.
+    let holdingColor: String
     @Environment(AppState.self) private var app
-    @State private var scene: RecordedScene?
-    @State private var failed = false
+
+    private var scene: RecordedScene? {
+        app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)
+    }
 
     var body: some View {
         ZStack {
-            Color(hex: scene?.spec?.background?.primaryColor ?? "0A0A0F").ignoresSafeArea()
-            if let scene, isShowing {
-                RecordedSceneView(scene: scene, channelId: channelId)
+            Color(hex: scene?.spec?.background?.primaryColor ?? holdingColor).ignoresSafeArea()
+            if let scene {
+                RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
+                    .ignoresSafeArea()
                     .transition(.opacity)
-            } else if failed {
+            } else if app.scenes.didFail(channelId: channelId, sceneId: stop.sceneId) {
                 VStack(spacing: 12) {
                     Image(systemName: "clock.badge.exclamationmark")
                         .font(.system(size: 30))
-                        .foregroundStyle(Color.textSecondary)
+                        .foregroundStyle(Color.secondary)
                     Text("couldn't load this moment")
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.textPrimary)
-                    Button("Try again") { Task { await load() } }
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.textPrimary)
+                        .foregroundStyle(Color.primary)
+                    Button("Try again") {
+                        Task { await app.scenes.load(channelId: channelId, sceneId: stop.sceneId,
+                                                     from: app.gallery, retry: true) }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.primary)
                 }
                 .padding(24)
                 .glassPanel(shape: RoundedRectangle(cornerRadius: 20))
             } else if isShowing {
-                ProgressView().tint(Color.textSecondary)
+                ProgressView().tint(.white.opacity(0.7))
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: scene != nil)
-        .task(id: isShowing) {
-            if isShowing, scene == nil { await load() }
-        }
+        .animation(.easeInOut(duration: 0.3), value: scene != nil)
+        // The safety net under the prefetch: a page that somehow arrives
+        // without its scene still asks for it.
+        .task { await app.scenes.load(channelId: channelId, sceneId: stop.sceneId, from: app.gallery) }
     }
+}
 
-    private func load() async {
-        failed = false
-        do {
-            scene = try await app.gallery.fetchScene(channelId: channelId, sceneId: stop.sceneId)
-        } catch {
-            failed = true
+private extension View {
+    /// Moments travel as cards: mid-swipe a page pulls back slightly and
+    /// rounds its corners, so you see two frames of a timeline passing rather
+    /// than one slab pushing another off the edge. At rest it is full-bleed.
+    func momentCard() -> some View {
+        scrollTransition(.interactive, axis: .horizontal) { content, phase in
+            content
+                .scaleEffect(phase.isIdentity ? 1 : 0.93)
+                .opacity(phase.isIdentity ? 1 : 0.72)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
+}
+
+extension SpecSubset.Background {
+    /// Colour at the top of the background — under the status pill.
+    var headColor: String? { stops?.first?.color ?? color ?? primaryColor }
+    /// Colour at the bottom — under the caption. Differs for a gradient.
+    var footColor: String? { stops?.last?.color ?? color ?? primaryColor }
 }

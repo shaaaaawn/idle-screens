@@ -51,6 +51,10 @@ final class ChannelSession {
     /// Backdrop colour taken from the spec before anything renders, so the
     /// entry transition is channel-coloured rather than a black flash.
     private(set) var backdrop: String?
+    /// The colour at the bottom of the scene's background. A gradient can be
+    /// pale at the top and dark at the foot (or the reverse), and the caption
+    /// lives at the foot — so it is judged separately from the top bar.
+    private(set) var backdropBottom: String?
 
     private var channelId: String?
     private let ws: ChannelWSClient
@@ -204,12 +208,12 @@ final class ChannelSession {
         // just `{"id": "warp"}`. Either way label-then-id is the right read.
         sceneLabel = fields["label"]?.stringValue ?? fields["id"]?.stringValue
         if case .object(let bg)? = fields["background"] {
-            if let color = bg["color"]?.stringValue {
+            if case .array(let stops)? = bg["stops"], !stops.isEmpty {
+                if case .object(let first)? = stops.first { backdrop = first["color"]?.stringValue ?? backdrop }
+                if case .object(let last)? = stops.last { backdropBottom = last["color"]?.stringValue }
+            } else if let color = bg["color"]?.stringValue {
                 backdrop = color
-            } else if case .array(let stops)? = bg["stops"],
-                      case .object(let first)? = stops.first,
-                      let color = first["color"]?.stringValue {
-                backdrop = color
+                backdropBottom = color
             }
         }
         isClassicSpec = false
