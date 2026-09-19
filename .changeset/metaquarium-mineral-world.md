@@ -28,3 +28,13 @@ unchanged.
 - `marineSnow` (0–1) — slow snow lit by the crystals it falls through.
 
 The world's one rule: minerals are faceted, the living and the made are voxel.
+
+`vignette` — small scripted scenes for two or three fish. A script of beats in
+which actors `a b c` (the first fish of the cast) go to the space's named marks,
+face each other and take turns at gestures (`talk nod shake hop spin wiggle bow
+peek rest`, plus `circle` and `follow`): a visitor is met at the door and sat
+down to tea; lamps out and bed; hide and seek for three. Presets `tea`,
+`bedtime`, `seek`, or write your own. Closed-form and looping (a closing beat
+walks everyone home), so it is frame-addressable like the rest of the tank;
+`inspect()` reports what each actor is doing. Zero-dep parser exported from
+`/manifest` for server-side validation.

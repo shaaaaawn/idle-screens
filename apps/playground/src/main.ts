@@ -174,12 +174,28 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
-  // Indoors: the room behind the round door. The camera orbits INSIDE the dome.
+  // Indoors: the room behind the round door — and the small scenes played in
+  // it. Two or three fish, a script of beats; ?saver=metaquarium-vignette-<name>.
+  ...([
+    ['tea', '100:1,257:1', 'a friend calls round for tea', 118, 300],
+    ['bedtime', '257:1,100:1', 'lamps, a last word, bed', 112, 235],
+    ['seek', '100:1,257:1,glowfish:1', 'hide and seek, three fish', 124, 20],
+  ] as const).map(([name, cast, what, dist, az]) =>
+    createMetaquarium({
+      id: `metaquarium-vignette-${name}`, label: `Metaquarium (vignette ${name} — ${what})`,
+      params: {
+        interior: 'geode', vignette: name, fishMix: cast, dracoPath: asset('/draco/'),
+        bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalTint: 0.7, bodyWiggle: 0.25,
+        fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
+        cameraDistance: dist, cameraElevation: 14, cameraAzimuth: az, autoRotate: 0.6,
+      }, catalog: LOCAL_CATALOG,
+    }),
+  ),
   createMetaquarium({
     id: 'metaquarium-study-geode-interior', label: 'Metaquarium (study geode interior)',
     params: {
-      interior: 'geode', bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalScale: 1, crystalTint: 0.7,
-      fishMix: '100:2,257:2,glowfish:1', dracoPath: asset('/draco/'), swimStyle: 'drift', swimSpeed: 0.4, swimVariance: 0.5,
+      interior: 'geode', vignette: 'tea', bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalScale: 1, crystalTint: 0.7,
+      fishMix: '100:1,257:1', bodyWiggle: 0.25,
       fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
       cameraDistance: 100, cameraElevation: 12, cameraAzimuth: 300, autoRotate: 1.4,
     }, catalog: LOCAL_CATALOG,
@@ -507,6 +523,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
 const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ['metaquarium-world-', 'worlds'],
   ['metaquarium-study-', 'studies'],
+  ['metaquarium-vignette-', 'vignettes'],
   ['metaquarium-crystal-', 'crystals'],
   ['metaquarium-env-', 'environments'],
   ['metaquarium-swim-', 'swim styles'],

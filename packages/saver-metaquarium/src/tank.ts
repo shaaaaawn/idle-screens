@@ -54,6 +54,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { buildStudio, type Studio } from './studio';
+import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
   clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
   type Cluster, type Emitter,
@@ -536,6 +537,10 @@ class TankInstance implements SaverInstance {
   private readonly lightScratch: [number, number, number] = [0, 0, 0];
   // Fish glow: built on the first glowing fish, never for a cast without one.
   private glowCards: GlowCards | null = null;
+  /** The scripted scene the first fish of the cast are playing, if any. */
+  private vignette: Vignette | null = null;
+  private vignetteKey = '';
+  private warnedVignette = '';
   /** Lit mode: the rig, and the glow parts competing for its point lights. */
   private lit = false;
   private readonly flatFill: HemisphereLight;
@@ -1088,6 +1093,27 @@ class TankInstance implements SaverInstance {
     this.flatFill.visible = !want;
   }
 
+  /** Parse the `vignette` param when it (or the space it plays in) changes. */
+  private buildVignette(): void {
+    const script = resolveVignette(this.str('vignette'));
+    const indoors = this.str('interior') === 'geode';
+    const scale = this.num('crystalScale');
+    const key = `${script}|${indoors}|${scale}`;
+    if (key === this.vignetteKey) return;
+    this.vignetteKey = key;
+    this.vignette = null;
+    if (!script) return;
+    const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
+    const k = indoors ? scale : 1;
+    const marks: Marks = Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }]));
+    const parsed = parseVignette(script, marks);
+    if (parsed.problems.length && script !== this.warnedVignette) {
+      this.warnedVignette = script;
+      console.warn(`[metaquarium] vignette: ${parsed.problems.join('; ')}`);
+    }
+    if (parsed.actors > 0 && parsed.duration > 0) this.vignette = parsed;
+  }
+
   private installPools(): void {
     this.poolsInstalled = true;
     installFloorPools(this.floorMat, this.poolUniforms);
@@ -1516,6 +1542,7 @@ class TankInstance implements SaverInstance {
       : tSec * speed;
 
     this.ensureStudio();
+    this.buildVignette();
     this.reconcile();
 
     // Camera orbit
@@ -1955,10 +1982,18 @@ class TankInstance implements SaverInstance {
         const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
         if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
+      // An actor in a vignette is not swimming: the script places it.
+      const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
+      if (act) { px = act.x; y = act.y; pz = act.z; }
       f.group.position.set(px, y, pz);
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
-      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
-      f.group.rotateZ(pose.roll);
+      if (act) {
+        f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
+        f.group.rotateZ(act.roll);
+      } else {
+        f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
+        f.group.rotateZ(pose.roll);
+      }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
@@ -2041,6 +2076,12 @@ class TankInstance implements SaverInstance {
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
       },
+      vignette: this.vignette ? {
+        actors: this.vignette.actors,
+        beats: this.vignette.beats.length,
+        duration: Math.round(this.vignette.duration * 10) / 10,
+        doing: Array.from({ length: this.vignette.actors }, (_, i) => poseOf(this.vignette!, i, this.lastFrameT / 1000)?.doing ?? null),
+      } : null,
       glow: {
         lighting: this.lit ? 'lit' : 'flat',
         glowLights: this.studio?.lights.filter((l) => l.intensity > 0).length ?? 0,

@@ -32,7 +32,7 @@ const ALL_FISH = [...LOCAL_FISH, ...IPFS_FISH];
  */
 const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
-  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath']],
+  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
   // The renderer's look: on by default, listed so it can be turned off.
   ['look', ['fishLighting', 'fishGlow', 'fishMetal']],
   ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
@@ -47,6 +47,7 @@ const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
 /** Starting points for the DSL strings — a text box with no examples is a
  *  param nobody tries. Offered as suggestions; anything may be typed. */
 const DSL_PRESETS: Readonly<Record<string, readonly string[]>> = {
+  vignette: ['tea', 'bedtime', 'seek', 'a =table, b =door | b >table @a | a @b talk, b @a nod | b @a talk, a @b wiggle | a b circle rug'],
   propMix: [
     'crystal#hero:1@lotus/hotpink',
     'crystal:6@lotus/rainbow',

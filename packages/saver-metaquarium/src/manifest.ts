@@ -164,6 +164,17 @@ export const METAQUARIUM_PARAMS = {
    *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
   rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
+  /** A small scene for the first two or three fish of the cast: a script of
+   *  beats in which actors `a b c` go to the space's marks, face each other and
+   *  take turns at gestures. A preset name (`tea · bedtime · seek`) or a script:
+   *  `a =table, b =door | b >table @a | a @b talk, b @a nod | a b circle rug`.
+   *  Words: `=mark` start there · `>mark` go there · `@target` face · `circle X`
+   *  · `follow X` · gestures `talk nod shake hop spin wiggle bow peek rest` ·
+   *  leading `6s:` sets a beat's length. Marks indoors (`interior: geode`):
+   *  rug table bed shelf stove lamp armchair door window chest chandelier;
+   *  outdoors: centre left right front back high low. Closed-form and looping;
+   *  fish beyond the actors swim as usual. Empty (default) is no vignette. */
+  vignette: { type: 'string', default: '', ease: 'step' },
   /** `geode` sets the whole scene INSIDE a geode home: a crystal-lined dome
    *  with agate strata, a plank floor and rug, and the inhabitants' voxel
    *  furniture, lit by a chandelier, a lamp, a stove and a round window. The
@@ -316,6 +327,7 @@ export * from './farm';
 export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, type FishMixResult, type FishSlot, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
 
 export * from './environments';
+export { parseVignette, resolveVignette, VIGNETTES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {
   parsePropMix, CRYSTAL_HABITS, CRYSTAL_PALETTES, ENV_PROP_MIX, MAX_CLUSTERS,
   type PropMixEntry, type PropMixResult, type CrystalHabit,
