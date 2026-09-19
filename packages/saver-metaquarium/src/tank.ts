@@ -923,9 +923,10 @@ class TankInstance implements SaverInstance {
     const rocks = this.num('rockDensity');
     const homes = this.num('geodeHomes');
     const veins = this.num('rockVeins');
+    const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow');
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -934,9 +935,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0) {
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, snow, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same
@@ -1565,7 +1566,7 @@ class TankInstance implements SaverInstance {
     this.buildRoom();
     this.buildProps();
     this.buildScenery();
-    this.scenery?.setFrame(tSec);
+    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,

@@ -164,6 +164,11 @@ export const METAQUARIUM_PARAMS = {
    *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
   rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
+  /** `geode` sets the whole scene INSIDE a geode home: a crystal-lined dome
+   *  with agate strata, a plank floor and rug, and the inhabitants' voxel
+   *  furniture, lit by a chandelier, a lamp, a stove and a round window. The
+   *  fish swim the room. Pairs with the default `void` environment. */
+  interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },

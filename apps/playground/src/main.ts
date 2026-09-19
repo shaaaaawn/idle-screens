@@ -174,6 +174,16 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   }),
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
+  // Indoors: the room behind the round door. The camera orbits INSIDE the dome.
+  createMetaquarium({
+    id: 'metaquarium-study-geode-interior', label: 'Metaquarium (study geode interior)',
+    params: {
+      interior: 'geode', bubbleVents: 0.5, propMix: 'crystal:1@lotus/purple', crystalScale: 1, crystalTint: 0.7,
+      fishMix: '100:2,257:2,glowfish:1', dracoPath: asset('/draco/'), swimStyle: 'drift', swimSpeed: 0.4, swimVariance: 0.5,
+      fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
+      cameraDistance: 100, cameraElevation: 12, cameraAzimuth: 300, autoRotate: 1.4,
+    }, catalog: LOCAL_CATALOG,
+  }),
   createMetaquarium({
     id: 'metaquarium-study-flora', label: 'Metaquarium (study flora)',
     params: {

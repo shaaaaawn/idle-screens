@@ -12,6 +12,11 @@ unchanged.
   recessed inside (round door, lit window, lamp, steps, a chimney that vents
   bubbles). Three habits — cottage, hall, tower. Each home is a warm emitter in
   the light field.
+- `interior: geode` — sets the whole scene INSIDE a geode home: a dome lined
+  with thousands of small crystals over agate strata, a plank floor and rug, and
+  the inhabitants' voxel furniture (bed, tea table, bookshelf, stove and kettle,
+  reading corner, round door and window, chandelier). Its lights are emitters in
+  the light field and wear bloom cards; the fish swim the room.
 - `rockDensity` (0–1) + `rockVeins` (0–1, default 0.7) — boulders, a ridge and an
   arch, fractured by fissures cut from the stone's own facets, with forks, a
   white-hot core and crystals pushing out of the crack.

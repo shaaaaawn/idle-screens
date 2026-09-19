@@ -9,6 +9,8 @@ import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './cryst
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
+import { buildGeodeInterior } from './interior';
+import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildRock, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
@@ -19,6 +21,8 @@ export interface SceneryOptions {
   flora: number;
   bubbles: number;
   snow: number;
+  /** Build the scene INSIDE a geode home instead of out on the floor. */
+  interior?: boolean;
   cap: number;
   scale: number;
 }
@@ -32,7 +36,7 @@ export interface Scenery {
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
-  setFrame(t: number): void;
+  setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number): void;
 }
 
 /** Each feature gets its own fork, so adding flora never rearranges a village. */
@@ -143,6 +147,28 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     homeLights.push(home.emitter);
     obstacles.push(home.obstacle);
     counts.homes!++;
+  }
+  // Indoors: the whole scene is the room behind a geode's round door.
+  const shellParts: BufferGeometry[] = [];
+  let cards: GlowCards | null = null;
+  if (opts.interior) {
+    const room = buildGeodeInterior(rng.fork(7), { tint: anchors[0]!.color, scale: s, floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
+    shellParts.push(...room.shell);
+    interiors.push(...room.glow);
+    details.push(...room.voxels);
+    vents.push(...room.vents);
+    homeLights.push(...room.emitters);
+    obstacles.push(...room.obstacles);
+    counts.interior = 1;
+    counts.furniture = room.obstacles.length;
+    cards = buildGlowCards(room.lights.length);
+    const c = new Color();
+    room.lights.forEach((l, i) => {
+      c.set(l.color);
+      cards!.set(i, l.x, l.y, l.z, l.size, c.r, c.g, c.b, i * 1.3);
+    });
+    cards.mesh.userData.mqLights = room.lights.length;
+    group.add(cards.mesh);
   }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
     density: opts.flora, cap: opts.cap, scale: s,
@@ -257,6 +283,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   particles(false, counts.snow);
   // Closed solids draw front faces only — half the fragment work of the
   // DoubleSide everything used to wear; only the open geode throat needs both.
+  batch(group, shellParts, 'geode-room', FrontSide);
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
   batch(group, stones, 'rock-formations', FrontSide);
@@ -274,6 +301,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       }
       return h;
     },
-    setFrame(t) { for (const clock of clocks) clock.value = t; },
+    setFrame(t, fog, glow = 1) {
+      for (const clock of clocks) clock.value = t;
+      if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, 0.35, fog);
+    },
   };
 }
