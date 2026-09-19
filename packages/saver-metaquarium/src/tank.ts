@@ -1,4 +1,3 @@
-import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
@@ -525,8 +524,6 @@ class TankInstance implements SaverInstance {
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
-  private scenery: Scenery | null = null;
-  private sceneryKey = "";
   private crystals: CrystalField | null = null;
   private clusters: Cluster[] = [];
   private emitters: Emitter[] = [];
@@ -868,7 +865,7 @@ class TankInstance implements SaverInstance {
     const scale = this.num('crystalScale');
     const wild = this.num('crystalWild');
     const budget = this.quality.props;
-    const key = `${mix}|${scale}|${wild}|${this.num('rockDensity')}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    const key = `${mix}|${scale}|${wild}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
     if (key === this.propsKey) return;
     this.propsKey = key;
 
@@ -904,7 +901,7 @@ class TankInstance implements SaverInstance {
     if (!layout.clusters.length) return;
 
     const terrain = this.terrainAt;
-    for (const c of layout.clusters) c.y = (terrain ? terrain(c.x, c.z) : 0) + (this.num('rockDensity') > 0 ? 6 * scale : 0);
+    for (const c of layout.clusters) c.y = terrain ? terrain(c.x, c.z) : 0;
     this.clusters = layout.clusters;
     this.emitters = emittersOf(this.clusters);
     const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
@@ -917,27 +914,6 @@ class TankInstance implements SaverInstance {
     const clusters = this.clusters;
     this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
     this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
-  }
-
-  private buildScenery(): void {
-    const rocks = this.num('rockDensity');
-    const homes = this.num('geodeHomes');
-    const flora = this.num('floraDensity');
-    const key = `${this.propsKey}|${rocks}|${homes}|${flora}`;
-    if (key === this.sceneryKey) return;
-    this.sceneryKey = key;
-    if (this.scenery) {
-      this.scene.remove(this.scenery.group);
-      disposeOwned(this.scenery.group);
-      this.scenery = null;
-    }
-    const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0) {
-      this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, homes, flora, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
-      this.scene.add(this.scenery.group);
-    }
-    this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
   }
 
   /**
@@ -977,17 +953,10 @@ class TankInstance implements SaverInstance {
       p.set(part.x, part.y, part.z).multiplyScalar(body.scale.x);
       p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
       p.applyQuaternion(f.group.quaternion).add(f.group.position);
-      // A COAT (a glow part that is most of the silhouette — the angelfish's
-      // whole fin outline) is not a lamp. Sized and lit like an accent it
-      // washed a quarter of the frame in its colour, in every scene, from a
-      // single fish: it keeps a close, faint rim and casts nothing.
-      const size = part.coat
-        ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
-        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
-      const k = g.gain * (part.coat ? 0.5 : 1);
-      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
+      const size = Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
+      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * g.gain, part.g * g.gain, part.b * g.gain, phase);
       n += 1;
-      if (this.studio?.lights.length && !part.coat) {
+      if (this.studio?.lights.length) {
         this.lightBids.push({
           d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
           x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
@@ -998,9 +967,7 @@ class TankInstance implements SaverInstance {
     p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
     p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
     p.applyQuaternion(f.group.quaternion).add(f.group.position);
-    // The floor takes light from accents only, over a fish-sized reach.
-    if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
-    const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
+    const reach = Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8;
     this.fishEmitters.push({
       x: p.x, y: p.y, z: p.z, r: g.r * 0.7 * g.gain, g: g.g * 0.7 * g.gain, b: g.b * 0.7 * g.gain,
       reach, phase, owner: f.index,
@@ -1551,8 +1518,6 @@ class TankInstance implements SaverInstance {
     // everything else so it stays pure in t.
     this.buildRoom();
     this.buildProps();
-    this.buildScenery();
-    this.scenery?.setFrame(tSec);
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,
@@ -2036,7 +2001,6 @@ class TankInstance implements SaverInstance {
         floorPools: Number(this.poolUniforms.uMqPoolN!.value) - Math.min(this.emitters.length, MAX_POOLS),
       },
       props: {
-        scenery: this.scenery?.counts ?? {},
         propMix: this.str('propMix'),
         envProps: this.str('envProps'),
         budget: this.quality.props,

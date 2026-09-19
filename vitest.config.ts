@@ -57,6 +57,10 @@ export default defineConfig({
         // unit-hostile shape as tank.ts; the geometry/layout math it consumes
         // stays in crystals.ts (gated). Covered by playground e2e (MQ40).
         'packages/saver-metaquarium/src/crystal-mesh.ts',
+        // PMREMGenerator needs a real WebGLRenderer — same unit-hostile shape
+        // as tank.ts/crystal-mesh.ts. Covered by playground e2e (fishLighting
+        // scenes mount a real renderer).
+        'packages/saver-metaquarium/src/studio.ts',
         // Covered by playground e2e (element.spec.ts, worker.spec.ts).
         'packages/core/src/idle-screen.element.ts',
       ],
