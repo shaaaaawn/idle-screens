@@ -162,7 +162,6 @@ export const METAQUARIUM_PARAMS = {
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
-  skyShards: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.

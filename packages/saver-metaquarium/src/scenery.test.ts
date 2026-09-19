@@ -3,8 +3,8 @@ import { Mesh, Points, ShaderLib, type WebGLRenderer, type Material } from 'thre
 import { describe, expect, it } from 'vitest';
 import { buildScenery, type SceneryOptions } from './scenery';
 
-const off: SceneryOptions = { rocks: 0, homes: 0, flora: 0, sky: 0, bubbles: 0, snow: 0, cap: 8, scale: 1 };
-const full: SceneryOptions = { ...off, rocks: 1, homes: 3, flora: 1, sky: 1, bubbles: 1, snow: 1 };
+const off: SceneryOptions = { rocks: 0, homes: 0, flora: 0, bubbles: 0, snow: 0, cap: 8, scale: 1 };
+const full: SceneryOptions = { ...off, rocks: 1, homes: 3, flora: 1, bubbles: 1, snow: 1 };
 const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
 const build = (options = full, seed = 42) => buildScenery([], createRng(seed), terrain, options);
 const buffers = (world: ReturnType<typeof build>) => world.group.children.map(o => {
@@ -22,11 +22,11 @@ describe('mineral world', () => {
     expect(buffers(build())).toEqual(buffers(build()));
     expect(buffers(build(full, 43))).not.toEqual(buffers(build()));
     const geology = (opts: SceneryOptions) => buffers(build(opts)).filter(b => b[0] === 'rock-formations');
-    expect(geology(full)).toEqual(geology({ ...full, flora: 0, sky: 0, bubbles: 0, snow: 0 }));
+    expect(geology(full)).toEqual(geology({ ...full, flora: 0, bubbles: 0, snow: 0 }));
   });
   it('batches every layer with finite geometry and owned resources', () => {
     const world = build();
-    expect(world.group.children.length).toBeLessThanOrEqual(8);
+    expect(world.group.children.length).toBeLessThanOrEqual(7);
     for (const object of world.group.children) {
       expect(object instanceof Mesh || object instanceof Points).toBe(true);
       const mesh = object as Mesh;
@@ -44,7 +44,6 @@ describe('mineral world', () => {
     const world = build({ ...full, cap: 4 });
     expect(world.counts.homes).toBe(2);
     expect(world.counts.flora).toBe(20);
-    expect(world.counts.skyShards).toBe(8);
     expect(world.counts.bubbles).toBe(48);
     expect(world.counts.snow).toBe(100);
     expect(world.counts.arches).toBe(1);
@@ -68,7 +67,7 @@ describe('mineral world', () => {
       }
       if (object instanceof Points) particlePrograms.push(material.customProgramCacheKey());
     }
-    expect(clocks).toHaveLength(4);
+    expect(clocks).toHaveLength(3);
     expect(new Set(particlePrograms).size).toBe(2);
     const before = buffers(world);
     world.setFrame(73.5);
