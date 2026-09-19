@@ -145,6 +145,46 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
+  // so the props are judged without waiting on a gateway.
+  createMetaquarium({
+    id: 'metaquarium-crystal-lotus',
+    label: 'Metaquarium (crystal lotus)',
+    params: {
+      propMix: 'crystal#hero:1@lotus/hotpink,crystal:1@lotus/orange,crystal:1@lotus/glass',
+      fishCount: 3, fishUrl: LOCAL_FISH_URL, swimStyle: 'hover', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 95, cameraElevation: 20,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-crystal-habits',
+    label: 'Metaquarium (crystal habits)',
+    params: {
+      propMix: 'crystal:1@lotus/hotpink,crystal:1@spire/cyan,crystal:1@druse/yellow,crystal:1@scatter/blue,crystal:1@spire/glass',
+      fishCount: 2, fishUrl: LOCAL_FISH_URL, fogColor: '#020108', floorColor: '#070a12',
+      cameraDistance: 260, cameraElevation: 22, autoRotate: 3,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-crystal-tint',
+    label: 'Metaquarium (crystal tint, opt-in)',
+    params: {
+      propMix: 'crystal:6@druse/rainbow,crystal:2@lotus/rainbow', crystalTint: 1,
+      fishCount: 6, fishUrl: LOCAL_FISH_URL, swimStyle: 'bottom', swimVariance: 0.6,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 150, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  ...(['abyss', 'reef', 'ice', 'vent', 'universe'] as const).map((env) =>
+    createMetaquarium({
+      id: `metaquarium-crystal-env-${env}`,
+      label: `Metaquarium (crystals in ${env})`,
+      params: { environment: env, envProps: 'on', fishCount: 4, fishUrl: LOCAL_FISH_URL, moteDensity: 0.4, cameraDistance: 190, cameraElevation: 16 },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
   // Choreography showcases: pathShape x formationShape x maneuver.
   // ?saver=metaquarium-choreo-<name>.
   createMetaquarium({

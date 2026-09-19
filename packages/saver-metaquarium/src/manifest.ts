@@ -139,6 +139,26 @@ export const METAQUARIUM_PARAMS = {
    *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
    *  to a fifth. Only ever expands, so the spacing guarantee holds. */
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette]`.
+   *  One kind so far — `crystal`, generated from the seed (nothing is
+   *  fetched), habits `lotus · spire · druse · scatter`, palettes `env`
+   *  (the room's colours) · `rainbow` · a named colour · `glass`.
+   *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
+   *  nothing and draws no rng, so every published scene is unchanged. */
+  propMix: { type: 'string', default: '', ease: 'step' },
+  /** `on` lets a named environment bring its own crystals when `propMix` is
+   *  empty. Off by default: a room never changes on a wall by itself. */
+  envProps: { type: 'enum', default: 'off', options: ['off', 'on'], ease: 'step' },
+  /** Cluster size multiplier. Rebuilds the layout, so it steps. */
+  crystalScale: { type: 'number', default: 1, min: 0.4, max: 2.5, ease: 'step' },
+  /** How much the crystals glow: halo, glow card and the light pools they
+   *  throw on the floor. 0 leaves faceted, unlit-looking stone. */
+  crystalGlow: { type: 'number', default: 0.8, min: 0, max: 1, ease: 'smooth' },
+  /** Slow breathing of that glow (0.12 Hz, ≤15 % — flash-safe at any value). */
+  crystalPulse: { type: 'number', default: 0.3, min: 0, max: 1, ease: 'smooth' },
+  /** OPT-IN: fish passing a cluster pick up its colour. 0 (default) never
+   *  touches a fish material — minted fish look exactly as minted. */
+  crystalTint: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
 } satisfies ParamSpace;
 
 /** The original's Miami-Vice body palette (scss-variables.ts) — seeded fish
@@ -258,4 +278,8 @@ export * from './farm';
 export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, type FishMixResult, type FishSlot, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
 
 export * from './environments';
+export {
+  parsePropMix, CRYSTAL_HABITS, CRYSTAL_PALETTES, ENV_PROP_MIX, MAX_CLUSTERS,
+  type PropMixEntry, type PropMixResult, type CrystalHabit,
+} from './crystals';
 export * from './swim';

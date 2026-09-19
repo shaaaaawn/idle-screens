@@ -11,6 +11,7 @@ describe('metaquarium quality tiers', () => {
       pixelBudget: 1_800_000,
       moteCap: 400,
       envBudget: 3,
+      props: { clusters: 12, shards: 32, halo: true },
     });
   });
 

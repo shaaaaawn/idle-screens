@@ -52,6 +52,11 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import {
+  clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
+  type Cluster, type Emitter,
+} from './crystals';
+import { buildCrystalField, emptyPoolUniforms, installFloorPools, type CrystalField } from './crystal-mesh';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
@@ -436,6 +441,10 @@ interface Fish {
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
+  /** Materials this fish owns for crystal tinting, with their untinted
+   *  colours. Created on the first tinted frame — never, by default. */
+  tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
+  tinted?: boolean;
 }
 
 /** One fish as `inspect()` reports it — the analytic view of a frame. */
@@ -502,6 +511,16 @@ class TankInstance implements SaverInstance {
   private terrainMat: MeshBasicMaterial | null = null;
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
+  /** The bare terrain, before any cluster stands on it (null = flat at 0). */
+  private terrainAt: ((x: number, z: number) => number) | null = null;
+  // Scenery. Everything below stays null/empty until a scene asks for props.
+  private crystals: CrystalField | null = null;
+  private clusters: Cluster[] = [];
+  private emitters: Emitter[] = [];
+  private propsKey = '';
+  private warnedProps = '';
+  private readonly poolUniforms = emptyPoolUniforms();
+  private readonly lightScratch: [number, number, number] = [0, 0, 0];
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
@@ -761,12 +780,18 @@ class TankInstance implements SaverInstance {
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
-      this.floorHeightAt = (x, z) => height(x, z) + terrain.position.y;
+      this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
+      this.floorHeightAt = this.terrainAt;
       group.add(terrain);
       this.terrainMat = terrain.material as MeshBasicMaterial;
     }
     // A flat floor has no hills to avoid; clear any the previous room left.
-    if (kind === 'flat') this.floorHeightAt = null;
+    if (kind === 'flat') {
+      this.floorHeightAt = null;
+      this.terrainAt = null;
+    }
+    // Crystals stand ON this floor: a new room re-plants them.
+    this.propsKey = '';
     this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
@@ -798,6 +823,117 @@ class TankInstance implements SaverInstance {
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
+  }
+
+  /**
+   * Scenery for the current `propMix` — crystals, generated from the seed.
+   *
+   * Keyed like the room. With no tokens this returns before touching the rng,
+   * the scene graph or any material, so a propless tank is byte-for-byte the
+   * tank it was before props existed.
+   */
+  private buildProps(): void {
+    const envName = this.str('environment');
+    let mix = this.str('propMix').trim();
+    if (!mix && this.str('envProps') === 'on') {
+      mix = ENV_PROP_MIX[environmentOf(envName).name] ?? '';
+    }
+    const scale = this.num('crystalScale');
+    const budget = this.quality.props;
+    const key = `${mix}|${scale}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    if (key === this.propsKey) return;
+    this.propsKey = key;
+
+    if (this.crystals) {
+      this.scene.remove(this.crystals.group);
+      disposeOwned(this.crystals.group);
+      this.crystals = null;
+      this.clusters = [];
+      this.emitters = [];
+      this.poolUniforms.uMqPoolN!.value = 0;
+      this.floorHeightAt = this.terrainAt;
+    }
+    delete this.ctxSaver.host.dataset.mqProps;
+    if (!mix) return;
+
+    const parsed = parsePropMix(mix);
+    const preset = environmentOf(envName);
+    const rng = this.ctxSaver.rng.fork(0xc257a1 ^ preset.seedSalt);
+    const VARIANTS = 3;
+    const layout = layoutCrystals(parsed.entries, rng.fork(1), {
+      environment: preset.name,
+      clusterCap: budget.clusters,
+      shardCap: budget.shards,
+      variants: VARIANTS,
+      scale,
+    });
+    const problems = [...parsed.problems, ...layout.problems];
+    if (problems.length > 0 && mix !== this.warnedProps) {
+      this.warnedProps = mix;
+      console.warn(`[metaquarium] propMix "${mix}": ${problems.join('; ')}`);
+    }
+    if (!layout.clusters.length) return;
+
+    const terrain = this.terrainAt;
+    for (const c of layout.clusters) c.y = terrain ? terrain(c.x, c.z) : 0;
+    this.clusters = layout.clusters;
+    this.emitters = emittersOf(this.clusters);
+    const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
+    this.crystals = buildCrystalField(
+      this.clusters, variants, this.emitters, { halo: budget.halo }, this.poolUniforms,
+    );
+    this.scene.add(this.crystals.group);
+    installFloorPools(this.floorMat, this.poolUniforms);
+    if (this.terrainMat) installFloorPools(this.terrainMat, this.poolUniforms);
+    // Floor-huggers ride over a cluster instead of through it.
+    const clusters = this.clusters;
+    this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
+    this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
+  }
+
+  /** Opt-in (`crystalTint` > 0): a fish near a cluster picks up its colour.
+   *  The fish's materials are cloned on its first tinted frame so clones of
+   *  one template never share a tint; at 0 nothing here ever runs. */
+  private tintFish(f: Fish, amount: number, tSec: number, pulse: number): void {
+    if (amount <= 0 || !this.emitters.length) {
+      if (f.tinted && f.tint) {
+        for (const t of f.tint) t.mat.color.copy(t.base);
+        f.tinted = false;
+      }
+      return;
+    }
+    if (!f.body) return;
+    if (!f.tint) {
+      const list: NonNullable<Fish['tint']> = [];
+      const cloned = new Map<MeshBasicMaterial, MeshBasicMaterial>();
+      f.body.traverse((o) => {
+        const mesh = o as Mesh;
+        if (!mesh.isMesh || mesh.userData.mqHalo) return;
+        const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
+          // Eyes stay pure; GLOW parts are sources, not receivers.
+          if (!m.color || /eye/i.test(m.name) || m.userData.mqGlowColor) return m;
+          let own = cloned.get(m);
+          if (!own) {
+            own = m.clone();
+            own.userData.mqOwned = true;
+            cloned.set(m, own);
+            list.push({ mat: own, base: own.color.clone() });
+          }
+          return own;
+        };
+        mesh.material = Array.isArray(mesh.material)
+          ? (mesh.material as MeshBasicMaterial[]).map(swap)
+          : swap(mesh.material as MeshBasicMaterial);
+      });
+      f.tint = list;
+    }
+    const p = f.group.position;
+    const l = sampleLight(this.emitters, p.x, p.y, p.z, tSec, pulse, this.lightScratch);
+    const k = amount * 1.8 * this.num('crystalGlow');
+    for (const t of f.tint) {
+      t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
+    }
+    f.tinted = true;
   }
 
   /**
@@ -1207,6 +1343,12 @@ class TankInstance implements SaverInstance {
     // The room: rebuilt only on change, then driven by the same clock as
     // everything else so it stays pure in t.
     this.buildRoom();
+    this.buildProps();
+    if (this.crystals) {
+      this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+        color: this.fogColor, near: fog.near, far: fog.far,
+      });
+    }
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
@@ -1306,6 +1448,8 @@ class TankInstance implements SaverInstance {
     // no fish changes epicentre mid-flinch.
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
+    const tintAmount = this.emitters.length ? this.num('crystalTint') : 0;
+    const tintPulse = this.num('crystalPulse');
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -1583,6 +1727,7 @@ class TankInstance implements SaverInstance {
         if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
       f.group.position.set(px, y, pz);
+      if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
       f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
       f.group.rotateZ(pose.roll);
 
@@ -1664,6 +1809,18 @@ class TankInstance implements SaverInstance {
         waterY: this.ceiling ? (this.num('waterY') >= 0 ? this.num('waterY') : this.presetWaterY) : null,
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
+      },
+      props: {
+        propMix: this.str('propMix'),
+        envProps: this.str('envProps'),
+        budget: this.quality.props,
+        drawCalls: this.crystals?.drawCalls ?? 0,
+        triangles: this.crystals?.triangles ?? 0,
+        clusters: this.clusters.map((c) => ({
+          id: c.id, kind: 'crystal', habit: c.habit, color: c.color, glass: c.glass,
+          x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z),
+          radius: Math.round(c.radius), height: Math.round(c.height), shards: c.shards.length,
+        })),
       },
       cast: {
         fishMix: this.str('fishMix'),
@@ -1855,6 +2012,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
     delete this.ctxSaver.host.dataset.mqEnv;
+    delete this.ctxSaver.host.dataset.mqProps;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }

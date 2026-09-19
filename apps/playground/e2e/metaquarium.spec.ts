@@ -334,3 +334,28 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
     .toBe(false);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * Crystals (propMix): generated scenery builds and reports itself, and a tank
+ * that asked for none builds none — the "byte-identical when off" contract,
+ * checked at the one place a viewer could see it break.
+ */
+test('MQ40: propMix grows crystals; a propless tank grows none', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const props = (): Promise<string | null> => page.evaluate(() => document
+    .querySelector('idle-screen')
+    ?.shadowRoot?.querySelector<HTMLElement>('.surface')?.dataset.mqProps ?? null);
+
+  await page.goto('/?saver=metaquarium-crystal-habits');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect.poll(props, { timeout: 20_000 }).toBe('5');
+
+  await page.goto('/?saver=metaquarium-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect.poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+  expect(await props()).toBeNull();
+  expect(pageErrors).toEqual([]);
+});
