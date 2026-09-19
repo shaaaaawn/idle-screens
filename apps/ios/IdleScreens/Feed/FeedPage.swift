@@ -40,7 +40,9 @@ struct FeedPage: View {
     private static func key(_ stop: ChannelFeed.Stop) -> String { "s\(stop.sceneId)" }
 
     private var channelId: String { channel.id }
-    private var canSteer: Bool { app.token(for: channelId) != nil }
+    /// Steering needs an editor or owner key. A viewer key opens a private
+    /// channel and must not light up controls that would then be refused.
+    private var canSteer: Bool { app.canEdit(channelId) }
     private var isLive: Bool { moment == Self.liveKey || moment == nil }
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
     private var currentIndex: Int? { stops.firstIndex { Self.key($0) == moment } }
@@ -493,6 +495,7 @@ struct FeedPage: View {
     /// Right-hand rail, under the thumb.
     private var actionRail: some View {
         VStack(spacing: 12) {
+            followButton
             if let stop = currentStop {
                 if canSteer {
                     railButton(recalling ? "hourglass" : "arrow.uturn.backward", label: "Bring back") {
@@ -522,6 +525,25 @@ struct FeedPage: View {
             }
             .accessibilityLabel("Share channel")
         }
+    }
+
+    private var followButton: some View {
+        let following = app.follows.isFollowing(channelId)
+        return Button {
+            let now = app.follows.toggle(channelId)
+            UIImpactFeedbackGenerator(style: now ? .medium : .light).impactOccurred()
+            flash(now ? "following \(channel.displayLabel)" : "unfollowed")
+        } label: {
+            Image(systemName: following ? "star.fill" : "star")
+                .font(.system(size: 17, weight: .medium))
+                // Gold when on: the one colour on the rail, because it is the
+                // one control that reports a state rather than doing a thing.
+                .foregroundStyle(following ? Color.appWarning : Color.primary)
+                .frame(width: 46, height: 46)
+                .glassCapsule(shape: Circle())
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .accessibilityLabel(following ? "Following. Unfollow" : "Follow \(channel.displayLabel)")
     }
 
     private func railButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {

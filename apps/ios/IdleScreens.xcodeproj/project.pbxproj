@@ -27,6 +27,7 @@
 		1AC66F3C1B9943FD6A3B0873 /* ChannelCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */; };
 		1B72EE0A2C604408347F1BA9 /* PreviewBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0798A8407FEE982D655152D7 /* PreviewBudgetTests.swift */; };
 		1D09AC570238966371459456 /* SteerLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA087ACB9CE0F9D09CC7854A /* SteerLine.swift */; };
+		1F18E9E2345A1DAF319F6AC7 /* ChannelRole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C1316E08161072D168168 /* ChannelRole.swift */; };
 		2226A68E7EEE44DF4A4C3E64 /* MCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD71E2D3D58C11D78E18BC10 /* MCPClient.swift */; };
 		224F15826E5164E5B8904937 /* ChannelFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D7E436C9C0F1504197A67E9 /* ChannelFeed.swift */; };
 		271D6B41A4C2F67B659C9DBF /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4E7F929E9D6DB9F6B7C78FA6 /* PrivacyInfo.xcprivacy */; };
@@ -38,7 +39,9 @@
 		2F88D3F95B2861F5818A3807 /* WatchdogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB3E2C3E0868AA60704B174 /* WatchdogTests.swift */; };
 		34018E505AD097DAD48BB660 /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */; };
 		397D42DA61855ABDBAC2B8A0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CB8961D3C4F6D107D5B1DA6B /* PrivacyInfo.xcprivacy */; };
+		3B95E3E2C09395C255A3539F /* ChannelKeysSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685D94682C689CE876BDD39E /* ChannelKeysSheet.swift */; };
 		3EF0AC464EDBC7A434553D5C /* PairedTVView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 773AA4A5F9D47466B26A7AA9 /* PairedTVView.swift */; };
+		3F67230A14ABFC7853C08929 /* ChannelRole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C1316E08161072D168168 /* ChannelRole.swift */; };
 		401B7EE09A958360F46ABE8C /* PairCodeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A40E570458CC36138A7D5A /* PairCodeFormat.swift */; };
 		4765715ED3E86B10E3700A26 /* Mulberry32Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */; };
 		484A4E76F6F49B6E8F58F19E /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */; };
@@ -49,6 +52,7 @@
 		50EA498A1DA57D87072CD745 /* PairCodeFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 951AB785C6D4D250AA6E509C /* PairCodeFormatTests.swift */; };
 		57953B22A04B7B0D5DB83E8B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BE66C1790A533FA14463C9 /* SettingsView.swift */; };
 		5CF8C76AAD444EE804E53A86 /* ChannelSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E393D04E499C2B42C170AC0 /* ChannelSearchTests.swift */; };
+		5EA5D9A124B1E8884B166EF2 /* KeyringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284CE7B14983D8416989D5D3 /* KeyringTests.swift */; };
 		603A182B7D3F5EBB3FDEDC0D /* PairClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9290BC579DBCC0BF2ED620D /* PairClient.swift */; };
 		6076DD6256D0FBE9290E9D34 /* OrbitParentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4F33A0B67C1A16E03B7317 /* OrbitParentTests.swift */; };
 		618315BE32863FF1C7F44F94 /* HomeSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71EDB676A59798A0FAB07300 /* HomeSections.swift */; };
@@ -72,6 +76,7 @@
 		7E0812589AAE254D67248DF4 /* AquariumFieldTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C8CF7BAE45EAB80E2DAE2F /* AquariumFieldTests.swift */; };
 		7EEF7298E422281920E9E145 /* ComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7837B2C4483DFA183A8676 /* ComposerSheet.swift */; };
 		817503F2D9A8F93E996A5D93 /* IdleScreensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6CCF4CE86BDB728B8599EB /* IdleScreensApp.swift */; };
+		81D6038B766770F0FBFF7224 /* FollowStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76C9083C4EA3C79CB1414888 /* FollowStore.swift */; };
 		824BB1E0792FC2EF21044663 /* IdleScreensTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFAB638A3244FDF7750559F /* IdleScreensTVApp.swift */; };
 		827C69E65661D4CE7937F6D0 /* TextBlockHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD719448D47D15060E8247C6 /* TextBlockHelpers.swift */; };
 		89DEA9107CAD94D9623D1827 /* AppState+VJ.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB1826693F09BA9A26F848A /* AppState+VJ.swift */; };
@@ -104,6 +109,7 @@
 		B39D9751769F3397C53C5EF0 /* LobbyFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */; };
 		B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */; };
 		BA040E0C8FB03735BF177BAD /* ChannelSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452F2484E3DAE7DC772CFC2A /* ChannelSearch.swift */; };
+		BA5CD0C4855DC1EAAB52D4BC /* FollowStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 449DE28B134E47C299974347 /* FollowStoreTests.swift */; };
 		BBBD4937EAC130CDC9A4E739 /* CapabilityTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */; };
 		BF6188FF2BF538BA62DD8728 /* TextBlockHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88DE0542BC47C9CC2E295A36 /* TextBlockHelpersTests.swift */; };
 		BFE4907F462C3F7B544B2EA6 /* SpecSubset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF31BA50BFD69C16BEEF755 /* SpecSubset.swift */; };
@@ -206,6 +212,7 @@
 		21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDeckView.swift; sourceTree = "<group>"; };
 		21E7FC58CC5ADF102F507CE7 /* RenderGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderGuard.swift; sourceTree = "<group>"; };
 		2226F884FD690065486D008D /* RenderBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderBudgetTests.swift; sourceTree = "<group>"; };
+		284CE7B14983D8416989D5D3 /* KeyringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyringTests.swift; sourceTree = "<group>"; };
 		28B72E150FD50FD2B4798EF0 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 		297E491830405A999EBA8D60 /* IdleScreens.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IdleScreens.entitlements; sourceTree = "<group>"; };
 		2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelTokenFormat.swift; sourceTree = "<group>"; };
@@ -217,6 +224,8 @@
 		43D0B70D1571B04903F7A7CE /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		445CFB48DB79AAE0CAAF8B78 /* ContentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentProvider.swift; sourceTree = "<group>"; };
 		445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePreviewView.swift; sourceTree = "<group>"; };
+		448C1316E08161072D168168 /* ChannelRole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelRole.swift; sourceTree = "<group>"; };
+		449DE28B134E47C299974347 /* FollowStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowStoreTests.swift; sourceTree = "<group>"; };
 		452F2484E3DAE7DC772CFC2A /* ChannelSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSearch.swift; sourceTree = "<group>"; };
 		4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedView.swift; sourceTree = "<group>"; };
 		4A88C730E2ED055EB1FB0901 /* PairCodeField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairCodeField.swift; sourceTree = "<group>"; };
@@ -237,6 +246,7 @@
 		5FAF2CAEEF3EC53EBCE656C8 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		64B5A0CBD688755360E23C34 /* NativeSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSceneView.swift; sourceTree = "<group>"; };
 		64D757754C3AA6ACA6EACBF6 /* PairingSheetAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSheetAnchorTests.swift; sourceTree = "<group>"; };
+		685D94682C689CE876BDD39E /* ChannelKeysSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelKeysSheet.swift; sourceTree = "<group>"; };
 		68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6A39FC4E62FA08D2DC673189 /* IdleScreens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A7837B2C4483DFA183A8676 /* ComposerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSheet.swift; sourceTree = "<group>"; };
@@ -249,6 +259,7 @@
 		75D9356F7D477A173A572EAA /* IdleScreensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IdleScreensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7627C6D296C4CE46FAC3AD41 /* ClassicSaverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSaverView.swift; sourceTree = "<group>"; };
 		7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LobbyFixtureTests.swift; sourceTree = "<group>"; };
+		76C9083C4EA3C79CB1414888 /* FollowStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowStore.swift; sourceTree = "<group>"; };
 		773AA4A5F9D47466B26A7AA9 /* PairedTVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedTVView.swift; sourceTree = "<group>"; };
 		7822D79CA74B34F90F5AE612 /* IdleScreensTVTopShelf.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = IdleScreensTVTopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		79E14B7DC8B4215FD925DF86 /* SpriteSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteSceneView.swift; sourceTree = "<group>"; };
@@ -347,7 +358,9 @@
 				4ECFB44253D0D0EC22D67E8B /* ChannelFeedTests.swift */,
 				3551860E6D059B5B5C52CA1D /* ChannelHistoryTests.swift */,
 				B31EA569AACE6302D45E28A3 /* ChannelTokenFormatTests.swift */,
+				449DE28B134E47C299974347 /* FollowStoreTests.swift */,
 				D79C818F41D1C21CBE9A2F38 /* GalleryCatchUpTests.swift */,
+				284CE7B14983D8416989D5D3 /* KeyringTests.swift */,
 				9C22C1EE5FD739454250DE58 /* MCPClientTests.swift */,
 				B7A5408F494FA3C16573E5AB /* MockTransport.swift */,
 				951AB785C6D4D250AA6E509C /* PairCodeFormatTests.swift */,
@@ -379,6 +392,7 @@
 				1DB89DC3DC82D8A38AE4EE65 /* ChannelCredential.swift */,
 				4D7E436C9C0F1504197A67E9 /* ChannelFeed.swift */,
 				AC039696D750E04AA5F7FDC7 /* ChannelHistory.swift */,
+				448C1316E08161072D168168 /* ChannelRole.swift */,
 				2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */,
 				A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */,
 				734C05B9186BD117E244C887 /* GalleryClient.swift */,
@@ -495,6 +509,7 @@
 				FAB1826693F09BA9A26F848A /* AppState+VJ.swift */,
 				68B2FCDCDDA2C5E71443E8D5 /* ContentView.swift */,
 				184174A6AF1FFAB56C9837B1 /* CrashReporter.swift */,
+				76C9083C4EA3C79CB1414888 /* FollowStore.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -503,6 +518,7 @@
 			isa = PBXGroup;
 			children = (
 				21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */,
+				685D94682C689CE876BDD39E /* ChannelKeysSheet.swift */,
 				C529DD00521F3987A78786C1 /* MyChannelsView.swift */,
 				5A1A9CB25DCED3A1D90BE51F /* TokenHandoffSheet.swift */,
 			);
@@ -725,7 +741,9 @@
 				224F15826E5164E5B8904937 /* ChannelFeed.swift in Sources */,
 				F2E2957AE2BFF6FE13569E81 /* ChannelFeedView.swift in Sources */,
 				8C79AFFEA230CACF8155DA4D /* ChannelHistory.swift in Sources */,
+				3B95E3E2C09395C255A3539F /* ChannelKeysSheet.swift in Sources */,
 				B1AB82CB3AE4D9F59787540A /* ChannelOverviewSheet.swift in Sources */,
+				3F67230A14ABFC7853C08929 /* ChannelRole.swift in Sources */,
 				DAF53EE2FBE295964F3FD6C7 /* ChannelSession.swift in Sources */,
 				768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */,
 				B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */,
@@ -736,6 +754,7 @@
 				AB76FAD280B8EE48343D1993 /* CrashReporter.swift in Sources */,
 				FC05E0C625973EEFF57584FA /* FallbackSceneView.swift in Sources */,
 				784A037DD2D489D970C82ACB /* FeedPage.swift in Sources */,
+				81D6038B766770F0FBFF7224 /* FollowStore.swift in Sources */,
 				0B3FC1932DA73A5BA0973A8D /* GalleryClient.swift in Sources */,
 				2F38E6E5A65143C6434582CB /* GalleryView.swift in Sources */,
 				A55DF47FA460196B4FC3499D /* Glass.swift in Sources */,
@@ -782,6 +801,7 @@
 				C7F18BE10855F6F9E51FAB36 /* ChannelFeed.swift in Sources */,
 				187089A01CE17AF038149D95 /* ChannelGridView.swift in Sources */,
 				8D299D989B033D3506072932 /* ChannelHistory.swift in Sources */,
+				1F18E9E2345A1DAF319F6AC7 /* ChannelRole.swift in Sources */,
 				BA040E0C8FB03735BF177BAD /* ChannelSearch.swift in Sources */,
 				0034F065C3FBE82F797CA09D /* ChannelTokenFormat.swift in Sources */,
 				4FDE466BCFAEE3788424E6DA /* ChannelWSClient.swift in Sources */,
@@ -867,7 +887,9 @@
 				F0837C400D9439951003DB90 /* ChannelFeedTests.swift in Sources */,
 				E99AC3B406D45D209C250781 /* ChannelHistoryTests.swift in Sources */,
 				CB40C47A1702FE3B71AACA3C /* ChannelTokenFormatTests.swift in Sources */,
+				BA5CD0C4855DC1EAAB52D4BC /* FollowStoreTests.swift in Sources */,
 				2BC870CF8FBB90F01B4B9C8E /* GalleryCatchUpTests.swift in Sources */,
+				5EA5D9A124B1E8884B166EF2 /* KeyringTests.swift in Sources */,
 				06584EA3E404F3BEB995E4F0 /* MCPClientTests.swift in Sources */,
 				6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */,
 				50EA498A1DA57D87072CD745 /* PairCodeFormatTests.swift in Sources */,
@@ -905,7 +927,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -947,7 +969,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1030,7 +1052,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1051,7 +1073,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1072,7 +1094,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1112,7 +1134,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091902;
+				CURRENT_PROJECT_VERSION = 2026091903;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

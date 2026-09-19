@@ -19,6 +19,8 @@ final class AppState {
     /// Past scenes, fetched once and shared by the feed, its neighbours and
     /// the channel timeline.
     let scenes = RecordedSceneStore()
+    /// Channels this person follows — theirs alone, synced by iCloud Keychain.
+    let follows = FollowStore()
     var isLoadingGallery = false
     var galleryError: String?
 

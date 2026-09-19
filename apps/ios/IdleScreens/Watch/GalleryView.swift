@@ -18,6 +18,16 @@ struct GalleryView: View {
                                       peers: app.channels)
                             .padding(.horizontal, 16)
                     }
+                    // Yours before everyone's. Absent until you follow
+                    // something — an empty "Following" row is a nag.
+                    if !following.isEmpty {
+                        ChannelShelf(
+                            title: "Following",
+                            subtitle: following.count == 1 ? "1 channel" : "\(following.count) channels",
+                            channels: following,
+                            cardWidth: sizeClass == .regular ? 224 : 148
+                        )
+                    }
                     ForEach(shelves) { shelf in
                         ChannelShelf(
                             title: shelf.title,
@@ -83,6 +93,8 @@ struct GalleryView: View {
     /// Evals, the curated categories, Latest, then the tail — from the one
     /// shared builder. The phone used to bucket by each channel's first tag,
     /// which produced shelves the website has never had.
+    private var following: [PublicChannel] { app.follows.channels(in: app.channels) }
+
     private var shelves: [HomeSection] {
         HomeSections.build(channels: app.channels, categories: app.categories)
     }
