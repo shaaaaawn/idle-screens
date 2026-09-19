@@ -139,6 +139,10 @@ export const METAQUARIUM_PARAMS = {
    *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
    *  to a fifth. Only ever expands, so the spacing guarantee holds. */
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  // ---- The look. These three are the RENDERER, not settings a scene must
+  // carry: every tank is lit, glowing and reflective with no params at all,
+  // and the room, the cast and the camera never need to know. Each exists only
+  // so a scene can opt OUT (or turn the glow up).
   /** How strongly the fish's own `GLOW-*` parts glow: a soft bloom card
    *  around the glowing fins, a white-hot breathing core, and colour thrown on
    *  the floor beneath a low swimmer. 0 is the flat glow colour + thin halo
@@ -160,6 +164,7 @@ export const METAQUARIUM_PARAMS = {
    *  `crystal#hero:1@lotus/hotpink, crystal:5@druse`. Empty (default) builds
    *  nothing and draws no rng, so every published scene is unchanged. */
   /** Faceted boulders, mineral seams, a ridge and an open arch. Opt-in. */
+  floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   propMix: { type: 'string', default: '', ease: 'step' },

@@ -11,6 +11,7 @@ import type { Cluster, CrystalRng } from './crystals';
 export interface SceneryOptions {
   rocks: number;
   homes: number;
+  flora: number;
   cap: number;
   scale: number;
 }
@@ -73,6 +74,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const anchors = sceneryAnchors(clusters, rng.fork(1), terrain);
   const stones: BufferGeometry[] = [], veins: BufferGeometry[] = [];
   const obstacles: { x: number; y: number; z: number; r: number; h: number }[] = [];
+  const clocks: { value: number }[] = [];
   const vents: SceneryAnchor[] = [];
   const counts: Record<string, number> = { rocks: 0, arches: 0, homes: 0 };
   const rockRng = rng.fork(2);
@@ -158,6 +160,52 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     obstacles.push({ x, y: y + r * 0.82, z, r, h: r });
     counts.homes!++;
   }
+  const flora: BufferGeometry[] = [];
+  const floraRng = rng.fork(4);
+  const strands = Math.round(opts.flora * opts.cap * 5);
+  for (let i = 0; i < strands; i++) {
+    const a = anchors[i % anchors.length]!;
+    const angle = floraRng.range(0, Math.PI * 2), radius = floraRng.range(17, 29) * s;
+    const x = a.x + Math.cos(angle) * radius, z = a.z + Math.sin(angle) * radius;
+    const root = terrain(x, z), height = floraRng.range(17, 43) * s;
+    const tint = new Color(a.color).lerp(new Color('#369a81'), 0.5);
+    for (let j = 0; j < 9; j++) {
+      const h = j / 8;
+      const color = tint.clone().multiplyScalar(0.28 + h * 0.5).getHexString();
+      const p = painted(new BoxGeometry(1, 1, 1), j === 8 ? a.color : `#${color}`,
+        new Vector3(x + Math.sin(h * 3 + angle) * h * 3 * s, root + h * height, z),
+        new Vector3((j === 8 ? 1.7 : 1) * s, height / 8 + 0.2, 0.9 * s), new Quaternion(), j !== 8);
+      const roots = new Float32Array(p.getAttribute('position').count * 2);
+      for (let k = 0; k < roots.length; k += 2) { roots[k] = root; roots[k + 1] = angle; }
+      p.setAttribute('aSway', new BufferAttribute(roots, 2));
+      flora.push(p);
+      if (j > 1 && j < 8 && j % 2 === 0) {
+        const leaf = painted(new BoxGeometry(1, 1, 1), `#${color}`,
+          new Vector3(x + (j % 4 === 0 ? 2 : -2) * s, root + h * height, z),
+          new Vector3(4 * s, 1.1 * s, 1 * s));
+        const lr = new Float32Array(leaf.getAttribute('position').count * 2);
+        for (let k = 0; k < lr.length; k += 2) { lr[k] = root; lr[k + 1] = angle; }
+        leaf.setAttribute('aSway', new BufferAttribute(lr, 2));
+        flora.push(leaf);
+      }
+    }
+  }
+  const plants = batch(group, flora, 'voxel-light-kelp');
+  if (plants) {
+    const clock = { value: 0 }; clocks.push(clock);
+    (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
+      shader.uniforms.uSwayTime = clock;
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec2 aSway;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        float h = max(0.0, position.y - aSway.x);
+        transformed.x += sin(uSwayTime * 0.55 + aSway.y + h * 0.07) * h * 0.13;
+        transformed.z += cos(uSwayTime * 0.38 + aSway.y + h * 0.06) * h * 0.055;
+      `);
+    };
+    plants.frustumCulled = false;
+  }
+  counts.flora = strands;
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings');
   batch(group, stones, 'rock-formations');
@@ -172,6 +220,6 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       }
       return h;
     },
-    setFrame(_t) { /* Static geology. Animated layers use the same analytic clock. */ },
+    setFrame(t) { for (const clock of clocks) clock.value = t; },
   };
 }

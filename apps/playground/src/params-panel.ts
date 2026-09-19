@@ -32,12 +32,14 @@ const ALL_FISH = [...LOCAL_FISH, ...IPFS_FISH];
  */
 const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
-  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'fishLighting', 'fishGlow', 'fishMetal']],
+  ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath']],
+  // The renderer's look: on by default, listed so it can be turned off.
+  ['look', ['fishLighting', 'fishGlow', 'fishMetal']],
   ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
   ['formation', ['formationShape', 'formationBreathe']],
   ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
   ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-  ['world', ['rockDensity', 'geodeHomes']],
+  ['world', ['rockDensity', 'geodeHomes', 'floraDensity']],
   ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
   ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'floorColor', 'moteDensity', 'moteColor']],
 ];
