@@ -57,5 +57,12 @@ export function probeSoftwareGL(): boolean {
   const renderer = String(
     dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
   );
+  // This scratch context is never used again — lose it explicitly rather than
+  // leaving it for GC. Harmless on its own, but every tank mount calls this
+  // before creating its real WebGLRenderer, and now also builds a per-mount
+  // PMREM environment (studio.ts) that is heavy enough to pile up un-GC'd
+  // contexts faster than Chrome reclaims them, tipping repeated mount/dispose
+  // cycles over the browser's live-context cap (MQ3).
+  gl.getExtension('WEBGL_lose_context')?.loseContext();
   return isSoftwareGL(renderer);
 }

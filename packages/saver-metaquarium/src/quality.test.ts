@@ -71,7 +71,9 @@ describe('probeSoftwareGL', () => {
     const UNMASKED = 0x9246;
     const gl = {
       RENDERER: 0x1f01,
-      getExtension: vi.fn().mockReturnValue({ UNMASKED_RENDERER_WEBGL: UNMASKED }),
+      getExtension: vi.fn((name: string) =>
+        name === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: UNMASKED } : null,
+      ),
       getParameter: vi.fn((p: number) =>
         p === UNMASKED
           ? 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0)))'

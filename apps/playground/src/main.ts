@@ -489,11 +489,14 @@ const GALLERY_GROUPS: GalleryGroup[] = SAVER_GROUPS.map((g) => ({
   savers: g.savers,
 }));
 
-// Variants belong in the on-demand viewer, but not the gallery's live tiles.
-const PREVIEW_ENTRIES: PreviewEntry[] = [
-  ...SAVER_GROUPS.flatMap((g) => g.savers.map((saver) => ({ saver, pkg: g.label }))),
-  ...METAQUARIUM_VARIANTS.map((saver) => ({ saver, pkg: '@idle-screens/saver-metaquarium' })),
-];
+// Variants belong in the on-demand viewer, but not the gallery's live tiles —
+// they're reachable through PALETTE_SHELVES in Dev Tools instead. Including
+// them here diverged PREVIEW_ENTRIES's length from the gallery's actual
+// `.gallery-card` count, which is what the preview's `N / total` position
+// counts against.
+const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
+  g.savers.map((saver) => ({ saver, pkg: g.label })),
+);
 
 /**
  * Dev Tools only: the metaquarium QA scenes, filed under the metaquarium group
