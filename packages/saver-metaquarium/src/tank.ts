@@ -923,7 +923,8 @@ class TankInstance implements SaverInstance {
     const rocks = this.num('rockDensity');
     const homes = this.num('geodeHomes');
     const flora = this.num('floraDensity');
-    const key = `${this.propsKey}|${rocks}|${homes}|${flora}`;
+    const sky = this.num('skyShards');
+    const key = `${this.propsKey}|${rocks}|${homes}|${flora}|${sky}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -932,9 +933,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0) {
+    if (rocks > 0 || homes > 0 || flora > 0 || sky > 0) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, homes, flora, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, homes, flora, sky, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);

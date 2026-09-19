@@ -12,6 +12,7 @@ export interface SceneryOptions {
   rocks: number;
   homes: number;
   flora: number;
+  sky: number;
   cap: number;
   scale: number;
 }
@@ -206,6 +207,39 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     plants.frustumCulled = false;
   }
   counts.flora = strands;
+  const sky: BufferGeometry[] = [];
+  const skyRng = rng.fork(5);
+  const skyCount = Math.round(opts.sky * opts.cap * 2);
+  for (let i = 0; i < skyCount; i++) {
+    const a = i * 2.399963;
+    const r = skyRng.range(50, 170) * s;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r - 45 * s;
+    const y = skyRng.range(80, 130) * s;
+    const size = skyRng.range(2, 4.8) * s;
+    const q = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), skyRng.range(-0.6, 0.6));
+    const tint = new Color(anchors[i % anchors.length]!.color).lerp(new Color('#98b9de'), 0.4);
+    const g = painted(new OctahedronGeometry(1), `#${tint.getHexString()}`,
+      new Vector3(x, y, z), new Vector3(size * 0.35, size * 1.6, size * 0.35), q);
+    const phases = new Float32Array(g.getAttribute('position').count).fill(a);
+    g.setAttribute('aDrift', new BufferAttribute(phases, 1));
+    sky.push(g);
+  }
+  const stars = batch(group, sky, 'drifting-crystal-canopy');
+  if (stars) {
+    const clock = { value: 0 }; clocks.push(clock);
+    (stars.material as MeshBasicMaterial).onBeforeCompile = shader => {
+      shader.uniforms.uDriftTime = clock;
+      shader.vertexShader = 'uniform float uDriftTime; attribute float aDrift;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        transformed.x += sin(uDriftTime * 0.09 + aDrift) * 7.0;
+        transformed.y += sin(uDriftTime * 0.16 + aDrift) * 3.0;
+        transformed.z += cos(uDriftTime * 0.07 + aDrift) * 5.0;
+      `);
+    };
+    stars.frustumCulled = false;
+  }
+  counts.skyShards = skyCount;
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings');
   batch(group, stones, 'rock-formations');
