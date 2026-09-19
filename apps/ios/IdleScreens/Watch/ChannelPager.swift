@@ -11,7 +11,9 @@ import SwiftUI
 /// from "featured" and you move through featured, not through everything.
 struct ChannelPager: View {
     let channels: [PublicChannel]
-    @State private var selection: String
+    /// Optional because `scrollPosition(id:)` binds an optional; it is never
+    /// nil in practice — it starts on the channel you tapped.
+    @State private var selection: String?
 
     init(channels: [PublicChannel], start: String) {
         self.channels = channels
@@ -19,22 +21,51 @@ struct ChannelPager: View {
     }
 
     var body: some View {
-        TabView(selection: $selection) {
-            ForEach(channels) { channel in
-                ChannelViewerView(
-                    channelId: channel.id,
-                    label: channel.displayLabel,
-                    // Exactly one page holds a live socket.
-                    isActive: channel.id == selection
-                )
-                .tag(channel.id)
+        // Read the insets BEFORE discarding them. The pager has to ignore the
+        // safe area so scenes run edge to edge — but that also strips the
+        // insets from everything inside it, and the viewer's chrome ended up
+        // drawn underneath the clock and the Dynamic Island.
+        GeometryReader { proxy in
+            let insets = proxy.safeAreaInsets
+            // A paging ScrollView, not `TabView(.page)`: the TabView insets its
+            // pages from the top even when told to ignore the safe area, which
+            // left a 14pt black band above every scene.
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(channels) { channel in
+                        ChannelViewerView(
+                            channelId: channel.id,
+                            label: channel.displayLabel,
+                            // Exactly one page holds a web view and a socket.
+                            isActive: channel.id == selection
+                        )
+                        .environment(\.viewerChromeInsets, insets)
+                        .containerRelativeFrame([.horizontal, .vertical])
+                        .id(channel.id)
+                    }
+                }
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selection)
+            .scrollIndicators(.hidden)
+            .ignoresSafeArea()
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        // The scene is the content; page dots over live artwork are noise, and
-        // the chrome already names the channel you're on.
-        .ignoresSafeArea()
         .background(Color.black.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar, .tabBar)
+    }
+}
+
+/// The safe area the viewer's chrome should respect when an ancestor has
+/// thrown the real one away. Zero outside a pager, where SwiftUI's own
+/// safe area is intact and no extra padding is wanted.
+private struct ViewerChromeInsetsKey: EnvironmentKey {
+    static let defaultValue = EdgeInsets()
+}
+
+extension EnvironmentValues {
+    var viewerChromeInsets: EdgeInsets {
+        get { self[ViewerChromeInsetsKey.self] }
+        set { self[ViewerChromeInsetsKey.self] = newValue }
     }
 }

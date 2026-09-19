@@ -20,6 +20,7 @@ struct ChannelViewerView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.viewerChromeInsets) private var chromeInsets
     @State private var session = ChannelSession()
     @State private var guardrail = RenderGuard()
     @State private var showChrome = true
@@ -57,6 +58,8 @@ struct ChannelViewerView: View {
                     Spacer()
                     bottomBar
                 }
+                .padding(.top, chromeInsets.top)
+                .padding(.bottom, chromeInsets.bottom)
                 .transition(.opacity)
             }
         }
