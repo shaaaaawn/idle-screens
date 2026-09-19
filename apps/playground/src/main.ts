@@ -25,6 +25,7 @@ import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { buildParamsPanel } from './params-panel';
+import { buildViewportNav } from './viewport-nav';
 import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
@@ -997,6 +998,13 @@ function liveMode(): void {
 
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
+    // Orbit / dolly / numpad views for any saver that declares the camera rig.
+    // Its chrome sits beside the host, not in it: selecting a saver clears
+    // every child of the host except the label.
+    const viewportNav = viewportHost?.parentElement
+      ? buildViewportNav(viewportHost, viewportHost.parentElement, timeline, () => devParams.refresh())
+      : null;
+
     let devPreviewInst: SaverInstance | null = null;
     let devStage: MountedStage | null = null;
     let devMountToken = 0;
@@ -1050,6 +1058,7 @@ function liveMode(): void {
       viewportHost.classList.add('active');
       viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
       if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
+      viewportNav?.select(saver);
 
       if (devPreviewInst) devPreviewInst.dispose();
       devPreviewInst = null;

@@ -370,6 +370,38 @@
       #viewport-host.active { display: block; }
       #viewport-host.passthrough { background: transparent; }
       #viewport-host > canvas { display: block; width: 100%; height: 100%; }
+      /* — Viewport navigation (viewport-nav.ts) — */
+      #viewport-host.vp-navigable { cursor: grab; touch-action: none; }
+      #viewport-host.vp-orbiting { cursor: grabbing; }
+      .vp-nav { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+      .vp-nav[hidden] { display: none; }
+      .vp-hud {
+        position: absolute; top: 10px; left: 12px; display: flex; flex-direction: column; gap: 3px;
+        font: 11px/1.2 system-ui, sans-serif; color: rgba(255,255,255,.82);
+        text-shadow: 0 1px 2px rgba(0,0,0,.9);
+      }
+      .vp-hud-title { font-weight: 600; }
+      .vp-nav.free .vp-hud-title { color: #ffb454; }
+      .vp-hud-readout { font: 10px/1 ui-monospace, monospace; color: rgba(255,255,255,.55); }
+      .vp-gizmo {
+        position: absolute; top: 8px; right: 10px; width: 84px; height: 84px;
+        pointer-events: auto; border-radius: 50%;
+        transition: background .15s;
+      }
+      .vp-gizmo:hover { background: rgba(255,255,255,.07); }
+      .vp-gizmo-end { cursor: pointer; }
+      .vp-gizmo-end:hover circle { stroke: #fff; opacity: 1; }
+      .vp-gizmo text { font: 700 9px/1 system-ui, sans-serif; fill: #10131a; pointer-events: none; }
+      .vp-bar { position: absolute; top: 98px; right: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: auto; }
+      .vp-btn {
+        font: 600 10px/1 system-ui, sans-serif; padding: 5px 8px; cursor: pointer;
+        color: var(--wb-text); background: rgba(20,22,28,.78);
+        border: 1px solid var(--wb-border); border-radius: 4px;
+      }
+      .vp-btn:hover:not(:disabled) { border-color: var(--wb-accent); color: #fff; }
+      .vp-btn:disabled { opacity: .35; cursor: default; }
+      .vp-nav.free .vp-btn:not(:disabled):nth-child(2) { border-color: #ffb454; color: #ffb454; }
+      .vp-btn:last-child { opacity: .6; cursor: help; }
       #viewport-label {
         position: absolute; left: 10px; bottom: 10px; z-index: 2; pointer-events: none;
         font: 10px/1 ui-monospace, monospace; color: var(--wb-text-muted);
