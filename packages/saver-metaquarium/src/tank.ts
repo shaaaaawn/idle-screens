@@ -52,7 +52,6 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
-import { buildStudio, type Studio } from './studio';
 import {
   clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
   type Cluster, type Emitter,
@@ -533,11 +532,6 @@ class TankInstance implements SaverInstance {
   private readonly lightScratch: [number, number, number] = [0, 0, 0];
   // Fish glow: built on the first glowing fish, never for a cast without one.
   private glowCards: GlowCards | null = null;
-  /** Lit mode: the rig, and the glow parts competing for its point lights. */
-  private lit = false;
-  private readonly flatFill: HemisphereLight;
-  private studio: Studio | null = null;
-  private readonly lightBids: Array<{ d: number; x: number; y: number; z: number; r: number; g: number; b: number; size: number; power: number }> = [];
   private readonly glowPos = new Vector3();
   private readonly fishEmitters: Emitter[] = [];
   private tintEmitters: Emitter[] = [];
@@ -723,10 +717,7 @@ class TankInstance implements SaverInstance {
 
     // Gentle hemisphere so MeshStandardMaterial eyes render their authored detail.
     // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
-    // Flat mode's one light: a gentle hemisphere so authored PBR eyes and
-    // atlases render. Lit mode swaps it for the studio (ensureStudio).
-    this.flatFill = new HemisphereLight(0xffffff, 0x4466aa, 1.5);
-    this.scene.add(this.flatFill);
+    this.scene.add(new HemisphereLight(0xffffff, 0x4466aa, 1.5));
 
     this.reconcile();
 
@@ -937,42 +928,24 @@ class TankInstance implements SaverInstance {
       );
     }
     if (amount <= 0) return n;
-    // Body-local → world, by hand: the scene graph's matrices are a frame
-    // stale here, and updating 24 skinned hierarchies to read a few points
+    // Body-local centre → world, by hand: the scene graph's matrices are a
+    // frame stale here, and updating 24 skinned hierarchies to read one point
     // would cost more than the glow.
     const scale = body.scale.x * f.group.scale.x;
-    if (!this.glowCards) {
-      this.glowCards = buildGlowCards(MAX_FISH * 4);
-      this.scene.add(this.glowCards.mesh);
-    }
-    const cam = this.camera.position;
-    const p = this.glowPos;
-    // One card PER glowing part, in the part's own colour: the bloom hugs the
-    // fin that glows instead of fogging the whole fish.
-    for (const part of g.parts) {
-      p.set(part.x, part.y, part.z).multiplyScalar(body.scale.x);
-      p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
-      p.applyQuaternion(f.group.quaternion).add(f.group.position);
-      const size = Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
-      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * g.gain, part.g * g.gain, part.b * g.gain, phase);
-      n += 1;
-      if (this.studio?.lights.length) {
-        this.lightBids.push({
-          d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
-          x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
-          size, power: amount * g.gain * beat,
-        });
-      }
-    }
-    p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
+    const p = this.glowPos.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
     p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
     p.applyQuaternion(f.group.quaternion).add(f.group.position);
-    const reach = Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8;
+    const size = Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 2.9;
+    if (!this.glowCards) {
+      this.glowCards = buildGlowCards(MAX_FISH);
+      this.scene.add(this.glowCards.mesh);
+    }
+    this.glowCards.set(n, p.x, p.y, p.z, size, g.r * g.gain, g.g * g.gain, g.b * g.gain, phase);
     this.fishEmitters.push({
       x: p.x, y: p.y, z: p.z, r: g.r * 0.7 * g.gain, g: g.g * 0.7 * g.gain, b: g.b * 0.7 * g.gain,
-      reach, phase, owner: f.index,
+      reach: size * 0.62, phase, owner: f.index,
     });
-    return n;
+    return n + 1;
   }
 
   /** After the cast: the cards in use, and the glowing fish nearest the floor
@@ -980,27 +953,6 @@ class TankInstance implements SaverInstance {
   private commitGlow(n: number, amount: number, pulse: number, tSec: number): void {
     const fog = this.scene.fog as Fog;
     this.glowCards?.commit(n, tSec, amount, pulse, { color: this.fogColor, near: fog.near, far: fog.far });
-    // The point lights go to the glow parts nearest the lens — where light
-    // falling on a neighbouring voxel is actually seen. The rest keep their
-    // bloom; nobody can tell a distant fin is not casting.
-    if (this.studio) {
-      this.lightBids.sort((a, b) => a.d - b.d);
-      this.studio.lights.forEach((light, i) => {
-        const bid = this.lightBids[i];
-        if (!bid || amount <= 0) { light.intensity = 0; return; }
-        // A glow part sits IN the surface it should light, so from its own
-        // centre every neighbouring face is edge-on and takes nothing. Lifted
-        // toward the lens, it lights the faces the viewer is looking at —
-        // which is where a renderer's bounce and bloom put that colour.
-        const cam = this.camera.position;
-        const k = (bid.size * 0.3) / Math.max(1, Math.hypot(cam.x - bid.x, cam.y - bid.y, cam.z - bid.z));
-        light.position.set(bid.x + (cam.x - bid.x) * k, bid.y + (cam.y - bid.y) * k, bid.z + (cam.z - bid.z) * k);
-        light.color.setRGB(bid.r, bid.g, bid.b);
-        light.distance = bid.size * 3;
-        light.intensity = bid.power * bid.size * bid.size * 2.5;
-      });
-      this.lightBids.length = 0;
-    }
     this.tintEmitters = this.fishEmitters.length ? [...this.emitters, ...this.fishEmitters] : this.emitters;
     const clusterSlots = Math.min(this.emitters.length, MAX_POOLS);
     if (!this.fishEmitters.length || amount <= 0) {
@@ -1022,25 +974,6 @@ class TankInstance implements SaverInstance {
     }
   }
 
-  /**
-   * Lit or flat, decided per frame from the param — on a channel the scene's
-   * params arrive as a track AFTER mount, so a constructor read would make
-   * `flat` unreachable from exactly the place it is steered. The rig is built
-   * once, on the first lit frame; a fish wears the look it was spawned under.
-   */
-  private ensureStudio(): void {
-    const want = this.str('fishLighting') !== 'flat' && !this.thumbnail;
-    if (want === this.lit) return;
-    this.lit = want;
-    if (want && !this.studio) {
-      this.studio = buildStudio(this.renderer, this.quality.glowLights);
-      this.scene.add(...this.studio.objects);
-    }
-    this.scene.environment = want ? this.studio!.environment : null;
-    for (const o of this.studio?.objects ?? []) o.visible = want;
-    this.flatFill.visible = !want;
-  }
-
   private installPools(): void {
     this.poolsInstalled = true;
     installFloorPools(this.floorMat, this.poolUniforms);
@@ -1058,11 +991,15 @@ class TankInstance implements SaverInstance {
       }
       return;
     }
-    if (!f.body) return;
     if (!f.tint) {
       const list: NonNullable<Fish['tint']> = [];
       const cloned = new Map<MeshBasicMaterial, MeshBasicMaterial>();
-      f.body.traverse((o) => {
+      // The GROUP, not f.body: f.body is null BY DESIGN for a fallback
+      // (non-GLB) fish — it gates the GLB-only wiggle animation, not "has a
+      // paintable body" — so gating tint on it silently skipped every
+      // fallback fish. The fallback's sphere+cone share one material and are
+      // both direct children of the group, so traversing it tints them too.
+      f.group.traverse((o) => {
         const mesh = o as Mesh;
         if (!mesh.isMesh || mesh.userData.mqHalo) return;
         const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
@@ -1339,7 +1276,7 @@ class TankInstance implements SaverInstance {
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off', this.lit);
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off');
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
@@ -1464,7 +1401,6 @@ class TankInstance implements SaverInstance {
         }) / 1000
       : tSec * speed;
 
-    this.ensureStudio();
     this.reconcile();
 
     // Camera orbit
@@ -1989,8 +1925,6 @@ class TankInstance implements SaverInstance {
         rayPools: this.rayPools.length,
       },
       glow: {
-        lighting: this.lit ? 'lit' : 'flat',
-        glowLights: this.studio?.lights.filter((l) => l.intensity > 0).length ?? 0,
         fishGlow: this.num('fishGlow'),
         fishMetal: this.str('fishMetal'),
         glowing: this.fish.filter((f) => f?.glow && f.group.visible).length,
@@ -2191,7 +2125,6 @@ class TankInstance implements SaverInstance {
       this.scene.remove(f.group);
     }
     this.fish = [];
-    this.studio?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
