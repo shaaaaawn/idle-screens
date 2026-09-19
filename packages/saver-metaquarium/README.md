@@ -101,6 +101,7 @@ never changes because a dependency was bumped.
 | maneuverIntensity | number | 0.7 | How hard — scales the surge, the kick and the tail flurry together, 0–1 |
 | lightSeek | number | 0 | Free fish drawn toward the room's light shafts, each to its own pool, 0–1 (needs rays) |
 | formationBreathe | number | 0 | The school relaxes outward and back on a ~15 s cycle, 0–1; only ever expands |
+| *look* | | | *The next three are the renderer's defaults, not something a scene sets: every tank is lit, glowing and reflective with no params. They exist to opt out.* |
 | fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
 | fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
 | fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |

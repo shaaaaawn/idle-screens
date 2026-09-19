@@ -358,6 +358,19 @@ describe('lit mode — fish that take light', () => {
   });
 });
 
+describe('the look is the default, and each part of it is optional', () => {
+  it('lit + fishMetal off: the plate is an ordinary lit surface wearing its atlas', () => {
+    const tex = new Texture();
+    const a = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1 }));
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3), false, true);
+    const m = a.material as unknown as MeshLambertMaterial;
+    expect(m).toBeInstanceOf(MeshLambertMaterial);
+    expect(m.map).toBe(tex);
+  });
+});
+
 describe('fish glow — GLOW parts as light sources', () => {
   const fin = (r: number, x: number, name = 'GLOW-HotPink'): Mesh => {
     const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name }));
@@ -392,6 +405,7 @@ describe('fish glow — GLOW parts as light sources', () => {
     const g = collectFishGlow(root, createRng(2))!;
     expect(g.cores).toHaveLength(0);
     expect(g.gain).toBeLessThan(0.5);
+    expect(g.parts[0]!.coat).toBe(true); // a coat is not a lamp: no light, close rim only
   });
 
   it('a fish with nothing that glows has no glow', () => {

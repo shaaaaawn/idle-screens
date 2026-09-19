@@ -180,6 +180,13 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
           // metal finally has something to reflect — real reflections that
           // slide across the plates as the fish turns. Polished a little past
           // glTF's default roughness of 1, which reflects nothing sharp.
+          if (lit && !reflective) {
+            // Opted out of metal: the same atlas as an ordinary lit surface.
+            const matte = new MeshLambertMaterial({ map });
+            matte.name = m.name;
+            matte.userData.mqOwned = true;
+            return matte;
+          }
           if (lit) {
             const src = m as MeshStandardMaterial;
             const plate = src.clone();
@@ -372,7 +379,7 @@ export interface FishGlow {
   cores: Array<{ mat: MeshBasicMaterial; base: Color }>;
   /** The glowing parts themselves, largest first (body-local), each in its own
    *  colour — bloom hugs the fin that glows, not the fish that owns it. */
-  parts: Array<{ x: number; y: number; z: number; radius: number; r: number; g: number; b: number }>;
+  parts: Array<{ x: number; y: number; z: number; radius: number; r: number; g: number; b: number; coat: boolean }>;
 }
 
 /** Runs after applyNpcMaterials. null = this fish has nothing that glows. */
@@ -405,6 +412,11 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
     const r = sphere.radius * scale;
     centre.copy(sphere.center).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
     cx += centre.x * r; cy += centre.y * r; cz += centre.z * r; w += r;
+    // Same rule as the halo pass: a part that is most of the silhouette is a
+    // coat, not an accent. Whitening it bleaches the fish (the seahorse went
+    // chalk white); it keeps its colour and earns a fainter bloom.
+    const large = r > modelR * 0.55;
+    if (!large) accent = true;
     {
       const stored = m.userData.mqGlowColor as number | undefined;
       const pc = stored !== undefined ? new Color(stored) : glowColorOf(m, rng);
@@ -412,14 +424,9 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
       // as fog around the fish, which is the opposite of a light source.
       const hi = Math.max(pc.r, pc.g, pc.b);
       const k = hi > 0 ? 0.06 + 0.94 * ((hi - Math.min(pc.r, pc.g, pc.b)) / hi) ** 1.5 : 0;
-      parts.push({ x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k });
+      parts.push({ x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k, coat: large });
     }
     radius = Math.max(radius, r);
-    // Same rule as the halo pass: a part that is most of the silhouette is a
-    // coat, not an accent. Whitening it bleaches the fish (the seahorse went
-    // chalk white); it keeps its colour and earns a fainter bloom.
-    const large = r > modelR * 0.55;
-    if (!large) accent = true;
     if (!large && !m.map && m.userData.mqOwned && !seen.has(m)) {
       seen.add(m);
       cores.push({ mat: m, base: m.color.clone() });
