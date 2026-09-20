@@ -3,7 +3,7 @@
 import {
   BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
-  Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
+  DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -12,6 +12,7 @@ import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_VERTEX } from './fl
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
+import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildSky, LANTERN_COLOR, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
@@ -25,6 +26,8 @@ export interface SceneryOptions {
   snow: number;
   /** 0..1 — jellyfish lanterns in the water overhead. */
   lanterns?: number;
+  /** 0..1 — silhouettes standing past the fog line. */
+  horizon?: number;
   /** Build the scene INSIDE a geode home instead of out on the floor. */
   interior?: boolean;
   cap: number;
@@ -240,6 +243,26 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     group.add(skyCards.mesh);
     counts.lanterns = sky.lanterns.length;
   }
+  // The far distance: hazed rings of spires, castle crystals and a grand geode.
+  const horizonFog = { value: new Color() };
+  const far = opts.interior ? null : buildHorizon(rng.fork(8), { amount: opts.horizon ?? 0, palette: clusters.map(c => c.color) });
+  if (far?.geometry) {
+    far.geometry.userData.mqOwned = true;
+    const material = new MeshBasicMaterial({ vertexColors: true, fog: false, side: DoubleSide });
+    material.userData.mqOwned = true;
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uHorizonFog = horizonFog;
+      shader.vertexShader = 'attribute vec2 aHaze; varying float vHorizon;\n' + shader.vertexShader.replace('#include <begin_vertex>', HORIZON_VERTEX);
+      shader.fragmentShader = 'uniform vec3 uHorizonFog; varying float vHorizon;\n' + shader.fragmentShader.replace('#include <color_fragment>', HORIZON_FRAGMENT);
+    };
+    material.customProgramCacheKey = () => 'horizon-v1';
+    const mesh = new Mesh(far.geometry, material);
+    mesh.name = 'horizon';
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -1;
+    group.add(mesh);
+    counts.horizon = far.counts.spires + far.counts.crystals + far.counts.geodes;
+  }
   counts.flora = field.plants;
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
@@ -404,6 +427,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     },
     setFrame(t, fog, glow = 1) {
       for (const clock of clocks) clock.value = t;
+      if (fog) horizonFog.value.copy(fog.color);
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, 0.35, fog);
       if (sky && skyCards && fog) {
         const p = { x: 0, y: 0, z: 0 }, c = new Color();

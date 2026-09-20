@@ -195,6 +195,10 @@ export const METAQUARIUM_PARAMS = {
    *  pulsing as they rise and sink; a few hang far out as fogged silhouettes.
    *  They take the scene's crystal colours and join the light field. */
   skyLanterns: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** The far distance: three hazed rings of silhouettes past the fog line —
+   *  rock spires, castle-sized crystals in the scene's colours, and (from 0.4)
+   *  one grand geode with its door lit. One draw call, unlit. */
+  horizon: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
    *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).
    *  One kind so far — `crystal`, generated from the seed (nothing is

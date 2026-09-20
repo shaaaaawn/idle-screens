@@ -192,7 +192,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: {
       propMix: 'crystal#keep:1@spire/cyan*6.5,crystal:3@spire/purple*3.6,crystal:2@lotus/blue*2.4,crystal:3@druse/cyan,crystal:2@coral/hotpink',
       crystalWild: 0.8, crystalGlow: 0.9, rockDensity: 0.7, rockVeins: 0.9, geodeHomes: 3, floraDensity: 0.7,
-      bubbleVents: 0.6, marineSnow: 0.7, skyLanterns: 0.7,
+      bubbleVents: 0.6, marineSnow: 0.7, skyLanterns: 0.7, horizon: 1,
       fishMix: '100:4@school,257:3,glowfish:1', dracoPath: asset('/draco/'), swimStyle: 'auto', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
       fogColor: '#03071a', floorColor: '#0a1226', fogNear: 220, fogFar: 1100,
       cameraDistance: 330, cameraElevation: 7, cameraAzimuth: 12, autoRotate: 0.35, moteDensity: 0,
@@ -203,7 +203,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-world-citadel-street', label: 'Metaquarium (citadel, street level)',
     params: {
       propMix: 'crystal#keep:1@spire/seafoam*7,crystal:2@spire/cyan*4,crystal:3@druse/seafoam,crystal:2@coral/yellow',
-      crystalWild: 0.8, crystalGlow: 0.85, rockDensity: 0.5, rockVeins: 0.8, geodeHomes: 3, floraDensity: 0.9, bubbleVents: 0.8, marineSnow: 0.8, skyLanterns: 0.7,
+      crystalWild: 0.8, crystalGlow: 0.85, rockDensity: 0.5, rockVeins: 0.8, geodeHomes: 3, floraDensity: 0.9, bubbleVents: 0.8, marineSnow: 0.8, skyLanterns: 0.7, horizon: 1,
       fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
       fogColor: '#021210', floorColor: '#07201c', fogNear: 180, fogFar: 1000,
       cameraDistance: 165, cameraElevation: 2, cameraAzimuth: 24, autoRotate: 0.3, moteDensity: 0,
@@ -214,7 +214,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-world-mineral-garden', label: 'Metaquarium (mineral garden)',
     params: {
-      rockDensity: 1, rockVeins: 1, geodeHomes: 1, floraDensity: 0.3, bubbleVents: 0.55, marineSnow: 0.5, skyLanterns: 0.6,
+      rockDensity: 1, rockVeins: 1, geodeHomes: 1, floraDensity: 0.3, bubbleVents: 0.55, marineSnow: 0.5, skyLanterns: 0.6, horizon: 1,
       propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple,crystal:1@lotus/blue',
       fishMix: '100:3,257:3', swimStyle: 'patrol', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
       fogColor: '#040916', floorColor: '#0b1525', fogNear: 120, fogFar: 700,
@@ -281,7 +281,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-world-geode-harbor', label: 'Metaquarium (geode harbor)',
     params: {
-      geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8,
+      geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
       propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange,crystal:1@druse/purple',
       fishMix: '100:2,257:1,glowfish:2,crab:1', dracoPath: asset('/draco/'),
       swimStyle: 'auto', swimVariance: 0.5, swimSpeed: 0.55, bodyWiggle: 0.25,
@@ -295,7 +295,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
   createMetaquarium({
     id: 'metaquarium-world-moonlit-grove', label: 'Metaquarium (moonlit grove)',
     params: {
-      floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1,
+      floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
       propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
       fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
       fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
