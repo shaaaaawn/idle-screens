@@ -7,6 +7,20 @@ import {
 } from './manifest';
 
 export function createMetaquarium(opts: MetaquariumOptions = {}): SaverPlugin {
+  if (opts.backend === 'lofi' && opts.catalog) {
+    // The lofi tank fetches icons by numeric id from the live IPFS asset set
+    // (`fishAsset` in farm.ts) — that lookup never consults a `FishEntry[]`,
+    // so a custom catalog's `localGlb`/closed-world guarantees (which the
+    // webgl tank honors via `parseFishMix(mix, catalog)`) can't be honored
+    // here: a closed-world id would still try to resolve a live icon instead
+    // of failing closed, or resolve to the wrong fish entirely. Silently
+    // dropping `catalog` would let that mismatch pass unnoticed, so reject
+    // the combination instead of half-applying it.
+    throw new Error(
+      "[metaquarium] createMetaquarium({ backend: 'lofi', catalog }) is unsupported — the lofi renderer resolves fish icons by id " +
+        'from the live asset set and cannot honor a custom fish catalog. Pass `catalog` only with the default webgl backend.',
+    );
+  }
   const space = paramSpaceWith(opts.params);
   return {
     manifest: {
