@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { ROCK_BASE, boulder, buildRock, fissures, type Tri } from './rocks';
+import { ROCK_BASE, boulder, buildRock, fissures, shardCount, type Tri } from './rocks';
 
 const spec = { x: 0, y: 0, z: 0, rx: 18, ry: 9, rz: 15, tint: '#4fe9ff', veins: 0.7 };
 
@@ -41,11 +41,11 @@ describe('fissured rocks', () => {
     expect(cut.positions.length).toBeGreaterThan(200);
     const planes = facetPlanes(tris);
     const p = new Vector3();
-    // The channels come first, the breach's shards last: `3 + round(amount * 5)`
+    // The channels come first, the breach's shards last: `shardCount(amount)`
     // shards of three triangles each (rocks.ts). Split the soup there so the
     // ribbon bound is not loosened by the tips, which are MEANT to leave the
     // surface. The shard section is recognisable on its own: it carries no flow.
-    const shardFloats = (3 + Math.round(1 * 5)) * 9 * 3;
+    const shardFloats = shardCount(1) * 9 * 3;
     const ribbonEnd = cut.positions.length - shardFloats;
     expect(cut.flow.slice(ribbonEnd / 3).every((f) => f === 0)).toBe(true);
     let ribbon = 0, shard = 0;
