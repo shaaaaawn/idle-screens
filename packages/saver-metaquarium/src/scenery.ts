@@ -14,6 +14,7 @@ import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
+import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildSky, LANTERN_COLOR, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
@@ -32,6 +33,9 @@ export interface SceneryOptions {
   horizon?: number;
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
   castle?: 0 | 1 | 2;
+  /** 0..1 — walks from every door to the village hub, a road to the landmark, trails to the crystals. */
+  paths?: number;
+  pathMaterial?: PathMaterial | 'auto';
   /** Build the scene INSIDE a geode home instead of out on the floor. */
   interior?: boolean;
   cap: number;
@@ -48,6 +52,8 @@ export interface Scenery {
   moving: Emitter[];
   /** Named places in this world a vignette can send a fish (gate, plaza, home doors). */
   marks: Record<string, { x: number; y: number; z: number }>;
+  /** What the floor should paint: the path network, as segments. */
+  paths: PathSegment[];
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -132,6 +138,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const interiors: BufferGeometry[] = [], details: BufferGeometry[] = [];
   const homeLights: Emitter[] = [];
   const marks: Record<string, { x: number; y: number; z: number }> = {};
+  const doorsteps: { x: number; z: number }[] = [];
   const homeRng = rng.fork(3);
   const homeCount = Math.min(Math.round(opts.homes), opts.cap >= 8 ? 3 : 2);
   for (let i = 0; i < homeCount; i++) {
@@ -139,6 +146,10 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const habit = GEODE_HABITS[(i + (homeCount === 1 ? 0 : 1)) % GEODE_HABITS.length]!;
     let x = t * 132 * s + homeRng.range(-5, 5) * s;
     let z = (-38 + Math.abs(t) * 30) * s + homeRng.range(-4, 4) * s;
+    // With a castle the village stands ASIDE: its road runs down the middle,
+    // so homes take slots either side of it and turn to face it.
+    const flank = opts.castle ? ([[-96, -34], [92, -46], [-66, 44]] as const)[i % 3]! : null;
+    if (flank) { x = flank[0] * s + homeRng.range(-5, 5) * s; z = flank[1] * s + homeRng.range(-4, 4) * s; }
     // A home never grows through a crystal: step it back from any cluster
     // whose footprint it would share.
     for (let pass = 0; pass < 3; pass++) {
@@ -153,7 +164,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const home = buildGeode({
       x, y: terrain(x, z), z, habit, scale: s,
       // Turned in toward the middle of the crescent, never square-on.
-      facing: -t * 0.75 + homeRng.range(-0.12, 0.12),
+      facing: (flank ? Math.atan2(-x, 46 * s) : -t * 0.75) + homeRng.range(-0.12, 0.12),
       tint: anchors[i % anchors.length]!.color,
     }, homeRng.fork(20 + i));
     stones.push(...home.stone);
@@ -166,6 +177,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     {
       const m = home.emitter, dx = m.x - x, dz = m.z - z, dl = Math.hypot(dx, dz) || 1;
       marks[`home${i + 1}`] = { x: m.x + (dx / dl) * 20 * s, y: m.y + 2 * s, z: m.z + (dz / dl) * 20 * s };
+      // Where the walk to this door begins: the foot of its steps.
+      doorsteps.push({ x: m.x + (dx / dl) * 7 * s, z: m.z + (dz / dl) * 7 * s });
       marks[`home${i + 1}in`] = { x: m.x - (dx / dl) * 5 * s, y: m.y, z: m.z - (dz / dl) * 5 * s };
     }
     obstacles.push(home.obstacle);
@@ -192,6 +205,23 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     Object.assign(marks, castle.marks);
     counts.castle = 1;
   }
+  // Paths: every door to the hub, the hub to the landmark's plaza, trails to
+  // the big crystals. Painted by the floor shader, so they cost no geometry.
+  const network = opts.interior ? null : buildPaths([
+    ...doorsteps.map(d => ({ ...d, kind: 'home' as const })),
+    ...(marks.plaza ? [{ x: marks.plaza.x, z: marks.plaza.z, kind: 'landmark' as const }] : []),
+    ...clusters.map(c => ({ x: c.x, z: c.z, kind: 'crystal' as const })),
+  ], rng.fork(13), {
+    amount: opts.paths ?? 0, material: opts.pathMaterial ?? 'auto', scale: s,
+    obstacles: [...obstacles.map(o => ({ x: o.x, z: o.z, r: o.r })), ...clusters.map(c => ({ x: c.x, z: c.z, r: c.radius * 0.7 }))],
+  });
+  if (network?.hub) marks.hub = { x: network.hub.x, y: terrain(network.hub.x, network.hub.z) + 30 * s, z: network.hub.z };
+  counts.paths = network?.edges ?? 0;
+  const keepClear: PathSegment[] = [...(network?.segments ?? [])];
+  if (marks.gate && marks.plaza) {
+    keepClear.push({ x0: marks.gate.x, z0: marks.gate.z, x1: marks.plaza.x, z1: marks.plaza.z, width: 12 * s, material: 'pebble' });
+    keepClear.push({ x0: marks.plaza.x, z0: marks.plaza.z, x1: marks.plaza.x, z1: marks.plaza.z + 0.01, width: 30 * s, material: 'pebble' });
+  }
   // Indoors: the whole scene is the room behind a geode's round door.
   const shellParts: BufferGeometry[] = [];
   let cards: GlowCards | null = null;
@@ -214,7 +244,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
     density: opts.flora, cap: opts.cap, scale: s,
-    blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s),
+    // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
+    blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
   const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
   if (plants) {
@@ -497,7 +528,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
   }
   return {
-    group, counts, vents, emitters: homeLights, moving, marks,
+    group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [],
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),

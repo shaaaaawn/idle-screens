@@ -277,6 +277,18 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: `metaquarium-recipe-${r.id}`, label: `Metaquarium (recipe — ${r.label})`,
     params: { ...r.params, dracoPath: asset('/draco/') },
   })),
+  // STUDY: paths. A village and its castle, joined up — every door walks to
+  // the hub, the hub has a road to the plaza, trails run out to the crystals.
+  createMetaquarium({
+    id: 'metaquarium-study-paths', label: 'Metaquarium (study paths)',
+    params: {
+      paths: 1, geodeHomes: 3, landmark: 'castle', horizon: 0.6, floraDensity: 0.2, bubbleVents: 0.4,
+      propMix: 'crystal:2@druse/cyan,crystal:2@spire/orange,crystal:1@lotus/hotpink', crystalScale: 1, crystalTint: 0.6,
+      fishMix: '100:2,257:2', swimStyle: 'drift', swimSpeed: 0.5,
+      fogColor: '#0a1020', floorColor: '#3a3324', fogNear: 200, fogFar: 1000,
+      cameraDistance: 260, cameraElevation: 42, cameraAzimuth: 0, autoRotate: 0.8,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // STUDY: the jellyfish lanterns, brought down to eye level — three species
   // (lantern, moon, comb), the squeeze rolling down the bell, the lines streaming.
   createMetaquarium({

@@ -11,6 +11,7 @@
  * floor is the closed-form field in `crystals.ts` mirrored as a shader loop.
  */
 
+import { MAX_PATH_SEGMENTS, PATH_FRAGMENT, PATH_MATERIALS, PATH_PARS, type PathSegment } from './paths';
 import {
   AdditiveBlending,
   BackSide,
@@ -384,6 +385,10 @@ export function emptyPoolUniforms(): Uniforms {
     // The performer's shadow in its own pool: heading xz, half-length, half-width — and how soft.
     uMqSpotShade: { value: [new Vector4(0, 1, 0, 0), new Vector4(0, 1, 0, 0), new Vector4(0, 1, 0, 0)] },
     uMqSpotSoft: { value: [0.2, 0.2, 0.2] },
+    // Paths painted on the floor: segment ends (x0 z0 x1 z1), then half-width and material.
+    uMqPathN: { value: 0 },
+    uMqPathA: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
+    uMqPathB: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
   };
 }
 
@@ -403,6 +408,18 @@ export function writePoolSlots(u: Uniforms, emitters: readonly Emitter[], from: 
   }
   u.uMqPoolN!.value = i;
   return i;
+}
+
+/** Paint these paths on the floor (an empty list clears them). */
+export function writePaths(u: Uniforms, segments: readonly PathSegment[]): void {
+  const A = u.uMqPathA!.value as Vector4[], B = u.uMqPathB!.value as Vector4[];
+  const n = Math.min(segments.length, MAX_PATH_SEGMENTS);
+  for (let i = 0; i < n; i++) {
+    const g = segments[i]!;
+    A[i]!.set(g.x0, g.z0, g.x1, g.z1);
+    B[i]!.set(g.width, PATH_MATERIALS.indexOf(g.material), 0, 0);
+  }
+  u.uMqPathN!.value = n;
 }
 
 export function fillPoolUniforms(u: Uniforms, emitters: readonly Emitter[]): void {
@@ -439,9 +456,12 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform vec3 uMqSpotColor[3];
       uniform vec4 uMqSpotShade[3];
       uniform float uMqSpotSoft[3];
+      ${PATH_PARS}
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        // Paths first: they are ground, so every light below falls on them too.
+        ${PATH_FRAGMENT}
         for (int i = 0; i < ${MAX_POOLS}; i++) {
           if (i >= uMqPoolN) break;
           vec3 dv = vMqW - uMqPoolPos[i].xyz;
@@ -486,7 +506,7 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
         }`,
       )}`;
   };
-  mat.customProgramCacheKey = () => 'mq-floor-pools-v4';
+  mat.customProgramCacheKey = () => 'mq-floor-pools-v5';
   mat.needsUpdate = true;
 }
 

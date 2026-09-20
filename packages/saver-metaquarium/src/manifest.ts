@@ -215,6 +215,14 @@ export const METAQUARIUM_PARAMS = {
   /** The far distance: three hazed rings of silhouettes past the fog line —
    *  rock spires, castle-sized crystals in the scene's colours, and (from 0.4)
    *  one grand geode with its door lit. One draw call, unlit. */
+  /** Paths on the sea floor: a walk from every home's door to the village hub,
+   *  a road from the hub to the landmark's plaza, and (above 0.5) trails out
+   *  to the big crystals. Painted by the floor's shader — no geometry, any
+   *  terrain. Adds the vignette mark `hub`. */
+  paths: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** What paths are made of. `auto` is mostly fish-tank algae, with the odd
+   *  stretch of pebbles or pale sand — and some walks change part-way. */
+  pathMaterial: { type: 'enum', default: 'auto', options: ['auto', 'algae', 'pebble', 'sand'], ease: 'step' },
   /** The landmark — one thing bigger than everything else. `castle`: voxel
    *  curtain walls, six towers roofed with glowing crystal spires, a lit
    *  gatehouse, a paved road and plaza, and a grand geode for a keep.

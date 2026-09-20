@@ -78,6 +78,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   skyLanterns: 'The sky motif: voxel jellyfish lanterns overhead (three species), pulsing, lighting what is under them.',
   skyHeight: 'How high the lanterns ride. 1 overhead; ~0.3 brings them down among the houses.',
   horizon: 'The far distance: hazed rings of rock spires and castle-sized crystals past the fog line (and, from 0.4 with no landmark, a grand geode).',
+  paths: 'Walks painted on the floor: every home door → a village hub → the landmark plaza; above 0.5, trails to the crystals. Adds the mark `hub`.',
+  pathMaterial: '`auto` is mostly fish-tank algae green with the odd stretch of `pebble` or `sand`; or force one.',
   landmark: 'One thing bigger than everything else. `castle`: voxel walls, crystal-spired towers, gate, road, plaza. `citadel`: two storeys. Marks: `gate`, `plaza`, `courtyard`.',
   // stage
   followSpot: 'A follow-spot on one fish slot (0 = first of the cast); -1 off. House lights drop with it.',
@@ -122,13 +124,13 @@ const STAGE = { fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar
 export const RECIPES: readonly Recipe[] = [
   {
     id: 'geode-harbor', label: 'Geode harbor', what: 'A village at night: three geode homes, chimneys bubbling, lanterns overhead, a far horizon.',
-    params: { ...NIGHT, floorColor: '#2a1a2a', geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
+    params: { ...NIGHT, floorColor: '#2a1a2a', paths: 0.7, geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
       propMix: 'crystal:2@spire/orange,crystal:2@druse/hotpink,crystal:1@lotus/purple', crystalTint: 0.6, fishMix: '100:2,257:2,seahorse:2', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 190, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
     id: 'moonlit-grove', label: 'Moonlit grove', what: 'A garden: dense swaying flora in green light, one home, lanterns thick overhead.',
-    params: { fogColor: '#041410', floorColor: '#16402e', fogNear: 120, fogFar: 700, floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
+    params: { fogColor: '#041410', floorColor: '#16402e', fogNear: 120, fogFar: 700, paths: 0.6, floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
       propMix: 'crystal:3@spire/seafoam,crystal:1@lotus/yellow,crystal:1@druse/cyan', crystalWild: 0.8, crystalTint: 0.6, fishMix: '100:2,257:3', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 170, cameraElevation: 10, cameraAzimuth: 0, autoRotate: 1 },
   },
@@ -146,7 +148,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'commute', label: 'Going home', what: 'Three neighbours leave their own front doors, meet in the village, and go home again. Loops.',
-    params: { ...NIGHT, floorColor: '#2a1a2a', geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
+    params: { ...NIGHT, floorColor: '#2a1a2a', paths: 0.5, geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
       propMix: 'crystal:3@druse/rainbow', crystalTint: 0.6, fishMix: '100:2,257:1', fishGlow: 0.5,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0 },
