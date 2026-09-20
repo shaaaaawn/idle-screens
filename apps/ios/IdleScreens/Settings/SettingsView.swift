@@ -56,6 +56,9 @@ struct SettingsView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.textTertiary)
                 }
+                // Without this only the words are tappable; the gap between
+                // "Screens" and the count swallows the tap.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
