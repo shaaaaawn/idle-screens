@@ -7,7 +7,8 @@ const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number;
 describe('vignettes', () => {
   it('every shipped example parses clean against the room it is written for', () => {
     for (const [name, script] of Object.entries(VIGNETTES)) {
-      const v = parseVignette(script, INTERIOR_MARKS);
+      // duet and trio are written for the open stage; the rest for the geode room.
+      const v = parseVignette(script, name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
       expect(v.problems, name).toEqual([]);
       expect(v.actors).toBeGreaterThanOrEqual(2);
       expect(v.actors).toBeLessThanOrEqual(3);

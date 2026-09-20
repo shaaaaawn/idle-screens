@@ -172,6 +172,13 @@ export const METAQUARIUM_PARAMS = {
   /** How hard the spot is on, and how far the house lights drop with it. */
   spotStrength: { type: 'number', default: 0.85, min: 0, max: 1, ease: 'smooth' },
   spotColor: { type: 'color', default: '#fff2cf', ease: 'smooth' },
+  /** A rig of up to three follow-spots: `slot[/color][*radius]`, comma-separated
+   *  (`0/#fff2cf, 1/#ff8ad0, 2/#7fdcff*24`). Overrides `followSpot`/`spotColor`.
+   *  The spots are a, b, c in order; their pools add where they cross. */
+  spotRig: { type: 'string', default: '', ease: 'step' },
+  /** A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` — which spots
+   *  are up when (`-` is a blackout). Spots cross-fade at each cue. Empty = all up. */
+  spotCues: { type: 'string', default: '', ease: 'step' },
   /** A small scene for the first two or three fish of the cast: a script of
    *  beats in which actors `a b c` go to the space's marks, face each other and
    *  take turns at gestures. A preset name (`tea · bedtime · seek`) or a script:
@@ -348,7 +355,8 @@ export * from './farm';
 export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, type FishMixResult, type FishSlot, type FishEntry, FISH_CATALOG, NPC_CATALOG } from './ipfs';
 
 export * from './environments';
-export { parseVignette, resolveVignette, VIGNETTES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
+export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
+export { parseVignette, resolveVignette, VIGNETTES, VIGNETTE_CUES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {
   parsePropMix, CRYSTAL_HABITS, CRYSTAL_PALETTES, ENV_PROP_MIX, MAX_CLUSTERS,
   type PropMixEntry, type PropMixResult, type CrystalHabit,

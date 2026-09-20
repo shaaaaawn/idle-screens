@@ -166,7 +166,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // its keep is the same geode home everyone else lives in — only grand.
   const marks: Record<string, { x: number; y: number; z: number }> = {};
   if (opts.castle && !opts.interior) {
-    const cz = (homeCount ? -150 : -40) * s;
+    const cz = (homeCount ? -150 : -110) * s;
     const castle = buildCastle({ x: 0, y: terrain(0, cz), z: cz, facing: 0, scale: s, palette: clusters.map(c => c.color) }, rng.fork(11));
     for (const [g, name, side] of [[castle.masonry, 'castle-masonry', FrontSide], [castle.crystal, 'castle-spires', DoubleSide]] as const) {
       g.userData.mqOwned = true;

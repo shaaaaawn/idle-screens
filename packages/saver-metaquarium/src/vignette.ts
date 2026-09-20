@@ -360,6 +360,39 @@ export const VIGNETTES: Readonly<Record<string, string>> = {
     'b follow a, a >rug, c >rug',
     'a b c circle rug',
   ].join(' | '),
+  // FOR THE OPEN STAGE (OPEN_MARKS), written to be lit: every beat is timed, and
+  // everyone ends where they began, so a `spotCues` sheet stays in step forever.
+  // duet cues:  4s:-, 7s:a, 5s:a, 7s:b, 5s:b, 6s:a+b, 8s:a+b, 6s:a+b, 5s:a+b
+  duet: [
+    '4s: a =left, b =right',
+    '7s: a >centre spin',
+    '5s: a >front bow',
+    '7s: b >centre hop, a >left @b',
+    '5s: b @a wiggle, a @b nod',
+    '6s: a >centre @b, b @a',
+    '8s: a b circle centre',
+    '6s: a @b bow, b @a bow',
+    '5s: a >left, b >right',
+  ].join(' | '),
+  // trio cues:  4s:-, 6s:a, 6s:b, 6s:c, 7s:a+b, 7s:b+c, 9s:a+b+c, 6s:a+b+c, 5s:c, 5s:-
+  trio: [
+    '4s: a =left, b =right, c =back',
+    '6s: a >front spin',
+    '6s: b >high hop, a @b',
+    '6s: c >centre wiggle, a @c, b @c',
+    '7s: a >centre @b, b >centre @a',
+    '7s: b @c talk, c @b nod, a >left',
+    '9s: a b c circle centre',
+    '6s: a @c bow, b @c bow, c >front bow',
+    '5s: a >left, b >right, c @front shake',
+    '5s: c >back',
+  ].join(' | '),
+};
+
+/** The cue sheet that lights a staged preset, spot for spot (`spotRig` a b c = slots 0 1 2). */
+export const VIGNETTE_CUES: Readonly<Record<string, string>> = {
+  duet: '4s:-, 7s:a, 5s:a, 7s:b, 5s:b, 6s:a+b, 8s:a+b, 6s:a+b, 5s:a+b',
+  trio: '4s:-, 6s:a, 6s:b, 6s:c, 7s:a+b, 7s:b+c, 9s:a+b+c, 6s:a+b+c, 5s:c, 5s:-',
 };
 
 /** A preset's name, or the script itself. */

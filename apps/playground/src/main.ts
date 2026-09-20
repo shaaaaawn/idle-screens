@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { createMetaquarium, FISH_CATALOG, NPC_CATALOG } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium, FISH_CATALOG, NPC_CATALOG, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, FACETS_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, PINGS_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, RELAY_BOARD_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -170,6 +170,41 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       pathShape: 'crossing', fishGlow: 0.5,
       fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5,
       cameraDistance: 190, cameraElevation: 14, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // A DUET under two spots: a's solo, b's solo, then they meet and the pink
+  // and the cyan pools cross into white. Cues are the script's beats, 1:1.
+  createMetaquarium({
+    id: 'metaquarium-stage-duet', label: 'Metaquarium (stage — duet, two spots)',
+    params: {
+      vignette: 'duet', spotRig: '0/#ff8ad0*26, 1/#7fdcff*26', spotCues: VIGNETTE_CUES.duet!, spotStrength: 0.95,
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.5, bodyWiggle: 0.3,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5, bubbleVents: 0.3,
+      cameraDistance: 170, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // A TRIO: three solos, two pairings, the full company, and c's last word
+  // alone before the blackout.
+  createMetaquarium({
+    id: 'metaquarium-stage-trio', label: 'Metaquarium (stage — trio, three spots)',
+    params: {
+      vignette: 'trio', spotRig: '0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24', spotCues: VIGNETTE_CUES.trio!, spotStrength: 0.95,
+      fishMix: '100:2,257:1', fishCount: 3, fishGlow: 0.5, bodyWiggle: 0.3,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5,
+      cameraDistance: 185, cameraElevation: 13, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The castle as a theatre: two fish meet on the plaza under their own spots
+  // and go in through the gate together.
+  createMetaquarium({
+    id: 'metaquarium-stage-castle-gate', label: 'Metaquarium (stage — two spots at the castle gate)',
+    params: {
+      landmark: 'castle', horizon: 0.8, skyLanterns: 0.4, crystalScale: 1,
+      vignette: '4s: a =plaza, b =left | 7s: a @gate spin | 7s: b >plaza @a hop | 6s: a @b bow, b @a bow | 8s: a b circle plaza | 8s: a >gate, b follow a | 6s: a >courtyard, b >gate | 6s: a >plaza, b >left',
+      spotRig: '0/#ffd27a*26, 1/#7fdcff*26', spotCues: '4s:-, 7s:a, 7s:b, 6s:a+b, 8s:a+b, 8s:a+b, 6s:b, 6s:a+b', spotStrength: 0.85,
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.5,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 0,
     }, catalog: LOCAL_CATALOG,
   }),
   // The same spot on a village: the performer swims the street at night.

@@ -378,8 +378,9 @@ export function emptyPoolUniforms(): Uniforms {
     uMqPoolTime: { value: 0 },
     uMqPoolPulse: { value: 0 },
     // The follow-spot's pool: xz, radius, gain — and its colour.
-    uMqSpot: { value: new Vector4(0, 0, 1, 0) },
-    uMqSpotColor: { value: new Color('#fff2cf') },
+    // Three follow-spots: xz, radius, gain — and a colour each.
+    uMqSpot: { value: [new Vector4(0, 0, 1, 0), new Vector4(0, 0, 1, 0), new Vector4(0, 0, 1, 0)] },
+    uMqSpotColor: { value: [new Color('#fff2cf'), new Color('#fff2cf'), new Color('#fff2cf')] },
   };
 }
 
@@ -431,8 +432,8 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform float uMqPoolGain;
       uniform float uMqPoolTime;
       uniform float uMqPoolPulse;
-      uniform vec4 uMqSpot;
-      uniform vec3 uMqSpotColor;
+      uniform vec4 uMqSpot[3];
+      uniform vec3 uMqSpotColor[3];
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -451,19 +452,22 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
         // two warped sine fields multiplied and sharpened, so the bright lines
         // are thin and the cells dark, the way light through a rippled surface
         // lands. Nothing is evaluated when the gain is 0.
-        if (uMqSpot.w > 0.0) {
-          float sd = length(vMqW.xz - uMqSpot.xy) / uMqSpot.z;
-          float edge = 1.0 - smoothstep(0.62, 1.0, sd);
+        if (uMqSpot[0].w + uMqSpot[1].w + uMqSpot[2].w > 0.0) {
           vec2 cw = vMqW.xz * 0.085;
           float ct = uMqPoolTime;
           float ca = sin(cw.x * 1.7 + ct * 0.9 + sin(cw.y * 2.3 - ct * 0.7));
           float cb = sin(cw.y * 1.9 - ct * 0.8 + sin(cw.x * 2.1 + ct * 0.6));
           float web = pow(1.0 - abs(ca * cb), 5.0);
-          diffuseColor.rgb += uMqSpotColor * (edge * uMqSpot.w * (0.2 + 1.5 * web));
+          // Pools ADD where they cross: a pink and a cyan spot meet in white.
+          for (int k = 0; k < 3; k++) {
+            float sd = length(vMqW.xz - uMqSpot[k].xy) / uMqSpot[k].z;
+            float edge = 1.0 - smoothstep(0.62, 1.0, sd);
+            diffuseColor.rgb += uMqSpotColor[k] * (edge * uMqSpot[k].w * (0.2 + 1.5 * web));
+          }
         }`,
       )}`;
   };
-  mat.customProgramCacheKey = () => 'mq-floor-pools-v2';
+  mat.customProgramCacheKey = () => 'mq-floor-pools-v3';
   mat.needsUpdate = true;
 }
 

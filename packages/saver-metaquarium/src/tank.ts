@@ -18,7 +18,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry,
+  CircleGeometry, PointLight, Vector4,
   Color,
   ConeGeometry,
   Fog,
@@ -54,6 +54,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { buildStudio, type Studio } from './studio';
+import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
   clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
@@ -538,9 +539,14 @@ class TankInstance implements SaverInstance {
   // Fish glow: built on the first glowing fish, never for a cast without one.
   private glowCards: GlowCards | null = null;
   /** Follow-spot: the beam, and where its fish was this frame. */
-  private spotBeam: SpotBeam | null = null;
-  private readonly spotAt = new Vector3();
-  private spotSeen = false;
+  private readonly spotBeams: (SpotBeam | undefined)[] = [];
+  private readonly spotLights: (PointLight | undefined)[] = [];
+  private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
+  private readonly spotSeen = [false, false, false];
+  private readonly spotLevel = [0, 0, 0];
+  private spotRig: SpotSpec[] = [];
+  private spotSheet: SpotSheet | null = null;
+  private spotKey = '\u0000';
   private readonly spotLamp = new Vector3();
   private readonly spotHit = new Vector3();
   private readonly spotTint = new Color();
@@ -1109,14 +1115,15 @@ class TankInstance implements SaverInstance {
     const script = resolveVignette(this.str('vignette'));
     const indoors = this.str('interior') === 'geode';
     const scale = this.num('crystalScale');
-    const key = `${script}|${indoors}|${scale}`;
+    const key = `${script}|${indoors}|${scale}|${this.sceneryKey}`;
     if (key === this.vignetteKey) return;
     this.vignetteKey = key;
     this.vignette = null;
     if (!script) return;
     const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
     const k = indoors ? scale : 1;
-    const marks: Marks = Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }]));
+    // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
+    const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
     const parsed = parseVignette(script, marks);
     if (parsed.problems.length && script !== this.warnedVignette) {
       this.warnedVignette = script;
@@ -1133,43 +1140,75 @@ class TankInstance implements SaverInstance {
    * closed-form position, so it is as deterministic as the swim.
    */
   private aimSpot(tSec: number): void {
-    const gain = this.spotSeen ? this.num('spotStrength') : 0;
-    const spot = this.poolUniforms.uMqSpot!.value as { set(x: number, y: number, z: number, w: number): void };
+    const rig = this.spotRig;
+    const spots = this.poolUniforms.uMqSpot!.value as Vector4[];
+    const tints = this.poolUniforms.uMqSpotColor!.value as Color[];
+    const strength = this.num('spotStrength');
+    spotLevels(this.spotSheet, rig.length, tSec, this.spotLevel);
+    // The house comes down for the SHOW, not per lamp: it stays down through
+    // a blackout cue, which is what makes the next spot an entrance.
+    const show = rig.some((_, i) => this.spotSeen[i]) ? strength : 0;
     if (this.studio) {
-      // House lights: down to 40 % at full strength.
-      this.studio.hemi.intensity = 1.15 * (1 - 0.6 * gain);
-      this.studio.key.intensity = 2.1 * (1 - 0.6 * gain);
+      this.studio.hemi.intensity = 1.15 * (1 - 0.6 * show);
+      this.studio.key.intensity = 2.1 * (1 - 0.6 * show);
       this.studio.follow.intensity = 0;
+      for (const l of this.spotLights) if (l) l.intensity = 0;
     }
-    if (gain <= 0) {
-      if (this.spotBeam) this.spotBeam.mesh.visible = false;
-      spot.set(0, 0, 1, 0);
-      return;
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const spec = rig[i];
+      const gain = spec && this.spotSeen[i] ? strength * this.spotLevel[i]! : 0;
+      const beam = this.spotBeams[i];
+      if (gain <= 0.001 || !spec) {
+        if (beam) beam.mesh.visible = false;
+        spots[i]!.set(0, 0, 1, 0);
+        continue;
+      }
+      if (!this.spotBeams[i]) {
+        this.spotBeams[i] = buildSpotBeam();
+        this.scene.add(this.spotBeams[i]!.mesh);
+      }
+      if (!this.poolsInstalled) this.installPools();
+      const f = this.spotAt[i]!;
+      // Lamps hang over the stage a little toward the house, spread across
+      // the rig so three beams fan instead of stacking.
+      this.spotLamp.set(f.x * 0.25 + (i - (rig.length - 1) / 2) * 46, 210, f.z * 0.25 + 30);
+      const floorY = this.terrainAt ? this.terrainAt(f.x, f.z) : 0;
+      const k = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      this.spotHit.set(this.spotLamp.x + (f.x - this.spotLamp.x) * k, floorY, this.spotLamp.z + (f.z - this.spotLamp.z) * k);
+      this.spotTint.set(spec.color);
+      this.spotBeams[i]!.aim(this.spotLamp, this.spotHit, spec.radius, this.spotTint, gain, tSec);
+      spots[i]!.set(this.spotHit.x, this.spotHit.z, spec.radius, gain * 0.9);
+      tints[i]!.copy(this.spotTint);
+      if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
+      if (this.studio) {
+        // Spot 0 uses the studio's own follow light; more spots bring their
+        // own, added once — a one-time recompile, only in scenes that ask.
+        let light = i === 0 ? this.studio.follow : this.spotLights[i - 1];
+        if (!light) {
+          light = new PointLight(0xffffff, 0, 95, 2);
+          this.spotLights[i - 1] = light;
+          this.scene.add(light);
+        }
+        light.position.set(f.x + (this.spotLamp.x - f.x) * 0.12, f.y + 16, f.z + (this.spotLamp.z - f.z) * 0.12 + 8);
+        light.color.copy(this.spotTint);
+        light.distance = 95;
+        light.intensity = 5200 * gain;
+      }
     }
-    if (!this.spotBeam) {
-      this.spotBeam = buildSpotBeam();
-      this.scene.add(this.spotBeam.mesh);
-    }
-    if (!this.poolsInstalled) this.installPools();
-    const f = this.spotAt;
-    // The lamp hangs over the middle of the stage, a little toward the house.
-    this.spotLamp.set(f.x * 0.25, 210, f.z * 0.25 + 30);
-    const floorY = this.terrainAt ? this.terrainAt(f.x, f.z) : 0;
-    const k = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
-    this.spotHit.set(this.spotLamp.x + (f.x - this.spotLamp.x) * k, floorY, this.spotLamp.z + (f.z - this.spotLamp.z) * k);
-    const radius = 30;
-    this.spotTint.set(this.str('spotColor'));
-    this.spotBeam.aim(this.spotLamp, this.spotHit, radius, this.spotTint, gain, tSec);
-    spot.set(this.spotHit.x, this.spotHit.z, radius, gain * 0.9);
-    (this.poolUniforms.uMqSpotColor!.value as Color).copy(this.spotTint);
-    if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
-    if (this.studio) {
-      // On the lamp's side of the fish, so the lit face is the one the beam hits.
-      this.studio.follow.position.set(f.x + (this.spotLamp.x - f.x) * 0.12, f.y + 16, f.z + (this.spotLamp.z - f.z) * 0.12 + 8);
-      this.studio.follow.color.copy(this.spotTint);
-      this.studio.follow.distance = 95;
-      this.studio.follow.intensity = 5200 * gain;
-    }
+  }
+
+  /** `spotRig` when given, else the single `followSpot` — parsed on change. */
+  private buildSpotRig(): void {
+    const rigText = this.str('spotRig'), cues = this.str('spotCues');
+    const single = Math.round(this.num('followSpot')), color = this.str('spotColor');
+    const key = `${rigText}|${cues}|${single}|${color}`;
+    if (key === this.spotKey) return;
+    this.spotKey = key;
+    const parsed = parseSpotRig(rigText);
+    this.spotRig = parsed.spots.length ? parsed.spots : single >= 0 ? [{ slot: single, color, radius: 30 }] : [];
+    this.spotSheet = cues.trim() ? parseSpotCues(cues, this.spotRig.length) : null;
+    const problems = [...parsed.problems, ...(this.spotSheet?.problems ?? [])];
+    if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
   }
 
   private installPools(): void {
@@ -1757,8 +1796,8 @@ class TankInstance implements SaverInstance {
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
-    const spotSlot = Math.round(this.num('followSpot'));
-    this.spotSeen = false;
+    this.buildSpotRig();
+    this.spotSeen.fill(false);
     const glowPulse = this.num('crystalPulse');
     let glowN = 0;
     this.fishEmitters.length = 0;
@@ -2046,7 +2085,9 @@ class TankInstance implements SaverInstance {
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
       if (act) { px = act.x; y = act.y; pz = act.z; }
       f.group.position.set(px, y, pz);
-      if (f.index === spotSlot) { this.spotAt.set(px, y, pz); this.spotSeen = true; }
+      for (let si = 0; si < this.spotRig.length; si++) {
+        if (this.spotRig[si]!.slot === f.index) { this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true; }
+      }
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
       if (act) {
         f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
