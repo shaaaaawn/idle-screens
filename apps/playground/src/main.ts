@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { createMetaquarium, FISH_CATALOG, NPC_CATALOG } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium, FISH_CATALOG, NPC_CATALOG, RECIPES, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, FACETS_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, PINGS_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, RELAY_BOARD_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -25,6 +25,7 @@ import { wireCapabilitiesHarness, wireSchemaHarness } from './dev-harness';
 import { buildBottomDock } from './bottom-dock';
 import { buildRightDock } from './right-dock';
 import { buildParamsPanel } from './params-panel';
+import { buildViewportNav } from './viewport-nav';
 import { formatBackendLabel } from './preview-backend';
 import { buildEvalsPanel } from './evals/evals-panel';
 import { buildSettingsPanel } from './settings-panel';
@@ -152,6 +153,350 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     },
     catalog: LOCAL_CATALOG,
   }),
+  // Fish glow QA: GLOW parts as light sources, in the dark where it shows —
+  // bloom card, breathing core, colour on the floor under low swimmers, and
+  // chrome plates. ?saver=metaquarium-glow-dark (local NPC models).
+  createMetaquarium({
+    id: 'metaquarium-glow-dark',
+    label: 'Metaquarium (glow in the dark)',
+    params: {
+      fishMix: 'glowfish:2,hackerfish:1,blowfish:1,jellyfish:1,crab:1,dori:1',
+      dracoPath: asset('/draco/'), swimStyle: 'bottom', swimVariance: 0.6, bodyWiggle: 0.35,
+      fishGlow: 1, propMix: 'crystal:3@coral', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 130, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  // THE STAGE: one performer, a follow-spot, the house lights down. The beam
+  // and its pool of caustics track slot 0 as it crosses; the rest of the cast
+  // waits in the dark. ?saver=metaquarium-stage-followspot
+  createMetaquarium({
+    id: 'metaquarium-stage-followspot', label: 'Metaquarium (stage — follow-spot)',
+    params: {
+      followSpot: 0, spotStrength: 0.9, fishMix: '257:1@patrol,100:4@drift', swimSpeed: 0.6, swimVariance: 0.4, bodyWiggle: 0.3,
+      pathShape: 'crossing', fishGlow: 0.5,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5,
+      cameraDistance: 190, cameraElevation: 14, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // A DUET under two spots: a's solo, b's solo, then they meet and the pink
+  // and the cyan pools cross into white. Cues are the script's beats, 1:1.
+  createMetaquarium({
+    id: 'metaquarium-stage-duet', label: 'Metaquarium (stage — duet, two spots)',
+    params: {
+      vignette: 'duet', spotRig: '0/#ff8ad0*26, 1/#7fdcff*26', spotCues: VIGNETTE_CUES.duet!, spotStrength: 0.95,
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.5, bodyWiggle: 0.3,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5, bubbleVents: 0.3,
+      cameraDistance: 170, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // A TRIO: three solos, two pairings, the full company, and c's last word
+  // alone before the blackout.
+  createMetaquarium({
+    id: 'metaquarium-stage-trio', label: 'Metaquarium (stage — trio, three spots)',
+    params: {
+      vignette: 'trio', spotRig: '0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24', spotCues: VIGNETTE_CUES.trio!, spotStrength: 0.95,
+      fishMix: '100:2,257:1', fishCount: 3, fishGlow: 0.5, bodyWiggle: 0.3,
+      fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, marineSnow: 0.5,
+      cameraDistance: 185, cameraElevation: 13, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The castle as a theatre: two fish meet on the plaza under their own spots
+  // and go in through the gate together.
+  createMetaquarium({
+    id: 'metaquarium-stage-castle-gate', label: 'Metaquarium (stage — two spots at the castle gate)',
+    params: {
+      landmark: 'castle', horizon: 0.8, skyLanterns: 0.4, crystalScale: 1,
+      vignette: '4s: a =plaza, b =left | 7s: a @gate spin | 7s: b >plaza @a hop | 6s: a @b bow, b @a bow | 8s: a b circle plaza | 8s: a >gate, b follow a | 6s: a >courtyard, b >gate | 6s: a >plaza, b >left',
+      spotRig: '0/#ffd27a*26, 1/#7fdcff*26', spotCues: '4s:-, 7s:a, 7s:b, 6s:a+b, 8s:a+b, 8s:a+b, 6s:b, 6s:a+b', spotStrength: 0.85,
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.5,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The same spot on a village: the performer swims the street at night.
+  createMetaquarium({
+    id: 'metaquarium-stage-spot-harbor', label: 'Metaquarium (stage — spot over the harbor)',
+    params: {
+      followSpot: 0, spotStrength: 0.8, spotColor: '#dff3ff', fishMix: 'glowfish:1@patrol,100:2,257:2', dracoPath: asset('/draco/'),
+      geodeHomes: 3, rockDensity: 0.35, floraDensity: 0.5, bubbleVents: 0.7, marineSnow: 0.5,
+      propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange', crystalGlow: 0.6, swimSpeed: 0.55,
+      fogColor: '#04040f', floorColor: '#0c1222', fogNear: 110, fogFar: 650,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 8, autoRotate: 0.3,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // THE BIG WORLD: crystals at castle scale. A keep and its towers stand out
+  // past the swim space as a skyline; the village, rocks and gardens sit in
+  // its shadow, and the fish are small in front of it. Tests the large end of
+  // everything: fog depth, far plane, glow-card caps, prop budgets.
+  createMetaquarium({
+    id: 'metaquarium-world-crystal-citadel', label: 'Metaquarium (crystal citadel)',
+    params: {
+      propMix: 'crystal#keep:1@spire/cyan*6.5,crystal:3@spire/purple*3.6,crystal:2@lotus/blue*2.4,crystal:3@druse/cyan,crystal:2@coral/hotpink',
+      crystalWild: 0.8, crystalGlow: 0.9, rockDensity: 0.7, rockVeins: 0.9, geodeHomes: 3, floraDensity: 0.7,
+      bubbleVents: 0.6, marineSnow: 0.7, skyLanterns: 0.7, horizon: 1,
+      fishMix: '100:4@school,257:3,glowfish:1', dracoPath: asset('/draco/'), swimStyle: 'auto', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#03071a', floorColor: '#0a1226', fogNear: 220, fogFar: 1100,
+      cameraDistance: 330, cameraElevation: 7, cameraAzimuth: 12, autoRotate: 0.35, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // The same keep from among the houses: the low, close angle that shows scale.
+  createMetaquarium({
+    id: 'metaquarium-world-citadel-street', label: 'Metaquarium (citadel, street level)',
+    params: {
+      propMix: 'crystal#keep:1@spire/seafoam*7,crystal:2@spire/cyan*4,crystal:3@druse/seafoam,crystal:2@coral/yellow',
+      crystalWild: 0.8, crystalGlow: 0.85, rockDensity: 0.5, rockVeins: 0.8, geodeHomes: 3, floraDensity: 0.9, bubbleVents: 0.8, marineSnow: 0.8, skyLanterns: 0.7, horizon: 1,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#021210', floorColor: '#07201c', fogNear: 180, fogFar: 1000,
+      cameraDistance: 165, cameraElevation: 2, cameraAzimuth: 24, autoRotate: 0.3, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // THE ROCK WORLD: fractured stone is the subject — a field of boulders, the
+  // arch and the ridge all split by light, one home tucked among them.
+  createMetaquarium({
+    id: 'metaquarium-world-mineral-garden', label: 'Metaquarium (mineral garden)',
+    params: {
+      rockDensity: 1, rockVeins: 1, geodeHomes: 1, floraDensity: 0.3, bubbleVents: 0.55, marineSnow: 0.5, skyLanterns: 0.6, horizon: 1,
+      propMix: 'crystal:3@druse/cyan,crystal:2@spire/purple,crystal:1@lotus/blue',
+      fishMix: '100:3,257:3', swimStyle: 'patrol', swimSpeed: 0.5, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#040916', floorColor: '#0b1525', fogNear: 120, fogFar: 700,
+      cameraDistance: 215, cameraElevation: 13, cameraAzimuth: 14, autoRotate: 0.5, moteDensity: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // COMMUTE: three neighbours come out of their own front doors, meet in the
+  // middle of the village, and go home again. The world's marks (home1..3,
+  // home1in..3in) are what make them citizens instead of swimmers.
+  createMetaquarium({
+    id: 'metaquarium-vignette-commute', label: 'Metaquarium (vignette commute — going home)',
+    params: {
+      geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
+      propMix: 'crystal:3@druse/rainbow', crystalScale: 1, crystalTint: 0.6,
+      vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
+      fishMix: '100:2,257:1', fishCount: 3, fishGlow: 0.5,
+      fogColor: '#0a0a1a', floorColor: '#2a1a2a', fogNear: 120, fogFar: 700,
+      cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // RECIPES: the package's own named scenes, exactly as an agent would publish
+  // them over MCP (default catalog, minted ids from IPFS) — so what is on this
+  // shelf is what a channel can show. ?saver=metaquarium-recipe-<id>
+  ...RECIPES.map((r) => createMetaquarium({
+    id: `metaquarium-recipe-${r.id}`, label: `Metaquarium (recipe — ${r.label})`,
+    params: { ...r.params, dracoPath: asset('/draco/') },
+  })),
+  // STUDY: paths. A village and its castle, joined up — every door walks to
+  // the hub, the hub has a road to the plaza, trails run out to the crystals.
+  createMetaquarium({
+    id: 'metaquarium-study-paths', label: 'Metaquarium (study paths)',
+    params: {
+      paths: 1, geodeHomes: 3, landmark: 'castle', horizon: 0.6, floraDensity: 0.2, bubbleVents: 0.4,
+      propMix: 'crystal:2@druse/cyan,crystal:2@spire/orange,crystal:1@lotus/hotpink', crystalScale: 1, crystalTint: 0.6,
+      fishMix: '100:2,257:2', swimStyle: 'drift', swimSpeed: 0.5,
+      fogColor: '#0a1020', floorColor: '#3a3324', fogNear: 200, fogFar: 1000,
+      cameraDistance: 260, cameraElevation: 42, cameraAzimuth: 0, autoRotate: 0.8,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // STUDY: the jellyfish lanterns, brought down to eye level — three species
+  // (lantern, moon, comb), the squeeze rolling down the bell, the lines streaming.
+  createMetaquarium({
+    id: 'metaquarium-study-jellyfish', label: 'Metaquarium (study jellyfish)',
+    params: {
+      skyLanterns: 1, skyHeight: 0.3, propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/yellow,crystal:1@druse/purple', crystalScale: 0.7,
+      fishMix: '100:1,257:1', swimStyle: 'drift', swimSpeed: 0.4, marineSnow: 0.4,
+      fogColor: '#04081a', floorColor: '#0c1428', fogNear: 160, fogFar: 800,
+      cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // STUDY: eyes across the breeds. Every minted eye is a pixel grid — 3×3 on a
+  // betafish or seahorse, 3×2 on an angelfish, 2×2 on a turtle — and each
+  // token's pattern is its own. Hovering close, so blinks and looks can be read.
+  createMetaquarium({
+    id: 'metaquarium-study-eyes-breeds', label: 'Metaquarium (study eyes — every breed)',
+    params: {
+      fishMix: '30:1@hover,60:1@hover,180:1@hover,420:1@hover,456:1@hover,480:1@hover,500:1@hover', dracoPath: asset('/draco/'),
+      swimSpeed: 0.35, bodyWiggle: 0.2, fishGlow: 0.3, eyeLife: 1,
+      fogColor: '#04101c', floorColor: '#0c2030', fogNear: 140, fogFar: 700,
+      cameraDistance: 80, cameraElevation: 10, cameraAzimuth: 0, autoRotate: 0.6,
+    },
+  }),
+  // STUDY: eyes. Two fish, close, talking — blinks, saccades, a look at each
+  // other, a glance at the lens, wide for the hop, shut for the rest.
+  createMetaquarium({
+    id: 'metaquarium-study-eyes', label: 'Metaquarium (study eyes)',
+    params: {
+      vignette: '3s: a =left, b =right | 6s: a >centre @b, b >centre @a | 6s: a @b talk, b @a nod | 5s: b @a hop | 5s: a @b wiggle, b @a | 6s: a @front peek, b @a | 6s: a @b bow, b @a bow | 7s: a rest, b @a | 6s: a >left, b >right',
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.4, eyeLife: 1,
+      fogColor: '#04101c', floorColor: '#0c2030', fogNear: 120, fogFar: 600, marineSnow: 0.3,
+      cameraDistance: 84, cameraElevation: 16, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // Study scenes: one subject each, close, slowly orbiting — where a layer is
+  // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
+  // Indoors: the room behind the round door — and the small scenes played in
+  // it. Two or three fish, a script of beats; ?saver=metaquarium-vignette-<name>.
+  ...([
+    ['tea', '100:1,257:1', 'a friend calls round for tea', 118, 300],
+    ['bedtime', '257:1,100:1', 'lamps, a last word, bed', 112, 235],
+    ['seek', '100:1,257:1,glowfish:1', 'hide and seek, three fish', 124, 20],
+  ] as const).map(([name, cast, what, dist, az]) =>
+    createMetaquarium({
+      id: `metaquarium-vignette-${name}`, label: `Metaquarium (vignette ${name} — ${what})`,
+      params: {
+        interior: 'geode', vignette: name, fishMix: cast, dracoPath: asset('/draco/'),
+        bubbleVents: 0.5, crystalTint: 0.7, bodyWiggle: 0.25,
+        fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
+        cameraDistance: dist, cameraElevation: 14, cameraAzimuth: az, autoRotate: 0.6,
+      }, catalog: LOCAL_CATALOG,
+    }),
+  ),
+  createMetaquarium({
+    id: 'metaquarium-study-geode-interior', label: 'Metaquarium (study geode interior)',
+    params: {
+      interior: 'geode', vignette: 'tea', bubbleVents: 0.5, crystalTint: 0.7,
+      fishMix: '100:1,257:1', bodyWiggle: 0.25,
+      fogColor: '#0a0616', floorColor: '#1a1020', fogNear: 160, fogFar: 1000,
+      cameraDistance: 100, cameraElevation: 12, cameraAzimuth: 300, autoRotate: 1.4,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-study-flora', label: 'Metaquarium (study flora)',
+    params: {
+      floraDensity: 1, rockDensity: 0.3, rockVeins: 0.6, marineSnow: 0.5, propMix: 'crystal:2@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, crystalTint: 0.5,
+      fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
+      cameraDistance: 150, cameraElevation: 10, cameraAzimuth: 348, autoRotate: 1.2,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-study-rocks', label: 'Metaquarium (study rocks)',
+    params: {
+      rockDensity: 1, rockVeins: 1, bubbleVents: 0.5, propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink',
+      fishMix: '100:2,257:2', swimStyle: 'patrol', swimSpeed: 0.5,
+      fogColor: '#04070f', floorColor: '#0a101c', fogNear: 120, fogFar: 700,
+      cameraDistance: 170, cameraElevation: 14, cameraAzimuth: 20, autoRotate: 1.2,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // STUDY: the castle. The landmark on its own — walls, towers, spires, gate
+  // and road — orbited slowly so every side gets looked at.
+  createMetaquarium({
+    id: 'metaquarium-study-castle', label: 'Metaquarium (study castle)',
+    params: {
+      landmark: 'castle', propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalScale: 1,
+      bubbleVents: 0.4, skyLanterns: 0.5, horizon: 0.8, floraDensity: 0.3,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900,
+      cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // STUDY: the citadel — the castle's two-storey version, with an upper ward.
+  createMetaquarium({
+    id: 'metaquarium-study-citadel', label: 'Metaquarium (study citadel, two-storey)',
+    params: {
+      landmark: 'citadel', propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalScale: 1,
+      bubbleVents: 0.4, skyLanterns: 0.5, horizon: 0.8, floraDensity: 0.3,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 180, fogFar: 1000,
+      cameraDistance: 340, cameraElevation: 20, cameraAzimuth: 14, autoRotate: 1.5,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-study-geode', label: 'Metaquarium (study geode)',
+    params: {
+      geodeHomes: 3, bubbleVents: 0.6, propMix: 'crystal:3@druse/rainbow', crystalScale: 1,
+      fishMix: '100:2,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#05060f', floorColor: '#0c1220', fogNear: 120, fogFar: 700,
+      cameraDistance: 150, cameraElevation: 9, cameraAzimuth: 6, autoRotate: 1.2,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // THE HOME WORLD: the village is the subject — three geode homes in a
+  // crescent, chimneys going, a few rocks and a little flora around them.
+  createMetaquarium({
+    id: 'metaquarium-world-geode-harbor', label: 'Metaquarium (geode harbor)',
+    params: {
+      geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
+      propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange,crystal:1@druse/purple',
+      fishMix: '100:2,257:1,glowfish:2,crab:1', dracoPath: asset('/draco/'),
+      swimStyle: 'auto', swimVariance: 0.5, swimSpeed: 0.55, bodyWiggle: 0.25,
+      crystalTint: 0.65, crystalGlow: 0.65, fogColor: '#080718', floorColor: '#10182b',
+      cameraDistance: 185, cameraElevation: 10, cameraAzimuth: 6, autoRotate: 0.5,
+      fogNear: 110, fogFar: 650,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // THE FLORA WORLD: the grove is the subject — kelp, reeds and lantern bulbs
+  // crowding the crystals they feed on, snow falling through the glow.
+  createMetaquarium({
+    id: 'metaquarium-world-moonlit-grove', label: 'Metaquarium (moonlit grove)',
+    params: {
+      floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
+      propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
+      fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 346, autoRotate: 0.5,
+    }, catalog: LOCAL_CATALOG,
+  }),
+  // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
+  // so the props are judged without waiting on a gateway.
+  createMetaquarium({
+    id: 'metaquarium-crystal-lotus',
+    label: 'Metaquarium (crystal lotus)',
+    params: {
+      propMix: 'crystal#hero:1@lotus/hotpink,crystal:1@lotus/orange,crystal:1@lotus/glass',
+      fishCount: 3, fishUrl: LOCAL_FISH_URL, swimStyle: 'hover', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 95, cameraElevation: 20,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-crystal-habits',
+    label: 'Metaquarium (crystal habits)',
+    params: {
+      propMix: 'crystal:1@lotus/hotpink,crystal:1@spire/cyan,crystal:1@druse/yellow,crystal:1@scatter/blue,crystal:1@spire/glass',
+      fishCount: 2, fishUrl: LOCAL_FISH_URL, fogColor: '#020108', floorColor: '#070a12',
+      cameraDistance: 260, cameraElevation: 22, autoRotate: 3,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  createMetaquarium({
+    id: 'metaquarium-crystal-coral',
+    label: 'Metaquarium (crystal coral)',
+    params: {
+      propMix: 'crystal#hero:1@coral/hotpink,crystal:2@coral/seafoam,crystal:2@coral/orange,crystal:2@druse/purple',
+      crystalWild: 1, fishCount: 4, fishUrl: LOCAL_FISH_URL, swimStyle: 'drift', moteDensity: 0.5,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 150, cameraElevation: 16, autoRotate: 2,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  // The same lotus garden twice — `crystalWild` 0 (the measured, regular
+  // rosette) against 1 — so the dial can be judged side by side.
+  ...([0, 1] as const).map((wild) =>
+    createMetaquarium({
+      id: `metaquarium-crystal-wild-${wild}`,
+      label: `Metaquarium (crystal wild ${wild})`,
+      params: {
+        propMix: 'crystal:6@lotus/rainbow', crystalWild: wild, fishCount: 2, fishUrl: LOCAL_FISH_URL,
+        fogColor: '#020108', floorColor: '#070a12', cameraDistance: 200, cameraElevation: 24,
+      },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
+  createMetaquarium({
+    id: 'metaquarium-crystal-tint',
+    label: 'Metaquarium (crystal tint, opt-in)',
+    params: {
+      propMix: 'crystal:6@druse/rainbow,crystal:2@lotus/rainbow', crystalTint: 1,
+      fishCount: 6, fishUrl: LOCAL_FISH_URL, swimStyle: 'bottom', swimVariance: 0.6,
+      fogColor: '#020108', floorColor: '#070a12', cameraDistance: 150, cameraElevation: 10,
+    },
+    catalog: LOCAL_CATALOG,
+  }),
+  ...(['abyss', 'reef', 'ice', 'vent', 'universe'] as const).map((env) =>
+    createMetaquarium({
+      id: `metaquarium-crystal-env-${env}`,
+      label: `Metaquarium (crystals in ${env})`,
+      params: { environment: env, envProps: 'on', fishCount: 4, fishUrl: LOCAL_FISH_URL, moteDensity: 0.4, cameraDistance: 190, cameraElevation: 16 },
+      catalog: LOCAL_CATALOG,
+    }),
+  ),
   // Choreography showcases: pathShape x formationShape x maneuver.
   // ?saver=metaquarium-choreo-<name>.
   createMetaquarium({
@@ -341,9 +686,41 @@ const GALLERY_GROUPS: GalleryGroup[] = SAVER_GROUPS.map((g) => ({
   savers: g.savers,
 }));
 
+// Variants belong in the on-demand viewer, but not the gallery's live tiles —
+// they're reachable through PALETTE_SHELVES in Dev Tools instead. Including
+// them here diverged PREVIEW_ENTRIES's length from the gallery's actual
+// `.gallery-card` count, which is what the preview's `N / total` position
+// counts against.
 const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
   g.savers.map((saver) => ({ saver, pkg: g.label })),
 );
+
+/**
+ * Dev Tools only: the metaquarium QA scenes, filed under the metaquarium group
+ * in the palette. They stay out of SAVER_GROUPS (the gallery live-mounts every
+ * grouped saver), which used to mean the only way to reach one was to already
+ * know its `?saver=` id.
+ */
+const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['metaquarium-recipe-', 'recipes (what MCP can publish)'],
+  ['metaquarium-world-', 'worlds'],
+  ['metaquarium-study-', 'studies'],
+  ['metaquarium-vignette-', 'vignettes'],
+  ['metaquarium-stage-', 'stage'],
+  ['metaquarium-crystal-', 'crystals'],
+  ['metaquarium-env-', 'environments'],
+  ['metaquarium-swim-', 'swim styles'],
+  ['metaquarium-choreo-', 'choreography'],
+  ['metaquarium-', 'scenes'],
+];
+const PALETTE_SHELVES: Record<string, Array<{ label: string; savers: SaverPlugin[] }>> = {
+  'saver-metaquarium': VARIANT_SHELVES.map(([prefix, label], i) => ({
+    label,
+    savers: METAQUARIUM_VARIANTS.filter((v) =>
+      v.manifest.id.startsWith(prefix)
+      && !VARIANT_SHELVES.slice(0, i).some(([earlier]) => v.manifest.id.startsWith(earlier))),
+  })).filter((shelf) => shelf.savers.length > 0),
+};
 
 function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, activeId?: string): void {
   // Same filter affordance as the gallery's — 36 savers is too many to scan.
@@ -372,7 +749,7 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     const items = document.createElement('div');
     items.className = 'palette-group-items';
 
-    for (const s of group.savers) {
+    const addItem = (s: SaverPlugin, into: HTMLElement, open: () => void): void => {
       const item = document.createElement('button');
       item.className = 'palette-item';
       item.dataset.id = s.manifest.id;
@@ -393,15 +770,71 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
       }
 
       item.addEventListener('click', () => {
-        details.open = true;
+        open();
         onSelect(s.manifest.id);
       });
-      items.append(item);
+      into.append(item);
+    };
+    for (const s of group.savers) addItem(s, items, () => { details.open = true; });
+
+    // Shelves of variants: closed until wanted, open when one is the selection.
+    const shelves = PALETTE_SHELVES[group.id] ?? [];
+    const shelfRail = document.createElement('div');
+    shelfRail.className = 'palette-shelves';
+    if (shelves.length) items.append(shelfRail);
+    for (const shelf of shelves) {
+      const sub = document.createElement('details');
+      sub.className = 'palette-group palette-shelf';
+      sub.open = shelf.savers.some((s) => s.manifest.id === activeId);
+      const head = document.createElement('summary');
+      head.className = 'palette-group-head';
+      const name = document.createElement('span');
+      name.className = 'palette-shelf-name';
+      name.textContent = shelf.label;
+      const count = document.createElement('span');
+      count.className = 'palette-shelf-count';
+      count.textContent = String(shelf.savers.length);
+      head.append(name, count);
+      const list = document.createElement('div');
+      list.className = 'palette-group-items';
+      for (const s of shelf.savers) {
+        addItem(s, list, () => { details.open = true; sub.open = true; });
+        const lbl = list.lastElementChild?.querySelector('.palette-label');
+        // "Metaquarium (crystal lotus)" → "crystal lotus": the shelf says the rest.
+        // …and inside "crystals", "crystal lotus" → "lotus": say it once.
+        if (lbl) {
+          const inner = /\((.+)\)\s*$/.exec(s.manifest.label)?.[1] ?? s.manifest.label;
+          const single = shelf.label.replace(/s$/, '');
+          lbl.textContent = inner.startsWith(`${single} `) ? inner.slice(single.length + 1) : inner;
+        }
+      }
+      sub.append(head, list);
+      shelfRail.append(sub);
     }
 
     details.append(summary, items);
     tree.append(details);
   }
+
+  // Arrow keys walk the visible rows (the mount is debounced, so holding a key
+  // scrubs the list without mounting every saver it passes).
+  const walk = (from: Element | null, step: 1 | -1): void => {
+    const rows = [...tree.querySelectorAll<HTMLElement>('.palette-item')].filter((r) => r.offsetParent !== null);
+    if (!rows.length) return;
+    const at = from ? rows.indexOf(from as HTMLElement) : -1;
+    const next = rows[Math.min(rows.length - 1, Math.max(0, at < 0 ? 0 : at + step))]!;
+    next.focus();
+    next.click();
+    next.scrollIntoView({ block: 'nearest' });
+  };
+  tree.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    walk(document.activeElement?.closest('.palette-item') ?? tree.querySelector('.palette-item.active'), e.key === 'ArrowDown' ? 1 : -1);
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); walk(null, 1); }
+  });
 
   search.addEventListener('input', () => {
     const q = search.value.trim().toLowerCase();
@@ -414,6 +847,9 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
       }
       details.hidden = shown === 0;
       if (q !== '') details.open = true;
+      else if (details.classList.contains('palette-shelf')) {
+        details.open = details.querySelector('.palette-item.active') !== null;
+      }
     }
   });
 
@@ -422,9 +858,11 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
 
 /** Derived from the group a saver was registered in, so a new package can't
  *  silently show up attributed to savers-classic. */
-const PACKAGE_BY_ID = new Map<string, string>(
-  SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
-);
+const PACKAGE_BY_ID = new Map<string, string>([
+  ...SAVER_GROUPS.flatMap((g) => g.savers.map((s) => [s.manifest.id, g.label] as [string, string])),
+  // Variants live outside the groups but are still their package's savers.
+  ...METAQUARIUM_VARIANTS.map((s) => [s.manifest.id, '@idle-screens/saver-metaquarium'] as [string, string]),
+]);
 
 function packageFor(saver: SaverPlugin): string {
   const id = saver.manifest.id;
@@ -631,7 +1069,10 @@ function liveMode(): void {
   const toEngineConfig = (c: LiveConfig): Partial<IdleScreensConfig> => ({
     timeoutMs: c.timeoutMs,
     sleepOnBlur: c.sleepOnBlur,
-    suppress: () => previewIsOpen,
+    // Dev Tools is a workbench: you sit still reading a panel for a minute and
+    // the idle screensaver used to take the whole window. The inline viewport
+    // IS the saver there. The Idle demo button force-sleeps, so it still works.
+    suppress: () => previewIsOpen || currentView === 'dev',
     disableOnLocalhost: false,
     defaultPluginId: c.saver,
     selection: c.selection,
@@ -681,6 +1122,22 @@ function liveMode(): void {
     window.__idleScreens?.setPlugin(c.saver);
   };
   rebuild(cfg);
+
+  // Dev Tools changes saver on every palette row; the idle engine only needs
+  // to know by the time Preview / Idle demo is pressed. Rebuilding the whole
+  // <idle-screen> element inline was part of what made a switch hitch.
+  let engineTimer = 0;
+  const flushEngineRebuild = (): void => {
+    if (!engineTimer) return;
+    window.clearTimeout(engineTimer);
+    engineTimer = 0;
+    rebuild(cfg);
+  };
+  document.addEventListener('idle:flush-engine', flushEngineRebuild);
+  const scheduleEngineRebuild = (): void => {
+    window.clearTimeout(engineTimer);
+    engineTimer = window.setTimeout(() => { engineTimer = 0; rebuild(cfg); }, 900);
+  };
 
   /*
    * The top-right control does two different jobs, so it says which one it is
@@ -763,6 +1220,7 @@ function liveMode(): void {
       return;
     }
     preview.close();
+    flushEngineRebuild();
     window.__idleScreens?.sleep();
   });
 
@@ -804,9 +1262,13 @@ function liveMode(): void {
       gallery.setPlaying(currentView === 'gallery');
     },
     onOpenInDev: goToDev,
+    // Variants stay out of the gallery's arrow-cycle set, but Dev Tools'
+    // Preview button still needs to be able to open one by id.
+    extraEntries: METAQUARIUM_VARIANTS.map((saver) => ({ saver, pkg: '@idle-screens/saver-metaquarium' })),
   });
 
   function openPreview(id: string): void {
+    flushEngineRebuild();
     cfg.saver = id;
     setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === id) ?? null);
     rebuild(cfg);
@@ -863,20 +1325,39 @@ function liveMode(): void {
     const devParams = buildParamsPanel(right.params, timeline);
     devParams.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
 
-    timeline.onTrackChange = () => devParams.refresh();
+    const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
+    const viewportLabel = document.getElementById('viewport-label');
+    // Orbit / dolly / numpad views for any saver that declares the camera rig.
+    // Its chrome sits beside the host, not in it: selecting a saver clears
+    // every child of the host except the label.
+    const viewportNav = viewportHost?.parentElement
+      ? buildViewportNav(viewportHost, viewportHost.parentElement, timeline, () => devParams.refresh())
+      : null;
+
+    timeline.onTrackChange = () => { devParams.refresh(); viewportNav?.refresh(); };
 
     let percThrottleId = 0;
     let pendingT = 0;
     timeline.onTimeChange = (t) => {
+      // The gizmo follows the scene camera frame by frame (an autoRotate
+      // turntable is a camera that never sits still); it is cheap and skips
+      // itself when the view has not moved. Perception is the expensive one.
+      viewportNav?.refresh();
       pendingT = t;
       if (percThrottleId) return;
       percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); devParams.refresh(); }, 250);
     };
 
-    const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
-    const viewportLabel = document.getElementById('viewport-label');
     let devPreviewInst: SaverInstance | null = null;
     let devStage: MountedStage | null = null;
+    const layerInsts = new Map<HTMLElement, SaverInstance>();
+    let mountTimer = 0;
+    /** The first selection (page load, deep link) has nothing to debounce. */
+    let instantMount = true;
+    const loadingChip = document.createElement('span');
+    loadingChip.id = 'viewport-loading';
+    loadingChip.hidden = true;
+    viewportHost?.append(loadingChip);
     let devMountToken = 0;
 
     // Stage picker: passthrough savers perform ON a page, so the workbench
@@ -917,7 +1398,7 @@ function liveMode(): void {
       url.searchParams.set('saver', id);
       url.hash = 'dev';
       history.replaceState(null, '', url);
-      rebuild(cfg);
+      scheduleEngineRebuild();
       devProps.select(saver);
       devParams.select(saver);
       setTopbarSaver(saver);
@@ -928,36 +1409,55 @@ function liveMode(): void {
       viewportHost.classList.add('active');
       viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
       if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
-
-      if (devPreviewInst) devPreviewInst.dispose();
-      devPreviewInst = null;
-      devStage?.destroy();
-      devStage = null;
-      viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
-      const rect = viewportHost.getBoundingClientRect();
-      const previewCtx = {
-        saver,
-        previewActive: true,
-        previewSize: { w: Math.round(rect.width) || 640, h: Math.round(rect.height) || 400 },
-      };
+      // The timeline lets go of the outgoing instance now, which leaves its
+      // last frame standing in the viewport — that still frame is what the
+      // incoming scene fades in over.
       timeline.setSaver(saver, null, cfg.seed);
-      debug.setContext(previewCtx);
-      perception.setSaver(id, {
-        width: Math.round(rect.width) || 640,
-        height: Math.round(rect.height) || 400,
-        seed: cfg.seed,
-        // Imperative savers have no spec to analyse; the panel reads their
-        // pixels instead, which needs the plugin itself.
-        saver,
-      });
+      // After setSaver: the nav paints the gizmo from the timeline's track,
+      // and until then the track is still the outgoing saver's camera.
+      viewportNav?.select(saver);
       layers.setSaver(id);
-
-      // Passthrough savers perform ON a page: mount a stage document in an
-      // iframe and let the saver play inside it, victims scoped to the stage.
-      // (stage, seed) is the whole recipe — the performance is repeatable.
-      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
       stagePick.style.display = saver.manifest.passthrough ? 'block' : 'none';
+      loadingChip.textContent = `loading ${saver.manifest.label}…`;
+      loadingChip.hidden = false;
+      // Browsing the palette (clicks, arrow keys) should not mount a WebGL
+      // tank per row passed: only the row you stop on mounts.
       const token = ++devMountToken;
+      window.clearTimeout(mountTimer);
+      mountTimer = window.setTimeout(() => { if (token === devMountToken) mountSelected(saver, token); }, instantMount ? 0 : 110);
+      instantMount = false;
+    };
+
+    /**
+     * Swap the viewport to `saver` without the old cut-to-black.
+     *
+     * It used to dispose the running instance and clear the viewport FIRST,
+     * then mount: a blank frame, a main-thread stall while a new GL context
+     * compiled its programs and built its scenery, an empty tank popping in —
+     * and, in the same tick, the Perception panel mounting a second hidden tank
+     * and the idle engine being rebuilt. Now the incoming scene mounts into its
+     * own layer UNDER the outgoing one's last frame, renders, and fades in over
+     * it; only then is the old instance disposed. Everything that is not the
+     * picture (perception's sampler, the idle engine) waits until it is up.
+     */
+    const mountSelected = (saver: SaverPlugin, token: number): void => {
+      if (!viewportHost) return;
+      const id = saver.manifest.id;
+      const rect = viewportHost.getBoundingClientRect();
+      const w = Math.round(rect.width) || 640, h = Math.round(rect.height) || 400;
+      const previewCtx = { saver, previewActive: true, previewSize: { w, h } };
+      debug.setContext(previewCtx);
+      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
+
+      // A stage is an iframe that owns the viewport: no layer, no crossfade —
+      // going onto one OR coming off one. Leaving the outgoing stage for the
+      // 340 ms retire would only drop its iframe from the DOM; the instance
+      // performing inside it would keep running with nothing to dispose it.
+      if (useStage || devStage) retireLayers(null);
+      const layer = document.createElement('div');
+      layer.className = 'vp-layer';
+      if (!useStage) viewportHost.append(layer);
+
       const mounted: Promise<SaverInstance> = useStage
         ? mountStage(viewportHost, STAGES.find((st) => st.id === stageId)!).then((st) => {
             if (token !== devMountToken) { st.destroy(); throw new Error('stale stage mount'); }
@@ -966,8 +1466,8 @@ function liveMode(): void {
               saver.mount({
                 host: st.overlay,
                 dpr: devicePixelRatio ?? 1,
-                width: st.width || Math.round(rect.width) || 640,
-                height: st.height || Math.round(rect.height) || 400,
+                width: st.width || w,
+                height: st.height || h,
                 rng: createRng((cfg.seed >>> 0) || 1),
                 seed: cfg.seed,
                 reducedMotion: false,
@@ -977,48 +1477,91 @@ function liveMode(): void {
           })
         : Promise.resolve(
             saver.mount({
-              host: viewportHost,
+              host: layer,
               dpr: devicePixelRatio ?? 1,
-              width: Math.round(rect.width) || 640,
-              height: Math.round(rect.height) || 400,
+              width: w,
+              height: h,
               rng: createRng((cfg.seed >>> 0) || 1),
               seed: cfg.seed,
               reducedMotion: false,
             }),
           );
       mounted.then((inst) => {
-        if (token !== devMountToken) { inst.dispose(); return; }
+        if (token !== devMountToken) { inst.dispose(); layer.remove(); return; }
         devPreviewInst = inst;
+        if (!useStage) layerInsts.set(layer, inst);
         inst.setPaused(true);
         timeline.setSaver(saver, inst, cfg.seed);
         layers.setRuntime(inst, devStage?.doc.body ?? null);
-        if (devStage) {
-          // Re-aim perception at the STAGE performance: same victim geometry
-          // (mirrored, so the sampler never fights the live instance), same
-          // dimensions — the map now portrays what the viewport shows.
-          perception.setSaver(id, {
-            width: devStage.width || Math.round(rect.width) || 640,
-            height: devStage.height || Math.round(rect.height) || 400,
-            seed: cfg.seed,
-            saver,
-            page: mirrorPage(devStage),
-          });
-        }
-        requestAnimationFrame(() => {
+        // Two frames: the first paints the scene, the second guarantees it has
+        // been presented before the fade starts showing it.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (token !== devMountToken) return;
+          layer.classList.add('live');
+          loadingChip.hidden = true;
+          // A stage mount never appended `layer` (line ~1317) and already
+          // retired every prior layer up front (retireLayers(null) at entry) —
+          // scheduling another retireLayers(layer) here would remove the
+          // stage's own iframe too, since `layer` (detached, never `keep`)
+          // never matches it.
+          if (!useStage) window.setTimeout(() => { if (token === devMountToken) retireLayers(layer); }, 340);
           devProps.refresh();
           devParams.refresh();
           debug.setContext(previewCtx);
-        });
-      }).catch(() => { /* superseded by a newer selection */ });
+        }));
+        // Off the critical path: the sampler mounts its own hidden instance,
+        // and the idle engine only matters when Preview / Idle demo is pressed.
+        window.setTimeout(() => {
+          if (token !== devMountToken) return;
+          // An imperative saver is perceived from its pixels on a coarse grid:
+          // a second full-size GL tank is a second full-size stall. A third of
+          // the viewport, same aspect, reads the same. Spec savers are analysed
+          // from the spec and keep the real size (text legibility depends on it).
+          const k = saver.spec || devStage ? 1 : Math.min(1, 360 / w);
+          perception.setSaver(id, {
+            width: Math.round((devStage?.width || w) * k),
+            height: Math.round((devStage?.height || h) * k),
+            seed: cfg.seed,
+            saver,
+            ...(devStage ? { page: mirrorPage(devStage) } : {}),
+          });
+        }, 900);
+      }).catch((err: unknown) => {
+        layer.remove();
+        // Superseded by a newer selection: that one owns the chip and the
+        // stage now. Otherwise the mount itself failed (no WebGL, a bad
+        // asset): say so and take the loading state and any stage down with
+        // it, or the viewport reads "loading…" for a scene that never comes.
+        if (token !== devMountToken) return;
+        console.warn(`[dev] ${saver.manifest.label} failed to mount:`, err);
+        loadingChip.hidden = true;
+        if (devStage) { devStage.destroy(); devStage = null; }
+      });
+    };
+
+    /** Dispose every layer except `keep` (and any layer-less direct mount). */
+    const retireLayers = (keep: HTMLElement | null): void => {
+      if (!viewportHost) return;
+      for (const [el, inst] of [...layerInsts]) {
+        if (el === keep) continue;
+        try { inst.dispose(); } catch { /* a saver that throws on dispose must not wedge the viewport */ }
+        if (devPreviewInst === inst) devPreviewInst = null;
+        layerInsts.delete(el);
+      }
+      if (keep === null) {
+        devStage?.destroy();
+        devStage = null;
+        if (devPreviewInst) { devPreviewInst.dispose(); devPreviewInst = null; }
+      }
+      viewportHost.querySelectorAll(':scope > :not(#viewport-label):not(#viewport-loading)').forEach((n) => { if (n !== keep) n.remove(); });
     };
 
     layers.onSpecChange = (editedSpec) => {
       if (!viewportHost) return;
       try {
         const newSaver = compileSaver(editedSpec);
-        if (devPreviewInst) devPreviewInst.dispose();
-        devPreviewInst = null;
-        viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
+        ++devMountToken; // a pending palette mount must not land on top of this
+        retireLayers(null);
         const rect = viewportHost.getBoundingClientRect();
         timeline.setSaver(newSaver, null, cfg.seed);
         void Promise.resolve(
@@ -1305,7 +1848,11 @@ function buildConfigPanel(
   sleepBtn.className = 'wb-btn';
   sleepBtn.textContent = 'Idle demo';
   sleepBtn.title = 'Sleep the engine — wakes on any input, like a real screensaver';
-  sleepBtn.addEventListener('click', () => window.__idleScreens?.sleep());
+  sleepBtn.addEventListener('click', () => {
+    // The engine follows the palette on a delay; make it current first.
+    document.dispatchEvent(new Event('idle:flush-engine'));
+    window.__idleScreens?.sleep();
+  });
   const wakeBtn = document.createElement('button');
   wakeBtn.type = 'button';
   wakeBtn.className = 'wb-btn';

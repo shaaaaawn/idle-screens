@@ -30,7 +30,7 @@ export function buildRightDock(mount: HTMLElement): RightDockHandle {
   stack.className = 'wb-stack wb-stack-right';
 
   const props = makePanel('Properties', true, 'wb-panel-props');
-  const params = makePanel('Parameters', true);
+  const params = makePanel('Parameters', true, 'wb-panel-params');
   const engine = makePanel('Engine', true, 'wb-panel-engine');
   const layersPanel = makePanel('Layers', true, 'wb-panel-layers');
   // Open by default: perception now has something to show for EVERY saver with

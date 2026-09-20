@@ -1,3 +1,4 @@
+import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
@@ -17,7 +18,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry,
+  CircleGeometry, PointLight, Vector4,
   Color,
   ConeGeometry,
   Fog,
@@ -52,13 +53,30 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { buildStudio, type Studio } from './studio';
+import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+
+const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
+import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
+import {
+  clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
+  type Cluster, type Emitter,
+} from './crystals';
+import {
+  buildCrystalField, buildGlowCards, buildSpotBeam, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePaths, writePoolSlots,
+  type CrystalField, type GlowCards, type SpotBeam,
+} from './crystal-mesh';
 import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  collectFishGlow,
+  type FishGlow,
   eyeNoseSign,
   forceOpaque,
+  isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
 import {
@@ -80,7 +98,11 @@ import {
 import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
+const CAMERA_FAR = 1400;
+/** Floor-pool slots kept free of fixed light, for the sources that move. */
+const MOVING_POOLS = 4;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
+const Y_AXIS = new Vector3(0, 1, 0);
 const GLB_CONCURRENCY = 3;
 
 // ---------------------------------------------------------------------------
@@ -436,6 +458,14 @@ interface Fish {
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
+  /** Materials this fish owns for crystal tinting, with their untinted
+   *  colours. Created on the first tinted frame — never, by default. */
+  /** What this fish's GLOW parts add up to; null when nothing on it glows. */
+  glow: FishGlow | null;
+  /** Eye rig: undefined until first asked for, null when the model has no eyes. */
+  eyes?: EyeRig | null;
+  tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
+  tinted?: boolean;
 }
 
 /** One fish as `inspect()` reports it — the analytic view of a frame. */
@@ -502,6 +532,53 @@ class TankInstance implements SaverInstance {
   private terrainMat: MeshBasicMaterial | null = null;
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
+  /** The bare terrain, before any cluster stands on it (null = flat at 0). */
+  private terrainAt: ((x: number, z: number) => number) | null = null;
+  // Scenery. Everything below stays null/empty until a scene asks for props.
+  private scenery: Scenery | null = null;
+  private sceneryKey = "";
+  private crystals: CrystalField | null = null;
+  private clusters: Cluster[] = [];
+  private emitters: Emitter[] = [];
+  /** The fixed emitters that hold a floor-pool slot: the light field has no
+   *  cap, the floor has `MAX_POOLS`. Biggest pools first, and never every
+   *  slot — a moving source (a glowing fish, a sinking lantern) always has
+   *  somewhere to land. */
+  private fixedPools: Emitter[] = [];
+  private propsKey = '';
+  private warnedProps = '';
+  private readonly poolUniforms = emptyPoolUniforms();
+  private readonly lightScratch: [number, number, number] = [0, 0, 0];
+  // Fish glow: built on the first glowing fish, never for a cast without one.
+  private glowCards: GlowCards | null = null;
+  /** Follow-spot: the beam, and where its fish was this frame. */
+  private readonly spotBeams: (SpotBeam | undefined)[] = [];
+  private readonly spotLights: (PointLight | undefined)[] = [];
+  private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
+  private readonly spotSeen = [false, false, false];
+  /** Heading (xz) of each spotted fish, for its shadow. */
+  private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
+  private readonly spotLevel = [0, 0, 0];
+  private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+  private spotRig: SpotSpec[] = [];
+  private spotSheet: SpotSheet | null = null;
+  private spotKey = '\u0000';
+  private readonly spotLamp = new Vector3();
+  private readonly spotHit = new Vector3();
+  private readonly spotTint = new Color();
+  /** The scripted scene the first fish of the cast are playing, if any. */
+  private vignette: Vignette | null = null;
+  private vignetteKey = '';
+  private warnedVignette = '';
+  /** Lit mode: the rig, and the glow parts competing for its point lights. */
+  private lit = false;
+  private readonly flatFill: HemisphereLight;
+  private studio: Studio | null = null;
+  private readonly lightBids: Array<{ d: number; x: number; y: number; z: number; r: number; g: number; b: number; size: number; power: number }> = [];
+  private readonly glowPos = new Vector3();
+  private readonly fishEmitters: Emitter[] = [];
+  private tintEmitters: Emitter[] = [];
+  private poolsInstalled = false;
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
@@ -604,7 +681,10 @@ class TankInstance implements SaverInstance {
     this.renderer.toneMapping = LinearToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
-    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, 1200);
+    // Far enough for the horizon's outer ring (radius 820 ± 45) seen across
+    // the tank from the widest orbit (`cameraDistance` 400): the far side of
+    // that ring is ~1270 out. Nothing past the fog is visible anyway.
+    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, CAMERA_FAR);
 
     const fogHex = String(this.space.fogColor?.default ?? '#030009');
     this.fogColor.set(fogHex);
@@ -683,7 +763,10 @@ class TankInstance implements SaverInstance {
 
     // Gentle hemisphere so MeshStandardMaterial eyes render their authored detail.
     // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
-    this.scene.add(new HemisphereLight(0xffffff, 0x4466aa, 1.5));
+    // Flat mode's one light: a gentle hemisphere so authored PBR eyes and
+    // atlases render. Lit mode swaps it for the studio (ensureStudio).
+    this.flatFill = new HemisphereLight(0xffffff, 0x4466aa, 1.5);
+    this.scene.add(this.flatFill);
 
     this.reconcile();
 
@@ -761,12 +844,16 @@ class TankInstance implements SaverInstance {
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
-      this.floorHeightAt = (x, z) => height(x, z) + terrain.position.y;
+      this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
+      this.floorHeightAt = this.terrainAt;
       group.add(terrain);
       this.terrainMat = terrain.material as MeshBasicMaterial;
     }
     // A flat floor has no hills to avoid; clear any the previous room left.
-    if (kind === 'flat') this.floorHeightAt = null;
+    if (kind === 'flat') {
+      this.floorHeightAt = null;
+      this.terrainAt = null;
+    }
     this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
@@ -795,9 +882,444 @@ class TankInstance implements SaverInstance {
     }
     this.room = group;
     this.scene.add(group);
+    // A rebuilt terrain is a new material: it must learn the light field too.
+    if (this.poolsInstalled) this.installPools();
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
+  }
+
+  /**
+   * Scenery for the current `propMix` — crystals, generated from the seed.
+   *
+   * Keyed like the room. With no tokens this returns before touching the rng,
+   * the scene graph or any material, so a propless tank is byte-for-byte the
+   * tank it was before props existed.
+   */
+  private buildProps(): void {
+    const envName = this.str('environment');
+    let mix = this.str('propMix').trim();
+    if (!mix && this.str('envProps') === 'on') {
+      mix = ENV_PROP_MIX[environmentOf(envName).name] ?? '';
+    }
+    const scale = this.num('crystalScale');
+    const wild = this.num('crystalWild');
+    const budget = this.quality.props;
+    const key = `${mix}|${scale}|${wild}|${this.num('rockDensity')}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    if (key === this.propsKey) return;
+    this.propsKey = key;
+
+    if (this.crystals) {
+      this.scene.remove(this.crystals.group);
+      disposeOwned(this.crystals.group);
+      this.crystals = null;
+      this.clusters = [];
+      this.emitters = [];
+      this.fixedPools = [];
+      this.poolUniforms.uMqPoolN!.value = 0;
+      this.floorHeightAt = this.terrainAt;
+    }
+    delete this.ctxSaver.host.dataset.mqProps;
+    if (!mix) return;
+
+    const parsed = parsePropMix(mix);
+    const preset = environmentOf(envName);
+    const rng = this.ctxSaver.rng.fork(0xc257a1 ^ preset.seedSalt);
+    const VARIANTS = 3;
+    const layout = layoutCrystals(parsed.entries, rng.fork(1), {
+      environment: preset.name,
+      clusterCap: budget.clusters,
+      shardCap: budget.shards,
+      variants: VARIANTS,
+      scale,
+      wild,
+    });
+    const problems = [...parsed.problems, ...layout.problems];
+    if (problems.length > 0 && mix !== this.warnedProps) {
+      this.warnedProps = mix;
+      console.warn(`[metaquarium] propMix "${mix}": ${problems.join('; ')}`);
+    }
+    if (!layout.clusters.length) return;
+
+    const terrain = this.terrainAt;
+    for (const c of layout.clusters) c.y = (terrain ? terrain(c.x, c.z) : 0) + (this.num('rockDensity') > 0 ? 6 * scale : 0);
+    this.clusters = layout.clusters;
+    this.emitters = emittersOf(this.clusters);
+    const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
+    this.crystals = buildCrystalField(
+      this.clusters, variants, this.emitters, { halo: budget.halo }, this.poolUniforms,
+    );
+    this.scene.add(this.crystals.group);
+    this.installPools();
+    // Floor-huggers ride over a cluster instead of through it.
+    const clusters = this.clusters;
+    this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
+    this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
+  }
+
+  private buildScenery(): void {
+    const rocks = this.num('rockDensity');
+    const homes = this.num('geodeHomes');
+    const veins = this.num('rockVeins');
+    const interior = this.str('interior') === 'geode';
+    const flora = this.num('floraDensity');
+    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
+    const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}`;
+    if (key === this.sceneryKey) return;
+    this.sceneryKey = key;
+    if (this.scenery) {
+      this.scene.remove(this.scenery.group);
+      disposeOwned(this.scenery.group);
+      this.scenery = null;
+    }
+    const terrain = this.terrainAt ?? (() => 0);
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+      this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
+        { rocks, veins, homes, flora, bubbles, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+      this.scene.add(this.scenery.group);
+    }
+    // Homes are light sources too: their doors and windows join the same
+    // field the crystals feed, so they pool on the floor and tint a fish
+    // that swims past the door.
+    const lights = this.scenery?.emitters ?? [];
+    const walks = this.scenery?.paths ?? [];
+    writePaths(this.poolUniforms, walks, this.num('crystalScale'));
+    if (walks.length && !this.poolsInstalled) this.installPools();
+    this.emitters = [...emittersOf(this.clusters), ...lights];
+    // A castle brings a dozen lamps of its own; queued behind twelve clusters
+    // and the homes they would never reach the floor, and nothing moving
+    // could either. The biggest pools win the slots; the field itself keeps
+    // every source.
+    this.fixedPools = [...this.emitters].sort((a, b) => b.reach - a.reach).slice(0, MAX_POOLS - MOVING_POOLS);
+    if (this.emitters.length) {
+      fillPoolUniforms(this.poolUniforms, this.fixedPools);
+      this.installPools();
+    }
+    this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
+  }
+
+  /**
+   * One glowing fish, one frame: place its bloom card, breathe its core, and
+   * enter it in the light field. The fish's GLOW parts are SOURCES — that is
+   * what the original renders say and what a flat unlit colour never did.
+   */
+  private glowFish(f: Fish, n: number, amount: number, pulse: number, tSec: number): number {
+    const g = f.glow!;
+    const body = f.body!;
+    const phase = f.index * 1.7;
+    // At 0 the cores are their authored colour, static — no heat, no breath:
+    // `fishGlow: 0` is the tank before glow existed. Still written, not
+    // skipped, so turning the dial down un-latches the last hot frame.
+    const beat = amount > 0 ? 1 - pulse * 0.15 * (0.5 + 0.5 * Math.sin(tSec * 0.754 + phase)) : 1;
+    // White-hot core: emissive without HDR. The halo and card stay saturated,
+    // so the part reads as brighter than its own colour.
+    const hot = 0.34 * amount;
+    for (const c of g.cores) {
+      c.mat.color.setRGB(
+        (c.base.r + (1 - c.base.r) * hot) * beat,
+        (c.base.g + (1 - c.base.g) * hot) * beat,
+        (c.base.b + (1 - c.base.b) * hot) * beat,
+      );
+    }
+    if (amount <= 0) return n;
+    // Body-local → world, by hand: the scene graph's matrices are a frame
+    // stale here, and updating 24 skinned hierarchies to read a few points
+    // would cost more than the glow.
+    const scale = body.scale.x * f.group.scale.x;
+    if (!this.glowCards) {
+      this.glowCards = buildGlowCards(MAX_FISH * 4);
+      this.scene.add(this.glowCards.mesh);
+    }
+    const cam = this.camera.position;
+    const p = this.glowPos;
+    // One card PER glowing part, in the part's own colour: the bloom hugs the
+    // fin that glows instead of fogging the whole fish.
+    for (const part of g.parts) {
+      p.set(part.x, part.y, part.z).multiplyScalar(body.scale.x);
+      p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
+      p.applyQuaternion(f.group.quaternion).add(f.group.position);
+      // A COAT (a glow part that is most of the silhouette — the angelfish's
+      // whole fin outline) is not a lamp. Sized and lit like an accent it
+      // washed a quarter of the frame in its colour, in every scene, from a
+      // single fish: it keeps a close, faint rim and casts nothing.
+      const size = part.coat
+        ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
+        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
+      const k = g.gain * (part.coat ? 0.5 : 1);
+      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
+      n += 1;
+      if (this.studio?.lights.length && !part.coat) {
+        this.lightBids.push({
+          d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
+          x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
+          size, power: amount * g.gain * beat,
+        });
+      }
+    }
+    p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
+    p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
+    p.applyQuaternion(f.group.quaternion).add(f.group.position);
+    // The floor takes light from accents only, over a fish-sized reach. The
+    // source is as strong as the dial says: what it throws on the floor and
+    // on a neighbour scales with `fishGlow` like the bloom does.
+    if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
+    const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
+    const emit = 0.7 * g.gain * amount;
+    this.fishEmitters.push({
+      x: p.x, y: p.y, z: p.z, r: g.r * emit, g: g.g * emit, b: g.b * emit,
+      reach, phase, owner: f.index,
+    });
+    return n;
+  }
+
+  /** After the cast: the cards in use, and the glowing fish nearest the floor
+   *  into the pool slots the clusters left free. */
+  private commitGlow(n: number, amount: number, pulse: number, tSec: number): void {
+    const fog = this.scene.fog as Fog;
+    this.glowCards?.commit(n, tSec, amount, pulse, { color: this.fogColor, near: fog.near, far: fog.far });
+    // The point lights go to the glow parts nearest the lens — where light
+    // falling on a neighbouring voxel is actually seen. The rest keep their
+    // bloom; nobody can tell a distant fin is not casting.
+    if (this.studio) {
+      this.lightBids.sort((a, b) => a.d - b.d);
+      this.studio.lights.forEach((light, i) => {
+        const bid = this.lightBids[i];
+        if (!bid || amount <= 0) { light.intensity = 0; return; }
+        // A glow part sits IN the surface it should light, so from its own
+        // centre every neighbouring face is edge-on and takes nothing. Lifted
+        // toward the lens, it lights the faces the viewer is looking at —
+        // which is where a renderer's bounce and bloom put that colour.
+        const cam = this.camera.position;
+        const k = (bid.size * 0.3) / Math.max(1, Math.hypot(cam.x - bid.x, cam.y - bid.y, cam.z - bid.z));
+        light.position.set(bid.x + (cam.x - bid.x) * k, bid.y + (cam.y - bid.y) * k, bid.z + (cam.z - bid.z) * k);
+        light.color.setRGB(bid.r, bid.g, bid.b);
+        light.distance = bid.size * 3;
+        light.intensity = bid.power * bid.size * bid.size * 2.5;
+      });
+      this.lightBids.length = 0;
+    }
+    // Lanterns are moving light too: they tint a fish that passes under one
+    // and, when they sink low, pool on the floor like a glowing fin does.
+    const sky = this.scenery?.moving ?? [];
+    const dynamic = amount > 0 ? [...sky, ...this.fishEmitters] : sky;
+    this.tintEmitters = dynamic.length ? [...this.emitters, ...dynamic] : this.emitters;
+    const clusterSlots = this.fixedPools.length;
+    // Without crystals nobody else drives the pool look — homes alone, or
+    // glowing fish alone, or lanterns alone, must still light the floor. The
+    // gain is the room's (`crystalGlow`) when the room has fixed light, else
+    // full: a moving source already carries its own strength in its colour
+    // (a fish its `fishGlow`, a lantern its beat), so it is not scaled twice.
+    if (!this.crystals && this.poolsInstalled) {
+      this.poolUniforms.uMqPoolGain!.value = 0.4 * (this.emitters.length ? this.num('crystalGlow') : 1);
+      this.poolUniforms.uMqPoolTime!.value = tSec;
+      this.poolUniforms.uMqPoolPulse!.value = pulse;
+    }
+    if (!dynamic.length) {
+      if (this.poolsInstalled) this.poolUniforms.uMqPoolN!.value = clusterSlots;
+      return;
+    }
+    if (!this.poolsInstalled) this.installPools();
+    const floorAt = this.terrainAt;
+    const low = dynamic
+      .map((e) => ({ e, h: e.y - (floorAt ? floorAt(e.x, e.z) : 0) }))
+      .filter((c) => c.h < c.e.reach * 2.2)
+      .sort((a, b) => a.h - b.h)
+      .map((c) => c.e);
+    writePoolSlots(this.poolUniforms, low, clusterSlots);
+  }
+
+  /**
+   * Lit or flat, decided per frame from the param — on a channel the scene's
+   * params arrive as a track AFTER mount, so a constructor read would make
+   * `flat` unreachable from exactly the place it is steered. The rig is built
+   * once, on the first lit frame; a fish wears the look it was spawned under.
+   */
+  private ensureStudio(): void {
+    const want = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    if (want === this.lit) return;
+    this.lit = want;
+    if (want && !this.studio) {
+      this.studio = buildStudio(this.renderer, this.quality.glowLights);
+      this.scene.add(...this.studio.objects);
+    }
+    this.scene.environment = want ? this.studio!.environment : null;
+    for (const o of this.studio?.objects ?? []) o.visible = want;
+    this.flatFill.visible = !want;
+  }
+
+  /** Parse the `vignette` param when it (or the space it plays in) changes. */
+  private buildVignette(): void {
+    const script = resolveVignette(this.str('vignette'));
+    const indoors = this.str('interior') === 'geode';
+    const scale = this.num('crystalScale');
+    const key = `${script}|${indoors}|${scale}|${this.sceneryKey}`;
+    if (key === this.vignetteKey) return;
+    this.vignetteKey = key;
+    this.vignette = null;
+    if (!script) return;
+    const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
+    const k = indoors ? scale : 1;
+    // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
+    const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
+    const parsed = parseVignette(script, marks);
+    if (parsed.problems.length && script !== this.warnedVignette) {
+      this.warnedVignette = script;
+      console.warn(`[metaquarium] vignette: ${parsed.problems.join('; ')}`);
+    }
+    if (parsed.actors > 0 && parsed.duration > 0) this.vignette = parsed;
+  }
+
+  /**
+   * The follow-spot. A lamp fixed high in the rig throws a cone through its
+   * fish to the floor, where it lands as a pool of moving caustics; a light
+   * rides with the fish so IT is lit, and the house lights come down by the
+   * spot's strength — a performer on a stage. All of it follows the fish's
+   * closed-form position, so it is as deterministic as the swim.
+   */
+  private aimSpot(tSec: number): void {
+    const rig = this.spotRig;
+    const spots = this.poolUniforms.uMqSpot!.value as Vector4[];
+    const tints = this.poolUniforms.uMqSpotColor!.value as Color[];
+    const strength = this.num('spotStrength');
+    spotLevels(this.spotSheet, rig.length, tSec, this.spotLevel);
+    // The house comes down for the SHOW, not per lamp: it stays down through
+    // a blackout cue, which is what makes the next spot an entrance.
+    const show = rig.some((_, i) => this.spotSeen[i]) ? strength : 0;
+    if (this.studio) {
+      this.studio.hemi.intensity = 1.15 * (1 - 0.6 * show);
+      this.studio.key.intensity = 2.1 * (1 - 0.6 * show);
+      this.studio.follow.intensity = 0;
+      for (const l of this.spotLights) if (l) l.intensity = 0;
+    }
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const spec = rig[i];
+      const gain = spec && this.spotSeen[i] ? strength * this.spotLevel[i]! : 0;
+      const beam = this.spotBeams[i];
+      if (gain <= 0.001 || !spec) {
+        if (beam) beam.mesh.visible = false;
+        spots[i]!.set(0, 0, 1, 0);
+        (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.z = 0;
+        continue;
+      }
+      if (!this.spotBeams[i]) {
+        this.spotBeams[i] = buildSpotBeam();
+        this.scene.add(this.spotBeams[i]!.mesh);
+      }
+      if (!this.poolsInstalled) this.installPools();
+      const f = this.spotAt[i]!;
+      // Lamps hang over the stage a little toward the house, spread across
+      // the rig so three beams fan instead of stacking.
+      this.spotLamp.set(f.x * 0.25 + (i - (rig.length - 1) / 2) * 46, 210, f.z * 0.25 + 30);
+      const floorY = this.terrainAt ? this.terrainAt(f.x, f.z) : 0;
+      const k = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      this.spotHit.set(this.spotLamp.x + (f.x - this.spotLamp.x) * k, floorY, this.spotLamp.z + (f.z - this.spotLamp.z) * k);
+      this.spotTint.set(spec.color);
+      this.spotBeams[i]!.aim(this.spotLamp, this.spotHit, spec.radius, this.spotTint, gain, tSec);
+      spots[i]!.set(this.spotHit.x, this.spotHit.z, spec.radius, gain * 0.9);
+      // Its shadow: the fish's plan, magnified by how far above the floor it
+      // swims (the lamp is a point), and softened the same way.
+      const lift = Math.max(0, f.y - floorY), grow = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      const half = FISH_LENGTH * 0.5 * grow * this.num('spotShadow');
+      const h = this.spotHead[i]!;
+      (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.set(h.x, h.z, half, half * 0.42);
+      (this.poolUniforms.uMqSpotSoft!.value as number[])[i] = Math.min(0.6, 0.1 + lift / 160);
+      tints[i]!.copy(this.spotTint);
+      if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
+      if (this.studio) {
+        // Spot 0 uses the studio's own follow light; more spots bring their
+        // own, added once — a one-time recompile, only in scenes that ask.
+        let light = i === 0 ? this.studio.follow : this.spotLights[i - 1];
+        if (!light) {
+          light = new PointLight(0xffffff, 0, 95, 2);
+          this.spotLights[i - 1] = light;
+          this.scene.add(light);
+        }
+        light.position.set(f.x + (this.spotLamp.x - f.x) * 0.12, f.y + 16, f.z + (this.spotLamp.z - f.z) * 0.12 + 8);
+        light.color.copy(this.spotTint);
+        light.distance = 95;
+        light.intensity = 5200 * gain;
+      }
+    }
+  }
+
+  /** `spotRig` when given, else the single `followSpot` — parsed on change. */
+  private buildSpotRig(): void {
+    const rigText = this.str('spotRig'), cues = this.str('spotCues');
+    const single = Math.round(this.num('followSpot')), color = this.str('spotColor');
+    const key = `${rigText}|${cues}|${single}|${color}`;
+    if (key === this.spotKey) return;
+    this.spotKey = key;
+    const parsed = parseSpotRig(rigText);
+    this.spotRig = parsed.spots.length ? parsed.spots : single >= 0 ? [{ slot: single, color, radius: 30 }] : [];
+    this.spotSheet = cues.trim() ? parseSpotCues(cues, this.spotRig.length) : null;
+    const problems = [...parsed.problems, ...(this.spotSheet?.problems ?? [])];
+    if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
+  }
+
+  private installPools(): void {
+    this.poolsInstalled = true;
+    installFloorPools(this.floorMat, this.poolUniforms);
+    if (this.terrainMat) installFloorPools(this.terrainMat, this.poolUniforms);
+  }
+
+  /** Opt-in (`crystalTint` > 0): a fish near a cluster picks up its colour.
+   *  The fish's materials are cloned on its first tinted frame so clones of
+   *  one template never share a tint; at 0 nothing here ever runs. */
+  private tintFish(f: Fish, amount: number, tSec: number, pulse: number): void {
+    if (amount <= 0 || !this.tintEmitters.length) {
+      if (f.tinted && f.tint) {
+        for (const t of f.tint) t.mat.color.copy(t.base);
+        f.tinted = false;
+      }
+      return;
+    }
+    if (!f.tint) {
+      const list: NonNullable<Fish['tint']> = [];
+      const cloned = new Map<MeshBasicMaterial, MeshBasicMaterial>();
+      // The GROUP, not f.body: f.body is null BY DESIGN for a fallback
+      // (non-GLB) fish — it gates the GLB-only wiggle animation, not "has a
+      // paintable body" — so gating tint on it silently skipped every
+      // fallback fish. The fallback's sphere+cone share one material and are
+      // both direct children of the group, so traversing it tints them too.
+      f.group.traverse((o) => {
+        const mesh = o as Mesh;
+        if (!mesh.isMesh || mesh.userData.mqHalo) return;
+        const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
+          // Eyes stay pure; GLOW parts are sources, not receivers — including
+          // the textured (betafish-generation) ones, which keep their
+          // template name but never get tagged mqGlowColor.
+          if (!m.color || /eye/i.test(m.name) || m.userData.mqGlowColor || isGlow(m)) return m;
+          let own = cloned.get(m);
+          if (!own) {
+            own = m.clone();
+            own.userData.mqOwned = true;
+            cloned.set(m, own);
+            list.push({ mat: own, base: own.color.clone() });
+            // `m` is either this fish's own material (applyNpcMaterials owns
+            // everything it creates) or the template's shared, untouched
+            // texture atlas. The clone above permanently replaces it on this
+            // mesh, so an owned `m` becomes unreachable from here on — dispose
+            // it now or its GPU program leaks until the tank tears down. The
+            // shared atlas case is never mqOwned, so it is left for the
+            // template's other clones.
+            if (m.userData.mqOwned) m.dispose();
+          }
+          return own;
+        };
+        mesh.material = Array.isArray(mesh.material)
+          ? (mesh.material as MeshBasicMaterial[]).map(swap)
+          : swap(mesh.material as MeshBasicMaterial);
+      });
+      f.tint = list;
+    }
+    const p = f.group.position;
+    const l = sampleLight(this.tintEmitters, p.x, p.y, p.z, tSec, pulse, this.lightScratch, f.index);
+    const k = amount * 1.8 * this.num('crystalGlow');
+    for (const t of f.tint) {
+      t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
+    }
+    f.tinted = true;
   }
 
   /**
@@ -1033,13 +1555,15 @@ class TankInstance implements SaverInstance {
     let tail: Object3D | null = null;
     let bodyNode: Object3D | null = null;
     let clipDuration = 0;
+    let fishGlow: FishGlow | null = null;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off', this.lit);
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      fishGlow = collectFishGlow(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
@@ -1089,6 +1613,7 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
+      glow: fishGlow,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
     if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
@@ -1159,6 +1684,7 @@ class TankInstance implements SaverInstance {
         }) / 1000
       : tSec * speed;
 
+    this.ensureStudio();
     this.reconcile();
 
     // Camera orbit
@@ -1207,6 +1733,16 @@ class TankInstance implements SaverInstance {
     // The room: rebuilt only on change, then driven by the same clock as
     // everything else so it stays pure in t.
     this.buildRoom();
+    this.buildProps();
+    this.buildScenery();
+    // After the scenery: a vignette may name the world's own marks (home doors, a gate).
+    this.buildVignette();
+    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
+    if (this.crystals) {
+      this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+        color: this.fogColor, near: fog.near, far: fog.far,
+      });
+    }
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
 
@@ -1306,6 +1842,17 @@ class TankInstance implements SaverInstance {
     // no fish changes epicentre mid-flinch.
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
+    const fishGlow = this.num('fishGlow');
+    const eyeLife = this.num('eyeLife');
+    this.buildSpotRig();
+    this.spotSeen.fill(false);
+    const glowPulse = this.num('crystalPulse');
+    let glowN = 0;
+    this.fishEmitters.length = 0;
+    // Tint reads LAST frame's fish emitters (this frame's are still being
+    // gathered) — one frame of lag on a 0.12 Hz light is invisible.
+    const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
+    const tintPulse = this.num('crystalPulse');
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -1582,12 +2129,60 @@ class TankInstance implements SaverInstance {
         const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
         if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
+      // An actor in a vignette is not swimming: the script places it. The
+      // GROUND still holds, though: an open-stage mark is authored for a flat
+      // floor, and on `ridges` it can sit inside a hill. Terrain only — not
+      // the scenery domes — because a script sends a fish INTO a home's
+      // throat or under a gate on purpose, and a dome would lift it out.
+      const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
+      if (act) {
+        px = act.x; y = act.y; pz = act.z;
+        if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
+      }
       f.group.position.set(px, y, pz);
-      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
-      f.group.rotateZ(pose.roll);
+      for (let si = 0; si < this.spotRig.length; si++) {
+        if (this.spotRig[si]!.slot === f.index) {
+          this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
+          this.spotHead[si]!.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz).normalize();
+        }
+      }
+      if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
+      if (act) {
+        f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
+        f.group.rotateZ(act.roll);
+      } else {
+        f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
+        f.group.rotateZ(pose.roll);
+      }
+
+      // Eye life: blinks, saccades, a look at whoever it is talking to, a
+      // glance at the lens. Rigged on the first frame that asks for it, so
+      // `eyeLife: 0` compiles the stock eye program and costs nothing.
+      if (eyeLife > 0 && f.body) {
+        if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
+        if (f.eyes) {
+          const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hz) || 1;
+          const toward = (tx: number, ty: number, tz: number): { fwd: number; up: number } => {
+            const dx = tx - px, dy = ty - y, dz = tz - pz, dl = Math.hypot(dx, dy, dz) || 1;
+            return { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl };
+          };
+          const cam = this.camera.position;
+          const look = act?.lookAt ?? null;
+          eyeMood(tSec, f.index, {
+            doing: act ? act.doing : '',
+            target: look ? toward(look.x, look.y, look.z) : null,
+            camera: toward(cam.x, cam.y, cam.z),
+            climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
+          }, eyeLife, this.eyeState);
+          f.eyes.set(this.eyeState);
+        }
+      } else if (f.eyes) {
+        f.eyes.set(EYES_AT_REST);
+      }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+      if (f.glow && f.body) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
@@ -1621,10 +2216,13 @@ class TankInstance implements SaverInstance {
         x: Math.round(px * 10) / 10,
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
-        heading: Math.round(((Math.atan2(pose.fx, pose.fz) * 180) / Math.PI + 360) % 360),
+        // The facing the frame shows: the script's, for an actor.
+        heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
       });
     }
+    this.commitGlow(glowN, fishGlow, glowPulse, tSec);
+    this.aimSpot(tSec);
     this.lastFish = report;
     this.lastFrameT = t;
     this.rendered = true;
@@ -1664,6 +2262,36 @@ class TankInstance implements SaverInstance {
         waterY: this.ceiling ? (this.num('waterY') >= 0 ? this.num('waterY') : this.presetWaterY) : null,
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
+      },
+      // Only what the frame shows: a slot hidden by a lower `fishCount` keeps
+      // its rig for when it comes back, but it is not on screen now.
+      eyes: this.fish.map((f) => (f?.group.visible ? f.eyes?.grids.map((g) => g.signature).join(' · ') ?? null : null)),
+      vignette: this.vignette ? {
+        actors: this.vignette.actors,
+        beats: this.vignette.beats.length,
+        duration: Math.round(this.vignette.duration * 10) / 10,
+        doing: Array.from({ length: this.vignette.actors }, (_, i) => poseOf(this.vignette!, i, this.lastFrameT / 1000)?.doing ?? null),
+      } : null,
+      glow: {
+        lighting: this.lit ? 'lit' : 'flat',
+        glowLights: this.studio?.lights.filter((l) => l.intensity > 0).length ?? 0,
+        fishGlow: this.num('fishGlow'),
+        fishMetal: this.str('fishMetal'),
+        glowing: this.fish.filter((f) => f?.glow && f.group.visible).length,
+        floorPools: Number(this.poolUniforms.uMqPoolN!.value) - this.fixedPools.length,
+      },
+      props: {
+        scenery: this.scenery?.counts ?? {},
+        propMix: this.str('propMix'),
+        envProps: this.str('envProps'),
+        budget: this.quality.props,
+        drawCalls: (this.crystals?.drawCalls ?? 0) + (this.scenery?.drawCalls ?? 0),
+        triangles: (this.crystals?.triangles ?? 0) + (this.scenery?.triangles ?? 0),
+        clusters: this.clusters.map((c) => ({
+          id: c.id, kind: 'crystal', habit: c.habit, color: c.color, glass: c.glass,
+          x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z),
+          radius: Math.round(c.radius), height: Math.round(c.height), shards: c.shards.length,
+        })),
       },
       cast: {
         fishMix: this.str('fishMix'),
@@ -1848,6 +2476,7 @@ class TankInstance implements SaverInstance {
       this.scene.remove(f.group);
     }
     this.fish = [];
+    this.studio?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
@@ -1855,6 +2484,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
     delete this.ctxSaver.host.dataset.mqEnv;
+    delete this.ctxSaver.host.dataset.mqProps;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }
