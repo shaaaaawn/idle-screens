@@ -1,0 +1,39 @@
+import { createRng } from '@idle-screens/core';
+import { describe, expect, it } from 'vitest';
+import { buildCastle, type CastleSpec } from './castle';
+
+const spec: CastleSpec = { x: 10, y: 2, z: -150, facing: 0, scale: 1, palette: ['#49cfff', '#ff67bc'] };
+const arr = (g: { getAttribute(n: string): { array: ArrayLike<number> } }, n: string): number[] => Array.from(g.getAttribute(n).array);
+
+describe('castle', () => {
+  it('is seeded: same seed, same stones', () => {
+    const a = buildCastle(spec, createRng(1)), b = buildCastle(spec, createRng(1));
+    expect(arr(a.masonry, 'position')).toEqual(arr(b.masonry, 'position'));
+    expect(arr(a.crystal, 'color')).toEqual(arr(b.crystal, 'color'));
+  });
+
+  it('is voxel masonry under faceted spires, finite, inside a landmark budget', () => {
+    const c = buildCastle(spec, createRng(2));
+    expect(c.counts.towers).toBe(6);
+    expect(arr(c.masonry, 'position').length % (36 * 3)).toBe(0);
+    expect(c.counts.triangles).toBeLessThan(30000);
+    for (const g of [c.masonry, c.crystal]) {
+      expect(arr(g, 'position').every(Number.isFinite)).toBe(true);
+      expect(g.getAttribute('color').count).toBe(g.getAttribute('position').count);
+    }
+    // Spires stand on the towers: every crystal vertex is above the wall walk.
+    const y = arr(c.crystal, 'position').filter((_, i) => i % 3 === 1);
+    expect(y.reduce((m, v) => Math.min(m, v), Infinity)).toBeGreaterThan(spec.y + 40);
+  });
+
+  it('lights the field from its spires and gate, and names places to go', () => {
+    const c = buildCastle(spec, createRng(3));
+    expect(c.emitters.length).toBeGreaterThanOrEqual(7);
+    expect(c.emitters.every(e => e.reach > 10 && Number.isFinite(e.x + e.y + e.z))).toBe(true);
+    expect(Object.keys(c.marks).sort()).toEqual(['courtyard', 'gate', 'plaza']);
+    // The gate faces +z at facing 0; the road runs out to the plaza.
+    expect(c.marks.gate!.z).toBeGreaterThan(spec.z + 80);
+    expect(c.marks.plaza!.z).toBeGreaterThan(c.marks.gate!.z);
+    expect(c.obstacles[0]!.r).toBeGreaterThan(80);
+  });
+});

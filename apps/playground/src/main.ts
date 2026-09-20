@@ -267,6 +267,18 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 170, cameraElevation: 14, cameraAzimuth: 20, autoRotate: 1.2,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: the castle. The landmark on its own — walls, towers, spires, gate
+  // and road — orbited slowly so every side gets looked at.
+  createMetaquarium({
+    id: 'metaquarium-study-castle', label: 'Metaquarium (study castle)',
+    params: {
+      landmark: 'castle', propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalScale: 1,
+      bubbleVents: 0.4, skyLanterns: 0.5, horizon: 0.8, floraDensity: 0.3,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900,
+      cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5,
+    }, catalog: LOCAL_CATALOG,
+  }),
   createMetaquarium({
     id: 'metaquarium-study-geode', label: 'Metaquarium (study geode)',
     params: {

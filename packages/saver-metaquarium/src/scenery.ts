@@ -12,6 +12,7 @@ import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX,
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
+import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildSky, LANTERN_COLOR, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
@@ -28,6 +29,8 @@ export interface SceneryOptions {
   lanterns?: number;
   /** 0..1 — silhouettes standing past the fog line. */
   horizon?: number;
+  /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
+  castle?: boolean;
   /** Build the scene INSIDE a geode home instead of out on the floor. */
   interior?: boolean;
   cap: number;
@@ -42,6 +45,8 @@ export interface Scenery {
   emitters: Emitter[];
   /** Light that MOVES (the lanterns) — rewritten in place by `setFrame`. */
   moving: Emitter[];
+  /** Named places in this world a vignette can send a fish (gate, plaza, home doors). */
+  marks: Record<string, { x: number; y: number; z: number }>;
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -116,7 +121,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     counts.arches = 1;
     for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, '#947cff');
     // Low back ridge frames the settlement without sealing off its centre.
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < (opts.castle ? 0 : 4); i++) {
       const rx = (i - 1.5) * 30 * s, rz = -115 * s;
       rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, '#567fae');
     }
@@ -156,6 +161,28 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     homeLights.push(home.emitter);
     obstacles.push(home.obstacle);
     counts.homes!++;
+  }
+  // The landmark. It stands behind the village, gate toward the camera, and
+  // its keep is the same geode home everyone else lives in — only grand.
+  const marks: Record<string, { x: number; y: number; z: number }> = {};
+  if (opts.castle && !opts.interior) {
+    const cz = (homeCount ? -150 : -40) * s;
+    const castle = buildCastle({ x: 0, y: terrain(0, cz), z: cz, facing: 0, scale: s, palette: clusters.map(c => c.color) }, rng.fork(11));
+    for (const [g, name, side] of [[castle.masonry, 'castle-masonry', FrontSide], [castle.crystal, 'castle-spires', DoubleSide]] as const) {
+      g.userData.mqOwned = true;
+      const material = new MeshBasicMaterial({ vertexColors: true, side });
+      material.userData.mqOwned = true;
+      const mesh = new Mesh(g, material);
+      mesh.name = name;
+      group.add(mesh);
+    }
+    const keep = buildGeode({ ...castle.keep, habit: 'tower', facing: 0, tint: anchors[0]!.color }, rng.fork(12));
+    stones.push(...keep.stone); details.push(...keep.voxels); interiors.push(...keep.glow);
+    vents.push(keep.vent);
+    homeLights.push(keep.emitter, ...castle.emitters);
+    obstacles.push(...castle.obstacles);
+    Object.assign(marks, castle.marks);
+    counts.castle = 1;
   }
   // Indoors: the whole scene is the room behind a geode's round door.
   const shellParts: BufferGeometry[] = [];
@@ -413,8 +440,18 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
           * (1.0 - smoothstep(0.78, 0.97, r)) * 0.4 * big;
         float fill = edge * 0.07;
         float glint = max(0.16, px * 1.7);
-        float spec = 1.0 - smoothstep(glint * 0.35, glint, length(uv - vec2(-0.37, -0.41)));
-        float echo = (1.0 - smoothstep(0.0, 0.09, length(uv - vec2(0.43, 0.45)))) * 0.5 * big;
+        // The highlight is a reflection, so it is not pinned: each bubble
+        // carries it at its own bearing and depth, it slides as the bubble
+        // wobbles and turns, and it smears along the rim into a short arc.
+        float hb = -2.35 + (fract(vShape.y * 7.31) - 0.5) * 1.3
+          + sin(uParticleTime * (0.9 + fract(vShape.y * 3.7)) + vShape.y * 60.0) * 0.35 + vShape.x * 2.2;
+        float hr = 0.44 + fract(vShape.y * 5.13) * 0.18 + vShape.x * 0.6;
+        vec2 hc = vec2(cos(hb), sin(hb)) * hr;
+        vec2 hd = uv - hc;
+        vec2 tang = vec2(-sin(hb), cos(hb));
+        float along = dot(hd, tang), across = dot(hd, vec2(cos(hb), sin(hb)));
+        float spec = 1.0 - smoothstep(glint * 0.35, glint, length(vec2(along * mix(1.0, 0.55, big), across * 1.25)));
+        float echo = (1.0 - smoothstep(0.0, 0.09, length(uv + hc * 1.05))) * 0.5 * big;
         float ang = atan(uv.y, uv.x);
         vec3 film = 0.5 + 0.5 * cos(ang * 2.0 + r * 3.0 + vShape.y * 40.0 + uParticleTime * 0.35 + vec3(0.0, 2.1, 4.2));
         diffuseColor.rgb = mix(diffuseColor.rgb, film, 0.42 * rim) * (0.85 + 0.7 * under * rim);
@@ -426,7 +463,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
         diffuseColor.a *= mask * vLife;
       `);
     };
-    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v4' : 'mineral-snow-v4';
+    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v5' : 'mineral-snow-v4';
     const points = new Points(geometry, material);
     points.name = bubble ? 'bubble-vents' : 'illuminated-marine-snow';
     points.frustumCulled = false;
@@ -452,7 +489,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
   }
   return {
-    group, counts, vents, emitters: homeLights, moving,
+    group, counts, vents, emitters: homeLights, moving, marks,
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),

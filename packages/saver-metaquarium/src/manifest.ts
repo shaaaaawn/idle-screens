@@ -198,6 +198,10 @@ export const METAQUARIUM_PARAMS = {
   /** The far distance: three hazed rings of silhouettes past the fog line —
    *  rock spires, castle-sized crystals in the scene's colours, and (from 0.4)
    *  one grand geode with its door lit. One draw call, unlit. */
+  /** The landmark — one thing bigger than everything else. `castle`: voxel
+   *  curtain walls, six towers roofed with glowing crystal spires, a lit
+   *  gatehouse, a paved road and plaza, and a grand geode for a keep. */
+  landmark: { type: 'enum', default: 'none', options: ['none', 'castle'], ease: 'step' },
   horizon: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
    *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).

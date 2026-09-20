@@ -40,7 +40,7 @@ const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['formation', ['formationShape', 'formationBreathe']],
   ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
   ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-  ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'marineSnow', 'skyLanterns', 'horizon']],
+  ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'marineSnow', 'skyLanterns', 'horizon', 'landmark']],
   ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
   ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'floorColor', 'moteDensity', 'moteColor']],
 ];

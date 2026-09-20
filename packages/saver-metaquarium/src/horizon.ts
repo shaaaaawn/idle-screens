@@ -145,7 +145,7 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
     // Its door and windows face the village; they are light, so no haze at the foot.
     t.fade = 0;
     const tint = new Color(palette[0]!);
-    const glow = tint.clone().lerp(new Color('#ffd9a0'), 0.55).multiplyScalar(0.6), dimGlow = glow.clone().multiplyScalar(0.5);
+    const glow = tint.clone().lerp(new Color('#ffb860'), 0.75).multiplyScalar(0.3), dimGlow = glow.clone().multiplyScalar(0.5);
     const inX = -Math.sin(geodeBearing), inZ = -Math.cos(geodeBearing), sX = inZ, sZ = -inX;
     const face = (u: number, y: number, push: number): number[] => [gx + inX * push + sX * u, y, gz + inZ * push + sZ * u];
     const rAt = (y: number): number => R * (y < R * 0.35 ? 0.99 : 0.9) + 2;
@@ -155,7 +155,7 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
     });
     [[-62, 58], [62, 66], [-38, 104], [30, 112]].forEach(([u, y]) => {
       const push = Math.sqrt(Math.max(0, rAt(y!) ** 2 - u! * u!)) * 0.97;
-      t.quad(face(u! - 9, y! - 9, push), face(u! + 9, y! - 9, push), face(u! + 9, y! + 9, push), face(u! - 9, y! + 9, push), glow, glow);
+      t.quad(face(u! - 5, y! - 7, push), face(u! + 5, y! - 7, push), face(u! + 5, y! + 7, push), face(u! - 5, y! + 7, push), glow, glow);
     });
     counts.geodes = 1;
   }
