@@ -1,5 +1,6 @@
 import type { ParamDef, ParamValue, SaverPlugin } from '@idle-screens/core';
 import { sampleTrack } from '@idle-screens/core';
+import { buildCastEditor } from './cast-editor';
 import type { TimelineHandle } from './timeline-panel';
 
 export interface ParamsHandle {
@@ -83,6 +84,7 @@ function buildControl(
   def: ParamDef,
   value: ParamValue,
   onChange: (v: ParamValue) => void,
+  styles: readonly string[] = [],
 ): { row: HTMLElement; update: (v: ParamValue) => void } {
   const row = document.createElement('div');
   row.className = 'wb-param';
@@ -95,7 +97,13 @@ function buildControl(
 
   let update: (v: ParamValue) => void;
 
-  if (path === 'fishUrl') {
+  if (path === 'fishMix') {
+    // The cast is an array: rows, not a one-line string.
+    const cast = buildCastEditor(String(value), styles, onChange);
+    row.classList.add('wb-param-wide');
+    dd.append(cast.el);
+    update = (v) => cast.update(String(v));
+  } else if (path === 'fishUrl') {
     const sel = document.createElement('select');
     sel.className = 'wb-input wb-select wb-param-input';
 
@@ -289,7 +297,7 @@ export function buildParamsPanel(
         const value = sampled[path] ?? def.default;
         const { row, update } = buildControl(path, def, value, (v) => {
           timeline.setParam(path, v);
-        });
+        }, (space.swimStyle?.options ?? []).filter((o) => o !== 'auto'));
         dl.append(row);
         controls.push({ path, update });
         rows.push({ path, row, head });
