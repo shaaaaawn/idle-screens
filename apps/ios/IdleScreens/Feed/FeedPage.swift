@@ -51,6 +51,15 @@ struct FeedPage: View {
     /// Steering needs an editor or owner key. A viewer key opens a private
     /// channel and must not light up controls that would then be refused.
     private var canSteer: Bool { app.canEdit(channelId) }
+    /// One web engine at a time. While the moment on screen is a past scene
+    /// drawn by the web (a 3D tank), the live page gives its WebView up — two
+    /// three.js contexts is how a 13 Pro gets jettisoned. Coming back to live
+    /// pays a reload; that is the right side of the trade.
+    private var historyHoldsTheEngine: Bool {
+        guard let stop = currentStop else { return false }
+        return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.needsWebEngine == true
+    }
+
     private var isLive: Bool { moment == Self.liveKey || moment == nil }
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
     private var currentIndex: Int? { stops.firstIndex { Self.key($0) == moment } }
@@ -211,7 +220,7 @@ struct FeedPage: View {
     private var livePage: some View {
         ZStack {
             Color(hex: backdropHex).ignoresSafeArea()
-            if isActive {
+            if isActive && !historyHoldsTheEngine {
                 // The web engine draws; nothing in it can be touched.
                 WebSceneView(
                     channelId: channelId,
@@ -775,6 +784,10 @@ private struct HistoryMomentPage: View {
     /// Held while the scene loads: the channel's own colour, never bare black.
     let holdingColor: String
     @Environment(AppState.self) private var app
+    /// Granted a moment after the page settles, so flicking THROUGH a run of
+    /// tanks never boots an engine per page.
+    @State private var engineGranted = false
+    @State private var webReady = false
 
     private var scene: RecordedScene? {
         app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)
@@ -783,7 +796,34 @@ private struct HistoryMomentPage: View {
     var body: some View {
         ZStack {
             Color(hex: scene?.spec?.background?.primaryColor ?? holdingColor).ignoresSafeArea()
-            if let scene {
+            if let scene, scene.needsWebEngine {
+                // Neighbours stay a cheap native still; only the page you are
+                // ON gets the engine, and only once the swipe has settled.
+                if !isShowing || !webReady {
+                    RecordedSceneView(scene: scene, channelId: channelId, animating: false)
+                        .ignoresSafeArea()
+                }
+                if isShowing && engineGranted {
+                    WebSceneView(
+                        channelId: channelId,
+                        baseURL: URL(string: Config.baseURL)!,
+                        token: app.token(for: channelId),
+                        sceneId: stop.sceneId,
+                        // The page's first socket frame is the proof it booted;
+                        // the stored scene mounts a beat after.
+                        onFrame: { _ in
+                            guard !webReady else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(0.8))
+                                withAnimation(.easeInOut(duration: 0.6)) { webReady = true }
+                            }
+                        },
+                        onFailure: { engineGranted = false }
+                    )
+                    .ignoresSafeArea()
+                    .opacity(webReady ? 1 : 0)
+                }
+            } else if let scene {
                 RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -809,6 +849,15 @@ private struct HistoryMomentPage: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: scene != nil)
+        .task(id: isShowing) {
+            guard isShowing else {
+                engineGranted = false
+                webReady = false
+                return
+            }
+            try? await Task.sleep(for: .seconds(0.45))
+            if !Task.isCancelled { engineGranted = true }
+        }
         // The safety net under the prefetch: a page that somehow arrives
         // without its scene still asks for it.
         .task { await app.scenes.load(channelId: channelId, sceneId: stop.sceneId, from: app.gallery) }

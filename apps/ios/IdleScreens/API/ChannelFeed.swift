@@ -67,6 +67,18 @@ struct RecordedScene: Decodable, Equatable, Sendable {
     /// Set when the scene is a classic saver document (`{"id": "warp"}`).
     let classicSaverId: String?
 
+    /// Scenes the phone can only impersonate. The native aquarium is a 2D
+    /// stand-in built for the Apple TV (no WebKit there); it ignores the
+    /// scene's staging, so every past tank looked like the same tank. On the
+    /// phone these are drawn by the web engine instead — one at a time.
+    static let webOnlySavers: Set<String> = ["metaquarium"]
+
+    var needsWebEngine: Bool {
+        if let classicSaverId { return Self.webOnlySavers.contains(classicSaverId) }
+        // Nothing native can draw at all: better the real thing than a caption.
+        return spec == nil
+    }
+
     private enum CodingKeys: String, CodingKey { case id, label, seed, publishedAt, author, spec }
     private struct ClassicProbe: Decodable { let id: String? }
 

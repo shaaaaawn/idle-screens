@@ -134,3 +134,31 @@ final class RecordedSceneTests: XCTestCase {
         XCTAssertNil(scene.classicSaverId)
     }
 }
+
+/// Which past scenes get the web engine. The aquarium's native port is a 2D
+/// stand-in that ignores the scene's staging; everything the phone CAN draw
+/// faithfully must stay native, because a WebView per history page is the
+/// expensive path.
+final class WebEngineHistoryTests: XCTestCase {
+    private func decode(_ json: String) throws -> RecordedScene {
+        try JSONDecoder().decode(RecordedScene.self, from: json.data(using: .utf8)!)
+    }
+
+    func testTheTankGoesToTheWebEngineAndNativeScenesDoNot() throws {
+        XCTAssertTrue(try decode(#"{"id":1,"seed":1,"spec":{"id":"metaquarium","params":{"fishCount":3}}}"#).needsWebEngine)
+        XCTAssertFalse(try decode(#"{"id":2,"seed":1,"spec":{"id":"warp"}}"#).needsWebEngine)
+        XCTAssertFalse(try decode("""
+        {"id":3,"seed":1,"spec":{"schemaVersion":1,"id":"x","label":"x","layers":[{"count":1,"sprite":{"kind":"circle"}}]}}
+        """).needsWebEngine)
+    }
+
+    func testPinnedSceneRidesTheURLAndNothingElseDoes() {
+        let base = URL(string: "https://idlescreens.com")!
+        XCTAssertEqual(WebSceneView.sceneURL(baseURL: base, channelId: "fishtank", sceneId: 412).absoluteString,
+                       "https://idlescreens.com/channel/fishtank?chrome=off&scene=412")
+        XCTAssertEqual(WebSceneView.sceneURL(baseURL: base, channelId: "fishtank").absoluteString,
+                       "https://idlescreens.com/channel/fishtank?chrome=off")
+        XCTAssertEqual(WebSceneView.sceneURL(baseURL: base, channelId: "fishtank", sceneId: 0).absoluteString,
+                       "https://idlescreens.com/channel/fishtank?chrome=off")
+    }
+}

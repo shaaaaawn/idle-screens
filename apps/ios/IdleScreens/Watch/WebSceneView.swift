@@ -27,16 +27,23 @@ struct WebSceneView: UIViewRepresentable {
     /// storage, never its URL — the server's threat model rules URLs out
     /// (they land in logs), and so do we.
     var token: String?
+    /// A stored scene to open on instead of what the channel is playing
+    /// (`?scene=<id>`): the site mounts it detached, as its own timeline scrub
+    /// does — a local read that reports nothing back to the channel.
+    var sceneId: Int? = nil
     /// Bump to force a reload (the native "Try again").
     var reloadCount: Int = 0
     var onFrame: (String) -> Void
     var onFailure: () -> Void
 
-    static func sceneURL(baseURL: URL, channelId: String) -> URL {
+    static func sceneURL(baseURL: URL, channelId: String, sceneId: Int? = nil) -> URL {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("channel").appendingPathComponent(channelId),
             resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "chrome", value: "off")]
+        if let sceneId, sceneId > 0 {
+            components.queryItems?.append(URLQueryItem(name: "scene", value: String(sceneId)))
+        }
         return components.url!
     }
 
@@ -78,7 +85,7 @@ struct WebSceneView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
 
         context.coordinator.loaded = (channelId, reloadCount)
-        webView.load(URLRequest(url: Self.sceneURL(baseURL: baseURL, channelId: channelId)))
+        webView.load(URLRequest(url: Self.sceneURL(baseURL: baseURL, channelId: channelId, sceneId: sceneId)))
         return webView
     }
 
@@ -87,7 +94,7 @@ struct WebSceneView: UIViewRepresentable {
         context.coordinator.onFailure = onFailure
         guard context.coordinator.loaded != (channelId, reloadCount) else { return }
         context.coordinator.loaded = (channelId, reloadCount)
-        webView.load(URLRequest(url: Self.sceneURL(baseURL: baseURL, channelId: channelId)))
+        webView.load(URLRequest(url: Self.sceneURL(baseURL: baseURL, channelId: channelId, sceneId: sceneId)))
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
