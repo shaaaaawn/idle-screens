@@ -43,7 +43,18 @@ describe('geode interior', () => {
     expect(r.boxes).toBeGreaterThan(250); // floor, rug, furniture
     expect(r.emitters.length).toBe(r.lights.length);
     expect(r.emitters.length).toBeGreaterThanOrEqual(7);
-    expect(r.emitters.some((e) => e.b > e.r)).toBe(true); // the window is cool
+    // The window's own emitter, not just "some emitter happens to be cool":
+    // three potted-plant lamps already tint cool (room tint #7a3cff, b > r)
+    // and the >= 4 warm count is already met by the chandelier, bedside lamp,
+    // stove and floor lamp alone, so a broader `.some()`/count check can't
+    // catch the window itself regressing to a warm color. Locate it by its
+    // world position instead — `piece(128, 158)` in interior.ts, the round
+    // window onto "the blue outside" — and assert directly on it.
+    const windowAngle = (128 * Math.PI) / 180;
+    const windowX = Math.cos(windowAngle) * 158, windowZ = Math.sin(windowAngle) * 158;
+    const windowEmitter = r.emitters.find((e) => Math.hypot(e.x - windowX, e.z - windowZ) < 30);
+    expect(windowEmitter, 'no emitter found near the window\'s position').toBeDefined();
+    expect(windowEmitter!.b).toBeGreaterThan(windowEmitter!.r); // the window is cool
     expect(r.emitters.filter((e) => e.r > e.b).length).toBeGreaterThanOrEqual(4); // the rest are warm
     expect(r.vents.length).toBe(2); // teapot and kettle
     expect(r.obstacles.length).toBeGreaterThanOrEqual(8);
