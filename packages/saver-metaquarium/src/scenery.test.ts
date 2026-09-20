@@ -127,4 +127,76 @@ describe('mineral world', () => {
     expect(() => world.setFrame(12, { color: new Color('#000'), near: 10, far: 100 }, 0.6)).not.toThrow();
   });
 
+  /** Drives a mesh's onBeforeCompile and customProgramCacheKey the way
+   *  three.js would when it actually compiles the program — the source of
+   *  the shader patch and its cache key, both otherwise only ever called
+   *  by a real renderer. */
+  const patchShader = (mesh: Mesh): void => {
+    const material = mesh.material as Material;
+    const shader = { uniforms: {}, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader } as Parameters<Material['onBeforeCompile']>[0];
+    material.onBeforeCompile(shader, {} as WebGLRenderer);
+    material.customProgramCacheKey?.();
+  };
+
+  it('fills the sky with jellyfish lanterns and lights their glow cards', () => {
+    const world = build({ ...off, lanterns: 1 });
+    expect(world.counts.lanterns).toBeGreaterThan(0);
+    const lanterns = world.group.children.find(o => o.name === 'sky-lanterns') as Mesh | undefined;
+    expect(lanterns).toBeDefined();
+    patchShader(lanterns!);
+    for (const object of world.group.children) {
+      const mesh = object as Mesh;
+      if (!mesh.geometry) continue;
+      for (const attr of Object.values(mesh.geometry.attributes)) {
+        expect(Array.from(attr.array).every(Number.isFinite)).toBe(true);
+      }
+    }
+    // setFrame's lantern glow-card commit only runs with a fog argument.
+    expect(() => world.setFrame(9, { color: new Color('#000'), near: 10, far: 100 }, 0.7)).not.toThrow();
+  });
+
+  it('stands a hazed horizon of spires, castle crystals and a grand geode past the fog line', () => {
+    const world = build({ ...off, horizon: 1 });
+    expect(world.counts.horizon).toBeGreaterThan(0);
+    const horizon = world.group.children.find(o => o.name === 'horizon') as Mesh | undefined;
+    expect(horizon).toBeDefined();
+    patchShader(horizon!);
+    for (const object of world.group.children) {
+      const mesh = object as Mesh;
+      if (!mesh.geometry) continue;
+      for (const attr of Object.values(mesh.geometry.attributes)) {
+        expect(Array.from(attr.array).every(Number.isFinite)).toBe(true);
+      }
+    }
+    expect(() => world.setFrame(5, { color: new Color('#123'), near: 10, far: 100 }, 0.5)).not.toThrow();
+  });
+
+  it('never stands a sky or horizon indoors', () => {
+    const world = build({ ...off, lanterns: 1, horizon: 1, interior: true });
+    expect(world.counts.lanterns).toBeUndefined();
+    expect(world.counts.horizon).toBeUndefined();
+    expect(world.group.children.some(o => o.name === 'sky-lanterns' || o.name === 'horizon')).toBe(false);
+  });
+
+  it('raises a castle behind the village, its keep a grand geode home', () => {
+    const world = build({ ...off, homes: 1, castle: 1 });
+    expect(world.counts.castle).toBe(1);
+    expect(world.group.children.some(o => o.name === 'castle-masonry')).toBe(true);
+    expect(world.group.children.some(o => o.name === 'castle-spires')).toBe(true);
+    expect(Object.keys(world.marks).length).toBeGreaterThan(0);
+    for (const object of world.group.children) {
+      const mesh = object as Mesh;
+      if (!mesh.geometry) continue;
+      for (const attr of Object.values(mesh.geometry.attributes)) {
+        expect(Array.from(attr.array).every(Number.isFinite)).toBe(true);
+      }
+    }
+  });
+
+  it('never raises a castle indoors', () => {
+    const world = build({ ...off, castle: 1, interior: true });
+    expect(world.counts.castle).toBeUndefined();
+    expect(world.group.children.some(o => o.name.startsWith('castle-'))).toBe(false);
+  });
+
 });
