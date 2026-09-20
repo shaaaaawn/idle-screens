@@ -319,7 +319,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   }
   // The far distance: hazed rings of spires, castle crystals and a grand geode.
   const horizonFog = { value: new Color() };
-  const far = opts.interior ? null : buildHorizon(rng.fork(8), { amount: opts.horizon ?? 0, palette: clusters.map(c => c.color), geode: !opts.castle });
+  const far = opts.interior ? null : buildHorizon(rng.fork(8), { amount: opts.horizon ?? 0, palette: clusters.map(c => c.color), geode: !opts.castle, scale: s });
   if (far?.geometry) {
     far.geometry.userData.mqOwned = true;
     const material = new MeshBasicMaterial({ vertexColors: true, fog: false, side: DoubleSide });

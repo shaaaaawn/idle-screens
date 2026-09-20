@@ -289,7 +289,10 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     stone, voxels, glow,
     vent: { x: ventP.x, y: ventP.y, z: ventP.z, color: '#ffe6bd' },
     emitter: { x: mouth.x, y: mouth.y, z: mouth.z, r: warm.r * 0.9, g: warm.g * 0.9, b: warm.b * 0.9, reach: r * 1.5, phase: rng.next() * 6.28 },
-    obstacle: { x: spec.x, y: cy, z: spec.z, r: r * Math.max(sx, sz), h: r * sy },
+    // The chimney (via `ventP`, its very top) reaches noticeably higher above
+    // `cy` than the boulder's own `r * sy` — a floor-hugging fish must clear
+    // the whole home, chimney included, not just the buried boulder.
+    obstacle: { x: spec.x, y: cy, z: spec.z, r: r * Math.max(sx, sz), h: Math.max(r * sy, ventP.y - cy) },
     doorstep: { x: foot.x, z: foot.z },
     radius: r,
     triangles,
