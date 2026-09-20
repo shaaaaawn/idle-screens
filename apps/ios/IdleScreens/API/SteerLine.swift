@@ -12,7 +12,11 @@ import Foundation
 ///   printed "pi · pi · glm". A label survives only if it adds a fact.
 enum SteerLine {
     static func ago(_ atMs: Int, now: Date = Date()) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince1970) - atMs / 1000)
+        // Subtract at millisecond precision, THEN truncate to seconds —
+        // truncating `now` and `atMs` independently before subtracting can
+        // advance an event into the next bucket up to a second early.
+        let nowMs = Int(now.timeIntervalSince1970 * 1000)
+        let seconds = max(0, (nowMs - atMs) / 1000)
         if seconds < 60 { return "just now" }
         if seconds < 3600 { return "\(seconds / 60)m ago" }
         if seconds < 86_400 { return "\(seconds / 3600)h ago" }

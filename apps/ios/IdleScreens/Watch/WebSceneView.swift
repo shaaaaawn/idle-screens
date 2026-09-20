@@ -187,7 +187,8 @@ struct WebSceneView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard action.targetFrame?.isMainFrame != false else { return decisionHandler(.allow) }
             let url = action.request.url
-            let sameOrigin = url?.scheme == "https" && url?.host == baseURL.host
+            let sameOrigin = url?.scheme == baseURL.scheme && url?.host == baseURL.host
+                && url?.port == baseURL.port
             let isChannel = url?.path.hasPrefix("/channel/") == true
             decisionHandler(sameOrigin && isChannel ? .allow : .cancel)
         }
