@@ -58,7 +58,7 @@ struct WebSceneView: UIViewRepresentable {
         let controller = config.userContentController
         controller.add(WeakScriptHandler(context.coordinator), name: Self.handlerName)
         controller.addUserScript(WKUserScript(
-            source: Self.bootstrapScript(channelId: channelId, token: token),
+            source: Self.bootstrapScript(channelId: channelId, token: token, baseURL: baseURL),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true))
 
@@ -106,12 +106,19 @@ struct WebSceneView: UIViewRepresentable {
     /// Values are embedded as JSON literals — never string-concatenated — and
     /// the token is re-validated against the server's own pattern first, so a
     /// malformed Keychain value cannot become script.
-    static func bootstrapScript(channelId: String, token: String?) -> String {
+    static func bootstrapScript(channelId: String, token: String?, baseURL: URL) -> String {
         func literal(_ value: String) -> String {
             let data = (try? JSONSerialization.data(withJSONObject: [value])) ?? Data("[\"\"]".utf8)
             let array = String(decoding: data, as: UTF8.self)
             return String(array.dropFirst().dropLast())
         }
+        // The channel socket's expected origin, derived from the native-trusted
+        // `baseURL` rather than the page's own `location` — a hijacked or
+        // injected page script must not be able to widen what counts as "the
+        // channel socket" by controlling where it thinks it's loaded from.
+        let wsProtocol = baseURL.scheme == "https" ? "wss:" : "ws:"
+        let wsHost = baseURL.host ?? ""
+        let wsPort = baseURL.port.map(String.init) ?? ""
         var seed = ""
         if let token, isWellFormed(token) {
             seed = "try { localStorage.setItem(\(literal("isk:" + channelId)), \(literal(token))); } catch (_) {}"
@@ -122,11 +129,33 @@ struct WebSceneView: UIViewRepresentable {
           const post = (kind, body) => {
             try { window.webkit.messageHandlers.\(handlerName).postMessage({ kind, body }); } catch (_) {}
           };
+          // Only the channel's own stream is instrumented. A page that opens
+          // some OTHER socket (telemetry, an embed, or one on a spoofed
+          // origin) must never have its frames posted here — ChannelSession
+          // treats matching JSON as authoritative state, so an unrelated
+          // socket could spoof it. Origin (protocol+host+port) and path must
+          // match exactly; a path suffix alone would let
+          // wss://attacker.example/anything/c/<id>/ws slip through.
+          const channelSocketProtocol = \(literal(wsProtocol));
+          const channelSocketHost = \(literal(wsHost));
+          const channelSocketPort = \(literal(wsPort));
+          const channelSocketPath = \(literal("/c/" + channelId + "/ws"));
+          const isChannelSocket = (url) => {
+            try {
+              const u = new URL(url, location.href);
+              return u.protocol === channelSocketProtocol
+                && u.hostname === channelSocketHost
+                && u.port === channelSocketPort
+                && u.pathname === channelSocketPath;
+            } catch (_) { return false; }
+          };
           const Native = window.WebSocket;
           if (Native && !Native.__idleTapped) {
             const Tapped = function (url, protocols) {
               const ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
-              ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data); });
+              if (isChannelSocket(url)) {
+                ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data); });
+              }
               return ws;
             };
             Tapped.prototype = Native.prototype;
@@ -187,7 +216,8 @@ struct WebSceneView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard action.targetFrame?.isMainFrame != false else { return decisionHandler(.allow) }
             let url = action.request.url
-            let sameOrigin = url?.scheme == "https" && url?.host == baseURL.host
+            let sameOrigin = url?.scheme == baseURL.scheme && url?.host == baseURL.host
+                && url?.port == baseURL.port
             let isChannel = url?.path.hasPrefix("/channel/") == true
             decisionHandler(sameOrigin && isChannel ? .allow : .cancel)
         }

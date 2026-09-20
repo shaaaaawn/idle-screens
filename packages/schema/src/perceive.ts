@@ -84,6 +84,8 @@ interface BuiltScene {
   w: number;
   h: number;
   scale: number;
+  /** Normalized exactly like `SpecInstance.seed` (0 is falsy, so it lands on 1). */
+  seed: number;
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
 }
@@ -97,7 +99,10 @@ export interface PerceiveOptions {
 
 function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const { width: w, height: h } = opts.viewport ?? { width: 1920, height: 1080 };
-  const seed = opts.seed ?? spec.seed ?? 42;
+  // Normalized exactly like `SpecInstance.seed` — a valid `seed: 0` lands on 1,
+  // matching the renderer, and this same normalized value is reused for field
+  // background sampling (see `luminanceGrid`) so both agree on one seed.
+  const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
   let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
@@ -109,7 +114,7 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  return { w, h, scale, layers, byKey };
+  return { w, h, scale, seed, layers, byKey };
 }
 
 /** Position with layer-parented-orbit resolution (matches the renderer). */
@@ -271,7 +276,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   } else if (bg.type === 'field') {
     bgCells = new Array<number>(cols * rows);
     const short = Math.max(1, Math.min(w, h));
-    const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
+    const seed = scene.seed;
     const ft = fieldSampleTime(bg, t);
     for (let r = 0; r < rows; r++) {
       let rowSum = 0;

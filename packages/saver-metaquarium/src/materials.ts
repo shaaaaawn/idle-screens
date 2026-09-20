@@ -2,7 +2,12 @@ import type { Rng } from '@idle-screens/core';
 import {
   AdditiveBlending,
   Color,
+  DataTexture,
   MeshBasicMaterial,
+  MeshLambertMaterial,
+  MeshMatcapMaterial,
+  SRGBColorSpace,
+  Vector3,
   type Material,
   type Mesh,
   type MeshStandardMaterial,
@@ -22,7 +27,7 @@ function isEyes(m: Material): boolean {
   return m.name.startsWith('EYES-') || /eye/i.test(m.name);
 }
 
-function isGlow(m: Material): boolean {
+export function isGlow(m: Material): boolean {
   return m.name.startsWith('GLOW-') || /glow/i.test(m.name);
 }
 
@@ -131,7 +136,7 @@ function colorLuminance(m: Material): number {
  * - other untextured → seeded palette coat; textured → untouched (the atlas
  *   IS the look).
  */
-export function applyNpcMaterials(root: Object3D, rng: Rng): void {
+export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, lit = false): void {
   const coatA = rng.pick(BODY_COATS);
   const coatB = rng.pick(BODY_COATS.filter((c) => c !== coatA));
   root.traverse((node) => {
@@ -145,6 +150,8 @@ export function applyNpcMaterials(root: Object3D, rng: Rng): void {
         const eye = new MeshBasicMaterial({ color: white ? 0xffffff : 0x000000 });
         eye.name = m.name;
         eye.userData.mqOwned = true;
+        // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
+        eye.userData.mqEye = white ? 'sclera' : 'pupil';
         return eye;
       }
       if (isGlow(m) && !(m as Partial<MeshBasicMaterial>).map) {
@@ -167,6 +174,40 @@ export function applyNpcMaterials(root: Object3D, rng: Rng): void {
         // authored material untouched.
         const metalness = (m as Partial<import('three').MeshStandardMaterial>).metalness ?? 0;
         if (metalness >= 0.5) {
+          // …and make it READ as metal. A matcap is reflection without an
+          // environment or a light: each face looks up a painted chrome ball
+          // by its view-space normal, so the voxel plates flash as the fish
+          // turns. One texture lookup, skinning intact.
+          // LIT: the scene carries a studio environment, so the authored PBR
+          // metal finally has something to reflect — real reflections that
+          // slide across the plates as the fish turns. Polished a little past
+          // glTF's default roughness of 1, which reflects nothing sharp.
+          if (lit && !reflective) {
+            // Opted out of metal: the same atlas as an ordinary lit surface.
+            const matte = new MeshLambertMaterial({ map });
+            matte.name = m.name;
+            matte.userData.mqOwned = true;
+            return matte;
+          }
+          if (lit) {
+            const src = m as MeshStandardMaterial;
+            const plate = src.clone();
+            plate.roughness = Math.min(src.roughness ?? 1, 0.3);
+            // glTF's default metalness is 1 — a mirror with no diffuse at all,
+            // which in a dark room is a BLACK fish, and at 0.6 a GREY one (the
+            // jellyfish did both). 0.35 keeps the atlas's colour and lays the
+            // reflections over it as a sheen.
+            plate.metalness = Math.min(src.metalness ?? 1, 0.35);
+            plate.envMapIntensity = 1.3;
+            plate.userData.mqOwned = true;
+            return plate;
+          }
+          if (reflective) {
+            const metal = new MeshMatcapMaterial({ map, matcap: chromeMatcap() });
+            metal.name = m.name;
+            metal.userData.mqOwned = true;
+            return metal;
+          }
           const atlas = new MeshBasicMaterial({ map });
           atlas.name = m.name;
           atlas.userData.mqOwned = true;
@@ -179,7 +220,13 @@ export function applyNpcMaterials(root: Object3D, rng: Rng): void {
         : /secondary/i.test(m.name)
         ? coatB
         : rng.pick(BODY_COATS);
-      const body = new MeshBasicMaterial({ color: new Color(coat) });
+      // LIT: a coat that takes light, so every voxel face shades by where it
+      // points — the single biggest difference between our flat fish and the
+      // original renders. Lambert: one dot product, no specular to fight the
+      // palette.
+      const body = lit
+        ? new MeshLambertMaterial({ color: new Color(coat) })
+        : new MeshBasicMaterial({ color: new Color(coat) });
       body.name = m.name;
       body.userData.mqOwned = true;
       return body;
@@ -282,4 +329,125 @@ export function addGlowHalos(root: Object3D, rng: Rng): number {
     }
   }
   return added;
+}
+
+
+let CHROME: DataTexture | null = null;
+/**
+ * The painted chrome ball behind every reflective plate: a cool sky over a
+ * darker ground, one hard highlight up-left, dark toward the rim. Generated
+ * (64², 16 KB) — nothing fetched — and shared by every fish. Never tagged
+ * `mqOwned`: it outlives any one tank.
+ */
+export function chromeMatcap(): DataTexture {
+  if (CHROME) return CHROME;
+  const N = 64;
+  const data = new Uint8Array(N * N * 4);
+  for (let j = 0; j < N; j += 1) {
+    for (let i = 0; i < N; i += 1) {
+      const x = (i + 0.5) / N * 2 - 1;
+      const y = (j + 0.5) / N * 2 - 1;
+      const r2 = Math.min(1, x * x + y * y);
+      const z = Math.sqrt(1 - r2);
+      const sky = 0.7 + 0.26 * y;
+      const horizon = 0.16 * Math.exp(-((y - 0.04) ** 2) / 0.012);
+      const hot = Math.max(0, -0.5 * x + 0.6 * y + 0.62 * z) ** 14 * 0.75;
+      const v = Math.min(1, (sky + horizon) * (0.6 + 0.4 * z) + hot);
+      const o = (j * N + i) * 4;
+      data[o] = Math.round(255 * Math.min(1, v * 0.94));
+      data[o + 1] = Math.round(255 * Math.min(1, v * 0.99));
+      data[o + 2] = Math.round(255 * Math.min(1, v * 1.08));
+      data[o + 3] = 255;
+    }
+  }
+  CHROME = new DataTexture(data, N, N);
+  CHROME.colorSpace = SRGBColorSpace;
+  CHROME.needsUpdate = true;
+  return CHROME;
+}
+
+/** What a fish's GLOW parts add up to — the source the bloom card, the core
+ *  pulse and the light field all read. */
+export interface FishGlow {
+  /** Linear RGB of the dominant glow colour (largest part wins). */
+  r: number; g: number; b: number;
+  /** Centre and radius of the glowing parts, in the BODY's local space. */
+  cx: number; cy: number; cz: number; radius: number;
+  /** 0..1 — how much bloom this source earns. A glow part that IS the whole
+   *  silhouette, or a colour with no saturation, would bloom as grey fog. */
+  gain: number;
+  /** Untextured glow materials this fish owns, with their authored colour —
+   *  the ones the core pulse may repaint. Textured glow keeps its atlas. */
+  cores: Array<{ mat: MeshBasicMaterial; base: Color }>;
+  /** The glowing parts themselves, largest first (body-local), each in its own
+   *  colour — bloom hugs the fin that glows, not the fish that owns it. */
+  parts: Array<{ x: number; y: number; z: number; radius: number; r: number; g: number; b: number; coat: boolean }>;
+}
+
+/** Runs after applyNpcMaterials. null = this fish has nothing that glows. */
+export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
+  const cores: FishGlow['cores'] = [];
+  const parts: FishGlow['parts'] = [];
+  const seen = new Set<Material>();
+  let cx = 0, cy = 0, cz = 0, w = 0, radius = 0;
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const centre = new Vector3();
+  let modelR = 0;
+  root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh || !mesh.geometry || mesh.userData.mqHalo) return;
+    mesh.geometry.computeBoundingSphere();
+    modelR = Math.max(modelR, (mesh.geometry.boundingSphere?.radius ?? 0)
+      * mesh.matrixWorld.getMaxScaleOnAxis() / (root.matrixWorld.getMaxScaleOnAxis() || 1));
+  });
+  let accent = false, lamps = false;
+  root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh || !mesh.material || mesh.userData.mqHalo || Array.isArray(mesh.material)) return;
+    const m = mesh.material as MeshBasicMaterial;
+    if (!isGlow(m)) return;
+    mesh.geometry.computeBoundingSphere();
+    const sphere = mesh.geometry.boundingSphere;
+    if (!sphere) return;
+    const scale = mesh.matrixWorld.getMaxScaleOnAxis() / (root.matrixWorld.getMaxScaleOnAxis() || 1);
+    const r = sphere.radius * scale;
+    centre.copy(sphere.center).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
+    cx += centre.x * r; cy += centre.y * r; cz += centre.z * r; w += r;
+    // Same rule as the halo pass: a part that is most of the silhouette is a
+    // coat, not an accent. Whitening it bleaches the fish (the seahorse went
+    // chalk white); it keeps its colour and earns a fainter bloom.
+    const large = r > modelR * 0.55;
+    if (!large) accent = true;
+    {
+      const stored = m.userData.mqGlowColor as number | undefined;
+      const pc = stored !== undefined ? new Color(stored) : glowColorOf(m, rng);
+      // Bloom is earned by SATURATION, per part: a white or grey glow blooms
+      // as fog around the fish, which is the opposite of a light source.
+      const hi = Math.max(pc.r, pc.g, pc.b);
+      const sat = hi > 0 ? (hi - Math.min(pc.r, pc.g, pc.b)) / hi : 0;
+      let k = 0.06 + 0.94 * sat ** 1.5;
+      // …except a SMALL WHITE part: that is a lamp (the glowfish's angler
+      // lure is `GLOW-White`). It cannot fog the fish — it is a few voxels —
+      // so it blooms, a touch warm, like the bulb it is. White by name or by
+      // colour, and only white: a pale tint (`GLOW-Crystal`, `GLOW-LightBlue`)
+      // is a colour that earns little bloom, not a bulb.
+      const lamp = r < modelR * 0.3 && hi > 0.5 && (sat < 0.12 || /white/i.test(m.name));
+      if (lamp) { k = 1.15; pc.lerp(new Color('#ffe9c4'), 0.35); lamps = true; }
+      parts.push({ x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k, coat: large });
+    }
+    radius = Math.max(radius, r);
+    if (!large && !m.map && m.userData.mqOwned && !seen.has(m)) {
+      seen.add(m);
+      cores.push({ mat: m, base: m.color.clone() });
+    }
+  });
+  if (!parts.length || w === 0) return null;
+  parts.sort((p, q) => q.radius - p.radius);
+  parts.length = Math.min(parts.length, 4);
+  const c = parts[0]!;
+  const hi = Math.max(c.r, c.g, c.b);
+  const sat = hi > 0 ? (hi - Math.min(c.r, c.g, c.b)) / hi : 0;
+  const gain = (accent ? 1 : 0.45) * (0.08 + 0.92 * Math.max(sat, lamps ? 0.8 : 0));
+  return { gain, parts, r: c.r, g: c.g, b: c.b, cx: cx / w, cy: cy / w, cz: cz / w, radius, cores };
 }

@@ -2478,16 +2478,27 @@ describe('SequenceInstance — hotSwapSequence', () => {
       expect(sequenceSwapCompatible(base(), { ...base(), bed: { ...bed('#ffffff'), layers: [...bed('#ffffff').layers, SCENE.layers[0]!] } })).toBe(false);
     });
 
-    it('a seq.seed change is pinned even when every segment and the bed carry their own seed — a sequence-level finish still resolves against the mount-time seed', () => {
+    it('a seq.seed change is free when every segment and the bed carry their own seed and there is no sequence-level finish — seq.seed is dead weight', () => {
       const ownSeeds: IdleSequence = {
         ...base(),
         bed: { ...bed('#ffffff'), seed: 100 },
         segments: base().segments.map((sg, i) => ({ ...sg, scene: { ...sg.scene, seed: i + 1 } })),
       };
       // segmentRenderSeed/bedRenderSeed are unaffected by seq.seed here — the
-      // per-segment and bed seeds win — so only the explicit seq.seed check
-      // catches this.
-      expect(sequenceSwapCompatible(ownSeeds, { ...ownSeeds, seed: (ownSeeds.seed ?? 0) + 1 })).toBe(false);
+      // per-segment and bed seeds win — and with no sequence-level `finish`,
+      // nothing else reads seq.seed either, so changing it can't affect a
+      // single rendered pixel and must not force a remount.
+      expect(sequenceSwapCompatible(ownSeeds, { ...ownSeeds, seed: (ownSeeds.seed ?? 0) + 1 })).toBe(true);
+    });
+
+    it('a seq.seed change IS pinned in that same own-seeds case once a sequence-level finish is present — its grain resolves against the mount-time seed, which a swap cannot update', () => {
+      const ownSeedsWithFinish: IdleSequence = {
+        ...base(),
+        finish: { grain: 0.3 },
+        bed: { ...bed('#ffffff'), seed: 100 },
+        segments: base().segments.map((sg, i) => ({ ...sg, scene: { ...sg.scene, seed: i + 1 } })),
+      };
+      expect(sequenceSwapCompatible(ownSeedsWithFinish, { ...ownSeedsWithFinish, seed: (ownSeedsWithFinish.seed ?? 0) + 1 })).toBe(false);
     });
 
     it('a seq.seed change of an exact multiple of 2**32 is free — the mount-time seed normalizes (>>> 0) to the same value', () => {

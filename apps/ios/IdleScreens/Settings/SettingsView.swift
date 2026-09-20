@@ -106,7 +106,10 @@ struct SettingsView: View {
                 }
             }
             Button(role: .destructive) { removing = credential; confirmingRemoval = true } label: {
-                Label("Remove from this device", systemImage: "trash")
+                // Keychain items are synchronizable (see `KeychainHelper`):
+                // removing one removes it from every iCloud-Keychain device,
+                // not just this phone — say so.
+                Label("Remove from all devices", systemImage: "trash")
             }
         } label: {
             HStack(spacing: 12) {

@@ -87,7 +87,10 @@ extension AppState {
         let name = label?.isEmpty == false
             ? label!
             : "\(source?.displayLabel ?? sourceChannelId) remix"
-        let created = try await mcp.remixChannel(sourceChannelId: sourceChannelId, label: name)
+        // A viewer key on a private source authorizes the read; a public
+        // source needs none, and `token(for:)` is nil when we hold nothing.
+        let created = try await mcp.remixChannel(sourceChannelId: sourceChannelId, label: name,
+                                                 token: token(for: sourceChannelId))
         let credential = ChannelCredential(
             channelId: created.channelId, label: name, createdAt: Date(), role: .owner)
         credentials.append(credential)
@@ -131,22 +134,32 @@ extension AppState {
         let role = verdict.role ?? ChannelRole.hint(fromToken: token)
         if let index = credentials.firstIndex(where: { $0.channelId == channelId }) {
             // A better key for a channel already on the ring replaces the old
-            // one; a lesser key must not quietly demote you.
-            if let held = credentials[index].role, let role, role < held {
+            // one; a lesser key must not quietly demote you. Compare against
+            // the role actually in effect — for a pre-role entry that's the
+            // old token's prefix hint, not the (nil) stored role field.
+            // (`self.` is required here: the local `role` below would
+            // otherwise shadow the `role(for:)` method of the same name.)
+            if let held = self.role(for: channelId), let role, role < held {
                 throw VJError.lesserKey(held: held, offered: role)
+            }
+            // Store the replacement token before the role metadata that
+            // describes it — a failed Keychain write must not leave the
+            // credential list claiming a role for a token we don't hold.
+            guard store.setToken(token, for: channelId) else {
+                throw VJError.tokenNotStored
             }
             credentials[index].role = role
             store.save(credentials)
         } else {
+            guard store.setToken(token, for: channelId) else {
+                throw VJError.tokenNotStored
+            }
             // Use the channel's public label when the gallery knows it —
             // "velvet-meadow-fc / velvet-meadow-fc" rows read as broken.
             let label = channels.first { $0.id == channelId }?.displayLabel ?? channelId
             credentials.append(ChannelCredential(channelId: channelId, label: label,
                                                  createdAt: Date(), role: role))
             store.save(credentials)
-        }
-        guard store.setToken(token, for: channelId) else {
-            throw VJError.tokenNotStored
         }
     }
 

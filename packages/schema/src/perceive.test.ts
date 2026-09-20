@@ -423,8 +423,14 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     const seq: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 0, segments: [{ key: 'a', scene: scatter, duration: 5000 }] };
     const atNormalizedSeed = luminanceGrid(scatter, { t: 1000, seed: 1 });
     const atRawZeroSeed = luminanceGrid(scatter, { t: 1000, seed: 0 });
-    // Sanity: seed 0 vs seed 1 actually renders differently for this fixture.
-    expect(atRawZeroSeed.centroid!.x).not.toBeCloseTo(atNormalizedSeed.centroid!.x, 2);
+    // buildScene normalizes its own `opts.seed ?? spec.seed` exactly like
+    // SpecInstance, so a bare `luminanceGrid(..., { seed: 0 })` call already
+    // matches the seed-1 renderer output — not just perceiveSequenceFrame's
+    // (already-normalized) segmentRenderSeed path.
+    expect(atRawZeroSeed.centroid!.x).toBeCloseTo(atNormalizedSeed.centroid!.x, 9);
+    // Sanity: this fixture is seed-sensitive at all (an unrelated seed differs).
+    const atOtherSeed = luminanceGrid(scatter, { t: 1000, seed: 2 });
+    expect(atOtherSeed.centroid!.x).not.toBeCloseTo(atNormalizedSeed.centroid!.x, 2);
     const p = perceiveSequenceFrame(seq, 1000);
     expect(p.centroid!.x).toBeCloseTo(atNormalizedSeed.centroid!.x, 9);
   });

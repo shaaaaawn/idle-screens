@@ -88,7 +88,14 @@ test('MQ2: school variant spawns at least 6 fish', async ({ page }) => {
  * cycles crash unless dispose() force-releases via forceContextLoss().
  */
 test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ page }) => {
-  test.setTimeout(90_000);
+  // fishLighting defaults to 'lit' (studio.ts), so every one of the 18 mounts
+  // now also builds a fresh PMREMGenerator environment — real per-mount GPU
+  // work that cannot be cached across cycles (each cycle gets its own
+  // WebGLRenderer/context, which is the whole point of this test). Measured
+  // ~60-70s for the loop alone on an idle runner; under a loaded CI runner
+  // running other WebGL-heavy specs concurrently that leaves too little
+  // margin against the old 90s budget.
+  test.setTimeout(150_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   const contextErrors: string[] = [];
@@ -332,5 +339,35 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
       ),
     )
     .toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Crystals (propMix): generated scenery builds and reports itself, and a tank
+ * that asked for none builds none — the "byte-identical when off" contract,
+ * checked at the one place a viewer could see it break.
+ */
+test('MQ40: propMix grows crystals; a propless tank grows none', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const props = (): Promise<string | null> => page.evaluate(() => document
+    .querySelector('idle-screen')
+    ?.shadowRoot?.querySelector<HTMLElement>('.surface')?.dataset.mqProps ?? null);
+
+  await page.goto('/?saver=metaquarium-crystal-habits');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  // 5 clusters requested, but a software-GL runner resolves the 'minimal'
+  // tier (see MQ10's fish-count check for the same class of flakiness),
+  // whose props.clusters budget of 4 clamps the layout — accept either.
+  await expect
+    .poll(async () => [4, 5].includes(Number(await props())), { timeout: 20_000 })
+    .toBe(true);
+
+  await page.goto('/?saver=metaquarium-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect.poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+  expect(await props()).toBeNull();
   expect(pageErrors).toEqual([]);
 });
