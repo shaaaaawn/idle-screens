@@ -177,6 +177,9 @@ export const METAQUARIUM_PARAMS = {
   /** How hard the spot is on, and how far the house lights drop with it. */
   spotStrength: { type: 'number', default: 0.85, min: 0, max: 1, ease: 'smooth' },
   spotColor: { type: 'color', default: '#fff2cf', ease: 'smooth' },
+  /** The spotted fish's shadow in its own pool: a fish seen from above, turned
+   *  with its heading, larger and softer the higher it swims. 0 = none; 1 = true size. */
+  spotShadow: { type: 'number', default: 1, min: 0, max: 2, ease: 'smooth' },
   /** A rig of up to three follow-spots: `slot[/color][*radius]`, comma-separated
    *  (`0/#fff2cf, 1/#ff8ad0, 2/#7fdcff*24`). Overrides `followSpot`/`spotColor`.
    *  The spots are a, b, c in order; their pools add where they cross. */

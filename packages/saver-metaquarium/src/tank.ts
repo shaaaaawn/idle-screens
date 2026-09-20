@@ -548,6 +548,8 @@ class TankInstance implements SaverInstance {
   private readonly spotLights: (PointLight | undefined)[] = [];
   private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
   private readonly spotSeen = [false, false, false];
+  /** Heading (xz) of each spotted fish, for its shadow. */
+  private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
   private readonly spotLevel = [0, 0, 0];
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
@@ -1167,6 +1169,7 @@ class TankInstance implements SaverInstance {
       if (gain <= 0.001 || !spec) {
         if (beam) beam.mesh.visible = false;
         spots[i]!.set(0, 0, 1, 0);
+        (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.z = 0;
         continue;
       }
       if (!this.spotBeams[i]) {
@@ -1184,6 +1187,13 @@ class TankInstance implements SaverInstance {
       this.spotTint.set(spec.color);
       this.spotBeams[i]!.aim(this.spotLamp, this.spotHit, spec.radius, this.spotTint, gain, tSec);
       spots[i]!.set(this.spotHit.x, this.spotHit.z, spec.radius, gain * 0.9);
+      // Its shadow: the fish's plan, magnified by how far above the floor it
+      // swims (the lamp is a point), and softened the same way.
+      const lift = Math.max(0, f.y - floorY), grow = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      const half = FISH_LENGTH * 0.5 * grow * this.num('spotShadow');
+      const h = this.spotHead[i]!;
+      (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.set(h.x, h.z, half, half * 0.42);
+      (this.poolUniforms.uMqSpotSoft!.value as number[])[i] = Math.min(0.6, 0.1 + lift / 160);
       tints[i]!.copy(this.spotTint);
       if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
       if (this.studio) {
@@ -2094,7 +2104,10 @@ class TankInstance implements SaverInstance {
       if (act) { px = act.x; y = act.y; pz = act.z; }
       f.group.position.set(px, y, pz);
       for (let si = 0; si < this.spotRig.length; si++) {
-        if (this.spotRig[si]!.slot === f.index) { this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true; }
+        if (this.spotRig[si]!.slot === f.index) {
+          this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
+          this.spotHead[si]!.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz).normalize();
+        }
       }
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
       if (act) {

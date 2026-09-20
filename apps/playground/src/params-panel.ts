@@ -36,7 +36,7 @@ const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
   // The renderer's look: on by default, listed so it can be turned off.
   ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife']],
-  ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotRig', 'spotCues']],
+  ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
   ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
   ['formation', ['formationShape', 'formationBreathe']],
   ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],

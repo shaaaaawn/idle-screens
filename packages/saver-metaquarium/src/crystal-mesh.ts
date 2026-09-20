@@ -381,6 +381,9 @@ export function emptyPoolUniforms(): Uniforms {
     // Three follow-spots: xz, radius, gain — and a colour each.
     uMqSpot: { value: [new Vector4(0, 0, 1, 0), new Vector4(0, 0, 1, 0), new Vector4(0, 0, 1, 0)] },
     uMqSpotColor: { value: [new Color('#fff2cf'), new Color('#fff2cf'), new Color('#fff2cf')] },
+    // The performer's shadow in its own pool: heading xz, half-length, half-width — and how soft.
+    uMqSpotShade: { value: [new Vector4(0, 1, 0, 0), new Vector4(0, 1, 0, 0), new Vector4(0, 1, 0, 0)] },
+    uMqSpotSoft: { value: [0.2, 0.2, 0.2] },
   };
 }
 
@@ -434,6 +437,8 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform float uMqPoolPulse;
       uniform vec4 uMqSpot[3];
       uniform vec3 uMqSpotColor[3];
+      uniform vec4 uMqSpotShade[3];
+      uniform float uMqSpotSoft[3];
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -462,12 +467,26 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
           for (int k = 0; k < 3; k++) {
             float sd = length(vMqW.xz - uMqSpot[k].xy) / uMqSpot[k].z;
             float edge = 1.0 - smoothstep(0.62, 1.0, sd);
-            diffuseColor.rgb += uMqSpotColor[k] * (edge * uMqSpot[k].w * (0.2 + 1.5 * web));
+            // The fish stands in its own beam, so its shadow lies at the pool's
+            // centre: a body and a fanned tail seen from above, turned with
+            // its heading, softer the higher it swims. It dims THIS lamp only —
+            // a second spot crossing the pool fills the shadow in, as it would.
+            float shade = 0.0;
+            if (uMqSpotShade[k].z > 0.0) {
+              vec2 rel = vMqW.xz - uMqSpot[k].xy, head = uMqSpotShade[k].xy;
+              float along = dot(rel, head) / uMqSpotShade[k].z, across = dot(rel, vec2(-head.y, head.x)) / uMqSpotShade[k].w;
+              float body = length(vec2((along - 0.18) / 0.78, across));
+              float fan = clamp((-along - 0.45) / 0.55, 0.0, 1.0);
+              float tail = along < -0.45 && along > -1.0 ? abs(across) / max(0.12, fan * 1.15) : 9.0;
+              float soft = uMqSpotSoft[k];
+              shade = 1.0 - smoothstep(1.0 - soft, 1.0 + soft, min(body, tail));
+            }
+            diffuseColor.rgb += uMqSpotColor[k] * (edge * uMqSpot[k].w * (0.2 + 1.5 * web) * (1.0 - 0.82 * shade));
           }
         }`,
       )}`;
   };
-  mat.customProgramCacheKey = () => 'mq-floor-pools-v3';
+  mat.customProgramCacheKey = () => 'mq-floor-pools-v4';
   mat.needsUpdate = true;
 }
 
