@@ -38,6 +38,17 @@ describe('sky lanterns', () => {
     expect(buildSky(createRng(4), { ...opts, cap: 4 }).lanterns.length).toBeLessThan(s.lanterns.length);
   });
 
+  it('is a flotilla of species, and every bell voxel knows how high up the bell it is', () => {
+    const s = buildSky(createRng(7), opts);
+    expect(new Set(s.lanterns.map(l => l.species)).size).toBeGreaterThanOrEqual(2);
+    const bell = arr(s.geometry!, 'aBell'), hang = arr(s.geometry!, 'aJelly').filter((_, i) => i % 3 === 1);
+    expect(bell.every(b => b === -1 || (b >= 0 && b <= 1))).toBe(true);
+    // whatever hangs is not bell, and the bell does not hang
+    bell.forEach((b, i) => { if (b >= 0) expect(hang[i]).toBe(0); });
+    expect(bell.some(b => b === 1)).toBe(true);
+    expect(buildSky(createRng(7), { ...opts, height: 0.3 }).lanterns.filter(l => !l.far).every(l => l.y < 60)).toBe(true);
+  });
+
   it('moves as a pure function of t, slowly, and the shader has no other clock', () => {
     const s = buildSky(createRng(5), opts);
     const p = { x: 0, y: 0, z: 0 }, q = { x: 0, y: 0, z: 0 };

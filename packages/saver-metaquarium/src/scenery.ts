@@ -14,7 +14,7 @@ import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
-import { buildSky, LANTERN_COLOR, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
+import { buildSky, LANTERN_COLOR, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
@@ -27,6 +27,7 @@ export interface SceneryOptions {
   snow: number;
   /** 0..1 — jellyfish lanterns in the water overhead. */
   lanterns?: number;
+  lanternHeight?: number;
   /** 0..1 — silhouettes standing past the fog line. */
   horizon?: number;
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
@@ -253,7 +254,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   }
   // The sky: jellyfish lanterns. One mesh, moved entirely in its shader.
   const sky = opts.interior ? null : buildSky(rng.fork(7), {
-    density: opts.lanterns ?? 0, cap: opts.cap, scale: s, palette: clusters.map(c => c.color),
+    density: opts.lanterns ?? 0, cap: opts.cap, scale: s, palette: clusters.map(c => c.color), height: opts.lanternHeight ?? 1,
   });
   const moving: Emitter[] = [];
   let skyCards: GlowCards | null = null;
@@ -264,11 +265,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const clock = { value: 0 }; clocks.push(clock);
     material.onBeforeCompile = shader => {
       shader.uniforms.uSkyTime = clock;
-      shader.vertexShader = 'uniform float uSkyTime; attribute vec4 aHome; attribute vec3 aJelly; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = 'uniform float uSkyTime; attribute vec4 aHome; attribute vec3 aJelly; attribute float aGlow; attribute float aBell;\n' + LANTERN_PARS + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', LANTERN_VERTEX)
         .replace('#include <color_vertex>', LANTERN_COLOR);
     };
-    material.customProgramCacheKey = () => 'sky-lanterns-v1';
+    material.customProgramCacheKey = () => 'sky-lanterns-v3';
     const mesh = new Mesh(sky.geometry, material);
     mesh.name = 'sky-lanterns';
     mesh.frustumCulled = false;
@@ -517,8 +518,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
         sky.lanterns.forEach((l, i) => {
           lanternAt(l, t, p);
           c.set(l.color);
-          const k = l.far ? 0.22 : 0.8;
-          skyCards!.set(i, p.x, p.y + 2 * l.size, p.z, (l.far ? 30 : 44) * l.size, c.r * k, c.g * k, c.b * k, l.phase);
+          const k = l.far ? 0.2 : 0.5;
+          skyCards!.set(i, p.x, p.y + 4 * l.size, p.z, (l.far ? 28 : 32) * l.size, c.r * k, c.g * k, c.b * k, l.phase);
         });
         skyCards.commit(sky.lanterns.length, t, glow, 0.5, fog);
         lanternEmitters(sky.lanterns, t, moving);

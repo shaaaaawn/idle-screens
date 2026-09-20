@@ -951,8 +951,8 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
-    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), horizon = this.num('horizon'), castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${horizon}|${castle}`;
+    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -963,7 +963,7 @@ class TankInstance implements SaverInstance {
     const terrain = this.terrainAt ?? (() => 0);
     if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, lanterns, horizon, castle, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, snow, lanterns, lanternHeight, horizon, castle, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same

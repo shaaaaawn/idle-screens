@@ -270,6 +270,17 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: the jellyfish lanterns, brought down to eye level — three species
+  // (lantern, moon, comb), the squeeze rolling down the bell, the lines streaming.
+  createMetaquarium({
+    id: 'metaquarium-study-jellyfish', label: 'Metaquarium (study jellyfish)',
+    params: {
+      skyLanterns: 1, skyHeight: 0.3, propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/gold,crystal:1@druse/purple', crystalScale: 0.7,
+      fishMix: '100:1,257:1', swimStyle: 'drift', swimSpeed: 0.4, marineSnow: 0.4,
+      fogColor: '#04081a', floorColor: '#0c1428', fogNear: 160, fogFar: 800,
+      cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // STUDY: eyes across the breeds. Every minted eye is a pixel grid — 3×3 on a
   // betafish or seahorse, 3×2 on an angelfish, 2×2 on a turtle — and each
   // token's pattern is its own. Hovering close, so blinks and looks can be read.

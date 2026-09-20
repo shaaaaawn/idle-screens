@@ -210,6 +210,8 @@ export const METAQUARIUM_PARAMS = {
    *  pulsing as they rise and sink; a few hang far out as fogged silhouettes.
    *  They take the scene's crystal colours and join the light field. */
   skyLanterns: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** How high the flotilla rides: 1 is overhead, ~0.35 brings the lanterns down among the houses. */
+  skyHeight: { type: 'number', default: 1, min: 0.25, max: 1.5, ease: 'step' },
   /** The far distance: three hazed rings of silhouettes past the fog line —
    *  rock spires, castle-sized crystals in the scene's colours, and (from 0.4)
    *  one grand geode with its door lit. One draw call, unlit. */

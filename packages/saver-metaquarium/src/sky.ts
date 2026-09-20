@@ -22,6 +22,7 @@ export interface Lantern {
   color: string;
   /** Out past the swim space: bigger, dimmer, no light of its own. */
   far: boolean;
+  species: LanternSpecies;
 }
 
 export interface SkyOptions {
@@ -31,6 +32,8 @@ export interface SkyOptions {
   scale: number;
   /** Colours to borrow (the scene's crystals), so a lantern belongs to its district. */
   palette: readonly string[];
+  /** Altitude multiplier: 1 is overhead; ~0.35 brings the flotilla down among the houses. */
+  height?: number;
 }
 
 export interface Sky {
@@ -51,33 +54,57 @@ export function lanternAt(l: Lantern, t: number, out: { x: number; y: number; z:
   out.y = l.y + Math.sin(t * 0.07 + l.phase) * 12 * amp - Math.cos(t * LANTERN_BEAT + l.phase) * 1.6 * l.size;
 }
 
+/** One beat of the bell, 0 relaxed → 1 squeezed: a quick snap shut, a long
+ *  ease open. `lag` delays it — the rim follows the crown, a tentacle follows
+ *  the rim — which is what makes the pulse travel down the animal. */
+const BEAT_GLSL = /* glsl */ `
+  float mqBeat(float t, float ph, float lag) {
+    float u = fract((t * ${LANTERN_BEAT.toFixed(2)} + ph) / 6.2831853 - lag);
+    return u < 0.22 ? smoothstep(0.0, 0.22, u) : 1.0 - smoothstep(0.22, 1.0, u);
+  }
+`;
 export const LANTERN_VERTEX = /* glsl */ `
   #include <begin_vertex>
-  float ph = aJelly.x, hang = aJelly.y, amp = aHome.w;
-  float beat = 0.5 + 0.5 * sin(uSkyTime * ${LANTERN_BEAT.toFixed(2)} + ph);
-  beat *= beat;
+  float ph = aJelly.x, hang = aJelly.y, amp = aHome.w, bell = aBell;
   vec3 local = position - aHome.xyz;
-  if (hang <= 0.0) {
-    // The bell: squeezes in and grows a little taller, then relaxes wide.
-    local.xz *= 1.0 + 0.2 * (0.45 - beat);
-    local.y *= 1.0 + 0.14 * (beat - 0.45);
+  float t = uSkyTime;
+  if (bell >= 0.0) {
+    // The bell: the crown squeezes first and the rim a beat later, so the
+    // squeeze rolls down it; squeezed it is narrower and taller, and as it
+    // relaxes the rim flares out past its rest width.
+    float b = mqBeat(t, ph, (1.0 - bell) * 0.12);
+    float rim = 1.0 - bell;
+    local.xz *= 1.0 - b * (0.1 + 0.26 * rim) + (1.0 - b) * 0.08 * rim;
+    local.y *= 1.0 + b * 0.16;
   } else {
-    // Tentacles trail: the same wave, later the further down it hangs.
-    local.x += sin(uSkyTime * ${LANTERN_BEAT.toFixed(2)} + ph - hang * 0.24) * hang * 0.11;
-    local.z += cos(uSkyTime * ${(LANTERN_BEAT * 0.8).toFixed(2)} + ph - hang * 0.2) * hang * 0.09;
-    local.y += beat * hang * 0.07;
+    // Arms and lines trail: they hear the beat late, the later the lower.
+    // On the squeeze they are drawn in and streamed straight behind the
+    // surge; between beats they drift apart and wave.
+    float b = mqBeat(t, ph, 0.14 + hang * 0.012);
+    float r = length(local.xz) + 0.001;
+    vec2 outward = local.xz / r;
+    local.xz += outward * hang * (0.1 * (1.0 - b) - 0.05 * b);
+    local.x += sin(t * 0.9 + ph - hang * 0.12) * hang * 0.07 * (1.0 - 0.6 * b);
+    local.z += cos(t * 0.7 + ph * 1.7 - hang * 0.1) * hang * 0.06 * (1.0 - 0.6 * b);
+    local.y -= b * hang * 0.1;
   }
+  // The whole animal leans into its drift.
+  vec2 vel = vec2(cos(t * 0.031 + ph * 2.0) * 28.0 * 0.031, -sin(t * 0.023 + ph * 1.3) * 22.0 * 0.023) * amp;
+  local.xz += vel * local.y * 0.12;
   vec3 home = aHome.xyz;
-  home.x += sin(uSkyTime * 0.031 + ph * 2.0) * 28.0 * amp;
-  home.z += cos(uSkyTime * 0.023 + ph * 1.3) * 22.0 * amp;
-  home.y += sin(uSkyTime * 0.07 + ph) * 12.0 * amp - cos(uSkyTime * ${LANTERN_BEAT.toFixed(2)} + ph) * 1.6 * aJelly.z;
+  home.x += sin(t * 0.031 + ph * 2.0) * 28.0 * amp;
+  home.z += cos(t * 0.023 + ph * 1.3) * 22.0 * amp;
+  home.y += sin(t * 0.07 + ph) * 12.0 * amp - cos(t * ${LANTERN_BEAT.toFixed(2)} + ph) * 1.6 * aJelly.z;
   transformed = home + local;
 `;
 export const LANTERN_COLOR = /* glsl */ `
   #include <color_vertex>
-  float lbeat = 0.5 + 0.5 * sin(uSkyTime * ${LANTERN_BEAT.toFixed(2)} + aJelly.x);
-  vColor.rgb *= 1.0 + aGlow * 0.55 * lbeat * lbeat;
+  // The light inside flares on the squeeze and runs down the lines after it.
+  float lb = mqBeat(uSkyTime, aJelly.x, aBell >= 0.0 ? 0.0 : 0.1 + aJelly.y * 0.02);
+  vColor.rgb *= 1.0 + aGlow * (0.15 + 0.85 * lb);
 `;
+/** Shader preamble both chunks need. */
+export const LANTERN_PARS = BEAT_GLSL;
 
 const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
   [0, 1, 0, 1], [0, -1, 0, 0.5], [1, 0, 0, 0.82], [-1, 0, 0, 0.66], [0, 0, 1, 0.75], [0, 0, -1, 0.6],
@@ -85,11 +112,12 @@ const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
 
 class LanternWriter {
   readonly pos: number[] = []; readonly col: number[] = [];
-  readonly home: number[] = []; readonly jelly: number[] = []; readonly glow: number[] = [];
+  readonly home: number[] = []; readonly jelly: number[] = []; readonly glow: number[] = []; readonly bell: number[] = [];
   count = 0;
-  l: Lantern = { x: 0, y: 0, z: 0, size: 1, phase: 0, color: '#fff', far: false };
+  l: Lantern = { x: 0, y: 0, z: 0, size: 1, phase: 0, color: '#fff', far: false, species: 'lantern' };
 
-  cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, hang: number, lit: number): void {
+  /** `bell`: 0 (rim) … 1 (crown) for a voxel of the bell, -1 for anything that hangs from it. */
+  cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, hang: number, lit: number, bell = -1): void {
     const hx = sx / 2, hy = sy / 2, hz = sz / 2, l = this.l;
     for (const [nx, ny, nz, shade] of FACES) {
       const a = ny !== 0 ? [1, 0, 0] : nx !== 0 ? [0, 0, 1] : [1, 0, 0];
@@ -109,61 +137,93 @@ class LanternWriter {
         this.home.push(l.x, l.y, l.z, l.far ? 0.35 : 1);
         this.jelly.push(l.phase, hang, l.size);
         this.glow.push(lit);
+        this.bell.push(bell);
       }
     }
     this.count += 1;
   }
 }
 
-/** One jellyfish, voxel by voxel: a stepped dome, a scalloped skirt, a lit
- *  core showing through the underside, frilled arms and thin trailing lines. */
+export type LanternSpecies = 'moon' | 'lantern' | 'comb';
+const SPECIES: Readonly<Record<LanternSpecies, { radii: readonly number[]; arms: number; armLen: number; lines: number; lineLen: readonly [number, number] }>> = {
+  // A moon jelly: wide and shallow, a short frill, a fringe of fine lines.
+  moon: { radii: [3.9, 4.3, 4.0, 3.1, 1.8], arms: 4, armLen: 4, lines: 12, lineLen: [3, 6] },
+  // A lantern: a tall bell with long trailing lines — the one the motif is named for.
+  lantern: { radii: [2.9, 3.3, 3.4, 3.1, 2.5, 1.5], arms: 3, armLen: 7, lines: 7, lineLen: [9, 17] },
+  // A small comb: narrow, quick-looking, a few beaded lines.
+  comb: { radii: [2.0, 2.4, 2.3, 1.7, 0.9], arms: 2, armLen: 3, lines: 5, lineLen: [5, 9] },
+};
+export const LANTERN_SPECIES = Object.keys(SPECIES) as LanternSpecies[];
+
+/** One jellyfish, voxel by voxel: a stepped dome that is a SHELL (the light
+ *  inside shows through windows left in it), a scalloped skirt, a lit core,
+ *  ruffled arms and thin beaded lines. */
 function growLantern(w: LanternWriter, l: Lantern, rng: CrystalRng): void {
   w.l = l;
+  const sp = SPECIES[l.species];
   const u = 1.7 * l.size;
   const dim = l.far ? 0.3 : 1;
-  const body = new Color(l.color).multiplyScalar(0.62 * dim);
-  const crown = new Color(l.color).lerp(new Color('#ffffff'), 0.35).multiplyScalar(0.8 * dim);
-  const core = new Color(l.color).lerp(new Color('#fff6e0'), 0.55).multiplyScalar(l.far ? 0.4 : 1);
-  const line = new Color(l.color).multiplyScalar(0.45 * dim);
-  // Dome: discs of voxels, widest at the skirt. Hollowed, so the core shows.
-  const radii = [3.6, 3.4, 2.7, 1.6];
-  radii.forEach((r, layer) => {
+  const tint = new Color(l.color), whiteC = new Color('#ffffff');
+  const rimC = tint.clone().multiplyScalar(0.5 * dim);
+  const crownC = tint.clone().lerp(whiteC, 0.45).multiplyScalar(0.85 * dim);
+  const core = tint.clone().lerp(new Color('#fff6e0'), 0.55).multiplyScalar(l.far ? 0.4 : 1);
+  // Lines must read as LINES: nearly as bright as the bell, so the eye joins
+  // them up; the beads are only a touch wider and warmer than the line.
+  const line = tint.clone().lerp(whiteC, 0.2).multiplyScalar(0.78 * dim);
+  const bead = tint.clone().lerp(whiteC, 0.6).multiplyScalar(dim);
+  const arm = tint.clone().lerp(whiteC, 0.3).multiplyScalar(0.9 * dim);
+  const layers = sp.radii.length;
+  sp.radii.forEach((r, layer) => {
+    const k = layer / (layers - 1); // 0 rim … 1 crown
+    const shell = rimC.clone().lerp(crownC, k ** 0.8);
     const n = Math.ceil(r);
     for (let ix = -n; ix <= n; ix++) for (let iz = -n; iz <= n; iz++) {
       const d = Math.hypot(ix, iz);
       if (d > r) continue;
-      // Keep the shell and the spots; drop the inside of the low layers.
-      if (layer < 2 && d < r - 1.3) continue;
-      const spot = layer >= 1 && ((ix * 7 + iz * 13 + layer * 5) & 7) === 0;
-      w.cube(l.x + ix * u, l.y + layer * u, l.z + iz * u, u, u, u, spot ? core : layer >= 2 ? crown : body, 0, spot ? 1 : 0);
+      // A shell, one to two voxels thick, closed over the crown.
+      if (layer < layers - 2 && d < r - 1.35) continue;
+      // Windows in the lower bell: the lantern's light shows through them.
+      const bearing = Math.round((Math.atan2(iz, ix) / Math.PI) * 6);
+      if (layer >= 1 && layer <= layers - 3 && d > r - 1.35 && (bearing + layer) % 3 === 0) {
+        if (!l.far) w.cube(l.x + ix * u * 0.8, l.y + layer * u, l.z + iz * u * 0.8, u * 0.8, u, u * 0.8, core, 0, 1, k);
+        continue;
+      }
+      // Radial stripes on the crown, the way a real bell is marked.
+      const stripe = layer >= layers - 3 && bearing % 2 === 0;
+      w.cube(l.x + ix * u, l.y + layer * u, l.z + iz * u, u, u, u, stripe ? shell.clone().multiplyScalar(1.18) : shell, 0, layer === 0 ? 0.35 : 0, k);
     }
   });
-  // Scalloped skirt: every other rim voxel drops one.
-  for (let i = 0; i < 20; i++) {
-    const a = (i / 20) * Math.PI * 2;
-    if (i % 2) w.cube(l.x + Math.round(Math.cos(a) * 3.5) * u, l.y - u, l.z + Math.round(Math.sin(a) * 3.5) * u, u, u, u, body, 0.01, 0);
+  // Scalloped skirt: every other rim voxel drops one. It belongs to the bell (it squeezes with the rim).
+  const r0 = sp.radii[0]!, scallops = Math.round(r0 * 5.5);
+  for (let i = 0; i < scallops; i++) {
+    if (i % 2) continue;
+    const a = (i / scallops) * Math.PI * 2;
+    w.cube(l.x + Math.round(Math.cos(a) * r0) * u, l.y - u, l.z + Math.round(Math.sin(a) * r0) * u, u, u, u, rimC, 0, 0.5, 0);
   }
-  // The lantern's flame.
+  // The flame.
   for (let ix = -1; ix <= 1; ix++) for (let iz = -1; iz <= 1; iz++) {
-    w.cube(l.x + ix * u, l.y + u * 0.2, l.z + iz * u, u, u * 1.4, u, core, 0, 1);
+    if (Math.abs(ix) + Math.abs(iz) === 2 && r0 < 2.6) continue;
+    w.cube(l.x + ix * u, l.y + u * 0.6, l.z + iz * u, u, u * 1.6, u, core, 0, 1, 0.3);
   }
-  // Frilled arms: short, thick, glowing a little.
-  for (let k = 0; k < 3; k++) {
-    const a = k * 2.1 + rng.next();
-    const len = 4 + Math.floor(rng.next() * 3);
+  // Oral arms: thick, ruffled — each step sits a little off the last — and lit.
+  for (let k = 0; k < sp.arms; k++) {
+    const a = (k / sp.arms) * Math.PI * 2 + rng.next();
+    const len = sp.armLen + Math.floor(rng.next() * 3);
     for (let j = 1; j <= len; j++) {
-      const wd = u * (1.25 - j * 0.12);
-      w.cube(l.x + Math.cos(a) * u * 0.9, l.y - j * u, l.z + Math.sin(a) * u * 0.9, wd, u, wd, j % 2 ? core : crown, j * u, j % 2 ? 0.6 : 0);
+      const wd = u * Math.max(0.5, 1.2 - j * 0.1), ruffle = (j % 2 ? 0.22 : -0.1) * u;
+      w.cube(l.x + Math.cos(a) * (u * 0.9 + ruffle), l.y - j * u, l.z + Math.sin(a) * (u * 0.9 + ruffle), wd, u, wd,
+        j % 2 ? arm : crownC, j * u, j % 2 ? 0.45 : 0.15);
     }
   }
-  // Trailing lines: thin, long, from under the rim.
-  const lines = l.far ? 5 : 7;
+  // Trailing lines from under the rim: thin, long, beaded with light.
+  const lines = l.far ? Math.ceil(sp.lines * 0.6) : sp.lines;
   for (let k = 0; k < lines; k++) {
     const a = (k / lines) * Math.PI * 2 + rng.next() * 0.5;
-    const len = 7 + Math.floor(rng.next() * 8);
+    const len = sp.lineLen[0] + Math.floor(rng.next() * (sp.lineLen[1] - sp.lineLen[0] + 1));
+    const rr = (r0 - 0.6) * u, every = 4 + Math.floor(rng.next() * 3);
     for (let j = 1; j <= len; j++) {
-      const wd = u * Math.max(0.28, 0.6 - j * 0.03);
-      w.cube(l.x + Math.cos(a) * u * 2.6, l.y - (j + 0.5) * u, l.z + Math.sin(a) * u * 2.6, wd, u * 1.02, wd, j % 4 === 0 && !l.far ? core : line, j * u, j % 4 === 0 && !l.far ? 0.8 : 0);
+      const wd = u * Math.max(0.3, 0.62 - j * 0.022), lit = j % every === 0 && !l.far;
+      w.cube(l.x + Math.cos(a) * rr, l.y - (j + 0.5) * u, l.z + Math.sin(a) * rr, lit ? wd * 1.2 : wd, u * 1.02, lit ? wd * 1.2 : wd, lit ? bead : line, j * u, lit ? 0.7 : 0.12);
     }
   }
 }
@@ -184,11 +244,13 @@ export function buildSky(rng: CrystalRng, opts: SkyOptions): Sky {
     const r = isFar ? rng.range(210, 300) : rng.range(35, 165);
     const l: Lantern = {
       x: Math.sin(a) * r * s, z: Math.cos(a) * r * s,
-      y: (isFar ? rng.range(110, 210) : rng.range(92, 175)) * s,
+      y: (isFar ? rng.range(110, 210) : rng.range(92, 175)) * s * (isFar ? 1 : opts.height ?? 1),
       size: (isFar ? rng.range(2.4, 3.6) : rng.range(0.75, 1.5)) * s,
       phase: rng.next() * Math.PI * 2,
       color: palette[Math.floor(rng.next() * palette.length)]!,
       far: isFar,
+      // A flotilla is mostly lanterns, with moons among them and a few small combs.
+      species: (['lantern', 'moon', 'lantern', 'comb', 'moon'] as const)[Math.floor(rng.next() * 5)]!,
     };
     lanterns.push(l);
     growLantern(w, l, rng.fork(10 + i));
@@ -199,6 +261,7 @@ export function buildSky(rng: CrystalRng, opts: SkyOptions): Sky {
   g.setAttribute('aHome', new BufferAttribute(new Float32Array(w.home), 4));
   g.setAttribute('aJelly', new BufferAttribute(new Float32Array(w.jelly), 3));
   g.setAttribute('aGlow', new BufferAttribute(new Float32Array(w.glow), 1));
+  g.setAttribute('aBell', new BufferAttribute(new Float32Array(w.bell), 1));
   return { lanterns, geometry: g, voxels: w.count };
 }
 
