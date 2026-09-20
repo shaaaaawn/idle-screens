@@ -4,8 +4,9 @@
 
 The mineral world: opt-in scenery layers that turn a tank into a place, all
 generated from the seed (nothing fetched), all batched, all motion a pure
-function of the tank clock. Every layer defaults to 0, so existing scenes are
-unchanged.
+function of the tank clock. Nothing is on by default — every layer is 0, and
+the one non-zero default, `rockVeins` (0.7), only applies once `rockDensity`
+is above zero — so existing scenes are unchanged.
 
 - `geodeHomes` (0–3) — real geodes: a displaced boulder broken along a jagged
   plane, an agate rind, a throat of inward crystal teeth, and a voxel house

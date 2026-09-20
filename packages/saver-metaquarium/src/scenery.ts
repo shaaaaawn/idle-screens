@@ -10,12 +10,12 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
-import { buildGeodeInterior } from './interior';
+import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
-import { buildSky, LANTERN_COLOR, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
+import { buildSky, LANTERN_COLOR, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
@@ -57,7 +57,8 @@ export interface Scenery {
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
-  setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number): void;
+  /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
+  setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
 }
 
 /** Each feature gets its own fork, so adding flora never rearranges a village. */
@@ -228,7 +229,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const shellParts: BufferGeometry[] = [];
   let cards: GlowCards | null = null;
   if (opts.interior) {
-    const room = buildGeodeInterior(rng.fork(7), { tint: clusters.length ? anchors[0]!.color : '#8a4dff', scale: s, floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
+    // The room must hold the swim volume whatever `crystalScale` says.
+    const room = buildGeodeInterior(rng.fork(7), { tint: clusters.length ? anchors[0]!.color : '#8a4dff', scale: Math.max(s, ROOM_MIN_SCALE), floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
     shellParts.push(...room.room);
     vents.push(...room.vents);
     homeLights.push(...room.emitters);
@@ -250,11 +252,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
   const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
+  // The light sweep is written in scale-1 units; this is the world's scale.
+  const floraScale = { value: s };
   if (plants) {
     const clock = { value: 0 }; clocks.push(clock);
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uFloraScale = floraScale;
+      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
     };
@@ -274,7 +279,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const clock = { value: 0 }; clocks.push(clock);
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uFloraScale = floraScale;
+      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', FLORA_LAMP_EMISSIVE);
@@ -542,20 +548,24 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       }
       return h;
     },
-    setFrame(t, fog, glow = 1) {
+    setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       if (fog) horizonFog.value.copy(fog.color);
-      if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, 0.35, fog);
+      if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
+      // The light field is kept current whether or not there is a card pass
+      // to draw (fog is the card pass's business): a caller that only asks
+      // for time still gets the lanterns where they are.
+      if (sky) lanternEmitters(sky.lanterns, t, moving);
       if (sky && skyCards && fog) {
         const p = { x: 0, y: 0, z: 0 }, c = new Color();
         sky.lanterns.forEach((l, i) => {
           lanternAt(l, t, p);
           c.set(l.color);
-          const k = l.far ? 0.2 : 0.5;
+          // The bloom flares on the bell's own beat, with the core it haloes.
+          const k = (l.far ? 0.2 : 0.5) * lanternLight(lanternBeat(t, l.phase));
           skyCards!.set(i, p.x, p.y + 4 * l.size, p.z, (l.far ? 28 : 32) * l.size, c.r * k, c.g * k, c.b * k, l.phase);
         });
         skyCards.commit(sky.lanterns.length, t, glow, 0.5, fog);
-        lanternEmitters(sky.lanterns, t, moving);
       }
     },
   };

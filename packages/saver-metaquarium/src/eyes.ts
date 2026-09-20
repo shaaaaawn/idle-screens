@@ -82,10 +82,10 @@ const EYE_PARS = /* glsl */ `
   }
 `;
 
-function trianglesOf(geometry: BufferGeometry, m: Matrix4): number[] {
+function trianglesOf(geometry: BufferGeometry, m: Matrix4, start = 0, count = Infinity): number[] {
   const pos = geometry.getAttribute('position'), idx = geometry.index;
-  const n = idx ? idx.count : pos.count, out: number[] = [], v = new Vector3();
-  for (let i = 0; i < n; i++) {
+  const n = Math.min(idx ? idx.count : pos.count, start + count), out: number[] = [], v = new Vector3();
+  for (let i = start; i < n; i++) {
     v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(m);
     out.push(v.x, v.y, v.z);
   }
@@ -106,17 +106,25 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
   body.traverse((node) => {
     const mesh = node as Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
-    const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as (Material & MeshBasicMaterial) | undefined;
-    if (!mat) return;
-    const kind = mat.userData.mqEye as 'sclera' | 'pupil' | undefined;
-    if (!kind) return;
-    // Everything is measured in GROUP space; a skinned mesh's vertices live in bind space.
-    const skinned = (mesh as unknown as SkinnedMesh).isSkinnedMesh ? (mesh as unknown as SkinnedMesh) : null;
-    const toGroup = skinned
-      ? new Matrix4().copy(body.matrix).multiply(skinned.bindMatrix)
-      : new Matrix4().multiplyMatrices(groupInv, mesh.matrixWorld);
-    (kind === 'pupil' ? black : white).push(...trianglesOf(mesh.geometry, toGroup));
-    parts.push({ mat, toGroup });
+    const rigged = new Set<Material>(); // one part per material, however many groups draw it
+    // A multi-material mesh is several parts in one geometry: only the
+    // GROUPS drawn with an eye material are eye, and each slot is looked at.
+    const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as (Material & MeshBasicMaterial)[];
+    const groups = Array.isArray(mesh.material) && mesh.geometry.groups.length
+      ? mesh.geometry.groups : [{ start: 0, count: Infinity, materialIndex: 0 }];
+    let toGroup: Matrix4 | null = null;
+    for (const g of groups) {
+      const mat = mats[g.materialIndex ?? 0];
+      const kind = mat?.userData.mqEye as 'sclera' | 'pupil' | undefined;
+      if (!mat || !kind) continue;
+      // Everything is measured in GROUP space; a skinned mesh's vertices live in bind space.
+      const skinned = (mesh as unknown as SkinnedMesh).isSkinnedMesh ? (mesh as unknown as SkinnedMesh) : null;
+      toGroup ??= skinned
+        ? new Matrix4().copy(body.matrix).multiply(skinned.bindMatrix)
+        : new Matrix4().multiplyMatrices(groupInv, mesh.matrixWorld);
+      (kind === 'pupil' ? black : white).push(...trianglesOf(mesh.geometry, toGroup, g.start, g.count));
+      if (!rigged.has(mat)) { rigged.add(mat); parts.push({ mat, toGroup }); }
+    }
   });
   if (!parts.length) return null;
   const centre: Vec3 = [0, 0, 0];

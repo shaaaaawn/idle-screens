@@ -277,10 +277,16 @@ test.describe('config panel (dev view)', () => {
     await expect.poll(() =>
       page.evaluate(() => {
         const host = document.getElementById('viewport-host');
+        if (!host?.classList.contains('active')) return false;
+        // The scene just picked, not just any: the outgoing layer keeps its
+        // `live` class (and its canvas) until it is retired 340 ms after the
+        // new one goes live, so "some live layer has children" is true before
+        // the pick has mounted anything. The incoming layer is appended last.
+        const layers = host.querySelectorAll(':scope > .vp-layer');
+        const newest = layers[layers.length - 1];
         return (
-          !!host?.classList.contains('active') &&
-          // A mounted scene, not just the chrome (label, loading chip) the host always holds.
-          host.querySelectorAll('.vp-layer.live > *, :scope > iframe').length > 0
+          (!!newest && newest.classList.contains('live') && newest.childElementCount > 0) ||
+          host.querySelector(':scope > iframe') !== null
         );
       }),
     ).toBe(true);

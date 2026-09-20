@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GRAMMAR, PARAM_DOCS, RECIPES, recipeTrack, validateMetaquariumParams } from './guide';
+import { GRAMMAR, PARAM_DOCS, RECIPES, recipe, recipeTrack, validateMetaquariumParams } from './guide';
 import { metaquariumManifest } from './manifest';
 
 const space = metaquariumManifest.paramSpace!;
@@ -35,6 +35,13 @@ describe('agent guide', () => {
     const track = recipeTrack(RECIPES[0]!.params);
     expect(track.deltas).toHaveLength(Object.keys(RECIPES[0]!.params).length);
     expect(track.deltas.every((d) => d.t === 0 && d.path in space)).toBe(true);
+  });
+
+  it('finds a recipe by id, and nothing by a name it does not have', () => {
+    for (const r of RECIPES) expect(recipe(r.id)).toBe(r);
+    expect(recipe('tea')!.params.interior).toBe('geode');
+    expect(recipe('TEA')).toBeUndefined(); // ids are exact
+    expect(recipe('')).toBeUndefined();
   });
 
   it('catches what an agent gets wrong, with the path to fix', () => {

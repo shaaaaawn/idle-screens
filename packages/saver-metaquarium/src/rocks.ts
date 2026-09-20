@@ -20,6 +20,10 @@
 import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Matrix4, Quaternion, Vector3 } from 'three';
 import type { CrystalRng } from './crystals';
 
+/** How far below the floor a boulder's base is clamped: the buried rim. A
+ *  fissure may dip to it, never below the stone — rocks.test.ts pins this. */
+export const ROCK_BASE = -0.42;
+
 export type Tri = [Vector3, Vector3, Vector3];
 
 export interface RockSpec {
@@ -52,7 +56,7 @@ export function boulder(rng: CrystalRng, detail = 1): Tri[] {
     let v = bump.get(k);
     if (v === undefined) { v = rng.range(0.74, 1.18); bump.set(k, v); }
     // Sat on the floor, not balanced on a point.
-    return new Vector3(x * v, Math.max(-0.42, y * v), z * v);
+    return new Vector3(x * v, Math.max(ROCK_BASE, y * v), z * v);
   };
   for (let i = 0; i < src.count; i += 3) tris.push([at(i), at(i + 1), at(i + 2)]);
   ico.dispose();
@@ -84,7 +88,8 @@ export function fissures(
   tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number, worldPerUnit = 12,
 ): { positions: number[]; colors: number[]; flow: number[]; seep: Vector3 | null } {
   const positions: number[] = [], colors: number[] = [], flow: number[] = [];
-  if (amount <= 0) return { positions, colors, flow, seep: null };
+  // Nothing to cut: no stone, no crown — and no seep for the vents to use.
+  if (amount <= 0 || !tris.length) return { positions, colors, flow, seep: null };
   const band = new Color(tint);
   const core = band.clone().lerp(new Color('#ffffff'), 0.82);
   const bank = new Color('#04060a');
@@ -129,16 +134,22 @@ export function fissures(
 
   const lay = (segs: Seg[], origin: Vector3, reach: number, width: number, heat: number, f0: number): void => {
     for (const sg of segs) {
-      const dp = sg.p.distanceTo(origin), dq = sg.q.distanceTo(origin);
+      let dp = sg.p.distanceTo(origin), dq = sg.q.distanceTo(origin);
+      if (dp >= reach && dq >= reach) continue;
+      // A segment that straddles the reach ends AT it: the channel stops where
+      // its seeded length says, not at the far corner of whatever facet it
+      // was crossing. (Linear along a facet-sized segment — close enough.)
+      let sp = sg.p, sq = sg.q;
+      if (dq >= reach) { sq = sp.clone().lerp(sq, (reach - dp) / (dq - dp)); dq = reach; }
+      else if (dp >= reach) { sp = sq.clone().lerp(sp, (reach - dq) / (dp - dq)); dp = reach; }
       const fp = Math.max(0, 1 - dp / reach), fq = Math.max(0, 1 - dq / reach);
-      if (fp <= 0 && fq <= 0) continue;
       const jag = rng.range(0.75, 1.3);
       const quad = (w: number, lift: number, c: Color, kp: number, kq: number): void => {
         // A channel pinches toward its toe but keeps a body most of the way.
         const wp = w * jag * (0.25 + 0.75 * fp ** 0.5), wq = w * jag * (0.25 + 0.75 * fq ** 0.5);
         const l = sg.normal.clone().multiplyScalar(lift);
-        const p0 = sg.p.clone().addScaledVector(sg.side, -wp).add(l), p1 = sg.p.clone().addScaledVector(sg.side, wp).add(l);
-        const q0 = sg.q.clone().addScaledVector(sg.side, -wq).add(l), q1 = sg.q.clone().addScaledVector(sg.side, wq).add(l);
+        const p0 = sp.clone().addScaledVector(sg.side, -wp).add(l), p1 = sp.clone().addScaledVector(sg.side, wp).add(l);
+        const q0 = sq.clone().addScaledVector(sg.side, -wq).add(l), q1 = sq.clone().addScaledVector(sg.side, wq).add(l);
         const a = f0 + dp, b = f0 + dq;
         put(p0, c, kp, a); put(q0, c, kq, b); put(q1, c, kq, b); put(p0, c, kp, a); put(q1, c, kq, b); put(p1, c, kp, a);
       };

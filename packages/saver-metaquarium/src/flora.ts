@@ -275,10 +275,12 @@ export const FLORA_VERTEX = /* glsl */ `
 `;
 /** Bioluminescence: every few seconds a band of light climbs each plant from
  *  root to tip, and the lamp at the top flares as it arrives. The gust sets
- *  the whole garden off in a wave, because it shares the gust's phase. */
+ *  the whole garden off in a wave, because it shares the gust's phase. The
+ *  sweep is measured in `uFloraScale` units (the world's `crystalScale`), so
+ *  it reaches the tip of a kelp grown at 2.5 as surely as one grown at 1. */
 export const FLORA_COLOR = /* glsl */ `
   #include <color_vertex>
-  float fh = max(0.0, position.y - aSway.x);
+  float fh = max(0.0, position.y - aSway.x) / uFloraScale;
   float run = fract(uSwayTime * 0.11 + aSway.y * 0.159 - aSway.z * 0.04);
   float band = 1.0 - smoothstep(0.0, 7.0, abs(run * 70.0 - 8.0 - fh));
   float arrive = 1.0 - smoothstep(0.0, 0.16, abs(run - 0.62));

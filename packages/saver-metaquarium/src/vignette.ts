@@ -52,6 +52,11 @@ export const OPEN_MARKS: Marks = {
 interface ActorBeat {
   /** Where the actor is when the beat ends (and rests, if it does not move). */
   to: Mark;
+  /** The first beat only: where the actor was before it — its opening spot
+   *  on the centre ring, or where `=` placed it — so an opening `>mark` is a
+   *  walk, and the loop's closing beat comes back HERE. Later beats start
+   *  where the beat before ended. */
+  from?: Mark;
   moved: boolean;
   /** Another actor's index, a fixed point, or nothing. */
   faceActor: number | null;
@@ -163,9 +168,13 @@ export function parseVignette(script: string, marks: Marks): Vignette {
       const lead = state[sb.follow]!.to;
       state[i] = { ...sb, moved: true, to: { x: lead.x + Math.cos(i * 2.1 + 1) * STANDOFF, y: lead.y - 2, z: lead.z + Math.sin(i * 2.1 + 1) * STANDOFF } };
     });
-    if (bi === 0) start.push(...state.map((sb) => sb.to));
+    // The opening positions: `at` still holds them here (`=` has written its
+    // placements into it; `>` has not). The loop closes back to them.
+    if (bi === 0) {
+      start.push(...at);
+      state.forEach((sb, i) => { sb.from = at[i]!; });
+    }
     const length = dur ?? Math.max(3.5, longest / 0.62 + 0.6);
-    // A `=` beat has nowhere to walk from: begin where it ends.
     beats.push({ t0, dur: length, actors: state });
     at = state.map((sb) => sb.to);
     t0 += length;
@@ -203,7 +212,7 @@ function placeOf(v: Vignette, actor: number, tSec: number, depth = 0): Mark {
   if (bi < 0) bi = v.beats.length - 1;
   const beat = v.beats[bi]!, me = beat.actors[actor]!;
   const prev = v.beats[(bi + v.beats.length - 1) % v.beats.length]!.actors[actor]!;
-  const from = bi === 0 ? me.to : prev.to;
+  const from = bi === 0 ? me.from ?? me.to : prev.to;
   const u = (t - beat.t0) / beat.dur;
   if (me.follow !== null && depth < 2) {
     // Behind the leader, a beat late: where they were a moment ago, a little low.

@@ -47,7 +47,7 @@ export const METAQUARIUM_PARAMS = {
   /** Fog start distance, world units. Default matches the tank's original
    *  hardcoded Fog(60, 500) — steering below pulls the murk close. */
   fogNear: { type: 'number', default: 60, min: 20, max: 200, ease: 'smooth' },
-  /** Fog full-opacity distance. Kept under the camera far plane (1200);
+  /** Fog full-opacity distance. Kept under the camera far plane (1400);
    *  the tank enforces far > near + 20. */
   fogFar: { type: 'number', default: 500, min: 120, max: 1100, ease: 'smooth' },
   /** Plankton mote density, 0-1 of the device tier's mote budget. Default 0
@@ -156,12 +156,14 @@ export const METAQUARIUM_PARAMS = {
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is the flat unlit atlas. */
-/** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
+  fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+  /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.
-   *  Vertex offsets on the eye materials only; 0 compiles the stock program. */
-  eyeLife: { type: 'number', default: 1, min: 0, max: 1, ease: 'smooth' },
-    fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+   *  A fragment function on the eye materials only. Defaults to 0 — the
+   *  stock eye program, byte for byte — because every param this saver adds
+   *  defaults to the previous look; a scene opts in with 1. */
+  eyeLife: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
@@ -215,6 +217,7 @@ export const METAQUARIUM_PARAMS = {
   /** The far distance: three hazed rings of silhouettes past the fog line —
    *  rock spires, castle-sized crystals in the scene's colours, and (from 0.4)
    *  one grand geode with its door lit. One draw call, unlit. */
+  horizon: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Paths on the sea floor: a walk from every home's door to the village hub,
    *  a road from the hub to the landmark's plaza, and (above 0.5) trails out
    *  to the big crystals. Painted by the floor's shader — no geometry, any
@@ -229,7 +232,6 @@ export const METAQUARIUM_PARAMS = {
    *  `citadel` is the two-storey version: a wider outer ward, and inside it a
    *  raised terrace with its own ring, four taller towers, a stair, the keep on top. */
   landmark: { type: 'enum', default: 'none', options: ['none', 'castle', 'citadel'], ease: 'step' },
-  horizon: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
    *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).
    *  One kind so far — `crystal`, generated from the seed (nothing is

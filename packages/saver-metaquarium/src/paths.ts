@@ -73,10 +73,46 @@ export function buildPaths(nodes: readonly PathNode[], rng: CrystalRng, opts: Pa
       }
       return p;
     });
+    // Pushing the SAMPLES out is not enough: the chord between two pushed
+    // samples can still sag through the stone (seed 9 in paths.test.ts laid a
+    // segment 8.95 units from the centre of a 16-radius rock). Where a chord
+    // passes inside the stone (plus half a path width, so the paving itself
+    // clears the rim), split it at its nearest point and push that point out
+    // to the full clearance. The test is against the STONE, not the clearance
+    // circle: a chord between two points on the clearance circle always sags
+    // a little inside it, so testing there never converges. Splitting halves
+    // the chord and the sag shrinks quadratically — two rounds settle any
+    // walk; the cap and the uniform budget bound it regardless. No rng, so
+    // the walk stays a pure function of the seed.
+    let inserted = 0;
+    for (let round = 0; round < 3 && inserted < 8; round++) {
+      let split = false;
+      for (let i = 0; i + 1 < pts.length && inserted < 8; i++) {
+        // The uniform array is exactly MAX_PATH_SEGMENTS wide; a split that
+        // would overflow it is dropped rather than written past the end.
+        if (segments.length + pts.length > MAX_PATH_SEGMENTS) break;
+        const p = pts[i]!, q = pts[i + 1]!;
+        for (const o of opts.obstacles) {
+          const need = o.r + width * 1.5;
+          const vx = q.x - p.x, vz = q.z - p.z, len2 = vx * vx + vz * vz;
+          if (len2 < 1e-6) continue;
+          const u = ((o.x - p.x) * vx + (o.z - p.z) * vz) / len2;
+          if (u <= 0 || u >= 1) continue; // endpoints were already cleared
+          const cx = p.x + vx * u, cz = p.z + vz * u;
+          const d = Math.hypot(cx - o.x, cz - o.z);
+          if (d >= o.r + width * 0.5 || d <= 1e-3) continue;
+          pts.splice(i + 1, 0, { x: o.x + ((cx - o.x) / d) * need, z: o.z + ((cz - o.z) / d) * need });
+          inserted++;
+          split = true;
+          break;
+        }
+      }
+      if (!split) break;
+    }
     // One material, or two: some walks change underfoot half-way.
     const first = pick(r), second = opts.material === 'auto' && r.next() < 0.3 ? pick(r) : first;
-    for (let i = 0; i < n; i++) {
-      segments.push({ x0: pts[i]!.x, z0: pts[i]!.z, x1: pts[i + 1]!.x, z1: pts[i + 1]!.z, width, material: i < n / 2 ? first : second });
+    for (let i = 0; i + 1 < pts.length; i++) {
+      segments.push({ x0: pts[i]!.x, z0: pts[i]!.z, x1: pts[i + 1]!.x, z1: pts[i + 1]!.z, width, material: i < (pts.length - 1) / 2 ? first : second });
     }
     edges += 1;
   };

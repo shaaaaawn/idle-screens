@@ -4,14 +4,18 @@ import { buildGeode, GEODE_HABITS, type GeodeSpec } from './geode';
 
 const spec = (habit: GeodeSpec['habit'], over: Partial<GeodeSpec> = {}): GeodeSpec =>
   ({ x: 10, y: 2, z: -30, facing: 0.3, habit, tint: '#ff3f9e', scale: 1, ...over });
-const flat = (gs: ReturnType<typeof buildGeode>['stone']): number[] =>
-  gs.flatMap((g) => Array.from(g.getAttribute('position').array));
+/** The whole home as numbers: every part's positions AND colours (the rind,
+ *  teeth and chamber tints are seeded too), plus where it vents and lights. */
+const flat = (g: ReturnType<typeof buildGeode>): number[] => [
+  ...[...g.stone, ...g.glow, ...g.voxels].flatMap((p) => [...p.getAttribute('position').array, ...p.getAttribute('color').array]),
+  g.vent.x, g.vent.y, g.vent.z, g.emitter.x, g.emitter.y, g.emitter.z, g.emitter.r, g.emitter.g, g.emitter.b, g.doorstep.x, g.doorstep.z,
+];
 
 describe('geode homes', () => {
   it('is the same home from the same seed, and a different one from another', () => {
     const a = buildGeode(spec('cottage'), createRng(5));
-    expect(flat(a.stone)).toEqual(flat(buildGeode(spec('cottage'), createRng(5)).stone));
-    expect(flat(a.stone)).not.toEqual(flat(buildGeode(spec('cottage'), createRng(6)).stone));
+    expect(flat(a)).toEqual(flat(buildGeode(spec('cottage'), createRng(5))));
+    expect(flat(a)).not.toEqual(flat(buildGeode(spec('cottage'), createRng(6))));
   });
 
   it('every habit is a broken stone: an open shell, a lit throat, a voxel house', () => {

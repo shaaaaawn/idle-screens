@@ -24,6 +24,9 @@ type View = Record<RigKey, number>;
 
 export interface ViewportNavHandle {
   select(saver: SaverPlugin): void;
+  /** Repaint from the scene camera — for the host to call when the timeline
+   *  moves or the track changes. A no-op in free look, where the view is pinned. */
+  refresh(): void;
 }
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -83,6 +86,13 @@ export function buildViewportNav(
     };
   };
   const clamp = (k: RigKey, v: number): number => Math.min(def(k).max, Math.max(def(k).min, v));
+  /** The rig's highest (+1) or lowest (−1) elevation: the manifest's bound, or
+   *  just short of the pole when it declares none — the Y axis must land on a
+   *  finite angle, and 90° would fold the view basis flat. */
+  const pole = (sign: 1 | -1): number => {
+    const bound = sign > 0 ? def('cameraElevation').max : def('cameraElevation').min;
+    return Number.isFinite(bound) ? bound : sign * 89;
+  };
 
   /** Where the SCENE's camera is right now, from the authored track. */
   const sceneView = (): View => {
@@ -126,9 +136,14 @@ export function buildViewportNav(
   const NAMED: ReadonlyArray<readonly [string, number, number]> = [
     ['Front', 0, 0], ['Right', 90, 0], ['Back', 180, 0], ['Left', 270, 0],
   ];
+  /** What the chrome last painted; the timeline calls refresh() every frame. */
+  let painted = '';
   const paint = (): void => {
     const v = current();
-    const top = v.cameraElevation >= def('cameraElevation').max - 0.5;
+    const key = `${free ? 'free' : 'scene'}|${v.cameraAzimuth}|${v.cameraElevation}|${v.cameraDistance}`;
+    if (key === painted) return;
+    painted = key;
+    const top = v.cameraElevation >= pole(1) - 0.5;
     const named = top ? 'Top'
       : NAMED.find(([, az, el]) => Math.abs(v.cameraAzimuth - az) < 0.5 && Math.abs(v.cameraElevation - el) < 0.5)?.[0];
     title.textContent = `${named ?? 'User'} Perspective`;
@@ -145,7 +160,7 @@ export function buildViewportNav(
     const toCam = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
     const axes: Array<{ name: string; v: number[]; color: string; az: number; el: number }> = [
       { name: 'X', v: [1, 0, 0], color: '#ff5468', az: 90, el: 0 },
-      { name: 'Y', v: [0, 1, 0], color: '#8fd437', az: NaN, el: def('cameraElevation').max },
+      { name: 'Y', v: [0, 1, 0], color: '#8fd437', az: NaN, el: pole(1) },
       { name: 'Z', v: [0, 0, 1], color: '#4d9fff', az: 0, el: 0 },
     ];
     const dot = (a: number[], b: number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
@@ -183,7 +198,7 @@ export function buildViewportNav(
         ev.stopPropagation();
         if (e.name === 'Y') {
           // The rig cannot go under the floor: −Y is the lowest it allows.
-          look(current().cameraAzimuth, e.sign > 0 ? def('cameraElevation').max : def('cameraElevation').min);
+          look(current().cameraAzimuth, pole(e.sign > 0 ? 1 : -1));
         } else {
           look((e.az + (e.sign > 0 ? 0 : 180)) % 360, 0);
         }
@@ -231,10 +246,14 @@ export function buildViewportNav(
       const ps = saver.manifest.paramSpace as ParamSpace | undefined;
       space = ps && RIG.every((k) => ps[k]?.type === 'number') ? ps : null;
       free = null;
+      painted = '';
       timeline.setViewOverride(null);
       root.hidden = !space;
       surface.classList.toggle('vp-navigable', !!space);
       if (space) paint();
+    },
+    refresh() {
+      if (space && !free) paint();
     },
   };
 }

@@ -43,8 +43,11 @@ describe('sky lanterns', () => {
     expect(new Set(s.lanterns.map(l => l.species)).size).toBeGreaterThanOrEqual(2);
     const bell = arr(s.geometry!, 'aBell'), hang = arr(s.geometry!, 'aJelly').filter((_, i) => i % 3 === 1);
     expect(bell.every(b => b === -1 || (b >= 0 && b <= 1))).toBe(true);
-    // whatever hangs is not bell, and the bell does not hang
+    // whatever hangs is not bell, and the bell does not hang — both ways,
+    // since the shader picks its branch on `bell >= 0`.
     bell.forEach((b, i) => { if (b >= 0) expect(hang[i]).toBe(0); });
+    hang.forEach((h, i) => { if (h > 0) expect(bell[i]).toBe(-1); });
+    expect(hang.some(h => h > 0)).toBe(true); // …and something does hang
     expect(bell.some(b => b === 1)).toBe(true);
     expect(buildSky(createRng(7), { ...opts, height: 0.3 }).lanterns.filter(l => !l.far).every(l => l.y < 60)).toBe(true);
   });

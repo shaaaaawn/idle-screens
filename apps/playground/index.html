@@ -1633,7 +1633,9 @@
       .wb-param.wb-param-wide dd { display: block; width: 100%; }
       .wb-cast-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 46px minmax(0, 1fr) 22px; gap: 4px; margin-bottom: 4px; }
       .wb-cast-row .wb-input { min-width: 0; width: 100%; height: 24px; padding: 0 6px; font-size: 11px; }
-      .wb-cast-count { text-align: right; }
+      /* Outranks `input[type=number].wb-input { width: 72px }`, which would
+         otherwise spill the count over the swim-style column. */
+      .wb-cast-row input[type=number].wb-cast-count { width: 100%; text-align: right; }
       .wb-cast-btn { background: none; border: 1px solid var(--wb-line, #2a2d36); color: inherit; border-radius: 3px; font-size: 11px; cursor: pointer; padding: 2px 8px; opacity: .8; }
       .wb-cast-btn:hover { opacity: 1; border-color: var(--wb-accent); }
       .wb-cast-del { padding: 0; }
@@ -1652,6 +1654,9 @@
       .wb-param-check { accent-color: var(--wb-accent); margin: 0; cursor: pointer; }
       .wb-params-panel { max-height: min(62vh, 680px); overflow-y: auto; }
       .wb-param[hidden], .wb-param-section[hidden] { display: none; }
+      /* One <dl> per section (a <dl> holds only dt/dd groups); the rule
+         between sections is the one the last row used to draw. */
+      .wb-param-group + .wb-param-group { border-top: 1px solid rgba(42,42,50,.55); }
       .wb-param-section {
         position: sticky; top: 0; z-index: 1;
         padding: 5px 10px 3px; font: 9px/1 ui-monospace, monospace;

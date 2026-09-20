@@ -26,11 +26,17 @@ const DEFAULT_COLORS = ['#fff2cf', '#ff8ad0', '#7fdcff'];
 export function parseSpotRig(value: string): { spots: SpotSpec[]; problems: string[] } {
   const spots: SpotSpec[] = [], problems: string[] = [];
   for (const raw of value.split(',').map(s => s.trim()).filter(Boolean)) {
-    const m = /^(\d{1,2})(?:\/(#[0-9a-fA-F]{3,8}))?(?:\*(\d+(?:\.\d+)?))?$/.exec(raw);
+    // `#rgb` or `#rrggbb` only — the two forms three's Color reads; any other
+    // length it warns about and leaves the colour as it was.
+    const m = /^(\d{1,2})(?:\/(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})))?(?:\*(\d+(?:\.\d+)?))?$/.exec(raw);
     if (!m) { problems.push(`"${raw}" is not slot[/color][*radius]`); continue; }
     if (spots.length >= MAX_SPOTS) { problems.push(`more than ${MAX_SPOTS} spots — "${raw}" dropped`); continue; }
+    // One spot per performer: a second entry on the same slot would stack
+    // two pools on one fish and leave the rig a letter short.
+    const slot = Math.min(23, Number(m[1]));
+    if (spots.some(spot => spot.slot === slot)) { problems.push(`slot ${slot} is already spotted — "${raw}" dropped`); continue; }
     spots.push({
-      slot: Math.min(23, Number(m[1])),
+      slot,
       color: m[2] ?? DEFAULT_COLORS[spots.length]!,
       radius: Math.min(60, Math.max(12, m[3] ? Number(m[3]) : 28)),
     });

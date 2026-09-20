@@ -399,11 +399,14 @@ export function writePoolSlots(u: Uniforms, emitters: readonly Emitter[], from: 
   const col3 = u.uMqPoolCol!.value as Float32Array;
   const phases = u.uMqPoolPhase!.value as Float32Array;
   let i = from;
+  // Indexed writes, not `set([...])`: this runs every frame for the moving
+  // sources, and two throwaway arrays per emitter is GC churn in the loop.
   for (const e of emitters) {
     if (i >= MAX_POOLS) break;
     const k = 1 / (0.55 + 1.6 * (0.2126 * e.r + 0.7152 * e.g + 0.0722 * e.b));
-    pos4.set([e.x, e.y, e.z, e.reach * 0.55], i * 4);
-    col3.set([e.r * k, e.g * k, e.b * k], i * 3);
+    const p = i * 4, c = i * 3;
+    pos4[p] = e.x; pos4[p + 1] = e.y; pos4[p + 2] = e.z; pos4[p + 3] = e.reach * 0.55;
+    col3[c] = e.r * k; col3[c + 1] = e.g * k; col3[c + 2] = e.b * k;
     phases[i] = e.phase;
     i += 1;
   }

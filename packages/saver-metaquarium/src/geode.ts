@@ -201,7 +201,7 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   const yaw = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), spec.facing);
   const vox = (into: BufferGeometry[], x: number, y: number, z: number, w: number, hh: number, d: number, color: string, shade = true): void => {
     const p = new Vector3(x * sx, y * sy, z * sz).applyMatrix4(place);
-    into.push(painted(new BoxGeometry(1, 1, 1), color, p, new Vector3(w * sx * r, hh * sy * r, d * r), yaw, shade));
+    into.push(painted(new BoxGeometry(1, 1, 1), color, p, new Vector3(w * sx * r, hh * sy * r, d * sz * r), yaw, shade));
   };
   const zf = h.cut - 0.3; // facade plane, recessed behind the teeth
   // Each home is painted: one colour for the door and the shutters, picked
@@ -282,7 +282,9 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   // Where the home's light leaves it: out through the break, low, warm.
   const mouth = new Vector3(0, -0.25 * sy, (h.cut + 0.55) * sz).applyMatrix4(place);
   const warm = new Color(WARM).lerp(tint, 0.3);
-  const triangles = (stoneP.length + glowP.length) / 9 + voxels.length * 12;
+  // Counted from the geometry, so the boxes in `glow` (knob, windows, the
+  // lantern) are in the total the scenery reports.
+  const triangles = [...stone, ...glow, ...voxels].reduce((n, g) => n + g.getAttribute('position').count / 3, 0);
   return {
     stone, voxels, glow,
     vent: { x: ventP.x, y: ventP.y, z: ventP.z, color: '#ffe6bd' },

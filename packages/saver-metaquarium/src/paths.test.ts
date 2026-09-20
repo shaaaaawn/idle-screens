@@ -32,12 +32,35 @@ describe('paths', () => {
     expect(high.edges).toBeGreaterThan(low.edges);
     expect(pathClearance(low.segments, 120, 60)).toBeGreaterThan(5);
     expect(pathClearance(high.segments, 40, 130)).toBeLessThan(0.01);
+    // At 0.7 the budget is ONE trail (round((0.7 − 0.5) · 2 · 3) = 1), and it
+    // goes to whichever crystal stands nearest the hub — the other two stay wild.
+    const one = buildPaths(village, createRng(4), { ...opts, amount: 0.7 });
+    expect(one.edges).toBe(low.edges + 1);
+    const byDistance = village.filter((v) => v.kind === 'crystal')
+      .sort((p, q) => Math.hypot(p.x - one.hub!.x, p.z - one.hub!.z) - Math.hypot(q.x - one.hub!.x, q.z - one.hub!.z));
+    expect(pathClearance(one.segments, byDistance[0]!.x, byDistance[0]!.z)).toBeLessThan(0.01);
+    for (const far of byDistance.slice(1)) expect(pathClearance(one.segments, far.x, far.z)).toBeGreaterThan(5);
   });
 
-  it('goes round things, not through them', () => {
+  it('goes round things, not through them — every chord, every seed', () => {
     const rock = { x: -48, z: 5, r: 16 };
-    const net = buildPaths([{ x: -96, z: -20, kind: 'home' }, { x: 0, z: 30, kind: 'landmark' }], createRng(5), { ...opts, obstacles: [rock] });
-    for (const g of net.segments.slice(1, -1)) expect(Math.hypot(g.x0 - rock.x, g.z0 - rock.z)).toBeGreaterThanOrEqual(rock.r);
+    const doors = [{ x: -96, z: -20, kind: 'home' as const }, { x: 0, z: 30, kind: 'landmark' as const }];
+    // Not the sample points — the SEGMENTS: the closest approach of every
+    // centreline to the rock's centre clears the stone. The samples alone are
+    // pushed out to r + 1.5·width, but the chord between two pushed samples
+    // used to sag back through the rock (seed 9 laid one 8.95 units from the
+    // centre); walk() now splits any offending chord at its nearest point.
+    // Sweeping seeds is what makes this a guard and not a fixture.
+    for (let seed = 1; seed <= 24; seed++) {
+      const net = buildPaths(doors, createRng(seed), { ...opts, obstacles: [rock] });
+      expect(net.segments.length).toBeGreaterThan(2);
+      expect(net.segments.length).toBeLessThanOrEqual(MAX_PATH_SEGMENTS);
+      for (const g of net.segments) {
+        const bx = g.x1 - g.x0, bz = g.z1 - g.z0;
+        const t = Math.min(1, Math.max(0, ((rock.x - g.x0) * bx + (rock.z - g.z0) * bz) / (bx * bx + bz * bz)));
+        expect(Math.hypot(rock.x - g.x0 - bx * t, rock.z - g.z0 - bz * t), `seed ${seed}`).toBeGreaterThanOrEqual(rock.r);
+      }
+    }
   });
 
   it('with a paved road for a spine, every door joins it on its own side — nobody crosses the street', () => {

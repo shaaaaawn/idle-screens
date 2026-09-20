@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
 
+/** duet and trio are written for the open stage; the rest for the geode room. */
+const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
 const tea = (): ReturnType<typeof parseVignette> => parseVignette(VIGNETTES.tea!, INTERIOR_MARKS);
 const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
 describe('vignettes', () => {
   it('every shipped example parses clean against the room it is written for', () => {
     for (const [name, script] of Object.entries(VIGNETTES)) {
-      // duet and trio are written for the open stage; the rest for the geode room.
-      const v = parseVignette(script, name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
+      const v = parseVignette(script, marksFor(name));
       expect(v.problems, name).toEqual([]);
       expect(v.actors).toBeGreaterThanOrEqual(2);
       expect(v.actors).toBeLessThanOrEqual(3);
@@ -21,21 +22,43 @@ describe('vignettes', () => {
   it('is a pure function of time, and loops without a cut', () => {
     const v = tea();
     for (const t of [0, 3.3, 17.9, 41]) expect(poseOf(v, 0, t)).toEqual(poseOf(v, 0, t));
-    for (let a = 0; a < v.actors; a += 1) {
-      expect(dist(poseOf(v, a, v.duration - 0.01)!, poseOf(v, a, 0.01)!)).toBeLessThan(1.5);
-      expect(poseOf(v, a, 5 + v.duration)!.x).toBeCloseTo(poseOf(v, a, 5)!.x, 6);
-    }
     expect(poseOf(v, 2, 1)).toBeNull(); // no third actor in a two-hander
+    for (const [name, script] of Object.entries(VIGNETTES)) {
+      const v = parseVignette(script, marksFor(name));
+      for (let a = 0; a < v.actors; a += 1) {
+        // The blocking repeats every `duration`…
+        expect(poseOf(v, a, 5 + v.duration)!.x).toBeCloseTo(poseOf(v, a, 5)!.x, 6);
+        // …and the seam is invisible: the frame either side of it, in REAL
+        // time, differs by no more than 0.02 s of motion. Sampled as D ± 0.01
+        // rather than (D − 0.01, 0.01) because the alive bob rides the raw
+        // clock (vignette.ts: `sin(tSec * 1.25 + …) * 0.9`), so it is
+        // continuous across the wrap but not periodic in it — comparing
+        // against t = 0.01 would measure the bob's phase, not the seam.
+        // Bound: a jump-free walk covers < 70 u/s (below) → 1.4, plus the
+        // bob's own 0.9 · 1.25 · 0.02 ≈ 0.02.
+        const before = poseOf(v, a, v.duration - 0.01)!, after = poseOf(v, a, v.duration + 0.01)!;
+        expect(dist(before, after), `${name} actor ${a}`).toBeLessThan(1.45);
+      }
+    }
   });
 
   it('nobody teleports, nobody shares a body, headings are always unit', () => {
-    for (const script of Object.values(VIGNETTES)) {
-      const v = parseVignette(script, INTERIOR_MARKS);
+    for (const [name, script] of Object.entries(VIGNETTES)) {
+      const marks = marksFor(name);
+      const v = parseVignette(script, marks);
+      expect(v.problems, name).toEqual([]); // parsed for its own stage, so every cue moves someone
+      // The fastest honest move on this stage: a follower closes on its leader
+      // over the first half of a beat (`smoother(u * 2)`, peak slope 3.75), so
+      // the longest span between two marks in the shortest beat bounds every
+      // walk, circle and follow. A jump covers a span in ONE tick — 20× that.
+      const at = Object.values(marks);
+      const span = Math.max(...at.flatMap((m) => at.map((n) => dist(m, n))));
+      const cap = (3.75 * span) / Math.min(...v.beats.map((b) => b.dur));
       let prev = Array.from({ length: v.actors }, (_, a) => poseOf(v, a, 0)!);
       for (let t = 0.05; t < v.duration; t += 0.05) {
         const now = Array.from({ length: v.actors }, (_, a) => poseOf(v, a, t)!);
         now.forEach((p, a) => {
-          expect(dist(p, prev[a]!) / 0.05).toBeLessThan(70); // units/s — brisk, never a jump
+          expect(dist(p, prev[a]!) / 0.05, `${name} actor ${a} at ${t}`).toBeLessThan(cap); // units/s — brisk, never a jump
           expect(Math.hypot(p.fx, p.fy, p.fz)).toBeCloseTo(1, 3);
           expect(p.y).toBeGreaterThanOrEqual(9);
         });

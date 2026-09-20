@@ -54,6 +54,21 @@ export function lanternAt(l: Lantern, t: number, out: { x: number; y: number; z:
   out.y = l.y + Math.sin(t * 0.07 + l.phase) * 12 * amp - Math.cos(t * LANTERN_BEAT + l.phase) * 1.6 * l.size;
 }
 
+/** `mqBeat` below, in JS, at the crown (lag 0): 0 relaxed → 1 squeezed. The
+ *  light a lantern throws — its bloom card, its pool on the floor, the tint on
+ *  a fish under it — flares on this same beat, so the field never brightens
+ *  while the lantern it comes from is dark. */
+export function lanternBeat(t: number, phase: number): number {
+  const w = (t * LANTERN_BEAT + phase) / 6.2831853;
+  const u = w - Math.floor(w);
+  const x = u < 0.22 ? u / 0.22 : (u - 0.22) / 0.78;
+  const s = x * x * (3 - 2 * x);
+  return u < 0.22 ? s : 1 - s;
+}
+/** How bright the lit core is on this beat, relative to its peak — the
+ *  shader's `0.15 + 0.85 * beat` over a base of 1, normalised to the squeeze. */
+export const lanternLight = (beat: number): number => 0.575 + 0.425 * beat;
+
 /** One beat of the bell, 0 relaxed → 1 squeezed: a quick snap shut, a long
  *  ease open. `lag` delays it — the rim follows the crown, a tentacle follows
  *  the rim — which is what makes the pulse travel down the animal. */
@@ -265,7 +280,8 @@ export function buildSky(rng: CrystalRng, opts: SkyOptions): Sky {
   return { lanterns, geometry: g, voxels: w.count };
 }
 
-/** The light the near lanterns throw, at `t`, written into `out` in place. */
+/** The light the near lanterns throw, at `t`, written into `out` in place —
+ *  on the bell's beat, so it flares with the core the shader is drawing. */
 export function lanternEmitters(lanterns: readonly Lantern[], t: number, out: Emitter[]): void {
   const p = { x: 0, y: 0, z: 0 };
   const c = new Color();
@@ -275,8 +291,9 @@ export function lanternEmitters(lanterns: readonly Lantern[], t: number, out: Em
     lanternAt(l, t, p);
     c.set(l.color);
     const e = out[n] ?? (out[n] = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, reach: 1, phase: 0 });
+    const k = 0.55 * lanternLight(lanternBeat(t, l.phase));
     e.x = p.x; e.y = p.y; e.z = p.z;
-    e.r = c.r * 0.55; e.g = c.g * 0.55; e.b = c.b * 0.55;
+    e.r = c.r * k; e.g = c.g * k; e.b = c.b * k;
     e.reach = 58 * l.size; e.phase = l.phase;
     n += 1;
   }

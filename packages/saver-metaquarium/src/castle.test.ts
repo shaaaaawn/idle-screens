@@ -6,10 +6,20 @@ const spec: CastleSpec = { x: 10, y: 2, z: -150, facing: 0, scale: 1, palette: [
 const arr = (g: { getAttribute(n: string): { array: ArrayLike<number> } }, n: string): number[] => Array.from(g.getAttribute(n).array);
 
 describe('castle', () => {
-  it('is seeded: same seed, same stones', () => {
+  it('is seeded: same seed, same stones, same spires, same lights', () => {
     const a = buildCastle(spec, createRng(1)), b = buildCastle(spec, createRng(1));
-    expect(arr(a.masonry, 'position')).toEqual(arr(b.masonry, 'position'));
-    expect(arr(a.crystal, 'color')).toEqual(arr(b.crystal, 'color'));
+    // Every rng-driven output: masonry picks its shades from the shared stream,
+    // spires take spin/lean/shoulder from a fork, and the emitters sit on both.
+    for (const attr of ['position', 'color'] as const) {
+      expect(arr(a.masonry, attr)).toEqual(arr(b.masonry, attr));
+      expect(arr(a.crystal, attr)).toEqual(arr(b.crystal, attr));
+    }
+    expect(a.emitters).toEqual(b.emitters);
+    expect(a.marks).toEqual(b.marks);
+    // …and a different seed is a different castle.
+    const c = buildCastle(spec, createRng(2));
+    expect(arr(a.masonry, 'color')).not.toEqual(arr(c.masonry, 'color'));
+    expect(arr(a.crystal, 'position')).not.toEqual(arr(c.crystal, 'position'));
   });
 
   it('is voxel masonry under faceted spires, finite, inside a landmark budget', () => {

@@ -338,7 +338,8 @@ export interface PerceiveFrameOptions {
 
 /**
  * Mount `saver` off-screen, sample one frame, and read it back.
- * Always disposes the instance and removes the host, including on failure.
+ * Always disposes the instance and removes the host, including on failure —
+ * unless `reuse` keeps it, and then only one that read back cleanly is kept.
  */
 /**
  * One kept perception instance, for callers that sample the SAME saver over
@@ -349,31 +350,45 @@ export interface PerceiveFrameOptions {
  * the scene, is what dragged the workbench to 30 fps. A frame-addressable
  * saver renders any `t` on demand, so one hidden instance serves every sample.
  */
-let kept: { key: string; inst: SaverInstance; host: HTMLElement } | null = null;
+let kept: { key: string; page: PageContext | undefined; inst: SaverInstance; host: HTMLElement } | null = null;
 let queue: Promise<unknown> = Promise.resolve();
+/**
+ * Bumped by every release. A reuse sample carries the generation it was asked
+ * under and gives up if that has moved on — a sample queued behind a slow one,
+ * or mid-mount, when the panel switched saver or closed would otherwise mount
+ * and keep a hidden instance that no later call releases.
+ */
+let generation = 0;
 
-export function releasePerceptionInstance(): void {
+const discardKept = (): void => {
   if (!kept) return;
   try { kept.inst.dispose(); } catch { /* must not break the panel */ }
   kept.host.remove();
   kept = null;
+};
+
+export function releasePerceptionInstance(): void {
+  generation += 1;
+  discardKept();
 }
 
 export function perceiveSaverFrame(
   saver: SaverPlugin,
   opts: PerceiveFrameOptions = {},
 ): Promise<FramePerception> {
-  if (!opts.reuse) return perceiveOnce(saver, opts);
+  if (!opts.reuse) return perceiveOnce(saver, opts, generation);
   // Serialised: two samples interleaving renderFrame on one instance would
   // read each other's frame.
-  const run = queue.then(() => perceiveOnce(saver, opts));
+  const gen = generation;
+  const run = queue.then(() => perceiveOnce(saver, opts, gen));
   queue = run.catch(() => undefined);
   return run;
 }
 
 async function perceiveOnce(
   saver: SaverPlugin,
-  opts: PerceiveFrameOptions = {},
+  opts: PerceiveFrameOptions,
+  gen: number,
 ): Promise<FramePerception> {
   const width = opts.width ?? 640;
   const height = opts.height ?? 400;
@@ -395,14 +410,23 @@ async function perceiveOnce(
     reason,
   });
 
+  // Released (saver switched, panel closed) since this sample was queued: the
+  // caller has moved on, and mounting now would keep an instance for no one.
+  const released = (): boolean => opts.reuse === true && gen !== generation;
+  if (released()) return empty('unsupported', 'Released before it ran.');
+
   // NB: `manifest.workerReady` is not a disqualifier. The Worker path is engine
   // plumbing (the element passes a workerUrl); a direct `saver.mount()` like
   // this one renders on the main thread, so its canvas is readable. Whether a
   // canvas was actually transferred is discovered below by trying to read it,
   // rather than assumed from the manifest.
+  //
+  // The page is part of the identity: the same passthrough saver on an empty
+  // page and on a staged one are two different performances, so a new stage
+  // (a new page mirror) must get a fresh instance, not the old page's.
   const keepKey = `${saver.manifest.id}|${width}x${height}|${seed}|${opts.dpr ?? 1}`;
-  const reusing = opts.reuse === true && kept?.key === keepKey;
-  if (opts.reuse && kept && !reusing) releasePerceptionInstance();
+  const reusing = opts.reuse === true && kept?.key === keepKey && kept.page === opts.page;
+  if (opts.reuse && kept && !reusing) discardKept();
   const host = reusing ? kept!.host : document.createElement('div');
   if (!reusing) {
     host.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;height:${height}px;pointer-events:none;`;
@@ -410,7 +434,12 @@ async function perceiveOnce(
   }
 
   let inst: SaverInstance | null = reusing ? kept!.inst : null;
-  let keep = reusing;
+  // This call disposes what it mounted unless it hands the instance to `kept`
+  // (only after a successful read — an instance that cannot be read is not
+  // worth keeping, and a kept one that stops reading is let go the same way).
+  // A reused instance is `kept`'s to dispose, never this call's.
+  let owned = !reusing;
+  let read = false;
   try {
     if (!inst) inst = await Promise.resolve(
       saver.mount({
@@ -427,9 +456,10 @@ async function perceiveOnce(
       }),
     );
 
+    // Released while the mount was in flight — same as above, one await later.
+    if (released()) return empty('unsupported', 'Released while mounting.');
+
     const addressable = typeof inst.renderFrame === 'function';
-    // Only an addressable saver can be kept: a sampled one must run live.
-    if (opts.reuse && addressable && !kept) { kept = { key: keepKey, inst, host }; keep = true; }
     if (addressable) {
       inst.setPaused(true);
       inst.renderFrame!(t, seed);
@@ -519,6 +549,14 @@ async function perceiveOnce(
             : undefined;
     }
 
+    // Read back cleanly: this is the instance worth keeping. Only an
+    // addressable saver can be kept — a sampled one must run live.
+    read = true;
+    if (opts.reuse && addressable && !kept && !released()) {
+      kept = { key: keepKey, page: opts.page, inst, host };
+      owned = false;
+    }
+
     return {
       braille: renderBrailleMap(grid),
       density: renderDensityMap(grid),
@@ -537,13 +575,18 @@ async function perceiveOnce(
   } catch (err) {
     return empty('unsupported', `Mount failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
-    if (!keep) {
+    if (owned) {
       try {
         inst?.dispose();
       } catch {
         /* a saver that throws on dispose must not break perception */
       }
       host.remove();
+    } else if (reusing && !read && kept?.inst === inst) {
+      // A kept instance that stopped reading back is not one to keep asking;
+      // the next sample mounts fresh. (A release mid-flight already emptied
+      // `kept`, so this cannot dispose twice.)
+      discardKept();
     }
   }
 }

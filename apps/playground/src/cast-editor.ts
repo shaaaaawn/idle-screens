@@ -9,7 +9,9 @@
 
 export interface CastRow { who: string; count: number; style: string; raw?: string }
 
-const TOKEN = /^([^:@\s]+)(?::(\d+))?(?:@([a-z-]+))?$/i;
+// A count is 1 or more, as the tank's parser has it: `:0` is not a row with
+// nothing in it but a token the tank drops, so it stays raw and visible.
+const TOKEN = /^([^:@\s]+)(?::([1-9]\d*))?(?:@([a-z-]+))?$/i;
 
 export function parseCast(mix: string): CastRow[] {
   return mix.split(',').map((t) => t.trim()).filter(Boolean).map((t) => {
@@ -78,7 +80,13 @@ export function buildCastEditor(
       style.setAttribute('aria-label', `cast ${i + 1}: swim style`);
       style.append(Object.assign(document.createElement('option'), { value: '', textContent: 'scene style' }));
       for (const s of styles) style.append(Object.assign(document.createElement('option'), { value: s, textContent: s }));
-      style.value = r.style;
+      // The tank reads the style case-blind, so `@School` is `school` here.
+      // One it does not know at all is still shown as what it is — the string
+      // keeps it either way; a select with no matching option would show
+      // "scene style" for a fish that is tagged.
+      const known = styles.includes(r.style.toLowerCase());
+      if (r.style && !known) style.append(Object.assign(document.createElement('option'), { value: r.style, textContent: `${r.style} (unknown)` }));
+      style.value = known ? r.style.toLowerCase() : r.style;
       style.addEventListener('change', () => { r.style = style.value; delete r.raw; commit(); });
       const del = Object.assign(document.createElement('button'), { type: 'button', className: 'wb-cast-btn wb-cast-del', textContent: '×', title: 'Remove from the cast' });
       del.addEventListener('click', () => { rows.splice(i, 1); paint(); commit(); });
@@ -94,13 +102,32 @@ export function buildCastEditor(
   el.append(list, body, foot, raw);
   paint();
 
+  const show = (mix: string): void => { shown = mix; rows = parseCast(mix); raw.value = mix; paint(); };
+  /** A value that arrived while a field was being edited, to show once the
+   *  editor is left — an edit in the meantime supersedes it. */
+  let pending: string | null = null;
+  el.addEventListener('focusout', () => {
+    // Next tick: focus moving to another of the editor's own fields is not
+    // leaving, and a click on × or + add has committed by then (which clears
+    // `pending` through update) rather than being painted over first.
+    window.setTimeout(() => {
+      if (pending === null || el.contains(document.activeElement)) return;
+      const mix = pending;
+      pending = null;
+      if (mix !== shown) show(mix);
+    }, 0);
+  });
+
   return {
     el,
     update(mix) {
       // The timeline refreshes values constantly; only rebuild on a real change,
-      // and never under a field someone is typing in.
-      if (mix === shown || el.contains(document.activeElement)) return;
-      shown = mix; rows = parseCast(mix); raw.value = mix; paint();
+      // and never under a field someone is typing in — that value waits for
+      // focus to leave, and the user's own commit (which arrives here as the
+      // shown value) cancels it.
+      if (mix === shown) { pending = null; return; }
+      if (el.contains(document.activeElement)) { pending = mix; return; }
+      show(mix);
     },
   };
 }

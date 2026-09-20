@@ -458,6 +458,8 @@ export interface CrystalLayout {
 }
 
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+/** The tank's swim radius (`BOUNDS.radius` in tank.ts): where giants must not stand. */
+const SWIM_RADIUS = 120;
 
 /**
  * Every cluster in the scene, placed. A golden-angle spiral rather than
@@ -482,16 +484,21 @@ export function layoutCrystals(
       // (radius 120) so it is a skyline the fish pass in front of, never a
       // wall they swim inside.
       const giant = Math.max(0, e.size - 1.5);
-      const r = 24 + 100 * Math.sqrt(k / Math.max(1, total)) + crng.range(-8, 8) + giant * 62;
+      let r = 24 + 100 * Math.sqrt(k / Math.max(1, total)) + crng.range(-8, 8) + giant * 62;
       const a = spin + k * GOLDEN;
       const names = e.palette === 'env' ? envColors : e.palette === 'rainbow' ? RAINBOW : [e.palette];
       const name = names[(k + Math.floor(crng.next() * 2)) % names.length]!;
       // The camera orbits at 80–400 and looks at the centre, so an outer
       // cluster is the one that ends up between lens and fish: the hero
-      // stands in the middle, the ring around it stays low.
+      // stands in the middle, the ring around it stays low. A giant is exempt
+      // — it is the skyline — and the exemption fades in over `*1.5`–`*3`, so
+      // a size dial never steps a cluster to twice its size.
       const grown = growCluster(e.habit, crng, {
-        ...opts, scale: opts.scale * e.size * (giant > 0 ? 1 : 1 - 0.5 * Math.min(1, r / 124)),
+        ...opts, scale: opts.scale * e.size * (1 - 0.5 * Math.min(1, r / 124) * Math.max(0, 1 - giant / 1.5)),
       });
+      // Its FOOT stays out of the swim space too, not only its root: what the
+      // fish clear is the dome `clusterClearance` raises over the footprint.
+      if (giant > 0) r = Math.max(r, SWIM_RADIUS + grown.radius * 1.1 + 9);
       clusters.push({
         id: e.id && e.count === 1 ? e.id : e.id ? `${e.id}.${i}` : null,
         habit: e.habit,

@@ -98,6 +98,9 @@ import {
 import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
+const CAMERA_FAR = 1400;
+/** Floor-pool slots kept free of fixed light, for the sources that move. */
+const MOVING_POOLS = 4;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
 const Y_AXIS = new Vector3(0, 1, 0);
 const GLB_CONCURRENCY = 3;
@@ -537,6 +540,11 @@ class TankInstance implements SaverInstance {
   private crystals: CrystalField | null = null;
   private clusters: Cluster[] = [];
   private emitters: Emitter[] = [];
+  /** The fixed emitters that hold a floor-pool slot: the light field has no
+   *  cap, the floor has `MAX_POOLS`. Biggest pools first, and never every
+   *  slot — a moving source (a glowing fish, a sinking lantern) always has
+   *  somewhere to land. */
+  private fixedPools: Emitter[] = [];
   private propsKey = '';
   private warnedProps = '';
   private readonly poolUniforms = emptyPoolUniforms();
@@ -673,7 +681,10 @@ class TankInstance implements SaverInstance {
     this.renderer.toneMapping = LinearToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
-    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, 1200);
+    // Far enough for the horizon's outer ring (radius 820 ± 45) seen across
+    // the tank from the widest orbit (`cameraDistance` 400): the far side of
+    // that ring is ~1270 out. Nothing past the fog is visible anyway.
+    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, CAMERA_FAR);
 
     const fogHex = String(this.space.fogColor?.default ?? '#030009');
     this.fogColor.set(fogHex);
@@ -904,6 +915,7 @@ class TankInstance implements SaverInstance {
       this.crystals = null;
       this.clusters = [];
       this.emitters = [];
+      this.fixedPools = [];
       this.poolUniforms.uMqPoolN!.value = 0;
       this.floorHeightAt = this.terrainAt;
     }
@@ -975,8 +987,13 @@ class TankInstance implements SaverInstance {
     writePaths(this.poolUniforms, walks, this.num('crystalScale'));
     if (walks.length && !this.poolsInstalled) this.installPools();
     this.emitters = [...emittersOf(this.clusters), ...lights];
+    // A castle brings a dozen lamps of its own; queued behind twelve clusters
+    // and the homes they would never reach the floor, and nothing moving
+    // could either. The biggest pools win the slots; the field itself keeps
+    // every source.
+    this.fixedPools = [...this.emitters].sort((a, b) => b.reach - a.reach).slice(0, MAX_POOLS - MOVING_POOLS);
     if (this.emitters.length) {
-      fillPoolUniforms(this.poolUniforms, this.emitters);
+      fillPoolUniforms(this.poolUniforms, this.fixedPools);
       this.installPools();
     }
     this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
@@ -991,7 +1008,10 @@ class TankInstance implements SaverInstance {
     const g = f.glow!;
     const body = f.body!;
     const phase = f.index * 1.7;
-    const beat = 1 - pulse * 0.15 * (0.5 + 0.5 * Math.sin(tSec * 0.754 + phase));
+    // At 0 the cores are their authored colour, static — no heat, no breath:
+    // `fishGlow: 0` is the tank before glow existed. Still written, not
+    // skipped, so turning the dial down un-latches the last hot frame.
+    const beat = amount > 0 ? 1 - pulse * 0.15 * (0.5 + 0.5 * Math.sin(tSec * 0.754 + phase)) : 1;
     // White-hot core: emissive without HDR. The halo and card stay saturated,
     // so the part reads as brighter than its own colour.
     const hot = 0.34 * amount;
@@ -1040,11 +1060,14 @@ class TankInstance implements SaverInstance {
     p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
     p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
     p.applyQuaternion(f.group.quaternion).add(f.group.position);
-    // The floor takes light from accents only, over a fish-sized reach.
+    // The floor takes light from accents only, over a fish-sized reach. The
+    // source is as strong as the dial says: what it throws on the floor and
+    // on a neighbour scales with `fishGlow` like the bloom does.
     if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
     const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
+    const emit = 0.7 * g.gain * amount;
     this.fishEmitters.push({
-      x: p.x, y: p.y, z: p.z, r: g.r * 0.7 * g.gain, g: g.g * 0.7 * g.gain, b: g.b * 0.7 * g.gain,
+      x: p.x, y: p.y, z: p.z, r: g.r * emit, g: g.g * emit, b: g.b * emit,
       reach, phase, owner: f.index,
     });
     return n;
@@ -1081,11 +1104,14 @@ class TankInstance implements SaverInstance {
     const sky = this.scenery?.moving ?? [];
     const dynamic = amount > 0 ? [...sky, ...this.fishEmitters] : sky;
     this.tintEmitters = dynamic.length ? [...this.emitters, ...dynamic] : this.emitters;
-    const clusterSlots = Math.min(this.emitters.length, MAX_POOLS);
+    const clusterSlots = this.fixedPools.length;
     // Without crystals nobody else drives the pool look — homes alone, or
-    // glowing fish alone, must still light the floor.
+    // glowing fish alone, or lanterns alone, must still light the floor. The
+    // gain is the room's (`crystalGlow`) when the room has fixed light, else
+    // full: a moving source already carries its own strength in its colour
+    // (a fish its `fishGlow`, a lantern its beat), so it is not scaled twice.
     if (!this.crystals && this.poolsInstalled) {
-      this.poolUniforms.uMqPoolGain!.value = 0.4 * Math.max(amount, this.emitters.length ? this.num('crystalGlow') : 0);
+      this.poolUniforms.uMqPoolGain!.value = 0.4 * (this.emitters.length ? this.num('crystalGlow') : 1);
       this.poolUniforms.uMqPoolTime!.value = tSec;
       this.poolUniforms.uMqPoolPulse!.value = pulse;
     }
@@ -1711,7 +1737,7 @@ class TankInstance implements SaverInstance {
     this.buildScenery();
     // After the scenery: a vignette may name the world's own marks (home doors, a gate).
     this.buildVignette();
-    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'));
+    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,
@@ -2103,9 +2129,16 @@ class TankInstance implements SaverInstance {
         const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
         if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
-      // An actor in a vignette is not swimming: the script places it.
+      // An actor in a vignette is not swimming: the script places it. The
+      // GROUND still holds, though: an open-stage mark is authored for a flat
+      // floor, and on `ridges` it can sit inside a hill. Terrain only — not
+      // the scenery domes — because a script sends a fish INTO a home's
+      // throat or under a gate on purpose, and a dome would lift it out.
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
-      if (act) { px = act.x; y = act.y; pz = act.z; }
+      if (act) {
+        px = act.x; y = act.y; pz = act.z;
+        if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
+      }
       f.group.position.set(px, y, pz);
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
@@ -2183,7 +2216,8 @@ class TankInstance implements SaverInstance {
         x: Math.round(px * 10) / 10,
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
-        heading: Math.round(((Math.atan2(pose.fx, pose.fz) * 180) / Math.PI + 360) % 360),
+        // The facing the frame shows: the script's, for an actor.
+        heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
       });
     }
@@ -2229,7 +2263,9 @@ class TankInstance implements SaverInstance {
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
       },
-      eyes: this.fish.map((f) => f?.eyes?.grids.map((g) => g.signature).join(' · ') ?? null),
+      // Only what the frame shows: a slot hidden by a lower `fishCount` keeps
+      // its rig for when it comes back, but it is not on screen now.
+      eyes: this.fish.map((f) => (f?.group.visible ? f.eyes?.grids.map((g) => g.signature).join(' · ') ?? null : null)),
       vignette: this.vignette ? {
         actors: this.vignette.actors,
         beats: this.vignette.beats.length,
@@ -2242,7 +2278,7 @@ class TankInstance implements SaverInstance {
         fishGlow: this.num('fishGlow'),
         fishMetal: this.str('fishMetal'),
         glowing: this.fish.filter((f) => f?.glow && f.group.visible).length,
-        floorPools: Number(this.poolUniforms.uMqPoolN!.value) - Math.min(this.emitters.length, MAX_POOLS),
+        floorPools: Number(this.poolUniforms.uMqPoolN!.value) - this.fixedPools.length,
       },
       props: {
         scenery: this.scenery?.counts ?? {},

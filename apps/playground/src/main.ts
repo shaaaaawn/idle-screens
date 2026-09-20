@@ -364,7 +364,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       floraDensity: 1, rockDensity: 0.3, rockVeins: 0.6, marineSnow: 0.5, propMix: 'crystal:2@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
       fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, crystalTint: 0.5,
       fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
-      cameraDistance: 150, cameraElevation: 10, cameraAzimuth: -12, autoRotate: 1.2,
+      cameraDistance: 150, cameraElevation: 10, cameraAzimuth: 348, autoRotate: 1.2,
     }, catalog: LOCAL_CATALOG,
   }),
   createMetaquarium({
@@ -431,7 +431,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       propMix: 'crystal:3@spire/seafoam,crystal:2@druse/cyan,crystal:1@lotus/yellow',
       fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.45, swimVariance: 0.5, crystalTint: 0.5,
       fogColor: '#031012', floorColor: '#08191a', fogNear: 110, fogFar: 650,
-      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: -14, autoRotate: 0.5,
+      cameraDistance: 200, cameraElevation: 12, cameraAzimuth: 346, autoRotate: 0.5,
     }, catalog: LOCAL_CATALOG,
   }),
   // Crystals (propMix) QA: ?saver=metaquarium-crystal-<name>. Local fish only,
@@ -1325,16 +1325,6 @@ function liveMode(): void {
     const devParams = buildParamsPanel(right.params, timeline);
     devParams.select(ALL_SAVERS.find((s) => s.manifest.id === cfg.saver) ?? ALL_SAVERS[0]!);
 
-    timeline.onTrackChange = () => devParams.refresh();
-
-    let percThrottleId = 0;
-    let pendingT = 0;
-    timeline.onTimeChange = (t) => {
-      pendingT = t;
-      if (percThrottleId) return;
-      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); devParams.refresh(); }, 250);
-    };
-
     const viewportHost = document.getElementById('viewport-host') as HTMLDivElement | null;
     const viewportLabel = document.getElementById('viewport-label');
     // Orbit / dolly / numpad views for any saver that declares the camera rig.
@@ -1343,6 +1333,20 @@ function liveMode(): void {
     const viewportNav = viewportHost?.parentElement
       ? buildViewportNav(viewportHost, viewportHost.parentElement, timeline, () => devParams.refresh())
       : null;
+
+    timeline.onTrackChange = () => { devParams.refresh(); viewportNav?.refresh(); };
+
+    let percThrottleId = 0;
+    let pendingT = 0;
+    timeline.onTimeChange = (t) => {
+      // The gizmo follows the scene camera frame by frame (an autoRotate
+      // turntable is a camera that never sits still); it is cheap and skips
+      // itself when the view has not moved. Perception is the expensive one.
+      viewportNav?.refresh();
+      pendingT = t;
+      if (percThrottleId) return;
+      percThrottleId = window.setTimeout(() => { percThrottleId = 0; perception.setTime(pendingT); devParams.refresh(); }, 250);
+    };
 
     let devPreviewInst: SaverInstance | null = null;
     let devStage: MountedStage | null = null;
@@ -1405,11 +1409,13 @@ function liveMode(): void {
       viewportHost.classList.add('active');
       viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
       if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
-      viewportNav?.select(saver);
       // The timeline lets go of the outgoing instance now, which leaves its
       // last frame standing in the viewport — that still frame is what the
       // incoming scene fades in over.
       timeline.setSaver(saver, null, cfg.seed);
+      // After setSaver: the nav paints the gizmo from the timeline's track,
+      // and until then the track is still the outgoing saver's camera.
+      viewportNav?.select(saver);
       layers.setSaver(id);
       stagePick.style.display = saver.manifest.passthrough ? 'block' : 'none';
       loadingChip.textContent = `loading ${saver.manifest.label}…`;
@@ -1443,8 +1449,11 @@ function liveMode(): void {
       debug.setContext(previewCtx);
       const useStage = !!saver.manifest.passthrough && stageId !== 'none';
 
-      // A stage is an iframe that owns the viewport: no layer, no crossfade.
-      if (useStage) retireLayers(null);
+      // A stage is an iframe that owns the viewport: no layer, no crossfade —
+      // going onto one OR coming off one. Leaving the outgoing stage for the
+      // 340 ms retire would only drop its iframe from the DOM; the instance
+      // performing inside it would keep running with nothing to dispose it.
+      if (useStage || devStage) retireLayers(null);
       const layer = document.createElement('div');
       layer.className = 'vp-layer';
       if (!useStage) viewportHost.append(layer);
@@ -1517,7 +1526,17 @@ function liveMode(): void {
             ...(devStage ? { page: mirrorPage(devStage) } : {}),
           });
         }, 900);
-      }).catch(() => { layer.remove(); /* superseded by a newer selection */ });
+      }).catch((err: unknown) => {
+        layer.remove();
+        // Superseded by a newer selection: that one owns the chip and the
+        // stage now. Otherwise the mount itself failed (no WebGL, a bad
+        // asset): say so and take the loading state and any stage down with
+        // it, or the viewport reads "loading…" for a scene that never comes.
+        if (token !== devMountToken) return;
+        console.warn(`[dev] ${saver.manifest.label} failed to mount:`, err);
+        loadingChip.hidden = true;
+        if (devStage) { devStage.destroy(); devStage = null; }
+      });
     };
 
     /** Dispose every layer except `keep` (and any layer-less direct mount). */

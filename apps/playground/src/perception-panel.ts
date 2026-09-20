@@ -262,7 +262,10 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
 
   return {
     setSaver(id: string, opts: PerceptionSaverOptions = {}) {
-      if (id !== currentId) releasePerceptionInstance();
+      // A new saver, or the same passthrough saver on a new stage (a new page
+      // mirror), is a new performance: let the kept instance and anything
+      // queued against it go.
+      if (id !== currentId || opts.page !== currentOpts.page) releasePerceptionInstance();
       currentId = id;
       currentOpts = opts;
       overrideSpec = null;

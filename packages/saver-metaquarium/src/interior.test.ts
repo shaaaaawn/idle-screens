@@ -5,15 +5,17 @@ import { buildGeodeInterior, ROOM_HEIGHT, ROOM_RADIUS, sideAxisFor } from './int
 
 const room = (seed = 4, over = {}) => buildGeodeInterior(createRng(seed), { tint: '#7a3cff', scale: 1, floorY: 0, ...over });
 const pos = (r: ReturnType<typeof room>): number[] => Array.from(r.room[0]!.getAttribute('position').array);
+// A room is a detail-5 icosphere, thousands of packed crystals and hundreds of
+// voxels — build the reference one ONCE and let every read-only case share it.
+const r = room();
 
 describe('geode interior', () => {
   it('is the same room from the same seed', () => {
-    expect(pos(room())).toEqual(pos(room()));
-    expect(pos(room(5))).not.toEqual(pos(room()));
+    expect(pos(room())).toEqual(pos(r));
+    expect(pos(room(5))).not.toEqual(pos(r));
   });
 
   it('is ONE geometry — dome, lining, floor, furniture, lamps in a single draw', () => {
-    const r = room();
     expect(r.room).toHaveLength(1);
     const g = r.room[0]!;
     expect(g.getAttribute('color').count).toBe(g.getAttribute('position').count);
@@ -23,7 +25,6 @@ describe('geode interior', () => {
   });
 
   it('holds the swim volume and the orbit camera indoors', () => {
-    const r = room();
     expect(r.radius).toBe(ROOM_RADIUS);
     expect(ROOM_RADIUS).toBeGreaterThan(120 + 30); // swim radius + furniture depth
     expect(ROOM_HEIGHT).toBeGreaterThan(72 + 20); //  swim ceiling + chandelier
@@ -34,12 +35,11 @@ describe('geode interior', () => {
   });
 
   it('is lined with thousands of packed crystals, half of them on a weak device', () => {
-    expect(room().crystals).toBeGreaterThan(4000);
-    expect(room(4, { detail: 0.5 }).crystals).toBeLessThan(room().crystals * 0.6);
+    expect(r.crystals).toBeGreaterThan(4000);
+    expect(room(4, { detail: 0.5 }).crystals).toBeLessThan(r.crystals * 0.6);
   });
 
   it('is furnished and lit: warm lights plus a cool window, vents, things to swim over', () => {
-    const r = room();
     expect(r.boxes).toBeGreaterThan(250); // floor, rug, furniture
     expect(r.emitters.length).toBe(r.lights.length);
     expect(r.emitters.length).toBeGreaterThanOrEqual(7);

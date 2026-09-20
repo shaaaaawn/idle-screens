@@ -207,6 +207,42 @@ describe('mineral world', () => {
     }
   });
 
+  it('cuts the castle\'s spires in the crystals\' own colours', () => {
+    // The spire palette is the clusters' colours: two villages of the same
+    // shape but different crystals get the same stones under different spires.
+    const cluster: Cluster = {
+      id: null, habit: 'lotus', x: 80, y: 0, z: 40, color: '#49cfff', accent: '#49cfff',
+      glass: false, radius: 20, height: 30, phase: 0, shards: [],
+    };
+    const spires = (color: string): (string | number)[][] => buffers(build({ ...off, castle: 1 }, 42, [{ ...cluster, color }]))
+      .filter(b => b[0] === 'castle-spires');
+    const colours = (color: string): number[] => {
+      const mesh = build({ ...off, castle: 1 }, 42, [{ ...cluster, color }]).group.children.find(o => o.name === 'castle-spires') as Mesh;
+      return Array.from(mesh.geometry.getAttribute('color').array);
+    };
+    expect(spires('#49cfff')).toEqual(spires('#ff67bc'));
+    expect(colours('#49cfff')).not.toEqual(colours('#ff67bc'));
+  });
+
+  it('names one program per patched layer, so three never shares a cache entry between two patches', () => {
+    // three.js caches compiled programs by customProgramCacheKey: two
+    // materials with different onBeforeCompile patches but the same key
+    // would silently share one program. Every patched layer names its own.
+    const world = build({ ...full, lanterns: 1, horizon: 1, castle: 1 });
+    const keys = new Map<string, string>();
+    for (const object of world.group.children) {
+      const mesh = object as Mesh;
+      const material = mesh.material as Material;
+      if (!Object.prototype.hasOwnProperty.call(material, 'customProgramCacheKey')) continue;
+      keys.set(object.name, material.customProgramCacheKey());
+    }
+    expect(keys.get('voxel-light-flora')).toBe('mineral-flora-v3');
+    expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v2');
+    expect(keys.get('crystal-veins')).toBe('mineral-fissures-v3');
+    expect(keys.size).toBeGreaterThanOrEqual(6); // + spores, vents, snow, lanterns, horizon
+    expect(new Set(keys.values()).size).toBe(keys.size);
+  });
+
   it('never raises a castle indoors', () => {
     const world = build({ ...off, castle: 1, interior: true });
     expect(world.counts.castle).toBeUndefined();

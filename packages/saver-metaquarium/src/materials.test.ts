@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
+import { Color, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  BLOOM_COLORS,
   chromeMatcap,
   collectFishGlow,
   eyeNoseSign,
@@ -372,12 +373,18 @@ describe('the look is the default, and each part of it is optional', () => {
 });
 
 describe('fish glow — GLOW parts as light sources', () => {
-  const fin = (r: number, x: number, name = 'GLOW-HotPink'): Mesh => {
-    const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name }));
+  // Fixture names resolve through GLOW_NAME_COLORS (`pink` → #ff5ad0, `teal`
+  // → #00ffc8), so the colour a part wears is AUTHORED, and the assertions
+  // below can name the exact hex. (An unlisted name — `GLOW-HotPink` — would
+  // fall through to the seeded pick, and "its own colour" would be whatever
+  // the seed drew.)
+  const fin = (r: number, x: number, name = 'GLOW-Pink', emissive?: string): Mesh => {
+    const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name, ...(emissive ? { emissive } : {}) }));
     m.material.name = name;
     m.position.x = x;
     return m;
   };
+  const rgb = (c: { r: number; g: number; b: number }): number[] => [c.r, c.g, c.b].map((v) => Number(v.toFixed(5)));
 
   it('an accent fin earns full bloom, its own colour, and a repaintable core', () => {
     const root = new Group();
@@ -392,20 +399,52 @@ describe('fish glow — GLOW parts as light sources', () => {
     expect(g.parts).toHaveLength(1);
     expect(g.parts[0]!.x).toBeCloseTo(5, 5);
     expect(g.gain).toBeGreaterThan(0.8);
-    // The bloom is the colour the part actually wears — never a second guess.
-    expect(g.r).toBeCloseTo(g.cores[0]!.base.r, 6);
-    expect(g.g).toBeCloseTo(g.cores[0]!.base.g, 6);
+    // The bloom is the colour the part actually wears — the pink its name
+    // spells — never a second guess. Bloom is that colour scaled by one
+    // saturation gain (near 1 for a pink this pure), so the hue is exact.
+    const pink = new Color('#ff5ad0');
+    expect(rgb(g.cores[0]!.base)).toEqual(rgb(pink));
+    const k = g.r / pink.r;
+    expect(k).toBeGreaterThan(0.8);
+    expect(rgb(g)).toEqual(rgb(pink.clone().multiplyScalar(k)));
+  });
+
+  it('an authored emissive outranks the name, and an unlisted name is a seeded pick', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })), fin(1, 5, 'GLOW Blue.001', '#ff7a00'));
+    applyNpcMaterials(root, createRng(2));
+    const orange = new Color('#ff7a00'), g = collectFishGlow(root, createRng(2))!;
+    expect(rgb(g)).toEqual(rgb(orange.clone().multiplyScalar(g.r / orange.r)));
+    const named = new MeshStandardMaterial({ name: 'GLOW-HotPink' });
+    expect(BLOOM_COLORS.map((hex) => new Color(hex).getHex())).toContain(glowColorOf(named, createRng(2)).getHex());
+    expect(glowColorOf(named, createRng(2)).getHex()).toBe(glowColorOf(named, createRng(2)).getHex());
   });
 
   it('a glow part that IS the silhouette is a coat: never whitened, fainter bloom', () => {
     const root = new Group();
     const body = new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' }));
-    root.add(body, fin(4, 0, 'GLOW-Seafoam'));
+    root.add(body, fin(4, 0, 'GLOW-Teal'));
     applyNpcMaterials(root, createRng(2));
     const g = collectFishGlow(root, createRng(2))!;
     expect(g.cores).toHaveLength(0);
     expect(g.gain).toBeLessThan(0.5);
     expect(g.parts[0]!.coat).toBe(true); // a coat is not a lamp: no light, close rim only
+    const teal = new Color('#00ffc8'), p = g.parts[0]!;
+    expect(rgb(p)).toEqual(rgb(teal.clone().multiplyScalar(p.g / teal.g))); // still teal, not bleached
+  });
+
+  it('lists its parts largest first, keeps four, and takes the lead colour from the biggest', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(6, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));
+    // Five accents in five sizes, added smallest first so the order is earned.
+    const sizes = [0.4, 0.6, 0.8, 1, 1.2], names = ['GLOW-Yellow', 'GLOW-Pink', 'GLOW-Teal', 'GLOW-Purple', 'GLOW-Orange'];
+    sizes.forEach((r, i) => root.add(fin(r, i * 3, names[i])));
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.parts.map((p) => Number(p.radius.toFixed(4)))).toEqual([1.2, 1, 0.8, 0.6]);
+    const orange = new Color('#ff7a00');
+    expect(rgb(g)).toEqual(rgb(orange.clone().multiplyScalar(g.r / orange.r)));
+    expect(g.cores).toHaveLength(5); // …but every glowing material is still repaintable
   });
 
   it('a small WHITE glow part is a lamp — the glowfish\'s angler lure — and blooms; a big white coat still does not', () => {

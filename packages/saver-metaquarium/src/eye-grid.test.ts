@@ -87,6 +87,23 @@ describe('eye grid', () => {
     expect(analyseEyes({ white: [], black: [] }, centre, [0, 1, 0], [0, 0, 1])).toEqual([]);
   });
 
+  it('takes a one-colour lump for an eye only in a pair: a glowfish\'s two black cubes, never a lone stripe', () => {
+    // Two matching black cubes, one a side: each is the other's twin.
+    const pair = analyseEyes(both(['##', '##']), centre, [0, 1, 0], [0, 0, 1]);
+    expect(pair).toHaveLength(2);
+    for (const g of pair) {
+      expect(g.signature).toBe('2x2 ##/##');
+      expect(g.darkEye).toBe(true);
+      expect(g.shiftX).toEqual([0, 0]); // all pupil: nowhere for it to go
+    }
+    // The same cube alone is a mouth (or a stripe) that wears the eye material.
+    expect(analyseEyes(slab(['##', '##'], 1), centre, [0, 1, 0], [0, 0, 1])).toEqual([]);
+    // …and a real two-colour eye on the other side is no twin for it.
+    const eye = slab(['...', '.#.', '...'], -1), stripe = slab(['##', '##'], 1);
+    const grids = analyseEyes({ white: eye.white, black: [...eye.black, ...stripe.black] }, centre, [0, 1, 0], [0, 0, 1]);
+    expect(grids.map((g) => g.signature)).toEqual(['3x3 .../.#./...']);
+  });
+
   it('keeps a notched grid honest: absent cells are marked, not guessed', () => {
     const [g] = analyseEyes(slab(['_..', '.#.', '...'], 1), centre, [0, 1, 0], [0, 0, 1]);
     expect(g!.signature).toBe('3x3 _../.#./...');

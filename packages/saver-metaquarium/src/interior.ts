@@ -60,6 +60,11 @@ export interface InteriorParts {
  *  is radius 120 / y ≤ 72 and its camera orbits from distance 80 up. */
 export const ROOM_RADIUS = 172;
 export const ROOM_HEIGHT = 132;
+/** The smallest the room may be built: below this the dome (172 × scale) no
+ *  longer holds the swim volume's far corner (√(120² + 72²) ≈ 140) and the
+ *  fish swim out through the shell. `crystalScale` runs down to 0.4; the
+ *  interior clamps to this. */
+export const ROOM_MIN_SCALE = 0.85;
 
 const linear = (hex: string): [number, number, number] => {
   const c = new Color(hex);

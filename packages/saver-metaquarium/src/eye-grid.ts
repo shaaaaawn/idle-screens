@@ -98,7 +98,13 @@ export function analyseEyes(soup: EyeSoup, fishCentre: Vec3, up: Vec3, fwd: Vec3
   const roots = [...pointsOf.keys()], reach = voxel * 0.34;
   // By real distance, not by bounding box: on a turned head (a sea turtle's)
   // boxes are fat and would swallow the nostril that sits between the eyes.
-  const near = (A: Vec3[], B: Vec3[]): boolean => A.some((p) => B.some((q2) => Math.abs(p[0] - q2[0]) < reach && Math.abs(p[1] - q2[1]) < reach && Math.abs(p[2] - q2[2]) < reach));
+  // Euclidean, not per axis — a per-axis box reaches √3 further on the
+  // diagonal, which is where a nostril sits.
+  const reach2 = reach * reach;
+  const near = (A: Vec3[], B: Vec3[]): boolean => A.some((p) => B.some((q2) => {
+    const dx = p[0] - q2[0], dy = p[1] - q2[1], dz = p[2] - q2[2];
+    return dx * dx + dy * dy + dz * dz < reach2;
+  }));
   for (let i = 0; i < roots.length; i++) for (let j = i + 1; j < roots.length; j++) {
     if (find(roots[i]!) !== find(roots[j]!) && near(pointsOf.get(roots[i]!)!, pointsOf.get(roots[j]!)!)) parent[find(roots[i]!)] = find(roots[j]!);
   }

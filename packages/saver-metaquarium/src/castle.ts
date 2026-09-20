@@ -83,6 +83,7 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
   const warm = new Color(WARM), dark = new Color('#1d2333');
   const palette = spec.palette.length ? spec.palette : ['#49cfff', '#a17bff', '#ff67bc'];
   const emitters: Emitter[] = [];
+  const obstacles: CastleParts['obstacles'] = [];
   const emit = (x: number, y: number, z: number, color: Color, reach: number): void => {
     emitters.push({ x, y, z, r: color.r, g: color.g, b: color.b, reach, phase: rng.next() * 6.28 });
   };
@@ -139,10 +140,15 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
     const h = (26 + sr.range(0, 12)) * big * spireK * s;
     facets.spire(tx, top, tz, tr * V * 0.78, h, tint, sr);
     for (let c = 0; c < 4; c++) {
-      const oa = sr.next() * 6.28, lean = sr.range(0.18, 0.4);
+      // The court's bearing is castle-local, like the masonry's, so the roof
+      // turns with its tower (`W` maps a local angle to world by -facing).
+      const oa = sr.next() * 6.28 - spec.facing, lean = sr.range(0.18, 0.4);
       facets.spire(tx + Math.cos(oa) * tr * V * 0.45, top, tz + Math.sin(oa) * tr * V * 0.45, tr * V * 0.3, h * sr.range(0.35, 0.6), tint, sr,
         [Math.cos(oa) * lean, Math.sin(oa) * lean]);
     }
+    // What a floor-hugger must clear here is the spire's tip, not the parapet:
+    // a dome per tower, the castle's own dome covers the walls between.
+    obstacles.push({ x: tx, y: spec.y, z: tz, r: tr * V * 1.5, h: y0 + hgt * V + h });
     emit(tx, top + h * 0.5, tz, tint, 70 * big * s);
     // A banner off the parapet, in the spire's colour.
     const flag = tint.clone().multiplyScalar(0.8);
@@ -228,7 +234,7 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
   const [mx, mz] = W(0, R + 14 * s), [px, pz] = W(0, plazaW), [cx, cz] = W(0, R * 0.55);
   return {
     masonry, crystal, emitters,
-    obstacles: [{ x: spec.x, y: spec.y, z: spec.z, r: R + 12 * s, h: (towerH + 4) * V + P }],
+    obstacles: [{ x: spec.x, y: spec.y, z: spec.z, r: R + 12 * s, h: (towerH + 4) * V + P }, ...obstacles],
     marks: {
       gate: { x: mx, y: spec.y + 16 * s, z: mz },
       plaza: { x: px, y: spec.y + 20 * s, z: pz },

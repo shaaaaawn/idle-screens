@@ -11,7 +11,9 @@ too. A glow part that is the whole silhouette keeps its colour and blooms
 fainter, and unsaturated glows never bloom as grey fog. `fishMetal` (default
 on) renders metallic plates with a generated chrome matcap — reflection with
 no environment map and no lights — instead of a flat unlit atlas. `fishGlow: 0`
-and `fishMetal: off` are the previous look exactly.
+and `fishMetal: off` restore the previous look exactly: at 0 every glow core is
+written back to its authored colour and holds it, no bloom, no breathing (with
+`fishLighting: flat`, below, for the original unlit tank).
 
 `fishLighting` (default `lit`): fish take light. A key and a fill shade every
 voxel face by where it points; a generated studio environment (prefiltered once,

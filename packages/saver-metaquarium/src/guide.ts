@@ -120,61 +120,63 @@ export interface Recipe {
 
 const NIGHT = { fogColor: '#0a0a1a', fogNear: 120, fogFar: 700 } as const;
 const STAGE = { fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, autoRotate: 0 } as const;
+/** Every recipe is close enough to see a face: eyes alive (an opt-in, like every look param). */
+const ALIVE = { eyeLife: 1 } as const;
 
 export const RECIPES: readonly Recipe[] = [
   {
     id: 'geode-harbor', label: 'Geode harbor', what: 'A village at night: three geode homes, chimneys bubbling, lanterns overhead, a far horizon.',
-    params: { ...NIGHT, floorColor: '#2a1a2a', paths: 0.7, geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
+    params: { ...ALIVE, ...NIGHT, floorColor: '#2a1a2a', paths: 0.7, geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
       propMix: 'crystal:2@spire/orange,crystal:2@druse/hotpink,crystal:1@lotus/purple', crystalTint: 0.6, fishMix: '100:2,257:2,seahorse:2', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 190, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
     id: 'moonlit-grove', label: 'Moonlit grove', what: 'A garden: dense swaying flora in green light, one home, lanterns thick overhead.',
-    params: { fogColor: '#041410', floorColor: '#16402e', fogNear: 120, fogFar: 700, paths: 0.6, floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
+    params: { ...ALIVE, fogColor: '#041410', floorColor: '#16402e', fogNear: 120, fogFar: 700, paths: 0.6, floraDensity: 1, rockDensity: 0.3, rockVeins: 0.5, geodeHomes: 1, bubbleVents: 0.3, marineSnow: 0.85, skyLanterns: 1, horizon: 1,
       propMix: 'crystal:3@spire/seafoam,crystal:1@lotus/yellow,crystal:1@druse/cyan', crystalWild: 0.8, crystalTint: 0.6, fishMix: '100:2,257:3', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 170, cameraElevation: 10, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
     id: 'castle', label: 'The castle', what: 'The landmark: voxel walls and crystal-spired towers, a lit gate, a road to a plaza. Orbit it.',
-    params: { fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900, landmark: 'castle', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
+    params: { ...ALIVE, fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900, landmark: 'castle', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
       propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalTint: 0.6, fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5 },
   },
   {
     id: 'citadel', label: 'The citadel', what: 'The two-storey castle: an upper ward on a terrace, taller towers, a stair. Wants a high, far camera.',
-    params: { fogColor: '#060818', floorColor: '#101830', fogNear: 180, fogFar: 1000, landmark: 'citadel', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
+    params: { ...ALIVE, fogColor: '#060818', floorColor: '#101830', fogNear: 180, fogFar: 1000, landmark: 'citadel', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
       propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalTint: 0.6, fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5,
       cameraDistance: 340, cameraElevation: 20, cameraAzimuth: 14, autoRotate: 1.5 },
   },
   {
     id: 'commute', label: 'Going home', what: 'Three neighbours leave their own front doors, meet in the village, and go home again. Loops.',
-    params: { ...NIGHT, floorColor: '#2a1a2a', paths: 0.5, geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
+    params: { ...ALIVE, ...NIGHT, floorColor: '#2a1a2a', paths: 0.5, geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
       propMix: 'crystal:3@druse/rainbow', crystalTint: 0.6, fishMix: '100:2,257:1', fishGlow: 0.5,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0 },
   },
   {
     id: 'stage-duet', label: 'Duet, two spots', what: 'A dark stage: a solo, the other solo, then they meet and the pink and cyan pools cross into white.',
-    params: { ...STAGE, vignette: 'duet', spotRig: '0/#ff8ad0*26, 1/#7fdcff*26', spotCues: VIGNETTE_CUES.duet!, spotStrength: 0.95,
+    params: { ...ALIVE, ...STAGE, vignette: 'duet', spotRig: '0/#ff8ad0*26, 1/#7fdcff*26', spotCues: VIGNETTE_CUES.duet!, spotStrength: 0.95,
       fishMix: '100:1,257:1', fishGlow: 0.5, bodyWiggle: 0.3, marineSnow: 0.5, bubbleVents: 0.3, cameraDistance: 170, cameraElevation: 12, cameraAzimuth: 0 },
   },
   {
     id: 'stage-trio', label: 'Trio, three spots', what: 'Three solos, two pairings, the full company, a last word alone, blackout.',
-    params: { ...STAGE, vignette: 'trio', spotRig: '0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24', spotCues: VIGNETTE_CUES.trio!, spotStrength: 0.95,
+    params: { ...ALIVE, ...STAGE, vignette: 'trio', spotRig: '0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24', spotCues: VIGNETTE_CUES.trio!, spotStrength: 0.95,
       fishMix: '100:2,257:1', fishGlow: 0.5, bodyWiggle: 0.3, marineSnow: 0.5, cameraDistance: 185, cameraElevation: 13, cameraAzimuth: 0 },
   },
   {
     id: 'follow-spot', label: 'Follow-spot', what: 'One performer crosses a dark stage in a beam, its shadow in the pool under it.',
-    params: { ...STAGE, followSpot: 0, spotStrength: 0.9, fishMix: '257:1@patrol,100:4@drift', swimSpeed: 0.6, swimVariance: 0.4, bodyWiggle: 0.3, pathShape: 'crossing', fishGlow: 0.5, marineSnow: 0.5,
+    params: { ...ALIVE, ...STAGE, followSpot: 0, spotStrength: 0.9, fishMix: '257:1@patrol,100:4@drift', swimSpeed: 0.6, swimVariance: 0.4, bodyWiggle: 0.3, pathShape: 'crossing', fishGlow: 0.5, marineSnow: 0.5,
       cameraDistance: 190, cameraElevation: 14, cameraAzimuth: 0 },
   },
   {
     id: 'tea', label: 'Tea, indoors', what: 'Inside a geode home: a friend calls round for tea. Two fish, an intimate room.',
-    params: { interior: 'geode', vignette: 'tea', fishMix: '100:1,257:1', bubbleVents: 0.5, crystalTint: 0.7, bodyWiggle: 0.25, cameraDistance: 118, cameraElevation: 14, cameraAzimuth: 300, autoRotate: 0 },
+    params: { ...ALIVE, interior: 'geode', vignette: 'tea', fishMix: '100:1,257:1', bubbleVents: 0.5, crystalTint: 0.7, bodyWiggle: 0.25, cameraDistance: 118, cameraElevation: 14, cameraAzimuth: 300, autoRotate: 0 },
   },
   {
     id: 'jellyfish', label: 'Among the lanterns', what: 'The jellyfish flotilla brought down to eye level over a few crystals.',
-    params: { fogColor: '#04081a', floorColor: '#0c1428', fogNear: 160, fogFar: 800, skyLanterns: 1, skyHeight: 0.3, marineSnow: 0.4, crystalScale: 0.7,
+    params: { ...ALIVE, fogColor: '#04081a', floorColor: '#0c1428', fogNear: 160, fogFar: 800, skyLanterns: 1, skyHeight: 0.3, marineSnow: 0.4, crystalScale: 0.7,
       propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/yellow,crystal:1@druse/purple', fishMix: '100:1,257:1', swimStyle: 'drift', swimSpeed: 0.4,
       cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1 },
   },
@@ -210,6 +212,8 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     const at = { x: 0, y: 0, z: 0 };
     for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
     if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
+    // Paths meet at a hub: the mark `paths` documents itself as adding.
+    if (Number(params.paths ?? 0) > 0) world.hub = at;
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
   }
   return out;

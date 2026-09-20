@@ -78,8 +78,21 @@ describe('eye mood', () => {
   });
 
   it('means it: looks where it swims, at who it faces, wide for a hop, shut for a rest', () => {
-    expect(mood(3.3, 2, { ...idle, doing: 'moving', climb: 1 }).gazeUp).toBeGreaterThan(0.5);
-    expect(mood(3.3, 2, { ...idle, target: { fwd: 1, up: -0.6 } }).gazeFwd).toBeGreaterThan(0.6);
+    // Gaze is sampled across a whole window, not at one instant: every 8–15 s
+    // the fish glances at the camera for 1.3 s, and a single sample could sit
+    // inside (or outside) that glance by luck of the phase. The camera cue is
+    // put where the fish should already be looking, so a glance can only
+    // reinforce the gaze — then EVERY sample must hold it, glance or not.
+    const window = Array.from({ length: 200 }, (_, i) => i * 0.1);
+    for (const t of window) {
+      expect(mood(t, 2, { ...idle, doing: 'moving', climb: 1, camera: { fwd: 0, up: 0.9 } }).gazeUp, `climb at ${t}`).toBeGreaterThan(0.5);
+      expect(mood(t, 2, { ...idle, target: { fwd: 1, up: -0.6 }, camera: { fwd: 0.9, up: -0.54 } }).gazeFwd, `target at ${t}`).toBeGreaterThan(0.6);
+    }
+    // And with the camera elsewhere the glance is real: some frames DO look
+    // away from the target, but most hold it.
+    const held = window.filter((t) => mood(t, 2, { ...idle, target: { fwd: 1, up: -0.6 } }).gazeFwd > 0.6).length;
+    expect(held).toBeGreaterThan(window.length * 0.75);
+    expect(held).toBeLessThan(window.length);
     const hop = mood(3.3, 2, { ...idle, doing: 'hop' });
     expect(hop.dilate).toBeGreaterThan(1.3);
     expect(hop.widen).toBe(1);
