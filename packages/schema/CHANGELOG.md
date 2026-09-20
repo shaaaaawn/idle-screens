@@ -1,5 +1,66 @@
 # @idle-screens/schema
 
+## 3.9.0
+
+### Minor Changes
+
+- afbb530: Examples go comprehensive: five specs and the first bundled sequence.
+  
+  Every feature that had **no example** now has one:
+  
+  - **`signal-board`** — `layout: { type: 'table' }`: nine bars and nine labels
+    as two layers instead of eighteen positioned blocks. `values` are paint, so
+    one `setParam` glides the whole readout.
+  - **`phase-duet`** — `clock`: three layers (a `pulse.wave` dot field, swelling
+    rings, a breathing heart) sharing one clock so they stay in step instead of
+    drifting on seeded phases.
+  - **`web-work`** — `links.mode: 'random'` + `links.falloff`: a web that crosses
+    itself with edges that fade toward the cutoff, plus `stroke.orient` marks
+    that turn along their heading.
+  - **`shard-fall`** — `rotate` (static per-entity tilt, which `spin: [0, 0]`
+    cannot express) over `blend: 'multiply'` shadows on a pale plate.
+  - **`murmur`** — `density: 'dense'` doing real work: 620 entities, past the
+    500-entity line where `adviseSpec` raises `dense-scene`, so the declaration
+    is the thing withholding it.
+  - **`three-movements`** — the first sequence example anywhere: a `bed` that
+    survives every boundary, a `morph` with `text: 'crossfade'` between
+    structural twins, a `fade` between unlike segments, and a sequence-level
+    `finish`.
+  
+  New exports `EXAMPLE_SEQUENCES` and `SequenceExample`. A sequence is a
+  different top-level format, so it gets its own catalog rather than widening
+  `SCHEMA_EXAMPLES`'s `SaverSpec[]` contract — existing consumers are untouched.
+  
+  Tests pin the properties the examples teach rather than the prose: every
+  example validates with zero warnings and zero (non-informational) advisories,
+  the `three-movements` morph pair is structurally identical so the morph is
+  real, and `murmur` stays above the threshold its declaration describes.
+  
+  `three-movements` carries one **deliberate** informational advisory —
+  `fade-degrades-on-low-tier` — because a fade is the honest transition between
+  segments with nothing structurally in common, and the lowest capability tier
+  degrading it to a cut is a fact the piece accepts.
+
+### Patch Changes
+
+- 451308c: Two worked examples for features that had none, plus one units clarification.
+  
+  - **`sparse-night`** — the `density: 'sparse'` declaration in use: a star-grain
+    field under the advisory's coverage threshold, one chain-linked figure, one
+    satellite that flares every eighteen seconds. Shows the declaration
+    withholding `sparse-scene` while opting into `density-mismatch` honesty.
+  - **`typed-cue`** — `textBlock.reveal` in both moods: a typewriter block with a
+    caret (`speed` makes it self-type on the scene clock) and a `glyphFade` block
+    that arrives as a wave of overlapping alphas. Both declare `opacity` so the
+    path is steerable. The one non-text layer (a soft scan band) keeps the scene
+    off the `text-heavy` advisory.
+  - **FORMAT.md** — `perceiveScene`'s `t` is milliseconds (the MCP `previewScene`
+    tool's `t` is seconds and converts). Passing seconds to the library makes a
+    self-typing block read as one that never finishes, which wasted a debugging
+    pass on the `typed-cue` example.
+  
+  Determinism baselines for both new examples are pinned in the snapshot suite.
+
 ## 3.8.0
 
 ### Minor Changes
