@@ -26,6 +26,15 @@ describe('castle', () => {
     expect(y.reduce((m, v) => Math.min(m, v), Infinity)).toBeGreaterThan(spec.y + 40);
   });
 
+  it('the two-storey citadel raises an upper ward: more towers, a keep on the terrace, still in budget', () => {
+    const one = buildCastle(spec, createRng(2)), two = buildCastle({ ...spec, tiers: 2 }, createRng(2));
+    expect(two.counts.towers).toBe(10);
+    expect(two.keep.y).toBeGreaterThan(one.keep.y + 15);
+    expect(two.counts.triangles).toBeLessThan(60000);
+    const top = (c: typeof one): number => arr(c.crystal, 'position').filter((_, i) => i % 3 === 1).reduce((m, v) => Math.max(m, v), 0);
+    expect(top(two)).toBeGreaterThan(top(one) + 20);
+  });
+
   it('lights the field from its spires and gate, and names places to go', () => {
     const c = buildCastle(spec, createRng(3));
     expect(c.emitters.length).toBeGreaterThanOrEqual(7);

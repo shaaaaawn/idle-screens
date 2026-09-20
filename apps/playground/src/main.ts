@@ -314,6 +314,17 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: the citadel — the castle's two-storey version, with an upper ward.
+  createMetaquarium({
+    id: 'metaquarium-study-citadel', label: 'Metaquarium (study citadel, two-storey)',
+    params: {
+      landmark: 'citadel', propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalScale: 1,
+      bubbleVents: 0.4, skyLanterns: 0.5, horizon: 0.8, floraDensity: 0.3,
+      fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5, crystalTint: 0.6,
+      fogColor: '#060818', floorColor: '#101830', fogNear: 180, fogFar: 1000,
+      cameraDistance: 340, cameraElevation: 20, cameraAzimuth: 14, autoRotate: 1.5,
+    }, catalog: LOCAL_CATALOG,
+  }),
   createMetaquarium({
     id: 'metaquarium-study-geode', label: 'Metaquarium (study geode)',
     params: {

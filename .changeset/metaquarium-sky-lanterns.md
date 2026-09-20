@@ -11,3 +11,5 @@ Flora moves again, at no frame cost: the sway is an S-curve that climbs the stal
 `landmark: castle` — the one thing bigger than everything else: voxel curtain walls and six drum towers roofed with glowing crystal spires, a lit gatehouse, banners, a paved road between lamp posts to a round plaza, and a grand geode for a keep. Two draw calls; its spires, gate and lamps join the light field. Bubble highlights now sit at a per-bubble bearing and slide as the bubble wobbles.
 
 `spotRig` + `spotCues` — a rig of up to three follow-spots (`0/#ff8ad0*26, 1/#7fdcff`), each on its own fish in its own colour, and a looping cue sheet (`8s:a, 8s:b, 12s:a+b, 4s:-`) that cross-fades solos, duets and blackouts. Pools add where they cross. New open-stage vignettes `duet` and `trio` ship with matching sheets (`VIGNETTE_CUES`), and a vignette can now send actors to the world's own marks (a castle's `gate`, `plaza`, `courtyard`). `followSpot` alone behaves as before.
+
+`landmark: citadel` — the castle's two-storey version: a wider outer ward, and inside it a raised terrace with its own crenellated ring, four taller spired towers, a stair up from the courtyard, and the keep on top.

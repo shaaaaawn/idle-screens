@@ -207,8 +207,10 @@ export const METAQUARIUM_PARAMS = {
    *  one grand geode with its door lit. One draw call, unlit. */
   /** The landmark — one thing bigger than everything else. `castle`: voxel
    *  curtain walls, six towers roofed with glowing crystal spires, a lit
-   *  gatehouse, a paved road and plaza, and a grand geode for a keep. */
-  landmark: { type: 'enum', default: 'none', options: ['none', 'castle'], ease: 'step' },
+   *  gatehouse, a paved road and plaza, and a grand geode for a keep.
+   *  `citadel` is the two-storey version: a wider outer ward, and inside it a
+   *  raised terrace with its own ring, four taller towers, a stair, the keep on top. */
+  landmark: { type: 'enum', default: 'none', options: ['none', 'castle', 'citadel'], ease: 'step' },
   horizon: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
    *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).

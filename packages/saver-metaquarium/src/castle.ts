@@ -26,6 +26,8 @@ export interface CastleSpec {
   scale: number;
   /** Spire colours, cycled round the towers. */
   palette: readonly string[];
+  /** 2 raises an upper ward on a terrace inside the walls: a second ring, four taller towers, a stair. */
+  tiers?: 1 | 2;
 }
 
 export interface CastleParts {
@@ -85,36 +87,37 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
     emitters.push({ x, y, z, r: color.r, g: color.g, b: color.b, reach, phase: rng.next() * 6.28 });
   };
 
-  const R = 86 * s, wallH = 9, towerH = 17;
+  const two = (spec.tiers ?? 1) >= 2;
+  const R = (two ? 108 : 86) * s, wallH = 9, towerH = 17;
+  const gateHalf = 0.2 * (two ? 0.8 : 1); // radians either side of the gate left open
   const box = (u: number, w: number, y0: number, su: number, h: number, sw: number, c: Color, yaw = 0, flat = false): void => {
     const [x, z] = W(u, w);
     cubes.cube(x, spec.y + y0 + h / 2, z, su, h, sw, c, spec.facing + yaw, flat);
   };
 
-  // Curtain wall: a ring of voxel courses, crenellated, open at the gate.
-  const columns = Math.round((Math.PI * 2 * R) / V);
-  const gateHalf = 0.2; // radians either side of the gate left open
-  for (let i = 0; i < columns; i++) {
-    const a = (i / columns) * Math.PI * 2;
-    const off = Math.atan2(Math.sin(a), Math.cos(a));
-    if (Math.abs(off) < gateHalf) continue;
-    const u = Math.sin(a) * R, w = Math.cos(a) * R;
-    // Two courses per column, different stones, so the wall reads as laid.
-    const split = 3 + Math.floor(rng.next() * 4);
-    box(u, w, 0, V * 1.04, split * V, V * 1.6, stone(), a);
-    box(u, w, split * V, V * 1.04, (wallH - split) * V, V * 1.6, stone(), a);
-    if (i % 2 === 0) box(u + Math.sin(a) * V * 0.45, w + Math.cos(a) * V * 0.45, wallH * V, V * 1.04, V * 1.2, V * 0.7, stone(), a);
-    // Arrow slits, lit from inside.
-    if (i % 5 === 2) box(u + Math.sin(a) * V * 0.82, w + Math.cos(a) * V * 0.82, V * 4.5, V * 0.36, V * 2.2, V * 0.1, warm, a, true);
-  }
+  /** A ring of voxel courses, crenellated, open at the gate. */
+  const ringWall = (rad: number, y0: number, h: number): void => {
+    const columns = Math.round((Math.PI * 2 * rad) / V);
+    const half = Math.asin(Math.min(0.9, (Math.sin(gateHalf) * R) / rad)); // same gate WIDTH on any ring
+    for (let i = 0; i < columns; i++) {
+      const a = (i / columns) * Math.PI * 2;
+      if (Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < half) continue;
+      const u = Math.sin(a) * rad, w = Math.cos(a) * rad;
+      // Two courses per column, different stones, so the wall reads as laid.
+      const split = Math.min(h - 1, 3 + Math.floor(rng.next() * 4));
+      box(u, w, y0, V * 1.04, split * V, V * 1.6, stone(), a);
+      box(u, w, y0 + split * V, V * 1.04, (h - split) * V, V * 1.6, stone(), a);
+      if (i % 2 === 0) box(u + Math.sin(a) * V * 0.45, w + Math.cos(a) * V * 0.45, y0 + h * V, V * 1.04, V * 1.2, V * 0.7, stone(), a);
+      // Arrow slits, lit from inside.
+      if (i % 5 === 2) box(u + Math.sin(a) * V * 0.82, w + Math.cos(a) * V * 0.82, y0 + h * V * 0.5, V * 0.36, V * 2.2, V * 0.1, warm, a, true);
+    }
+  };
 
-  // Towers: round voxel drums, a flared parapet, a crystal for a roof.
-  const towerAt: Array<[number, number, number]> = [
-    [gateHalf + 0.09, 1.25, 1], [-gateHalf - 0.09, 1.25, 1], // the gatehouse pair
-    [Math.PI * 0.5, 1, 0], [-Math.PI * 0.5, 1, 0], [Math.PI * 0.82, 1.1, 0], [-Math.PI * 0.82, 1.1, 0],
-  ];
-  towerAt.forEach(([a, big], ti) => {
-    const u = Math.sin(a) * R, w = Math.cos(a) * R;
+  /** A round voxel drum with a flared parapet and a crystal for a roof. */
+  let towers = 0;
+  const tower = (a: number, rad: number, y0: number, big: number, spireK = 1): void => {
+    const ti = towers++;
+    const u = Math.sin(a) * rad, w = Math.cos(a) * rad;
     const [tx, tz] = W(u, w);
     const tr = 3.1 * big, hgt = Math.round(towerH * big);
     const drum = Math.round(tr * 2 * Math.PI);
@@ -122,18 +125,18 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
       const b = (k / drum) * Math.PI * 2;
       const du = Math.sin(b) * tr * V, dw = Math.cos(b) * tr * V;
       const split = 5 + Math.floor(rng.next() * 6);
-      box(u + du, w + dw, 0, V * 1.08, split * V, V * 1.08, stone(), b);
-      box(u + du, w + dw, split * V, V * 1.08, (hgt - split) * V, V * 1.08, stone(), b);
+      box(u + du, w + dw, y0, V * 1.08, split * V, V * 1.08, stone(), b);
+      box(u + du, w + dw, y0 + split * V, V * 1.08, (hgt - split) * V, V * 1.08, stone(), b);
       // Parapet flares one voxel out; every other merlon stands.
-      box(u + du * 1.22, w + dw * 1.22, hgt * V, V * 1.1, V * 1.1, V * 1.1, stone(), b);
-      if (k % 2 === 0) box(u + du * 1.22, w + dw * 1.22, (hgt + 1.1) * V, V * 1.1, V, V * 1.1, stone(), b);
-      if (k % 4 === 1) box(u + du * 1.09, w + dw * 1.09, (hgt - 5 - (k % 8)) * V, V * 0.5, V * 1.6, V * 0.5, warm, b, true);
+      box(u + du * 1.22, w + dw * 1.22, y0 + hgt * V, V * 1.1, V * 1.1, V * 1.1, stone(), b);
+      if (k % 2 === 0) box(u + du * 1.22, w + dw * 1.22, y0 + (hgt + 1.1) * V, V * 1.1, V, V * 1.1, stone(), b);
+      if (k % 4 === 1) box(u + du * 1.09, w + dw * 1.09, y0 + (hgt - 5 - (k % 8)) * V, V * 0.5, V * 1.6, V * 0.5, warm, b, true);
     }
     // The roof: a crystal grown out of the drum, with a court of small ones.
     const tint = new Color(palette[ti % palette.length]!);
-    const top = spec.y + hgt * V;
+    const top = spec.y + y0 + hgt * V;
     const sr = rng.fork(60 + ti);
-    const h = (26 + sr.range(0, 12)) * big * s;
+    const h = (26 + sr.range(0, 12)) * big * spireK * s;
     facets.spire(tx, top, tz, tr * V * 0.78, h, tint, sr);
     for (let c = 0; c < 4; c++) {
       const oa = sr.next() * 6.28, lean = sr.range(0.18, 0.4);
@@ -143,8 +146,43 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
     emit(tx, top + h * 0.5, tz, tint, 70 * big * s);
     // A banner off the parapet, in the spire's colour.
     const flag = tint.clone().multiplyScalar(0.8);
-    for (let f = 0; f < 4; f++) box(u + (tr + 1.4) * V * Math.sin(a), w + (tr + 1.4) * V * Math.cos(a), (hgt - 2 - f * 1.05) * V, V * 0.95 - f * 0.12 * V, V, V * 0.3, f % 2 ? flag : flag.clone().multiplyScalar(0.7), a);
-  });
+    for (let f = 0; f < 4; f++) box(u + (tr + 1.4) * V * Math.sin(a), w + (tr + 1.4) * V * Math.cos(a), y0 + (hgt - 2 - f * 1.05) * V, V * 0.95 - f * 0.12 * V, V, V * 0.3, f % 2 ? flag : flag.clone().multiplyScalar(0.7), a);
+  };
+
+  ringWall(R, 0, wallH);
+  tower(gateHalf + 0.09, R, 0, 1.25); tower(-gateHalf - 0.09, R, 0, 1.25); // the gatehouse pair
+  for (const a of [Math.PI * 0.5, -Math.PI * 0.5]) tower(a, R, 0, 1);
+  for (const a of [Math.PI * 0.82, -Math.PI * 0.82]) tower(a, R, 0, 1.1);
+
+  // The upper ward: a terrace raised inside the walls, its own ring and four
+  // taller towers, reached by a stair from the courtyard. The keep stands on it.
+  const P = two ? 7 * V : 0, R2 = 50 * s;
+  if (two) {
+    const lip = R2 + 7 * s;
+    // Retaining wall, battered in two courses.
+    const cols = Math.round((Math.PI * 2 * lip) / V);
+    for (let i = 0; i < cols; i++) {
+      const a = (i / cols) * Math.PI * 2;
+      box(Math.sin(a) * lip, Math.cos(a) * lip, 0, V * 1.06, P, V * 1.5, stone(), a);
+      if (i % 3 === 0) box(Math.sin(a) * (lip + V * 0.7), Math.cos(a) * (lip + V * 0.7), 0, V * 1.06, P * 0.45, V * 0.9, stone(), a);
+    }
+    // The terrace floor.
+    const step = V * 2, n = Math.ceil(lip / step);
+    const flagA = new Color('#77829b'), flagB = new Color('#646f89');
+    for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) {
+      if (Math.hypot(i, j) * step > lip) continue;
+      box(i * step, j * step, P - V * 0.3, step * 0.98, V * 0.3, step * 0.98, (i + j) % 2 ? flagA : flagB);
+    }
+    ringWall(R2, P, 6);
+    for (const a of [Math.PI * 0.27, -Math.PI * 0.27, Math.PI * 0.75, -Math.PI * 0.75]) tower(a, R2, P, 1.15, 1.5);
+    // The stair: up from the courtyard to the upper gate.
+    const steps = Math.ceil(P / (V * 0.6));
+    for (let k = 0; k < steps; k++) {
+      const rise = P - k * V * 0.6;
+      box(0, lip + V * 0.75 + k * V, 0, V * 5.2, Math.max(V * 0.3, rise), V * 1.02, k % 2 ? flagA : flagB);
+    }
+    for (const side of [-1, 1]) box(side * V * 3, lip + V * 0.75, P, V * 0.8, V * 2.4, V * 0.8, warm, 0, true);
+  }
 
   // Gatehouse: a lintel over the opening, a dark passage, a portcullis of light.
   const gw = Math.sin(gateHalf) * R;
@@ -190,13 +228,13 @@ export function buildCastle(spec: CastleSpec, rng: CrystalRng): CastleParts {
   const [mx, mz] = W(0, R + 14 * s), [px, pz] = W(0, plazaW), [cx, cz] = W(0, R * 0.55);
   return {
     masonry, crystal, emitters,
-    obstacles: [{ x: spec.x, y: spec.y, z: spec.z, r: R + 12 * s, h: (towerH + 4) * V }],
+    obstacles: [{ x: spec.x, y: spec.y, z: spec.z, r: R + 12 * s, h: (towerH + 4) * V + P }],
     marks: {
       gate: { x: mx, y: spec.y + 16 * s, z: mz },
       plaza: { x: px, y: spec.y + 20 * s, z: pz },
-      courtyard: { x: cx, y: spec.y + 22 * s, z: cz },
+      courtyard: { x: cx, y: spec.y + P + 22 * s, z: cz },
     },
-    keep: { x: spec.x, y: spec.y, z: spec.z - 0 * s, scale: 1.8 * s },
-    counts: { towers: towerAt.length, cubes: cubes.count, triangles: cubes.count * 12 + facets.pos.length / 9 },
+    keep: { x: spec.x, y: spec.y + P, z: spec.z - (two ? 6 * s : 0), scale: (two ? 1.35 : 1.8) * s },
+    counts: { towers, cubes: cubes.count, triangles: cubes.count * 12 + facets.pos.length / 9 },
   };
 }

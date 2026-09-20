@@ -20,6 +20,8 @@ export interface HorizonOptions {
   amount: number;
   /** Colours for the distant crystals (the scene's own). */
   palette: readonly string[];
+  /** False when the world already has its landmark: one grand thing, not two. */
+  geode?: boolean;
 }
 
 export interface Horizon {
@@ -100,7 +102,7 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
     for (let i = 0; i < slots; i++) {
       const a = (i / slots) * Math.PI * 2 + rr.range(-0.16, 0.16) + ri * 0.4;
       // The grand geode owns its stretch of the first ring.
-      if (ri === 0 && Math.abs(Math.atan2(Math.sin(a - geodeBearing), Math.cos(a - geodeBearing))) < 0.42) continue;
+      if (ri === 0 && opts.geode !== false && Math.abs(Math.atan2(Math.sin(a - geodeBearing), Math.cos(a - geodeBearing))) < 0.42) continue;
       const rad = ring.r + rr.range(-45, 45);
       const x = Math.sin(a) * rad, z = Math.cos(a) * rad;
       if (rr.next() < 0.42) {
@@ -134,7 +136,7 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
     }
   });
   // The grand geode: the biggest home in the world, seen from the village.
-  if (opts.amount >= 0.4) {
+  if (opts.amount >= 0.4 && opts.geode !== false) {
     const gr = rng.fork(40);
     const R = 150, rad = HORIZON_RINGS[0]!.r + 30;
     const gx = Math.sin(geodeBearing) * rad, gz = Math.cos(geodeBearing) * rad;

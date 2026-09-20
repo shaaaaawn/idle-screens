@@ -943,7 +943,7 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
-    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), horizon = this.num('horizon'), castle = this.str('landmark') === 'castle';
+    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), horizon = this.num('horizon'), castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
     const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${horizon}|${castle}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;

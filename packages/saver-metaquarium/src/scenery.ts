@@ -30,7 +30,7 @@ export interface SceneryOptions {
   /** 0..1 — silhouettes standing past the fog line. */
   horizon?: number;
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
-  castle?: boolean;
+  castle?: 0 | 1 | 2;
   /** Build the scene INSIDE a geode home instead of out on the floor. */
   interior?: boolean;
   cap: number;
@@ -167,7 +167,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const marks: Record<string, { x: number; y: number; z: number }> = {};
   if (opts.castle && !opts.interior) {
     const cz = (homeCount ? -150 : -110) * s;
-    const castle = buildCastle({ x: 0, y: terrain(0, cz), z: cz, facing: 0, scale: s, palette: clusters.map(c => c.color) }, rng.fork(11));
+    const castle = buildCastle({ x: 0, y: terrain(0, cz), z: cz, facing: 0, scale: s, palette: clusters.map(c => c.color), tiers: opts.castle === 2 ? 2 : 1 }, rng.fork(11));
     for (const [g, name, side] of [[castle.masonry, 'castle-masonry', FrontSide], [castle.crystal, 'castle-spires', DoubleSide]] as const) {
       g.userData.mqOwned = true;
       const material = new MeshBasicMaterial({ vertexColors: true, side });
@@ -272,7 +272,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   }
   // The far distance: hazed rings of spires, castle crystals and a grand geode.
   const horizonFog = { value: new Color() };
-  const far = opts.interior ? null : buildHorizon(rng.fork(8), { amount: opts.horizon ?? 0, palette: clusters.map(c => c.color) });
+  const far = opts.interior ? null : buildHorizon(rng.fork(8), { amount: opts.horizon ?? 0, palette: clusters.map(c => c.color), geode: !opts.castle });
   if (far?.geometry) {
     far.geometry.userData.mqOwned = true;
     const material = new MeshBasicMaterial({ vertexColors: true, fog: false, side: DoubleSide });
