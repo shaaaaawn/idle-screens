@@ -212,7 +212,7 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   const away = (hex: string): number => { const d = Math.abs(hueOf(hex) - home); return Math.min(d, 1 - d); };
   const ranked = [...PAINTS].sort((p, q) => away(q[0]) - away(p[0]));
   const paint = ranked[rng.next() < 0.7 ? 0 : 1]!;
-  const BEAM = '#3d2a24', BEAM2 = '#4a332b', STONE_A = '#c9bda3', STONE_B = '#a99c84', BRASS = '#ffd76a';
+  const BEAM = '#3d2a24', STONE_A = '#c9bda3', STONE_B = '#a99c84', BRASS = '#ffd76a';
   // A stepped disc of planks — round because the throat is — lighter than it
   // was, so the dark timber and the painted door have something to stand on.
   const R = FACADE_R, rows = 9;
@@ -222,20 +222,9 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     const w = Math.sqrt(Math.max(0.02, R * R - y * y)) * 2;
     vox(voxels, 0, y - 0.04, zf, w, 2 * R / rows + 0.004, 0.07, planks[j % 3]!);
   }
-  // Timber rim: a ring of beam ends round the wall, and two uprights — the
-  // frame the planks are hung in.
-  for (let i = 0; i < 22; i += 1) {
-    const a = (i / 22) * Math.PI * 2;
-    vox(voxels, Math.cos(a) * (R - 0.015), Math.sin(a) * (R - 0.015) - 0.04, zf + 0.03, 0.085, 0.085, 0.07, i % 2 ? BEAM : BEAM2);
-  }
-  for (const ux of [-0.36, 0.4]) {
-    const half = Math.sqrt(Math.max(0.01, R * R - ux * ux)) - 0.04;
-    vox(voxels, ux, -0.04, zf + 0.025, 0.045, half * 2, 0.05, BEAM);
-  }
-
   // The round door. A ring of dressed stones frames it; the slab is painted
-  // boards (cut to the circle), with strap hinges and a big brass knob dead
-  // centre, the way a burrow door has it.
+  // boards (cut to the circle) with a big brass knob dead centre, the way a
+  // burrow door has it.
   const dr = 0.215, dx = -0.05, dy = -0.25;
   for (let i = 0; i < 16; i += 1) {
     const a = (i / 16) * Math.PI * 2;
@@ -248,51 +237,31 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     const hgt = Math.sqrt(Math.max(0.01, dr * dr - x * x)) * 2;
     vox(voxels, dx + x, dy, zf + 0.055, 2 * dr / boards - 0.006, hgt, 0.05, paint[j % 2]);
   }
-  for (const hy of [0.095, -0.095]) vox(voxels, dx - 0.055, dy + hy, zf + 0.085, 0.27, 0.028, 0.02, '#23262e');
   vox(glow, dx, dy, zf + 0.1, 0.06, 0.06, 0.05, BRASS, false);
   vox(voxels, dx, dy, zf + 0.085, 0.085, 0.085, 0.02, '#8a6a1f');
 
-  // A little porch: shingles stepping out over the door on two posts. It is
-  // what gives the front DEPTH — everything else lies in one plane.
-  const eave = dy + dr + 0.085;
-  for (let j = 0; j < 3; j += 1) {
-    vox(voxels, dx, eave + j * 0.05, zf + 0.2 - j * 0.045, 0.66 - j * 0.17, 0.05, 0.3 - j * 0.07, j % 2 ? paint[1] : paint[0]);
-  }
-  vox(voxels, dx, eave - 0.035, zf + 0.2, 0.62, 0.025, 0.28, BEAM);
-  for (const px of [-0.29, 0.29]) vox(voxels, dx + px, (eave - 0.5) / 2 - 0.02, zf + 0.31, 0.04, eave + 0.46, 0.04, BEAM2);
+  // One plain awning over the door, in the door's paint: the only thing that
+  // projects, so the front has depth without clutter.
+  const eave = dy + dr + 0.1;
+  vox(voxels, dx, eave, zf + 0.15, 0.6, 0.05, 0.2, paint[0]);
+  vox(voxels, dx, eave + 0.045, zf + 0.11, 0.44, 0.045, 0.12, paint[1]);
 
-  // Windows: glass with muntins, a pale frame, painted shutters, and under
-  // the main one a box of flowers.
-  const windowAt = (wx: number, wy: number, size: number, box: boolean): void => {
+  // A window: glass, muntins, a pale sill and lintel. Nothing else.
+  const windowAt = (wx: number, wy: number, size: number): void => {
     vox(glow, wx, wy, zf + 0.045, size, size, 0.03, WARM, false);
     vox(voxels, wx, wy, zf + 0.065, size, 0.022, 0.02, BEAM);
     vox(voxels, wx, wy, zf + 0.065, 0.022, size, 0.02, BEAM);
     const f = size / 2 + 0.014;
-    vox(voxels, wx, wy + f, zf + 0.06, size + 0.06, 0.03, 0.05, STONE_A);
+    vox(voxels, wx, wy + f, zf + 0.06, size + 0.05, 0.03, 0.05, STONE_A);
     vox(voxels, wx, wy - f, zf + 0.06, size + 0.08, 0.035, 0.07, STONE_A);
-    for (const sxn of [-1, 1]) {
-      vox(voxels, wx + sxn * f, wy, zf + 0.06, 0.03, size, 0.05, STONE_B);
-      vox(voxels, wx + sxn * (f + 0.05), wy, zf + 0.055, 0.07, size + 0.02, 0.03, paint[sxn > 0 ? 0 : 1]);
-    }
-    if (!box) return;
-    vox(voxels, wx, wy - f - 0.05, zf + 0.1, size + 0.1, 0.055, 0.09, '#5a3b2a');
-    const blooms = ['#ff7aa8', '#ffe27a', '#ffffff', '#ff9a5a'];
-    for (let k = 0; k < 4; k += 1) {
-      const fx = wx + (k - 1.5) * (size + 0.06) / 4;
-      vox(voxels, fx, wy - f - 0.012, zf + 0.1, 0.035, 0.04, 0.05, '#3f8a55');
-      vox(glow, fx + 0.006, wy - f + 0.02, zf + 0.105, 0.034, 0.034, 0.04, blooms[(k + Math.floor(wx * 10 + 5)) % 4]!, false);
-    }
   };
   const tower = spec.habit === 'tower';
-  windowAt(tower ? 0.02 : 0.27, tower ? 0.27 : 0.15, 0.17, true);
-  if (spec.habit === 'hall') windowAt(-0.34, 0.17, 0.13, false);
-  if (tower) vox(glow, -0.05, 0.1, zf + 0.045, 0.07, 0.07, 0.03, WARM, false); // a fanlight over the porch
+  windowAt(tower ? 0.02 : 0.28, tower ? 0.29 : 0.17, 0.17);
+  if (spec.habit === 'hall') windowAt(-0.34, 0.19, 0.13);
 
-  // A lantern hung from the porch post, lit.
-  vox(voxels, dx - 0.29, eave - 0.1, zf + 0.37, 0.03, 0.03, 0.1, '#23262e');
-  vox(voxels, dx - 0.29, eave - 0.13, zf + 0.42, 0.075, 0.02, 0.075, '#23262e');
-  vox(glow, dx - 0.29, eave - 0.18, zf + 0.42, 0.06, 0.08, 0.06, '#ffe2a3', false);
-  vox(voxels, dx - 0.29, eave - 0.23, zf + 0.42, 0.075, 0.02, 0.075, '#23262e');
+  // A lantern on a bracket beside the door.
+  vox(voxels, dx - 0.31, dy + 0.12, zf + 0.1, 0.03, 0.03, 0.14, '#23262e');
+  vox(glow, dx - 0.31, dy + 0.06, zf + 0.17, 0.065, 0.085, 0.065, '#ffe2a3', false);
 
   // Steps from the sill down to the floor, out through the break, between
   // low cheek walls — so they belong to the house instead of floating at it.
