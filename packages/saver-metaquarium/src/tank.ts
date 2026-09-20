@@ -1559,7 +1559,11 @@ class TankInstance implements SaverInstance {
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off', this.lit);
+      // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
+      // (still `false` at construction) would get flat materials even though
+      // `fishLighting` defaults to 'lit'. Derive the same value directly.
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
+        this.str('fishLighting') !== 'flat' && !this.thumbnail);
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));

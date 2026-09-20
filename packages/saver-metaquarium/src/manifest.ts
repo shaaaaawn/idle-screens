@@ -155,7 +155,9 @@ export const METAQUARIUM_PARAMS = {
    *  look. Read at mount. */
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
-   *  with no environment map and no lights). `off` is the flat unlit atlas. */
+   *  with no environment map and no lights). `off` is non-metallic instead —
+   *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
+   *  for the original unlit atlas look. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a

@@ -42,7 +42,7 @@ describe('vignettes', () => {
     }
   });
 
-  it('nobody teleports, nobody shares a body, headings are always unit', () => {
+  it('nobody teleports, headings are always unit', () => {
     for (const [name, script] of Object.entries(VIGNETTES)) {
       const marks = marksFor(name);
       const v = parseVignette(script, marks);
@@ -84,6 +84,24 @@ describe('vignettes', () => {
     const end = v.beats[1]!.t0 + v.beats[1]!.dur - 0.05;
     expect(dist(poseOf(v, 0, end)!, poseOf(v, 1, end)!)).toBeLessThan(24);
     expect(dist(poseOf(v, 1, end)!, poseOf(v, 1, 1)!)).toBeGreaterThan(80);
+  });
+
+  it('"follow" onto a mark is a validation problem, not a silent no-op', () => {
+    const v = parseVignette('a follow rug', INTERIOR_MARKS);
+    expect(v.problems.join(' ')).toMatch(/follow/);
+  });
+
+  it('a circle beat leaves the actor where it actually ends, not the stale > destination', () => {
+    const v = parseVignette('a >door circle rug | a >table', INTERIOR_MARKS);
+    expect(v.problems).toEqual([]);
+    const b0 = v.beats[0]!;
+    // Right before the circle beat ends, the actor is back near where the
+    // beat started (the ring eases back to `from`). Right after, the next
+    // beat's walk begins — it should pick up from that same spot, not from
+    // the `>door` destination the circle cue left stale in `state[i].to`.
+    const before = poseOf(v, 0, b0.t0 + b0.dur - 0.01)!;
+    const after = poseOf(v, 0, b0.t0 + b0.dur + 0.01)!;
+    expect(dist(before, after)).toBeLessThan(2);
   });
 
   it('bad scripts say what is wrong and what IS allowed, and never throw', () => {
