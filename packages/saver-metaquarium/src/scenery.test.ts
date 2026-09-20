@@ -130,12 +130,14 @@ describe('mineral world', () => {
   /** Drives a mesh's onBeforeCompile and customProgramCacheKey the way
    *  three.js would when it actually compiles the program — the source of
    *  the shader patch and its cache key, both otherwise only ever called
-   *  by a real renderer. */
-  const patchShader = (mesh: Mesh): void => {
+   *  by a real renderer. Returns the patched shader so callers can assert
+   *  the replace() actually landed, not just that it ran without throwing. */
+  const patchShader = (mesh: Mesh): Parameters<Material['onBeforeCompile']>[0] => {
     const material = mesh.material as Material;
     const shader = { uniforms: {}, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader } as Parameters<Material['onBeforeCompile']>[0];
     material.onBeforeCompile(shader, {} as WebGLRenderer);
     material.customProgramCacheKey?.();
+    return shader;
   };
 
   it('fills the sky with jellyfish lanterns and lights their glow cards', () => {
@@ -143,7 +145,13 @@ describe('mineral world', () => {
     expect(world.counts.lanterns).toBeGreaterThan(0);
     const lanterns = world.group.children.find(o => o.name === 'sky-lanterns') as Mesh | undefined;
     expect(lanterns).toBeDefined();
-    patchShader(lanterns!);
+    const shader = patchShader(lanterns!);
+    // Tokens unique to the replaced-in shader body — not the unconditionally
+    // prepended `uniform float uSkyTime` declaration, which would still be
+    // present even if the #include marker it replaces stopped matching.
+    expect(shader.vertexShader).toContain('transformed = home + local');
+    expect(shader.vertexShader).toContain('vColor.rgb *= 1.0 + aGlow');
+    expect(shader.uniforms.uSkyTime).toBeDefined();
     for (const object of world.group.children) {
       const mesh = object as Mesh;
       if (!mesh.geometry) continue;
@@ -160,7 +168,13 @@ describe('mineral world', () => {
     expect(world.counts.horizon).toBeGreaterThan(0);
     const horizon = world.group.children.find(o => o.name === 'horizon') as Mesh | undefined;
     expect(horizon).toBeDefined();
-    patchShader(horizon!);
+    const shader = patchShader(horizon!);
+    // Tokens unique to the replaced-in shader body — not the unconditionally
+    // prepended `varying`/`uniform` declarations, which would still be
+    // present even if the #include marker they replace stopped matching.
+    expect(shader.vertexShader).toContain('smoothstep(0.0, aHaze.y, position.y)');
+    expect(shader.fragmentShader).toContain('diffuseColor.rgb * vHorizon');
+    expect(shader.uniforms.uHorizonFog).toBeDefined();
     for (const object of world.group.children) {
       const mesh = object as Mesh;
       if (!mesh.geometry) continue;

@@ -66,6 +66,19 @@ const linear = (hex: string): [number, number, number] => {
   return [c.r, c.g, c.b];
 };
 
+const Y_UP = new Vector3(0, 1, 0);
+
+/** A vector perpendicular to `axis` and level with `Y_UP`, for building a
+ *  crystal's cross-section. `axis` occasionally lands parallel to `Y_UP`
+ *  (near the dome's poles), where the cross product is the zero vector —
+ *  normalize() of THAT is NaN, and a lengthSq() check after normalizing
+ *  never catches it (NaN comparisons are always false). Check before
+ *  normalizing instead. */
+export function sideAxisFor(axis: Vector3, out: Vector3): Vector3 {
+  out.crossVectors(axis, Y_UP);
+  return out.lengthSq() < 0.01 ? out.set(1, 0, 0) : out.normalize();
+}
+
 export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): InteriorParts {
   const s = opts.scale, y0 = opts.floorY;
   const R = ROOM_RADIUS * s, H = ROOM_HEIGHT * s;
@@ -99,7 +112,6 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
   const centre = new Vector3(0, y0 + H * 0.3, 0);
   const mid = new Vector3(), inward = new Vector3();
   const faces: Array<[Vector3, Vector3, Vector3, number]> = [];
-  const Y_UP = new Vector3(0, 1, 0);
   for (let i = 0; i < src.count; i += 3) {
     const a = at(i), b = at(i + 1), c = at(i + 2);
     mid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
@@ -155,12 +167,7 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     const len = (great ? trng.range(30, 50) : (up < 0.2 ? 9 : 5.5) * (0.6 + patch * 1.3) * trng.range(0.8, 1.25)) * s;
     const wid = len * (great ? 0.3 : trng.range(0.42, 0.6));
     axis.copy(inward).add(new Vector3(trng.range(-0.22, 0.22), trng.range(-0.22, 0.22), trng.range(-0.22, 0.22))).normalize();
-    // `axis` occasionally lands parallel to Y_UP (near the dome's poles),
-    // where the cross product is the zero vector — normalize() of THAT is
-    // NaN, and a lengthSq() check after normalizing never catches it (NaN
-    // comparisons are always false). Check before normalizing instead.
-    side.crossVectors(axis, Y_UP);
-    if (side.lengthSq() < 0.01) side.set(1, 0, 0); else side.normalize();
+    sideAxisFor(axis, side);
     fwd.crossVectors(axis, side).normalize();
     const spin = trng.next() * 6.28;
     const foot: Vector3[] = [], shoulder: Vector3[] = [];

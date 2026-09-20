@@ -1,6 +1,7 @@
 import { createRng } from '@idle-screens/core';
+import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { buildGeodeInterior, ROOM_HEIGHT, ROOM_RADIUS } from './interior';
+import { buildGeodeInterior, ROOM_HEIGHT, ROOM_RADIUS, sideAxisFor } from './interior';
 
 const room = (seed = 4, over = {}) => buildGeodeInterior(createRng(seed), { tint: '#7a3cff', scale: 1, floorY: 0, ...over });
 const pos = (r: ReturnType<typeof room>): number[] => Array.from(r.room[0]!.getAttribute('position').array);
@@ -47,5 +48,25 @@ describe('geode interior', () => {
     expect(r.vents.length).toBe(2); // teapot and kettle
     expect(r.obstacles.length).toBeGreaterThanOrEqual(8);
     for (const o of r.obstacles) expect(Math.hypot(o.x, o.z)).toBeLessThan(ROOM_RADIUS);
+  });
+
+  it('falls back to a fixed side axis at the dome\'s poles, exactly or nearly on Y_UP', () => {
+    // Three's own Vector3.normalize() guards an exactly-zero length (divides
+    // by 1, not 0), so an exactly-parallel axis can't produce NaN either way
+    // — but that guard is also why checking lengthSq() AFTER normalizing
+    // can't work at all: normalize() always leaves length ~1 unless the input
+    // was exactly zero, so a merely near-zero cross product (axis close to
+    // but not exactly Y_UP) sails through a post-normalize check and comes
+    // out as an arbitrary, ill-conditioned direction instead of the fallback.
+    // Check the raw cross product's length before normalizing.
+    const out = new Vector3();
+    expect(sideAxisFor(new Vector3(0, 1, 0), out)).toBe(out);
+    expect(out.equals(new Vector3(1, 0, 0))).toBe(true);
+    sideAxisFor(new Vector3(0, -1, 0), out);
+    expect(out.equals(new Vector3(1, 0, 0))).toBe(true);
+    // Not exactly parallel — a raw cross product of length 0.05, comfortably
+    // under the 0.01 lengthSq threshold, but not the zero vector.
+    sideAxisFor(new Vector3(0.05, Math.sqrt(1 - 0.05 ** 2), 0), out);
+    expect(out.equals(new Vector3(1, 0, 0))).toBe(true);
   });
 });
