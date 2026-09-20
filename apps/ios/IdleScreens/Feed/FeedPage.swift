@@ -606,21 +606,28 @@ struct FeedPage: View {
             return channel.lastEventAt.map { SteerLine.ago($0) }
         }()
         let artist = actor ?? model
-        // The model is small print only when someone else took the credit.
-        // One line only: with a relay to name, the harness waits in the
-        // expanded details rather than pushing "aired by" off the edge.
-        let small = [actor == nil ? nil : model, relay == nil ? harness.map { "via \($0)" } : nil,
-                     relay.map { "aired by \($0)" }, when].compactMap { $0 }
+        // The model sits BESIDE the artist, in the same row, rather than in
+        // the small print where it was the first thing to be truncated. The
+        // row was already there; it just had one chip in it.
+        let modelChip = actor == nil ? nil : model
+        // What is left is short enough to never truncate: who aired it, how,
+        // and when. With a relay to name, the harness waits in the expansion.
+        let small = [relay.map { "aired by \($0)" }, relay == nil ? harness.map { "via \($0)" } : nil,
+                     when].compactMap { $0 }
 
         VStack(alignment: .leading, spacing: 5) {
-            if let artist {
-                Label(artist, systemImage: "paintbrush.pointed.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .glassPanel(shape: Capsule())
-                    .accessibilityLabel("Made by \(artist)")
+            HStack(spacing: 6) {
+                if let artist {
+                    // A brush for a named artist; a chip for a model signing
+                    // its own work.
+                    creditChip(artist, icon: actor == nil ? "cpu" : "paintbrush.pointed.fill", strong: true)
+                        .accessibilityLabel("Made by \(artist)")
+                        .layoutPriority(1)
+                }
+                if let modelChip {
+                    creditChip(modelChip, icon: "cpu", strong: false)
+                        .accessibilityLabel("Model \(modelChip)")
+                }
             }
             if !small.isEmpty {
                 Text(small.joined(separator: " · "))
@@ -629,6 +636,20 @@ struct FeedPage: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    private func creditChip(_ text: String, icon: String, strong: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption2.weight(.semibold))
+            Text(text)
+                .font(strong ? .subheadline.weight(.semibold) : .footnote.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .opacity(strong ? 1 : 0.9)
+        .padding(.horizontal, strong ? 11 : 9)
+        .padding(.vertical, 6)
+        .glassPanel(shape: Capsule())
     }
 
     static func attribution(_ event: ChannelEvent) -> String? {
