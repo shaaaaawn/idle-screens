@@ -63,12 +63,19 @@ const LOCAL_CATALOG = [...FISH_CATALOG, ...NPC_CATALOG].map((f) =>
 );
 /** `?lofi=1` swaps the tank for the Apple TV's 2D aquarium — transparent-icon
  *  fish on a Canvas2D, no three.js — for QA against the TV and for nostalgia.
- *  Icons come from IPFS, so it stays opt-in here (the gallery mounts this). */
+ *  Icons come from IPFS, so it stays opt-in here (the gallery mounts this).
+ *  Scoped to this one grouped tile only: METAQUARIUM_VARIANTS below (reached
+ *  via `?saver=metaquarium-school` etc.) and the rest of the gallery's
+ *  metaquarium entries always build the webgl tank regardless of `?lofi=1`
+ *  — each is 3D-choreography-specific (formationShape, swimStyle,
+ *  cameraDistance/Elevation, maneuver…) with no lofi analogue. */
 const LOFI = ['1', 'true', 'on', ''].includes(new URLSearchParams(location.search).get('lofi') ?? 'off');
 const playgroundMetaquarium = createMetaquarium({
   params: { fishUrl: LOCAL_FISH_URL },
-  catalog: LOCAL_CATALOG,
-  ...(LOFI ? { backend: 'lofi' as const } : {}),
+  // lofi resolves fish icons by id from the live IPFS asset set and can't
+  // honor an offline local-GLB catalog (createMetaquarium rejects the
+  // combination) — drop the catalog override when lofi is on instead.
+  ...(LOFI ? { backend: 'lofi' as const } : { catalog: LOCAL_CATALOG }),
 });
 
 const SAVER_GROUPS: SaverGroup[] = [

@@ -26,7 +26,10 @@ export const SIGNAL_BOARD_SPEC: SaverSpec = {
         kind: "bar",
         values: [62, 38, 84, 21, 55, 91, 44, 70, 29],
         max: 100,
-        length: 0.24,
+        // Cell pitch is the table's `gap` (0.07 here, from region [0.1, 0.9]
+        // over 3 columns), so a full-value bar must stay under that or
+        // neighboring cells' bars overlap. 0.06 leaves a hairline margin.
+        length: 0.06,
         thickness: 0.013,
         color: "#ffb000",
         direction: "right",
