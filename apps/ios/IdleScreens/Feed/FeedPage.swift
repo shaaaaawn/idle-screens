@@ -35,7 +35,8 @@ struct FeedPage: View {
     @State private var moment: String? = FeedPage.liveKey
     @Binding var chromeHidden: Bool
     @State private var showComposer = false
-    @State private var showInfo = false
+    /// The caption opened up into the scene's full credits.
+    @State private var captionExpanded = false
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -83,7 +84,13 @@ struct FeedPage: View {
             .ignoresSafeArea()
             // A still page is not a dead page: the past is a scroll away.
             .scrollDisabled(!isActive)
-            .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { chromeHidden.toggle() } }
+            .onTapGesture {
+                if captionExpanded {
+                    withAnimation(.spring(duration: 0.35, bounce: 0.12)) { captionExpanded = false }
+                } else {
+                    withAnimation(.easeInOut(duration: 0.25)) { chromeHidden.toggle() }
+                }
+            }
             // Pinch in to zoom out — the same thing the channel name does, for
             // people who reach for the gesture first.
             .simultaneousGesture(
@@ -92,6 +99,7 @@ struct FeedPage: View {
                 }
             )
             .onChange(of: moment) { _, _ in
+                captionExpanded = false
                 prefetchAroundCurrent()
                 replayCaptionEntrance()
             }
@@ -125,10 +133,6 @@ struct FeedPage: View {
                                  current: moment) { key in
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
-        }
-        .sheet(isPresented: $showInfo) {
-            SceneInfoSheet(session: session, channelId: channelId)
-                .presentationDetents([.medium])
         }
         .onAppear { if isActive { activate() } }
         .onChange(of: isActive) { _, nowActive in
@@ -377,37 +381,35 @@ struct FeedPage: View {
                 followPill
                 Spacer(minLength: 6)
 
-                if isLive {
-                    if let viewers = session.viewers, viewers > 0 {
-                        Label("\(viewers)", systemImage: "eye.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .glassCapsule(shape: Capsule())
-                            .accessibilityLabel("\(viewers) watching")
-                            .transition(.opacity)
-                    }
-                } else {
-                    // In the past, the way back has to be one tap.
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.35)) { moment = Self.liveKey }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
-                            Text("Live").font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(Color.primary)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 7)
-                        .glassCapsule(shape: Capsule())
-                    }
-                    .accessibilityLabel("Back to live")
-                    .transition(.opacity)
+                // One badge, and only when it is true: a green dot with the
+                // audience beside it. On a past scene it simply is not there —
+                // the avatar's ring and the segments already say "not live".
+                if isLive && !session.sleeping {
+                    liveBadge.transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: isLive)
         }
+    }
+
+    private var liveBadge: some View {
+        let viewers = session.viewers ?? 0
+        return HStack(spacing: 6) {
+            Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
+            if viewers > 0 {
+                Text("\(viewers)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+        }
+        .foregroundStyle(Color.primary)
+        .padding(.horizontal, viewers > 0 ? 10 : 8)
+        .padding(.vertical, 8)
+        .glassCapsule(shape: Capsule())
+        .animation(.easeInOut(duration: 0.2), value: viewers)
+        .accessibilityElement()
+        .accessibilityLabel(viewers > 0 ? "Live, \(viewers) watching" : "Live")
     }
 
     /// The channel's face: its deterministic generative art, so every channel
@@ -480,7 +482,7 @@ struct FeedPage: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(sceneTitle)
                 .font(.title2.weight(.bold))
-                .lineLimit(2)
+                .lineLimit(captionExpanded ? 4 : 2)
                 .minimumScaleFactor(0.8)
                 .captionEntrance(captionEntered, order: 0)
 
@@ -488,25 +490,76 @@ struct FeedPage: View {
                 .captionEntrance(captionEntered, order: 1)
 
             // The prompt behind the change: the one thing here a picture of
-            // the same scene could not tell you.
-            if let intent = currentStop?.event.intent, !intent.isEmpty {
+            // the same scene could not tell you. One line until asked for.
+            if let intent = event?.intent, !intent.isEmpty {
                 Text(intent)
-                    .font(.caption)
-                    .opacity(0.8)
-                    .lineLimit(3)
+                    .font(captionExpanded ? .footnote : .caption)
+                    .opacity(captionExpanded ? 0.95 : 0.8)
+                    .lineLimit(captionExpanded ? 12 : 1)
                     .captionEntrance(captionEntered, order: 2)
             }
+
+            if captionExpanded {
+                sceneFacts(for: event)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .padding(captionExpanded ? 16 : 0)
+        .frame(maxWidth: captionExpanded ? .infinity : 280, alignment: .leading)
+        .background {
+            if captionExpanded {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(duration: 0.35, bounce: 0.12)) { captionExpanded.toggle() }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(captionExpanded ? "Collapses the scene details" : "Shows the scene details")
         .foregroundStyle(Color.primary)
         .multilineTextAlignment(.leading)
         // Scenes are arbitrary art, so the text carries its own halo — in the
         // OPPOSITE tone to the text, or it just smudges it.
-        .shadow(color: (footScheme == .light ? Color.white : Color.black).opacity(0.6), radius: 6, y: 1)
-        .frame(maxWidth: 280, alignment: .leading)
+        .shadow(color: (footScheme == .light ? Color.white : Color.black).opacity(captionExpanded ? 0 : 0.6),
+                radius: 6, y: 1)
         .opacity(presence)
         .blur(radius: (1 - presence) * 9)
         .offset(y: (1 - presence) * -10)
         .scaleEffect(0.97 + 0.03 * presence, anchor: .bottomLeading)
+    }
+
+    /// What the info sheet used to hold, now one tap on the caption: the rest
+    /// of the credit, and the scene's vital statistics.
+    @ViewBuilder
+    private func sceneFacts(for event: ChannelEvent?) -> some View {
+        let recorded = currentStop.flatMap { app.scenes.scene(channelId: channelId, sceneId: $0.sceneId) }
+        let spec = recorded?.spec ?? (isLive ? channel.spec : nil)
+        let rows: [(String, String)] = [
+            ("model", event?.model),
+            ("via", event?.harness),
+            ("aired", event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }),
+            ("layers", spec.map { "\($0.layers.count)" }),
+            ("seed", recorded?.seed.map(String.init)),
+        ].compactMap { label, value in
+            guard let value, !value.isEmpty else { return nil }
+            return (label, value)
+        }
+        if !rows.isEmpty {
+            VStack(spacing: 7) {
+                Divider().opacity(0.4)
+                ForEach(rows, id: \.0) { row in
+                    HStack {
+                        Text(row.0).opacity(0.65)
+                        Spacer()
+                        Text(row.1).fontWeight(.medium).lineLimit(1)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
     }
 
     /// Reset without animation, then animate in — so the stagger replays even
@@ -595,7 +648,6 @@ struct FeedPage: View {
                     }
                 }
             }
-            railButton("info.circle", label: "About this scene") { showInfo = true }
             ShareLink(item: app.gallery.viewerURL(for: channelId)) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 17, weight: .medium))
