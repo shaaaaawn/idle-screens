@@ -58,6 +58,8 @@ export interface GeodeParts {
   vent: { x: number; y: number; z: number; color: string };
   emitter: Emitter;
   obstacle: { x: number; y: number; z: number; r: number; h: number };
+  /** The foot of the front steps, on the floor: where a path to this door begins. */
+  doorstep: { x: number; z: number };
   radius: number;
   triangles: number;
 }
@@ -275,6 +277,8 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   vox(voxels, cx + 0.05, 1.19, -0.12, 0.19, 0.04, 0.19, '#2f3848');
   const ventP = new Vector3((cx + 0.05) * sx, 1.24 * sy, -0.12 * sz).applyMatrix4(place);
 
+  // The foot of the steps (the third step's outer edge), in the world.
+  const foot = new Vector3(-0.05 * sx, -0.6 * sy, (zf + 0.12 + 2 * 0.13 + 0.12) * sz).applyMatrix4(place);
   // Where the home's light leaves it: out through the break, low, warm.
   const mouth = new Vector3(0, -0.25 * sy, (h.cut + 0.55) * sz).applyMatrix4(place);
   const warm = new Color(WARM).lerp(tint, 0.3);
@@ -284,6 +288,7 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     vent: { x: ventP.x, y: ventP.y, z: ventP.z, color: '#ffe6bd' },
     emitter: { x: mouth.x, y: mouth.y, z: mouth.z, r: warm.r * 0.9, g: warm.g * 0.9, b: warm.b * 0.9, reach: r * 1.5, phase: rng.next() * 6.28 },
     obstacle: { x: spec.x, y: cy, z: spec.z, r: r * Math.max(sx, sz), h: r * sy },
+    doorstep: { x: foot.x, z: foot.z },
     radius: r,
     triangles,
   };

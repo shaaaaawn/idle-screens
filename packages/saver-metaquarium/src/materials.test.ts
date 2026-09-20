@@ -408,6 +408,24 @@ describe('fish glow — GLOW parts as light sources', () => {
     expect(g.parts[0]!.coat).toBe(true); // a coat is not a lamp: no light, close rim only
   });
 
+  it('a small WHITE glow part is a lamp — the glowfish\'s angler lure — and blooms; a big white coat still does not', () => {
+    const lure = new Group();
+    lure.add(new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' })), fin(0.6, 5, 'GLOW-White'));
+    applyNpcMaterials(lure, createRng(2));
+    const lamp = collectFishGlow(lure, createRng(2))!;
+    expect(lamp.gain).toBeGreaterThan(0.6);
+    const p = lamp.parts[0]!;
+    expect(Math.max(p.r, p.g, p.b)).toBeGreaterThan(0.5);
+    expect(p.r).toBeGreaterThanOrEqual(p.b); // a touch warm, like a bulb
+    expect(p.coat).toBe(false);
+
+    const coat = new Group();
+    coat.add(new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' })), fin(4, 0, 'GLOW-White'));
+    applyNpcMaterials(coat, createRng(2));
+    const fog = collectFishGlow(coat, createRng(2))!;
+    expect(Math.max(fog.parts[0]!.r, fog.parts[0]!.g, fog.parts[0]!.b)).toBeLessThan(0.2);
+  });
+
   it('a fish with nothing that glows has no glow', () => {
     const root = new Group();
     root.add(new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));

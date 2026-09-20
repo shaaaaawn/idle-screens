@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
-import { buildPaths, MAX_PATH_SEGMENTS, PATH_FRAGMENT, pathClearance, type PathNode, type PathOptions } from './paths';
+import { buildPaths, MAX_PATH_SEGMENTS, PATH_FRAGMENT, PATH_TILE, pathClearance, type PathNode, type PathOptions } from './paths';
 
 const village: PathNode[] = [
   { x: -96, z: -34, kind: 'home' }, { x: 92, z: -46, kind: 'home' }, { x: -66, z: 44, kind: 'home' },
@@ -40,12 +40,36 @@ describe('paths', () => {
     for (const g of net.segments.slice(1, -1)) expect(Math.hypot(g.x0 - rock.x, g.z0 - rock.z)).toBeGreaterThanOrEqual(rock.r);
   });
 
+  it('with a paved road for a spine, every door joins it on its own side — nobody crosses the street', () => {
+    const spine = { x0: 0, z0: -60, x1: 0, z1: 40, width: 12 };
+    const net = buildPaths(village, createRng(7), { ...opts, amount: 0.5, spine });
+    expect(net.edges).toBe(3);
+    for (const home of village.filter((v) => v.kind === 'home')) {
+      // the walk that starts at this door ends on the door's side of the road, at its edge
+      const first = net.segments.findIndex((g) => Math.hypot(g.x0 - home.x, g.z0 - home.z) < 0.01);
+      let last = first;
+      while (last + 1 < net.segments.length && Math.hypot(net.segments[last + 1]!.x0 - net.segments[last]!.x1, net.segments[last + 1]!.z0 - net.segments[last]!.z1) < 0.01) last++;
+      const end = net.segments[last]!;
+      expect(Math.sign(end.x1)).toBe(Math.sign(home.x));
+      expect(Math.abs(end.x1)).toBeCloseTo(spine.width * 0.8, 5);
+      expect(end.z1).toBeGreaterThanOrEqual(spine.z0);
+      expect(end.z1).toBeLessThanOrEqual(spine.z1);
+    }
+    expect(net.hub).toEqual({ x: 0, z: 40 });
+  });
+
+  it('is laid as tiles: coverage is decided per tile, not per pixel', () => {
+    expect(PATH_FRAGMENT).toMatch(/floor\(g\)/);
+    expect(PATH_FRAGMENT).toMatch(/pa = pc - a/); // distance from the TILE's centre
+    expect(PATH_TILE).toBeCloseTo(5.1, 5); //         the castle paving's pitch
+  });
+
   it('is mostly algae on auto, one thing when told, and the shader knows all three', () => {
     const mats = Array.from({ length: 40 }, (_, i) => buildPaths(village, createRng(100 + i), opts).segments.map((g) => g.material)).flat();
     const share = mats.filter((m) => m === 'algae').length / mats.length;
     expect(share).toBeGreaterThan(0.5);
     expect(share).toBeLessThan(0.95);
     expect(new Set(buildPaths(village, createRng(6), { ...opts, material: 'sand' }).segments.map((g) => g.material))).toEqual(new Set(['sand']));
-    for (const word of ['Algae', 'Pebbles', 'Sand']) expect(PATH_FRAGMENT).toContain(word);
+    for (const word of ['Algae', 'Cobbles', 'Sandstone']) expect(PATH_FRAGMENT).toContain(word);
   });
 });

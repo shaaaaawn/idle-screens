@@ -177,8 +177,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     {
       const m = home.emitter, dx = m.x - x, dz = m.z - z, dl = Math.hypot(dx, dz) || 1;
       marks[`home${i + 1}`] = { x: m.x + (dx / dl) * 20 * s, y: m.y + 2 * s, z: m.z + (dz / dl) * 20 * s };
-      // Where the walk to this door begins: the foot of its steps.
-      doorsteps.push({ x: m.x + (dx / dl) * 7 * s, z: m.z + (dz / dl) * 7 * s });
+      // Where the walk to this door begins: the real foot of its steps.
+      doorsteps.push(home.doorstep);
       marks[`home${i + 1}in`] = { x: m.x - (dx / dl) * 5 * s, y: m.y, z: m.z - (dz / dl) * 5 * s };
     }
     obstacles.push(home.obstacle);
@@ -213,6 +213,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     ...clusters.map(c => ({ x: c.x, z: c.z, kind: 'crystal' as const })),
   ], rng.fork(13), {
     amount: opts.paths ?? 0, material: opts.pathMaterial ?? 'auto', scale: s,
+    // A castle's paved road is the spine of the place: doors walk to IT.
+    spine: marks.gate && marks.plaza ? { x0: marks.gate.x, z0: marks.gate.z + 8 * s, x1: marks.plaza.x, z1: marks.plaza.z, width: 12 * s } : undefined,
     obstacles: [...obstacles.map(o => ({ x: o.x, z: o.z, r: o.r })), ...clusters.map(c => ({ x: c.x, z: c.z, r: c.radius * 0.7 }))],
   });
   if (network?.hub) marks.hub = { x: network.hub.x, y: terrain(network.hub.x, network.hub.z) + 30 * s, z: network.hub.z };

@@ -31,6 +31,8 @@ export interface PathOptions {
   scale: number;
   /** Things a path goes round, not through. */
   obstacles: readonly { x: number; z: number; r: number }[];
+  /** An existing paved road (a castle's). Doors join it at their nearest point, and it is the hub. */
+  spine?: { x0: number; z0: number; x1: number; z1: number; width: number };
 }
 export interface PathNetwork { segments: PathSegment[]; hub: { x: number; z: number } | null; edges: number }
 
@@ -79,10 +81,25 @@ export function buildPaths(nodes: readonly PathNode[], rng: CrystalRng, opts: Pa
     edges += 1;
   };
 
-  const main = 7.5 * s, lane = 5.2 * s, trail = 3.4 * s;
-  // The road to the landmark first: it must never be the one that misses the budget.
-  marks.forEach((m, i) => walk(hub, m, main, rng.fork(50 + i)));
-  homes.forEach((h, i) => walk(h, hub, lane, rng.fork(10 + i)));
+  const main = 9.5 * s, lane = 7 * s, trail = 4.6 * s;
+  const sp = opts.spine;
+  if (sp) {
+    // The paving IS the road: each door walks to the nearest point along its
+    // edge, on its own side — nobody crosses the street to reach a hub.
+    hub.x = sp.x1; hub.z = sp.z1;
+    const bx = sp.x1 - sp.x0, bz = sp.z1 - sp.z0, bl = Math.hypot(bx, bz) || 1;
+    const join = (p: { x: number; z: number }): { x: number; z: number } => {
+      const t = Math.min(1, Math.max(0.12, ((p.x - sp.x0) * bx + (p.z - sp.z0) * bz) / (bl * bl)));
+      const cx = sp.x0 + bx * t, cz = sp.z0 + bz * t;
+      const side = Math.sign((p.x - cx) * (-bz / bl) + (p.z - cz) * (bx / bl)) || 1;
+      return { x: cx + (-bz / bl) * side * sp.width * 0.8, z: cz + (bx / bl) * side * sp.width * 0.8 };
+    };
+    homes.forEach((h, i) => walk(h, join(h), lane, rng.fork(10 + i)));
+  } else {
+    // The road to the landmark first: it must never be the one that misses the budget.
+    marks.forEach((m, i) => walk(hub, m, main, rng.fork(50 + i)));
+    homes.forEach((h, i) => walk(h, hub, lane, rng.fork(10 + i)));
+  }
   if (opts.amount > 0.5) {
     const count = Math.round((opts.amount - 0.5) * 2 * Math.min(4, crystals.length));
     [...crystals].sort((p, q) => Math.hypot(p.x - hub.x, p.z - hub.z) - Math.hypot(q.x - hub.x, q.z - hub.z))
@@ -104,6 +121,7 @@ export function pathClearance(segments: readonly PathSegment[], x: number, z: nu
 
 export const PATH_PARS = /* glsl */ `
   uniform int uMqPathN;
+  uniform float uMqPathT;
   uniform vec4 uMqPathA[${MAX_PATH_SEGMENTS}];
   uniform vec4 uMqPathB[${MAX_PATH_SEGMENTS}];
   float mqHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -112,43 +130,51 @@ export const PATH_PARS = /* glsl */ `
     return mix(mix(mqHash(i), mqHash(i + vec2(1.0, 0.0)), f.x), mix(mqHash(i + vec2(0.0, 1.0)), mqHash(i + vec2(1.0, 1.0)), f.x), f.y);
   }
 `;
+/** Tile size of a painted path, in world units at scale 1 — the castle's paving is laid on the same grid. */
+export const PATH_TILE = 5.1;
 export const PATH_FRAGMENT = /* glsl */ `
   if (uMqPathN > 0) {
-    vec2 pw = vMqW.xz;
+    // The world is voxels and tiles, so a path is TILES: coverage is decided
+    // once per tile (at its centre), which steps the edge like everything
+    // else here instead of airbrushing a smear across the floor.
+    float T = ${PATH_TILE.toFixed(2)} * uMqPathT;
+    // Half a tile over in x, so the grid lines up with a castle road laid about x = 0.
+    vec2 g = vMqW.xz / T + vec2(0.5, 0.0);
+    vec2 cell = floor(g), pc = (cell + vec2(0.0, 0.5)) * T, in01 = fract(g);
     float best = 1e9, mat = 0.0, hw = 1.0;
     for (int i = 0; i < ${MAX_PATH_SEGMENTS}; i++) {
       if (i >= uMqPathN) break;
-      vec2 a = uMqPathA[i].xy, ba = uMqPathA[i].zw - a, pa = pw - a;
+      vec2 a = uMqPathA[i].xy, ba = uMqPathA[i].zw - a, pa = pc - a;
       float d = length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0)) - uMqPathB[i].x;
       if (d < best) { best = d; mat = uMqPathB[i].y; hw = uMqPathB[i].x; }
     }
-    // A ragged, grown edge — never a ruled line.
-    float n1 = mqNoise(pw * 0.12), n2 = mqNoise(pw * 0.41 + 7.3);
-    float cover = 1.0 - smoothstep(-0.8, 1.4, best + (n1 - 0.5) * 3.4 + (n2 - 0.5) * 1.3);
-    if (cover > 0.0) {
+    float r1 = mqHash(cell), r2 = mqHash(cell + 17.3);
+    // Ragged by whole tiles: the odd one missing inside, the odd one straying out.
+    float laid = step(best + (r1 - 0.5) * T * 0.9, 0.0) * step(0.06, r2 + step(best, -hw * 0.5));
+    if (laid > 0.5) {
       float worn = 1.0 - smoothstep(-hw, -hw * 0.25, best); // 1 down the middle, where it is walked
+      // A tile has an edge: a dark joint round it, a lit top-left lip.
+      float joint = min(min(in01.x, 1.0 - in01.x), min(in01.y, 1.0 - in01.y));
+      float seam = smoothstep(0.0, 0.07, joint);
+      float lipL = (1.0 - smoothstep(0.07, 0.16, min(in01.x, 1.0 - in01.y))) * seam;
       vec3 col;
       if (mat < 0.5) {
-        // Algae: tank green, mottled, paler and yellower where feet keep it short.
-        col = mix(vec3(0.015, 0.17, 0.07), vec3(0.06, 0.38, 0.12), n2);
+        // Algae: slabs gone green — tank green, a different shade a tile, paler where it is walked.
+        col = mix(vec3(0.012, 0.11, 0.045), vec3(0.04, 0.26, 0.085), r1);
         col = mix(col, col * 1.3 + vec3(0.03, 0.05, 0.0), worn * 0.6);
-        col *= 0.82 + 0.36 * step(0.7, mqNoise(pw * 1.4));
+        col *= 0.85 + 0.3 * step(0.72, mqNoise(vMqW.xz * 1.4)); // flecks of growth within a tile
       } else if (mat < 1.5) {
-        // Pebbles: rounded stones in a dark bed, each its own grey.
-        vec2 g = pw / 2.3, c = floor(g);
-        vec2 f = fract(g) - 0.5 + (vec2(mqHash(c), mqHash(c + 3.1)) - 0.5) * 0.3;
-        float stone = 1.0 - smoothstep(0.26, 0.44, length(f));
-        col = mix(vec3(0.10, 0.11, 0.14), mix(vec3(0.36, 0.39, 0.46), vec3(0.62, 0.60, 0.55), mqHash(c + 9.7)), stone);
+        // Cobbles: the castle's own greys.
+        col = mix(vec3(0.27, 0.3, 0.37), vec3(0.44, 0.47, 0.55), r1);
       } else {
-        // Sand: pale, rippled across the walk.
-        col = vec3(0.72, 0.64, 0.46) * (0.84 + 0.2 * n2 + 0.08 * sin(pw.x * 0.9 + pw.y * 0.5 + n1 * 6.0));
+        // Sandstone flags.
+        col = mix(vec3(0.62, 0.54, 0.38), vec3(0.78, 0.7, 0.5), r1);
       }
       // As bright as the floor it lies on: a path in a dark ocean is a dark path.
       float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
       col *= clamp(0.34 + lum * 2.6, 0.34, 1.0);
-      // A darker lip where the growth meets bare floor, so the walk has an edge to read.
-      float lip = smoothstep(0.0, 0.5, cover) * (1.0 - smoothstep(0.5, 1.0, cover));
-      diffuseColor.rgb = mix(diffuseColor.rgb, col * (1.0 - 0.45 * lip), min(1.0, cover * 1.1) * 0.95);
+      col = col * (0.45 + 0.55 * seam) + lipL * 0.07;
+      diffuseColor.rgb = mix(diffuseColor.rgb, col, 0.96);
     }
   }
 `;

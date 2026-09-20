@@ -972,7 +972,7 @@ class TankInstance implements SaverInstance {
     // that swims past the door.
     const lights = this.scenery?.emitters ?? [];
     const walks = this.scenery?.paths ?? [];
-    writePaths(this.poolUniforms, walks);
+    writePaths(this.poolUniforms, walks, this.num('crystalScale'));
     if (walks.length && !this.poolsInstalled) this.installPools();
     this.emitters = [...emittersOf(this.clusters), ...lights];
     if (this.emitters.length) {

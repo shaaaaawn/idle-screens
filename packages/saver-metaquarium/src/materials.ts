@@ -401,7 +401,7 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
     modelR = Math.max(modelR, (mesh.geometry.boundingSphere?.radius ?? 0)
       * mesh.matrixWorld.getMaxScaleOnAxis() / (root.matrixWorld.getMaxScaleOnAxis() || 1));
   });
-  let accent = false;
+  let accent = false, lamps = false;
   root.traverse((node) => {
     const mesh = node as Mesh;
     if (!mesh.isMesh || !mesh.material || mesh.userData.mqHalo || Array.isArray(mesh.material)) return;
@@ -425,7 +425,12 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
       // Bloom is earned by SATURATION, per part: a white or grey glow blooms
       // as fog around the fish, which is the opposite of a light source.
       const hi = Math.max(pc.r, pc.g, pc.b);
-      const k = hi > 0 ? 0.06 + 0.94 * ((hi - Math.min(pc.r, pc.g, pc.b)) / hi) ** 1.5 : 0;
+      let k = hi > 0 ? 0.06 + 0.94 * ((hi - Math.min(pc.r, pc.g, pc.b)) / hi) ** 1.5 : 0;
+      // …except a SMALL white part: that is a lamp (the glowfish's angler
+      // lure is `GLOW-White`). It cannot fog the fish — it is a few voxels —
+      // so it blooms, a touch warm, like the bulb it is.
+      const lamp = r < modelR * 0.3 && k < 0.5 && hi > 0.5;
+      if (lamp) { k = 1.15; pc.lerp(new Color('#ffe9c4'), 0.35); lamps = true; }
       parts.push({ x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k, coat: large });
     }
     radius = Math.max(radius, r);
@@ -440,6 +445,6 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
   const c = parts[0]!;
   const hi = Math.max(c.r, c.g, c.b);
   const sat = hi > 0 ? (hi - Math.min(c.r, c.g, c.b)) / hi : 0;
-  const gain = (accent ? 1 : 0.45) * (0.08 + 0.92 * sat);
+  const gain = (accent ? 1 : 0.45) * (0.08 + 0.92 * Math.max(sat, lamps ? 0.8 : 0));
   return { gain, parts, r: c.r, g: c.g, b: c.b, cx: cx / w, cy: cy / w, cz: cz / w, radius, cores };
 }

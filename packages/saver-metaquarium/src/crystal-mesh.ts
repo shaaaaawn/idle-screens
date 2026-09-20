@@ -387,6 +387,7 @@ export function emptyPoolUniforms(): Uniforms {
     uMqSpotSoft: { value: [0.2, 0.2, 0.2] },
     // Paths painted on the floor: segment ends (x0 z0 x1 z1), then half-width and material.
     uMqPathN: { value: 0 },
+    uMqPathT: { value: 1 },
     uMqPathA: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
     uMqPathB: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
   };
@@ -411,7 +412,8 @@ export function writePoolSlots(u: Uniforms, emitters: readonly Emitter[], from: 
 }
 
 /** Paint these paths on the floor (an empty list clears them). */
-export function writePaths(u: Uniforms, segments: readonly PathSegment[]): void {
+export function writePaths(u: Uniforms, segments: readonly PathSegment[], scale = 1): void {
+  u.uMqPathT!.value = scale;
   const A = u.uMqPathA!.value as Vector4[], B = u.uMqPathB!.value as Vector4[];
   const n = Math.min(segments.length, MAX_PATH_SEGMENTS);
   for (let i = 0; i < n; i++) {
@@ -506,7 +508,7 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
         }`,
       )}`;
   };
-  mat.customProgramCacheKey = () => 'mq-floor-pools-v5';
+  mat.customProgramCacheKey = () => 'mq-floor-pools-v6';
   mat.needsUpdate = true;
 }
 
