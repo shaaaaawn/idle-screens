@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, ShaderLib, type Material, type WebGLRenderer } from 'three';
 import { describe, expect, it } from 'vitest';
-import { eyeMood, rigEyes, type EyeCue, type EyeState } from './eyes';
+import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState } from './eyes';
 
 // A one-voxel-deep eye slab on the +x (or -x) side of a fish: `rows` top to
 // bottom, `#` black `.` white — the same construction as eye-grid.test.ts,
@@ -127,12 +127,28 @@ describe('eye rig', () => {
     }
   });
 
-  it('caps at MAX_EYES and never rigs a plain belly plate as an eye', () => {
+  it('never rigs a plain belly plate as an eye', () => {
     // A slab too large to read as a pupil-in-sclera eye at all.
     const bare = new Group();
     bare.add(new Mesh(slabGeometry(Array.from({ length: 8 }, () => '........'), 1, 'white')!, eyeMaterial('sclera')));
     const outer = new Group(); outer.add(bare);
     expect(rigEyes(outer, bare)).toBeNull();
+  });
+
+  it('caps at MAX_EYES when a body carries more recognised eyes than that', () => {
+    const body = new Group();
+    // Five separate 3x3 eye slabs, far enough apart along z that the merge
+    // pass (which only joins components within a fraction of a voxel) keeps
+    // them distinct — five real, recognisable eyes, one more than the cap.
+    for (let i = 0; i < 5; i++) {
+      const at: [number, number, number] = [2, 1, 3 + i * 10];
+      body.add(new Mesh(slabGeometry(['...', '.#.', '...'], 1, 'white', 0.5, at)!, eyeMaterial('sclera')));
+      body.add(new Mesh(slabGeometry(['...', '.#.', '...'], 1, 'black', 0.5, at)!, eyeMaterial('pupil')));
+    }
+    const group = new Group(); group.add(body);
+    const rig = rigEyes(group, body);
+    expect(rig).not.toBeNull();
+    expect(rig!.grids).toHaveLength(MAX_EYES);
   });
 
   it('drives the eye-display shader patch and updates gaze/blink uniforms from set()', () => {

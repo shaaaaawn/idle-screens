@@ -68,5 +68,14 @@ describe('geode interior', () => {
     // under the 0.01 lengthSq threshold, but not the zero vector.
     sideAxisFor(new Vector3(0.05, Math.sqrt(1 - 0.05 ** 2), 0), out);
     expect(out.equals(new Vector3(1, 0, 0))).toBe(true);
+    // Non-degenerate branch: stays level with Y_UP, unit length, and
+    // perpendicular to the axis — otherwise a dropped .normalize(), or a
+    // side that isn't actually perpendicular, would ship with this suite
+    // still green (it only ever drove the near-zero fallback branch above).
+    const axis = new Vector3(0.3, 0.95, 0.1).normalize();
+    sideAxisFor(axis, out);
+    expect(Math.abs(out.y)).toBeLessThan(1e-6);
+    expect(out.length()).toBeCloseTo(1, 6);
+    expect(out.dot(axis)).toBeCloseTo(0, 6);
   });
 });
