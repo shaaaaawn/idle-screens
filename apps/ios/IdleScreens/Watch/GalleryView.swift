@@ -1,32 +1,51 @@
 import SwiftUI
 
 /// Public channel gallery, streaming-service style: a hero billboard for the
-/// featured channel, then horizontally scrolling shelves grouped by tag.
+/// channel that is live now, then the same shelves in the same order as the
+/// web home page (`HomeSections`).
 /// Every tile is a live native render of the channel's scene — the content
 /// showcases itself.
 struct GalleryView: View {
     @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var query = ""
+    @State private var gridWidth: CGFloat = 390
+    @State private var filter: ChannelBrowse.Filter = .all
+
+    /// Shelves are for wandering; the moment you ask for something specific
+    /// — a search, a chip — you get one flat grid of answers instead.
+    private var isBrowsingShelves: Bool {
+        filter == .all && query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var results: [PublicChannel] {
+        let filtered = ChannelBrowse.apply(filter, to: app.channels, following: app.follows.followed)
+        return ChannelBrowse.search(query, in: filtered)
+    }
+
+    private var filters: [ChannelBrowse.Filter] {
+        var list: [ChannelBrowse.Filter] = [.all, .live, .fresh]
+        if !app.follows.followed.isEmpty { list.append(.following) }
+        list.append(.remixable)
+        return list + ChannelBrowse.topTags(in: app.channels).map { .tag($0) }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 32) {
-                    if let hero = heroChannel {
-                        HeroBillboard(channel: hero, compact: sizeClass != .regular,
-                                      peers: app.channels)
-                            .padding(.horizontal, 16)
-                    }
-                    ForEach(shelves) { shelf in
-                        ChannelShelf(
-                            title: shelf.title,
-                            channels: shelf.channels,
-                            cardWidth: sizeClass == .regular ? 224 : 148
-                        )
+                LazyVStack(alignment: .leading, spacing: 28) {
+                    if !app.channels.isEmpty { filterBar }
+                    if isBrowsingShelves {
+                        shelvesContent
+                    } else {
+                        resultsGrid
                     }
                 }
                 .padding(.vertical, 8)
             }
+            .searchable(text: $query, prompt: "Channels, tags, artists, models")
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
             .background(Color.appBackground)
             .overlay {
                 // First run has no cache: never show a bare black screen.
@@ -44,11 +63,101 @@ struct GalleryView: View {
                     }
                 }
             }
-            .navigationTitle("watch")
+            .navigationTitle("channels")
             .refreshable { await app.loadGallery() }
         }
         .task {
             if app.channels.isEmpty { await app.loadGallery() }
+        }
+    }
+
+    // MARK: Browse
+
+    @ViewBuilder
+    private var shelvesContent: some View {
+        if let hero = heroChannel {
+            HeroBillboard(channel: hero, compact: sizeClass != .regular, peers: app.channels)
+                .padding(.horizontal, 16)
+        }
+        // Yours before everyone's. Absent until you follow something — an
+        // empty "Following" row is a nag.
+        if !following.isEmpty {
+            ChannelShelf(title: "Following",
+                         subtitle: following.count == 1 ? "1 channel" : "\(following.count) channels",
+                         channels: following, cardWidth: cardWidth)
+        }
+        // Social proof, when there is any: what other people have on right now.
+        if watchedNow.count >= 2 {
+            ChannelShelf(title: "Watching now", subtitle: "on someone's screen this minute",
+                         channels: watchedNow, cardWidth: cardWidth)
+        }
+        ForEach(shelves) { shelf in
+            ChannelShelf(title: shelf.title, subtitle: shelf.subtitle, ownedTags: shelf.ownedTags,
+                         channels: shelf.channels, cardWidth: cardWidth)
+        }
+    }
+
+    private var cardWidth: CGFloat { sizeClass == .regular ? 224 : 148 }
+
+    private var watchedNow: [PublicChannel] {
+        Array(ChannelBrowse.apply(.live, to: app.channels, following: []).prefix(12))
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(filters) { item in
+                    let selected = item == filter
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { filter = selected && item != .all ? .all : item }
+                    } label: {
+                        Text(item.title)
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(selected ? Color.appBackground : Color.textPrimary)
+                            .background(selected ? Color.textPrimary : Color.appSurface, in: Capsule())
+                            .overlay { Capsule().strokeBorder(Color.appBorder.opacity(selected ? 0 : 0.6), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var resultsGrid: some View {
+        let found = results
+        if found.isEmpty {
+            ContentUnavailableView {
+                Label("Nothing matches", systemImage: "magnifyingglass")
+            } description: {
+                Text(query.isEmpty ? "No channels here right now." : "No channel, tag, artist or model matches “\(query)”.")
+            } actions: {
+                Button("Show everything") { query = ""; filter = .all }
+            }
+            .padding(.top, 40)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(found.count == 1 ? "1 channel" : "\(found.count) channels")
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+                    .padding(.horizontal, 16)
+                GeometryReader { geo in Color.clear.preference(key: GridWidthKey.self, value: geo.size.width) }
+                    .frame(height: 0)
+                let columns = sizeClass == .regular ? 4 : 2
+                let width = max(120, (gridWidth - 32 - CGFloat(columns - 1) * 12) / CGFloat(columns))
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(width), spacing: 12, alignment: .top), count: columns),
+                          alignment: .leading, spacing: 20) {
+                    ForEach(found) { channel in
+                        ChannelCard(channel: channel, width: width, peers: found)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
         }
     }
 
@@ -76,38 +185,27 @@ struct GalleryView: View {
         return score
     }
 
-    private struct Shelf: Identifiable {
-        let title: String
-        let channels: [PublicChannel]
-        var id: String { title }
+    /// The same running order as the web home and the Apple TV — Featured,
+    /// Evals, the curated categories, Latest, then the tail — from the one
+    /// shared builder. The phone used to bucket by each channel's first tag,
+    /// which produced shelves the website has never had.
+    private var following: [PublicChannel] {
+        app.follows.channels(in: app.channels) { app.token(for: $0.id) != nil }
     }
 
-    /// One shelf per primary tag (a channel lives on its first tag's shelf),
-    /// ordered by shelf size. Single-channel tags and untagged channels all
-    /// pool into a trailing "more" shelf — one-item rows read as broken.
-    private var shelves: [Shelf] {
-        var groups: [String: [PublicChannel]] = [:]
-        for channel in app.channels {
-            let key = channel.tags?.first ?? "more"
-            groups[key, default: []].append(channel)
+    /// `build`'s sections cover every channel, so without this the billboard
+    /// channel would also turn up as a card in whichever shelf claims it
+    /// (Featured, Latest, Other, …). Drop it there — dropping the section
+    /// entirely if it was the shelf's only channel.
+    private var shelves: [HomeSection] {
+        let built = HomeSections.build(channels: app.channels, categories: app.categories)
+        guard let heroId = heroChannel?.id else { return built }
+        return built.compactMap { section in
+            let channels = section.channels.filter { $0.id != heroId }
+            guard !channels.isEmpty else { return nil }
+            return HomeSection(id: section.id, title: section.title, subtitle: section.subtitle,
+                               ownedTags: section.ownedTags, channels: channels)
         }
-        var more = groups.removeValue(forKey: "more") ?? []
-        for (key, value) in groups where value.count == 1 && key != "featured" {
-            more.append(contentsOf: value)
-            groups.removeValue(forKey: key)
-        }
-        var result = groups
-            .sorted { lhs, rhs in
-                if lhs.key == "featured" { return true }
-                if rhs.key == "featured" { return false }
-                if lhs.value.count != rhs.value.count { return lhs.value.count > rhs.value.count }
-                return lhs.key < rhs.key
-            }
-            .map { Shelf(title: $0.key, channels: $0.value) }
-        if !more.isEmpty {
-            result.append(Shelf(title: "more", channels: more.sorted { $0.displayLabel < $1.displayLabel }))
-        }
-        return result
     }
 }
 
@@ -118,30 +216,65 @@ private struct HeroBillboard: View {
     let compact: Bool
     var peers: [PublicChannel] = []
 
+    /// Same definition as the "Watching now" filter (`ChannelBrowse.apply(.live, …)`).
+    private var isLive: Bool { (channel.viewers ?? 0) > 0 && channel.sleeping != true }
+
     var body: some View {
-        NavigationLink(destination: ChannelPager(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
+        NavigationLink(destination: ChannelFeedView(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
             ChannelPreviewTile(channel: channel)
-                .aspectRatio(compact ? 4.0 / 5.0 : 21.0 / 9.0, contentMode: .fit)
+                .aspectRatio(compact ? 16.0 / 10.0 : 21.0 / 9.0, contentMode: .fit)
                 .overlay(alignment: .bottom) {
                     LinearGradient(
                         colors: [.clear, Color.appBackground.opacity(0.65), Color.appBackground.opacity(0.95)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 180)
+                    .frame(height: 130)
                 }
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 10) {
+                        // The hero is curated (`default`, or featured+richest) —
+                        // not necessarily live. "LIVE NOW" claimed it always was.
+                        if isLive {
+                            HStack(spacing: 6) {
+                                Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
+                                Text("LIVE NOW")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.2)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        } else if channel.sleeping == true {
+                            HStack(spacing: 6) {
+                                Image(systemName: "moon.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.textTertiary)
+                                Text("ASLEEP")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.2)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        }
                         Text(channel.displayLabel)
-                            .font(.system(size: compact ? 30 : 40, weight: .bold))
+                            .font(.system(size: compact ? 24 : 40, weight: .bold))
                             .foregroundStyle(Color.textPrimary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        if let tags = channel.tags, !tags.isEmpty {
-                            Text(tags.joined(separator: " · "))
+                        // The web hero leads with what the channel is DOING — its
+                        // last event, and who made it — rather than its tags.
+                        if let summary = channel.lastSteer?.summary, !summary.isEmpty {
+                            Text(summary)
                                 .font(.subheadline)
                                 .foregroundStyle(Color.textSecondary)
+                                .lineLimit(compact ? 1 : 2)
+                                .multilineTextAlignment(.leading)
+                        }
+                        // A banner on the phone: the steer line is on every
+                        // card below, so the hero can go without it.
+                        if !compact, let steered = SteerLine.text(for: channel) {
+                            Text(steered)
+                                .font(.caption)
+                                .foregroundStyle(Color.textTertiary)
                                 .lineLimit(1)
                         }
                         HStack(spacing: 12) {
@@ -158,7 +291,7 @@ private struct HeroBillboard: View {
                             }
                         }
                     }
-                    .padding(20)
+                    .padding(compact ? 16 : 20)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 24))
                 .overlay {
@@ -174,20 +307,29 @@ private struct HeroBillboard: View {
 
 private struct ChannelShelf: View {
     let title: String
+    var subtitle: String?
+    var ownedTags: Set<String> = []
     let channels: [PublicChannel]
     let cardWidth: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(channels) { channel in
-                        ChannelCard(channel: channel, width: cardWidth, peers: channels)
+                        ChannelCard(channel: channel, width: cardWidth, peers: channels, ownedTags: ownedTags)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -204,14 +346,22 @@ private struct ChannelCard: View {
     /// The shelf this card sits in, so the viewer can page sideways through
     /// the row you actually entered from rather than the whole catalogue.
     var peers: [PublicChannel] = []
+    /// Tags the shelf title already says out loud. A "featured" chip on every
+    /// card of the Featured row is one word repeated four times.
+    var ownedTags: Set<String> = []
+
+    private var tagLine: String? {
+        let tags = (channel.tags ?? []).filter { !ownedTags.contains($0) }
+        return tags.isEmpty ? nil : tags.prefix(3).joined(separator: " · ")
+    }
 
     var body: some View {
-        NavigationLink(destination: ChannelPager(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id)) {
+        NavigationLink(destination: ChannelFeedView(
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
             VStack(alignment: .leading, spacing: 8) {
                 ChannelPreviewTile(channel: channel)
                     .frame(width: width, height: width * 9 / 16)
-                    .overlay(alignment: .topTrailing) {
+                    .overlay(alignment: .topLeading) {
                         if let viewers = channel.viewers, viewers > 0 {
                             Label("\(viewers)", systemImage: "eye.fill")
                                 .font(.caption2.weight(.semibold))
@@ -227,17 +377,104 @@ private struct ChannelCard: View {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
                     }
+                    // Follow without leaving the wall: the cheapest "yes" in
+                    // the app, so it is one tap from every card.
+                    .overlay(alignment: .topTrailing) { CardFollowButton(channelId: channel.id) }
 
-                Text(channel.displayLabel)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: width, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        // Claimed channels answer only to their token holder.
+                        // A symbol, not the web's emoji: it takes the text
+                        // colour and scales with Dynamic Type.
+                        if channel.isProtected == true {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.textTertiary)
+                                .accessibilityLabel("Claimed")
+                        }
+                        Text(channel.displayLabel)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Color.textPrimary)
+                            .lineLimit(1)
+                        if channel.remixOf != nil {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.caption2)
+                                .foregroundStyle(Color.textTertiary)
+                                .accessibilityLabel(channel.remixOf.flatMap { $0.isEmpty ? nil : "Remixed from \($0)" } ?? "A remix")
+                        }
+                    }
+                    // The wall's liveliest fact: who touched this, and when.
+                    if let steered = SteerLine.text(for: channel) {
+                        Text(steered)
+                            .font(.caption2)
+                            .foregroundStyle(Color.textSecondary)
+                            .lineLimit(1)
+                    }
+                    if let tagLine {
+                        Text(tagLine)
+                            .font(.caption2)
+                            .foregroundStyle(Color.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: width, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            CardMenu(channel: channel)
+        }
     }
+}
+
+private struct CardFollowButton: View {
+    let channelId: String
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        let following = app.follows.isFollowing(channelId)
+        Button {
+            let now = app.follows.toggle(channelId)
+            UIImpactFeedbackGenerator(style: now ? .medium : .light).impactOccurred()
+        } label: {
+            Image(systemName: following ? "checkmark" : "plus")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(following ? Color.black : Color.white)
+                .frame(width: 26, height: 26)
+                .background(following ? Color.white : Color.black.opacity(0.55), in: Circle())
+                .contentTransition(.symbolEffect(.replace))
+                // A 26pt dot with a 44pt target.
+                .padding(9)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(following ? "Following. Unfollow" : "Follow")
+    }
+}
+
+private struct CardMenu: View {
+    let channel: PublicChannel
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        let following = app.follows.isFollowing(channel.id)
+        Button { _ = app.follows.toggle(channel.id) } label: {
+            Label(following ? "Unfollow" : "Follow", systemImage: following ? "star.slash" : "star")
+        }
+        if !app.pairedScreens.isEmpty {
+            Button { Task { await app.pushToAllScreens(channelId: channel.id) } } label: {
+                Label("Play on your screens", systemImage: "play.tv")
+            }
+        }
+        ShareLink(item: app.gallery.viewerURL(for: channel.id)) {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+    }
+}
+
+private struct GridWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 390
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 // MARK: - Preview tile (shared)

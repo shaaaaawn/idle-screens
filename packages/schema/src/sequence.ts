@@ -190,10 +190,14 @@ export function sequenceWantsFinish(seq: IdleSequence): boolean {
  *   when present;
  * - the same top-level `seq.seed`, compared normalized (like the mount-time
  *   seed itself) so a change of an exact multiple of 2^32 isn't flagged —
- *   even when every segment and the bed resolve their own seed (so
- *   `segmentRenderSeed`/`bedRenderSeed` are unaffected), a sequence-level
- *   `finish` grain resolves against the instance's mount-time seed
- *   (`frameFinishSeed`), which a swap cannot update;
+ *   but ONLY when either side has a sequence-level `finish`: that's the one
+ *   place `seq.seed` reaches rendering on its own (`frameFinishSeed` uses the
+ *   instance's mount-time seed for a sequence-level finish's grain, which a
+ *   swap cannot update). Without a sequence-level `finish`, every consumer of
+ *   `seq.seed` is a `segmentRenderSeed`/`bedRenderSeed` fallback, and those
+ *   are already compared per segment and for the bed below — so when every
+ *   segment and the bed carry their own seed, `seq.seed` is dead weight and
+ *   changing it is free;
  * - the same finish presence (`sequenceWantsFinish`) — the presentation
  *   pass is allocated once at construction, so a swap that adds or removes
  *   every `finish` in the sequence cannot (de)allocate it;
@@ -213,8 +217,13 @@ export function sequenceWantsFinish(seq: IdleSequence): boolean {
  */
 export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): boolean {
   if (prev.segments.length !== next.segments.length) return false;
-  if ((prev.seed === undefined) !== (next.seed === undefined)) return false;
-  if (prev.seed !== undefined && next.seed !== undefined && normalizeSeed(prev.seed) !== normalizeSeed(next.seed)) return false;
+  // seq.seed only reaches rendering directly through a sequence-level finish
+  // (frameFinishSeed); otherwise segmentRenderSeed/bedRenderSeed below already
+  // cover every way it can matter, so it's pinned only when one side has one.
+  if (prev.finish !== undefined || next.finish !== undefined) {
+    if ((prev.seed === undefined) !== (next.seed === undefined)) return false;
+    if (prev.seed !== undefined && next.seed !== undefined && normalizeSeed(prev.seed) !== normalizeSeed(next.seed)) return false;
+  }
   if (sequenceWantsFinish(prev) !== sequenceWantsFinish(next)) return false;
   if (prev.loop !== next.loop) return false;
   if ((prev.sync ?? 'mount') !== (next.sync ?? 'mount')) return false;

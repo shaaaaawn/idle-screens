@@ -13,6 +13,14 @@ final class AppState {
     // MARK: Gallery (Watch)
 
     var channels: [PublicChannel] = []
+    /// Editorial shelves from `/api/categories` — the same catalog the web
+    /// home page groups on, so the two surfaces show the same wall.
+    var categories: [ChannelCategory] = []
+    /// Past scenes, fetched once and shared by the feed, its neighbours and
+    /// the channel timeline.
+    let scenes = RecordedSceneStore()
+    /// Channels this person follows — theirs alone, synced by iCloud Keychain.
+    let follows = FollowStore()
     var isLoadingGallery = false
     var galleryError: String?
 

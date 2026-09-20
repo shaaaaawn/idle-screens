@@ -22,20 +22,29 @@ struct ComposerSheet: View {
     @State private var savingPreset = false
     @State private var presetName = ""
 
-    private var canSteer: Bool { app.token(for: channelId) != nil }
+    private var canSteer: Bool { app.canEdit(channelId) }
 
     /// You created this channel, but there is no token behind it — a failed
     /// Keychain write, or a device that restored the list without the
     /// credentials. Without this state the app tells the OWNER of a channel
     /// "watching — remix to steer", which reads as "this was never yours".
     private var ownedButUnlocked: Bool {
-        !canSteer && app.credentials.contains { $0.channelId == channelId }
+        // "No key at all", not "can't steer": a viewer key is on the ring and
+        // working, and must not be reported as missing.
+        app.token(for: channelId) == nil && app.credentials.contains { $0.channelId == channelId }
     }
 
     private var steerStatus: String {
-        if canSteer { return "you can steer this" }
-        return ownedButUnlocked ? "yours — token missing on this device"
-                                : "watching — remix to steer"
+        switch app.role(for: channelId) {
+        case .owner: return "yours — you can steer this"
+        case .editor: return "you can steer this — shared with you"
+        // The honest sentence for a viewer key: it is doing its job, and its
+        // job is not steering. Not an error, so not red.
+        case .viewer: return "view only — this key can't steer"
+        case nil:
+            return ownedButUnlocked ? "yours — token missing on this device"
+                                    : "watching — remix to steer"
+        }
     }
 
     var body: some View {
