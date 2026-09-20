@@ -150,6 +150,8 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         const eye = new MeshBasicMaterial({ color: white ? 0xffffff : 0x000000 });
         eye.name = m.name;
         eye.userData.mqOwned = true;
+        // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
+        eye.userData.mqEye = white ? 'sclera' : 'pupil';
         return eye;
       }
       if (isGlow(m) && !(m as Partial<MeshBasicMaterial>).map) {

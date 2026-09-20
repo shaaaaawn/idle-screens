@@ -189,6 +189,8 @@ export interface ActorPose {
   roll: number;
   /** For `inspect()` and tests: what the actor is doing right now. */
   doing: string;
+  /** What the actor is facing this beat — another actor, a mark — for its EYES. */
+  lookAt: Mark | null;
 }
 
 const smoother = (u: number): number => { const c = Math.min(1, Math.max(0, u)); return c * c * c * (c * (c * 6 - 15) + 10); };
@@ -298,7 +300,7 @@ export function poseOf(v: Vignette, actor: number, tSec: number): ActorPose | nu
       if (pitch) { fy += Math.tan(pitch) * Math.hypot(fx, fz); fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl; }
     }
   }
-  return { x, y: Math.max(9, y), z, fx, fy, fz, roll, doing };
+  return { x, y: Math.max(9, y), z, fx, fy, fz, roll, doing, lookAt: target ?? null };
 }
 
 /** Where a fish hovers to be "at" each thing in the geode interior — a body

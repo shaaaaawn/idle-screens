@@ -35,7 +35,7 @@ const PARAM_SECTIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
   ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
   // The renderer's look: on by default, listed so it can be turned off.
-  ['look', ['fishLighting', 'fishGlow', 'fishMetal']],
+  ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife']],
   ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotRig', 'spotCues']],
   ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
   ['formation', ['formationShape', 'formationBreathe']],

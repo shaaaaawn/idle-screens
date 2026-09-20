@@ -54,6 +54,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { buildStudio, type Studio } from './studio';
+import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
@@ -456,6 +457,8 @@ interface Fish {
    *  colours. Created on the first tinted frame — never, by default. */
   /** What this fish's GLOW parts add up to; null when nothing on it glows. */
   glow: FishGlow | null;
+  /** Eye rig: undefined until first asked for, null when the model has no eyes. */
+  eyes?: EyeRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -544,6 +547,7 @@ class TankInstance implements SaverInstance {
   private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
   private readonly spotSeen = [false, false, false];
   private readonly spotLevel = [0, 0, 0];
+  private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
   private spotKey = '\u0000';
@@ -1797,6 +1801,7 @@ class TankInstance implements SaverInstance {
     let sentinel: { x: number; z: number } | null = null;
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
+    const eyeLife = this.num('eyeLife');
     this.buildSpotRig();
     this.spotSeen.fill(false);
     const glowPulse = this.num('crystalPulse');
@@ -2096,6 +2101,32 @@ class TankInstance implements SaverInstance {
       } else {
         f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
         f.group.rotateZ(pose.roll);
+      }
+
+      // Eye life: blinks, saccades, a look at whoever it is talking to, a
+      // glance at the lens. Rigged on the first frame that asks for it, so
+      // `eyeLife: 0` compiles the stock eye program and costs nothing.
+      if (eyeLife > 0 && f.body) {
+        if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
+        if (f.eyes) {
+          const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hz) || 1;
+          const toward = (tx: number, ty: number, tz: number): { fwd: number; up: number } => {
+            const dx = tx - px, dy = ty - y, dz = tz - pz, dl = Math.hypot(dx, dy, dz) || 1;
+            return { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl };
+          };
+          const cam = this.camera.position;
+          const look = act?.lookAt ?? null;
+          eyeMood(tSec, f.index, {
+            doing: act ? act.doing : '',
+            target: look ? toward(look.x, look.y, look.z) : null,
+            camera: toward(cam.x, cam.y, cam.z),
+            climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
+          }, eyeLife, this.eyeState);
+          const e = this.eyeState;
+          f.eyes.set(e.blink, e.gazeFwd, e.gazeUp, e.dilate, e.widen);
+        }
+      } else if (f.eyes) {
+        f.eyes.set(0, 0, 0, 1, 0);
       }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;

@@ -15,3 +15,5 @@ Flora moves again, at no frame cost: the sway is an S-curve that climbs the stal
 `landmark: citadel` — the castle's two-storey version: a wider outer ward, and inside it a raised terrace with its own crenellated ring, four taller spired towers, a stair up from the courtyard, and the keep on top.
 
 Geode homes publish door marks (`home1`…, and `home1in`… inside the throat), so a vignette can send a fish home: out of its own door, to the middle of the village, and back in.
+
+`eyeLife` (default 1) — the eyes are alive: blinks on a personal clock (one in four a double), idle saccades, pupils that lead a turn or a climb, eyes on whoever a vignette has the fish facing, a glance at the camera now and then, wide for a hop, shut for a rest. Vertex offsets on the existing sclera/pupil materials only — no geometry, no draw calls, works on skinned fish; `0` compiles the stock eye program.

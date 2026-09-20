@@ -156,7 +156,12 @@ export const METAQUARIUM_PARAMS = {
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is the flat unlit atlas. */
-  fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+/** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
+   *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
+   *  glance at the camera now and then, wide for a hop and shut for a rest.
+   *  Vertex offsets on the eye materials only; 0 compiles the stock program. */
+  eyeLife: { type: 'number', default: 1, min: 0, max: 1, ease: 'smooth' },
+    fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },

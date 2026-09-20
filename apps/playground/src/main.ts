@@ -270,6 +270,17 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: eyes. Two fish, close, talking — blinks, saccades, a look at each
+  // other, a glance at the lens, wide for the hop, shut for the rest.
+  createMetaquarium({
+    id: 'metaquarium-study-eyes', label: 'Metaquarium (study eyes)',
+    params: {
+      vignette: '3s: a =left, b =right | 6s: a >centre @b, b >centre @a | 6s: a @b talk, b @a nod | 5s: b @a hop | 5s: a @b wiggle, b @a | 6s: a @front peek, b @a | 6s: a @b bow, b @a bow | 7s: a rest, b @a | 6s: a >left, b >right',
+      fishMix: '100:1,257:1', fishCount: 2, fishGlow: 0.4, eyeLife: 1,
+      fogColor: '#04101c', floorColor: '#0c2030', fogNear: 120, fogFar: 600, marineSnow: 0.3,
+      cameraDistance: 84, cameraElevation: 16, cameraAzimuth: 0, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
   // Indoors: the room behind the round door — and the small scenes played in
