@@ -44,4 +44,15 @@ enum SteerLine {
         return (["steered \(ago(at, now: now))"] + [via, on].compactMap { $0 })
             .joined(separator: " · ")
     }
+
+    /// The card's version: who, on what, when — in the order a narrow card
+    /// truncates least harmfully. The web's sentence ("steered 13d ago ·
+    /// claude-code · claude-op…") loses the model first, which is the part
+    /// people browse by. The harness is dropped here; the feed shows it.
+    static func cardLine(for channel: PublicChannel, now: Date = Date()) -> String? {
+        guard let at = channel.lastEventAt, at > 0 else { return nil }
+        let by = namedActor(channel.lastSteer?.actor)
+        let on = distinct(channel.lastSteer?.model, from: by)
+        return ([by, on].compactMap { $0 } + [ago(at, now: now)]).joined(separator: " · ")
+    }
 }

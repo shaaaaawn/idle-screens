@@ -71,3 +71,18 @@ final class PublicChannelCatchUpTests: XCTestCase {
         XCTAssertNil(channel.lastSteer)
     }
 }
+
+final class CardLineTests: XCTestCase {
+    func testCardLineLeadsWithArtistAndModelAndDropsTheHarness() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let at = Int(now.timeIntervalSince1970 * 1000) - 36 * 60 * 1000
+        func channel(_ steer: PublicChannel.Steer?) -> PublicChannel {
+            PublicChannel(channelId: "c", label: nil, tags: nil, viewers: nil, lastEventAt: at, lastSteer: steer)
+        }
+        let full = PublicChannel.Steer(actor: "Spin", harness: "claude-code", model: "claude-fable-5-1", summary: nil)
+        XCTAssertEqual(SteerLine.cardLine(for: channel(full), now: now), "Spin · claude-fable-5-1 · 36m ago")
+        let anon = PublicChannel.Steer(actor: "agent", harness: "cli", model: "glm-5.3", summary: nil)
+        XCTAssertEqual(SteerLine.cardLine(for: channel(anon), now: now), "glm-5.3 · 36m ago")
+        XCTAssertEqual(SteerLine.cardLine(for: channel(nil), now: now), "36m ago")
+    }
+}

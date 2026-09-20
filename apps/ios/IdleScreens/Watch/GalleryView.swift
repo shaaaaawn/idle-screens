@@ -79,6 +79,12 @@ struct GalleryView: View {
             HeroBillboard(channel: hero, compact: sizeClass != .regular, peers: app.channels)
                 .padding(.horizontal, 16)
         }
+        // The map before the territory: every shelf below, as one row of
+        // tiles you can jump straight into — so the eighth category is as
+        // reachable as the first.
+        if shelves.count > 1 {
+            CategoryIndex(shelves: shelves)
+        }
         // Yours before everyone's. Absent until you follow something — an
         // empty "Following" row is a nag.
         if !following.isEmpty {
@@ -284,16 +290,36 @@ private struct ChannelShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.textPrimary)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
+            NavigationLink {
+                ShelfGridView(title: title, subtitle: subtitle, ownedTags: ownedTags, channels: channels)
+            } label: {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.textPrimary)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(Color.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    // Only promise more when there is more than a row shows.
+                    if channels.count > 2 {
+                        HStack(spacing: 3) {
+                            Text("All \(channels.count)")
+                            Image(systemName: "chevron.right").font(.caption2.weight(.bold))
+                        }
+                        .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.textSecondary)
+                    }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(channels.count <= 2)
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -303,6 +329,128 @@ private struct ChannelShelf: View {
                     }
                 }
                 .padding(.horizontal, 16)
+            }
+        }
+    }
+}
+
+// MARK: - Category index
+
+/// One tile per shelf: its name, how many channels, and a live still of its
+/// first channel as the cover.
+private struct CategoryIndex: View {
+    let shelves: [HomeSection]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Browse")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(shelves) { shelf in
+                        NavigationLink {
+                            ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
+                                          ownedTags: shelf.ownedTags, channels: shelf.channels)
+                        } label: {
+                            ZStack(alignment: .bottomLeading) {
+                                if let cover = shelf.channels.first {
+                                    ChannelPreviewTile(channel: cover)
+                                        .frame(width: 132, height: 84)
+                                }
+                                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.78)],
+                                               startPoint: .center, endPoint: .bottom)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(shelf.title)
+                                        .font(.footnote.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text("\(shelf.channels.count)")
+                                        .font(.caption2)
+                                        .opacity(0.75)
+                                }
+                                .foregroundStyle(.white)
+                                .padding(9)
+                            }
+                            .frame(width: 132, height: 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(shelf.title), \(shelf.channels.count) channels")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+}
+
+// MARK: - A whole shelf
+
+/// Everything in one category, as a grid you can sort — the answer to "show
+/// me all of these" that a sideways row never gives.
+private struct ShelfGridView: View {
+    let title: String
+    var subtitle: String?
+    var ownedTags: Set<String> = []
+    let channels: [PublicChannel]
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var order: Order = .curated
+
+    enum Order: String, CaseIterable, Identifiable {
+        case curated = "Curated", recent = "Recently updated", watched = "Most watched", name = "A–Z"
+        var id: String { rawValue }
+    }
+
+    private var sorted: [PublicChannel] {
+        switch order {
+        case .curated: channels
+        case .recent: channels.sorted { ($0.lastEventAt ?? 0, $1.id) > ($1.lastEventAt ?? 0, $0.id) }
+        case .watched: channels.sorted { ($0.viewers ?? 0, $1.id) > ($1.viewers ?? 0, $0.id) }
+        case .name: channels.sorted {
+            $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending
+        }
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let columns = sizeClass == .regular ? 4 : 2
+            let width = max(120, (geo.size.width - 32 - CGFloat(columns - 1) * 12) / CGFloat(columns))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(width), spacing: 12, alignment: .top),
+                                             count: columns),
+                              alignment: .leading, spacing: 20) {
+                        ForEach(sorted) { channel in
+                            ChannelCard(channel: channel, width: width, peers: sorted, ownedTags: ownedTags)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .background(Color.appBackground.ignoresSafeArea())
+        .navigationTitle(title.lowercased())
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort", selection: $order) {
+                        ForEach(Order.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
             }
         }
     }
@@ -374,7 +522,7 @@ private struct ChannelCard: View {
                         }
                     }
                     // The wall's liveliest fact: who touched this, and when.
-                    if let steered = SteerLine.text(for: channel) {
+                    if let steered = SteerLine.cardLine(for: channel) {
                         Text(steered)
                             .font(.caption2)
                             .foregroundStyle(Color.textSecondary)
