@@ -196,11 +196,16 @@ extension AppState {
             let claimed = try await pairClient.claim(code: code)
             KeychainHelper.save(
                 key: Self.pairTokenKey(for: claimed.deviceId), value: claimed.pairToken)
+            // lastSeenAt is left nil rather than stamped with "now": it must
+            // only ever hold a timestamp the SERVER reported (see the field's
+            // doc comment). `refreshScreenStatuses()` below fills in the real
+            // value; if that refresh fails, an honest "not seen yet" beats a
+            // fabricated freshness that would read as connected for two minutes.
             let screen = PairedScreen(
                 deviceId: claimed.deviceId,
                 channelId: claimed.channelId,
                 pairedAt: Date(),
-                lastSeenAt: Int(Date().timeIntervalSince1970 * 1000))
+                lastSeenAt: nil)
             // Re-pairing the same screen refreshes it rather than duplicating.
             if let index = pairedScreens.firstIndex(where: { $0.deviceId == claimed.deviceId }) {
                 pairedScreens[index] = screen
@@ -216,8 +221,16 @@ extension AppState {
             // succeeded even if the TV isn't listening right now.
             if let channelId = claimed.channelId, !channelId.isEmpty {
                 let token = claimed.pairToken
-                Task { [pairClient] in
-                    _ = try? await pairClient.push(pairToken: token, channelId: channelId)
+                let deviceId = claimed.deviceId
+                Task { [pairClient, self] in
+                    guard (try? await pairClient.push(pairToken: token, channelId: channelId)) != nil else { return }
+                    // A delivered push is the one real proof the screen is
+                    // there — record it the same way `push(channelId:to:)`
+                    // does, so the ack isn't invisible to `presence()`.
+                    if let index = pairedScreens.firstIndex(where: { $0.deviceId == deviceId }) {
+                        pairedScreens[index].lastDeliveredAt = Date()
+                        savePairedScreens()
+                    }
                 }
             }
             await refreshScreenStatuses()

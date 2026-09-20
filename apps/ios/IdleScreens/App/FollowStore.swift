@@ -50,8 +50,15 @@ final class FollowStore {
 
     /// Followed channels that still exist, newest update first — the same
     /// order as the Watch feed, so "Following" is a filter, not a new sort.
-    func channels(in all: [PublicChannel]) -> [PublicChannel] {
-        ChannelFeed.latestFirst(all.filter { followed.contains($0.id) })
+    ///
+    /// `canRead` mirrors `ChannelFeed.latestFirst`'s own parameter: a private
+    /// channel is only offered when it answers true. Defaults permissive so a
+    /// caller with no notion of "can this device read it" keeps today's
+    /// behaviour; the caller that can answer (a token-aware AppState) should
+    /// pass a real predicate rather than rely on the default.
+    func channels(in all: [PublicChannel],
+                  canRead: (PublicChannel) -> Bool = { _ in true }) -> [PublicChannel] {
+        ChannelFeed.latestFirst(all.filter { followed.contains($0.id) }, canRead: canRead)
     }
 }
 
