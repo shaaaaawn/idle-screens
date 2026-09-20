@@ -279,7 +279,8 @@ test.describe('config panel (dev view)', () => {
         const host = document.getElementById('viewport-host');
         return (
           !!host?.classList.contains('active') &&
-          host.querySelectorAll(':scope > :not(#viewport-label)').length > 0
+          // A mounted scene, not just the chrome (label, loading chip) the host always holds.
+          host.querySelectorAll('.vp-layer.live > *, :scope > iframe').length > 0
         );
       }),
     ).toBe(true);

@@ -683,6 +683,26 @@ function buildSaverPalette(mount: HTMLElement, onSelect: (id: string) => void, a
     tree.append(details);
   }
 
+  // Arrow keys walk the visible rows (the mount is debounced, so holding a key
+  // scrubs the list without mounting every saver it passes).
+  const walk = (from: Element | null, step: 1 | -1): void => {
+    const rows = [...tree.querySelectorAll<HTMLElement>('.palette-item')].filter((r) => r.offsetParent !== null);
+    if (!rows.length) return;
+    const at = from ? rows.indexOf(from as HTMLElement) : -1;
+    const next = rows[Math.min(rows.length - 1, Math.max(0, at < 0 ? 0 : at + step))]!;
+    next.focus();
+    next.click();
+    next.scrollIntoView({ block: 'nearest' });
+  };
+  tree.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    walk(document.activeElement?.closest('.palette-item') ?? tree.querySelector('.palette-item.active'), e.key === 'ArrowDown' ? 1 : -1);
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); walk(null, 1); }
+  });
+
   search.addEventListener('input', () => {
     const q = search.value.trim().toLowerCase();
     for (const details of tree.querySelectorAll<HTMLDetailsElement>('.palette-group')) {
@@ -970,6 +990,22 @@ function liveMode(): void {
   };
   rebuild(cfg);
 
+  // Dev Tools changes saver on every palette row; the idle engine only needs
+  // to know by the time Preview / Idle demo is pressed. Rebuilding the whole
+  // <idle-screen> element inline was part of what made a switch hitch.
+  let engineTimer = 0;
+  const flushEngineRebuild = (): void => {
+    if (!engineTimer) return;
+    window.clearTimeout(engineTimer);
+    engineTimer = 0;
+    rebuild(cfg);
+  };
+  document.addEventListener('idle:flush-engine', flushEngineRebuild);
+  const scheduleEngineRebuild = (): void => {
+    window.clearTimeout(engineTimer);
+    engineTimer = window.setTimeout(() => { engineTimer = 0; rebuild(cfg); }, 900);
+  };
+
   /*
    * The top-right control does two different jobs, so it says which one it is
    * doing. In Dev Tools it is a transport for the SELECTED saver's inline
@@ -1051,6 +1087,7 @@ function liveMode(): void {
       return;
     }
     preview.close();
+    flushEngineRebuild();
     window.__idleScreens?.sleep();
   });
 
@@ -1098,6 +1135,7 @@ function liveMode(): void {
   });
 
   function openPreview(id: string): void {
+    flushEngineRebuild();
     cfg.saver = id;
     setTopbarSaver(ALL_SAVERS.find((s) => s.manifest.id === id) ?? null);
     rebuild(cfg);
@@ -1175,6 +1213,14 @@ function liveMode(): void {
 
     let devPreviewInst: SaverInstance | null = null;
     let devStage: MountedStage | null = null;
+    const layerInsts = new Map<HTMLElement, SaverInstance>();
+    let mountTimer = 0;
+    /** The first selection (page load, deep link) has nothing to debounce. */
+    let instantMount = true;
+    const loadingChip = document.createElement('span');
+    loadingChip.id = 'viewport-loading';
+    loadingChip.hidden = true;
+    viewportHost?.append(loadingChip);
     let devMountToken = 0;
 
     // Stage picker: passthrough savers perform ON a page, so the workbench
@@ -1215,7 +1261,7 @@ function liveMode(): void {
       url.searchParams.set('saver', id);
       url.hash = 'dev';
       history.replaceState(null, '', url);
-      rebuild(cfg);
+      scheduleEngineRebuild();
       devProps.select(saver);
       devParams.select(saver);
       setTopbarSaver(saver);
@@ -1227,36 +1273,49 @@ function liveMode(): void {
       viewportHost.classList.toggle('passthrough', !!saver.manifest.passthrough);
       if (viewportLabel) viewportLabel.textContent = `${saver.manifest.label} -- inline preview`;
       viewportNav?.select(saver);
-
-      if (devPreviewInst) devPreviewInst.dispose();
-      devPreviewInst = null;
-      devStage?.destroy();
-      devStage = null;
-      viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
-      const rect = viewportHost.getBoundingClientRect();
-      const previewCtx = {
-        saver,
-        previewActive: true,
-        previewSize: { w: Math.round(rect.width) || 640, h: Math.round(rect.height) || 400 },
-      };
+      // The timeline lets go of the outgoing instance now, which leaves its
+      // last frame standing in the viewport — that still frame is what the
+      // incoming scene fades in over.
       timeline.setSaver(saver, null, cfg.seed);
-      debug.setContext(previewCtx);
-      perception.setSaver(id, {
-        width: Math.round(rect.width) || 640,
-        height: Math.round(rect.height) || 400,
-        seed: cfg.seed,
-        // Imperative savers have no spec to analyse; the panel reads their
-        // pixels instead, which needs the plugin itself.
-        saver,
-      });
       layers.setSaver(id);
-
-      // Passthrough savers perform ON a page: mount a stage document in an
-      // iframe and let the saver play inside it, victims scoped to the stage.
-      // (stage, seed) is the whole recipe — the performance is repeatable.
-      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
       stagePick.style.display = saver.manifest.passthrough ? 'block' : 'none';
+      loadingChip.textContent = `loading ${saver.manifest.label}…`;
+      loadingChip.hidden = false;
+      // Browsing the palette (clicks, arrow keys) should not mount a WebGL
+      // tank per row passed: only the row you stop on mounts.
       const token = ++devMountToken;
+      window.clearTimeout(mountTimer);
+      mountTimer = window.setTimeout(() => { if (token === devMountToken) mountSelected(saver, token); }, instantMount ? 0 : 110);
+      instantMount = false;
+    };
+
+    /**
+     * Swap the viewport to `saver` without the old cut-to-black.
+     *
+     * It used to dispose the running instance and clear the viewport FIRST,
+     * then mount: a blank frame, a main-thread stall while a new GL context
+     * compiled its programs and built its scenery, an empty tank popping in —
+     * and, in the same tick, the Perception panel mounting a second hidden tank
+     * and the idle engine being rebuilt. Now the incoming scene mounts into its
+     * own layer UNDER the outgoing one's last frame, renders, and fades in over
+     * it; only then is the old instance disposed. Everything that is not the
+     * picture (perception's sampler, the idle engine) waits until it is up.
+     */
+    const mountSelected = (saver: SaverPlugin, token: number): void => {
+      if (!viewportHost) return;
+      const id = saver.manifest.id;
+      const rect = viewportHost.getBoundingClientRect();
+      const w = Math.round(rect.width) || 640, h = Math.round(rect.height) || 400;
+      const previewCtx = { saver, previewActive: true, previewSize: { w, h } };
+      debug.setContext(previewCtx);
+      const useStage = !!saver.manifest.passthrough && stageId !== 'none';
+
+      // A stage is an iframe that owns the viewport: no layer, no crossfade.
+      if (useStage) retireLayers(null);
+      const layer = document.createElement('div');
+      layer.className = 'vp-layer';
+      if (!useStage) viewportHost.append(layer);
+
       const mounted: Promise<SaverInstance> = useStage
         ? mountStage(viewportHost, STAGES.find((st) => st.id === stageId)!).then((st) => {
             if (token !== devMountToken) { st.destroy(); throw new Error('stale stage mount'); }
@@ -1265,8 +1324,8 @@ function liveMode(): void {
               saver.mount({
                 host: st.overlay,
                 dpr: devicePixelRatio ?? 1,
-                width: st.width || Math.round(rect.width) || 640,
-                height: st.height || Math.round(rect.height) || 400,
+                width: st.width || w,
+                height: st.height || h,
                 rng: createRng((cfg.seed >>> 0) || 1),
                 seed: cfg.seed,
                 reducedMotion: false,
@@ -1276,48 +1335,76 @@ function liveMode(): void {
           })
         : Promise.resolve(
             saver.mount({
-              host: viewportHost,
+              host: layer,
               dpr: devicePixelRatio ?? 1,
-              width: Math.round(rect.width) || 640,
-              height: Math.round(rect.height) || 400,
+              width: w,
+              height: h,
               rng: createRng((cfg.seed >>> 0) || 1),
               seed: cfg.seed,
               reducedMotion: false,
             }),
           );
       mounted.then((inst) => {
-        if (token !== devMountToken) { inst.dispose(); return; }
+        if (token !== devMountToken) { inst.dispose(); layer.remove(); return; }
         devPreviewInst = inst;
+        if (!useStage) layerInsts.set(layer, inst);
         inst.setPaused(true);
         timeline.setSaver(saver, inst, cfg.seed);
         layers.setRuntime(inst, devStage?.doc.body ?? null);
-        if (devStage) {
-          // Re-aim perception at the STAGE performance: same victim geometry
-          // (mirrored, so the sampler never fights the live instance), same
-          // dimensions — the map now portrays what the viewport shows.
-          perception.setSaver(id, {
-            width: devStage.width || Math.round(rect.width) || 640,
-            height: devStage.height || Math.round(rect.height) || 400,
-            seed: cfg.seed,
-            saver,
-            page: mirrorPage(devStage),
-          });
-        }
-        requestAnimationFrame(() => {
+        // Two frames: the first paints the scene, the second guarantees it has
+        // been presented before the fade starts showing it.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (token !== devMountToken) return;
+          layer.classList.add('live');
+          loadingChip.hidden = true;
+          window.setTimeout(() => { if (token === devMountToken) retireLayers(layer); }, 340);
           devProps.refresh();
           devParams.refresh();
           debug.setContext(previewCtx);
-        });
-      }).catch(() => { /* superseded by a newer selection */ });
+        }));
+        // Off the critical path: the sampler mounts its own hidden instance,
+        // and the idle engine only matters when Preview / Idle demo is pressed.
+        window.setTimeout(() => {
+          if (token !== devMountToken) return;
+          // An imperative saver is perceived from its pixels on a coarse grid:
+          // a second full-size GL tank is a second full-size stall. A third of
+          // the viewport, same aspect, reads the same. Spec savers are analysed
+          // from the spec and keep the real size (text legibility depends on it).
+          const k = saver.spec || devStage ? 1 : Math.min(1, 360 / w);
+          perception.setSaver(id, {
+            width: Math.round((devStage?.width || w) * k),
+            height: Math.round((devStage?.height || h) * k),
+            seed: cfg.seed,
+            saver,
+            ...(devStage ? { page: mirrorPage(devStage) } : {}),
+          });
+        }, 900);
+      }).catch(() => { layer.remove(); /* superseded by a newer selection */ });
+    };
+
+    /** Dispose every layer except `keep` (and any layer-less direct mount). */
+    const retireLayers = (keep: HTMLElement | null): void => {
+      if (!viewportHost) return;
+      for (const [el, inst] of [...layerInsts]) {
+        if (el === keep) continue;
+        try { inst.dispose(); } catch { /* a saver that throws on dispose must not wedge the viewport */ }
+        if (devPreviewInst === inst) devPreviewInst = null;
+        layerInsts.delete(el);
+      }
+      if (keep === null) {
+        devStage?.destroy();
+        devStage = null;
+        if (devPreviewInst) { devPreviewInst.dispose(); devPreviewInst = null; }
+      }
+      viewportHost.querySelectorAll(':scope > :not(#viewport-label):not(#viewport-loading)').forEach((n) => { if (n !== keep) n.remove(); });
     };
 
     layers.onSpecChange = (editedSpec) => {
       if (!viewportHost) return;
       try {
         const newSaver = compileSaver(editedSpec);
-        if (devPreviewInst) devPreviewInst.dispose();
-        devPreviewInst = null;
-        viewportHost.querySelectorAll(':scope > :not(#viewport-label)').forEach((n) => n.remove());
+        ++devMountToken; // a pending palette mount must not land on top of this
+        retireLayers(null);
         const rect = viewportHost.getBoundingClientRect();
         timeline.setSaver(newSaver, null, cfg.seed);
         void Promise.resolve(
@@ -1604,7 +1691,11 @@ function buildConfigPanel(
   sleepBtn.className = 'wb-btn';
   sleepBtn.textContent = 'Idle demo';
   sleepBtn.title = 'Sleep the engine — wakes on any input, like a real screensaver';
-  sleepBtn.addEventListener('click', () => window.__idleScreens?.sleep());
+  sleepBtn.addEventListener('click', () => {
+    // The engine follows the palette on a delay; make it current first.
+    document.dispatchEvent(new Event('idle:flush-engine'));
+    window.__idleScreens?.sleep();
+  });
   const wakeBtn = document.createElement('button');
   wakeBtn.type = 'button';
   wakeBtn.className = 'wb-btn';

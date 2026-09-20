@@ -370,6 +370,20 @@
       #viewport-host.active { display: block; }
       #viewport-host.passthrough { background: transparent; }
       #viewport-host > canvas { display: block; width: 100%; height: 100%; }
+      /* Each mounted scene lives in its own layer: the incoming one fades in
+         over the outgoing one's last frame, so a switch never cuts to black. */
+      .vp-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .3s ease; }
+      .vp-layer.live { opacity: 1; }
+      .vp-layer > canvas { display: block; width: 100%; height: 100%; }
+      #viewport-loading {
+        position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 4;
+        padding: 5px 12px; border-radius: 999px; pointer-events: none;
+        font: 500 11px/1 system-ui, sans-serif; color: rgba(255,255,255,.85);
+        background: rgba(12,14,20,.72); border: 1px solid var(--wb-border);
+        animation: vp-loading 1.1s ease-in-out infinite;
+      }
+      @keyframes vp-loading { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .vp-layer { transition: none; } #viewport-loading { animation: none; } }
       /* — Viewport navigation (viewport-nav.ts) — */
       #viewport-host.vp-navigable { cursor: grab; touch-action: none; }
       #viewport-host.vp-orbiting { cursor: grabbing; }
