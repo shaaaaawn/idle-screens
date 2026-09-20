@@ -256,6 +256,20 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 215, cameraElevation: 13, cameraAzimuth: 14, autoRotate: 0.5, moteDensity: 0,
     }, catalog: LOCAL_CATALOG,
   }),
+  // COMMUTE: three neighbours come out of their own front doors, meet in the
+  // middle of the village, and go home again. The world's marks (home1..3,
+  // home1in..3in) are what make them citizens instead of swimmers.
+  createMetaquarium({
+    id: 'metaquarium-vignette-commute', label: 'Metaquarium (vignette commute — going home)',
+    params: {
+      geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
+      propMix: 'crystal:3@druse/rainbow', crystalScale: 1, crystalTint: 0.6,
+      vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
+      fishMix: '100:2,257:1', fishCount: 3, fishGlow: 0.5,
+      fogColor: '#0a0a1a', floorColor: '#2a1a2a', fogNear: 120, fogFar: 700,
+      cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
+    }, catalog: LOCAL_CATALOG,
+  }),
   // Study scenes: one subject each, close, slowly orbiting — where a layer is
   // tuned before it goes back into a world. ?saver=metaquarium-study-<name>.
   // Indoors: the room behind the round door — and the small scenes played in

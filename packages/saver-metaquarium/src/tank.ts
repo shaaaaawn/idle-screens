@@ -1639,7 +1639,6 @@ class TankInstance implements SaverInstance {
       : tSec * speed;
 
     this.ensureStudio();
-    this.buildVignette();
     this.reconcile();
 
     // Camera orbit
@@ -1690,6 +1689,8 @@ class TankInstance implements SaverInstance {
     this.buildRoom();
     this.buildProps();
     this.buildScenery();
+    // After the scenery: a vignette may name the world's own marks (home doors, a gate).
+    this.buildVignette();
     this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {

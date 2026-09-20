@@ -130,6 +130,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // so a village of three is a cottage, a hall and a tower.
   const interiors: BufferGeometry[] = [], details: BufferGeometry[] = [];
   const homeLights: Emitter[] = [];
+  const marks: Record<string, { x: number; y: number; z: number }> = {};
   const homeRng = rng.fork(3);
   const homeCount = Math.min(Math.round(opts.homes), opts.cap >= 8 ? 3 : 2);
   for (let i = 0; i < homeCount; i++) {
@@ -159,12 +160,18 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     interiors.push(...home.glow);
     vents.push(home.vent);
     homeLights.push(home.emitter);
+    // Somewhere to come home TO: `homeN` hovers outside the door, `homeNin`
+    // is in the throat, behind the rind — a fish sent there has gone indoors.
+    {
+      const m = home.emitter, dx = m.x - x, dz = m.z - z, dl = Math.hypot(dx, dz) || 1;
+      marks[`home${i + 1}`] = { x: m.x + (dx / dl) * 20 * s, y: m.y + 2 * s, z: m.z + (dz / dl) * 20 * s };
+      marks[`home${i + 1}in`] = { x: m.x - (dx / dl) * 5 * s, y: m.y, z: m.z - (dz / dl) * 5 * s };
+    }
     obstacles.push(home.obstacle);
     counts.homes!++;
   }
   // The landmark. It stands behind the village, gate toward the camera, and
   // its keep is the same geode home everyone else lives in — only grand.
-  const marks: Record<string, { x: number; y: number; z: number }> = {};
   if (opts.castle && !opts.interior) {
     const cz = (homeCount ? -150 : -110) * s;
     const castle = buildCastle({ x: 0, y: terrain(0, cz), z: cz, facing: 0, scale: s, palette: clusters.map(c => c.color), tiers: opts.castle === 2 ? 2 : 1 }, rng.fork(11));
