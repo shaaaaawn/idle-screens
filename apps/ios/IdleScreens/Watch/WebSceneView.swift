@@ -122,11 +122,22 @@ struct WebSceneView: UIViewRepresentable {
           const post = (kind, body) => {
             try { window.webkit.messageHandlers.\(handlerName).postMessage({ kind, body }); } catch (_) {}
           };
+          // Only the channel's own stream is instrumented. A page that opens
+          // some OTHER socket (telemetry, an embed) must never have its
+          // frames posted here — ChannelSession treats matching JSON as
+          // authoritative state, so an unrelated socket could spoof it.
+          const channelSocketSuffix = \(literal("/c/" + channelId + "/ws"));
+          const isChannelSocket = (url) => {
+            try { return new URL(url, location.href).pathname.endsWith(channelSocketSuffix); }
+            catch (_) { return false; }
+          };
           const Native = window.WebSocket;
           if (Native && !Native.__idleTapped) {
             const Tapped = function (url, protocols) {
               const ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
-              ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data); });
+              if (isChannelSocket(url)) {
+                ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data); });
+              }
               return ws;
             };
             Tapped.prototype = Native.prototype;
