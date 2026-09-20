@@ -76,7 +76,18 @@ final class ChannelSession {
         phase = hasScene ? .live : .connecting
         armConnectTimeout()
         if let seedSpec {
-            apply(spec: seedSpec, fallbackSeed: seedSpec.seed)
+            if source == .host {
+                // Host mode: the web view's own load is what proves the scene
+                // is live, via `noteHostedScene(_:)`. Running the native
+                // `apply` path here would flip `hasScene`/`phase` to `.live`
+                // before WebKit ever paints — so a load failure would find
+                // `hostFailed()` a no-op (`hasScene` already true) and leave
+                // the surface blank with no unreachable/retry state. The seed
+                // is only good for the label shown while still connecting.
+                sceneLabel = seedSpec.label ?? seedSpec.id
+            } else {
+                apply(spec: seedSpec, fallbackSeed: seedSpec.seed)
+            }
         }
         task?.cancel()
         // Host mode: the web view's socket is the only socket. Frames arrive
@@ -207,9 +218,26 @@ final class ChannelSession {
         // A sequence envelope names itself at the top; a classic saver is
         // just `{"id": "warp"}`. Either way label-then-id is the right read.
         sceneLabel = fields["label"]?.stringValue ?? fields["id"]?.stringValue
-        if case .object(let bg)? = fields["background"] {
+        // Cleared first: a scene that declares no background of its own must
+        // fall back to the channel/default colour, not keep showing the
+        // PREVIOUS scene's backdrop over top of it.
+        backdrop = nil
+        backdropBottom = nil
+        // An `idle-sequence` envelope carries no top-level `background` —
+        // its segments paint their own ground (and change under native's
+        // feet, untracked here). Its `bed`, when present, paints underneath
+        // every segment on the sequence's own global clock and segments'
+        // own backgrounds are ignored over it, so the bed's background is
+        // the one the page is actually showing.
+        let backgroundFields: JSONValue?
+        if case .object(let bed)? = fields["bed"] {
+            backgroundFields = bed["background"]
+        } else {
+            backgroundFields = fields["background"]
+        }
+        if case .object(let bg)? = backgroundFields {
             if case .array(let stops)? = bg["stops"], !stops.isEmpty {
-                if case .object(let first)? = stops.first { backdrop = first["color"]?.stringValue ?? backdrop }
+                if case .object(let first)? = stops.first { backdrop = first["color"]?.stringValue }
                 if case .object(let last)? = stops.last { backdropBottom = last["color"]?.stringValue }
             } else if let color = bg["color"]?.stringValue {
                 backdrop = color

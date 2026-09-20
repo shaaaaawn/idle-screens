@@ -195,10 +195,23 @@ struct GalleryView: View {
     /// Evals, the curated categories, Latest, then the tail — from the one
     /// shared builder. The phone used to bucket by each channel's first tag,
     /// which produced shelves the website has never had.
-    private var following: [PublicChannel] { app.follows.channels(in: app.channels) }
+    private var following: [PublicChannel] {
+        app.follows.channels(in: app.channels) { app.token(for: $0.id) != nil }
+    }
 
+    /// `build`'s sections cover every channel, so without this the billboard
+    /// channel would also turn up as a card in whichever shelf claims it
+    /// (Featured, Latest, Other, …). Drop it there — dropping the section
+    /// entirely if it was the shelf's only channel.
     private var shelves: [HomeSection] {
-        HomeSections.build(channels: app.channels, categories: app.categories)
+        let built = HomeSections.build(channels: app.channels, categories: app.categories)
+        guard let heroId = heroChannel?.id else { return built }
+        return built.compactMap { section in
+            let channels = section.channels.filter { $0.id != heroId }
+            guard !channels.isEmpty else { return nil }
+            return HomeSection(id: section.id, title: section.title, subtitle: section.subtitle,
+                               ownedTags: section.ownedTags, channels: channels)
+        }
     }
 }
 
@@ -208,6 +221,9 @@ private struct HeroBillboard: View {
     let channel: PublicChannel
     let compact: Bool
     var peers: [PublicChannel] = []
+
+    /// Same definition as the "Watching now" filter (`ChannelBrowse.apply(.live, …)`).
+    private var isLive: Bool { (channel.viewers ?? 0) > 0 && channel.sleeping != true }
 
     var body: some View {
         NavigationLink(destination: ChannelFeedView(
@@ -224,12 +240,26 @@ private struct HeroBillboard: View {
                 }
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 6) {
-                            Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
-                            Text("LIVE NOW")
-                                .font(.caption2.weight(.bold))
-                                .tracking(1.2)
-                                .foregroundStyle(Color.textSecondary)
+                        // The hero is curated (`default`, or featured+richest) —
+                        // not necessarily live. "LIVE NOW" claimed it always was.
+                        if isLive {
+                            HStack(spacing: 6) {
+                                Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
+                                Text("LIVE NOW")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.2)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        } else if channel.sleeping == true {
+                            HStack(spacing: 6) {
+                                Image(systemName: "moon.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.textTertiary)
+                                Text("ASLEEP")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.2)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
                         }
                         Text(channel.displayLabel)
                             .font(.system(size: compact ? 24 : 40, weight: .bold))
