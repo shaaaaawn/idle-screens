@@ -90,21 +90,9 @@ final class PreviewBudget {
     /// stop every background tile animating behind it. Tracked as an override
     /// rather than by zeroing the allowance, so a pressure recovery timer
     /// firing mid-viewing can't quietly wake the gallery up behind it.
-    ///
-    /// The device should also stay awake for exactly as long as any
-    /// fullscreen viewer is on screen — the same depth drives that, so an
-    /// interleaved transition (incoming `onAppear` before outgoing
-    /// `onDisappear`) can't have the outgoing view re-enable the idle timer
-    /// out from under the one still showing.
-    func enterFullscreen() {
-        fullscreenDepth += 1
-        if fullscreenDepth == 1 { UIApplication.shared.isIdleTimerDisabled = true }
-    }
+    func enterFullscreen() { fullscreenDepth += 1 }
 
-    func exitFullscreen() {
-        fullscreenDepth = max(0, fullscreenDepth - 1)
-        if fullscreenDepth == 0 { UIApplication.shared.isIdleTimerDisabled = false }
-    }
+    func exitFullscreen() { fullscreenDepth = max(0, fullscreenDepth - 1) }
 
     /// Step the budget down in response to real memory pressure, and schedule a
     /// recovery — pressure is transient, a permanently frozen gallery is not.

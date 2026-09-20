@@ -133,10 +133,6 @@ struct ChannelKeysSheet: View {
 
     private func mint() {
         guard let token = app.token(for: channelId) else { return }
-        // Captured now: if the owner flips the picker while this mint is in
-        // flight, the minted key must still be labelled with the role it was
-        // actually created with, not whatever the picker shows when we land.
-        let role = newRole
         let label = newLabel.trimmingCharacters(in: .whitespaces)
         minting = true
         problem = nil
@@ -144,9 +140,9 @@ struct ChannelKeysSheet: View {
             defer { minting = false }
             do {
                 let key = try await app.mcp.createToken(channelId: channelId, token: token,
-                                                        role: role, label: label)
+                                                        role: newRole, label: label)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                minted = Minted(key: key, role: role, label: label)
+                minted = Minted(key: key, role: newRole, label: label)
                 newLabel = ""
                 await load()
             } catch {

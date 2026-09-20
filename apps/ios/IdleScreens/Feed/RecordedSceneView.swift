@@ -23,18 +23,11 @@ struct RecordedSceneView: View {
             if let spec = scene.spec {
                 Color(hex: spec.background?.primaryColor ?? "0A0A0F")
                 if let layers {
-                    if SceneVisibility.verdict(layers: layers, background: spec.background) == .invisible {
-                        // This scene would render as a black/blank tile or
-                        // page — deterministic generative art beats
-                        // broken-looking, same guard as ScenePreviewView.
-                        ProceduralChannelArt(channelId: channelId)
-                    } else {
-                        NativeSceneView(layers: layers, background: spec.background,
-                                        tier: thumbnail ? .t2 : .t3,
-                                        paused: !animating,
-                                        staticFrame: thumbnail)
-                            .transition(.opacity)
-                    }
+                    NativeSceneView(layers: layers, background: spec.background,
+                                    tier: thumbnail ? .t2 : .t3,
+                                    paused: !animating,
+                                    staticFrame: thumbnail)
+                        .transition(.opacity)
                 }
             } else if let kind = ClassicSaverKind.supported(id: scene.classicSaverId) {
                 ClassicSaverView(kind: kind,

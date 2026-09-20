@@ -1,18 +1,22 @@
 import SwiftUI
 import UIKit
 
-/// The "Screens" tab: pair with any idle screen — Apple TV, a Mac, or a
-/// Linux display — by scanning its QR (or typing the
-/// code), see what it's watching, and push any channel to it.
+/// Screens & sync (inside Settings): everything that leaves this phone.
+///
+/// Three jobs, in the order you reach for them: manage the screens you have
+/// paired, carry a key to a desktop browser, and see what syncs on its own.
+/// It used to end in a copy of the gallery for "pick something to push" — but
+/// browsing is what the Channels tab is for, and pushing lives on every
+/// channel in the feed. Here a screen's own menu offers a short send list.
 struct PairedTVView: View {
     /// Pushed from Settings it must not bring a second navigation stack.
     var embedded = false
     @Environment(AppState.self) private var app
     @State private var showingScanner = false
     @State private var manualCode = ""
-    @State private var justPushed: String?
+    @State private var sendingTo: PairedScreen?
+    @State private var toast: String?
     @State private var screenKind: ScreenKind = .appleTV
-    @State private var selectedScreen: String?
     @State private var showingAddScreen = false
     /// The Add sheet needs its OWN scanner binding. Two `.sheet` modifiers on
     /// the same view share one presentation anchor, so asking the root to show
@@ -105,7 +109,7 @@ struct PairedTVView: View {
                 unpairedContent
             }
         }
-        .navigationTitle("screens")
+        .navigationTitle("screens & sync")
         .navigationBarTitleDisplayMode(embedded ? .inline : .automatic)
         .background(Color.appBackground.ignoresSafeArea())
     }
@@ -143,6 +147,8 @@ struct PairedTVView: View {
                 .padding(.top, 12)
 
                 pairingForm(scanBinding: $showingScanner)
+                desktopSection
+                syncSection
             }
             .padding(20)
         }
@@ -255,86 +261,40 @@ struct PairedTVView: View {
     // MARK: Paired
 
     /// Push target: one screen, or everything at once.
-    private var targetLabel: String {
-        guard let selectedScreen,
-              let screen = app.pairedScreens.first(where: { $0.deviceId == selectedScreen })
-        else { return app.pairedScreens.count > 1 ? "All screens" : "your screen" }
-        return screen.kind.label
-    }
-
-    private func send(_ channelId: String) {
-        Task {
-            let ok: Bool
-            if let selectedScreen,
-               let screen = app.pairedScreens.first(where: { $0.deviceId == selectedScreen }) {
-                ok = await app.push(channelId: channelId, to: screen)
-            } else {
-                ok = await app.pushToAllScreens(channelId: channelId) > 0
-            }
-            if ok {
-                justPushed = channelId
-                try? await Task.sleep(for: .seconds(2))
-                if justPushed == channelId { justPushed = nil }
-            }
-        }
-    }
-
     private var pairedContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                // Screens — one card each, live status while the app is open.
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("your screens")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.textPrimary)
-                        Spacer()
-                        Button {
-                            showingAddScreen = true
-                        } label: {
-                            Label("Add", systemImage: "plus")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.textPrimary)
-                        }
-                    }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            if app.pairedScreens.count > 1 {
-                                allScreensCard
-                            }
-                            ForEach(app.pairedScreens) { screen in
-                                screenCard(screen)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-
-                if let error = app.pairPushError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                }
-
-                // Channels as poster cards — same language as the Watch tab.
-                if !app.credentials.isEmpty {
-                    channelSection(
-                        "your channels",
-                        items: app.credentials.map { ($0.channelId, $0.label) })
-                }
-                channelSection(
-                    "gallery",
-                    items: app.channels.map { ($0.id, $0.displayLabel) })
+            VStack(alignment: .leading, spacing: 28) {
+                screensSection
+                desktopSection
+                syncSection
             }
             .padding(20)
         }
-        .refreshable {
-            await app.refreshScreenStatuses()
-            await app.loadGallery()
+        .overlay(alignment: .bottom) {
+            if let toast {
+                Text(toast)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.textPrimary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .glassCapsule(shape: Capsule())
+                    .padding(.bottom, 24)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: toast)
+        .sheet(item: $sendingTo) { screen in
+            SendToScreenSheet(screen: screen) { channelId, label in
+                Task {
+                    let ok = await app.push(channelId: channelId, to: screen)
+                    flash(ok ? "\(label) → \(screen.kind.label)"
+                             : app.pairPushError ?? "\(screen.kind.label) isn't answering")
+                }
+            }
+        }
+        .refreshable { await app.refreshScreenStatuses() }
         .task {
-            if app.channels.isEmpty { await app.loadGallery() }
-            // Poll while this tab is on screen so the dots stay honest.
+            // Poll while this page is on screen so the dots stay honest.
             while !Task.isCancelled {
                 await app.refreshScreenStatuses()
                 try? await Task.sleep(for: .seconds(10))
@@ -342,72 +302,194 @@ struct PairedTVView: View {
         }
     }
 
-    private var allScreensCard: some View {
-        let selected = selectedScreen == nil
-        return Button {
-            selectedScreen = nil
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "rectangle.3.group")
-                    .font(.title3)
-                    .foregroundStyle(Color.textPrimary)
-                Spacer(minLength: 0)
-                Text("All screens")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.textPrimary)
-                Text("\(app.pairedScreens.count) paired")
-                    .font(.caption)
-                    .foregroundStyle(Color.textSecondary)
-            }
-            .padding(14)
-            .frame(width: 148, height: 118, alignment: .leading)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.6),
-                                  lineWidth: selected ? 2 : 1)
-            }
+    private func flash(_ message: String) {
+        toast = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if toast == message { toast = nil }
         }
-        .buttonStyle(.plain)
     }
 
-    private func screenCard(_ screen: PairedScreen) -> some View {
-        let selected = selectedScreen == screen.deviceId
-        return Button {
-            selectedScreen = selected ? nil : screen.deviceId
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: screen.kind.icon)
-                        .font(.title3)
-                        .foregroundStyle(Color.textPrimary)
-                    Spacer()
-                    presenceDot(screen.presence())
+    // MARK: Screens
+
+    private var screensSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("screens", detail: "Apple TV, Mac and Linux displays this phone can steer.")
+            VStack(spacing: 0) {
+                ForEach(app.pairedScreens) { screen in
+                    screenRow(screen)
+                    Divider().overlay(Color.appBorder.opacity(0.5))
                 }
-                Spacer(minLength: 0)
-                Text(screen.kind.label)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.textPrimary)
-                Text(screen.statusText)
-                    .font(.caption)
-                    .foregroundStyle(screen.presence() == .notAnswering ? Color.appWarning
-                                     : screen.presence() == .connected ? Color.textSecondary
-                                     : Color.textTertiary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.9)
+                Button {
+                    showingAddScreen = true
+                } label: {
+                    Label("Pair a screen…", systemImage: "plus")
+                        .foregroundStyle(Color.appPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 13)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .padding(14)
-            .frame(width: 148, height: 118, alignment: .leading)
+            .padding(.horizontal, 16)
             .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(selected ? Color.textPrimary : Color.appBorder.opacity(0.6),
-                                  lineWidth: selected ? 2 : 1)
-            }
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
         }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Unpair \(screen.kind.label)", role: .destructive) { app.unpair(screen) }
+    }
+
+    private func screenRow(_ screen: PairedScreen) -> some View {
+        let presence = screen.presence()
+        return Menu {
+            Button { sendingTo = screen } label: { Label("Send a channel…", systemImage: "play.tv") }
+            if let watching = screen.channelId {
+                Button {
+                    Task {
+                        let ok = await app.push(channelId: watching, to: screen)
+                        flash(ok ? "\(screen.kind.label) answered" : "\(screen.kind.label) isn't answering")
+                    }
+                } label: { Label("Check it's there", systemImage: "dot.radiowaves.left.and.right") }
+            }
+            Button(role: .destructive) { app.unpair(screen) } label: {
+                Label("Unpair", systemImage: "minus.circle")
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: screen.kind.icon)
+                    .font(.title3)
+                    .foregroundStyle(Color.textPrimary)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(screen.kind.label)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Color.textPrimary)
+                    Text(screen.statusText)
+                        .font(.caption)
+                        .foregroundStyle(presence == .notAnswering ? Color.appWarning : Color.textSecondary)
+                        .lineLimit(1)
+                    if let watching = screen.channelId {
+                        Text("showing \(app.channels.first { $0.id == watching }?.displayLabel ?? watching)")
+                            .font(.caption)
+                            .foregroundStyle(Color.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                presenceDot(presence)
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+    }
+
+    // MARK: Desktop & web
+
+    /// A key held here, opened on a computer. The website takes a key from a
+    /// `?token=` link, stores it in that browser and strips it from the address
+    /// bar — so AirDropping the link to a Mac is the whole sync.
+    private var desktopSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("desktop & web",
+                          detail: "Open a channel's controls at idlescreens.com on a computer, already unlocked. AirDrop the link to your Mac, or send it to yourself.")
+            VStack(spacing: 0) {
+                let keyed = app.credentials.filter { app.token(for: $0.channelId) != nil }
+                if keyed.isEmpty {
+                    Text("No keys on this phone yet. Create a channel, or add a key in Settings, and it can be opened on a computer from here.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.textSecondary)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(keyed) { credential in
+                        if let link = Self.webRemoteLink(channelId: credential.channelId,
+                                                         token: app.token(for: credential.channelId)) {
+                            ShareLink(item: link,
+                                      subject: Text("Steer \(credential.label)"),
+                                      message: Text("Opens \(credential.label) unlocked. Anyone with this link can steer it.")) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "laptopcomputer.and.arrow.down")
+                                        .foregroundStyle(Color.appPrimary)
+                                        .frame(width: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(credential.label).foregroundStyle(Color.textPrimary)
+                                        Text(app.role(for: credential.channelId)?.rawValue ?? "key")
+                                            .font(.caption)
+                                            .foregroundStyle(Color.textSecondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "square.and.arrow.up")
+                                        .foregroundStyle(Color.textTertiary)
+                                }
+                                .padding(.vertical, 12)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if credential.id != keyed.last?.id {
+                                Divider().overlay(Color.appBorder.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
+            Text("The link carries the key. Send it only to yourself or someone you would hand the channel to.")
+                .font(.caption)
+                .foregroundStyle(Color.textTertiary)
+        }
+    }
+
+    /// `https://idlescreens.com/channel/<id>/remote?token=…` — the web remote's
+    /// own hand-in. nil for anything the site would refuse, so a malformed
+    /// key never becomes a link someone pastes around.
+    static func webRemoteLink(channelId: String, token: String?,
+                              baseURL: String = Config.baseURL) -> URL? {
+        guard let token, WebSceneView.isWellFormed(token),
+              let id = ChannelTokenFormat.sanitizeId(channelId),
+              var parts = URLComponents(string: baseURL) else { return nil }
+        parts.path = "/channel/\(id)/remote"
+        parts.queryItems = [URLQueryItem(name: "token", value: token)]
+        return parts.url
+    }
+
+    // MARK: Sync
+
+    private var syncSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("sync", detail: nil)
+            VStack(spacing: 12) {
+                syncRow("key.icloud", "Keys", "iCloud Keychain")
+                syncRow("star", "Following", "iCloud Keychain")
+                syncRow("tv", "Paired screens", "this phone only")
+            }
+            .cardStyle()
+            Text("Keys and follows reach your other Apple devices through iCloud Keychain, end-to-end encrypted — iOS Settings → your name → iCloud → Passwords. Screens are paired per phone: pair again on another device.")
+                .font(.caption)
+                .foregroundStyle(Color.textTertiary)
+        }
+    }
+
+    private func syncRow(_ icon: String, _ title: String, _ detail: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(Color.appPrimary).frame(width: 30)
+            Text(title).foregroundStyle(Color.textPrimary)
+            Spacer()
+            Text(detail).font(.subheadline).foregroundStyle(Color.textSecondary)
+        }
+    }
+
+    private func sectionHeader(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.textPrimary)
+            if let detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Color.textSecondary)
+            }
         }
     }
 
@@ -431,72 +513,65 @@ struct PairedTVView: View {
     }
 
     /// A shelf of channel poster cards that push on tap.
-    private func channelSection(_ title: String, items: [(String, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.textPrimary)
-                Text("→ \(targetLabel)")
-                    .font(.caption)
-                    .foregroundStyle(Color.textSecondary)
-            }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 16) {
-                ForEach(items, id: \.0) { id, label in
-                    channelCard(id: id, label: label)
-                }
-            }
+}
+
+// MARK: - Send sheet
+
+/// A short list, not a gallery: what you follow and what you own, then
+/// everything else — enough to put something on a screen without browsing.
+private struct SendToScreenSheet: View {
+    let screen: PairedScreen
+    let onPick: (_ channelId: String, _ label: String) -> Void
+    @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var groups: [(String, [(String, String)])] {
+        let mine = app.credentials.map { ($0.channelId, $0.label) }
+        let followed = app.follows.channels(in: app.channels).map { ($0.id, $0.displayLabel) }
+        let taken = Set((mine + followed).map(\.0))
+        let rest = app.channels.filter { !taken.contains($0.id) }.map { ($0.id, $0.displayLabel) }
+        let match: ((String, String)) -> Bool = { pair in
+            query.isEmpty || pair.0.localizedCaseInsensitiveContains(query)
+                || pair.1.localizedCaseInsensitiveContains(query)
         }
+        return [("yours", mine.filter(match)), ("following", followed.filter(match)),
+                ("all channels", rest.filter(match))].filter { !$0.1.isEmpty }
     }
 
-    private func channelCard(id: String, label: String) -> some View {
-        let onTarget = app.pairedScreens.contains { $0.channelId == id }
-        return Button {
-            send(id)
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack {
-                    if let spec = app.channels.first(where: { $0.id == id })?.spec {
-                        ScenePreviewView(spec: spec, fallbackSeed: id)
-                    } else {
-                        LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
-                                       startPoint: .top, endPoint: .bottom)
-                    }
-                    if justPushed == id {
-                        Color.black.opacity(0.45)
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(.white)
-                    }
-                }
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(alignment: .topTrailing) {
-                    if onTarget {
-                        Text("ON AIR")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.appBackground)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.textPrimary, in: Capsule())
-                            .padding(6)
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(groups, id: \.0) { title, items in
+                    Section(title) {
+                        ForEach(items, id: \.0) { id, label in
+                            Button {
+                                onPick(id, label)
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    Text(label).foregroundStyle(Color.textPrimary)
+                                    Spacer()
+                                    if screen.channelId == id {
+                                        Text("on now").font(.caption).foregroundStyle(Color.textSecondary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        }
                     }
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
-                }
-
-                Text(label)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
+            .searchable(text: $query, prompt: "Channel")
+            .navigationTitle("Send to \(screen.kind.label)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
-        .buttonStyle(.plain)
-        .disabled(app.isPairing)
+        .presentationDetents([.medium, .large])
     }
 }
 

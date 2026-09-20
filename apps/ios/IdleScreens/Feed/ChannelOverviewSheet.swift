@@ -159,10 +159,6 @@ struct ChannelOverviewSheet: View {
                     // preview composes at 16:9 and crops, which made the LIVE
                     // tile look zoomed-in next to its own history.
                     SpecStill(spec: spec)
-                } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId) {
-                    ClassicSaverView(kind: kind,
-                                     seed: ClassicSaverKind.seed(forChannel: channel.id),
-                                     tier: .t2, live: false)
                 } else {
                     ProceduralChannelArt(channelId: channel.id)
                 }

@@ -54,13 +54,7 @@ extension Color {
     static func luminance(hex: String?) -> Double? {
         guard var hex = hex?.trimmingCharacters(in: .alphanumerics.inverted), !hex.isEmpty else { return nil }
         if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
-        // Exactly six digits after expanding `#rgb`: this app's colour fields
-        // are always `#rgb` / `#rrggbb` (FORMAT.md), never an 8-digit RGBA/ARGB
-        // form, so anything else isn't a colour this function understands.
-        // `>= 6` used to let a longer string through by silently truncating
-        // to its first six digits, which is a guess, not the documented
-        // "nil when the string isn't a colour" contract.
-        guard hex.count == 6, let value = UInt64(hex, radix: 16) else { return nil }
+        guard hex.count >= 6, let value = UInt64(hex.prefix(6), radix: 16) else { return nil }
         func linear(_ c: Double) -> Double {
             c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
@@ -70,12 +64,9 @@ extension Color {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b
     }
 
-    /// Light enough that white text on it fails. The WCAG AA boundary for
-    /// white (contrast 4.5:1) is background luminance ≈0.183 — solving
-    /// `(1.05)/(L+0.05) = 4.5` — not the visually-intuitive 0.4 or 0.5. A
-    /// mid-tone background between ~0.18 and 0.4 still fails white text even
-    /// though it "looks dark", so the boundary has to be the WCAG one.
+    /// Light enough that white text on it fails. 0.4 rather than 0.5: white on
+    /// a mid-tone is already hard to read, and dark text on it is fine.
     static func isLight(hex: String?) -> Bool {
-        (luminance(hex: hex) ?? 0) > 0.18
+        (luminance(hex: hex) ?? 0) > 0.4
     }
 }

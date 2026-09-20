@@ -194,10 +194,7 @@ export const metaquariumManifest: SaverManifest = {
 export interface MetaquariumOptions {
   /** Override the fish catalog fishMix ids resolve against — the seam the
    *  playground uses to point ids at bundled local GLBs (offline e2e), and
-   *  the future farm/pack extension point. **webgl only**: the lofi backend
-   *  resolves fish icons by numeric id straight from the live IPFS asset set,
-   *  never consulting a `FishEntry[]`, so it can't honor a custom catalog —
-   *  `createMetaquarium({ backend: 'lofi', catalog })` throws. */
+   *  the future farm/pack extension point. */
   catalog?: import('./ipfs').FishEntry[];
   /** Renderer. `webgl` (default) is the three.js tank. `lofi` is the Apple
    *  TV's 2D aquarium — transparent-icon fish, kelp and bubbles on a Canvas2D,

@@ -70,25 +70,20 @@ struct ChannelFeedView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             isOnScreen = true
+            UIApplication.shared.isIdleTimerDisabled = true
             // One full-screen canvas deserves the device; gallery tiles alive
-            // on another tab have no business animating behind it. This also
-            // disables the idle timer for as long as any feed is fullscreen
-            // (see `PreviewBudget.enterFullscreen`), refcounted the same way
-            // so an interleaved transition can't wake the device mid-viewing.
+            // on another tab have no business animating behind it.
             PreviewBudget.shared.enterFullscreen()
             if selection == nil { selection = channels.first?.id }
         }
         .onDisappear {
             isOnScreen = false
+            UIApplication.shared.isIdleTimerDisabled = false
             PreviewBudget.shared.exitFullscreen()
         }
-        // The feed can mount before the gallery has loaded, or a refresh can
-        // drop the selected channel while the first ID stays the same — in
-        // both cases fall back to the (possibly new) first channel.
-        .onChange(of: channels) { _, refreshed in
-            if selection == nil || !refreshed.contains(where: { $0.id == selection }) {
-                selection = refreshed.first?.id
-            }
+        // The feed can mount before the gallery has loaded.
+        .onChange(of: channels.first?.id) { _, first in
+            if selection == nil { selection = first }
         }
     }
 }

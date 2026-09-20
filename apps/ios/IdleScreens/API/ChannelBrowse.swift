@@ -69,13 +69,7 @@ enum ChannelBrowse {
                 .appending(contentsOf: channel.tags ?? [])
                 .joined(separator: " ")
                 .lowercased()
-            return words.allSatisfy { word in
-                let term = word.hasPrefix("#") ? String(word.dropFirst()) : word
-                // A bare "#" normalizes to an empty term, which `contains`
-                // would treat as a match on everything — reject it instead.
-                guard !term.isEmpty else { return false }
-                return haystack.contains(term)
-            }
+            return words.allSatisfy { haystack.contains($0.hasPrefix("#") ? String($0.dropFirst()) : $0) }
         }
     }
 

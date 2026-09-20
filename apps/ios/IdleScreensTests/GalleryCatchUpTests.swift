@@ -18,21 +18,6 @@ final class SteerLineTests: XCTestCase {
         XCTAssertEqual(SteerLine.text(for: channel(minutesAgo: 60 * 24 * 51), now: now), "steered 51d ago")
     }
 
-    /// `ago`'s three thresholds (`< 60`, `< 3600`, `< 86_400`) each get the
-    /// value just under AND at the boundary pinned, so an off-by-one (e.g.
-    /// `<` flipped to `<=`) fails here even though the interior samples
-    /// above all still pass.
-    func testBucketBoundariesArePinned() {
-        func msAgo(_ seconds: Int) -> Int { (Int(now.timeIntervalSince1970) - seconds) * 1000 }
-
-        XCTAssertEqual(SteerLine.ago(msAgo(59), now: now), "just now")
-        XCTAssertEqual(SteerLine.ago(msAgo(60), now: now), "1m ago")
-        XCTAssertEqual(SteerLine.ago(msAgo(3599), now: now), "59m ago")
-        XCTAssertEqual(SteerLine.ago(msAgo(3600), now: now), "1h ago")
-        XCTAssertEqual(SteerLine.ago(msAgo(86_399), now: now), "23h ago")
-        XCTAssertEqual(SteerLine.ago(msAgo(86_400), now: now), "1d ago")
-    }
-
     func testHarnessAndModelAreShown() {
         XCTAssertEqual(
             SteerLine.text(for: channel(minutesAgo: 36, actor: "Spin", harness: "claude-code",

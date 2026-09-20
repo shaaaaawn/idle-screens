@@ -205,7 +205,6 @@ candidate ──triage──▶ triaged ──picked up──▶ in-progress ─
 - route: spec
 - status:
   - 2026-08-31 candidate — imported from screensaver research; concept only, no library code
-  - 2026-09-11 triaged — route: spec
   - 2026-09-11 shipped — shipped as spec doodle-grid-riso (Doodle Wall, Riso) — grid layout + polygon rotate + pulse.wave ripple + finish; premiered on prod default in the 6h docs-ideas arc (glm-5.3). Spec: greenroom/specs/doodle-grid-riso.json
 
 ### css-3d-wireframes

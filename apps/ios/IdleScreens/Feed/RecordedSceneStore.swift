@@ -12,7 +12,7 @@ import Observation
 final class RecordedSceneStore {
     private var scenes: [String: RecordedScene] = [:]
     @ObservationIgnored private var inflight: [String: Task<RecordedScene?, Never>] = [:]
-    private var failed: Set<String> = []
+    @ObservationIgnored private var failed: Set<String> = []
 
     private static func key(_ channelId: String, _ sceneId: Int) -> String { "\(channelId):\(sceneId)" }
 

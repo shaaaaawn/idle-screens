@@ -131,13 +131,10 @@ actor MCPClient {
     }
 
     /// Fork another channel's *current* scene into a brand-new channel you
-    /// own — one atomic call that returns the new id and its token. `token`
-    /// authorizes the read when the source is private and only a viewer key
-    /// is held for it; a public source needs none.
-    func remixChannel(sourceChannelId: String, label: String? = nil, token: String? = nil) async throws -> CreatedChannel {
+    /// own — one atomic call that returns the new id and its token.
+    func remixChannel(sourceChannelId: String, label: String? = nil) async throws -> CreatedChannel {
         var args: [String: JSONValue] = ["channelId": .string(sourceChannelId)]
         if let label, !label.isEmpty { args["label"] = .string(label) }
-        if let token, !token.isEmpty { args["token"] = .string(token) }
         return try await callTool("remixChannel", arguments: args, as: CreatedChannel.self)
     }
 
