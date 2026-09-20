@@ -1357,7 +1357,12 @@ function liveMode(): void {
           if (token !== devMountToken) return;
           layer.classList.add('live');
           loadingChip.hidden = true;
-          window.setTimeout(() => { if (token === devMountToken) retireLayers(layer); }, 340);
+          // A stage mount never appended `layer` (line ~1317) and already
+          // retired every prior layer up front (retireLayers(null) at entry) —
+          // scheduling another retireLayers(layer) here would remove the
+          // stage's own iframe too, since `layer` (detached, never `keep`)
+          // never matches it.
+          if (!useStage) window.setTimeout(() => { if (token === devMountToken) retireLayers(layer); }, 340);
           devProps.refresh();
           devParams.refresh();
           debug.setContext(previewCtx);
