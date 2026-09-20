@@ -23,13 +23,13 @@ final class WebSceneBootstrapTests: XCTestCase {
     }
 
     func testValidTokenIsSeededIntoTheKeyThePageReads() {
-        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: "isk_abc-123_XYZ")
+        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: "isk_abc-123_XYZ", baseURL: base)
         // `site/src/lib/tokens.ts` reads `isk:<channelId>` from localStorage.
         XCTAssertTrue(script.contains(#"localStorage.setItem("isk:lobby", "isk_abc-123_XYZ")"#))
     }
 
     func testNoTokenMeansNoSeed() {
-        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: nil)
+        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: nil, baseURL: base)
         XCTAssertFalse(script.contains("localStorage.setItem"))
     }
 
@@ -37,25 +37,34 @@ final class WebSceneBootstrapTests: XCTestCase {
     /// isn't shaped exactly like a token is dropped rather than escaped.
     func testMalformedTokenCannotBecomeScript() {
         for hostile in [#"isk_");alert(1);//"#, "isk_a b", "<script>", "isk_\nx", "isk_abc\n", "isk_", ""] {
-            let script = WebSceneView.bootstrapScript(channelId: "lobby", token: hostile)
+            let script = WebSceneView.bootstrapScript(channelId: "lobby", token: hostile, baseURL: base)
             XCTAssertFalse(script.contains("localStorage.setItem"), "seeded a malformed token: \(hostile)")
             XCTAssertFalse(script.contains("alert(1)"))
         }
     }
 
     func testChannelIdIsEmbeddedAsAJSONLiteral() {
-        let script = WebSceneView.bootstrapScript(channelId: #"a"b"#, token: "isk_ok")
+        let script = WebSceneView.bootstrapScript(channelId: #"a"b"#, token: "isk_ok", baseURL: base)
         XCTAssertTrue(script.contains(#""isk:a\"b""#), "the quote must arrive escaped")
     }
 
     /// The tap is how native chrome hears the channel without a second socket.
     func testScriptTapsTheSocketAndHidesTheWebTokenGate() {
-        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: nil)
+        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: nil, baseURL: base)
         XCTAssertTrue(script.contains("window.WebSocket = Tapped"))
         XCTAssertTrue(script.contains("Tapped.prototype = Native.prototype"),
                       "without this, the page's `instanceof WebSocket` checks break")
         XCTAssertTrue(script.contains("messageHandlers.\(WebSceneView.handlerName)"))
         XCTAssertTrue(script.contains(".private-gate{display:none!important}"))
+    }
+
+    /// A socket must match the channel's own origin, not just its path suffix
+    /// — `wss://attacker.example/anything/c/lobby/ws` must not slip through.
+    func testSocketTapPinsToTheFullOriginNotJustThePathSuffix() {
+        let script = WebSceneView.bootstrapScript(channelId: "lobby", token: nil, baseURL: base)
+        XCTAssertTrue(script.contains(#"const channelSocketProtocol = "wss:""#))
+        XCTAssertTrue(script.contains(#"const channelSocketHost = "idlescreens.com""#))
+        XCTAssertFalse(script.contains(".pathname.endsWith("), "must not fall back to a path-suffix check")
     }
 }
 

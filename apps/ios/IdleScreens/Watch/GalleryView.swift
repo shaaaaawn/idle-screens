@@ -206,9 +206,16 @@ struct GalleryView: View {
     private var shelves: [HomeSection] {
         let built = HomeSections.build(channels: app.channels, categories: app.categories)
         guard let heroId = heroChannel?.id else { return built }
+        // Category shelves must keep `HomeSections.build`'s own minimum after
+        // the hero is pulled out, or a category that had exactly the minimum
+        // stranded 1-2 cards as a shelf. Featured/Evals/Latest/Other are
+        // allowed to run thin by design (e.g. a single new arrival), so only
+        // drop those when the hero removal empties them entirely.
+        let categoryIds = Set(app.categories.map { $0.id })
         return built.compactMap { section in
             let channels = section.channels.filter { $0.id != heroId }
-            guard !channels.isEmpty else { return nil }
+            let minimum = categoryIds.contains(section.id) ? HomeSections.minimumPerShelf : 1
+            guard channels.count >= minimum else { return nil }
             return HomeSection(id: section.id, title: section.title, subtitle: section.subtitle,
                                ownedTags: section.ownedTags, channels: channels)
         }
@@ -290,7 +297,7 @@ private struct HeroBillboard: View {
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 9)
                                 .background(Color.textPrimary, in: Capsule())
-                            if let viewers = channel.viewers, viewers > 0 {
+                            if isLive, let viewers = channel.viewers {
                                 Label("\(viewers) watching", systemImage: "eye")
                                     .font(.footnote)
                                     .foregroundStyle(Color.textSecondary)

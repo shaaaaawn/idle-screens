@@ -101,6 +101,27 @@ never changes because a dependency was bumped.
 | maneuverIntensity | number | 0.7 | How hard — scales the surge, the kick and the tail flurry together, 0–1 |
 | lightSeek | number | 0 | Free fish drawn toward the room's light shafts, each to its own pool, 0–1 (needs rays) |
 | formationBreathe | number | 0 | The school relaxes outward and back on a ~15 s cycle, 0–1; only ever expands |
+| *look* | | | *The next three are the renderer's defaults, not something a scene sets: every tank is lit, glowing and reflective with no params. They exist to opt out.* |
+| fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
+| fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
+| fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
+| eyeLife | number | 0 | Eyes blink, look and emote — each token's own pixel-grid eye redrawn in a fragment function, black and white only. 0 is the stock eye program, byte for byte; a scene opts in with 1 |
+
+### Scenery
+
+Crystals and the props built from them. Everything here is generated from the
+seed (nothing fetched); the world layers that stand on it are under
+[Mineral worlds](#mineral-worlds).
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| propMix | string | `''` | Scenery, `kind[#id][:count][@habit][/palette][*size]` (`*6` = a tower-sized crystal, planted past the swim space). Kind `crystal` (generated, never fetched); habits `lotus · spire · druse · scatter · coral`; palettes `env · rainbow · glass ·` a named colour. Empty builds nothing |
+| envProps | enum | off | `on` lets a named environment bring its own crystals when `propMix` is empty |
+| crystalScale | number | 1 | Cluster size, 0.4–2.5 (rebuilds the layout) |
+| crystalWild | number | 0.7 | How individual each cluster is: 0 is the regular measured rosette; toward 1 clusters lean, go bald on one side, grow lopsided and branch like coral |
+| crystalGlow | number | 0.8 | Halo, glow card and the floor pools, 0–1 |
+| crystalPulse | number | 0.3 | Slow breathing of the glow (0.12 Hz, ≤15 %) |
+| crystalTint | number | 0 | Opt-in: fish near a cluster pick up its colour. 0 never touches a fish material |
 
 ### The room
 
@@ -144,3 +165,69 @@ never changes because a dependency was bumped.
 | manifest.ts | Param space, palettes, manifest metadata (zero-dep subpath) |
 | quality.ts | Device-tier quality caps |
 | metaquarium.ts | Plugin factory + demo track |
+
+## Mineral worlds
+
+The WebGL tank has a set of independent, opt-in world parameters. They work with
+`createMetaquarium({ params })`, the normal control track, and the playground's
+**World** controls. They do not change the 2D SaverSpec format or the lofi renderer.
+Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty for
+`vignette` — except `rockVeins`, which defaults to 0.7 but only applies once
+`rockDensity` is above zero. So existing scenes retain their composition.
+
+| Parameter | Range | Effect |
+| --- | --- | --- |
+| `rockDensity` | 0–1 | Crystal-root boulders, sparse satellite rocks, a distant ridge and an open arch. Any positive value provides foundations; density adds satellites. |
+| `rockVeins` | 0–1 (0.7) | How fractured the stone is. Fissures are cut from the rock's own facets (so they always lie on the surface), fork, carry a white-hot core, and sprout small crystals. 0 is plain stone. |
+| `geodeHomes` | 0–3 | Geode homes: a broken boulder with an agate rind and a throat of crystal teeth, and a voxel house recessed inside — round door, lit window, lamp, steps, a chimney that vents bubbles. Habits cycle cottage / hall / tower; each home lights the floor at its door. Weak devices retain at most two. |
+| `interior` | `none` · `geode` | Sets the scene INSIDE a geode home: crystal-lined dome with agate strata, plank floor and rug, voxel furniture, a chandelier / lamp / stove / window that light the floor and the fish. Use with the `void` environment; the default orbit camera stays indoors (keep `cameraDistance` ≲ 130). |
+| `followSpot` | -1…23 | A follow-spot on one fish (its cast slot; -1 off): a beam from the rig, a pool of moving caustics on the floor beneath it, a light that rides with the fish, and the house lights down — a performer on a stage. `spotStrength` 0–1, `spotColor`. Closed-form: it follows the fish's own deterministic path. |
+| `vignette` | string | A small scene for the first 2–3 fish: a preset (`tea`, `bedtime`, `seek`) or a script of beats — `a =table, b =door \| b >table @a \| a @b talk, b @a nod \| a b circle rug`. `=mark` start there, `>mark` go there, `@x` face a mark or actor, `circle x`, `follow x`, gestures `talk nod shake hop spin wiggle bow peek rest`, leading `6s:` sets a beat's length. Marks indoors: rug table bed shelf stove lamp armchair door window chest chandelier; outdoors: centre left right front back high low. Closed-form, looping; other fish swim as usual. |
+| `floraDensity` | 0–1 | Three voxel species — kelp, reed clumps, lantern bulbs — that lean toward and take the colour of the nearest crystal; sway grows with height, a gust travels across the field, tips breathe. |
+| `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
+| `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |
+
+Minerals are faceted; living flora and the inhabitants' furnishings are voxel.
+`crystalScale` also scales the world geometry. The layers work without crystals,
+using a seeded set of fallback anchors. With crystals, their layout supplies the
+anchors and palette. Rock foundations lift crystal roots; floor-hugging fish use
+scenery clearance in addition to terrain and crystal clearance. Normal depth
+buffering lets fish pass behind the scenery; this is not a general solid-body
+collision simulation.
+
+```ts
+createMetaquarium({ params: {
+  propMix: 'crystal:2@druse/hotpink,crystal:2@spire/orange',
+  rockDensity: 0.55, geodeHomes: 3, floraDensity: 0.35,
+  bubbleVents: 0.85, marineSnow: 0.6,
+  cameraDistance: 220, cameraElevation: 11, cameraAzimuth: 8,
+  fogColor: '#080718', floorColor: '#10182b',
+} });
+```
+
+In the playground, **Metaquarium → Worlds** offers **mineral garden**, **geode
+harbor**, and **moonlit grove**. Direct link suffixes are
+`?saver=metaquarium-world-mineral-garden#dev`,
+`?saver=metaquarium-world-geode-harbor#dev`, and
+`?saver=metaquarium-world-moonlit-grove#dev`.
+
+All animation is analytic in the scene clock (pause/seek/replay safe), with
+independent seeded forks per layer. Geometry is built only when structural
+parameters change. The complete world adds at most eight batched draws, no
+textures, downloads, shadow maps or additional lights. Flora, shards, snow and
+bubbles scale with the existing device prop budget. `inspect().props.scenery`
+reports actual populations; prop draw-call/triangle totals include the world.
+
+## For agents (MCP)
+
+Everything an agent needs to author a scene is data, importable without three.js:
+
+```ts
+import { RECIPES, recipeTrack, PARAM_DOCS, GRAMMAR, validateMetaquariumParams } from '@idle-screens/saver-metaquarium/manifest';
+
+const scene = RECIPES.find((r) => r.id === 'stage-duet')!;
+publishScene({ spec: { id: 'metaquarium' }, track: recipeTrack(scene.params) });
+validateMetaquariumParams({ vignette: 'a >home1', geodeHomes: 0 }); // → [{ path: 'vignette', message: 'beat 1: no mark "home1" …' }]
+```
+
+`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf.

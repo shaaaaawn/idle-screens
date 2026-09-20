@@ -14,6 +14,9 @@ export interface TimelineHandle {
   onTimeChange: ((t: number) => void) | null;
   /** Insert/update a param delta at the current playhead time. */
   setParam(path: string, value: ParamValue): void;
+  /** Pin params for the viewport only (free look). Never edits the track and
+   *  never stops playback; `null` hands the view back to the track. */
+  setViewOverride(overrides: Record<string, ParamValue> | null): void;
   /** Current playhead time in ms. */
   currentTime(): number;
   /** Current track without taking ownership (read-only peek). */
@@ -271,10 +274,33 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     resetBtn.disabled = !editable || !dirty;
   };
 
+  /**
+   * Free look: param values pinned by the viewport's navigation, laid OVER the
+   * authored track on its way to the instance. The track itself is never
+   * touched — orbiting to look at something must not write keyframes or stop
+   * playback, which is what routing a drag through `setParam` would do.
+   */
+  let viewOverride: Record<string, ParamValue> | null = null;
+  const pushTrack = (track: ControlTrack): void => {
+    if (!currentInstance?.applyTrack) return;
+    if (!viewOverride) {
+      currentInstance.applyTrack(track);
+      return;
+    }
+    const pinned = viewOverride;
+    currentInstance.applyTrack({
+      ...track,
+      deltas: [
+        ...track.deltas.filter((d) => !(d.path in pinned)),
+        ...Object.entries(pinned).map(([path, value]) => ({ t: 0, path, value, ease: 'step' as Ease })),
+      ],
+    });
+  };
+
   /** Apply an edit: push to the instance, re-render, persist, mark dirty. */
   const commitEdit = (track: ControlTrack): void => {
     persistEdit(saverId(), track);
-    currentInstance?.applyTrack?.(track);
+    pushTrack(track);
     updateChannels();
     updateValues();
     syncPreview(playheadT);
@@ -300,9 +326,7 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
     if (owned && currentProfile.mode === 'track') {
       currentProfile.track = owned;
     }
-    if (currentInstance?.applyTrack && currentProfile.mode === 'track') {
-      currentInstance.applyTrack(currentProfile.track);
-    }
+    if (currentProfile.mode === 'track') pushTrack(currentProfile.track);
     frameAll();
     refresh();
     syncPreview(playheadT);
@@ -1090,6 +1114,14 @@ export function buildTimelinePanel(mount: HTMLElement): TimelineHandle {
         track.deltas.push({ t: playheadT, path, value, ease: space[path]!.ease ?? 'step' });
       }
       commitEdit(track);
+    },
+
+    setViewOverride(overrides) {
+      viewOverride = overrides && Object.keys(overrides).length ? overrides : null;
+      const track = peekTrack();
+      if (!track || currentProfile?.mode !== 'track') return;
+      pushTrack(track);
+      if (!playing) syncPreview(playheadT);
     },
 
     currentTime: () => playheadT,

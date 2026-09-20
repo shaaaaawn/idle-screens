@@ -19,8 +19,12 @@ import type { IdleSequence } from "../types";
  *   hex value glides over 2500 ms, and because the words differ and the
  *   transition declares `text: 'crossfade'`, the outgoing caption fades under
  *   the incoming one instead of switching whole-frame. Without the crossfade
- *   declaration a morph steps strings on its first frame — it reads as a cut
- *   and the validator says `morph-nothing-morphable`.
+ *   declaration the morph would still glide — colour alone gives it a
+ *   `hasGlide` — just with the caption stepping on the first frame instead of
+ *   fading; the validator only says `morph-nothing-morphable` for a pair
+ *   whose differences are all values morph cannot glide — strings
+ *   (`textBlock.text` above all), booleans, mismatched arrays — which this
+ *   one isn't.
  * - **fade.** Segments 2 → 3 have nothing structurally in common, so a morph
  *   is impossible and a `fade` is the honest transition: the outgoing scene
  *   keeps animating on its own canvas for 3000 ms while the incoming one
