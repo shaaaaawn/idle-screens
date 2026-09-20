@@ -617,14 +617,6 @@ struct FeedPage: View {
         }
     }
 
-    static func attribution(_ event: ChannelEvent) -> String? {
-        let by = SteerLine.namedActor(event.actor)
-        let via = SteerLine.distinct(event.harness, from: by)
-        let on = SteerLine.distinct(event.model, from: by, via)
-        let parts = [by, via, on].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
     /// Right-hand rail, under the thumb.
     private var actionRail: some View {
         VStack(spacing: 12) {
