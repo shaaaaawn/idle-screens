@@ -37,6 +37,7 @@ struct FeedPage: View {
     @State private var showComposer = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
+    @State private var history: [ChannelEvent] = []
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -150,7 +151,10 @@ struct FeedPage: View {
         Task {
             // History is an enhancement. If it fails the channel still plays,
             // and the page simply has nothing to its right.
-            let events = (try? await app.gallery.fetchHistory(channelId: channelId)) ?? []
+            // Deep enough to reach the first publish of scenes the curator
+            // re-airs nightly — that is where the real credit lives.
+            let events = (try? await app.gallery.fetchHistory(channelId: channelId, limit: 200)) ?? []
+            history = events
             liveEvent = events.filter { $0.sceneId != nil }.max { $0.at < $1.at }
             stops = ChannelFeed.stops(from: events)
             prefetchAroundCurrent()
@@ -538,8 +542,9 @@ struct FeedPage: View {
         let recorded = currentStop.flatMap { app.scenes.scene(channelId: channelId, sceneId: $0.sceneId) }
         let spec = recorded?.spec ?? (isLive ? channel.spec : nil)
         let rows: [(String, String)] = [
-            ("model", event?.model),
-            ("via", event?.harness),
+            ("model", (event.flatMap { SceneCredit.original(for: $0, in: history) } ?? event)?.model),
+            ("via", (event.flatMap { SceneCredit.original(for: $0, in: history) } ?? event)?.harness),
+            ("aired by", event.flatMap { SceneCredit.original(for: $0, in: history) == nil ? nil : $0.actor }),
             ("aired", event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }),
             ("layers", spec.map { "\($0.layers.count)" }),
             ("seed", recorded?.seed.map(String.init)),
@@ -587,16 +592,25 @@ struct FeedPage: View {
     /// it. Four chips of equal weight read as a settings panel, not a credit.
     @ViewBuilder
     private func credits(for event: ChannelEvent?) -> some View {
-        let actor = SteerLine.namedActor(event?.actor ?? channel.lastSteer?.actor)
-        let model = SteerLine.distinct(event?.model ?? channel.lastSteer?.model, from: actor)
-        let harness = SteerLine.distinct(event?.harness ?? channel.lastSteer?.harness, from: actor, model)
+        // A relay (curator, scheduler) aired this but did not make it. When the
+        // log still holds the original publish, the artist is whoever signed
+        // that — and the relay drops to the small print as "aired by".
+        let origin = event.flatMap { SceneCredit.original(for: $0, in: history) }
+        let credited = origin ?? event
+        let relay = origin == nil ? nil : event?.actor
+        let actor = SteerLine.namedActor(credited?.actor ?? channel.lastSteer?.actor)
+        let model = SteerLine.distinct(credited?.model ?? channel.lastSteer?.model, from: actor)
+        let harness = SteerLine.distinct(credited?.harness ?? channel.lastSteer?.harness, from: actor, model)
         let when: String? = {
             if let event { return SteerLine.ago(Int(event.at)) }
             return channel.lastEventAt.map { SteerLine.ago($0) }
         }()
         let artist = actor ?? model
         // The model is small print only when someone else took the credit.
-        let small = [actor == nil ? nil : model, harness.map { "via \($0)" }, when].compactMap { $0 }
+        // One line only: with a relay to name, the harness waits in the
+        // expanded details rather than pushing "aired by" off the edge.
+        let small = [actor == nil ? nil : model, relay == nil ? harness.map { "via \($0)" } : nil,
+                     relay.map { "aired by \($0)" }, when].compactMap { $0 }
 
         VStack(alignment: .leading, spacing: 5) {
             if let artist {
