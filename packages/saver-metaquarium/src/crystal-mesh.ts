@@ -148,11 +148,13 @@ const CARD_VERT = /* glsl */ `
     // the quad's own xy in VIEW space so the card always faces the lens.
     vec4 c = viewMatrix * modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
     float s = length(instanceMatrix[0].xyz);
-    c.xy += position.xy * s;
     // Lifted toward the lens by a fraction of its size, a depth-tested card
     // clears the body it surrounds — so the glow spills OVER the fish, the
     // way bloom does — while anything genuinely nearer still occludes it.
-    c.z += s * uLift;
+    // Along the RAY, not along view z: a z-only lift slides an off-axis card
+    // outward from the centre of the frame, off the thing it belongs to.
+    c.xyz -= normalize(c.xyz) * s * uLift;
+    c.xy += position.xy * s;
     vUv = position.xy * 2.0;
     vColor = aColor;
     vLook = aLook;

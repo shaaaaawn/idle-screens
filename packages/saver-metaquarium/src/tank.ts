@@ -937,8 +937,8 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
-    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow');
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}`;
+    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns');
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -947,9 +947,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, snow, lanterns, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same
@@ -1058,7 +1058,11 @@ class TankInstance implements SaverInstance {
       });
       this.lightBids.length = 0;
     }
-    this.tintEmitters = this.fishEmitters.length ? [...this.emitters, ...this.fishEmitters] : this.emitters;
+    // Lanterns are moving light too: they tint a fish that passes under one
+    // and, when they sink low, pool on the floor like a glowing fin does.
+    const sky = this.scenery?.moving ?? [];
+    const dynamic = amount > 0 ? [...sky, ...this.fishEmitters] : sky;
+    this.tintEmitters = dynamic.length ? [...this.emitters, ...dynamic] : this.emitters;
     const clusterSlots = Math.min(this.emitters.length, MAX_POOLS);
     // Without crystals nobody else drives the pool look — homes alone, or
     // glowing fish alone, must still light the floor.
@@ -1067,13 +1071,13 @@ class TankInstance implements SaverInstance {
       this.poolUniforms.uMqPoolTime!.value = tSec;
       this.poolUniforms.uMqPoolPulse!.value = pulse;
     }
-    if (!this.fishEmitters.length || amount <= 0) {
+    if (!dynamic.length) {
       if (this.poolsInstalled) this.poolUniforms.uMqPoolN!.value = clusterSlots;
       return;
     }
     if (!this.poolsInstalled) this.installPools();
     const floorAt = this.terrainAt;
-    const low = this.fishEmitters
+    const low = dynamic
       .map((e) => ({ e, h: e.y - (floorAt ? floorAt(e.x, e.z) : 0) }))
       .filter((c) => c.h < c.e.reach * 2.2)
       .sort((a, b) => a.h - b.h)

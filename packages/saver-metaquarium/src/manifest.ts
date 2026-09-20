@@ -191,6 +191,10 @@ export const METAQUARIUM_PARAMS = {
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** The sky motif: voxel jellyfish lanterns drifting in the water overhead,
+   *  pulsing as they rise and sink; a few hang far out as fogged silhouettes.
+   *  They take the scene's crystal colours and join the light field. */
+  skyLanterns: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Scenery, same DSL family as `fishMix`: `kind[#id][:count][@habit][/palette][*size]`
    *  (`*6` is a tower-sized crystal, planted out past the swim space as skyline).
    *  One kind so far — `crystal`, generated from the seed (nothing is

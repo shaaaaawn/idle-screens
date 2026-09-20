@@ -3,7 +3,7 @@
 import {
   BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
-  Mesh, type MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
+  Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -12,6 +12,7 @@ import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_VERTEX } from './fl
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
+import { buildSky, LANTERN_COLOR, LANTERN_VERTEX, lanternAt, lanternEmitters } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
@@ -22,6 +23,8 @@ export interface SceneryOptions {
   flora: number;
   bubbles: number;
   snow: number;
+  /** 0..1 — jellyfish lanterns in the water overhead. */
+  lanterns?: number;
   /** Build the scene INSIDE a geode home instead of out on the floor. */
   interior?: boolean;
   cap: number;
@@ -34,6 +37,8 @@ export interface Scenery {
   vents: SceneryAnchor[];
   /** Light the scenery adds to the field: home windows and doors. */
   emitters: Emitter[];
+  /** Light that MOVES (the lanterns) — rewritten in place by `setFrame`. */
+  moving: Emitter[];
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -209,6 +214,32 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     lampMesh.frustumCulled = false;
     group.add(lampMesh);
   }
+  // The sky: jellyfish lanterns. One mesh, moved entirely in its shader.
+  const sky = opts.interior ? null : buildSky(rng.fork(7), {
+    density: opts.lanterns ?? 0, cap: opts.cap, scale: s, palette: clusters.map(c => c.color),
+  });
+  const moving: Emitter[] = [];
+  let skyCards: GlowCards | null = null;
+  if (sky?.geometry) {
+    sky.geometry.userData.mqOwned = true;
+    const material = new MeshBasicMaterial({ vertexColors: true });
+    material.userData.mqOwned = true;
+    const clock = { value: 0 }; clocks.push(clock);
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uSkyTime = clock;
+      shader.vertexShader = 'uniform float uSkyTime; attribute vec4 aHome; attribute vec3 aJelly; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', LANTERN_VERTEX)
+        .replace('#include <color_vertex>', LANTERN_COLOR);
+    };
+    material.customProgramCacheKey = () => 'sky-lanterns-v1';
+    const mesh = new Mesh(sky.geometry, material);
+    mesh.name = 'sky-lanterns';
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    skyCards = buildGlowCards(sky.lanterns.length);
+    group.add(skyCards.mesh);
+    counts.lanterns = sky.lanterns.length;
+  }
   counts.flora = field.plants;
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
@@ -359,7 +390,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
   }
   return {
-    group, counts, vents, emitters: homeLights,
+    group, counts, vents, emitters: homeLights, moving,
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
@@ -374,6 +405,17 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setFrame(t, fog, glow = 1) {
       for (const clock of clocks) clock.value = t;
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, 0.35, fog);
+      if (sky && skyCards && fog) {
+        const p = { x: 0, y: 0, z: 0 }, c = new Color();
+        sky.lanterns.forEach((l, i) => {
+          lanternAt(l, t, p);
+          c.set(l.color);
+          const k = l.far ? 0.22 : 0.8;
+          skyCards!.set(i, p.x, p.y + 2 * l.size, p.z, (l.far ? 30 : 44) * l.size, c.r * k, c.g * k, c.b * k, l.phase);
+        });
+        skyCards.commit(sky.lanterns.length, t, glow, 0.5, fog);
+        lanternEmitters(sky.lanterns, t, moving);
+      }
     },
   };
 }
