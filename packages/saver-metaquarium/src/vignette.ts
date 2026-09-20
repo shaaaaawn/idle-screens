@@ -93,7 +93,7 @@ export function parseVignette(script: string, marks: Marks): Vignette {
   // Who is in it: the highest actor letter the script names.
   let actors = 0;
   for (const beat of raw) {
-    for (const cue of beat.replace(/^\d+(?:\.\d+)?s\s*:/, '').split(',')) {
+    for (const cue of beat.replace(/^\d+(?:\.\d+)?s\s{0,16}:/, '').split(',')) {
       for (const word of cue.trim().split(/\s+/)) {
         if (!/^[abc]$/.test(word)) break;
         actors = Math.max(actors, ACTOR.indexOf(word) + 1);
@@ -111,7 +111,10 @@ export function parseVignette(script: string, marks: Marks): Vignette {
   raw.forEach((text, bi) => {
     let body = text;
     let dur: number | null = null;
-    const timed = /^(\d+(?:\.\d+)?)s\s*:\s*(.*)$/.exec(text);
+    // Whitespace runs around the colon are bounded — the script is authored
+    // content, not attacker-shaped, but an unbounded `\s*` here is exactly
+    // the polynomial-backtracking shape CodeQL flags on uncontrolled input.
+    const timed = /^(\d+(?:\.\d+)?)s\s{0,16}:\s{0,16}(.*)$/.exec(text);
     if (timed) { dur = Math.min(30, Math.max(1, Number(timed[1]))); body = timed[2]!; }
     const state: ActorBeat[] = at.map((p) => ({ to: p, moved: false, faceActor: null, facePoint: null, gesture: null, circle: null, follow: null }));
     let longest = 0;
