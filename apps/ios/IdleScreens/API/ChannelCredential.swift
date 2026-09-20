@@ -6,6 +6,9 @@ struct ChannelCredential: Codable, Equatable, Hashable, Identifiable, Sendable {
     let channelId: String
     var label: String
     let createdAt: Date
+    /// The role the server confirmed for the key behind this entry. nil for
+    /// entries stored before roles existed — read the key's prefix instead.
+    var role: ChannelRole?
 
     var id: String { channelId }
 }

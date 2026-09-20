@@ -9,7 +9,7 @@
 
 import type { Entity } from './simulate';
 import { isShapedSprite } from './shapes';
-import { fieldRgb, fieldRgbAt, hexToRgb255, rgb255Luma } from './field';
+import { fieldRgb, fieldRgbAt, fieldSampleTime, hexToRgb255, rgb255Luma } from './field';
 import type { FieldBackground, LayerSpec, SaverSpec } from './types';
 
 /**
@@ -175,19 +175,21 @@ export function legibilityRatio(a: Rgb, b: Rgb): number {
  * rest positions (`drift` moves them ±`amount` over time — the rest position
  * is the mean); a `band` wins where the point falls inside it. `unit` is the
  * spec's dimensional unit (1 for `px`, `min(w,h)` otherwise), for the band.
- * A field is sampled at the point when `xPx`/`w` are given (at `t` 0 — a
- * drifting field's rest), else it reads as its mean band, like the gradient.
+ * A field is sampled at the point at scene time `t` (bucketed like the
+ * renderer and `luminanceGrid`, default 0 — a drifting field's rest) when
+ * `xPx`/`w` are given, else it reads as its mean band, like the gradient.
  * `seed` is the effective seed the caller is perceiving with (`opts.seed ??
  * spec.seed`) — pass it through rather than defaulting to `spec.seed` here,
  * or a caller perceiving a specific seed samples the wrong field.
  */
-export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number, xPx?: number, w?: number, seed?: number): Rgb {
+export function backgroundRgbAt(spec: SaverSpec, yPx: number, h: number, unit: number, xPx?: number, w?: number, seed?: number, t = 0): Rgb {
   const bg = spec.background;
   if (!bg || bg.type === 'solid') return hexRgb(bg?.color ?? '#05050a');
   if (bg.type === 'field') {
     if (xPx === undefined || w === undefined) return backgroundRgb(spec);
     const short = Math.max(1, Math.min(w, h));
-    const c = fieldRgbAt(xPx / short, yPx / short, 0, bg, seed ?? spec.seed ?? 42);
+    const ft = fieldSampleTime(bg, t);
+    const c = fieldRgbAt(xPx / short, yPx / short, ft, bg, seed ?? spec.seed ?? 42);
     return { r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 };
   }
   if (bg.band) {

@@ -150,7 +150,7 @@ export function fieldAt(u: number, v: number, t: number, cfg: FieldBackground, s
 /** `#rgb` / `#rrggbb` → integer channels 0..255. Malformed input reads as mid grey. */
 export function hexToRgb255(hex: string): [number, number, number] {
   const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
-  const n = parseInt(h.slice(1), 16);
+  const n = /^#[0-9a-f]{6}$/i.test(h) ? parseInt(h.slice(1), 16) : NaN;
   if (Number.isNaN(n)) return [128, 128, 128];
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }

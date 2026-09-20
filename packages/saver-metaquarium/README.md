@@ -52,6 +52,14 @@ frame loop (rAF or renderFrame(t)):
   fish cap per device.
 - **Adaptive governor**: steps render resolution down when frames exceed budget.
 - **Zero-dep manifest subpath**: servers validate params without pulling three.js.
+- **Lofi backend**: `createMetaquarium({ backend: 'lofi' })` swaps three.js for
+  the Apple TV's 2D aquarium — each fish's `_transparent_icon.png` swimming a
+  Canvas2D After Dark tank (kelp, bubbles, light shafts). Same seed, same
+  layout as the TV. It reads **only** `environment` and `fishMix`, and always
+  swims 8 fish (13 on high-tier devices) like the TV — so a default scene is
+  one hero fish in WebGL and a full tank in lofi, by design. Other params
+  (`swimSpeed`, camera, fog, …) are no-ops there. A host choice for QA and
+  nostalgia, not a scene param; the playground exposes it as `?lofi=1`.
 
 ## Params
 
@@ -121,6 +129,8 @@ never changes because a dependency was bumped.
 | File | Role |
 |------|------|
 | tank.ts | Renderer, scene, fish spawn, environments, setState, governor, dispose |
+| lofi.ts | Lofi backend, pure half: the Apple TV's 2D aquarium layout, poses, palettes |
+| lofi-tank.ts | Lofi backend, canvas half: Canvas2D draw + transparent-icon loading |
 | plan.ts | Catmull-Rom swim: compile, arc-length, pose-at-distance, path shapes |
 | swim.ts | Swim styles, formations, depth bands, relationship bonds |
 | maneuver.ts | Named seeded events (dart, startle, graze, curious, zoomies) |

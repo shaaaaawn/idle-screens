@@ -678,6 +678,9 @@ interpolation, and background drift is sampled at rest. These are documented
 trade-offs for a zero-dependency, renderer-free analysis tool.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
+  **`t` is in milliseconds** (the MCP `previewScene` tool takes seconds and
+  converts; passing seconds here reads a self-typing block as one that never
+  finishes typing).
 - `perceiveSequenceFrame(seq, T, {viewport?, seed?, releasedBelow?})` — the
   same bundle for one frame of a **sequence** at global time `T`: resolves the
   segment (reported as `segment: {index, key, localT, held?}`) and, when the

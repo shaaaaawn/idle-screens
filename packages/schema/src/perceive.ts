@@ -34,7 +34,7 @@ import {
   textMetricsClassFor,
   type Entity,
 } from './simulate';
-import { bedRenderSeed, resolveSegment, segmentRenderSeed } from './sequence';
+import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   } else if (bg.type === 'field') {
     bgCells = new Array<number>(cols * rows);
     const short = Math.max(1, Math.min(w, h));
-    const seed = opts.seed ?? spec.seed ?? 42;
+    const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
     const ft = fieldSampleTime(bg, t);
     for (let r = 0; r < rows; r++) {
       let rowSum = 0;
@@ -412,8 +412,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         continue;
       }
       if (s.kind === 'streak') {
-        // Stamp along the segment from tail to head.
-        const heading = headingAt(e, tPass, w, h) ?? 0;
+        // Stamp along the segment from tail to head, like the renderer: motion
+        // heading plus the entity's own resolved rotation.
+        const heading = (headingAt(e, tPass, w, h) ?? 0) + rotationAt(e, tPass);
         const steps = Math.max(2, Math.ceil(sz / Math.min(cellW, cellH)));
         const wgt = Math.min(1, ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) / cellH);
         for (let i = 0; i <= steps; i++) {

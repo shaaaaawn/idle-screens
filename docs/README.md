@@ -35,7 +35,7 @@ the cross-repo map that ties these banks to StyleDNA profiles, holdout house
 styles and channels; this section only indexes what sits in this repo.
 
 - **[saver-ideas.md](saver-ideas.md)** — the canonical saver-idea registry: buckets, routes and lifecycle per entry. Fed by the mono's `saver-idea-discovery` loop; all ten fine-art briefs and selected entries from the historical screensaver-research bank below have been imported into it so far.
-- **[saver-art-ideas.md](saver-art-ideas.md)** — ten fine-art briefs, each expandable into a full SaverSpec by an agent.
+- **[saver-art-ideas.md](saver-art-ideas.md)** — deprecated fine-art brief source; imported into the registry, kept as source history.
 - **[aesthetic-brief-seeds.md](aesthetic-brief-seeds.md)** — consumer-aesthetic briefs (numbered 11 onward, CARI-sourced): mall, software, packaging and daytime-TV design languages.
 - **[saver-deep-research.md](saver-deep-research.md)** — unformatted research dump on the generative-art canon (Electric Sheep, Lenia, teamLab, Flurry, Reas/Lieberman) and the systems behind ambient screen art.
 - **[saver-benchmark-prompts.md](saver-benchmark-prompts.md)** — prompts for evaluating LLM creative output against the schema (MCP and standalone variants).

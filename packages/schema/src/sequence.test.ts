@@ -2477,5 +2477,34 @@ describe('SequenceInstance — hotSwapSequence', () => {
       expect(sequenceSwapCompatible(base(), { ...base(), bed: { ...bed('#ffffff'), seed: 3 } })).toBe(false);
       expect(sequenceSwapCompatible(base(), { ...base(), bed: { ...bed('#ffffff'), layers: [...bed('#ffffff').layers, SCENE.layers[0]!] } })).toBe(false);
     });
+
+    it('a seq.seed change is pinned even when every segment and the bed carry their own seed — a sequence-level finish still resolves against the mount-time seed', () => {
+      const ownSeeds: IdleSequence = {
+        ...base(),
+        bed: { ...bed('#ffffff'), seed: 100 },
+        segments: base().segments.map((sg, i) => ({ ...sg, scene: { ...sg.scene, seed: i + 1 } })),
+      };
+      // segmentRenderSeed/bedRenderSeed are unaffected by seq.seed here — the
+      // per-segment and bed seeds win — so only the explicit seq.seed check
+      // catches this.
+      expect(sequenceSwapCompatible(ownSeeds, { ...ownSeeds, seed: (ownSeeds.seed ?? 0) + 1 })).toBe(false);
+    });
+
+    it('a seq.seed change of an exact multiple of 2**32 is free — the mount-time seed normalizes (>>> 0) to the same value', () => {
+      const withSeed: IdleSequence = { ...base(), seed: 7 };
+      expect(sequenceSwapCompatible(withSeed, { ...withSeed, seed: 7 + 2 ** 32 })).toBe(true);
+      // undefined vs. defined must still be pinned even when the defined
+      // side normalizes to what undefined would fall back to elsewhere.
+      expect(sequenceSwapCompatible({ ...withSeed, seed: undefined }, withSeed)).toBe(false);
+    });
+
+    it('adding or removing every finish in the sequence is pinned — the presentation pass is allocated once at mount', () => {
+      expect(sequenceSwapCompatible(base(), { ...base(), finish: { grain: 0.3 } })).toBe(false);
+      expect(sequenceSwapCompatible(base(), edit(0, { scene: { ...slide('Alpha'), finish: { grain: 0.3 } } }))).toBe(false);
+      const withFinish: IdleSequence = { ...base(), finish: { grain: 0.3 } };
+      expect(sequenceSwapCompatible(withFinish, base())).toBe(false);
+      // Changing an existing finish's own values is free — finish paint isn't structural.
+      expect(sequenceSwapCompatible(withFinish, { ...withFinish, finish: { grain: 0.6 } })).toBe(true);
+    });
   });
 });
