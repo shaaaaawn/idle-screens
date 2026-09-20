@@ -48,6 +48,8 @@ export interface FloraField {
   plants: number;
   voxels: number;
   bySpecies: Record<FloraSpecies, number>;
+  /** Where the lamps are — what sheds spores. `root` is the plant's foot. */
+  lights: { x: number; y: number; z: number; root: number; phase: number; gust: number; color: string }[];
 }
 
 /** Voxel-art face values: top brightest, the two side pairs apart, bottom dark. */
@@ -63,6 +65,7 @@ class VoxelWriter {
   readonly glow: number[] = [];
   count = 0;
   root = 0; phase = 0; gust = 0;
+  last: [number, number, number] = [0, 0, 0];
 
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, lit: number, flat = false): void {
     const hx = sx / 2, hy = sy / 2, hz = sz / 2;
@@ -89,6 +92,7 @@ class VoxelWriter {
       }
     }
     this.count += 1;
+    this.last = [cx, cy, cz];
   }
 
   geometry(): BufferGeometry[] {
@@ -120,7 +124,8 @@ export function buildFlora(
   const body = new VoxelWriter(), lamp = new VoxelWriter();
   const s = opts.scale;
   const want = Math.round(opts.density * opts.cap * 9);
-  if (!want || !anchors.length) return { parts: [], lamps: [], plants: 0, voxels: 0, bySpecies };
+  const lights: FloraField['lights'] = [];
+  if (!want || !anchors.length) return { parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights };
   const V = 1.7 * s; // the voxel
   const white = new Color('#ffffff'), leafGreen = new Color('#2f9d7c'), brassBase = new Color('#c9a15a');
 
@@ -235,26 +240,61 @@ export function buildFlora(
       }
       lamp.cube(tx, root + (n + 0.45) * V, tz, V * 1.15, V * 1.15, V * 1.15, light.clone().lerp(white, 0.3), 1, true);
     }
+    if (species !== 'grass') lights.push({ x: lamp.last[0], y: lamp.last[1], z: lamp.last[2], root, phase, gust, color: near.color });
     bySpecies[species] += 1;
     plants += 1;
   }
-  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies };
+  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights };
 }
 
-/** The sway, as shader text. Exported so the test can hold it to "pure in t".
- *  Gentle: a 40-unit kelp tip moves about four units, and a gust adds as much
- *  again as it passes — enough to be water, not enough to be wind. */
+/** The sway, as shader text — one function shared by the plants, their lamps
+ *  and the spores the lamps shed, so all three agree where a tip is. It is an
+ *  S-curve, not a lean: a wave climbs the stalk (the `h * 0.16` term), so a
+ *  tall kelp snakes while grass just flutters; a gust crosses the garden in
+ *  space (`aSway.z` is a position), bowing each plant as it passes. All of it
+ *  is vertex work on a merged mesh: it costs the same as standing still. */
+export const FLORA_SWAY = /* glsl */ `
+  vec2 mqFloraSway(float h, vec3 sw, float t) {
+    float reach = min(h * h * 0.0042, 9.0) + min(h, 6.0) * 0.06;
+    float gust = pow(sin(t * 0.27 - sw.z) * 0.5 + 0.5, 3.0);
+    float wave = sin(t * 0.85 + sw.y - h * 0.16);
+    float slow = sin(t * 0.23 + sw.y * 1.7);
+    return vec2(
+      (wave * 0.7 + slow * 0.5 + gust * 2.1) * reach,
+      (cos(t * 0.6 + sw.y - h * 0.13) * 0.6 + gust * 0.8) * reach * 0.7);
+  }
+`;
 export const FLORA_VERTEX = /* glsl */ `
   #include <begin_vertex>
   float h = max(0.0, position.y - aSway.x);
-  float reach = min(h * h * 0.0016, 3.4);
-  float gustWave = sin(uSwayTime * 0.31 - aSway.z) * 0.5 + 0.5;
-  transformed.x += (sin(uSwayTime * 0.55 + aSway.y + h * 0.07) + gustWave * 1.2) * reach;
-  transformed.z += cos(uSwayTime * 0.38 + aSway.y + h * 0.06) * reach * 0.6;
+  vec2 sway = mqFloraSway(h, aSway, uSwayTime);
+  transformed.x += sway.x;
+  transformed.z += sway.y;
+  // A plant bowed over is a little shorter.
+  transformed.y -= dot(sway, sway) * 0.012;
 `;
+/** Bioluminescence: every few seconds a band of light climbs each plant from
+ *  root to tip, and the lamp at the top flares as it arrives. The gust sets
+ *  the whole garden off in a wave, because it shares the gust's phase. */
 export const FLORA_COLOR = /* glsl */ `
   #include <color_vertex>
-  vColor.rgb *= 1.0 + aGlow * 0.3 * sin(uSwayTime * 0.75 + aSway.y);
+  float fh = max(0.0, position.y - aSway.x);
+  float run = fract(uSwayTime * 0.11 + aSway.y * 0.159 - aSway.z * 0.04);
+  float band = 1.0 - smoothstep(0.0, 7.0, abs(run * 70.0 - 8.0 - fh));
+  float arrive = 1.0 - smoothstep(0.0, 0.16, abs(run - 0.62));
+  vColor.rgb *= 1.0 + band * 1.1 * (1.0 - aGlow) + aGlow * (0.25 * sin(uSwayTime * 0.75 + aSway.y) + 0.9 * arrive);
+`;
+
+/** Spores: each lamp sheds a few motes of its own light, which rise, wander
+ *  and go out. One Points draw for the whole garden. */
+export const SPORE_VERTEX = /* glsl */ `
+  #include <begin_vertex>
+  float life = fract(aSpore.x + uSwayTime * aSpore.y);
+  vec2 tip = mqFloraSway(max(0.0, position.y - aSway.x), aSway, uSwayTime - life * 3.0);
+  transformed.x += tip.x * (1.0 - life) + sin(life * 9.0 + aSpore.x * 40.0) * (1.5 + life * 5.0);
+  transformed.z += tip.y * (1.0 - life) + cos(life * 7.0 + aSpore.x * 31.0) * (1.5 + life * 5.0);
+  transformed.y += life * (14.0 + aSpore.z * 22.0);
+  vSpore = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.45, 1.0, life));
 `;
 
 /** Lamps are lit metal: their vertex colour is both the metal's tint and what

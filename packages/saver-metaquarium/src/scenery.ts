@@ -1,14 +1,14 @@
 /** Seeded mineral scenery. Minerals are faceted; living/inhabited details are voxels.
  * Geometry is batched at build time, owns its resources, and uses the tank clock. */
 import {
-  BufferAttribute, BufferGeometry, Color, Group,
+  AdditiveBlending, BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
   DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
@@ -186,11 +186,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const clock = { value: 0 }; clocks.push(clock);
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
     };
-    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v2';
+    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v3';
     plants.frustumCulled = false;
   }
   // The lights on the flora are polished metal: they take the studio
@@ -206,12 +206,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const clock = { value: 0 }; clocks.push(clock);
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + shader.vertexShader;
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', FLORA_LAMP_EMISSIVE);
     };
-    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v1';
+    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v2';
     const lampMesh = new Mesh(geometry, metal);
     lampMesh.name = 'flora-lamps';
     lampMesh.frustumCulled = false;
@@ -262,6 +262,45 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     mesh.renderOrder = -1;
     group.add(mesh);
     counts.horizon = far.counts.spires + far.counts.crystals + far.counts.geodes;
+  }
+  // Spores: three motes a lamp, rising off the swaying tip and going out.
+  if (field.lights.length) {
+    const sporeRng = rng.fork(9);
+    const per = 3, n = field.lights.length * per;
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sway = new Float32Array(n * 3), spore = new Float32Array(n * 3);
+    const c = new Color();
+    field.lights.forEach((l, i) => {
+      c.set(l.color).lerp(new Color('#ffffff'), 0.3);
+      for (let k = 0; k < per; k++) {
+        const j = (i * per + k) * 3;
+        pos.set([l.x, l.y, l.z], j); col.set([c.r, c.g, c.b], j); sway.set([l.root, l.phase, l.gust], j);
+        spore.set([sporeRng.next(), sporeRng.range(0.05, 0.11), sporeRng.next()], j);
+      }
+    });
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new BufferAttribute(col, 3));
+    geometry.setAttribute('aSway', new BufferAttribute(sway, 3));
+    geometry.setAttribute('aSpore', new BufferAttribute(spore, 3));
+    geometry.userData.mqOwned = true;
+    const material = new PointsMaterial({ vertexColors: true, size: 1.5 * s, transparent: true, depthWrite: false, blending: AdditiveBlending });
+    material.userData.mqOwned = true;
+    const clock = { value: 0 }; clocks.push(clock);
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uSwayTime = clock;
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute vec3 aSpore; varying float vSpore;\n' + FLORA_SWAY
+        + shader.vertexShader.replace('#include <begin_vertex>', SPORE_VERTEX);
+      shader.fragmentShader = 'varying float vSpore;\n' + shader.fragmentShader.replace('#include <color_fragment>', `
+        #include <color_fragment>
+        float sr = length(gl_PointCoord - 0.5) * 2.0;
+        diffuseColor.a *= (1.0 - smoothstep(0.15, 1.0, sr)) * vSpore;`);
+    };
+    material.customProgramCacheKey = () => 'flora-spores-v1';
+    const points = new Points(geometry, material);
+    points.name = 'flora-spores';
+    points.frustumCulled = false;
+    group.add(points);
+    counts.spores = n;
   }
   counts.flora = field.plants;
   // Both particle layers are one draw each; positions are pure in t, including

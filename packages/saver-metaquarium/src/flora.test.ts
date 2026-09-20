@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
-import { buildFlora, FLORA_COLOR, FLORA_SPECIES, FLORA_VERTEX, type FloraOptions } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX, type FloraOptions } from './flora';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
 const opts: FloraOptions = { density: 1, cap: 8, scale: 1, blocked: () => false };
@@ -47,10 +47,18 @@ describe('flora', () => {
     expect(arr(f.lamps[0]!, 'aGlow').every((v) => v === 1)).toBe(true);
   });
 
+  it('reports a light for every plant that carries one, at the lamp itself', () => {
+    const f = buildFlora(anchors, flat, createRng(3), opts);
+    expect(f.lights.length).toBe(f.plants - f.bySpecies.grass);
+    expect(f.lights.every(l => l.y > l.root && Number.isFinite(l.x + l.z))).toBe(true);
+  });
+
   it('motion is gentle, pure in the tank clock, and zero at the root', () => {
     for (const src of [FLORA_VERTEX, FLORA_COLOR]) expect(src).toMatch(/uSwayTime/);
-    expect(FLORA_VERTEX).toMatch(/h \* h/); // grows with height² — a root never moves
-    expect(FLORA_VERTEX).toMatch(/min\(/); //   and is capped — water, not wind
-    expect(FLORA_VERTEX).not.toMatch(/random|noise\(/);
+    expect(FLORA_SWAY).toMatch(/h \* h/); // grows with height² — a root never moves
+    expect(FLORA_SWAY).toMatch(/min\(/); //   and is capped — water, not wind
+    expect(FLORA_SWAY).toMatch(/- h \* 0\.16/); // a wave CLIMBS the stalk: an S-curve, not a lean
+    for (const src of [FLORA_SWAY, FLORA_VERTEX, FLORA_COLOR, SPORE_VERTEX]) expect(src).not.toMatch(/random|noise\(/);
+    expect(SPORE_VERTEX).toMatch(/mqFloraSway/); // spores leave from where the tip IS
   });
 });
