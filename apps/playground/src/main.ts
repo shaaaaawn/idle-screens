@@ -14,7 +14,7 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { createMetaquarium, FISH_CATALOG, NPC_CATALOG, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium, FISH_CATALOG, NPC_CATALOG, RECIPES, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, FACETS_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, PINGS_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, RELAY_BOARD_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';
@@ -270,12 +270,19 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
     }, catalog: LOCAL_CATALOG,
   }),
+  // RECIPES: the package's own named scenes, exactly as an agent would publish
+  // them over MCP (default catalog, minted ids from IPFS) — so what is on this
+  // shelf is what a channel can show. ?saver=metaquarium-recipe-<id>
+  ...RECIPES.map((r) => createMetaquarium({
+    id: `metaquarium-recipe-${r.id}`, label: `Metaquarium (recipe — ${r.label})`,
+    params: { ...r.params, dracoPath: asset('/draco/') },
+  })),
   // STUDY: the jellyfish lanterns, brought down to eye level — three species
   // (lantern, moon, comb), the squeeze rolling down the bell, the lines streaming.
   createMetaquarium({
     id: 'metaquarium-study-jellyfish', label: 'Metaquarium (study jellyfish)',
     params: {
-      skyLanterns: 1, skyHeight: 0.3, propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/gold,crystal:1@druse/purple', crystalScale: 0.7,
+      skyLanterns: 1, skyHeight: 0.3, propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/yellow,crystal:1@druse/purple', crystalScale: 0.7,
       fishMix: '100:1,257:1', swimStyle: 'drift', swimSpeed: 0.4, marineSnow: 0.4,
       fogColor: '#04081a', floorColor: '#0c1428', fogNear: 160, fogFar: 800,
       cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1,
@@ -676,6 +683,7 @@ const PREVIEW_ENTRIES: PreviewEntry[] = SAVER_GROUPS.flatMap((g) =>
  * know its `?saver=` id.
  */
 const VARIANT_SHELVES: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['metaquarium-recipe-', 'recipes (what MCP can publish)'],
   ['metaquarium-world-', 'worlds'],
   ['metaquarium-study-', 'studies'],
   ['metaquarium-vignette-', 'vignettes'],

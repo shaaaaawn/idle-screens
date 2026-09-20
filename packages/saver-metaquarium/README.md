@@ -205,3 +205,17 @@ parameters change. The complete world adds at most eight batched draws, no
 textures, downloads, shadow maps or additional lights. Flora, shards, snow and
 bubbles scale with the existing device prop budget. `inspect().props.scenery`
 reports actual populations; prop draw-call/triangle totals include the world.
+
+## For agents (MCP)
+
+Everything an agent needs to author a scene is data, importable without three.js:
+
+```ts
+import { RECIPES, recipeTrack, PARAM_DOCS, GRAMMAR, validateMetaquariumParams } from '@idle-screens/saver-metaquarium/manifest';
+
+const scene = RECIPES.find((r) => r.id === 'stage-duet')!;
+publishScene({ spec: { id: 'metaquarium' }, track: recipeTrack(scene.params) });
+validateMetaquariumParams({ vignette: 'a >home1', geodeHomes: 0 }); // → [{ path: 'vignette', message: 'beat 1: no mark "home1" …' }]
+```
+
+`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf.
