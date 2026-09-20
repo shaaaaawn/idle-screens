@@ -41,7 +41,7 @@ struct WebSceneView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onFrame: onFrame, onFailure: onFailure)
+        Coordinator(baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -156,11 +156,13 @@ struct WebSceneView: UIViewRepresentable {
     // MARK: Coordinator
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        let baseURL: URL
         var onFrame: (String) -> Void
         var onFailure: () -> Void
         var loaded: (String, Int) = ("", -1)
 
-        init(onFrame: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
+        init(baseURL: URL, onFrame: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
+            self.baseURL = baseURL
             self.onFrame = onFrame
             self.onFailure = onFailure
         }
@@ -175,15 +177,19 @@ struct WebSceneView: UIViewRepresentable {
 
         /// The page may move between channels (a paired push does), and
         /// nowhere else. Anything that would turn this surface into a browser
-        /// is refused.
+        /// is refused. Pinned to `baseURL` (scheme + host), never to the
+        /// webview's currently loaded URL: that URL is nil during the first
+        /// provisional navigation and is itself attacker-controlled after a
+        /// redirect, so either would let a hostile origin's own scripts run
+        /// with the bootstrap token seeded into `localStorage`.
         func webView(_ webView: WKWebView,
                      decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard action.targetFrame?.isMainFrame != false else { return decisionHandler(.allow) }
             let url = action.request.url
-            let sameHost = url?.host == webView.url?.host || webView.url == nil
+            let sameOrigin = url?.scheme == "https" && url?.host == baseURL.host
             let isChannel = url?.path.hasPrefix("/channel/") == true
-            decisionHandler(sameHost && isChannel ? .allow : .cancel)
+            decisionHandler(sameOrigin && isChannel ? .allow : .cancel)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
