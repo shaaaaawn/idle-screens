@@ -352,7 +352,7 @@ private struct NewChannelSheet: View {
 
 // MARK: - Add existing channel sheet
 
-private struct AddExistingChannelSheet: View {
+struct AddExistingChannelSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
 

@@ -96,7 +96,6 @@
 		A283256BA27B747A9FCD7508 /* ScenePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445D50F4219B172B3F7A6365 /* ScenePreviewView.swift */; };
 		A286AB92111C75F2E85539A9 /* ProceduralChannelArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A90895DB785841700E11AEB /* ProceduralChannelArt.swift */; };
 		A35D22B41699F53D6F62A43B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6339510B5B7C996B622F160 /* AppState.swift */; };
-		A54F268A26751C833B1FFEA7 /* SceneInfoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CA5F14AE8A494C8BCC9293B /* SceneInfoSheet.swift */; };
 		A55DF47FA460196B4FC3499D /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8BD5065123552EA8608DB0 /* Glass.swift */; };
 		A6C866C7D63E623487C94777 /* ProceduralChannelArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A90895DB785841700E11AEB /* ProceduralChannelArt.swift */; };
 		A7FEF522E56C9E1F4D26F706 /* RecordedSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9C30F162B64979C4B3F04E /* RecordedSceneView.swift */; };
@@ -106,6 +105,7 @@
 		AB76FAD280B8EE48343D1993 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184174A6AF1FFAB56C9837B1 /* CrashReporter.swift */; };
 		AC000386E0E47C842C0FBF9A /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B5A0CBD688755360E23C34 /* NativeSceneView.swift */; };
 		B1AB82CB3AE4D9F59787540A /* ChannelOverviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131CF06414AB247D1E968AFF /* ChannelOverviewSheet.swift */; };
+		B1E1F5B82B7C90B6C4DF2B7D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E51E7AD87C0BA811FC149BD /* SettingsView.swift */; };
 		B39D9751769F3397C53C5EF0 /* LobbyFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7634B667378A385CC7196D91 /* LobbyFixtureTests.swift */; };
 		B9AA2E9D0D0D82FAA58AF3D3 /* ChannelWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F99CB7028A5A6E2B2448BA /* ChannelWSClient.swift */; };
 		BA040E0C8FB03735BF177BAD /* ChannelSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452F2484E3DAE7DC772CFC2A /* ChannelSearch.swift */; };
@@ -230,7 +230,6 @@
 		4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedView.swift; sourceTree = "<group>"; };
 		4A88C730E2ED055EB1FB0901 /* PairCodeField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairCodeField.swift; sourceTree = "<group>"; };
 		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
-		4CA5F14AE8A494C8BCC9293B /* SceneInfoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneInfoSheet.swift; sourceTree = "<group>"; };
 		4D7E436C9C0F1504197A67E9 /* ChannelFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
 		4E7F929E9D6DB9F6B7C78FA6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4ECFB44253D0D0EC22D67E8B /* ChannelFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeedTests.swift; sourceTree = "<group>"; };
@@ -251,6 +250,7 @@
 		6A39FC4E62FA08D2DC673189 /* IdleScreens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IdleScreens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A7837B2C4483DFA183A8676 /* ComposerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSheet.swift; sourceTree = "<group>"; };
 		6A90895DB785841700E11AEB /* ProceduralChannelArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProceduralChannelArt.swift; sourceTree = "<group>"; };
+		6E51E7AD87C0BA811FC149BD /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		702C370C1F397FD4B6E902CB /* SceneMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneMotion.swift; sourceTree = "<group>"; };
 		71EDB676A59798A0FAB07300 /* HomeSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSections.swift; sourceTree = "<group>"; };
 		7214A81CE63D6662D8A7D288 /* SceneComplexity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneComplexity.swift; sourceTree = "<group>"; };
@@ -414,7 +414,6 @@
 				BB7CCE04A15329FC69EA8D34 /* FeedPage.swift */,
 				89005D7893267BAA3D3EF5E6 /* RecordedSceneStore.swift */,
 				DB9C30F162B64979C4B3F04E /* RecordedSceneView.swift */,
-				4CA5F14AE8A494C8BCC9293B /* SceneInfoSheet.swift */,
 				4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */,
 			);
 			path = Feed;
@@ -493,6 +492,7 @@
 				653EEA87414CA03BA29EFF2E /* Feed */,
 				6984F387691BCE6A22DF43C3 /* Pair */,
 				0BA9639EEE63D5270E4D5873 /* Render */,
+				AAF85798045BF89832B08BA0 /* Settings */,
 				1196F96E1C69DF0D982E2A5C /* Theme */,
 				AEE4203FDBEC1494EC5AEC21 /* VJ */,
 				78D76AAD1606576168304EB8 /* Watch */,
@@ -512,6 +512,14 @@
 				76C9083C4EA3C79CB1414888 /* FollowStore.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		AAF85798045BF89832B08BA0 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				6E51E7AD87C0BA811FC149BD /* SettingsView.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		AEE4203FDBEC1494EC5AEC21 /* VJ */ = {
@@ -776,11 +784,11 @@
 				A7FEF522E56C9E1F4D26F706 /* RecordedSceneView.swift in Sources */,
 				E85B8629E778140281F0628E /* RenderGuard.swift in Sources */,
 				028C4499DEFFECEEBE7ED0D4 /* SceneComplexity.swift in Sources */,
-				A54F268A26751C833B1FFEA7 /* SceneInfoSheet.swift in Sources */,
 				2A0AF3B6BDB8D8803FD347B7 /* SceneMotion.swift in Sources */,
 				A283256BA27B747A9FCD7508 /* ScenePreviewView.swift in Sources */,
 				98E476F9F95B9210B5076921 /* SceneVisibility.swift in Sources */,
 				F9BDE21EC58743E685ECB2BC /* SequenceSubset.swift in Sources */,
+				B1E1F5B82B7C90B6C4DF2B7D /* SettingsView.swift in Sources */,
 				34018E505AD097DAD48BB660 /* SpecSubset.swift in Sources */,
 				E8E8841AC339243ACEE363A7 /* SpriteSceneView.swift in Sources */,
 				1D09AC570238966371459456 /* SteerLine.swift in Sources */,
@@ -927,7 +935,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -969,7 +977,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTVTopShelf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1052,7 +1060,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1073,7 +1081,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1094,7 +1102,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1134,7 +1142,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026091903;
+				CURRENT_PROJECT_VERSION = 2026091905;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

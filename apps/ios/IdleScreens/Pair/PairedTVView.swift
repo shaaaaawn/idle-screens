@@ -5,6 +5,8 @@ import UIKit
 /// Linux display — by scanning its QR (or typing the
 /// code), see what it's watching, and push any channel to it.
 struct PairedTVView: View {
+    /// Pushed from Settings it must not bring a second navigation stack.
+    var embedded = false
     @Environment(AppState.self) private var app
     @State private var showingScanner = false
     @State private var manualCode = ""
@@ -50,16 +52,8 @@ struct PairedTVView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !app.pairedScreens.isEmpty {
-                    pairedContent
-                } else {
-                    unpairedContent
-                }
-            }
-            .navigationTitle("screens")
-            .background(Color.appBackground.ignoresSafeArea())
+        Group {
+            if embedded { screensRoot } else { NavigationStack { screensRoot } }
         }
         .sheet(isPresented: $showingAddScreen) {
             NavigationStack {
@@ -102,6 +96,19 @@ struct PairedTVView: View {
     }
 
     // MARK: Unpaired
+
+    private var screensRoot: some View {
+        Group {
+            if !app.pairedScreens.isEmpty {
+                pairedContent
+            } else {
+                unpairedContent
+            }
+        }
+        .navigationTitle("screens")
+        .navigationBarTitleDisplayMode(embedded ? .inline : .automatic)
+        .background(Color.appBackground.ignoresSafeArea())
+    }
 
     private var unpairedContent: some View {
         ScrollView {
