@@ -251,8 +251,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     geometry.setAttribute('color', new BufferAttribute(colors, 3));
     geometry.setAttribute('aParticle', new BufferAttribute(phases, 3));
     geometry.userData.mqOwned = true;
-    const material = new PointsMaterial({ vertexColors: true, size: bubble ? 3.4 * s : 0.65 * s,
-      transparent: true, opacity: bubble ? 0.8 : 0.5, depthWrite: false });
+    const material = new PointsMaterial({ vertexColors: true, size: bubble ? 4.2 * s : 0.65 * s,
+      transparent: true, opacity: bubble ? 1 : 0.5, depthWrite: false });
     material.userData.mqOwned = true;
     const clock = { value: 0 }; clocks.push(clock);
     material.onBeforeCompile = shader => {
@@ -260,7 +260,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       shader.uniforms.uMineralPosition = { value: lightPositions };
       shader.uniforms.uMineralColor = { value: lightColors };
       shader.vertexShader = `uniform float uParticleTime;
-        attribute vec3 aParticle; varying float vLife; varying vec2 vShape;
+        attribute vec3 aParticle; varying float vLife; varying vec2 vShape; varying float vSize;
         uniform vec4 uMineralPosition[12]; uniform vec3 uMineralColor[12];
       ` + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
@@ -291,34 +291,49 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       // Per-bubble size, and they swell as the pressure drops.
       if (bubble) shader.vertexShader = shader.vertexShader.replace('gl_PointSize = size;',
         'gl_PointSize = size * aParticle.z * (0.7 + 0.8 * fract(aParticle.x + uParticleTime * aParticle.y * 0.045));');
-      shader.fragmentShader = 'varying float vLife; varying vec2 vShape;\n' + shader.fragmentShader;
+      // The fragment stage needs the sprite's real size in pixels, after
+      // attenuation — and nothing under 3 px, where a bubble is only noise.
+      shader.vertexShader = shader.vertexShader.replace('#include <fog_vertex>',
+        `#include <fog_vertex>\n ${bubble ? 'gl_PointSize = max(gl_PointSize, 3.0);' : ''} vSize = gl_PointSize;`);
+      shader.fragmentShader = 'uniform float uParticleTime; varying float vLife; varying vec2 vShape; varying float vSize;\n' + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
         #include <color_fragment>
         float r = length(gl_PointCoord - 0.5) * 2.0;
         ${bubble ? `
-        // A bubble, not a ring. Squashed a little by its wobble; a rim that
-        // is thicker and brighter underneath (where a real one gathers light);
-        // a thin-film shift of hue round it; a hard highlight up-left and its
-        // small echo down-right; a faint fill so it has a body.
-        vec2 uv = (gl_PointCoord - 0.5) * 2.0;
+        // A bubble, not a ring — and never a square. The disc sits INSIDE the
+        // sprite with a margin, so its out-of-round wobble cannot reach the
+        // quad's edge (that clipped flat side was the "frame"). Everything is
+        // sized in pixels: the outer edge is antialiased over ~1.5 px, and a
+        // small bubble gets a fatter rim and glint so it reads as a bead of
+        // light instead of a hairline "o".
+        vec2 uv = (gl_PointCoord - 0.5) * 2.0 * 1.24;
         uv *= vec2(1.0 + vShape.x, 1.0 - vShape.x);
         r = length(uv);
+        float px = 2.48 / max(vSize, 1.0);
+        float big = smoothstep(7.0, 42.0, vSize);
+        float edge = 1.0 - smoothstep(1.0 - px * 1.5, 1.0, r);
         float under = 0.5 + 0.5 * uv.y;
-        float rim = smoothstep(0.66 - under * 0.1, 0.84, r) * (1.0 - smoothstep(0.9, 1.0, r));
-        float fill = (1.0 - smoothstep(0.0, 0.95, r)) * 0.1;
-        float spec = 1.0 - smoothstep(0.0, 0.17, length(uv - vec2(-0.36, -0.4)));
-        float echo = (1.0 - smoothstep(0.0, 0.1, length(uv - vec2(0.42, 0.44)))) * 0.55;
+        // Glass falls off like fresnel — a power of the radius, not a band.
+        float rim = pow(clamp(r, 0.0, 1.0), mix(2.6, 7.5, big)) * edge;
+        // The crescent of light gathered low inside, opposite the highlight.
+        float cres = smoothstep(0.62, 0.9, length(uv - vec2(-0.2, -0.24)))
+          * (1.0 - smoothstep(0.78, 0.97, r)) * 0.4 * big;
+        float fill = edge * 0.07;
+        float glint = max(0.16, px * 1.7);
+        float spec = 1.0 - smoothstep(glint * 0.35, glint, length(uv - vec2(-0.37, -0.41)));
+        float echo = (1.0 - smoothstep(0.0, 0.09, length(uv - vec2(0.43, 0.45)))) * 0.5 * big;
         float ang = atan(uv.y, uv.x);
-        vec3 film = 0.5 + 0.5 * cos(ang * 2.0 + vShape.y * 40.0 + vec3(0.0, 2.1, 4.2));
-        diffuseColor.rgb = mix(diffuseColor.rgb, film, 0.38 * rim) * (0.85 + 0.6 * under * rim);
-        float mask = clamp(rim * (0.7 + 0.5 * under) + fill + spec + echo, 0.0, 1.0);
+        vec3 film = 0.5 + 0.5 * cos(ang * 2.0 + r * 3.0 + vShape.y * 40.0 + uParticleTime * 0.35 + vec3(0.0, 2.1, 4.2));
+        diffuseColor.rgb = mix(diffuseColor.rgb, film, 0.42 * rim) * (0.85 + 0.7 * under * rim);
+        diffuseColor.rgb += film * cres * 0.5;
+        float mask = clamp(rim * (0.8 + 0.5 * under) + cres + fill + spec + echo, 0.0, 1.0) * edge;
         spec = max(spec, echo);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), spec * 0.85);` : `
         float mask = 1.0 - smoothstep(0.0, 1.0, r);`}
         diffuseColor.a *= mask * vLife;
       `);
     };
-    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v3' : 'mineral-snow-v3';
+    material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v4' : 'mineral-snow-v4';
     const points = new Points(geometry, material);
     points.name = bubble ? 'bubble-vents' : 'illuminated-marine-snow';
     points.frustumCulled = false;
