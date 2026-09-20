@@ -155,8 +155,12 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     const len = (great ? trng.range(30, 50) : (up < 0.2 ? 9 : 5.5) * (0.6 + patch * 1.3) * trng.range(0.8, 1.25)) * s;
     const wid = len * (great ? 0.3 : trng.range(0.42, 0.6));
     axis.copy(inward).add(new Vector3(trng.range(-0.22, 0.22), trng.range(-0.22, 0.22), trng.range(-0.22, 0.22))).normalize();
-    side.crossVectors(axis, Y_UP).normalize();
-    if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+    // `axis` occasionally lands parallel to Y_UP (near the dome's poles),
+    // where the cross product is the zero vector — normalize() of THAT is
+    // NaN, and a lengthSq() check after normalizing never catches it (NaN
+    // comparisons are always false). Check before normalizing instead.
+    side.crossVectors(axis, Y_UP);
+    if (side.lengthSq() < 0.01) side.set(1, 0, 0); else side.normalize();
     fwd.crossVectors(axis, side).normalize();
     const spin = trng.next() * 6.28;
     const foot: Vector3[] = [], shoulder: Vector3[] = [];
