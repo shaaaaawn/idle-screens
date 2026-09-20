@@ -55,6 +55,8 @@ import {
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+
+const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
@@ -547,7 +549,7 @@ class TankInstance implements SaverInstance {
   private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
   private readonly spotSeen = [false, false, false];
   private readonly spotLevel = [0, 0, 0];
-  private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0 };
+  private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
   private spotKey = '\u0000';
@@ -2122,11 +2124,10 @@ class TankInstance implements SaverInstance {
             camera: toward(cam.x, cam.y, cam.z),
             climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
           }, eyeLife, this.eyeState);
-          const e = this.eyeState;
-          f.eyes.set(e.blink, e.gazeFwd, e.gazeUp, e.dilate, e.widen);
+          f.eyes.set(this.eyeState);
         }
       } else if (f.eyes) {
-        f.eyes.set(0, 0, 0, 1, 0);
+        f.eyes.set(EYES_AT_REST);
       }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -2211,6 +2212,7 @@ class TankInstance implements SaverInstance {
         rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
         rayPools: this.rayPools.length,
       },
+      eyes: this.fish.map((f) => f?.eyes?.grids.map((g) => g.signature).join(' · ') ?? null),
       vignette: this.vignette ? {
         actors: this.vignette.actors,
         beats: this.vignette.beats.length,

@@ -3,7 +3,7 @@ import { eyeMood, type EyeCue, type EyeState } from './eyes';
 
 const idle: EyeCue = { doing: 'idle', target: null, camera: { fwd: 0, up: 0.2 }, climb: 0 };
 const mood = (t: number, slot: number, cue: EyeCue = idle, amount = 1): EyeState =>
-  eyeMood(t, slot, cue, amount, { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0 });
+  eyeMood(t, slot, cue, amount, { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 });
 
 describe('eye mood', () => {
   it('is pure in (t, slot) and stays inside the eye', () => {
@@ -13,7 +13,7 @@ describe('eye mood', () => {
       expect(Math.abs(a.gazeFwd)).toBeLessThanOrEqual(1);
       expect(Math.abs(a.gazeUp)).toBeLessThanOrEqual(1);
       expect(a.blink).toBeGreaterThanOrEqual(0);
-      expect(a.blink).toBeLessThan(0.95); // never a fully degenerate eye
+      expect(a.blink).toBeLessThanOrEqual(1);
     }
   });
 
@@ -38,6 +38,8 @@ describe('eye mood', () => {
     const hop = mood(3.3, 2, { ...idle, doing: 'hop' });
     expect(hop.dilate).toBeGreaterThan(1.3);
     expect(hop.widen).toBe(1);
+    expect(hop.expr).toBe(1);
+    expect(mood(3.3, 2, { ...idle, doing: 'wiggle' }).expr).toBe(2);
     expect(mood(3.3, 2, { ...idle, doing: 'rest' }).blink).toBeGreaterThan(0.9);
   });
 

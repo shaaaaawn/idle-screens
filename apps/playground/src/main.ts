@@ -270,6 +270,18 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: eyes across the breeds. Every minted eye is a pixel grid — 3×3 on a
+  // betafish or seahorse, 3×2 on an angelfish, 2×2 on a turtle — and each
+  // token's pattern is its own. Hovering close, so blinks and looks can be read.
+  createMetaquarium({
+    id: 'metaquarium-study-eyes-breeds', label: 'Metaquarium (study eyes — every breed)',
+    params: {
+      fishMix: '30:1@hover,60:1@hover,180:1@hover,420:1@hover,456:1@hover,480:1@hover,500:1@hover', dracoPath: asset('/draco/'),
+      swimSpeed: 0.35, bodyWiggle: 0.2, fishGlow: 0.3, eyeLife: 1,
+      fogColor: '#04101c', floorColor: '#0c2030', fogNear: 140, fogFar: 700,
+      cameraDistance: 80, cameraElevation: 10, cameraAzimuth: 0, autoRotate: 0.6,
+    },
+  }),
   // STUDY: eyes. Two fish, close, talking — blinks, saccades, a look at each
   // other, a glance at the lens, wide for the hop, shut for the rest.
   createMetaquarium({
