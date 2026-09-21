@@ -7,8 +7,8 @@ struct ContentView: View {
                 .tabItem { Label("Watch", systemImage: "play.tv") }
             GalleryView()
                 .tabItem { Label("Channels", systemImage: "square.grid.2x2") }
-            MyChannelsView()
-                .tabItem { Label("Create", systemImage: "wand.and.stars") }
+            AgentsView()
+                .tabItem { Label("Agents", systemImage: "sparkles") }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
