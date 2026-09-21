@@ -166,7 +166,8 @@ enum SceneMotion {
     static func growScale(of entity: CompiledEntity, at t: TimeInterval) -> Double {
         var s = 1.0
         if entity.growAmp != 0 {
-            s = 1 + entity.growAmp * sin(t * 1000 * 2 * .pi / entity.growPeriod + entity.growPhase)
+            s = 1 + entity.growAmp * sin(t * 1000 * entity.clockRate * 2 * .pi / entity.growPeriod
+                                         + entity.growPhase)
         }
         if let w = entity.warp {
             s *= Swift.min(1 / warpDepth(w, at: t), warpMaxScale)
@@ -180,8 +181,9 @@ enum SceneMotion {
 
     /// Rotation in degrees at time `t` (seconds). 0 for non-spinning entities.
     static func rotationDegrees(of entity: CompiledEntity, at t: TimeInterval) -> Double {
-        guard entity.spinSpeed != 0 else { return 0 }
-        return entity.spinAngle + entity.spinSpeed * t
+        // Static `rotate` holds even when nothing spins.
+        guard entity.spinSpeed != 0 else { return entity.rotate }
+        return entity.rotate + entity.spinAngle + entity.spinSpeed * t
     }
 
     /// Pulse alpha at time `t` (seconds), matching the Canvas renderer.
@@ -193,7 +195,9 @@ enum SceneMotion {
         // breathes 0.1…0.9 where this used to manage 0.3…0.7.
         var alpha = entity.alpha
         if let pulse = layer.pulse, pulse.amp != 0 {
-            alpha += pulse.amp * sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
+            // A clocked layer pulses in step (shared phase) at its own rate.
+            alpha += pulse.amp * sin(2 * .pi * (t * 1000 * entity.clockRate / pulse.period)
+                                     + (entity.pulsePhase ?? entity.phase))
         }
         if let w = entity.warp {
             // Fade in over the first 20% of depth after respawning at the far

@@ -69,6 +69,7 @@
 		6C8DB4D87A8BCCC9A6C8523A /* MockTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5408F494FA3C16573E5AB /* MockTransport.swift */; };
 		70C0E78D93C5088327E16069 /* ClassicSaverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */; };
 		730801F453F51D04CF89FDD5 /* DeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */; };
+		7668B788559B0C493AD6123C /* Spec39Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89EA7A8B8F55814E1624C25 /* Spec39Tests.swift */; };
 		768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */; };
 		784A037DD2D489D970C82ACB /* FeedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7CCE04A15329FC69EA8D34 /* FeedPage.swift */; };
 		791C3C15DA09CFF41821BA91 /* HeroChannelCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */; };
@@ -319,6 +320,7 @@
 		F6CF9EBBF30731AF766FA4CC /* HomeSectionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSectionsTests.swift; sourceTree = "<group>"; };
 		F75E101275D2605B4DC98F26 /* WebSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSceneView.swift; sourceTree = "<group>"; };
 		F7DFD7B40CC2612E723C2D9D /* Mulberry32Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mulberry32Tests.swift; sourceTree = "<group>"; };
+		F89EA7A8B8F55814E1624C25 /* Spec39Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spec39Tests.swift; sourceTree = "<group>"; };
 		FA087ACB9CE0F9D09CC7854A /* SteerLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteerLine.swift; sourceTree = "<group>"; };
 		FAB1826693F09BA9A26F848A /* AppState+VJ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+VJ.swift"; sourceTree = "<group>"; };
 		FD719448D47D15060E8247C6 /* TextBlockHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBlockHelpers.swift; sourceTree = "<group>"; };
@@ -459,6 +461,7 @@
 				07E1ACDD00C01EBDB5634643 /* RenderClassTests.swift */,
 				5A20EE3C25B74375AE34B120 /* SceneVisibilityTests.swift */,
 				84E690026189020F4B72497F /* SequenceSubsetTests.swift */,
+				F89EA7A8B8F55814E1624C25 /* Spec39Tests.swift */,
 				7A901E31607298040C25F564 /* SpecCoverageTests.swift */,
 				BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */,
 				88DE0542BC47C9CC2E295A36 /* TextBlockHelpersTests.swift */,
@@ -882,6 +885,7 @@
 				630F421ABED24E8958066C78 /* RenderClassTests.swift in Sources */,
 				AA180BA84C2B379271F248EF /* SceneVisibilityTests.swift in Sources */,
 				8CD27D5B46DC98A5A22B9303 /* SequenceSubsetTests.swift in Sources */,
+				7668B788559B0C493AD6123C /* Spec39Tests.swift in Sources */,
 				E5D119B5465B9195DE129CF4 /* SpecCoverageTests.swift in Sources */,
 				0DCCB4B6A0098FC9D312E3DE /* SpecSubsetTests.swift in Sources */,
 				BF6188FF2BF538BA62DD8728 /* TextBlockHelpersTests.swift in Sources */,

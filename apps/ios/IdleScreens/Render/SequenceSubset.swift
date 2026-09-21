@@ -21,8 +21,10 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
         var transition: Transition?
     }
 
-    /// `cut` (default) or `morph` with a duration — v1 renders morph as a
-    /// timed crossfade; true spec-lerp morph is a follow-up.
+    /// `cut` (default), `fade`, or `morph`, the last two with a duration.
+    /// `fade` IS a crossfade; morph is rendered as one for now (a true
+    /// spec-lerp is a follow-up). Treating only morph as timed made every
+    /// `fade` in a live sequence land as a hard cut.
     struct Transition: Decodable, Equatable, Sendable {
         var type: String?
         var dur: Double?
@@ -94,7 +96,7 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
     func transitionDuration(entering index: Int) -> TimeInterval {
         guard segments.indices.contains(index),
               let t = segments[index].transition,
-              t.type == "morph", let dur = t.dur else { return 0 }
+              t.type == "morph" || t.type == "fade", let dur = t.dur else { return 0 }
         return dur / 1000
     }
 }

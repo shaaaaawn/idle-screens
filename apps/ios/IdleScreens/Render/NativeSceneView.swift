@@ -88,7 +88,7 @@ struct NativeSceneView: View {
             ctx.scaleBy(x: scale, y: scale)
         }
 
-        drawBackground(ctx: ctx, size: space)
+        drawBackground(ctx: ctx, size: space, t: t)
         let minDim = min(space.width, space.height)
         // t2 load shedding: thin every layer by the same stride so the
         // composition survives (dropping whole trailing layers would cut the
@@ -144,7 +144,7 @@ struct NativeSceneView: View {
                         let decay = pow(ghosting, Double(k))
                         draw(entity: entity,
                              size: entity.size * SceneMotion.growScale(of: entity, at: back),
-                             sprite: layer.sprite, units: layer.units, at: ghostPoint,
+                             sprite: layer.sprite, textStyle: layer.textStyle, units: layer.units, at: ghostPoint,
                              dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
                     }
                 }
@@ -154,7 +154,7 @@ struct NativeSceneView: View {
                               parent: parentEntity, ctx: &ctx)
                 }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
-                draw(entity: entity, size: grownSize, sprite: layer.sprite,
+                draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
                      units: layer.units, at: point,
                      dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &ctx)
             }
@@ -294,10 +294,17 @@ struct NativeSceneView: View {
 
     // MARK: - Background
 
-    private func drawBackground(ctx: GraphicsContext, size: CGSize) {
+    private func drawBackground(ctx: GraphicsContext, size: CGSize, t: TimeInterval) {
         let rect = CGRect(origin: .zero, size: size)
         let path = Path(rect)
-        if let stops = background?.stops, !stops.isEmpty {
+        if let background, let raw = background.stops, !raw.isEmpty {
+            // Drift can carry one stop past its neighbour; a canvas gradient
+            // sorts by offset, so do the same (stably) before handing over.
+            let stops = background.driftedStops(at: t * 1000)
+                .enumerated()
+                .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at
+                                                         : $0.offset < $1.offset }
+                .map(\.element)
             let gradient = Gradient(stops: stops.map {
                 Gradient.Stop(color: Color(hex: $0.color), location: CGFloat(min(1, max(0, $0.at))))
             })
@@ -306,10 +313,19 @@ struct NativeSceneView: View {
                 startPoint: CGPoint(x: rect.midX, y: rect.minY),
                 endPoint: CGPoint(x: rect.midX, y: rect.maxY)
             ))
-        } else if let color = background?.color {
+        } else if let color = background?.primaryColor {
             ctx.fill(path, with: .color(Color(hex: color)))
         } else {
-            ctx.fill(path, with: .color(.black))
+            // The web engine's own default, not pure black.
+            ctx.fill(path, with: .color(Color(hex: "05050a")))
+        }
+        if let band = background?.band, band.height > 0 {
+            // Band height is dimensional, so it follows the spec's units —
+            // which every compiled layer carries.
+            let px = layers.first?.units == .px
+            let h = band.height * (px ? 1 : min(size.width, size.height))
+            ctx.fill(Path(CGRect(x: 0, y: size.height - h, width: size.width, height: h)),
+                     with: .color(Color(hex: band.color)))
         }
     }
 
@@ -333,13 +349,15 @@ struct NativeSceneView: View {
     // MARK: - Sprites
 
     private func draw(entity: CompiledEntity, size: Double, sprite: SpecSubset.Sprite,
+                      textStyle: SpecSubset.TextStyle? = nil,
                       units: SpecSubset.Units,
                       at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
                       ctx: inout GraphicsContext) {
         // Pre-parsed components — no hex-string Scanner in the hot loop.
         let color = Color(.sRGB, red: entity.red, green: entity.green,
                           blue: entity.blue, opacity: alpha)
-        let spin = entity.spinAngle + entity.spinSpeed * t
+        // Shared with the sprite tier — static `rotate` included.
+        let spin = SceneMotion.rotationDegrees(of: entity, at: t)
         /// Web engine default stroke width: 2px for px specs, 0.002 for viewport.
         let defaultWidth = units == .px ? 2.0 : 0.002
 
@@ -405,7 +423,7 @@ struct NativeSceneView: View {
 
         case .textBlock(let tbText, let maxWidth, let fontSize, let lineHeight,
                         let align, let tbColor, let reveal):
-            drawTextBlock(text: tbText, maxWidth: maxWidth, fontSize: fontSize,
+            drawTextBlock(style: textStyle, text: tbText, maxWidth: maxWidth, fontSize: fontSize,
                           lineHeight: lineHeight, align: align, color: tbColor,
                           reveal: reveal, at: point, dim: dim, alpha: alpha,
                           spin: spin, t: t, ctx: &ctx)
@@ -558,6 +576,7 @@ struct NativeSceneView: View {
     // MARK: - TextBlock (t3 only — full reveal animation)
 
     private func drawTextBlock(
+        style: SpecSubset.TextStyle? = nil,
         text tbText: String, maxWidth: Double, fontSize: Double,
         lineHeight: Double, align: String, color tbColor: String,
         reveal: SpecSubset.TextRevealSpec?, at point: CGPoint,
@@ -576,12 +595,22 @@ struct NativeSceneView: View {
         let visibleLines = rs?.fullLines ?? lines.count
 
         let rgb = SpecSubset.Layer.rgb(from: tbColor)
+        // Paint-level opacity for the block only (layer alpha is per entity).
         let fillColor = Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2,
-                               opacity: alpha)
+                               opacity: alpha * min(1, max(0, style?.opacity ?? 1)))
 
         var layer = ctx
         layer.translateBy(x: point.x, y: point.y)
         if spin != 0 { layer.rotate(by: .degrees(spin)) }
+        if let style, style.anchor != nil {
+            // `position` names a point of the rendered INK, not the layout
+            // box's top-left; rotation stays about that point.
+            let widest = (lines.map(\.widthEm).max() ?? 0) * fsPx
+            let off = style.anchorOffset(align: align, maxWidthPx: maxWPx,
+                                         widestLinePx: widest,
+                                         totalHeightPx: Double(lines.count) * lh)
+            layer.translateBy(x: off.dx, y: off.dy)
+        }
 
         let anchor: UnitPoint
         let xOff: CGFloat
@@ -591,7 +620,14 @@ struct NativeSceneView: View {
         default: anchor = .topLeading; xOff = 0
         }
 
-        let font: Font = .system(size: fsPx)
+        // A CSS font shorthand can only be honoured in kind on a system
+        // font: weight, slant, and serif / mono / rounded.
+        let traits = style?.fontTraits ?? (bold: false, italic: false, design: "default")
+        let design: Font.Design = traits.design == "mono" ? .monospaced
+            : traits.design == "serif" ? .serif
+            : traits.design == "rounded" ? .rounded : .default
+        var font: Font = .system(size: fsPx, weight: traits.bold ? .bold : .regular, design: design)
+        if traits.italic { font = font.italic() }
         for li in 0..<visibleLines {
             let lineView = Text(lines[li].text).font(font).foregroundStyle(fillColor)
             layer.draw(lineView, at: CGPoint(x: xOff, y: CGFloat(li) * lh),

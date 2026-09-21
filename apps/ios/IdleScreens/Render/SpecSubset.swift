@@ -44,8 +44,45 @@ struct SpecSubset: Decodable, Equatable {
         var color: String?
         /// Vertical gradient stops (background.type == 'gradient'). Band/drift ignored.
         var stops: [GradientStop]?
+        /// Slow oscillation of the gradient's stop positions.
+        var drift: Drift?
+        /// A flat strip along the bottom edge — a horizon, a floor.
+        var band: Band?
+        /// `field` backgrounds (seeded noise quantised into bands). Not
+        /// rasterised natively yet; the middle band stands in so the scene
+        /// keeps its key colour instead of dropping to black.
+        var bands: [String]?
 
-        var primaryColor: String? { color ?? stops?.first?.color }
+        var primaryColor: String? {
+            color ?? stops?.first?.color ?? bands.flatMap { $0.isEmpty ? nil : $0[$0.count / 2] }
+        }
+
+        struct Drift: Decodable, Equatable, Sendable {
+            /// Full cycle in ms.
+            var period: Double
+            /// Fraction of the 0…1 range each stop travels. Default 0.15.
+            var amount: Double?
+        }
+
+        struct Band: Decodable, Equatable, Sendable {
+            var color: String
+            /// Spec units: px, or a fraction of min(w,h).
+            var height: Double
+        }
+
+        /// Stop positions at time `t` (ms). Each stop rides the same sine a
+        /// fraction of a turn apart, so the gradient breathes rather than
+        /// sliding as a block (web parity: compile.ts paintBackground).
+        func driftedStops(at t: Double) -> [GradientStop] {
+            guard let stops, let drift, drift.period > 0 else { return stops ?? [] }
+            let amount = drift.amount ?? 0.15
+            let n = Double(stops.count)
+            return stops.enumerated().map { i, stop in
+                let phase = Double(i) / n * 2 * .pi
+                let at = stop.at + amount * sin(t * 2 * .pi / drift.period + phase)
+                return GradientStop(at: Swift.min(1, Swift.max(0, at)), color: stop.color)
+            }
+        }
     }
 
     struct GradientStop: Decodable, Equatable {
@@ -86,12 +123,26 @@ struct SpecSubset: Decodable, Equatable {
         var emit: Emit?
         /// Lines drawn between nearby entities of this layer.
         var links: Links?
+        /// textBlock presentation lifted out of `sprite`: anchor, font, opacity.
+        var textStyle: TextStyle?
+        /// Static per-entity rotation in degrees (scalar, or a seeded range),
+        /// added to any spin.
+        var rotate: Spin?
+        /// Phase-locks the layer: every entity pulses/grows in step, from
+        /// `phase` (0…1 of a cycle), at `rate`× time.
+        var clock: Clock?
 
         private enum CodingKeys: String, CodingKey {
             case key, count, sprite, size, motion, wrap, alpha, blend, pulse
             case spin, region, position, grow, life, layout, trail, emit, links
+            case rotate, clock
         }
-        private struct SpriteExtras: Decodable { var colorWeights: [Double]? }
+        private struct SpriteExtras: Decodable {
+            var colorWeights: [Double]?
+            var anchor: String?
+            var font: String?
+            var opacity: Double?
+        }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,7 +164,53 @@ struct SpecSubset: Decodable, Equatable {
             trail = try? c.decodeIfPresent(Trail.self, forKey: .trail)
             emit = try? c.decodeIfPresent(Emit.self, forKey: .emit)
             links = try? c.decodeIfPresent(Links.self, forKey: .links)
-            colorWeights = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite))??.colorWeights
+            let extras = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite)) ?? nil
+            colorWeights = extras?.colorWeights
+            if extras?.anchor != nil || extras?.font != nil || extras?.opacity != nil {
+                textStyle = TextStyle(anchor: extras?.anchor, font: extras?.font,
+                                      opacity: extras?.opacity)
+            }
+            rotate = try? c.decodeIfPresent(Spin.self, forKey: .rotate)
+            clock = try? c.decodeIfPresent(Clock.self, forKey: .clock)
+        }
+    }
+
+    struct Clock: Decodable, Equatable, Sendable {
+        var phase: Double?
+        var rate: Double?
+    }
+
+    /// How a textBlock is presented: which point of the rendered text
+    /// `position` names, a CSS-style font hint, and a paint-level opacity.
+    struct TextStyle: Equatable, Sendable {
+        var anchor: String?
+        var font: String?
+        var opacity: Double?
+
+        /// Offset that puts the named anchor of the INK (widest line × lines,
+        /// as `align` placed it) on the position. Port of simulate.ts
+        /// `textBlockAnchorOffset`.
+        func anchorOffset(align: String, maxWidthPx: Double, widestLinePx: Double,
+                          totalHeightPx: Double) -> (dx: Double, dy: Double) {
+            guard let anchor else { return (0, 0) }
+            let ax = anchor.hasSuffix("left") ? 0.0 : anchor.hasSuffix("right") ? 1.0 : 0.5
+            let ay = anchor.hasPrefix("top") ? 0.0 : anchor.hasPrefix("bottom") ? 1.0 : 0.5
+            let inkX0 = align == "center" ? (maxWidthPx - widestLinePx) / 2
+                      : align == "right" ? maxWidthPx - widestLinePx : 0
+            return (-(inkX0 + ax * widestLinePx), -(ay * totalHeightPx))
+        }
+
+        /// A CSS font shorthand ("italic 600 1px Georgia, serif") read for the
+        /// three things a system font can honour: weight, slant and family class.
+        var fontTraits: (bold: Bool, italic: Bool, design: String) {
+            let f = (font ?? "").lowercased()
+            let bold = f.contains("bold") || ["600", "700", "800", "900"].contains { f.contains($0) }
+            let italic = f.contains("italic") || f.contains("oblique")
+            let design = f.contains("mono") || f.contains("courier") || f.contains("menlo") ? "mono"
+                       : (f.contains("serif") && !f.contains("sans-serif")) || f.contains("georgia")
+                         || f.contains("times") ? "serif"
+                       : f.contains("rounded") ? "rounded" : "default"
+            return (bold, italic, design)
         }
     }
 
@@ -502,6 +599,11 @@ struct CompiledEntity: Equatable, Sendable {
     var wander: WanderParams?
     var warp: WarpParams?
     var path: PathParams?
+    /// Static rotation in degrees, added to any spin.
+    var rotate: Double = 0
+    /// Layer clock: a shared pulse phase (radians) and a time multiplier.
+    var pulsePhase: Double?
+    var clockRate: Double = 1
     /// Sparse-event window (see SpecSubset.Emit), or nil for always-present.
     var emit: EmitParams?
     /// True when this entity's orbit is centred on a parent layer's entity
@@ -613,6 +715,7 @@ struct CompiledLayer: Equatable, Sendable {
     var orbitParentKey: String?
     var trail: SpecSubset.Trail?
     var links: SpecSubset.Links?
+    var textStyle: SpecSubset.TextStyle?
 }
 
 extension SpecSubset {
@@ -957,10 +1060,20 @@ extension SpecSubset.Layer {
                 wander: wanderParams,
                 warp: warp,
                 path: path,
+                rotate: rotate.map { $0.min == $0.max ? $0.min : $0.min + rng.next() * ($0.max - $0.min) } ?? 0,
                 orbitParented: orbitParentKey != nil,
                 barIndex: i,
                 thickness: barThickness
             ))
+        }
+        if let clock {
+            // In step: one phase for the whole layer instead of a seeded one each.
+            let phase = (clock.phase ?? 0).truncatingRemainder(dividingBy: 1) * 2 * .pi
+            for i in entities.indices {
+                entities[i].pulsePhase = phase
+                entities[i].growPhase = phase
+                entities[i].clockRate = clock.rate ?? 1
+            }
         }
         if let emit, !entities.isEmpty {
             for i in entities.indices {
@@ -978,7 +1091,8 @@ extension SpecSubset.Layer {
             key: key,
             orbitParentKey: orbitParentKey,
             trail: trail,
-            links: links
+            links: links,
+            textStyle: textStyle
         )
     }
 

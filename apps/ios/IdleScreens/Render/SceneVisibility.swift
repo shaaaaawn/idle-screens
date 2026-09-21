@@ -29,6 +29,7 @@ enum SceneVisibility {
         let canvasArea = canvas.width * canvas.height
         let bgLum = backgroundLuminance(background)
         if bgLum >= brightBackgroundLuminance { return .visible }
+        let referenceLum = luminance(hex: background?.primaryColor ?? "000000")
         var ink = 0.0
 
         for layer in layers {
@@ -108,9 +109,13 @@ enum SceneVisibility {
                 }
                 // Dark-on-dark is as invisible as sub-pixel: weight by
                 // luminance contrast against the background.
-                let contrast = abs(luminance(hex: entity.color) - bgLum)
-                // Cap any single entity at 4% of the canvas so one giant dim
-                // wash can't carry an otherwise-empty scene.
+                // Contrast is measured against the gradient's FIRST stop, the
+                // reference `minInkFraction` was calibrated on. `bgLum` above
+                // is the BRIGHTEST stop — right for "is the fill itself
+                // bright?", wrong here: one warm stop at the foot of a night
+                // gradient dragged every lantern's contrast down and a
+                // working channel was shown as "not broadcasting".
+                let contrast = abs(luminance(hex: entity.color) - referenceLum)
                 ink += min(area, canvasArea * 0.04) * entity.alpha * contrast
             }
         }
