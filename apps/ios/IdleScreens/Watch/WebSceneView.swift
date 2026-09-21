@@ -218,9 +218,13 @@ struct WebSceneView: UIViewRepresentable {
         /// provisional navigation and is itself attacker-controlled after a
         /// redirect, so either would let a hostile origin's own scripts run
         /// with the bootstrap token seeded into `localStorage`.
+        // The handler's exact type matters: WebKit's SDK declares it
+        // `@MainActor @Sendable`. Without those this method only "nearly
+        // matches" the delegate requirement — a WARNING, not an error — and
+        // WebKit never calls it, leaving the surface free to navigate anywhere.
         func webView(_ webView: WKWebView,
                      decidePolicyFor action: WKNavigationAction,
-                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             guard action.targetFrame?.isMainFrame != false else { return decisionHandler(.allow) }
             let url = action.request.url
             let sameOrigin = url?.scheme == baseURL.scheme && url?.host == baseURL.host

@@ -148,3 +148,19 @@ final class HostedSessionTests: XCTestCase {
         XCTAssertNil(session.sceneLabel)
     }
 }
+
+/// WebKit finds delegate methods by Objective-C selector. A Swift method whose
+/// type only *nearly* matches the protocol requirement is never exposed under
+/// that selector — the compiler warns, the build passes, and the policy simply
+/// stops running. That happened to the navigation policy on an SDK bump, which
+/// left a web view holding a seeded key free to navigate anywhere.
+final class WebSceneDelegateConformanceTests: XCTestCase {
+    func testWebKitCanActuallyCallTheNavigationPolicy() {
+        let coordinator = WebSceneView.Coordinator(
+            baseURL: URL(string: "https://idlescreens.com")!, onFrame: { _ in }, onFailure: {})
+        let policy = NSSelectorFromString("webView:decidePolicyForNavigationAction:decisionHandler:")
+        XCTAssertTrue(coordinator.responds(to: policy),
+                      "navigation policy is not visible to WebKit — check the handler's exact type")
+        XCTAssertTrue(coordinator.responds(to: NSSelectorFromString("webViewWebContentProcessDidTerminate:")))
+    }
+}
