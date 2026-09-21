@@ -563,14 +563,23 @@ struct FeedPage: View {
     private func sceneFacts(for event: ChannelEvent?) -> some View {
         let recorded = currentStop.flatMap { app.scenes.scene(channelId: channelId, sceneId: $0.sceneId) }
         let spec = recorded?.spec ?? (isLive ? channel.spec : nil)
-        let rows: [(String, String)] = [
-            ("model", (event.flatMap { SceneCredit.original(for: $0, in: history) } ?? event)?.model),
-            ("via", (event.flatMap { SceneCredit.original(for: $0, in: history) } ?? event)?.harness),
-            ("aired by", event.flatMap { SceneCredit.original(for: $0, in: history) == nil ? nil : $0.actor }),
-            ("aired", event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }),
-            ("layers", spec.map { "\($0.layers.count)" }),
-            ("seed", recorded?.seed.map(String.init)),
-        ].compactMap { label, value in
+        // Resolved once and typed explicitly: left inline, this literal takes
+        // the type checker past its time limit on CI's slower runners.
+        let original: ChannelEvent? = event.flatMap { SceneCredit.original(for: $0, in: history) }
+        let author: ChannelEvent? = original ?? event
+        let airedBy: String? = original == nil ? nil : event?.actor
+        let aired: String? = event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }
+        let layerCount: String? = spec.map { "\($0.layers.count)" }
+        let seed: String? = recorded?.seed.map { String($0) }
+        let candidates: [(String, String?)] = [
+            ("model", author?.model),
+            ("via", author?.harness),
+            ("aired by", airedBy),
+            ("aired", aired),
+            ("layers", layerCount),
+            ("seed", seed),
+        ]
+        let rows: [(String, String)] = candidates.compactMap { label, value in
             guard let value, !value.isEmpty else { return nil }
             return (label, value)
         }
