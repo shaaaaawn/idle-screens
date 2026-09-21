@@ -268,7 +268,8 @@ private struct OnNowRail: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 10) {
                 ForEach(channels) { channel in
-                    NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true)) {
+                    NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true,
+                                          onRefresh: { await app.loadGallery() })) {
                         tile(channel)
                     }
                     .buttonStyle(.plain)
@@ -333,7 +334,7 @@ private struct SectionGrid: View {
         VStack(alignment: .leading, spacing: 12) {
             NavigationLink {
                 ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
-                              ownedTags: shelf.ownedTags, channels: shelf.channels)
+                              ownedTags: shelf.ownedTags, initial: shelf.channels, sectionId: shelf.id)
             } label: {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -380,9 +381,20 @@ private struct ShelfGridView: View {
     let title: String
     var subtitle: String?
     var ownedTags: Set<String> = []
-    let channels: [PublicChannel]
+    /// The shelf as it was when you tapped through…
+    let initial: [PublicChannel]
+    /// …and the id to find it again after a refresh, since the page outlives
+    /// the snapshot it was opened with.
+    var sectionId: String?
+    @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var order: Order = .curated
+
+    private var channels: [PublicChannel] {
+        guard let sectionId else { return initial }
+        return HomeSections.build(channels: app.channels, categories: app.categories)
+            .first { $0.id == sectionId }?.channels ?? initial
+    }
 
     enum Order: String, CaseIterable, Identifiable {
         case curated = "Curated", recent = "Recently updated", watched = "Most watched", name = "A–Z"
@@ -423,6 +435,7 @@ private struct ShelfGridView: View {
             }
         }
         .background(Color.appBackground.ignoresSafeArea())
+        .refreshable { await app.loadGallery() }
         .navigationTitle(title.lowercased())
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -442,6 +455,7 @@ private struct ShelfGridView: View {
 // MARK: - Poster card
 
 private struct ChannelCard: View {
+    @Environment(AppState.self) private var app
     let channel: PublicChannel
     let width: CGFloat
     /// The shelf this card sits in, so the viewer can page sideways through
@@ -458,7 +472,8 @@ private struct ChannelCard: View {
 
     var body: some View {
         NavigationLink(destination: ChannelFeedView(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
+            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true,
+                                          onRefresh: { await app.loadGallery() })) {
             VStack(alignment: .leading, spacing: 8) {
                 ChannelPreviewTile(channel: channel)
                     .frame(width: width, height: width * 9 / 16)

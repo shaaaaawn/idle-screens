@@ -20,7 +20,12 @@ import SwiftUI
 struct ChannelFeedView: View {
     let channels: [PublicChannel]
     var showsBack: Bool = false
+    /// Pull down on the first page. nil = this feed has nothing to refetch.
+    var onRefresh: (() async -> Void)? = nil
     @State private var selection: String?
+    /// Bumped after a refresh so the page on screen refetches its history too.
+    @State private var refreshToken = 0
+    @State private var jumpToNewest = false
     /// A feed that is not on screen must hold nothing. `TabView` keeps every
     /// tab's view tree alive, so without this the Watch tab's page kept its web
     /// view and socket running behind the Channels tab — the viewer count read
@@ -31,9 +36,11 @@ struct ChannelFeedView: View {
     @State private var chromeHidden = false
     @Environment(\.scenePhase) private var scenePhase
 
-    init(channels: [PublicChannel], start: String? = nil, showsBack: Bool = false) {
+    init(channels: [PublicChannel], start: String? = nil, showsBack: Bool = false,
+         onRefresh: (() async -> Void)? = nil) {
         self.channels = channels
         self.showsBack = showsBack
+        self.onRefresh = onRefresh
         _selection = State(initialValue: start ?? channels.first?.id)
     }
 
@@ -51,6 +58,7 @@ struct ChannelFeedView: View {
                                  isActive: isOnScreen && scenePhase == .active
                                      && channel.id == selection,
                                  showsBack: showsBack,
+                                 refreshToken: refreshToken,
                                  chromeHidden: $chromeHidden)
                             .environment(\.viewerChromeInsets, insets)
                             .containerRelativeFrame([.horizontal, .vertical])
@@ -62,9 +70,34 @@ struct ChannelFeedView: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $selection)
             .scrollIndicators(.hidden)
+            // Pulling down past the newest channel asks for newer ones — the
+            // gesture every feed has taught. After it, you land on whatever is
+            // now first, because that is what you pulled for.
+            .refreshable {
+                guard let onRefresh else { return }
+                jumpToNewest = true
+                await onRefresh()
+                refreshToken += 1
+                if jumpToNewest {   // the list came back identical
+                    jumpToNewest = false
+                    withAnimation { selection = channels.first?.id }
+                }
+            }
             .ignoresSafeArea()
         }
-        .background(Color.black.ignoresSafeArea())
+        // Behind the pages, so it is only ever seen while the first page is
+        // pulled down — the one moment it means something.
+        .background(alignment: .top) {
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
+                if onRefresh != nil {
+                    Label("Newest channels", systemImage: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.top, 64)
+                }
+            }
+        }
         .statusBarHidden(chromeHidden)
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
@@ -86,6 +119,11 @@ struct ChannelFeedView: View {
         // drop the selected channel while the first ID stays the same — in
         // both cases fall back to the (possibly new) first channel.
         .onChange(of: channels) { _, refreshed in
+            if jumpToNewest {
+                jumpToNewest = false
+                withAnimation { selection = refreshed.first?.id }
+                return
+            }
             if selection == nil || !refreshed.contains(where: { $0.id == selection }) {
                 selection = refreshed.first?.id
             }

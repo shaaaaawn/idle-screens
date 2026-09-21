@@ -25,6 +25,13 @@ struct SettingsView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
             }
+            // Screen presence and channel names are the two things here that
+            // go stale.
+            .refreshable {
+                async let screens: Void = app.refreshScreenStatuses()
+                async let gallery: Void = app.loadGallery()
+                _ = await (screens, gallery)
+            }
             .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("settings")
         }

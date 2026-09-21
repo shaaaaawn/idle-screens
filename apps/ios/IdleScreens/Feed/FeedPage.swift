@@ -33,6 +33,8 @@ struct FeedPage: View {
     @State private var captionEntered = false
     /// `"live"`, or a stop's key. Optional only because `scrollPosition` binds one.
     @State private var moment: String? = FeedPage.liveKey
+    /// Changes when the feed was pulled to refresh.
+    var refreshToken: Int = 0
     @Binding var chromeHidden: Bool
     @State private var showComposer = false
     /// The caption opened up into the scene's full credits.
@@ -140,11 +142,15 @@ struct FeedPage: View {
         .sheet(isPresented: $showOverview) {
             ChannelOverviewSheet(channel: channel, stops: stops, liveEvent: liveEvent,
                                  liveLabel: session.sceneLabel ?? channel.saverLabel,
-                                 current: moment) { key in
+                                 current: moment,
+                                 onRefresh: { await loadHistory() }) { key in
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
         }
         .onAppear { if isActive { activate() } }
+        .onChange(of: refreshToken) { _, _ in
+            if isActive { Task { await loadHistory() } }
+        }
         .onChange(of: isActive) { _, nowActive in
             if nowActive { activate() } else { deactivate() }
         }
@@ -157,12 +163,19 @@ struct FeedPage: View {
         replayCaptionEntrance()
         session.start(channelId: channelId, seedSpec: channel.spec, source: .host)
         guard stops.isEmpty else { return }
-        Task {
+        Task { await loadHistory() }
+    }
+
+    /// Also the overview sheet's pull-to-refresh, and the feed's.
+    private func loadHistory() async {
+        do {
             // History is an enhancement. If it fails the channel still plays,
             // and the page simply has nothing to its right.
             // Deep enough to reach the first publish of scenes the curator
             // re-airs nightly — that is where the real credit lives.
             let events = (try? await app.gallery.fetchHistory(channelId: channelId, limit: 200)) ?? []
+            // A failed refresh must not wipe a timeline that was already there.
+            if events.isEmpty && !stops.isEmpty { return }
             history = events
             liveEvent = events.filter { $0.sceneId != nil }.max { $0.at < $1.at }
             stops = ChannelFeed.stops(from: events)

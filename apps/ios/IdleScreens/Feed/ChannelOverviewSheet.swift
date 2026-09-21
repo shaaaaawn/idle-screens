@@ -14,6 +14,8 @@ struct ChannelOverviewSheet: View {
     let liveLabel: String?
     /// `FeedPage.liveKey`, or a stop's key.
     let current: String?
+    /// Pull down for anything the channel has aired since the sheet opened.
+    var onRefresh: (() async -> Void)? = nil
     let onPick: (String) -> Void
 
     @Environment(AppState.self) private var app
@@ -41,6 +43,7 @@ struct ChannelOverviewSheet: View {
                 }
                 .padding(.vertical, 16)
             }
+            .refreshable { await onRefresh?() }
             .background(Color.appBackground)
             .navigationTitle(channel.displayLabel)
             .navigationBarTitleDisplayMode(.inline)
