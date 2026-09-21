@@ -40,6 +40,8 @@ struct FeedPage: View {
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
     @State private var history: [ChannelEvent] = []
+    @State private var liveTank = TankLoadState()
+    @State private var liveTankLoading = false
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -241,6 +243,7 @@ struct FeedPage: View {
                     token: app.token(for: channelId),
                     reloadCount: reloadCount,
                     onFrame: { session.ingest($0) },
+                    onAssets: { liveTank.report($0) },
                     onFailure: { session.hostFailed() }
                 )
                 .ignoresSafeArea()
@@ -255,7 +258,26 @@ struct FeedPage: View {
                     .ignoresSafeArea()
             }
             liveStateLayer
+            // A 3D tank mounts empty and fills over many seconds. Say so, in
+            // the scene's own language, until its cast has arrived.
+            if isActive && !historyHoldsTheEngine && isTank && liveTankLoading && !session.sleeping {
+                TankLoadingView(pending: liveTank.pending, scheme: topScheme)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
         }
+        .task(id: "\(isActive && !historyHoldsTheEngine && isTank)-\(reloadCount)") {
+            guard isActive, !historyHoldsTheEngine, isTank else { return }
+            liveTank = TankLoadState()
+            liveTankLoading = true
+            await TankLoadState.watch(state: { liveTank }, settle: { liveTank.markSettled() }) { loading in
+                withAnimation(.easeInOut(duration: 0.5)) { liveTankLoading = loading }
+            }
+        }
+    }
+
+    /// The channel is playing a scene only the web engine can draw in full.
+    private var isTank: Bool {
+        channel.classicSaverId.map(RecordedScene.webOnlySavers.contains) ?? false
     }
 
     /// Connecting, unreachable, sleeping — all native. A web error card inside
@@ -802,6 +824,10 @@ private struct HistoryMomentPage: View {
     /// tanks never boots an engine per page.
     @State private var engineGranted = false
     @State private var webReady = false
+    @State private var tank = TankLoadState()
+    @State private var tankLoading = true
+    /// Booted AND filled: the moment the 3D tank is worth showing.
+    private var tankIsIn: Bool { webReady && !tankLoading }
 
     private var scene: RecordedScene? {
         app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)
@@ -813,8 +839,11 @@ private struct HistoryMomentPage: View {
             if let scene, scene.needsWebEngine {
                 // Neighbours stay a cheap native still; only the page you are
                 // ON gets the engine, and only once the swipe has settled.
-                if !isShowing || !webReady {
-                    RecordedSceneView(scene: scene, channelId: channelId, animating: false)
+                // The 2D stand-in is the loading scene: it swims while the real
+                // tank boots and fills, and the fish-ring over it says so. It
+                // only hands over once the 3D cast has actually arrived.
+                if !isShowing || !tankIsIn {
+                    RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
                         .ignoresSafeArea()
                 }
                 if isShowing && engineGranted {
@@ -832,10 +861,16 @@ private struct HistoryMomentPage: View {
                                 withAnimation(.easeInOut(duration: 0.6)) { webReady = true }
                             }
                         },
+                        onAssets: { tank.report($0) },
                         onFailure: { engineGranted = false }
                     )
                     .ignoresSafeArea()
-                    .opacity(webReady ? 1 : 0)
+                    .opacity(tankIsIn ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.9), value: tankIsIn)
+                }
+                if isShowing && !tankIsIn {
+                    TankLoadingView(pending: tank.pending)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
             } else if let scene {
                 RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
@@ -869,8 +904,14 @@ private struct HistoryMomentPage: View {
                 webReady = false
                 return
             }
+            tank = TankLoadState()
+            tankLoading = true
             try? await Task.sleep(for: .seconds(0.45))
-            if !Task.isCancelled { engineGranted = true }
+            if Task.isCancelled { return }
+            engineGranted = true
+            await TankLoadState.watch(state: { tank }, settle: { tank.markSettled() }) { loading in
+                withAnimation(.easeInOut(duration: 0.5)) { tankLoading = loading }
+            }
         }
         // The safety net under the prefetch: a page that somehow arrives
         // without its scene still asks for it.

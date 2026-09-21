@@ -34,6 +34,8 @@ struct WebSceneView: UIViewRepresentable {
     /// Bump to force a reload (the native "Try again").
     var reloadCount: Int = 0
     var onFrame: (String) -> Void
+    /// 3D models still downloading in the page (0 = the scene has its cast).
+    var onAssets: ((Int) -> Void)? = nil
     var onFailure: () -> Void
 
     static func sceneURL(baseURL: URL, channelId: String, sceneId: Int? = nil) -> URL {
@@ -48,7 +50,9 @@ struct WebSceneView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
+        let coordinator = Coordinator(baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
+        coordinator.onAssets = onAssets
+        return coordinator
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -91,6 +95,7 @@ struct WebSceneView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onFrame = onFrame
+        context.coordinator.onAssets = onAssets
         context.coordinator.onFailure = onFailure
         guard context.coordinator.loaded != (channelId, reloadCount) else { return }
         context.coordinator.loaded = (channelId, reloadCount)
@@ -170,6 +175,27 @@ struct WebSceneView: UIViewRepresentable {
             Tapped.__idleTapped = true;
             window.WebSocket = Tapped;
           }
+          // How many 3D models the page is still downloading. A three.js tank
+          // mounts empty and fills over 10-20s; this is the only honest signal
+          // of "still loading" a canvas offers. Counts only — never URLs or
+          // bodies — so it carries nothing a hostile page could abuse.
+          const nativeFetch = window.fetch;
+          if (nativeFetch && !nativeFetch.__idleTapped) {
+            let pending = 0;
+            const isModel = (u) => /\\.(glb|gltf|bin|drc|wasm)(\\?|$)/i.test(u) || /\\/ipfs\\//i.test(u);
+            const tapped = function (input, init) {
+              let url = '';
+              try { url = typeof input === 'string' ? input : (input && input.url) || ''; } catch (_) {}
+              const counted = isModel(url);
+              if (counted) post('assets', String(++pending));
+              const done = () => { if (counted) post('assets', String(--pending)); };
+              const p = nativeFetch.call(this, input, init);
+              p.then(done, done);
+              return p;
+            };
+            tapped.__idleTapped = true;
+            window.fetch = tapped;
+          }
           const css = document.createElement('style');
           // The token gate is web UI; the native app states privacy itself.
           css.textContent = '.private-gate{display:none!important}' +
@@ -195,6 +221,7 @@ struct WebSceneView: UIViewRepresentable {
         let baseURL: URL
         var onFrame: (String) -> Void
         var onFailure: () -> Void
+        var onAssets: ((Int) -> Void)?
         var loaded: (String, Int) = ("", -1)
 
         init(baseURL: URL, onFrame: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
@@ -206,9 +233,15 @@ struct WebSceneView: UIViewRepresentable {
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             guard let payload = message.body as? [String: Any],
-                  payload["kind"] as? String == "frame",
-                  let frame = payload["body"] as? String else { return }
-            onFrame(frame)
+                  let kind = payload["kind"] as? String,
+                  let body = payload["body"] as? String else { return }
+            switch kind {
+            case "frame": onFrame(body)
+            // A count, clamped: the page is untrusted, and this only ever
+            // decides how long a loading animation plays.
+            case "assets": if let n = Int(body) { onAssets?(max(0, min(n, 99))) }
+            default: break
+            }
         }
 
         /// The page may move between channels (a paired push does), and
