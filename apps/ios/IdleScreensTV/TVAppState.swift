@@ -107,16 +107,16 @@ final class TVAppState {
         return tier
     }
 
-    /// Raw hardware capability, ignoring the per-channel adaptive ladder.
-    /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
-    /// thumb-stream and schema-scene verdicts, and a broken server thumb
-    /// must not veto a fully local renderer.
     /// Compile ceiling for a fullscreen scene on this box.
     var sceneBudget: (layers: Int, entities: Int) {
         (layers: SpecSubset.Budget.fullscreen.layers,
          entities: renderClass.fullscreenEntityBudget)
     }
 
+    /// Raw hardware capability, ignoring the per-channel adaptive ladder.
+    /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
+    /// thumb-stream and schema-scene verdicts, and a broken server thumb
+    /// must not veto a fully local renderer.
     var hardwareTier: CapabilityTier {
         tierOverride ?? detectedTier
     }
@@ -249,6 +249,43 @@ final class TVAppState {
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
+    }
+
+    // MARK: Channel surfing
+
+    /// The channel `step` places along the feed from `current`, wrapping at
+    /// both ends — Up/Down on the remote, the oldest convention a TV has.
+    ///
+    /// Order is the iPhone feed's (`ChannelFeed.latestFirst`), so the two
+    /// devices flip through the same channels in the same order. Sleeping
+    /// channels are skipped: when you are surfing, a moon and a sentence is a
+    /// dud page. The current channel is kept in the ring even if it sleeps,
+    /// so there is always somewhere to step FROM.
+    static func surfTarget(from current: String?, step: Int,
+                           in channels: [PublicChannel]) -> String? {
+        let ring = ChannelFeed.latestFirst(channels)
+            .filter { $0.sleeping != true || $0.id == current }
+        guard ring.count > 1, step != 0 else { return nil }
+        guard let current, let i = ring.firstIndex(where: { $0.id == current }) else {
+            return ring.first?.id
+        }
+        let n = ring.count
+        return ring[((i + step) % n + n) % n].id
+    }
+
+    /// Where the current channel sits in the surf ring, for "3 of 61".
+    var surfPosition: (index: Int, count: Int)? {
+        let ring = ChannelFeed.latestFirst(channels)
+            .filter { $0.sleeping != true || $0.id == selectedChannelId }
+        guard let i = ring.firstIndex(where: { $0.id == selectedChannelId }) else { return nil }
+        return (i + 1, ring.count)
+    }
+
+    func surf(_ step: Int) {
+        guard let next = Self.surfTarget(from: selectedChannelId, step: step, in: channels)
+        else { return }
+        // Stay on whichever surface opened the player, so Back still returns there.
+        selectChannel(next, from: presentingSurface)
     }
 
     func exitChannel() {

@@ -144,6 +144,7 @@
 		E6A75BB3ACFAECBAEF42BB4D /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C408BF670E35B5612FAB86D /* AppStateTests.swift */; };
 		E6C221E7819340F08F51E919 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
 		E6D0EF3C4EB2E1D879DD87E4 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D17CDD8CA7EAD7AF0A5E09 /* Colors.swift */; };
+		E75EE0E38EB9E8BE57509595 /* ChannelSurfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B196648F747F39DE5CCAC24 /* ChannelSurfTests.swift */; };
 		E85B8629E778140281F0628E /* RenderGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21E7FC58CC5ADF102F507CE7 /* RenderGuard.swift */; };
 		E8A35E08A77232E6101B38C2 /* TokenHandoffSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1A9CB25DCED3A1D90BE51F /* TokenHandoffSheet.swift */; };
 		E8E8841AC339243ACEE363A7 /* SpriteSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E14B7DC8B4215FD925DF86 /* SpriteSceneView.swift */; };
@@ -234,6 +235,7 @@
 		452F2484E3DAE7DC772CFC2A /* ChannelSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSearch.swift; sourceTree = "<group>"; };
 		4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedView.swift; sourceTree = "<group>"; };
 		4A88C730E2ED055EB1FB0901 /* PairCodeField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairCodeField.swift; sourceTree = "<group>"; };
+		4B196648F747F39DE5CCAC24 /* ChannelSurfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSurfTests.swift; sourceTree = "<group>"; };
 		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
 		4D7E436C9C0F1504197A67E9 /* ChannelFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
 		4E7F929E9D6DB9F6B7C78FA6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -449,6 +451,7 @@
 				414EED19151EF752ABADB644 /* CapabilityTierTests.swift */,
 				DAF66651704C647AD73B6B25 /* CategoryShelfTests.swift */,
 				0E393D04E499C2B42C170AC0 /* ChannelSearchTests.swift */,
+				4B196648F747F39DE5CCAC24 /* ChannelSurfTests.swift */,
 				1E218599B8BE73C18DF08216 /* ChannelWSClientTests.swift */,
 				2DBBB37102D327AF802D67D2 /* ClassicSaverTests.swift */,
 				08B2F074CF28AFF079CBABA0 /* DeepLinkTests.swift */,
@@ -873,6 +876,7 @@
 				C4184B1F397DC4CD4B42440F /* CapabilityTierTests.swift in Sources */,
 				638257243A24B750EBBCB208 /* CategoryShelfTests.swift in Sources */,
 				5CF8C76AAD444EE804E53A86 /* ChannelSearchTests.swift in Sources */,
+				E75EE0E38EB9E8BE57509595 /* ChannelSurfTests.swift in Sources */,
 				6C720AB174B1ABEDE25192BB /* ChannelWSClientTests.swift in Sources */,
 				70C0E78D93C5088327E16069 /* ClassicSaverTests.swift in Sources */,
 				730801F453F51D04CF89FDD5 /* DeepLinkTests.swift in Sources */,

@@ -101,9 +101,17 @@ final class ChannelSearchTests: XCTestCase {
         XCTAssertEqual(results.map(\.id), ["tag-c", "tag-b", "tag-a"])
     }
 
-    func testPopularTagsSkipFeaturedAndRankByCount() {
-        let tags = ChannelSearch.popularTags(in: channels, limit: 3)
-        XCTAssertFalse(tags.contains("featured"), "not a browsable category")
-        XCTAssertEqual(tags.first, "ambient", "most common first")
+    func testSearchFindsAChannelByWhoSteeredIt() {
+        let c = PublicChannel(channelId: "tide", label: "tide", tags: [], viewers: nil,
+                              lastSteer: .init(actor: "spin", harness: "pi",
+                                               model: "claude-opus-5", summary: nil))
+        XCTAssertEqual(ChannelSearch.results(query: "opus", channels: [c]).map(\.id), ["tide"])
+        XCTAssertEqual(ChannelSearch.results(query: "spin", channels: [c]).map(\.id), ["tide"])
+        // `agent` is the server's default for an unattributed call — it names
+        // nobody, so it must not make every anonymous channel a hit.
+        let anon = PublicChannel(channelId: "x", label: "x", tags: [], viewers: nil,
+                                 lastSteer: .init(actor: "agent", harness: nil,
+                                                  model: nil, summary: nil))
+        XCTAssertTrue(ChannelSearch.results(query: "agent", channels: [anon]).isEmpty)
     }
 }

@@ -49,21 +49,6 @@ enum ChannelSearch {
             .map(\.channel)
     }
 
-    /// Suggested tags for the empty state — the most common ones, so the
-    /// reader can browse by clicking instead of spelling anything out.
-    static func popularTags(in channels: [PublicChannel], limit: Int = 8) -> [String] {
-        var counts: [String: Int] = [:]
-        for channel in channels {
-            for tag in channel.tags ?? [] where tag != "featured" {
-                counts[tag, default: 0] += 1
-            }
-        }
-        return counts
-            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .prefix(limit)
-            .map(\.key)
-    }
-
     // MARK: - Internals
 
     static func normalize(_ query: String) -> [String] {
@@ -107,6 +92,15 @@ enum ChannelSearch {
             if scene == token { best = max(best, 70) }
             else if scene.hasPrefix(token) { best = max(best, 45) }
             else if scene.contains(token) { best = max(best, 30) }
+        }
+        // Who made it. The iPhone's insight: "claude ocean" is a real query,
+        // because people browse this catalog by the agent and model behind a
+        // scene as much as by its name.
+        for credit in [channel.lastSteer?.actor, channel.lastSteer?.model,
+                       channel.lastSteer?.harness].compactMap({ $0?.lowercased() })
+        where credit != "agent" {
+            if credit == token { best = max(best, 35) }
+            else if credit.contains(token) { best = max(best, 22) }
         }
         return best
     }
