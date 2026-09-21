@@ -90,7 +90,7 @@ struct ScreenSaverView: View {
                 // crossfade — true spec-lerp morph is a follow-up).
                 // …and a channel change dissolves too, so surfing reads as
                 // turning a dial rather than a hard reload.
-                .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")")
+                .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")|\(timelineKey)")
                 .transition(.opacity)
             }
 
@@ -112,6 +112,11 @@ struct ScreenSaverView: View {
         .animation(.easeInOut(duration: max(0.001, app.sequenceCrossfade)),
                    value: app.sequenceSegmentKey)
         .animation(.easeInOut(duration: 0.45), value: app.selectedChannelId)
+        .animation(.easeInOut(duration: 0.45), value: app.timeline)
+        // Stepping through time is slower than reading a label: keep the
+        // chrome up while the viewer is in the past, so "this is not live"
+        // never silently disappears.
+        .onChange(of: app.timeline) { revealChrome() }
         .animation(.easeInOut(duration: 0.8), value: app.sleeping)
         .animation(.easeInOut(duration: 0.25), value: showChrome)
         .ignoresSafeArea()
@@ -125,7 +130,11 @@ struct ScreenSaverView: View {
             switch direction {
             case .up: app.surf(-1)
             case .down: app.surf(1)
-            default: return
+            // The phone's other axis: sideways is time. Left steps into this
+            // channel's past, Right comes back toward what is live.
+            case .left: app.stepTimeline(older: true)
+            case .right: app.stepTimeline(older: false)
+            @unknown default: return
             }
             revealChrome()
         }
@@ -148,7 +157,12 @@ struct ScreenSaverView: View {
                         .lineLimit(1)
                     // What is on, and who put it there — the product is
                     // agents authoring these, so the credit belongs on screen.
-                    if let credit = creditLine {
+                    if case .past = app.timeline {
+                        Label(pastLine, systemImage: "clock.arrow.circlepath")
+                            .font(.tvMeta)
+                            .foregroundStyle(Color.appAccent)
+                            .lineLimit(1)
+                    } else if let credit = creditLine {
                         Text(credit)
                             .font(.tvMeta)
                             .foregroundStyle(.white.opacity(0.75))
@@ -165,9 +179,11 @@ struct ScreenSaverView: View {
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 8) {
-                    if let position = app.surfPosition, position.count > 1 {
-                        Label("\(position.index) of \(position.count)",
-                              systemImage: "chevron.up.chevron.down")
+                    if let position = PlayerChrome.positionLine(timeline: app.timeline,
+                                                                stops: app.historyStops.count,
+                                                                surf: app.surfPosition) {
+                        Label(position, systemImage: app.timeline == .live
+                              ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
                     }
                     Label("Back to browse", systemImage: "chevron.backward")
                 }
@@ -184,14 +200,16 @@ struct ScreenSaverView: View {
         }
     }
 
-    /// "Warp Tunnel · steered 36m ago · pi · glm-5.3" — scene first, then
-    /// the shared SteerLine so the TV credits a scene the way the phone and
-    /// the website do.
     private var creditLine: String? {
-        guard let channel = app.channels.first(where: { $0.id == app.selectedChannelId })
-        else { return nil }
-        let parts = [channel.saverLabel, SteerLine.text(for: channel)].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        PlayerChrome.creditLine(for: app.channels.first { $0.id == app.selectedChannelId })
+    }
+
+    private var timelineKey: String { PlayerChrome.timelineKey(app.timeline) }
+
+    private var pastLine: String {
+        guard case .past(let i) = app.timeline, app.historyStops.indices.contains(i)
+        else { return "Earlier" }
+        return PlayerChrome.pastLine(stop: app.historyStops[i], sceneLabel: app.pastScene?.label)
     }
 
     private var channelLabel: String {
@@ -205,6 +223,7 @@ struct ScreenSaverView: View {
         chromeTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
             guard !Task.isCancelled else { return }
+            if case .past = app.timeline { return }   // "not live" stays said
             showChrome = false
         }
     }

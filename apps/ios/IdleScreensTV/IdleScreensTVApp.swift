@@ -69,6 +69,19 @@ struct IdleScreensTVApp: App {
                     // true at install time never pushes (cold-start quirk).
                     try? await Task.sleep(for: .milliseconds(300))
                     appState.selectChannel(args[i + 1])
+                    // Debug: `-past <n>` steps n scenes into the channel's
+                    // history — the Left key, for a remote-less simulator.
+                    if let p = args.firstIndex(of: "-past"), args.indices.contains(p + 1),
+                       let steps = Int(args[p + 1]) {
+                        for _ in 0..<max(0, steps) {
+                            try? await Task.sleep(for: .seconds(2.5))
+                            appState.stepTimeline(older: true)
+                        }
+                    }
+                } else if let resume = appState.resumeChannelId {
+                    // "Start where I left off" — same settle delay as -channel.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    appState.selectChannel(resume)
                 } else {
                     // Idle on the grid, but reachable: a paired phone can
                     // push a switch through this control socket.

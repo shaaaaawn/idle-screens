@@ -140,11 +140,16 @@ struct SearchView: View {
         }
     }
 
+    /// An empty filter says so in words — an empty grid under a heading that
+    /// reads "Watching now · 0" looks like a loading failure.
+    static func heading(for filter: ChannelBrowse.Filter, count: Int) -> String {
+        count == 0 ? "Nothing under \(filter.title) right now" : "\(filter.title) · \(count)"
+    }
+
     @ViewBuilder private func filtered(_ filter: ChannelBrowse.Filter) -> some View {
         let matches = ChannelBrowse.apply(filter, to: app.channels, following: [])
         VStack(alignment: .leading, spacing: TV.headerGap) {
-            Text(matches.isEmpty ? "Nothing under \(filter.title) right now"
-                                 : "\(filter.title) · \(matches.count)")
+            Text(Self.heading(for: filter, count: matches.count))
                 .font(.tvShelfTitle)
                 .foregroundStyle(Color.textPrimary)
             if !matches.isEmpty { grid(matches) }

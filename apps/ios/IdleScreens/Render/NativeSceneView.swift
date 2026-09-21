@@ -31,6 +31,10 @@ struct NativeSceneView: View {
     var referenceSize: CGSize?
     /// One frame, no animation loop — for tiles beyond the animation budget.
     var staticFrame: Bool = false
+    /// Which instant a static frame shows, in seconds. Zero is the honest
+    /// poster; tests render later instants to reach life envelopes, emitters
+    /// and trails without an animation loop.
+    var staticTime: TimeInterval = 0
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -38,7 +42,7 @@ struct NativeSceneView: View {
     var body: some View {
         if staticFrame {
             Canvas { ctx, size in
-                draw(into: &ctx, size: size, t: 0)
+                draw(into: &ctx, size: size, t: staticTime)
             }
             .ignoresSafeArea()
         } else {
