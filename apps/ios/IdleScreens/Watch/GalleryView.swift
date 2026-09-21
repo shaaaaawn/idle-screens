@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Public channel gallery, streaming-service style: a hero billboard for the
-/// channel that is live now, then the same shelves in the same order as the
-/// web home page (`HomeSections`).
+/// The Channels tab, built for finding something: search and a chip row of
+/// filters, categories and tags; a rail of tall live tiles; then each category
+/// two-by-two, in the web home page's running order (`HomeSections`).
 /// Every tile is a live native render of the channel's scene — the content
 /// showcases itself.
 struct GalleryView: View {
@@ -11,15 +11,19 @@ struct GalleryView: View {
     @State private var query = ""
     @State private var gridWidth: CGFloat = 390
     @State private var filter: ChannelBrowse.Filter = .all
+    /// A category chip. Separate from `filter` because categories come from the
+    /// server's shelves, not from a rule over the channel list.
+    @State private var sectionId: String?
 
     /// Shelves are for wandering; the moment you ask for something specific
     /// — a search, a chip — you get one flat grid of answers instead.
     private var isBrowsingShelves: Bool {
-        filter == .all && query.trimmingCharacters(in: .whitespaces).isEmpty
+        filter == .all && sectionId == nil && query.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private var results: [PublicChannel] {
-        let filtered = ChannelBrowse.apply(filter, to: app.channels, following: app.follows.followed)
+        let pool = sectionId.flatMap { id in allSections.first { $0.id == id }?.channels } ?? app.channels
+        let filtered = ChannelBrowse.apply(filter, to: pool, following: app.follows.followed)
         return ChannelBrowse.search(query, in: filtered)
     }
 
@@ -42,8 +46,14 @@ struct GalleryView: View {
                     }
                 }
                 .padding(.vertical, 8)
+                // Measured behind the stack, not in it: a zero-height probe as
+                // a row still costs a row's spacing.
+                .background {
+                    GeometryReader { geo in Color.clear.preference(key: GridWidthKey.self, value: geo.size.width) }
+                }
             }
-            .searchable(text: $query, prompt: "Channels, tags, artists, models")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Channels, tags, artists, models")
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .background(Color.appBackground)
@@ -63,6 +73,7 @@ struct GalleryView: View {
                     }
                 }
             }
+            .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
             .navigationTitle("channels")
             .refreshable { await app.loadGallery() }
         }
@@ -75,35 +86,40 @@ struct GalleryView: View {
 
     @ViewBuilder
     private var shelvesContent: some View {
-        if let hero = heroChannel {
-            HeroBillboard(channel: hero, compact: sizeClass != .regular, peers: app.channels)
-                .padding(.horizontal, 16)
+        // Tall, because that is the shape you watch in. The curated channel
+        // leads, then what you follow, what is being watched, what is newest —
+        // one rail doing the work the banner, "Following" and "Watching now"
+        // rows each did a third of.
+        if !onNow.isEmpty {
+            OnNowRail(channels: onNow)
         }
-        // The map before the territory: every shelf below, as one row of
-        // tiles you can jump straight into — so the eighth category is as
-        // reachable as the first.
-        if shelves.count > 1 {
-            CategoryIndex(shelves: shelves)
-        }
-        // Yours before everyone's. Absent until you follow something — an
-        // empty "Following" row is a nag.
-        if !following.isEmpty {
-            ChannelShelf(title: "Following",
-                         subtitle: following.count == 1 ? "1 channel" : "\(following.count) channels",
-                         channels: following, cardWidth: cardWidth)
-        }
-        // Social proof, when there is any: what other people have on right now.
-        if watchedNow.count >= 2 {
-            ChannelShelf(title: "Watching now", subtitle: "on someone's screen this minute",
-                         channels: watchedNow, cardWidth: cardWidth)
-        }
+        // Four of each category at once, two by two: you can compare them
+        // without dragging a strip sideways, and "All N" opens the rest.
         ForEach(shelves) { shelf in
-            ChannelShelf(title: shelf.title, subtitle: shelf.subtitle, ownedTags: shelf.ownedTags,
-                         channels: shelf.channels, cardWidth: cardWidth)
+            SectionGrid(shelf: shelf, columns: gridColumns, cardWidth: gridCardWidth)
         }
     }
 
-    private var cardWidth: CGFloat { sizeClass == .regular ? 224 : 148 }
+    private var gridColumns: Int { sizeClass == .regular ? 4 : 2 }
+    private var gridCardWidth: CGFloat {
+        max(120, (gridWidth - 32 - CGFloat(gridColumns - 1) * 12) / CGFloat(gridColumns))
+    }
+
+    /// Every shelf, hero included — the chips filter the real category, not
+    /// the version with the billboard channel taken out.
+    private var allSections: [HomeSection] {
+        HomeSections.build(channels: app.channels, categories: app.categories)
+    }
+
+    private var onNow: [PublicChannel] {
+        var seen = Set<String>()
+        let lead = [heroChannel].compactMap { $0 }
+        let latest = ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil }
+        return (lead + following + watchedNow + latest)
+            .filter { $0.sleeping != true && seen.insert($0.id).inserted }
+            .prefix(14).map { $0 }
+    }
+
 
     private var watchedNow: [PublicChannel] {
         Array(ChannelBrowse.apply(.live, to: app.channels, following: []).prefix(12))
@@ -112,25 +128,47 @@ struct GalleryView: View {
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(filters) { item in
-                    let selected = item == filter
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { filter = selected && item != .all ? .all : item }
-                    } label: {
-                        Text(item.title)
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 8)
-                            .foregroundStyle(selected ? Color.appBackground : Color.textPrimary)
-                            .background(selected ? Color.textPrimary : Color.appSurface, in: Capsule())
-                            .overlay { Capsule().strokeBorder(Color.appBorder.opacity(selected ? 0 : 0.6), lineWidth: 1) }
+                ForEach(filters.filter { if case .tag = $0 { return false }; return true }) { item in
+                    chip(item.title, selected: item == filter && (item != .all || sectionId == nil)) {
+                        filter = (item == filter && item != .all) ? .all : item
+                        if item == .all { sectionId = nil }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+                ForEach(allSections) { section in
+                    chip(section.title, count: section.channels.count, selected: sectionId == section.id) {
+                        sectionId = sectionId == section.id ? nil : section.id
+                    }
+                }
+                ForEach(filters.filter { if case .tag = $0 { return true }; return false }) { item in
+                    chip(item.title, selected: item == filter) {
+                        filter = item == filter ? .all : item
+                    }
                 }
             }
             .padding(.horizontal, 16)
         }
+    }
+
+    private func chip(_ title: String, count: Int? = nil, selected: Bool,
+                      action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { action() }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                if let count {
+                    Text("\(count)").opacity(0.55)
+                }
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
+            .foregroundStyle(selected ? Color.appBackground : Color.textPrimary)
+            .background(selected ? Color.textPrimary : Color.appSurface, in: Capsule())
+            .overlay { Capsule().strokeBorder(Color.appBorder.opacity(selected ? 0 : 0.6), lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -142,7 +180,7 @@ struct GalleryView: View {
             } description: {
                 Text(query.isEmpty ? "No channels here right now." : "No channel, tag, artist or model matches “\(query)”.")
             } actions: {
-                Button("Show everything") { query = ""; filter = .all }
+                Button("Show everything") { query = ""; filter = .all; sectionId = nil }
             }
             .padding(.top, 40)
         } else {
@@ -151,10 +189,8 @@ struct GalleryView: View {
                     .font(.caption)
                     .foregroundStyle(Color.textSecondary)
                     .padding(.horizontal, 16)
-                GeometryReader { geo in Color.clear.preference(key: GridWidthKey.self, value: geo.size.width) }
-                    .frame(height: 0)
-                let columns = sizeClass == .regular ? 4 : 2
-                let width = max(120, (gridWidth - 32 - CGFloat(columns - 1) * 12) / CGFloat(columns))
+                let columns = gridColumns
+                let width = gridCardWidth
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(width), spacing: 12, alignment: .top), count: columns),
                           alignment: .leading, spacing: 20) {
                     ForEach(found) { channel in
@@ -163,7 +199,6 @@ struct GalleryView: View {
                 }
                 .padding(.horizontal, 16)
             }
-            .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
         }
     }
 
@@ -222,131 +257,97 @@ struct GalleryView: View {
     }
 }
 
-// MARK: - Hero billboard
+// MARK: - On now
 
-private struct HeroBillboard: View {
-    let channel: PublicChannel
-    let compact: Bool
-    var peers: [PublicChannel] = []
-
-    /// Same definition as the "Watching now" filter (`ChannelBrowse.apply(.live, …)`).
-    private var isLive: Bool { (channel.viewers ?? 0) > 0 && channel.sleeping != true }
+/// The top of the page: tall live tiles, the shape of the feed they open.
+private struct OnNowRail: View {
+    let channels: [PublicChannel]
+    @Environment(AppState.self) private var app
 
     var body: some View {
-        NavigationLink(destination: ChannelFeedView(
-            channels: peers.isEmpty ? [channel] : peers, start: channel.id, showsBack: true)) {
-            ChannelPreviewTile(channel: channel)
-                .aspectRatio(compact ? 16.0 / 10.0 : 21.0 / 9.0, contentMode: .fit)
-                .overlay(alignment: .bottom) {
-                    LinearGradient(
-                        colors: [.clear, Color.appBackground.opacity(0.65), Color.appBackground.opacity(0.95)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 130)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        // The hero is curated (`default`, or featured+richest) —
-                        // not necessarily live. "LIVE NOW" claimed it always was.
-                        if isLive {
-                            HStack(spacing: 6) {
-                                Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
-                                Text("LIVE NOW")
-                                    .font(.caption2.weight(.bold))
-                                    .tracking(1.2)
-                                    .foregroundStyle(Color.textSecondary)
-                            }
-                        } else if channel.sleeping == true {
-                            HStack(spacing: 6) {
-                                Image(systemName: "moon.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(Color.textTertiary)
-                                Text("ASLEEP")
-                                    .font(.caption2.weight(.bold))
-                                    .tracking(1.2)
-                                    .foregroundStyle(Color.textSecondary)
-                            }
-                        }
-                        Text(channel.displayLabel)
-                            .font(.system(size: compact ? 24 : 40, weight: .bold))
-                            .foregroundStyle(Color.textPrimary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        // The web hero leads with what the channel is DOING — its
-                        // last event, and who made it — rather than its tags.
-                        if let summary = channel.lastSteer?.summary, !summary.isEmpty {
-                            Text(summary)
-                                .font(.subheadline)
-                                .foregroundStyle(Color.textSecondary)
-                                .lineLimit(compact ? 1 : 2)
-                                .multilineTextAlignment(.leading)
-                        }
-                        // A banner on the phone: the steer line is on every
-                        // card below, so the hero can go without it.
-                        if !compact, let steered = SteerLine.text(for: channel) {
-                            Text(steered)
-                                .font(.caption)
-                                .foregroundStyle(Color.textTertiary)
-                                .lineLimit(1)
-                        }
-                        HStack(spacing: 12) {
-                            Label("Watch", systemImage: "play.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.appBackground)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 9)
-                                .background(Color.textPrimary, in: Capsule())
-                            if isLive, let viewers = channel.viewers {
-                                Label("\(viewers) watching", systemImage: "eye")
-                                    .font(.footnote)
-                                    .foregroundStyle(Color.textSecondary)
-                            }
-                        }
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 10) {
+                ForEach(channels) { channel in
+                    NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true)) {
+                        tile(channel)
                     }
-                    .padding(compact ? 16 : 20)
+                    .buttonStyle(.plain)
+                    .contextMenu { CardMenu(channel: channel) }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24)
-                        .strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1)
-                }
+            }
+            .padding(.horizontal, 16)
         }
-        .buttonStyle(.plain)
+    }
+
+    private func tile(_ channel: PublicChannel) -> some View {
+        let viewers = channel.viewers ?? 0
+        return ChannelPreviewTile(channel: channel)
+            .frame(width: 132, height: 214)
+            .overlay {
+                LinearGradient(colors: [.black.opacity(0.35), .clear, .clear, .black.opacity(0.8)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .overlay(alignment: .topLeading) {
+                HStack(spacing: 5) {
+                    Circle().fill(viewers > 0 ? Color.appSuccess : Color.white.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                    if viewers > 0 {
+                        Text("\(viewers)").font(.caption2.weight(.bold)).monospacedDigit()
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(9)
+            }
+            .overlay(alignment: .topTrailing) { CardFollowButton(channelId: channel.id) }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(channel.displayLabel)
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if let line = SteerLine.cardLine(for: channel) {
+                        Text(line).font(.caption2).opacity(0.75).lineLimit(1)
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(9)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
+            }
+            .accessibilityElement(children: .combine)
     }
 }
 
-// MARK: - Shelf
+// MARK: - Category, two by two
 
-private struct ChannelShelf: View {
-    let title: String
-    var subtitle: String?
-    var ownedTags: Set<String> = []
-    let channels: [PublicChannel]
+private struct SectionGrid: View {
+    let shelf: HomeSection
+    let columns: Int
     let cardWidth: CGFloat
 
     var body: some View {
+        let shown = Array(shelf.channels.prefix(columns * 2))
         VStack(alignment: .leading, spacing: 12) {
             NavigationLink {
-                ShelfGridView(title: title, subtitle: subtitle, ownedTags: ownedTags, channels: channels)
+                ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
+                              ownedTags: shelf.ownedTags, channels: shelf.channels)
             } label: {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
+                        Text(shelf.title)
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(Color.textPrimary)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(Color.textSecondary)
-                                .lineLimit(1)
+                        if let subtitle = shelf.subtitle {
+                            Text(subtitle).font(.caption).foregroundStyle(Color.textSecondary).lineLimit(1)
                         }
                     }
                     Spacer()
-                    // Only promise more when there is more than a row shows.
-                    if channels.count > 2 {
+                    if shelf.channels.count > shown.count {
                         HStack(spacing: 3) {
-                            Text("All \(channels.count)")
+                            Text("All \(shelf.channels.count)")
                             Image(systemName: "chevron.right").font(.caption2.weight(.bold))
                         }
                         .font(.footnote.weight(.semibold))
@@ -356,73 +357,18 @@ private struct ChannelShelf: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(channels.count <= 2)
-            .padding(.horizontal, 16)
+            .disabled(shelf.channels.count <= shown.count)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(channels) { channel in
-                        ChannelCard(channel: channel, width: cardWidth, peers: channels, ownedTags: ownedTags)
-                    }
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(cardWidth), spacing: 12, alignment: .top),
+                                     count: columns),
+                      alignment: .leading, spacing: 18) {
+                ForEach(shown) { channel in
+                    ChannelCard(channel: channel, width: cardWidth, peers: shelf.channels,
+                                ownedTags: shelf.ownedTags)
                 }
-                .padding(.horizontal, 16)
             }
         }
-    }
-}
-
-// MARK: - Category index
-
-/// One tile per shelf: its name, how many channels, and a live still of its
-/// first channel as the cover.
-private struct CategoryIndex: View {
-    let shelves: [HomeSection]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Browse")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.horizontal, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 10) {
-                    ForEach(shelves) { shelf in
-                        NavigationLink {
-                            ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
-                                          ownedTags: shelf.ownedTags, channels: shelf.channels)
-                        } label: {
-                            ZStack(alignment: .bottomLeading) {
-                                if let cover = shelf.channels.first {
-                                    ChannelPreviewTile(channel: cover)
-                                        .frame(width: 132, height: 84)
-                                }
-                                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.78)],
-                                               startPoint: .center, endPoint: .bottom)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(shelf.title)
-                                        .font(.footnote.weight(.semibold))
-                                        .lineLimit(1)
-                                    Text("\(shelf.channels.count)")
-                                        .font(.caption2)
-                                        .opacity(0.75)
-                                }
-                                .foregroundStyle(.white)
-                                .padding(9)
-                            }
-                            .frame(width: 132, height: 84)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(shelf.title), \(shelf.channels.count) channels")
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
+        .padding(.horizontal, 16)
     }
 }
 
