@@ -2008,6 +2008,14 @@ class TankInstance implements SaverInstance {
         const cf = carrier ?? this.carrierFrame(
           extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
+        if (f.index === followSlot) {
+          // A schooled fish's own trail is the carrier's — the whole body
+          // turns together, so where the carrier was is close enough for the
+          // chase camera's chord (it does not chase the slot offset, same as
+          // the `rel` bonds below).
+          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - FOLLOW_TRAIL);
+          this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+        }
         beat = cf.lead;
         // A seated fish can lead too: a bonded fish after a school trails
         // the CARRIER route behind the whole formation, which is what
@@ -2226,8 +2234,10 @@ class TankInstance implements SaverInstance {
           if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
         }
       }
-      // The eye does not see itself.
-      if (f.body) f.body.visible = !(followPov && f.index === followSlot);
+      // The eye does not see itself. The GROUP, not f.body: f.body is null
+      // BY DESIGN for a fallback (non-GLB) fish (see tintFish), so gating on
+      // it would leave the fallback blob visible right at the camera.
+      f.group.visible = !(followPov && f.index === followSlot);
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
           this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
@@ -2270,7 +2280,7 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
-      if (f.glow && f.body && f.body.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
