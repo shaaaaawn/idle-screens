@@ -240,7 +240,13 @@ describe('mineral world', () => {
     expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v2');
     expect(keys.get('crystal-veins')).toBe('mineral-fissures-v3');
     expect(keys.size).toBeGreaterThanOrEqual(6); // + spores, vents, snow, lanterns, horizon
-    expect(new Set(keys.values()).size).toBe(keys.size);
+    // One key per distinct PATCH. The glass lanterns are three draws of one
+    // geometry with the identical patch (cores, depth, blended colour — the
+    // pass is a uniform), so those three share a program on purpose.
+    const lanternDraws = ['sky-lantern-cores', 'sky-lantern-depth', 'sky-lanterns'];
+    expect(new Set(lanternDraws.map((n) => keys.get(n))).size).toBe(1);
+    const distinct = [...keys].filter(([name]) => !lanternDraws.slice(1).includes(name));
+    expect(new Set(distinct.map(([, key]) => key)).size).toBe(distinct.length);
   });
 
   it('never raises a castle indoors', () => {

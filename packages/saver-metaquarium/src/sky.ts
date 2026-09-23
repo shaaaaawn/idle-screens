@@ -23,6 +23,8 @@ export interface Lantern {
   /** Out past the swim space: bigger, dimmer, no light of its own. */
   far: boolean;
   species: LanternSpecies;
+  /** Beats relative to LANTERN_BEAT: small jellies pulse quicker, the far giants slowly. */
+  rate: number;
 }
 
 export interface SkyOptions {
@@ -51,15 +53,25 @@ export function lanternAt(l: Lantern, t: number, out: { x: number; y: number; z:
   const amp = l.far ? 0.35 : 1;
   out.x = l.x + Math.sin(t * 0.031 + l.phase * 2.0) * 28 * amp;
   out.z = l.z + Math.cos(t * 0.023 + l.phase * 1.3) * 22 * amp;
-  out.y = l.y + Math.sin(t * 0.07 + l.phase) * 12 * amp - Math.cos(t * LANTERN_BEAT + l.phase) * 1.6 * l.size;
+  out.y = l.y + Math.sin(t * 0.07 + l.phase) * 12 * amp + lanternSurge(t, l) * 3.2 * l.size;
+}
+
+/** Propulsion: a jelly is THROWN upward by each squeeze and sinks until the
+ *  next — a quick rise, a long fall, zero over a beat. Same curve in GLSL. */
+export function lanternSurge(t: number, l: Pick<Lantern, 'phase' | 'rate'>): number {
+  const x = (t * LANTERN_BEAT * l.rate + l.phase) / (Math.PI * 2) - 0.08;
+  const u = x - Math.floor(x);
+  return (u < 0.3 ? u / 0.3 : 1 - (u - 0.3) / 0.7) - 0.5;
 }
 
 /** `mqBeat` below, in JS, at the crown (lag 0): 0 relaxed → 1 squeezed. The
  *  light a lantern throws — its bloom card, its pool on the floor, the tint on
  *  a fish under it — flares on this same beat, so the field never brightens
  *  while the lantern it comes from is dark. */
-export function lanternBeat(t: number, phase: number): number {
-  const w = (t * LANTERN_BEAT + phase) / 6.2831853;
+export function lanternBeat(t: number, phase: number, rate = 1): number {
+  // `rate`: each jelly beats at its own pace (the shader's `aBell.y`) — leave it
+  // out and the light drifts out of step with the bell it comes from.
+  const w = (t * LANTERN_BEAT * rate + phase) / 6.2831853;
   const u = w - Math.floor(w);
   const x = u < 0.22 ? u / 0.22 : (u - 0.22) / 0.78;
   const s = x * x * (3 - 2 * x);
@@ -74,13 +86,17 @@ export const lanternLight = (beat: number): number => 0.575 + 0.425 * beat;
  *  the rim — which is what makes the pulse travel down the animal. */
 const BEAT_GLSL = /* glsl */ `
   float mqBeat(float t, float ph, float lag) {
-    float u = fract((t * ${LANTERN_BEAT.toFixed(2)} + ph) / 6.2831853 - lag);
+    float u = fract((t * ${LANTERN_BEAT.toFixed(2)} * aBell.y + ph) / 6.2831853 - lag);
     return u < 0.22 ? smoothstep(0.0, 0.22, u) : 1.0 - smoothstep(0.22, 1.0, u);
+  }
+  float mqSurge(float t, float ph) {
+    float u = fract((t * ${LANTERN_BEAT.toFixed(2)} * aBell.y + ph) / 6.2831853 - 0.08);
+    return (u < 0.3 ? u / 0.3 : 1.0 - (u - 0.3) / 0.7) - 0.5;
   }
 `;
 export const LANTERN_VERTEX = /* glsl */ `
   #include <begin_vertex>
-  float ph = aJelly.x, hang = aJelly.y, amp = aHome.w, bell = aBell;
+  float ph = aJelly.x, hang = aJelly.y, amp = aHome.w, bell = aBell.x;
   vec3 local = position - aHome.xyz;
   float t = uSkyTime;
   if (bell >= 0.0) {
@@ -109,17 +125,43 @@ export const LANTERN_VERTEX = /* glsl */ `
   vec3 home = aHome.xyz;
   home.x += sin(t * 0.031 + ph * 2.0) * 28.0 * amp;
   home.z += cos(t * 0.023 + ph * 1.3) * 22.0 * amp;
-  home.y += sin(t * 0.07 + ph) * 12.0 * amp - cos(t * ${LANTERN_BEAT.toFixed(2)} + ph) * 1.6 * aJelly.z;
+  home.y += sin(t * 0.07 + ph) * 12.0 * amp + mqSurge(t, ph) * 3.2 * aJelly.z;
   transformed = home + local;
+  // What the fragment stage needs to make it GLASS: how edge-on this face is
+  // to the lens, how near the lantern's light it is, and what it is.
+  vec3 toLens = normalize(cameraPosition - transformed);
+  vSky = vec4(1.0 - abs(dot(normalize(normal), toLens)), exp(-dot(local, local) / (60.0 * aJelly.z * aJelly.z)), bell >= 0.0 ? 0.0 : 1.0, amp);
+  vSkyBeat = mqBeat(t, ph, 0.0);
+  // Three draws share this geometry. The lit core goes down first, opaque;
+  // the shell then writes depth only; then its colour is blended over — so
+  // the bell is see-through to its own light and the water behind, but never
+  // to its own inner faces. Each draw folds away the voxels that are not its.
+  bool coreVoxel = aGlow > 0.95 && bell >= 0.0;
+  if ((uSkyPass < 0.5) != coreVoxel) transformed = home;
 `;
 export const LANTERN_COLOR = /* glsl */ `
   #include <color_vertex>
   // The light inside flares on the squeeze and runs down the lines after it.
-  float lb = mqBeat(uSkyTime, aJelly.x, aBell >= 0.0 ? 0.0 : 0.1 + aJelly.y * 0.02);
+  float lb = mqBeat(uSkyTime, aJelly.x, aBell.x >= 0.0 ? 0.0 : 0.1 + aJelly.y * 0.02);
   vColor.rgb *= 1.0 + aGlow * (0.15 + 0.85 * lb);
 `;
 /** Shader preamble both chunks need. */
-export const LANTERN_PARS = BEAT_GLSL;
+export const LANTERN_PARS = 'varying vec4 vSky; varying float vSkyBeat;\n' + BEAT_GLSL;
+/** Glass, in the blended draw: see-through face-on, solid and bright at a
+ *  grazing edge (what makes a bell read as a dome of jelly, not a helmet),
+ *  lit from inside by its own lantern — more on the squeeze — with a faint
+ *  film of colour in the rim. Lines are nearly solid; the far giants fainter. */
+export const LANTERN_FRAGMENT = /* glsl */ `
+  #include <color_fragment>
+  if (uSkyPass > 1.5) {
+    float edge = pow(vSky.x, 1.35);
+    vec3 inner = (diffuseColor.rgb * 0.55 + vec3(0.5, 0.46, 0.38)) * vSky.y * (0.45 + 0.75 * vSkyBeat);
+    vec3 film = 0.5 + 0.5 * cos(vSky.x * 5.0 + vec3(0.0, 2.1, 4.2));
+    diffuseColor.rgb = diffuseColor.rgb * (0.78 + 0.5 * edge) + inner + film * edge * 0.1;
+    float glass = mix(0.3, 0.94, edge) + vSky.y * 0.18;
+    diffuseColor.a = clamp(mix(glass, 0.86, vSky.z), 0.0, 1.0) * (vSky.w < 0.9 ? 0.7 : 1.0);
+  }
+`;
 
 const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
   [0, 1, 0, 1], [0, -1, 0, 0.5], [1, 0, 0, 0.82], [-1, 0, 0, 0.66], [0, 0, 1, 0.75], [0, 0, -1, 0.6],
@@ -127,9 +169,9 @@ const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
 
 class LanternWriter {
   readonly pos: number[] = []; readonly col: number[] = [];
-  readonly home: number[] = []; readonly jelly: number[] = []; readonly glow: number[] = []; readonly bell: number[] = [];
+  readonly home: number[] = []; readonly jelly: number[] = []; readonly glow: number[] = []; readonly bell: number[] = []; readonly nor: number[] = [];
   count = 0;
-  l: Lantern = { x: 0, y: 0, z: 0, size: 1, phase: 0, color: '#fff', far: false, species: 'lantern' };
+  l: Lantern = { x: 0, y: 0, z: 0, size: 1, phase: 0, color: '#fff', far: false, species: 'lantern', rate: 1 };
 
   /** `bell`: 0 (rim) … 1 (crown) for a voxel of the bell, -1 for anything that hangs from it. */
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, hang: number, lit: number, bell = -1): void {
@@ -152,7 +194,8 @@ class LanternWriter {
         this.home.push(l.x, l.y, l.z, l.far ? 0.35 : 1);
         this.jelly.push(l.phase, hang, l.size);
         this.glow.push(lit);
-        this.bell.push(bell);
+        this.bell.push(bell, l.rate);
+        this.nor.push(nx, ny, nz);
       }
     }
     this.count += 1;
@@ -266,7 +309,10 @@ export function buildSky(rng: CrystalRng, opts: SkyOptions): Sky {
       far: isFar,
       // A flotilla is mostly lanterns, with moons among them and a few small combs.
       species: (['lantern', 'moon', 'lantern', 'comb', 'moon'] as const)[Math.floor(rng.next() * 5)]!,
+      rate: 1,
     };
+    // Small bells beat quicker; the far giants are slow.
+    l.rate = isFar ? 0.62 : Math.min(1.35, Math.max(0.75, 1.3 - 0.32 * (l.size / s))) * rng.range(0.92, 1.08);
     lanterns.push(l);
     growLantern(w, l, rng.fork(10 + i));
   }
@@ -276,7 +322,8 @@ export function buildSky(rng: CrystalRng, opts: SkyOptions): Sky {
   g.setAttribute('aHome', new BufferAttribute(new Float32Array(w.home), 4));
   g.setAttribute('aJelly', new BufferAttribute(new Float32Array(w.jelly), 3));
   g.setAttribute('aGlow', new BufferAttribute(new Float32Array(w.glow), 1));
-  g.setAttribute('aBell', new BufferAttribute(new Float32Array(w.bell), 1));
+  g.setAttribute('aBell', new BufferAttribute(new Float32Array(w.bell), 2));
+  g.setAttribute('normal', new BufferAttribute(new Float32Array(w.nor), 3));
   return { lanterns, geometry: g, voxels: w.count };
 }
 
@@ -291,7 +338,7 @@ export function lanternEmitters(lanterns: readonly Lantern[], t: number, out: Em
     lanternAt(l, t, p);
     c.set(l.color);
     const e = out[n] ?? (out[n] = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, reach: 1, phase: 0 });
-    const k = 0.55 * lanternLight(lanternBeat(t, l.phase));
+    const k = 0.55 * lanternLight(lanternBeat(t, l.phase, l.rate));
     e.x = p.x; e.y = p.y; e.z = p.z;
     e.r = c.r * k; e.g = c.g * k; e.b = c.b * k;
     e.reach = 58 * l.size; e.phase = l.phase;
