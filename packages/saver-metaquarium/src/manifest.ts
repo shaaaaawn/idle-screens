@@ -16,6 +16,13 @@ export const METAQUARIUM_PARAMS = {
   cameraElevation: { type: 'number', default: 15, min: -5, max: 60, ease: 'smooth' },
   /** Camera distance from tank center, world units. */
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
+  /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
+   *  camera. The orbit params are ignored while following. */
+  cameraFollow: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
+  /** How far behind the followed fish the camera rides, along the path it
+   *  swam. Under about one body length (18) it is the fish's own eye, and the
+   *  fish itself is hidden. */
+  followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },
