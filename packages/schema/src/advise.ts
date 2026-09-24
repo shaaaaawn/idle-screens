@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction } from './shapes';
+import { barFraction, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
@@ -185,6 +185,10 @@ export function adviseSpec(
       let pixArea: number;
       if (layer.sprite.kind === 'circle') {
         pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'polygon') {
+        // The outline's own area, not its bounding square (4r²) — a flat band
+        // or ridge fills a fraction of that.
+        pixArea = polygonArea(polygonPoints(layer.sprite, r));
       } else if (layer.sprite.kind === 'bar') {
         pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {

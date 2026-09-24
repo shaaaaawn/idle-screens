@@ -75,6 +75,133 @@ describe('luminanceGrid', () => {
   });
 });
 
+describe('polygon outline rasterization', () => {
+  // The flat-band repro: a 1.2-wide, 0.12-tall rectangle authored as `points`.
+  // Its circumradius is 0.6, so the old disc splat lit a full circle.
+  const BAND: Array<[number, number]> = [[-1, -0.1], [1, -0.1], [1, 0.1], [-1, 0.1]];
+  const GRID = { viewport: { width: 1920, height: 1080 }, cols: 24, rows: 10, t: 0 };
+  const one = (sprite: SaverSpec['layers'][number]['sprite'], extra: Partial<SaverSpec['layers'][number]> = {}, bg = '#808080'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'poly',
+    label: 'Poly',
+    background: { type: 'solid', color: bg },
+    layers: [{ count: 1, sprite, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 }, ...extra }],
+  });
+
+  it('a flat `points` band rasterizes as a bar, like the equivalent rect — not as its circumscribed disc', () => {
+    const band = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }), GRID);
+    const rect = luminanceGrid(one({ kind: 'rect', width: [1.2, 1.2], aspect: [0.1, 0.1], color: '#ffffff' }), GRID);
+    // The band is 129.6 px tall, centred on y = 540: rows 4 and 5 of 108 px each.
+    for (let r = 0; r < GRID.rows; r++) {
+      if (r === 4 || r === 5) expect(band.rowProfile[r]).toBeGreaterThan(0.1);
+      else expect(band.rowProfile[r]).toBe(0);
+    }
+    // The rect paints every cell it touches whole; the outline lights only the
+    // sliver of each end cell it crosses — same bar, give or take those four.
+    expect(Math.abs(band.coverage - rect.coverage)).toBeLessThanOrEqual(4 / (GRID.cols * GRID.rows) + 1e-9);
+    expect(band.coverage).toBeLessThan(0.2); // the disc model reported 0.63
+    expect(band.centroid!.x).toBeCloseTo(0.5, 5);
+    expect(band.centroid!.y).toBeCloseTo(0.5, 5);
+  });
+
+  it('honours rotate: the same band turned 90° is a vertical bar', () => {
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: BAND }, { rotate: 90 }), GRID);
+    // 86.4 px wide about x = 960: columns 11 and 12 of 80 px each.
+    for (let c = 0; c < GRID.cols; c++) {
+      if (c === 11 || c === 12) expect(g.colProfile[c]).toBeGreaterThan(0.1);
+      else expect(g.colProfile[c]).toBe(0);
+    }
+    expect(g.rowProfile[0]).toBe(0); // 864 px tall: rows 1..8 only
+    expect(g.rowProfile[5]).toBeGreaterThan(0);
+  });
+
+  it('honours spin at the sampled time', () => {
+    // 90°/s from a seeded phase: a quarter turn changes the picture, a half
+    // turn maps the symmetric band back onto itself.
+    const spun = one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: BAND }, { spin: 90 });
+    const at = (t: number): number[] => luminanceGrid(spun, { ...GRID, t }).cells;
+    const t0 = at(0);
+    const quarter = at(1000);
+    const half = at(2000);
+    expect(quarter.some((v, i) => Math.abs(v - t0[i]!) > 0.05)).toBe(true);
+    for (let i = 0; i < t0.length; i++) expect(half[i]).toBeCloseTo(t0[i]!, 6);
+  });
+
+  it('a full-width ridge silhouette at the bottom edge covers what it paints, not a dome', () => {
+    const ridge: Array<[number, number]> = [
+      [-1, 1], [-1, -0.25], [-0.7, -0.35], [-0.45, -0.2], [-0.2, -0.4], [0.05, -0.25],
+      [0.3, -0.33], [0.6, -0.18], [0.85, -0.28], [1, -0.22], [1, 1],
+    ];
+    const vp = { width: 1920, height: 1080 };
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [1, 1], color: '#ffffff', points: ridge }, { position: { x: 0.5, y: 1 } }), { viewport: vp, cols: 48, rows: 20, t: 0 });
+    // Ground truth: fraction of the viewport inside the outline, finely sampled.
+    const r = Math.min(vp.width, vp.height);
+    const abs = ridge.map(([x, y]) => ({ x: vp.width / 2 + x * r, y: vp.height + y * r }));
+    const inside = (x: number, y: number): boolean => {
+      let hit = false;
+      for (let i = 0, j = abs.length - 1; i < abs.length; j = i++) {
+        const a = abs[i]!;
+        const b = abs[j]!;
+        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+      }
+      return hit;
+    };
+    let lit = 0;
+    const N = 400;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (inside(((i + 0.5) / N) * vp.width, ((j + 0.5) / N) * vp.height)) lit++;
+    const truth = lit / (N * N);
+    expect(truth).toBeGreaterThan(0.2);
+    expect(truth).toBeLessThan(0.35);
+    // Coverage counts every cell with visible ink, so the ridge line's cells
+    // add up to one row's worth on top of the painted area.
+    expect(g.coverage).toBeGreaterThanOrEqual(truth - 0.02);
+    expect(g.coverage).toBeLessThanOrEqual(truth + 1 / 20 + 0.02); // the disc model reported ~0.87
+    expect(g.centroid!.y).toBeGreaterThan(0.8);
+    for (let row = 0; row < 10; row++) expect(g.rowProfile[row]).toBe(0);
+  });
+
+  it('a soft polygon keeps its outline and fades from its centre, as the clipped radial gradient does', () => {
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }), GRID);
+    for (const r of [0, 1, 2, 3, 6, 7, 8, 9]) expect(g.rowProfile[r]).toBe(0);
+    const at = (c: number): number => g.cells[4 * GRID.cols + c]! - g.background[4]!;
+    expect(at(11)).toBeGreaterThan(at(6));
+    expect(at(6)).toBeGreaterThan(at(3));
+  });
+
+  it('a soft additive polygon blooms past its outline by its thickness, not its circumradius', () => {
+    const glow = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }, { blend: 'lighter' }, '#101010'), GRID);
+    const hard = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }, {}, '#101010'), GRID);
+    expect(glow.coverage).toBeGreaterThan(hard.coverage); // the halo shows
+    expect(glow.coverage).toBeLessThan(0.4); // but a flat band is not a screen-filling dome
+    expect(glow.rowProfile[0]).toBe(0);
+    expect(glow.rowProfile[9]).toBe(0);
+    // A soft additive hexagon still blooms about as far as the disc model had it.
+    const hex = luminanceGrid(one({ kind: 'polygon', radius: [0.1, 0.1], sides: 6, color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    const disc = luminanceGrid(one({ kind: 'circle', radius: [0.1, 0.1], color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    expect(hex.coverage).toBeGreaterThan(disc.coverage * 0.6);
+    expect(hex.coverage).toBeLessThanOrEqual(disc.coverage);
+  });
+
+  it('fills with the canvas nonzero rule: a pentagram lights its centre', () => {
+    const star: Array<[number, number]> = [0, 2, 4, 1, 3].map((k) => {
+      const a = -Math.PI / 2 + (2 * Math.PI * k) / 5;
+      return [Math.cos(a), Math.sin(a)];
+    });
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: star }, {}, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    const centre = g.cells[10 * 48 + 24]!;
+    expect(centre).toBeGreaterThan(0.9);
+  });
+
+  it('a polygon under the size threshold keeps the cheap disc splat, weighted by its fill', () => {
+    const vp = { viewport: { width: 1920, height: 1080 } };
+    const hex = luminanceGrid(spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'polygon', radius: [20, 20], sides: 6, color: '#ffffff' }, motion: { type: 'static' } }]), vp);
+    const disc = luminanceGrid(spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [20, 20], color: '#ffffff' }, motion: { type: 'static' } }]), vp);
+    const fill = (3 * Math.sqrt(3)) / (2 * Math.PI); // regular hexagon / circumscribed disc
+    expect(disc.coverage).toBeGreaterThan(0);
+    for (let i = 0; i < disc.cells.length; i++) expect(hex.cells[i]).toBeCloseTo(disc.cells[i]! * fill, 9);
+  });
+});
+
 describe('additive-glow calibration (G1)', () => {
   it('a soft additive circle covers more than the same hard opaque circle', () => {
     const hard = luminanceGrid(spec([
