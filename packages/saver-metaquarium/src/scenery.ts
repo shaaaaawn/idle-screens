@@ -15,7 +15,7 @@ import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
-import { buildSky, LANTERN_COLOR, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
+import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 
 export interface SceneryOptions {
@@ -299,20 +299,38 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let skyCards: GlowCards | null = null;
   if (sky?.geometry) {
     sky.geometry.userData.mqOwned = true;
-    const material = new MeshBasicMaterial({ vertexColors: true });
-    material.userData.mqOwned = true;
+    // Three draws of one geometry (see LANTERN_VERTEX): the lit cores, opaque;
+    // the shells into depth only; the shells' colour, blended. The depth draw
+    // goes LAST among the opaque things, so a fish behind a bell is already
+    // on screen for the bell to be see-through to.
     const clock = { value: 0 }; clocks.push(clock);
-    material.onBeforeCompile = shader => {
-      shader.uniforms.uSkyTime = clock;
-      shader.vertexShader = 'uniform float uSkyTime; attribute vec4 aHome; attribute vec3 aJelly; attribute float aGlow; attribute float aBell;\n' + LANTERN_PARS + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', LANTERN_VERTEX)
-        .replace('#include <color_vertex>', LANTERN_COLOR);
-    };
-    material.customProgramCacheKey = () => 'sky-lanterns-v3';
-    const mesh = new Mesh(sky.geometry, material);
-    mesh.name = 'sky-lanterns';
-    mesh.frustumCulled = false;
-    group.add(mesh);
+    const draws: Array<[string, number, Partial<MeshBasicMaterial>, number]> = [
+      ['sky-lantern-cores', 0, {}, 48],
+      // Pushed back a hair: two programs never agree on depth to the last bit, and
+      // without the offset the blended draw loses the test on stray triangles.
+      ['sky-lantern-depth', 1, { colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 3 }, 49],
+      ['sky-lanterns', 2, { transparent: true, depthWrite: false }, 3],
+    ];
+    for (const [name, pass, extra, order] of draws) {
+      const material = new MeshBasicMaterial({ vertexColors: true, ...extra });
+      material.userData.mqOwned = true;
+      const uSkyPass = { value: pass };
+      material.onBeforeCompile = shader => {
+        shader.uniforms.uSkyTime = clock;
+        shader.uniforms.uSkyPass = uSkyPass;
+        shader.vertexShader = 'uniform float uSkyTime; uniform float uSkyPass; attribute vec4 aHome; attribute vec3 aJelly; attribute float aGlow; attribute vec2 aBell;\n' + LANTERN_PARS + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', LANTERN_VERTEX)
+          .replace('#include <color_vertex>', LANTERN_COLOR);
+        shader.fragmentShader = 'uniform float uSkyPass; varying vec4 vSky; varying float vSkyBeat;\n'
+          + shader.fragmentShader.replace('#include <color_fragment>', LANTERN_FRAGMENT);
+      };
+      material.customProgramCacheKey = () => 'sky-lanterns-v4';
+      const mesh = new Mesh(sky.geometry, material);
+      mesh.name = name;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = order;
+      group.add(mesh);
+    }
     skyCards = buildGlowCards(sky.lanterns.length);
     group.add(skyCards.mesh);
     counts.lanterns = sky.lanterns.length;
@@ -562,7 +580,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
           lanternAt(l, t, p);
           c.set(l.color);
           // The bloom flares on the bell's own beat, with the core it haloes.
-          const k = (l.far ? 0.2 : 0.5) * lanternLight(lanternBeat(t, l.phase));
+          const k = (l.far ? 0.2 : 0.5) * lanternLight(lanternBeat(t, l.phase, l.rate));
           skyCards!.set(i, p.x, p.y + 4 * l.size, p.z, (l.far ? 28 : 32) * l.size, c.r * k, c.g * k, c.b * k, l.phase);
         });
         skyCards.commit(sky.lanterns.length, t, glow, 0.5, fog);
