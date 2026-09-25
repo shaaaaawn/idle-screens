@@ -55,8 +55,9 @@ export const METAQUARIUM_PARAMS = {
    *  background at `fogFar`). 0 (default) is today's fog exactly. */
   water: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Output dither (±½ of an 8-bit step) on every material: the cure for
-   *  banding in dark fogged gradients on TV panels. Costs nothing. */
-  dither: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+   *  banding in dark fogged gradients on TV panels. Costs nothing per frame;
+   *  off by default only because turning it on recompiles every material. */
+  dither: { type: 'enum', default: 'off', options: ['on', 'off'], ease: 'step' },
   /** Plankton mote density, 0-1 of the device tier's mote budget. Default 0
    *  = off, so the baseline look is untouched until steered. */
   moteDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },

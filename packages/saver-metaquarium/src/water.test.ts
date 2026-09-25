@@ -55,6 +55,31 @@ describe('water', () => {
     expect(patchWater(new ShaderMaterial(), false)).toBe(false);
   });
 
+  it('survives a hook assigned AFTER it (floor pools, the eye rig): the next pass re-wraps the new hook', () => {
+    const floor = new MeshBasicMaterial();
+    patchWater(floor, false);
+    // what installFloorPools does once glowing fish arrive: assign, not wrap
+    let pools = 0;
+    floor.onBeforeCompile = () => { pools++; };
+    floor.customProgramCacheKey = () => 'mq-floor-pools-v6';
+    expect(patchWater(floor, false)).toBe(true);
+    const sh = shader();
+    floor.onBeforeCompile(sh as never, null as never);
+    expect(pools).toBe(1); //                          the pools patch still runs
+    expect(sh.fragmentShader).toContain('mqWaterFog('); // and so does the water
+    expect(floor.customProgramCacheKey()).toBe('mq-floor-pools-v6|mq-water-v1');
+    expect(patchWater(floor, false)).toBe(false); //   and it is stable from there
+  });
+
+  it('re-wrapping a hook assigned without its own key keys on that hook, not on the old wrap', () => {
+    const m = new MeshBasicMaterial();
+    patchWater(m, false);
+    m.onBeforeCompile = (sh) => { sh.fragmentShader += '// eyes'; };
+    patchWater(m, false);
+    expect(m.customProgramCacheKey()).toContain('// eyes');
+    expect(m.customProgramCacheKey().match(/mq-water-v1/g)).toHaveLength(1);
+  });
+
   it('exports a GLSL function the hand-rolled shaders can share', () => {
     expect(WATER_FOG_GLSL).toMatch(/vec3 mqWaterFog\(float d, float near, float far\)/);
   });

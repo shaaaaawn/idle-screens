@@ -55,7 +55,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fogFar: 'Where everything has dissolved into the water. Raise to 700–1000 for castles and horizons.',
   floorColor: 'Sea-floor colour.',
   water: 'Water instead of fog: red fades with distance first, then green, blue last — a red fish goes blue-green before it goes into the murk. 0.6–1 for most scenes; 0 is plain fog.',
-  dither: '`on` (default) adds an invisible dither that removes colour banding in dark fogged gradients on TVs; `off` for byte-exact comparisons.',
+  dither: '`on` adds an invisible dither that removes colour banding in dark fogged gradients on TVs. Recommended with `water`; `off` (default) is byte-exact with older scenes.',
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',

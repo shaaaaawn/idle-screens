@@ -2349,7 +2349,7 @@ class TankInstance implements SaverInstance {
    */
   private applyWater(): void {
     const water = this.num('water');
-    const dither = this.str('dither') !== 'off';
+    const dither = this.str('dither') === 'on';
     WATER.value = water;
     if (water > 0) this.waterInstalled = true;
     const install = this.waterInstalled;
