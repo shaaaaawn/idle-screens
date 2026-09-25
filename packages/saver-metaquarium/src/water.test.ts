@@ -1,5 +1,6 @@
 import { MeshBasicMaterial, MeshLambertMaterial, ShaderMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
+import { stackPatch } from './hooks';
 import { patchWater, WATER, WATER_FOG_GLSL, WATER_RATIO, waterFog } from './water';
 
 const shader = (): { uniforms: Record<string, unknown>; fragmentShader: string; vertexShader: string } => ({
@@ -78,6 +79,24 @@ describe('water', () => {
     patchWater(m, false);
     expect(m.customProgramCacheKey()).toContain('// eyes');
     expect(m.customProgramCacheKey().match(/mq-water-v1/g)).toHaveLength(1);
+  });
+
+  it('settles beside another stacked patch re-applied every frame (the swim wave): no re-wrap, no key growth', () => {
+    const m = new MeshBasicMaterial();
+    let hook = m.onBeforeCompile, key = '';
+    for (let frame = 0; frame < 6; frame++) {
+      patchWater(m, false);
+      stackPatch(m, 'mq-wave-v1', (sh) => { sh.vertexShader += '//wave'; });
+      if (frame > 0) {
+        expect(m.onBeforeCompile).toBe(hook);
+        expect(m.customProgramCacheKey()).toBe(key);
+      }
+      hook = m.onBeforeCompile; key = m.customProgramCacheKey();
+    }
+    const sh = shader();
+    m.onBeforeCompile(sh as never, null as never);
+    expect(sh.fragmentShader.match(/mqWaterFog\( vFogDepth/g)).toHaveLength(1);
+    expect(sh.vertexShader).toBe('//wave');
   });
 
   it('exports a GLSL function the hand-rolled shaders can share', () => {

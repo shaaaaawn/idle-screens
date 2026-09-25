@@ -22,6 +22,7 @@
  */
 
 import type { Material } from 'three';
+import { stackPatch } from './hooks';
 
 /** How much faster each channel runs out than blue, at full water. Red is
  *  gone in 40 % of the fog span, green in 70 %. */
@@ -80,39 +81,24 @@ export function setDither(material: Material, on: boolean): void {
   m.needsUpdate = true;
 }
 
+export const WATER_TAG = 'mq-water-v1';
+
 export function patchWater(material: Material, dither: boolean): boolean {
   const m = material as Material & { fog?: boolean; isShaderMaterial?: boolean };
   if (m.isShaderMaterial) return false;
   setDither(m, dither);
   if (m.fog === false) return false;
-  // Patched, and still ours? Other parts of the tank ASSIGN a material's hook
-  // later (the floor's light pools once glowing fish arrive, the eye rig when
-  // eyeLife is steered on). That drops this wrap silently, so a flag alone
-  // would leave the material on plain fog for good. Compare the hook itself.
-  if (m.userData.mqWaterHook && m.onBeforeCompile === m.userData.mqWaterHook) return false;
-  const before = m.onBeforeCompile;
-  // The key the material had. Three's default is `onBeforeCompile.toString()`
-  // evaluated LATE — after this wrap it would be the wrapper's own text for
-  // every material, merging different patches into one program. So: the
-  // material's own key function if it set one (and it is not our previous
-  // wrap's), else its current hook's text.
-  const ownKey = Object.prototype.hasOwnProperty.call(m, 'customProgramCacheKey') ? m.customProgramCacheKey : null;
-  const own = ownKey && ownKey !== m.userData.mqWaterKey ? ownKey : null;
-  const beforeText = before.toString();
-  const hook: Material['onBeforeCompile'] = (shader, renderer) => {
-    before.call(m, shader, renderer);
+  // Stacked, not assigned: the eyes and the swim wave patch the same fish
+  // materials. And other parts of the tank ASSIGN a material's hook later
+  // (the floor's light pools once glowing fish arrive, the eye rig when
+  // eyeLife is steered on), dropping this wrap — `stackPatch` sees the tag
+  // is gone from the chain and wraps again; a chain that has it is left alone.
+  return stackPatch(m, WATER_TAG, (shader) => {
     if (!shader.fragmentShader.includes('#include <fog_fragment>')) return;
     shader.uniforms.uMqWater = WATER;
     shader.uniforms.uMqWaterRatio = RATIO;
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <fog_pars_fragment>', `#include <fog_pars_fragment>\n${WATER_FOG_GLSL}`)
       .replace('#include <fog_fragment>', FOG_FRAGMENT);
-  };
-  const key = (): string => `${own ? own.call(m) : beforeText}|mq-water-v1`;
-  m.onBeforeCompile = hook;
-  m.customProgramCacheKey = key;
-  m.userData.mqWaterHook = hook;
-  m.userData.mqWaterKey = key;
-  m.needsUpdate = true;
-  return true;
+  });
 }
