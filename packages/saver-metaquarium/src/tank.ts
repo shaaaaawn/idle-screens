@@ -564,7 +564,6 @@ class TankInstance implements SaverInstance {
   /** Heading (xz) of each spotted fish, for its shadow. */
   private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
   private readonly spotLevel = [0, 0, 0];
-  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
@@ -572,6 +571,8 @@ class TankInstance implements SaverInstance {
   private readonly spotLamp = new Vector3();
   private readonly spotHit = new Vector3();
   private readonly spotTint = new Color();
+  /** The swim wave's per-fish state, reused every frame. */
+  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
   private vignetteKey = '';
