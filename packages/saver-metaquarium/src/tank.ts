@@ -1,3 +1,4 @@
+import { patchWater, setDither, WATER } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -559,6 +560,8 @@ class TankInstance implements SaverInstance {
   /** Heading (xz) of each spotted fish, for its shadow. */
   private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
   private readonly spotLevel = [0, 0, 0];
+  /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
+  private waterInstalled = false;
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
@@ -2330,7 +2333,34 @@ class TankInstance implements SaverInstance {
 
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
+    this.applyWater();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Water and dither, set right before THIS tank renders: `WATER` is one
+   * module uniform, and two tanks on a page (the Dev Tools crossfade) each
+   * write their own value and render with it in the same call.
+   *
+   * Materials are patched as they appear — fish arrive asynchronously, and a
+   * scenery rebuild makes new ones — so this walks the scene each frame and
+   * skips what it has seen. Water is installed only once it has been turned
+   * on: a tank that never asks for it compiles the stock fog.
+   */
+  private applyWater(): void {
+    const water = this.num('water');
+    const dither = this.str('dither') !== 'off';
+    WATER.value = water;
+    if (water > 0) this.waterInstalled = true;
+    const install = this.waterInstalled;
+    this.scene.traverse((o) => {
+      const mat = (o as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        if (install) patchWater(m, dither);
+        else setDither(m, dither);
+      }
+    });
   }
 
   private start(): void {
