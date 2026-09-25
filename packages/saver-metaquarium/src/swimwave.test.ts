@@ -121,6 +121,32 @@ describe('rigSwimWave', () => {
     rig.ensure();
     expect(compile(mesh.material as Material).vertexShader).toContain('uWaveTo');
   });
+  it('settles when another stacked patch re-applies alongside it every frame (water does)', () => {
+    const { group, body } = fish();
+    const rig = rigSwimWave(group, body)!;
+    const mat = (body.children[0] as Mesh).material as Material;
+    let hook = mat.onBeforeCompile, key = mat.customProgramCacheKey();
+    for (let frame = 0; frame < 6; frame++) {
+      stackPatch(mat, 'mq-water-v1', (sh) => { sh.fragmentShader += '//water'; });
+      rig.ensure();
+      if (frame > 0) {
+        expect(mat.onBeforeCompile).toBe(hook);
+        expect(mat.customProgramCacheKey()).toBe(key);
+      }
+      hook = mat.onBeforeCompile; key = mat.customProgramCacheKey();
+    }
+    const s = compile(mat);
+    expect(s.vertexShader.match(/uniform vec3 uWave;/g)).toHaveLength(1);
+    expect(s.fragmentShader.match(/\/\/water/g)).toHaveLength(1);
+  });
+  it('never shares a material with another fish\'s wave', () => {
+    const a = fish(), b = fish();
+    const shared = new MeshBasicMaterial(); shared.userData.mqOwned = true;
+    for (const f of [a, b]) for (const m of f.body.children as Mesh[]) m.material = shared;
+    rigSwimWave(a.group, a.body); rigSwimWave(b.group, b.body);
+    const mats = [...a.body.children, ...b.body.children].map((m) => (m as Mesh).material);
+    expect(new Set(mats).size).toBe(4);
+  });
   it('sets the shared wave uniform', () => {
     const { group, body } = fish();
     const rig = rigSwimWave(group, body)!;

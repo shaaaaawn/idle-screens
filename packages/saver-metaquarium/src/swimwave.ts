@@ -64,6 +64,7 @@ export function waveOffset(s: number, w: WaveState): number {
   return w.amp * env * Math.sin((s / WAVELENGTH) * Math.PI * 2 - w.phase) + w.bend * (s - 0.5) * (s - 0.5);
 }
 
+export const WAVE_TAG = 'mq-wave-v1';
 const WAVE_PARS = 'uniform vec3 uWave; uniform vec2 uWaveBody; uniform mat4 uWaveTo; uniform mat4 uWaveFrom;\n';
 // Runs just before projection: after skinning, morphs and the glow halos' push.
 const WAVE_VERTEX = /* glsl */ `
@@ -119,7 +120,9 @@ export function rigSwimWave(group: Object3D, body: Object3D): WaveRig | null {
   const seen = new Set<Material>();
   const parts = meshes.map((m) => {
     let mat = m.material as Material;
-    if (seen.has(mat) || !mat.userData.mqOwned) {
+    // Clone when this fish already claimed it, when it is a template's shared
+    // atlas, or when another fish's wave is already on it (its frame, not ours).
+    if (seen.has(mat) || !mat.userData.mqOwned || hasPatch(mat, WAVE_TAG)) {
       mat = cloneWithHooks(mat);
       mat.userData.mqOwned = true;
       m.material = mat;
@@ -129,8 +132,9 @@ export function rigSwimWave(group: Object3D, body: Object3D): WaveRig | null {
     return { m, uTo: { value: to }, uFrom: { value: to.clone().invert() } };
   });
   const attach = (p: (typeof parts)[number]): void => {
-    stackPatch(p.m.material as Material, 'mq-wave-v1', (shader) => {
-      if (!shader.vertexShader.includes('#include <project_vertex>')) return;
+    stackPatch(p.m.material as Material, WAVE_TAG, (shader) => {
+      // Idempotent: a chain that somehow runs the wave twice must not redeclare its uniforms.
+      if (!shader.vertexShader.includes('#include <project_vertex>') || shader.vertexShader.includes('uWaveTo')) return;
       Object.assign(shader.uniforms, { uWave: wave, uWaveBody: bodyU, uWaveTo: p.uTo, uWaveFrom: p.uFrom });
       shader.vertexShader = WAVE_PARS + shader.vertexShader.replace('#include <project_vertex>', WAVE_VERTEX);
     });
@@ -139,6 +143,6 @@ export function rigSwimWave(group: Object3D, body: Object3D): WaveRig | null {
   return {
     meshes: parts.length,
     set(w) { wave.value.set(w.phase, w.amp, w.bend); },
-    ensure() { for (const p of parts) if (!hasPatch(p.m.material as Material, 'mq-wave-v1')) attach(p); },
+    ensure() { for (const p of parts) if (!hasPatch(p.m.material as Material, WAVE_TAG)) attach(p); },
   };
 }

@@ -41,7 +41,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   maneuver: 'Which set-piece moves the cast may break into.',
   maneuverRate: 'How often maneuvers happen.',
   maneuverIntensity: 'How big they are.',
-  bodyWiggle: 'Body yaw while swimming, for models without an animation clip.',
+  bodyWiggle: 'Body yaw while swimming, for models without an animation clip. A fish the swim wave bends (`swimWave` > 0) ignores it.',
   lightSeek: 'How much fish are drawn toward light sources.',
   formationBreathe: 'How much a formation swells and tightens.',
   // look
