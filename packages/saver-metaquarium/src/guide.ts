@@ -48,6 +48,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishLighting: '`lit` (default) lights fish with a studio rig and their own glow parts; `flat` is the unlit original.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
+  bubbleStyle: 'How vent bubbles live: `classic` loops puffs; `live` grows each bubble at the vent, lets it go, rises it to the water surface (if the environment has one) and pops it, and rests a vent for a minute now and then. Distant bubbles dim instead of fattening.',
+  pearling: 'Oxygen pearls on the plants: beads grow on the leaves over half a minute or more, sway with them and let go (0 = none). Needs floraDensity > 0; with no flora there is nothing to pearl on.',
+  co2Mist: 'A fine haze of tiny bubbles from the vents, drifting on a slow current (0 = none).',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',

@@ -14,7 +14,22 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
-import { createMetaquarium, FISH_CATALOG, NPC_CATALOG, RECIPES, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
+import { createMetaquarium as createMetaquariumBase, FISH_CATALOG, NPC_CATALOG, RECIPES, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
+
+/**
+ * `?mq.<param>=<value>` layers onto EVERY metaquarium scene in the playground
+ * (`?saver=metaquarium-world-geode-harbor&mq.water=1`): the way to see one
+ * param across the shelves, and to shoot before/after pairs from a script.
+ * Numbers parse as numbers; anything else stays a string.
+ */
+const MQ_URL_PARAMS: Record<string, string | number> = Object.fromEntries(
+  [...new URLSearchParams(location.search)].filter(([k]) => k.startsWith('mq.'))
+    .map(([k, v]) => [k.slice(3), v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v]),
+);
+const createMetaquarium: typeof createMetaquariumBase = (opts = {}) =>
+  createMetaquariumBase(Object.keys(MQ_URL_PARAMS).length
+    ? { ...opts, params: { ...(opts.params ?? {}), ...MQ_URL_PARAMS } as NonNullable<typeof opts.params> }
+    : opts);
 import { CLASSIC_SAVERS } from '@idle-screens/savers-classic';
 import { AURORA_SPEC, COMETS_SPEC, compileSaver, CONSTELLATION_SPEC, DASHBOARD_SPEC, FACETS_SPEC, HAIKU_SPEC, LANTERNS_SPEC, MATRIX_RAIN_SPEC, NOSTALGHIA_CANDLE_SPEC, PINGS_SPEC, POLYGONS_SPEC, ORRERY_SPEC, PROCESSION_SPEC, RELAY_BOARD_SPEC, SAKURA_SPEC, SNOWFALL_SPEC, WARP_TUNNEL_SPEC } from '@idle-screens/schema';
 import type { FlashReport } from '@idle-screens/validator';

@@ -963,9 +963,11 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
+    const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
+    const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -974,9 +976,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same
@@ -1741,6 +1743,7 @@ class TankInstance implements SaverInstance {
     this.buildScenery();
     // After the scenery: a vignette may name the world's own marks (home doors, a gate).
     this.buildVignette();
+    this.scenery?.setSurface(this.ceiling ? this.ceiling.position.y : null);
     this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {

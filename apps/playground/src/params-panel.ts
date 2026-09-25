@@ -131,7 +131,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['formation', ['formationShape', 'formationBreathe']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
+    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'floorColor', 'moteDensity', 'moteColor']],
   ],
