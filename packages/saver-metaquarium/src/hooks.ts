@@ -19,6 +19,8 @@
 import type { Material } from 'three';
 
 type Hook = Material['onBeforeCompile'] & { mqTags?: ReadonlySet<string> };
+/** A key this module installed, and the hook it was installed with. */
+type Key = (() => string) & { mqFor?: Hook };
 type Shader = Parameters<Material['onBeforeCompile']>[0];
 
 export function hasPatch(material: Material, tag: string): boolean {
@@ -30,7 +32,11 @@ export function stackPatch(material: Material, tag: string, patch: (shader: Shad
   if (hasPatch(material, tag)) return false;
   const m = material;
   const before = m.onBeforeCompile as Hook;
-  const own = Object.prototype.hasOwnProperty.call(m, 'customProgramCacheKey') ? m.customProgramCacheKey : null;
+  // The material's own key, unless it is a key this module installed for a
+  // DIFFERENT hook: then someone assigned a new hook without a key of its own,
+  // and the key must come from that hook, not from the chain it replaced.
+  const ownKey = Object.prototype.hasOwnProperty.call(m, 'customProgramCacheKey') ? (m.customProgramCacheKey as Key) : null;
+  const own = ownKey && (!ownKey.mqFor || ownKey.mqFor === before) ? ownKey : null;
   const beforeText = before.toString();
   const hook: Hook = (shader, renderer) => {
     before.call(m, shader, renderer);
@@ -38,7 +44,9 @@ export function stackPatch(material: Material, tag: string, patch: (shader: Shad
   };
   hook.mqTags = new Set([...(before.mqTags ?? []), tag]);
   m.onBeforeCompile = hook;
-  m.customProgramCacheKey = () => `${own ? own.call(m) : beforeText}|${tag}`;
+  const key: Key = () => `${own ? own.call(m) : beforeText}|${tag}`;
+  key.mqFor = hook;
+  m.customProgramCacheKey = key;
   m.needsUpdate = true;
   return true;
 }
