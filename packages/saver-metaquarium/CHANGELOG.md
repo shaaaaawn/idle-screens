@@ -1,5 +1,27 @@
 # @idle-screens/saver-metaquarium
 
+## 0.10.0
+
+### Minor Changes
+
+- db21004: Jellyfish are glass. The flotilla is drawn three times from one geometry — the lit cores opaque, the shells into depth only, then the shells' colour blended — so a bell is see-through to its own lantern and to the water (and the fish) behind it, but never to its own inner voxel faces. Face-on it is nearly clear, at a grazing edge solid and bright, lit from inside (more on the squeeze), with a faint film of colour in the rim; lines stay nearly solid and the far giants fainter. Behaviour: each jelly is thrown upward by its squeeze and sinks until the next (a quick rise, a long fall), and beats at its own rate — small bells quicker, the far giants slow. Two extra draw calls for the whole sky.
+
+### Patch Changes
+
+- 971f03e: Fixes for the 0.9.0 mineral-world release, found in post-merge review:
+  
+  - `vignette`: `follow` onto a mark (not another actor) now reports a
+    validation problem instead of silently doing nothing; a `circle` beat
+    combined with `>mark` no longer leaves a stale position that teleports
+    the actor at the next beat boundary.
+  - `recipeTrack()` now returns the `program`/`seed` fields its `ControlTrack`
+    return type promises, so a recipe can be published directly.
+  - Crystal floor light pools now use the emitter's full `reach` (was scaled
+    by `0.55`), matching the light field fish and other geometry sample.
+  - A fish spawned before the tank's first material-mode reconcile now gets
+    the correct lit/flat material immediately, instead of momentarily
+    defaulting to flat regardless of `fishLighting`.
+
 ## 0.9.0
 
 ### Minor Changes
