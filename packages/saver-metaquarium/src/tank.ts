@@ -91,6 +91,7 @@ import {
   type SwimPose,
   type TankBounds,
 } from './plan';
+import { Shoal, SHOAL_KINDS, type Carrier, type ShoalKind } from './shoal';
 import {
   effectivePixelRatio,
   probeSoftwareGL,
@@ -643,6 +644,25 @@ class TankInstance implements SaverInstance {
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
   private carrierPlan: SwimPlan;
+  /** The ambient school (`shoal`): its own route, rebuilt only when its key changes. */
+  private shoal: Shoal | null = null;
+  private shoalKey = '';
+  private shoalPlan: SwimPlan | null = null;
+  private shoalTau = 0;
+  private readonly shoalFloor = (x: number, z: number): number => this.floorHeightAt?.(x, z) ?? 0;
+  /** The school's centre at swim-time τ: a slower route of its own, its heading
+   *  a chord average (as the carrier does), kept inside the tank by its centre. */
+  private readonly shoalCarrier = (tau: number, along: number): Carrier => {
+    const plan = this.shoalPlan!, L = this.shoal!.length, g = Math.cbrt(this.shoal!.count / 30);
+    const d = distanceAt(plan, tau, 0.8) + along;
+    const c = swimPoseAtDistance(plan, d);
+    const a = swimPoseAtDistance(plan, d + L * 2), b = swimPoseAtDistance(plan, d - L * 2);
+    let fx = a.x - b.x, fz = a.z - b.z;
+    if (Math.hypot(fx, fz) < 1e-3) { fx = c.fx; fz = c.fz; }
+    const reach = (2.2 * g + 1) * L, up = (1.8 * g + 1) * L;
+    const maxR = Math.max(0, BOUNDS.radius - reach), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    return { x: c.x * cs, y: Math.min(BOUNDS.yMax - up, Math.max(BOUNDS.yMin + up, c.y)), z: c.z * cs, fx, fz };
+  };
   /** Shape every live plan was compiled on — setState recompiles when the
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
@@ -1334,6 +1354,32 @@ class TankInstance implements SaverInstance {
     f.tinted = true;
   }
 
+  /** The ambient school: count from `shoal` and the tier, look from `shoalKind`. */
+  private buildShoal(): void {
+    const count = Math.round(this.num('shoal') * this.quality.fishCap * 2.5);
+    const rawKind = this.str('shoalKind');
+    // str() is unvalidated (the classic lane is intake-unvalidated, MQ17),
+    // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
+    const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
+    const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    const key = `${count}|${kind}|${lit}`;
+    if (key === this.shoalKey) return;
+    this.shoalKey = key;
+    if (this.shoal) {
+      this.scene.remove(this.shoal.mesh);
+      disposeOwned(this.shoal.mesh);
+      // Its instance buffers are not the geometry's: free them too.
+      this.shoal.mesh.dispose();
+      this.shoal = null;
+    }
+    if (count < 3) return;
+    // Its own route whatever the cast swims: a figure of eight over the whole
+    // tank — long runs and wide turns, which is how a school uses a room.
+    this.shoalPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight');
+    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32 });
+    this.scene.add(this.shoal.mesh);
+  }
+
   /**
    * The carrier's frame for this instant — position, heading basis, and the
    * inward pull that keeps the shoal in the glass. Once per frame, shared by
@@ -1762,6 +1808,11 @@ class TankInstance implements SaverInstance {
     }
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
+    this.buildShoal();
+    if (this.shoal) {
+      this.shoalTau = warpSec;
+      this.shoal.update(warpSec, this.shoalCarrier, this.shoalFloor);
+    }
 
     const sceneStyleName = this.str('swimStyle');
     // `auto` is not a style: each untagged fish resolves to its breed's
@@ -2365,6 +2416,7 @@ class TankInstance implements SaverInstance {
         formationBreathe: this.num('formationBreathe'),
       },
       quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor) : null,
       fish,
     };
   }
