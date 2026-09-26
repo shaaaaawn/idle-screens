@@ -1,3 +1,4 @@
+import { patchWater, setDither, WATER } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -53,8 +54,10 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -79,6 +82,7 @@ import {
   isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
+import { applyCaustics, CAUSTIC, CAUSTIC_WINDOW } from './caustics';
 import {
   compileSwimPlan,
   PATH_SHAPES,
@@ -89,6 +93,7 @@ import {
   type SwimPose,
   type TankBounds,
 } from './plan';
+import { Shoal, SHOAL_KINDS, type Carrier, type ShoalKind } from './shoal';
 import {
   effectivePixelRatio,
   probeSoftwareGL,
@@ -466,6 +471,8 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
+  wave?: WaveRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -480,6 +487,8 @@ interface InspectFish {
   bond: string;
   /** Formation seat, or null for a free fish. */
   seat: number | null;
+  /** Whether the swim wave is bending this fish (false for a breed it skips, or `swimWave: 0`). */
+  waving: boolean;
   x: number;
   y: number;
   z: number;
@@ -524,6 +533,9 @@ class TankInstance implements SaverInstance {
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
   private readonly floorMat: MeshBasicMaterial;
+  /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
+  private finishPass: FinishPass | null = null;
+  private finishAmount = 0;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -532,6 +544,9 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  /** Caustics: installed the first frame `caustics` goes above 0, then kept (0 multiplies by 1). */
+  private causticsInstalled = false;
+  private readonly causticState = new Vector4(0, 12, 0, 132);
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
@@ -571,6 +586,8 @@ class TankInstance implements SaverInstance {
   private followHasTrail = false;
   private followState: { slot: number; x: number; y: number; z: number } | null = null;
   private readonly spotLevel = [0, 0, 0];
+  /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
+  private waterInstalled = false;
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
@@ -578,6 +595,8 @@ class TankInstance implements SaverInstance {
   private readonly spotLamp = new Vector3();
   private readonly spotHit = new Vector3();
   private readonly spotTint = new Color();
+  /** The swim wave's per-fish state, reused every frame. */
+  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
   private vignetteKey = '';
@@ -645,6 +664,25 @@ class TankInstance implements SaverInstance {
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
   private carrierPlan: SwimPlan;
+  /** The ambient school (`shoal`): its own route, rebuilt only when its key changes. */
+  private shoal: Shoal | null = null;
+  private shoalKey = '';
+  private shoalPlan: SwimPlan | null = null;
+  private shoalTau = 0;
+  private readonly shoalFloor = (x: number, z: number): number => this.floorHeightAt?.(x, z) ?? 0;
+  /** The school's centre at swim-time τ: a slower route of its own, its heading
+   *  a chord average (as the carrier does), kept inside the tank by its centre. */
+  private readonly shoalCarrier = (tau: number, along: number): Carrier => {
+    const plan = this.shoalPlan!, L = this.shoal!.length, g = Math.cbrt(this.shoal!.count / 30);
+    const d = distanceAt(plan, tau, 0.8) + along;
+    const c = swimPoseAtDistance(plan, d);
+    const a = swimPoseAtDistance(plan, d + L * 2), b = swimPoseAtDistance(plan, d - L * 2);
+    let fx = a.x - b.x, fz = a.z - b.z;
+    if (Math.hypot(fx, fz) < 1e-3) { fx = c.fx; fz = c.fz; }
+    const reach = (2.2 * g + 1) * L, up = (1.8 * g + 1) * L;
+    const maxR = Math.max(0, BOUNDS.radius - reach), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    return { x: c.x * cs, y: Math.min(BOUNDS.yMax - up, Math.max(BOUNDS.yMin + up, c.y)), z: c.z * cs, fx, fz };
+  };
   /** Shape every live plan was compiled on — setState recompiles when the
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
@@ -975,9 +1013,11 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
+    const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
+    const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -986,9 +1026,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same
@@ -1312,6 +1352,26 @@ class TankInstance implements SaverInstance {
     this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
   }
 
+  /**
+   * The finish wraps the renderer's own render for THIS scene only (the
+   * passes it draws go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets it, and at 0 the call is the original.
+   * Mid and high tiers only; bloom on high.
+   */
+  private updateFinish(): void {
+    const amount = this.num('finish');
+    const tier = this.quality.glowLights;
+    this.finishAmount = tier >= 3 ? amount : 0;
+    if (this.finishAmount <= 0 || this.finishPass) return;
+    const pass = new FinishPass({ bloom: tier >= 4 });
+    this.finishPass = pass;
+    const raw = this.renderer.render.bind(this.renderer);
+    this.renderer.render = (scene, camera) => {
+      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      else raw(scene, camera);
+    };
+  }
+
   private installPools(): void {
     this.poolsInstalled = true;
     installFloorPools(this.floorMat, this.poolUniforms);
@@ -1375,6 +1435,32 @@ class TankInstance implements SaverInstance {
       t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
     }
     f.tinted = true;
+  }
+
+  /** The ambient school: count from `shoal` and the tier, look from `shoalKind`. */
+  private buildShoal(): void {
+    const count = Math.round(this.num('shoal') * this.quality.fishCap * 2.5);
+    const rawKind = this.str('shoalKind');
+    // str() is unvalidated (the classic lane is intake-unvalidated, MQ17),
+    // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
+    const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
+    const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    const key = `${count}|${kind}|${lit}`;
+    if (key === this.shoalKey) return;
+    this.shoalKey = key;
+    if (this.shoal) {
+      this.scene.remove(this.shoal.mesh);
+      disposeOwned(this.shoal.mesh);
+      // Its instance buffers are not the geometry's: free them too.
+      this.shoal.mesh.dispose();
+      this.shoal = null;
+    }
+    if (count < 3) return;
+    // Its own route whatever the cast swims: a figure of eight over the whole
+    // tank — long runs and wide turns, which is how a school uses a room.
+    this.shoalPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight');
+    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32 });
+    this.scene.add(this.shoal.mesh);
   }
 
   /**
@@ -1725,6 +1811,7 @@ class TankInstance implements SaverInstance {
   private setState(t: number): void {
     const tSec = t / 1000;
     this.applyParams(t);
+    this.updateFinish();
     const speed = this.num('swimSpeed');
     // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
     // glide (MQ11 — multiplying the whole elapsed integral teleported every
@@ -1745,6 +1832,7 @@ class TankInstance implements SaverInstance {
 
     this.ensureStudio();
     this.reconcile();
+    this.updateCaustics(tSec);
 
     // Camera orbit
     const rotation = rateOffset(
@@ -1796,6 +1884,7 @@ class TankInstance implements SaverInstance {
     this.buildScenery();
     // After the scenery: a vignette may name the world's own marks (home doors, a gate).
     this.buildVignette();
+    this.scenery?.setSurface(this.ceiling ? this.ceiling.position.y : null);
     this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
@@ -1804,6 +1893,11 @@ class TankInstance implements SaverInstance {
     }
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
+    this.buildShoal();
+    if (this.shoal) {
+      this.shoalTau = warpSec;
+      this.shoal.update(warpSec, this.shoalCarrier, this.shoalFloor);
+    }
 
     const sceneStyleName = this.str('swimStyle');
     // `auto` is not a style: each untagged fish resolves to its breed's
@@ -1903,6 +1997,7 @@ class TankInstance implements SaverInstance {
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
     const eyeLife = this.num('eyeLife');
+    const swimWave = this.num('swimWave');
     this.buildSpotRig();
     this.spotSeen.fill(false);
     const followSlot = Math.round(this.num('cameraFollow'));
@@ -1982,6 +2077,8 @@ class TankInstance implements SaverInstance {
       // whose tails were out of step with its travel — fish moonwalking.
       let beat = effort;
       let pose;
+      // Where the fish's heading comes from, for the swim wave's C-bend.
+      let turnPlan: SwimPlan | null = null, turnD = 0;
       if (style.formation) {
         // Carrier school: ONE route, fish held in slots in its local frame, so
         // the shoal turns as a body.
@@ -2017,6 +2114,7 @@ class TankInstance implements SaverInstance {
           this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
         }
         beat = cf.lead;
+        turnPlan = this.carrierPlan; turnD = cf.lead;
         // A seated fish can lead too: a bonded fish after a school trails
         // the CARRIER route behind the whole formation, which is what
         // "follow the school" should mean. Retires any half-formed pair.
@@ -2065,6 +2163,7 @@ class TankInstance implements SaverInstance {
             const tr = swimPoseAtDistance(rel.plan, rel.d - lag - FOLLOW_TRAIL);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
           }
+          turnPlan = rel.plan; turnD = rel.d - lag;
           beat = rel.effort - lag;
           const hl = Math.hypot(pose.fx, pose.fz) || 1;
           const rxn = pose.fz / hl, rzn = -pose.fx / hl;
@@ -2094,6 +2193,7 @@ class TankInstance implements SaverInstance {
             const tr = swimPoseAtDistance(f.plan, d - FOLLOW_TRAIL);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
           }
+          turnPlan = f.plan; turnD = d;
           // Light-seeking: each free fish is drawn toward ITS shaft (chosen
           // by index, so the choice never flips as it moves) by a per-fish
           // appetite. The loop shrinks toward the pool — still the same
@@ -2282,6 +2382,29 @@ class TankInstance implements SaverInstance {
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
+      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
+      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
+      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
+      // move the meshes inside the fish frame the wave was measured in.
+      if (swimWave > 0 && f.body && f.wave === undefined) {
+        f.body.rotation.y = f.baseYaw;
+        if (f.mixer) f.mixer.setTime(0);
+        const breed = this.wantBreeds[f.index] ?? null;
+        f.wave = waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+      }
+      const waving = swimWave > 0 && !!f.wave;
+      if (f.wave) {
+        f.wave.ensure();
+        let turn = 0;
+        if (waving && turnPlan && !act) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
+          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        }
+        const flurry = mnv.flurry + flurryBoost;
+        f.wave.set(waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch));
+      }
+
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
       // A distance-driven yaw on the body fixes the whole library at once and
@@ -2290,13 +2413,13 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        const w = Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
+        const w = waving ? 0 : Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
         f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          waving ? 0 : (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
@@ -2311,6 +2434,7 @@ class TankInstance implements SaverInstance {
         band: bandStyle.band,
         bond,
         seat: style.formation ? seat : null,
+        waving,
         x: Math.round(px * 10) / 10,
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
@@ -2419,15 +2543,65 @@ class TankInstance implements SaverInstance {
         formationBreathe: this.num('formationBreathe'),
       },
       quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor) : null,
       fish,
     };
+  }
+
+  /**
+   * Caustics (caustics.ts): the net of light from the surface on every
+   * opaque surface. Patched the first frame it is asked for, so `caustics: 0`
+   * compiles the stock programs; the shared uniform is written in the scene's
+   * onBeforeRender so crossfading tanks each draw with their own.
+   */
+  private updateCaustics(tSec: number): void {
+    const strength = this.num('caustics');
+    if (strength > 0 && !this.causticsInstalled) {
+      this.causticsInstalled = true;
+      this.scene.onBeforeRender = () => {
+        // The ceiling moves with waterY; read it at draw time.
+        this.causticState.w = this.ceiling ? this.ceiling.position.y : BOUNDS.yMax + 60;
+        CAUSTIC.value.copy(this.causticState);
+      };
+    }
+    if (!this.causticsInstalled) return;
+    this.causticState.set(strength, 12 * this.num('causticScale'), ((tSec % CAUSTIC_WINDOW) + CAUSTIC_WINDOW) % CAUSTIC_WINDOW, this.causticState.w);
+    // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
+    applyCaustics(this.scene, this.quality.glowLights >= 3 ? 2 : 1);
   }
 
   // ---- render ----
 
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
+    this.applyWater();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Water and dither, set right before THIS tank renders: `WATER` is one
+   * module uniform, and two tanks on a page (the Dev Tools crossfade) each
+   * write their own value and render with it in the same call.
+   *
+   * Materials are patched as they appear — fish arrive asynchronously, and a
+   * scenery rebuild makes new ones — so this walks the scene each frame and
+   * skips what it has seen. Water is installed only once it has been turned
+   * on: a tank that never asks for it compiles the stock fog.
+   */
+  private applyWater(): void {
+    const water = this.num('water');
+    const dither = this.str('dither') === 'on';
+    WATER.value = water;
+    if (water > 0) this.waterInstalled = true;
+    const install = this.waterInstalled;
+    this.scene.traverse((o) => {
+      const mat = (o as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        if (install) patchWater(m, dither);
+        else setDither(m, dither);
+      }
+    });
   }
 
   private start(): void {
@@ -2563,6 +2737,7 @@ class TankInstance implements SaverInstance {
 
   dispose(): void {
     this.disposed = true;
+    this.finishPass?.dispose();
     this.stop();
     for (const f of this.fish) {
       if (!f) continue;

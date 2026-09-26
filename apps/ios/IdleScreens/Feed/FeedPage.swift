@@ -839,12 +839,17 @@ private struct HistoryMomentPage: View {
             if let scene, scene.needsWebEngine {
                 // Neighbours stay a cheap native still; only the page you are
                 // ON gets the engine, and only once the swipe has settled.
-                // The 2D stand-in is the loading scene: it swims while the real
-                // tank boots and fills, and the fish-ring over it says so. It
-                // only hands over once the 3D cast has actually arrived.
+                // Placeholder until the real engine has painted.
+                // A tank's 2D stand-in is itself the loading scene: it swims,
+                // and the fish-ring over it says so. Any other scene's native
+                // frame may be the WRONG layout (that is why it is going to the
+                // web), so it holds still and dimmed rather than animating a
+                // version that is about to be replaced.
                 if !isShowing || !tankIsIn {
-                    RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
+                    RecordedSceneView(scene: scene, channelId: channelId,
+                                      animating: isShowing && scene.isTank)
                         .ignoresSafeArea()
+                        .opacity(isShowing && !scene.isTank ? 0.55 : 1)
                 }
                 if isShowing && engineGranted {
                     WebSceneView(
@@ -857,8 +862,11 @@ private struct HistoryMomentPage: View {
                         onFrame: { _ in
                             guard !webReady else { return }
                             Task { @MainActor in
+                                // The pinned scene mounts a beat after the
+                                // socket's first frame; revealing sooner would
+                                // flash the channel's LIVE scene.
                                 try? await Task.sleep(for: .seconds(0.8))
-                                withAnimation(.easeInOut(duration: 0.6)) { webReady = true }
+                                withAnimation(.easeInOut(duration: scene.isTank ? 0.6 : 0.35)) { webReady = true }
                             }
                         },
                         onAssets: { tank.report($0) },
@@ -868,7 +876,7 @@ private struct HistoryMomentPage: View {
                     .opacity(tankIsIn ? 1 : 0)
                     .animation(.easeInOut(duration: 0.9), value: tankIsIn)
                 }
-                if isShowing && !tankIsIn {
+                if isShowing && !tankIsIn && scene.isTank {
                     TankLoadingView(pending: tank.pending)
                         .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
@@ -909,6 +917,12 @@ private struct HistoryMomentPage: View {
             try? await Task.sleep(for: .seconds(0.45))
             if Task.isCancelled { return }
             engineGranted = true
+            // Only a tank waits for its models. Anything else is in the moment
+            // its first frame is (see onFrame) — no download rule, no grace.
+            guard scene?.isTank == true else {
+                tankLoading = false
+                return
+            }
             await TankLoadState.watch(state: { tank }, settle: { tank.markSettled() }) { loading in
                 withAnimation(.easeInOut(duration: 0.5)) { tankLoading = loading }
             }
