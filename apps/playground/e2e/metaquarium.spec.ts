@@ -6,6 +6,18 @@ declare global {
   }
 }
 
+/** `inspect().shoal` (shoal.ts `stats()`), or null before the first frame reports one. */
+async function shoalStats(
+  page: Page,
+): Promise<{ count: number; inView: number | null; out: number; nearest: number; polarisation: number } | null> {
+  return page.evaluate(
+    () =>
+      (document.querySelector('idle-screen') as unknown as { inspect(): Record<string, unknown> | null }).inspect()?.[
+        'shoal'
+      ] as { count: number; inView: number | null; out: number; nearest: number; polarisation: number } | null ?? null,
+  );
+}
+
 /** The saver host inside <idle-screen>'s shadow root. */
 async function surfaceDataset(page: Page): Promise<{ fish: number; env: string; backend: string; draco: boolean }> {
   return page.evaluate(() => {
@@ -339,6 +351,37 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
       ),
     )
     .toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Ambient shoal + canopy (canopy.ts, tank.ts's shoalCarrier/buildShoal): the
+ * school mounts over a dense flora bed without erroring, and inspect().shoal
+ * — the PR's own inView metric — comes back well-formed rather than
+ * NaN/undefined from a broken canopy lookup or lift-table sample. Neither
+ * this path nor the `shoal` param is otherwise exercised anywhere in e2e.
+ */
+test('MQ11: shoal mounts over a dense canopy and reports a sane inspect().shoal', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.shoal=1&mq.floraDensity=1&mq.shoalSpeed=1.5');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('webgl2');
+  await expect.poll(() => shoalStats(page), { timeout: 15_000 }).not.toBeNull();
+
+  const shoal = await shoalStats(page);
+  expect(shoal!.count).toBeGreaterThan(0);
+  expect(shoal!.inView).not.toBeNull();
+  expect(shoal!.inView).toBeGreaterThanOrEqual(0);
+  expect(shoal!.inView).toBeLessThanOrEqual(1);
+  expect(shoal!.nearest).toBeGreaterThanOrEqual(0);
+  expect(Number.isFinite(shoal!.polarisation)).toBe(true);
+
   expect(pageErrors).toEqual([]);
 });
 
