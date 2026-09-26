@@ -22,6 +22,9 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private var fastPollTimer: Timer?
   private var cycleTimer: Timer?
   private var activityTimer: Timer?
+  /// The latest local agent roster (AgentPresence), fed to every bundled overlay
+  /// as the SaverSpec input `crew` — any scene declaring that input shows it.
+  private var crewJSON = "[]"
   private var assertionID: IOPMAssertionID = 0
   private var hasAssertion = false
   private(set) var isShowing = false
@@ -137,6 +140,10 @@ final class SaverController: NSObject, WKNavigationDelegate {
     beginDisplaySleepAssertion()
     startCycle()
     startActivityUpdates()
+    // The page needs a moment to load before the crew bridge exists.
+    for delay in [1.0, 2.5] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.pushCrew() }
+    }
     // Debug: --hold keeps the saver up despite input (screenshot/inspection).
     if !CommandLine.arguments.contains("--hold") {
       installWakeMonitors()
@@ -286,6 +293,23 @@ final class SaverController: NSObject, WKNavigationDelegate {
   private func stopActivityUpdates() {
     activityTimer?.invalidate()
     activityTimer = nil
+  }
+
+  // MARK: - Agent crew
+
+  /// Feed the current roster to the page's scene input `crew`. Pushed on
+  /// change, and again once a freshly shown page has loaded.
+  func setCrew(_ json: String) {
+    crewJSON = json
+    pushCrew()
+  }
+
+  private func pushCrew() {
+    guard isShowing else { return }
+    let js = "window.__idleScreensMac && window.__idleScreensMac.feed && window.__idleScreensMac.feed('crew', \(crewJSON))"
+    for overlay in overlays where channelURL(forDisplay: overlay.key) == nil {
+      overlay.webView.evaluateJavaScript(js, completionHandler: nil)
+    }
   }
 
   private func pushActivity() {

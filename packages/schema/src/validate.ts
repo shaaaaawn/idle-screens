@@ -2,6 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
+import { validateInputs } from './inputs';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -11,7 +12,7 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish', 'timeline']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish', 'timeline', 'inputs']);
 const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
@@ -238,6 +239,7 @@ function validateSpecCore(spec: unknown): ValidationResult {
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
   if (spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  if (spec.inputs !== undefined) validateInputs(spec.inputs, err);
 
   if (!Array.isArray(spec.layers) || spec.layers.length === 0) {
     err('layers', 'must be a non-empty array');

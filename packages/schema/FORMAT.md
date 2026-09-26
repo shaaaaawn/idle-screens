@@ -45,7 +45,9 @@ the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
 sequence-level) (2026-09-10 — the print look); `timeline` (keyframes on the
 scene's own clock), paint-level layer `opacity` and `transform`,
 `position.dx` / `dy`, `wrapMorph` on the sequence envelope and
-`text: 'dip'` on `morph` (2026-09-25 — timed scenes).
+`text: 'dip'` on `morph` (2026-09-25 — timed scenes); top-level `inputs` — live
+data a host feeds the scene, declared by the scene (2026-09-26 — live
+inputs).
 
 ## Safety invariants
 
@@ -753,6 +755,77 @@ it genuinely cuts to a different set of layers.
 **Native:** tvOS ignores `timeline` and shows the base spec — so **author the
 base as the piece's rest state** (its end card), and a timed piece degrades
 to a valid ambient scene.
+
+## Inputs — live data the scene declares
+
+A scene can say what live data it takes and how that data paints it. The
+host that has the data — a Mac app watching its own coding agents, a CI
+board, a status light — needs to know nothing about the scene: it calls
+`inputTrack(spec, name, value)` and hands the result to the mounted
+instance's `applyTrack`. Everything happens in the page, over the same
+steering path as a channel's `setParam`, so a scene fed locally and a scene
+steered remotely are the same scene. Runtimes that don't know `inputs`
+ignore it (see Validation semantics) and render the scene at rest.
+
+```json
+"inputs": {
+  "crew": {
+    "kind": "roster",
+    "slots": 8,
+    "default": "absent",
+    "states": {
+      "absent":  [{ "path": "pod.sprite.colors.{i}", "value": "#1c2338" },
+                  { "path": "label.sprite.strings.{i}", "value": " " }],
+      "editing": [{ "path": "pod.sprite.colors.{i}", "value": "#232b44" },
+                  { "path": "crew.sprite.glyphs.{i}", "value": "🧑‍💻" },
+                  { "path": "label.sprite.strings.{i}", "value": "{label} · {verb}{count}" }],
+      "waiting": [{ "path": "pod.sprite.colors.{i}", "value": "#3a2a12" },
+                  { "path": "crew.sprite.glyphs.{i}", "value": "🙋" },
+                  { "path": "label.sprite.strings.{i}", "value": "{label} · {verb}" }]
+    },
+    "verbs": { "waiting": "needs you" },
+    "count": { "glyph": "🛸", "max": 4 },
+    "level": { "path": "load.sprite.values.{i}", "max": 30 },
+    "alert": { "states": ["waiting"],
+               "on":  [{ "path": "beacon.sprite.color", "value": "#ffb040" }],
+               "off": [{ "path": "beacon.sprite.color", "value": "#2fb8a4" }] }
+  }
+}
+```
+
+- **`kind: "roster"`** (the only kind in format version 1): the host sends
+  `[{ "slot": 0, "state": "editing", "label": "api", "count": 2, "level": 12 }, …]`.
+  A roster item carries those five fields and nothing else.
+- **The states are the scene's own.** Name them for what the scene shows
+  (agent states, build results, service health). A state the scene doesn't
+  declare, and every empty slot, takes `default` — so a member who leaves is
+  cleared, not frozen.
+- **Bindings are paint.** Each state is a list of `{path, value}` steering
+  deltas; `{i}` in a path is the slot. Address one entity with an array index
+  (`colors.{i}`, `glyphs.{i}`, `strings.{i}`, `values.{i}`) on layers that
+  use a `list`/`table` layout, so entity *i* of every layer is member *i*.
+  `compileSaver` proves every state for every slot resolves, leaves the
+  structural signature untouched and yields a valid scene — a binding that
+  would rebuild the scene, or be silently dropped, is refused at compile time.
+- **Tokens** in string values: `{label}` (the member's label, control
+  characters and braces stripped, ≤ 24 chars), `{verb}` (from `verbs`, else
+  the state name), `{count}` (` ` + `count.glyph` × count, or empty). Any
+  other token is a validation error — privacy is structural: a scene cannot
+  template a path, prompt or command it was never given.
+- **`level`** writes a clamped per-slot number (0..`max`) to its path;
+  **`alert`** writes `on` while any slot is in one of its states, `off`
+  otherwise (whole-scene deltas, no tokens).
+- **Hosts** keep the latest value per input name and, when a scene that
+  declares it mounts, apply it at `dur: 0` so a fresh scene never glides in
+  from rest. Later feeds glide (strings and glyphs step).
+- **Scope:** scenes only — `inputs` inside `idle-sequence` segments or beds is
+  not fed in this version. At most 4 inputs, 64 slots, 32 states, 64
+  bindings per state. `inputs` is not part of the structural signature.
+
+The shipped `outpost` example declares a `crew` roster: eight crew pods on a
+station — working crew at lit screens, resting crew on the observation deck,
+and a member who needs you raising a hand in an amber pod while the roof
+beacon turns amber.
 
 ## Seeing without eyes — the perception API
 

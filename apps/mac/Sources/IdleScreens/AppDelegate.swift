@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let onboarding = Onboarding()
   private let access = AccessWindow()
   private let thumbnails = ThumbnailRenderer()
+  /// Local coding agents as crew: menu section, amber icon, and the station saver's feed.
+  private let presence = AgentPresence()
+  private var crew: [AgentPresence.Member] = []
 
   private let defaults = UserDefaults.standard
   private static let thresholdKey = "idleThresholdSeconds"
@@ -36,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let castChannelKey = "activeCastChannel"
   private static let pendingUpdateToastKey = "pendingUpdateToast"
   private static let activityHUDKey = "showActivityHUD"
+  private static let agentHooksKey = "listenForAgentHooks"  // default on
 
   /// pauseInFullscreen defaults ON (don't cover presentations/video calls).
   private var pauseInFullscreen: Bool {
@@ -84,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     setStatusIcon("display")
     statusItem.menu = buildMenu()
+    startPresence()
 
     idleMonitor.onIdle = { [weak self] in self?.idleTriggered() }
     idleMonitor.start()
@@ -92,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.onShow = { [weak self] in
       guard let self else { return }
       self.setStatusIcon("display.fill")
+      self.presence.setInterval(2)
       // Surface a silently-installed saver update the next time the saver shows.
       if let msg = self.defaults.string(forKey: Self.pendingUpdateToastKey) {
         self.defaults.removeObject(forKey: Self.pendingUpdateToastKey)
@@ -102,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     saver.onDismiss = { [weak self] in
       guard let self else { return }
+      self.presence.setInterval(8)
+      self.saver.pinnedSaver = self.defaults.string(forKey: Self.pinnedSaverKey)
       self.setStatusIcon(self.isCasting ? "antenna.radiowaves.left.and.right" : "display")
     }
     // Overlay F / Delete / Return persist here and push back to the saver.
@@ -166,6 +174,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if CommandLine.arguments.contains("--diagnostics") {
       print(Diagnostics.report(thumbnails: thumbnails))
       exit(0)
+    }
+
+    // Debug: --crew prints the local agent roster (JSON, then menu lines) and exits.
+    if CommandLine.arguments.contains("--crew") {
+      let roster = AgentPresence().scanNow()
+      print(AgentPresence.rosterJSON(roster))  // exactly what the `crew` input is fed
+      for m in roster { print("  [\(m.slot)] \(m.provider) · \(AgentPresence.menuLine(m))") }
+      exit(0)
+    }
+
+    // Debug: --crew-watch listens for agent hooks and prints the roster on
+    // every change for 60 s — the whole presence path, no overlay needed.
+    if CommandLine.arguments.contains("--crew-watch") {
+      // The app's own presence core (its listener already owns the hook port).
+      let menuUpdate = presence.onChange
+      presence.onChange = { roster in
+        menuUpdate?(roster)
+        print(AgentPresence.rosterJSON(roster))
+        fflush(stdout)
+      }
+      presence.setInterval(1)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 60) { exit(0) }
+      return
     }
 
     // Debug: --activity prints the system-activity snapshot and exits.
@@ -315,6 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       action: #selector(showAbout(_:)), keyEquivalent: "")
     about.target = self
     menu.addItem(about)
+    menu.addItem(.separator())
+    addCrewRows(to: menu)
     menu.addItem(.separator())
 
     let startNow = NSMenuItem(
@@ -927,6 +960,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     SystemActivity.snapshot { [weak self] snap in
       self?.alert("System Activity", SystemActivity.textReport(snap))
     }
+  }
+
+  // MARK: - Agent crew (AgentPresence)
+
+  private var listenForAgentHooks: Bool {
+    defaults.object(forKey: Self.agentHooksKey) == nil ? true : defaults.bool(forKey: Self.agentHooksKey)
+  }
+
+  private func startPresence() {
+    presence.onChange = { [weak self] roster in
+      guard let self else { return }
+      let wasCalling = self.crew.contains { $0.state == .waiting || $0.state == .error }
+      self.crew = roster
+      self.saver.setCrew(AgentPresence.rosterJSON(roster))
+      self.refreshCrewIcon()
+      // Rebuild only when something a person would read changed.
+      self.statusItem.menu = self.buildMenu()
+      let calling = roster.contains { $0.state == .waiting || $0.state == .error }
+      if calling && !wasCalling { NSSound(named: "Tink")?.play() }
+    }
+    if listenForAgentHooks { presence.startHookListener() }
+    presence.start(interval: 8)
+  }
+
+  /// Amber bubble while any agent needs you; otherwise the usual display icon.
+  private func refreshCrewIcon() {
+    let calling = crew.contains { $0.state == .waiting || $0.state == .error }
+    if calling {
+      statusItem.button?.image = NSImage(
+        systemSymbolName: "exclamationmark.bubble.fill", accessibilityDescription: "An agent needs you")
+      statusItem.button?.contentTintColor = .systemOrange
+    } else {
+      statusItem.button?.contentTintColor = nil
+      setStatusIcon(saver.isShowing ? "display.fill" : (isCasting ? "antenna.radiowaves.left.and.right" : "display"))
+    }
+  }
+
+  private func addCrewRows(to menu: NSMenu) {
+    let header = NSMenuItem(
+      title: crew.isEmpty ? "Crew — no agents running" : "Crew — \(crew.count) agent\(crew.count == 1 ? "" : "s")",
+      action: nil, keyEquivalent: "")
+    header.isEnabled = false
+    menu.addItem(header)
+    for m in crew {
+      let symbol: String
+      switch m.state {
+      case .waiting: symbol = "exclamationmark.bubble.fill"
+      case .error: symbol = "xmark.octagon.fill"
+      case .done: symbol = "checkmark.circle"
+      case .idle: symbol = "moon.zzz"
+      case .thinking, .compacting: symbol = "ellipsis.circle"
+      default: symbol = "hammer"
+      }
+      let item = NSMenuItem(title: "   " + AgentPresence.menuLine(m), action: nil, keyEquivalent: "")
+      item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: m.state.rawValue)
+      item.isEnabled = false
+      menu.addItem(item)
+    }
+    let watch = NSMenuItem(title: "Show Crew (Outpost)", action: #selector(showStation(_:)), keyEquivalent: "")
+    watch.target = self
+    menu.addItem(watch)
+    let hooks = NSMenuItem(
+      title: "Copy Agent Hooks Setup (exact “needs you”)", action: #selector(copyAgentHooks(_:)), keyEquivalent: "")
+    hooks.target = self
+    menu.addItem(hooks)
+  }
+
+  /// Show the crew now — the `outpost` scene, which declares the `crew` input —
+  /// without changing the user's pinned saver (restored on dismiss).
+  @objc private func showStation(_ sender: NSMenuItem) {
+    saver.pinnedSaver = "outpost"
+    startSaver()
+  }
+
+  @objc private func copyAgentHooks(_ sender: NSMenuItem) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(AgentPresence.hooksSettingsJSON(), forType: .string)
+    let alert = NSAlert()
+    alert.messageText = "Agent hooks copied"
+    alert.informativeText =
+      "Merge the copied block into ~/.claude/settings.json. Claude Code will then tell idle screens (on 127.0.0.1:\(AgentPresence.hookPort), nothing leaves this Mac) the moment an agent needs you, gets stuck or spawns helpers. Without it, the crew still shows — from each session's transcript."
+    alert.runModal()
   }
 
   private func setStatusIcon(_ symbol: String) {

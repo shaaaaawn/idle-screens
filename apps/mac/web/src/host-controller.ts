@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import type { SaverInstance, SaverPlugin } from '@idle-screens/core';
+import { inputTrack, type SaverSpec } from '@idle-screens/schema';
 
 export function normalizeSaverIndex(index: number, length: number): number {
   return ((index % length) + length) % length;
@@ -17,6 +18,8 @@ export interface MacHostBridge {
   setPaused(paused: boolean): void;
   toast(text: string): void;
   currentId(): string;
+  /** Feed a scene input (SaverSpec `inputs`) — kept, and applied to whichever scene declares it. */
+  feed(name: string, value: unknown): void;
 }
 
 export interface MacHostController {
@@ -26,6 +29,8 @@ export interface MacHostController {
   currentId(): string;
   currentIndex(): number;
   getInstance(): SaverInstance | null;
+  /** Latest value per input name; applied to the mounted scene if it declares that input. */
+  feed(name: string, value: unknown): void;
   createBridge(onToast: (text: string) => void): MacHostBridge;
 }
 
@@ -57,6 +62,22 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
   let instance: SaverInstance | null = null;
   let current = -1;
   let generation = 0;
+  // Live scene inputs (SaverSpec `inputs`): the latest value per name, so a
+  // scene that declares one is fed the moment it mounts — at dur 0, so it
+  // never glides in from its resting look — and on every later feed.
+  const inputs = new Map<string, unknown>();
+  const specOf = (i: number): SaverSpec | null => {
+    const spec = savers[i]?.spec as SaverSpec | undefined;
+    return spec && typeof spec === 'object' && 'inputs' in spec ? spec : null;
+  };
+  const applyInputs = (names: Iterable<string>, dur: number): void => {
+    const spec = specOf(current);
+    if (!spec || !instance?.applyTrack) return;
+    for (const name of names) {
+      const track = inputTrack(spec, name, inputs.get(name), { dur });
+      if (track) instance.applyTrack(track);
+    }
+  };
 
   const mountSaver = async (
     index: number,
@@ -115,6 +136,7 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
       return;
     }
     instance = inst;
+    applyInputs(inputs.keys(), 0);
     inst.setPaused(reduceMotion);
     host.style.opacity = '1';
     showHint(plugin.manifest.label);
@@ -138,6 +160,10 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
     getInstance() {
       return instance;
     },
+    feed(name: string, value: unknown) {
+      inputs.set(name, value);
+      applyInputs([name], 600);
+    },
     createBridge(onToast) {
       return {
         savers: savers.map((s) => s.manifest.id),
@@ -159,6 +185,10 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
         toast: onToast,
         currentId() {
           return savers[current]?.manifest.id ?? '';
+        },
+        feed(name, value) {
+          inputs.set(name, value);
+          applyInputs([name], 600);
         },
       };
     },

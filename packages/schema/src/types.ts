@@ -59,6 +59,53 @@ export interface SaverSpec {
    * Set to your design resolution so a spec authored at 4K doesn't over-densify.
    */
   referenceViewport?: number;
+  /**
+   * Live data a host feeds this scene, declared by the scene: each named input
+   * maps incoming values to paint-only steering deltas (see FORMAT.md
+   * `inputs`). Hosts apply them locally with `applyTrack`; runtimes that don't
+   * know `inputs` ignore it and render the scene at rest.
+   */
+  inputs?: Record<string, SpecInput>;
+}
+
+/** One steering delta an input emits. Tokens: `{i}` in `path`; `{label}` `{verb}` `{count}` in string values. */
+export interface InputBinding {
+  path: string;
+  value: string | number | boolean;
+}
+
+/**
+ * A roster: up to `slots` members, each in one of the scene's own named
+ * states. The host sends `[{slot, state, label?, count?, level?}]` and nothing
+ * else — a binding can only template what a roster item carries.
+ */
+export interface RosterInput {
+  kind: 'roster';
+  /** Members the scene can show (slot indices 0..slots-1). */
+  slots: number;
+  /** State for empty slots and for states the scene doesn't know. Must be a key of `states`. */
+  default: string;
+  /** State name → the deltas that put one slot in that state. */
+  states: Record<string, InputBinding[]>;
+  /** State name → the text `{verb}` stands for (default: the state name). */
+  verbs?: Record<string, string>;
+  /** `{count}` → ` ` + `glyph` repeated `count` times (capped at `max`, default 4), or empty. */
+  count?: { glyph: string; max?: number };
+  /** A per-slot number, clamped to 0..max, written to `path` (which uses `{i}`). */
+  level?: { path: string; max: number };
+  /** Whole-scene deltas: `on` while any slot is in one of `states`, `off` otherwise. */
+  alert?: { states: string[]; on: InputBinding[]; off: InputBinding[] };
+}
+
+export type SpecInput = RosterInput;
+
+/** One member of a roster, as a host sends it. */
+export interface RosterItem {
+  slot: number;
+  state: string;
+  label?: string;
+  count?: number;
+  level?: number;
 }
 
 /**

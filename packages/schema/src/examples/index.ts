@@ -11,6 +11,7 @@ import { PHASE_DUET_SPEC } from './phase-duet';
 import { WEB_WORK_SPEC } from './web-work';
 import { SHARD_FALL_SPEC } from './shard-fall';
 import { MURMUR_SPEC } from './murmur';
+import { OUTPOST_SPEC } from './outpost';
 import { THREE_MOVEMENTS_SEQUENCE } from './three-movements';
 import { FACETS_SPEC } from './facets';
 import { HAIKU_SPEC } from './haiku';
@@ -58,6 +59,7 @@ export { PHASE_DUET_SPEC } from './phase-duet';
 export { WEB_WORK_SPEC } from './web-work';
 export { SHARD_FALL_SPEC } from './shard-fall';
 export { MURMUR_SPEC } from './murmur';
+export { OUTPOST_SPEC } from './outpost';
 export { THREE_MOVEMENTS_SEQUENCE } from './three-movements';
 
 /** Catalog entry for a bundled schema example. */
@@ -97,6 +99,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'web-work', label: 'Web Work', spec: WEB_WORK_SPEC },
   { id: 'shard-fall', label: 'Shard Fall', spec: SHARD_FALL_SPEC },
   { id: 'murmur', label: 'Murmur', spec: MURMUR_SPEC },
+  { id: 'outpost', label: 'Outpost', spec: OUTPOST_SPEC },
 ] as const;
 
 /** Catalog entry for a bundled idle-sequence example. */
