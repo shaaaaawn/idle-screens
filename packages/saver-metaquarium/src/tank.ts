@@ -89,7 +89,7 @@ import {
   type SwimPose,
   type TankBounds,
 } from './plan';
-import { Shoal, type Carrier, type ShoalKind } from './shoal';
+import { Shoal, SHOAL_KINDS, type Carrier, type ShoalKind } from './shoal';
 import {
   effectivePixelRatio,
   probeSoftwareGL,
@@ -1345,7 +1345,10 @@ class TankInstance implements SaverInstance {
   /** The ambient school: count from `shoal` and the tier, look from `shoalKind`. */
   private buildShoal(): void {
     const count = Math.round(this.num('shoal') * this.quality.fishCap * 2.5);
-    const kind = this.str('shoalKind') as ShoalKind;
+    const rawKind = this.str('shoalKind');
+    // str() is unvalidated (the classic lane is intake-unvalidated, MQ17),
+    // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
+    const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
     const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
     const key = `${count}|${kind}|${lit}`;
     if (key === this.shoalKey) return;
