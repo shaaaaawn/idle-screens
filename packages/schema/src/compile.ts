@@ -374,13 +374,21 @@ class SpecInstance implements SaverInstance {
 
   private sizeCanvas(): void {
     const dpr = Math.min(this.saverCtx.dpr, 2);
-    this.canvas.width = Math.max(1, Math.round(this.w * dpr));
-    this.canvas.height = Math.max(1, Math.round(this.h * dpr));
+    // Assign only on a real change: writing `width`/`height` wipes a canvas
+    // even when the value is the same, and a sequence child shares its
+    // parent's surface — a segment mounting over a `bed` used to erase the
+    // bed painted a moment earlier, one black frame at every cut. A fresh
+    // canvas is blank anyway, and every frame repaints (or, after a resize,
+    // the ghosting warm-up below replays from a full clear).
+    const cw = Math.max(1, Math.round(this.w * dpr));
+    const ch = Math.max(1, Math.round(this.h * dpr));
+    if (this.canvas.width !== cw) this.canvas.width = cw;
+    if (this.canvas.height !== ch) this.canvas.height = ch;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (this.finishPass) {
       // The visible canvas mirrors the scene canvas, same size and transform.
-      this.finishPass.canvas.width = this.canvas.width;
-      this.finishPass.canvas.height = this.canvas.height;
+      if (this.finishPass.canvas.width !== cw) this.finishPass.canvas.width = cw;
+      if (this.finishPass.canvas.height !== ch) this.finishPass.canvas.height = ch;
       this.finishPass.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     // Resizing clears the canvas — force a ghosting warm-up on the next frame.
@@ -1624,7 +1632,12 @@ class SequenceInstance implements SequenceSaverInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint, capabilityTier: this.capabilityTier, hostPresents: true });
+      // Over a bed the child is transparent ink on the shared surface, and
+      // every caller renders the real frame right after this — so its
+      // constructor paint (t = 0) would only leave a stray frame of ink under
+      // it. Transparent children ignore ghosting, so skipping it changes no
+      // warm-up. Without a bed the opaque child repaints its ground over it.
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint: skipInitialPaint || this.bed !== null, capabilityTier: this.capabilityTier, hostPresents: true });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
