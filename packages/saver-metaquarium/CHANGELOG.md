@@ -1,5 +1,67 @@
 # @idle-screens/saver-metaquarium
 
+## 0.11.0
+
+### Minor Changes
+
+- 9f38cfd: Caustics: a new `caustics` param (0..1, default 0) throws the surface's dancing net of light over the floor, rocks, plants and fish, and `causticScale` sizes the cells. The net is procedural, two layers of animated Voronoi F2−F1 edges, and averages about 1, so it moves light around rather than brightening the scene. It projects down a slightly slanted sun and softens and dims with depth below the water surface, which follows the ceiling. It is strongest on faces that look up and absent underneath, with the face normal taken from screen derivatives, so it works on every material. It modulates the lit colour, the floor's light pools included. The low tier uses one layer. Rates divide a 20-minute window, so long uptime stays exact. At 0 the stock programs compile.
+- 9f38cfd: The finish: a new `finish` param (0..1, default 0) adds one full-screen pass over the finished frame. It gives a gentle grade: a touch of S-curve contrast, +8 % saturation, cool shadows, warm highlights and a soft vignette. It also adds ±1 LSB triangular dither against banding on 8-bit TV panels, and restrained bloom on the high tier. The scene draws to the canvas exactly as before. The pass copies that frame and works in display space, so the tank's hand-rolled shaders and additive glows are untouched. It is mid and high tier only, and `finish: 0` skips the pass entirely.
+- 9f38cfd: The water's light on the fish. The new `fishAmbient` param (0..1, default 0, lit mode only) lights fish the way a lit tank does:
+  - their backs take the bright water above;
+  - their flanks take the water around them;
+  - their bellies take the floor below;
+  - metal plates mirror all three, weaker, since they already reflect the studio.
+  
+  The colours come from the scene each frame: `waterTint`, else the surface or the shafts, the in-scatter, and the floor, with more bounce when caustics are on. They dim with a follow-spot's house lights, so a spotlit stage stays dark outside the spot. It applies only to coats and plates, never eyes or glow parts, and includes the shoal.
+- 9f38cfd: `cameraFollow` + `followDistance` — ride with one fish. The camera sits `followDistance` behind the chosen cast slot along the way it has been swimming (the chord to where it was two lengths back on its own closed-form path, so a wiggle or a kick does not swing the shot), lifted a little, looking just past it; kept above the floor and any scenery and under the water ceiling. Under about one body length it becomes the fish's own eye and the fish is hidden. Everything is sampled closed-form at `t`, so the shot is the same however a frame is reached. The orbit params are ignored while following; `-1` (default) is the orbit camera, byte-for-byte as before. `inspect().camera.follow` reports the camera's position.
+- 9f38cfd: Living bubbles, all opt-in (defaults unchanged). `bubbleStyle: 'live'` puts the vents on a real bubble life: each bubble grows at the mouth, lets go, rises in a widening helix, sits at the water surface (when the environment has one) and pops. A vent coughs, and goes quiet for a minute or two now and then. `pearling` grows oxygen beads on the flora's leaves over half a minute or more; they ride the leaf as it sways, then let go. It needs `floraDensity`. `co2Mist` adds a fine haze of tiny bubbles and soft puffs drifting from the vents on a slow current. Distant bubbles dim instead of fattening into 3-px dots, and bubbles under ~3 px draw as soft beads. Everything is closed-form in one draw call. Periods divide a 20-minute window, so long uptime stays exact.
+- 9f38cfd: One caustic system. The surface net, the follow-spot's web, the light shafts, the water's surface and the crystals now all read the same caustic function, on the same clock and cell size.
+  
+  - **Follow-spot pools** draw the shared net in place of their own sine web. A spot inside caustic-lit water shows one pattern, not two. The web keeps moving even when `caustics` is 0.
+  - **Shafts** brighten where the net focuses at the surface above them, with slow bands running down them.
+  - **The water's surface**, seen from below, carries the net, and its far edge fades into the water instead of drawing a line to the horizon.
+  - **Crystal shards** take a glass share of the net.
+  - **Light sources are no longer lit:** fish glow parts, eyes, lantern cores, the horizon, glowing veins and flora lamps opt out.
+  - **Layer count** is now a uniform the tier sets, not a shader macro, and the shared functions are include-guarded. Patches stack in any order.
+  - **Visible change:** with `caustics` 0 everything is as before, except the follow-spot's web, which now uses the shared net's look.
+- 9f38cfd: The shoal gets its own clock and swims in open water.
+  
+  - **Own speed:** `shoalSpeed` (0.3–2, default 0.8) sets how fast the school travels, independent of `swimSpeed`. It glides when steered. The school's life (tail beats, breathing, excursions) runs on real time, so a slow scene no longer has a near-frozen school.
+  - **Above the plants:** the school keeps above a precomputed canopy of ground, rocks, crystal domes and every plant's tip plus its sway. Each fish stays at least 1.2 body lengths clear, and the school rises ahead of a tall kelp bed. It gets a taller height band of its own (the surface less two lengths, at most 110).
+  - **In front of the camera:** with a still camera the school follows a crossing lane across the front of the shot. With an orbiting camera it follows the figure of eight.
+  - `inspect().shoal.inView` reports the share of the school inside the frame.
+  - **Look change:** scenes that already use `shoal` will see the school higher, in front, and at its own pace.
+- 9f38cfd: The shoal: a new `shoal` param (0..1, default 0) adds an ambient school of small voxel fish beside the cast, and `shoalKind` picks `neon`, `rummynose` or `ember`. Seats are relaxed at seed time into an even, row-free school. Each fish follows the route at its own distance along it, so the school bends through a turn instead of pivoting. They beat in burst-and-coast with a body wave, and now and then one drops back, rises or slips out to the side and returns, at most three at a time. Headings follow the route, steered by each fish's own motion. A stateless separation pass keeps fish at least 0.8 body lengths apart. It is closed-form in t and one instanced draw, with up to 2.5× the tier's fish cap. `inspect()` reports the count, the fish out, the nearest pair and polarisation.
+- 9f38cfd: Named shots. A new `shot` param cuts between framings:
+  - `orbit` (the classic camera, exactly, and the default)
+  - `hero` (three-quarter establishing)
+  - `front` (level, long lens)
+  - `low` (among the plants, looking up)
+  - `top` (steep, the floor as a map)
+  - `surface` (looking up at the water's underside)
+  - `macro` (close on the biggest landmark near the front)
+  
+  Azimuth and autoRotate still turn a shot, and distance scales it. Shots stay inside the water, never above the surface or under the floor. The follow camera still takes precedence. `inspect()` now reports `render: { programs, calls, triangles }` and the current `shot`.
+- 9f38cfd: The surface mirror. A new `surfaceMirror` param (0..1, default 0) makes the water's surface, seen from below, a window straight up to the light and a rippling mirror of the tank everywhere else. That covers Snell's window (about 48.6° either side of straight up), total internal reflection outside it, and Fresnel in between.
+  
+  - **High tier:** it reflects the real tank. The tank is drawn once more from a camera reflected in the surface, at half size into a corner of the canvas, then copied into a texture. That keeps the same shader programs and the same display-space blending. An oblique near plane clips the reflection at the surface. The pass is skipped whenever the mirrored tank can't be on screen, and latched off for good if the pixel governor has to drop.
+  - **Mid tier:** it reflects the lit water with no second render. **Low tier:** off.
+  - **Tint:** with a water tint, the reflection takes the lit in-scatter the light really travels through.
+  - **Where to use it:** it needs reef, kelp, ice or lagoon, and pays off on the `surface` and `low` shots.
+- 9f38cfd: Swim wave: new `swimWave` param (0..1, default 0). Fish bend as they swim: a wave runs from nose to tail, beating with distance swum and working harder in a flurry, and the body curls into turns. It replaces the rigid yaw and the angelfish's whole-node clip while on; the turtle, seahorse, crab, jellyfish and skeleton-rigged fish keep their own motion. At 0 the stock programs compile and nothing changes. `inspect()` reports `waving` per fish. Shader patches now stack through a shared helper, so the eye display and the wave survive each other.
+- 9f38cfd: Water clarity and tint, and the environment palettes finally apply.
+  
+  - **`waterClarity`** (0..1, default 0.5) only acts when `water` is on, and 0.5 is exactly the water as before. At 0 the water is murky: red and green go fast and the reach closes to ×0.7. At 1 it is clear: colour loss relaxes and the reach stretches to ×1.5.
+  - **`waterTint`** (`#rrggbb`, empty = off) is the sunlit water.
+    - Distant things fade into it looking up toward the light, half of it on the level, and none of it looking down into the deep.
+    - The background becomes a dome shaded with the same function, so the far fade and the background agree.
+    - The crystals and the horizon take the same in-scatter.
+    - With `water` on and no tint set, reef, kelp, ice and lagoon bring their own.
+  - **Palette fix (visible change):** the environment palettes (fog, floor, mote colours for abyss, reef, kelp, ice, vent, lagoon and universe) never applied, because every param arrives pre-filled. They now apply wherever a scene leaves that colour at its default and no track steers it. Scenes on those environments that don't set their own colours will change colour on this release.
+- 9f38cfd: `water` — water instead of fog. Each colour channel fades toward the water colour over its own span: red first (40 % of the fog span), green next (70 %), blue last on today's exact curve, so a red fish goes blue-green before it goes into the murk and everything still meets the background at `fogFar`. 0 (default) is today's fog to the bit. Installed per material, lazily (the first time water is on), wrapping any existing shader patch and extending its program key; the crystal, halo and glow-card shaders share the same function (additive layers take only the loss, never the in-scatter).
+  
+  `dither` (default `off`) — three's output dither on every material: ±½ of an 8-bit step, the cure for banding in dark fogged gradients on TV panels. Off by default only because turning it on recompiles every material once; recommended alongside `water`.
+
 ## 0.10.0
 
 ### Minor Changes
