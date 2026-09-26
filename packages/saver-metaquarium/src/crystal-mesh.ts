@@ -11,6 +11,7 @@
  * floor is the closed-form field in `crystals.ts` mirrored as a shader loop.
  */
 
+import { WATER_FOG_GLSL, waterUniforms } from './water';
 import { MAX_PATH_SEGMENTS, PATH_FRAGMENT, PATH_MATERIALS, PATH_PARS, type PathSegment } from './paths';
 import {
   AdditiveBlending,
@@ -43,6 +44,7 @@ const FOG_PARS = /* glsl */ `
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
+  ${WATER_FOG_GLSL}
 `;
 
 const SHARD_VERT = /* glsl */ `
@@ -112,7 +114,7 @@ const SHARD_FRAG = /* glsl */ `
     vec3 glass = vColor * (0.03 + 0.07 * shade) + vColor * rim * 1.7
       + vec3(smoothstep(0.62, 0.95, facet) * rim * 1.4 + pow(fres, 6.0));
     vec3 col = mix(glow, glass, vLook.x);
-    float fog = smoothstep(uFogNear, uFogFar, vDepth);
+    vec3 fog = mqWaterFog(vDepth, uFogNear, uFogFar);
     gl_FragColor = vec4(mix(col, uFogColor, fog), 1.0);
     #include <colorspace_fragment>
   }
@@ -128,9 +130,10 @@ const HALO_FRAG = /* glsl */ `
   varying float vDepth;
   void main() {
     float beat = 1.0 - uPulse * 0.15 * (0.5 + 0.5 * sin(uTime * 0.754 + vLook.y));
-    float fog = smoothstep(uFogNear, uFogFar, vDepth) ;
-    fog = max(fog, 1.0 - smoothstep(22.0, 70.0, vDepth));
+    vec3 fog = max(mqWaterFog(vDepth, uFogNear, uFogFar), vec3(1.0 - smoothstep(22.0, 70.0, vDepth)));
     // Additive, so fog FADES it rather than mixing toward the fog colour.
+    // Water: an additive layer only LOSES light with distance (red first);
+    // adding the in-scatter colour here would count the water twice.
     gl_FragColor = vec4(vColor * 0.11 * uGlow * beat * (1.0 - vLook.x) * (1.0 - fog), 1.0);
     #include <colorspace_fragment>
   }
@@ -180,7 +183,7 @@ const CARD_FRAG = /* glsl */ `
     if (d > 1.0) discard;
     float fall = (1.0 - d) * (1.0 - d);
     float beat = 1.0 - uPulse * 0.15 * (0.5 + 0.5 * sin(uTime * 0.754 + vLook.y));
-    float fog = smoothstep(uFogNear, uFogFar, vDepth);
+    vec3 fog = mqWaterFog(vDepth, uFogNear, uFogFar);
     // Pale palettes (ice) would sum to a white-out where cards overlap, and a
     // cluster the camera orbits past would fill the lens: normalise by the
     // colour's own brightness and let the card die away up close.
@@ -237,6 +240,7 @@ export function buildCrystalField(
     uFogColor: { value: new Color() },
     uFogNear: { value: 60 },
     uFogFar: { value: 500 },
+    ...waterUniforms(),
   };
   const shardMat = owned(new ShaderMaterial({
     uniforms: { ...shared, uPush: { value: 0 } },
@@ -534,6 +538,7 @@ export function buildGlowCards(capacity: number): GlowCards {
   const uniforms: Uniforms = {
     uTime: { value: 0 }, uGlow: { value: 1 }, uPulse: { value: 0 },
     uFogColor: { value: new Color() }, uFogNear: { value: 60 }, uFogFar: { value: 500 },
+    ...waterUniforms(),
     uLift: { value: 0.42 },
     // A fish is small and SUPPOSED to be seen close; only fade at the lens.
     uNear: { value: new Vector2(10, 34) },
