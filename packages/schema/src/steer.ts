@@ -74,6 +74,21 @@ export function readSpecPath(spec: unknown, path: string): unknown {
 
 const TRANSFORM_IDENTITY: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, rotate: 0 };
 
+/** Two layer `transform` objects with each one's missing fields filled with the identity, so a glide between them never steps (inputs returned as-is otherwise). */
+function alignTransform(a: unknown, b: unknown): [unknown, unknown] {
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObj(a) || !isObj(b)) return [a, b];
+  let fa: Record<string, unknown> | null = null;
+  let fb: Record<string, unknown> | null = null;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const id = TRANSFORM_IDENTITY[key];
+    if (id === undefined) continue;
+    if (a[key] === undefined) (fa ??= { ...a })[key] = id;
+    if (b[key] === undefined) (fb ??= { ...b })[key] = id;
+  }
+  return [fa ?? a, fb ?? b];
+}
+
 /**
  * When only one end of a spec lerp declares a layer's paint `opacity` or
  * `transform`, give the other end the identity value (opacity 1, x/y/rotate 0,
@@ -170,8 +185,9 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  * too — two timelines' key times must never blend. No existing spec carries a
  * timeline, so every stored morph and glide is unchanged.
  */
-export function lerpValue(from: unknown, to: unknown, k: number, specRoot = false): unknown {
+export function lerpValue(from: unknown, to: unknown, k: number, specRoot = false, rootKey?: string): unknown {
   if (specRoot) [from, to] = alignPaintFields(from, to);
+  if (rootKey === 'transform') [from, to] = alignTransform(from, to);
   const kk = Math.max(0, Math.min(1, k));
   const walk = (a: unknown, b: unknown, key?: string | number, root = false): unknown => {
     if (typeof a === 'number' && typeof b === 'number') {
@@ -189,13 +205,13 @@ export function lerpValue(from: unknown, to: unknown, k: number, specRoot = fals
       for (const kName of Object.keys(b as Record<string, unknown>)) {
         const av = (a as Record<string, unknown>)[kName];
         const bv = (b as Record<string, unknown>)[kName];
-        out[kName] = root && kName === 'timeline' ? (kk > 0 ? bv : av) : walk(av, bv, kName);
+        out[kName] = root && kName === 'timeline' ? (kk > 0 ? bv : av) : kName === 'transform' ? walk(...alignTransform(av, bv), kName) : walk(av, bv, kName);
       }
       return out;
     }
     return kk > 0 ? b : a; // non-interpolable → step to target
   };
-  return walk(from, to, undefined, specRoot);
+  return walk(from, to, rootKey, specRoot);
 }
 
 /**

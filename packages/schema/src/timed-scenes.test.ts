@@ -13,7 +13,7 @@ import { compileSaver, compileSequence } from './compile';
 import { canWrapMorph } from './sequence';
 import { buildEntities } from './simulate';
 import { easeSmooth, lerpSpec, structuralSignature } from './steer';
-import { nextKeyAfter, resolveTimelineAt, timelineTracks, withoutTimeline } from './timeline';
+import { nextKeyAfter, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { validateSequence, validateSpec } from './validate';
 import { dominanceRanking, luminanceGrid, motionStats } from './perceive';
 import { adviseSequence } from './advise';
@@ -844,5 +844,64 @@ describe('QA: sequences', () => {
       { key: 'b', scene: sc('#000000'), duration: 3000 },
     ] };
     expect(adviseSequence(s).map((w) => w.code)).toContain('boundary-luminance-jump');
+  });
+});
+
+describe('QA round 2', () => {
+  const pulseLayer = (): LayerSpec => dot({ key: 'a', count: 10, position: undefined, pulse: { amp: 0.5, period: 4000 }, clock: { rate: 0.5 } });
+
+  it('the settled state after the last key is always validated, however many keys come before it', () => {
+    const keys: Timeline['keys'] = [];
+    for (let i = 0; i < 40; i++) keys.push({ t: i * 1000, path: 'background.color', value: i % 2 ? '#101010' : '#202020', dur: 500 });
+    keys.push({ t: 100000, path: 'a.clock.rate', value: 4, dur: 0 }, { t: 100000, path: 'a.pulse.period', value: 500, dur: 0 });
+    const s = scene({ timeline: { keys } }, [pulseLayer()]);
+    expect(timelineSampleTimes(s, true, 120)).toContain(100000);
+    expect(validateSpec(s).valid).toBe(false);
+  });
+
+  const twin = (): SaverSpec => scene({ timeline: { keys: [{ t: 100, path: 'dot.sprite.color', value: '#eeeeee', dur: 0 }] } });
+
+  it('a steer made mid-morph between timeline segments takes effect on that frame', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, seed: 3, segments: [
+      { key: 'a', scene: twin(), duration: 3000, transition: { type: 'morph', dur: 2000 } },
+      { key: 'b', scene: twin(), duration: 5000 },
+    ] };
+    const inst = mountSeq(s);
+    groundAt(inst, 1000);
+    groundAt(inst, 3500);
+    clear();
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 9, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 }] } as never);
+    expect(rec.fillRects.at(-1)).toBe('#ff0000');
+    expect(groundAt(inst, 3600)).toBe('#ff0000');
+    expect(groundAt(inst, 4500)).toBe('#ff0000');
+    expect(groundAt(inst, 5100)).toBe('#ff0000');
+    inst.dispose();
+  });
+
+  it('hotSwapSequence keeps a steer the timeline took back taken back', () => {
+    const sc = (): SaverSpec => scene({ timeline: { keys: [
+      { t: 2000, path: 'background.color', value: '#ffffff', dur: 0 },
+      { t: 8000, path: 'background.color', value: '#0000ff', dur: 0 },
+    ] } });
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, seed: 3, segments: [{ key: 'a', scene: sc(), duration: 10000 }] };
+    const inst = mountSeq(s);
+    groundAt(inst, 1000);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 9, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 }] } as never);
+    expect(groundAt(inst, 1500)).toBe('#ff0000');
+    expect(groundAt(inst, 3000)).toBe('#ffffff');
+    const next = structuredClone(s);
+    next.label = 'Q2';
+    expect((inst as unknown as { hotSwapSequence(n: IdleSequence): boolean }).hotSwapSequence(next)).toBe(true);
+    expect(groundAt(inst, 3016)).toBe('#ffffff');
+    expect(groundAt(inst, 5000)).toBe('#ffffff');
+    expect(groundAt(inst, 9000)).toBe('#0000ff');
+    inst.dispose();
+  });
+
+  it('a timeline key or steer on a whole transform object glides fields present on one side only', () => {
+    const s = scene({ timeline: { keys: [{ t: 1000, path: 'dot.transform', value: { x: 0.4 }, dur: 1000, ease: 'linear' }] } }, [dot({ transform: { scale: 2 } })]);
+    const mid = resolveTimelineAt(s, 1500).layers[0]!.transform!;
+    expect(mid.x).toBeCloseTo(0.2, 9);
+    expect(mid.scale).toBeCloseTo(1.5, 9);
   });
 });

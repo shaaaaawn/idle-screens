@@ -294,8 +294,8 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
   // one flash-safety floor). Check the composed scene where it can change:
   // every key's start, end and glide quarter-points.
   if (failed) return;
-  // Capped at 120 samples: this runs at every mount, and a 256-key timeline
-  // on the heaviest stored scene must stay a fraction of a second on a TV.
+  // Every key boundary, plus up to 120 in-glide points: this runs at every
+  // mount, so the glide sampling is budgeted — the settled states are not.
   for (const t of timelineSampleTimes(spec, true, 120)) {
     const r = validateSpec(resolveTimelineAt(spec, t));
     if (!r.valid) {

@@ -218,6 +218,8 @@ const clamp01 = (v: number): number => (v <= 0 ? 0 : v >= 1 ? 1 : v);
 
 /** A live steer held on a timeline scene — see `SpecInstance.overrides`. */
 interface TimelineOverride {
+  /** The path's last segment — lets a whole-`transform` glide fill identity fields (see `lerpValue`). */
+  leaf: string;
   from: unknown;
   to: unknown;
   t0: number;
@@ -230,7 +232,7 @@ const EXPIRED = Symbol('expired');
 /** An override's glide-in value at scene time `t` (before `until`). */
 function overrideHeldAt(o: TimelineOverride, t: number): unknown {
   const k = o.dur > 0 ? easeSmooth(clamp01((t - o.t0) / o.dur)) : 1;
-  return k >= 1 ? o.to : lerpValue(o.from, o.to, k);
+  return k >= 1 ? o.to : lerpValue(o.from, o.to, k, false, o.leaf);
 }
 
 /**
@@ -241,14 +243,14 @@ function overrideHeldAt(o: TimelineOverride, t: number): unknown {
  */
 function overrideValueAt(o: TimelineOverride, t: number, timelineValue: () => unknown): unknown {
   if (t < o.until) return overrideHeldAt(o, t);
-  if (o.outDur > 0 && t < o.until + o.outDur) return lerpValue(overrideHeldAt(o, o.until), timelineValue(), easeSmooth((t - o.until) / o.outDur));
+  if (o.outDur > 0 && t < o.until + o.outDur) return lerpValue(overrideHeldAt(o, o.until), timelineValue(), easeSmooth((t - o.until) / o.outDur), false, o.leaf);
   return EXPIRED;
 }
 
 /** Arm one steer on a timeline scene at scene time `now` — the steering rule: held until the path's next key, or sticky when no key will touch it. */
 function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number): TimelineOverride {
   const next = nextKeyAfter(authored, path, now);
-  return { from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+  return { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
 }
 
 /**
@@ -1244,13 +1246,41 @@ class SpecInstance implements SaverInstance {
    * re-steered segment, a morph frame) drops them, as a plain hot-swap
    * replaces `effSpec` wholesale; the host re-sends the live track.
    */
-  private adoptAuthored(spec: SaverSpec): void {
+  private adoptAuthored(spec: SaverSpec, keepSteers = false): void {
     const next = spec.timeline ? spec : null;
-    if (next !== this.authored) {
+    if (next !== this.authored && !(keepSteers && next && this.authored)) {
       this.overrides.clear();
       this.seenSteers.clear();
     }
     this.authored = next;
+  }
+
+  /**
+   * A sequence's hot swap of a timeline segment: the new scene replaces the
+   * old, but the live steers (and which server steers were already applied)
+   * carry over — a steer the timeline already took back stays taken back —
+   * and only a steer this child has never seen is armed, now. Frame
+   * continuity is kept, so ghosting trails do not restart.
+   */
+  hotSwapKeepingSteers(spec: SaverSpec, retained: Iterable<SteerDelta>): void {
+    if (!spec.timeline || !this.authored) {
+      this.hotSwapSpec(spec);
+      return;
+    }
+    this.adoptAuthored(spec, true);
+    for (const d of retained) this.overrideAuthored([d], 0);
+    this.resolveAuthored(this.sceneNow());
+  }
+
+  /** Arm a steer made while a sequence was mid-morph, on the outgoing end's override set, at that end's scene time. */
+  static armInto(authored: SaverSpec, overrides: Map<string, TimelineOverride>, deltas: readonly SteerDelta[], now: number): void {
+    const at = resolveTimelineAt(authored, now);
+    for (const d of deltas) {
+      const path = canonicalSpecPath(at, d.path);
+      if (!path) continue;
+      const trial = new Map(overrides).set(path, armOverride(authored, path, d.value, d.value, now, 0));
+      if (overridesStayValid(authored, trial, now)) overrides.set(path, trial.get(path)!);
+    }
   }
 
   /** Paint-only hot-swap: skips structuralSignature (caller guarantees match). */
@@ -1405,7 +1435,7 @@ class SequenceInstance implements SequenceSaverInstance {
    */
   private pendingWrapFade = false;
   /** The morph in progress: its ends, and the override sets each end resolves with (see `morphEndpoint`). */
-  private morphEnds: { from: number; to: number; out: Map<string, TimelineOverride> | null; in: Map<string, TimelineOverride> | null } | null = null;
+  private morphEnds: { from: number; to: number; outT: number; out: Map<string, TimelineOverride> | null; in: Map<string, TimelineOverride> | null } | null = null;
   /**
    * Every non-`sequence.segment` delta this instance has been handed, last
    * wins per path, merged across `applyTrack` calls. Children are created
@@ -1683,6 +1713,7 @@ class SequenceInstance implements SequenceSaverInstance {
     const scene = this.childScene(index);
     if (!scene.timeline) return this.steeredScene(scene);
     const ends = this.morphEnds;
+    if (ends && side === 'out') ends.outT = t;
     let ov = side === 'out' ? ends?.out ?? null : ends?.in ?? null;
     if (!ov) {
       ov = this.armRetained(scene);
@@ -1796,7 +1827,8 @@ class SequenceInstance implements SequenceSaverInstance {
     if (scene.timeline) {
       // A timeline may key `finish.*`: read what the rendering child painted
       // (its chain-root slot mid-morph), not the authored base.
-      const live = this.children[this.activeIndex] ?? this.children[this.morphChainRoot(this.activeIndex)];
+      const live = (this.fadingIn?.index === this.activeIndex ? this.fadingIn.child : null)
+        ?? this.children[this.activeIndex] ?? this.children[this.morphChainRoot(this.activeIndex)];
       if (live) return live.presentedSpec().finish;
     }
     return this.steeredScene(scene).finish;
@@ -1869,7 +1901,7 @@ class SequenceInstance implements SequenceSaverInstance {
         // A new morph: carry the outgoing segment's live steers (held/expired
         // per the timeline rule, on its own clock) into the lerp, before its
         // child is released or hot-swapped to the lerped frame.
-        this.morphEnds = { from: morphFrom, to: index, out: this.children[morphFrom]?.timelineOverrides() ?? null, in: null };
+        this.morphEnds = { from: morphFrom, to: index, outT: 0, out: this.children[morphFrom]?.timelineOverrides() ?? null, in: null };
       }
       this.morphFromIndex = morphFrom;
       this.activeIndex = index;
@@ -2052,6 +2084,14 @@ class SequenceInstance implements SequenceSaverInstance {
         // immediately rather than gliding over its own `dur`. Skip only when
         // the segDelta branch above already re-rendered with these deltas
         // retained.
+        // Timeline ends resolve through `morphEnds`: arm the new steer on the
+        // outgoing set at its current time, and re-arm the incoming side.
+        const ends = this.morphEnds;
+        if (ends) {
+          const outScene = this.childScene(ends.from);
+          if (ends.out && outScene.timeline) SpecInstance.armInto(outScene, ends.out, childDeltas, ends.outT);
+          ends.in = null;
+        }
         if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);
       } else if (this.activeIndex >= 0) {
         // Not mid-morph: the active child still gets the track directly, as
@@ -2098,11 +2138,11 @@ class SequenceInstance implements SequenceSaverInstance {
       if (!child) return;
       const scene = this.childScene(index);
       if (!scene.timeline) { child.hotSwapSpec(this.steeredScene(scene)); return; }
-      // A timeline child takes the retained track as live steers (the
-      // steering rule), not baked into its base — baking would make a steer
-      // on an animated path sticky.
-      child.hotSwapSpec(scene);
-      if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
+      // A timeline child keeps its live steers across the swap (the steering
+      // rule), rather than having them baked into its base (which would make
+      // a steer on an animated path sticky) or re-armed from scratch (which
+      // would bring back one the timeline already took back).
+      child.hotSwapKeepingSteers(scene, this.retainedDeltas.values());
     };
     for (let i = 0; i < this.children.length; i++) swap(this.children[i], i);
     if (this.fading) swap(this.fading.child, this.fading.index);

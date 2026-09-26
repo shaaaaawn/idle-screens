@@ -77,14 +77,14 @@ function ease(k: TimelineKey, x: number): number {
 }
 
 /** One path's value at timeline-local time `tt`, starting from `start`. */
-function evalTrack(keys: TimelineKey[], start: unknown, tt: number): unknown {
+function evalTrack(keys: TimelineKey[], start: unknown, tt: number, leaf?: string): unknown {
   let from = start;
   let key: TimelineKey | null = null;
   const at = (tau: number): unknown => {
     if (!key) return from;
     const dur = key.dur ?? DEFAULT_KEY_DUR;
     if (dur <= 0 || tau >= key.t + dur) return key.value;
-    return lerpValue(from, key.value, ease(key, (tau - key.t) / dur));
+    return lerpValue(from, key.value, ease(key, (tau - key.t) / dur), false, leaf);
   };
   for (const k of keys) {
     if (k.t > tt) break;
@@ -109,7 +109,7 @@ export function resolveTimelineAt(spec: SaverSpec, t: number): SaverSpec {
   const deltas: Array<{ t: number; path: string; value: unknown }> = [];
   for (const [path, keys] of tracks) {
     const start = tl.loop ? keys[keys.length - 1]!.value : readSpecPath(base, path);
-    deltas.push({ t: 0, path, value: evalTrack(keys, start, tt) });
+    deltas.push({ t: 0, path, value: evalTrack(keys, start, tt, path.slice(path.lastIndexOf('.') + 1)) });
   }
   return applyDeltasToSpec(base, deltas);
 }
@@ -146,23 +146,29 @@ export function nextKeyAfter(spec: SaverSpec, path: string, t: number): { at: nu
  * starts and ends, for the per-steer check a live viewer runs. Capped (evenly
  * subsampled) so a 256-key timeline stays cheap to check.
  */
-export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = dense ? 300 : 64): number[] {
+export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = 120): number[] {
   const tl = spec.timeline;
   if (!tl) return [];
-  const fracs = dense ? [0, 0.25, 0.5, 0.75, 1] : [0, 1];
-  const set = new Set<number>([0]);
+  const d = tl.duration ?? 0;
+  const fold = (t: number): number => (tl.loop && d > 0 ? ((t % d) + d) % d : t);
+  // Every key's start and end is always checked (≤ 2 × 256): a settled state
+  // must never be thinned away — the last key's end is the state a scene
+  // stays in. Only the in-glide quarter-points share a budget (`cap`).
+  const bounds = new Set<number>([0]);
+  const extras = new Set<number>();
   for (const k of tl.keys ?? []) {
     if (!Number.isFinite(k.t)) continue;
-    const d = k.dur ?? DEFAULT_KEY_DUR;
-    for (const f of fracs) set.add(k.t + d * f);
+    const dur = k.dur ?? DEFAULT_KEY_DUR;
+    bounds.add(fold(k.t));
+    bounds.add(fold(k.t + dur));
+    if (dense) for (const f of [0.25, 0.5, 0.75]) extras.add(fold(k.t + dur * f));
   }
-  const d = tl.duration ?? 0;
-  let times = [...set].filter(Number.isFinite);
-  if (tl.loop && d > 0) times = [...new Set(times.map((t) => ((t % d) + d) % d))];
-  times.sort((a, b) => a - b);
-  if (times.length <= cap) return times;
-  const step = times.length / cap;
-  return Array.from({ length: cap }, (_, i) => times[Math.floor(i * step)]!);
+  let extra = [...extras].filter((t) => !bounds.has(t)).sort((a, b) => a - b);
+  if (extra.length > cap) {
+    const step = extra.length / cap;
+    extra = Array.from({ length: cap }, (_, i) => extra[Math.floor(i * step)]!);
+  }
+  return [...new Set([...bounds, ...extra])].filter(Number.isFinite).sort((a, b) => a - b);
 }
 
 /** The absolute scene times at or after `now` where `timelineSampleTimes` fall — the next lap's occurrences under `loop`. */
