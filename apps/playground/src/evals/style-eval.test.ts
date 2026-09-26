@@ -25,6 +25,8 @@ describe('artistic style eval catalog', () => {
     }
   });
 
+  // Scores the whole catalog. Under `vitest --coverage` this blows the 5s
+  // default; isolated it finishes in ~1s.
   it('scoreSuite produces a summary with provenance and nextCycle hooks', () => {
     const { summary, results } = scoreSuite(catalog.screens, catalog.artists, {
       runId: 'test-run',
@@ -43,5 +45,5 @@ describe('artistic style eval catalog', () => {
     expect(summary.provenance.model?.name).toBe('test-harness');
     expect(summary.nextCycle.suggestedActions.length).toBeGreaterThan(0);
     expect(summary.suiteMedian).toBeGreaterThan(0);
-  });
+  }, 20_000);
 });
