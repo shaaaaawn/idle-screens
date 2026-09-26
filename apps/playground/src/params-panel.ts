@@ -134,7 +134,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
     ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
-    ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
+    ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'waterClarity', 'waterTint', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
   ],
   editors: {
     // The cast is an array: rows, not a one-line string.

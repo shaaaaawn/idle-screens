@@ -63,6 +63,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fogFar: 'Where everything has dissolved into the water. Raise to 700–1000 for castles and horizons.',
   floorColor: 'Sea-floor colour.',
   water: 'Water instead of fog: red fades with distance first, then green, blue last — a red fish goes blue-green before it goes into the murk. 0.6–1 for most scenes; 0 is plain fog.',
+  waterClarity: 'With `water` on: 0 murky (colour lost fast, short reach), 0.5 as before, 1 clear (colour kept, reach ×1.5). Bright tanks want 0.7–1.',
+  waterTint: 'The sunlit water, `#rrggbb`: distant things fade into it looking up, half of it on the level, none looking down, and the background becomes that gradient. Empty = off; with `water` on, reef, kelp, ice and lagoon bring their own.',
   dither: '`on` adds an invisible dither that removes colour banding in dark fogged gradients on TVs. Recommended with `water`; `off` (default) is byte-exact with older scenes.',
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
