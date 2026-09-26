@@ -69,7 +69,12 @@ export const WATER_INSCATTER_GLSL = /* glsl */ `
   #ifndef MQ_WATER_INSCATTER
   #define MQ_WATER_INSCATTER
   uniform vec4 uMqTint;
-  float mqTintWeight(vec3 dir) { return uMqTint.w * smoothstep(-0.35, 0.35, dir.y); }
+  // w: 0 off, 1 on, 2 on and seen in the surface mirror — where the light's
+  // real path looks UP into the lit water though the mirror camera looks down.
+  float mqTintWeight(vec3 dir) {
+    float y = uMqTint.w > 1.5 ? -dir.y : dir.y;
+    return step(0.5, uMqTint.w) * smoothstep(-0.35, 0.35, y);
+  }
   vec3 mqToDisplay(vec3 c) {
     c = max(c, vec3(0.0));
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));

@@ -75,6 +75,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   rayStrength: 'Light shafts from the surface.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
+  surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',
   // world
   propMix: 'Crystals: `crystal[:count][@habit][/palette][*size]`. Habits lotus·spire·druse·scatter·coral; palettes env·rainbow or a colour (blue hotpink purple seafoam yellow orange cyan white glass); `*6` is tower-sized. `crystal:3@druse/rainbow`.',
   envProps: '`on` lets the environment preset plant its own crystals when `propMix` is empty.',

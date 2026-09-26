@@ -125,7 +125,8 @@ describe('water clarity and tint', () => {
     for (let y = -1; y < 1; y += 0.05) expect(tintWeight(y + 0.05)).toBeGreaterThanOrEqual(tintWeight(y));
   });
   it('the GLSL weight mirrors the JS one and carries its own include guard', () => {
-    expect(WATER_INSCATTER_GLSL).toMatch(/smoothstep\(-0\.35, 0\.35, dir\.y\)/);
+    expect(WATER_INSCATTER_GLSL).toMatch(/smoothstep\(-0\.35, 0\.35, y\)/);
+    expect(WATER_INSCATTER_GLSL).toMatch(/uMqTint\.w > 1\.5 \? -dir\.y : dir\.y/);
     expect(WATER_INSCATTER_GLSL).toMatch(/#ifndef MQ_WATER_INSCATTER/);
     expect(WATER_FOG_GLSL).toContain('MQ_WATER_INSCATTER');
   });
