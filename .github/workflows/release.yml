@@ -8,7 +8,7 @@ name: Release
 #
 # Auth: prefer npm Trusted Publishing (OIDC). Keep secrets.NPM_TOKEN as a
 # temporary fallback until every @idle-screens/* package has a Trusted Publisher
-# pointing at this workflow filename (release.yml). See CLAUDE.md § Releasing.
+# pointing at this workflow filename (release.yml). See AGENTS.md § Releasing.
 
 on:
   push:

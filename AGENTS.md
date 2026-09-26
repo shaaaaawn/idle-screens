@@ -1,4 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
+
+Instructions for coding agents in this repo. Claude Code, Cursor, Codex and pi
+all read this file — keep it the only one: a `CLAUDE.md` here or in any parent
+directory makes Claude Code stop reading `AGENTS.md`.
 
 ## Repository layout
 
@@ -272,7 +276,7 @@ published via OIDC, remove the repo `NPM_TOKEN` secret and prefer
 
 ## Consumer integration (idle-server)
 
-The Cloudflare Worker at `~/code/idle-server` consumes `@idle-screens/schema` (plus core, savers-classic, saver-black-hole) from npm. Its `src/worker.ts` contains a `SCHEMA_REFERENCE` constant that mirrors `packages/schema/FORMAT.md` — **update the server's reference whenever the schema format changes** (new sprite kinds, motion types, top-level fields, etc.). See `~/code/idle-server/CLAUDE.md` for the update checklist.
+The Cloudflare Worker at `~/code/idle-server` consumes `@idle-screens/schema` (plus core, savers-classic, saver-black-hole) from npm. Its `src/worker.ts` contains a `SCHEMA_REFERENCE` constant that mirrors `packages/schema/FORMAT.md` — **update the server's reference whenever the schema format changes** (new sprite kinds, motion types, top-level fields, etc.). See `~/code/idle-server/AGENTS.md` for the update checklist.
 
 ## Consumer integration (shawn-site)
 

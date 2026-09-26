@@ -4,6 +4,8 @@ import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
+import { layerOpacity, transformBox } from './paint';
+import { resolveTimelineAt } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -58,6 +60,8 @@ export function adviseSpec(
    */
   opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
 ): SpecWarning[] {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
@@ -344,14 +348,17 @@ export function adviseSpec(
     const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
-      const box = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      const raw = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
+      const box = layer.transform ? { ...raw, ...transformBox(layer.transform, raw, w, h, scale) } : raw;
       // What the layer guarantees it paints, worst case: base alpha minus its
       // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
       // duty cycle is a readability question, not an ink-colour one; sampling
       // at `t = 0` would otherwise flag every emitting layer as invisible)
       // times a textBlock's own `opacity` — so faint or invisible
       // `role: 'read'` text can't hide behind an unmeasured alpha.
-      const alpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      const alpha = layer.opacity === undefined ? baseAlpha : baseAlpha * layerOpacity(layer);
       textBoxes.push({ li, label, alpha, ...box });
     }
   }
@@ -522,8 +529,9 @@ function brightestAdditivePlate(
       const growScale = (e.motion === 'warp' ? WARP_MAX_SCALE : 1) * (e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1);
       const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
       if (maxDim < box.fs) continue;
-      if (!entityReachesBox(e, maxDim / 2, box, w, h)) continue;
-      const a = Math.min(1, e.alpha + e.pulseAmp);
+      // A transformed layer is moved at draw time: treat it like a moving one (it may reach anywhere).
+      if (!layer.transform && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
+      const a = layer.opacity === undefined ? Math.min(1, e.alpha + e.pulseAmp) : Math.min(1, e.alpha + e.pulseAmp) * layerOpacity(layer);
       if (a <= 0) continue;
       const plate = additivePlate(ground, hexRgb(hex), a, blend);
       const lum = relativeLuminance(plate);
@@ -655,8 +663,11 @@ export function adviseSequence(
   }
 
   for (let i = 0; i < seq.segments.length - 1; i++) {
-    const lumaA = backgroundLuma(seq.segments[i]!.scene);
-    const lumaB = backgroundLuma(seq.segments[i + 1]!.scene);
+    // The ground each side of the cut actually shows: the outgoing segment at
+    // its end, the incoming at its start (a timeline may end on a different
+    // colour than it began; without one these are the scenes themselves).
+    const lumaA = backgroundLuma(resolveTimelineAt(seq.segments[i]!.scene, seq.segments[i]!.duration ?? 0));
+    const lumaB = backgroundLuma(resolveTimelineAt(seq.segments[i + 1]!.scene, 0));
     const delta = Math.abs(lumaA - lumaB);
     if (delta > 0.5) {
       warnings.push({
@@ -676,7 +687,8 @@ export function adviseSequence(
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
         });
-      } else if (morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' })) {
+      } else if (!seq.segments[i]!.scene.timeline && !seq.segments[i + 1]!.scene.timeline
+        && morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' || tr.text === 'dip' })) {
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-nothing-morphable',

@@ -35,7 +35,9 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
+import { layerOpacity, transformPoint, transformSize } from './paint';
+import { resolveTimelineAt } from './timeline';
+import { LIMITS, type IdleSequence, type LayerSpec, type LayerTransform, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -88,7 +90,10 @@ interface BuiltScene {
   seed: number;
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
+  /** Entities of layers with a paint `transform` — null (every scene without one) skips the lookup. */
+  transforms: Map<Entity, LayerTransform> | null;
 }
+
 
 export interface PerceiveOptions {
   viewport?: { width: number; height: number };
@@ -114,7 +119,13 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  return { w, h, scale, seed, layers, byKey };
+  let transforms: Map<Entity, LayerTransform> | null = null;
+  for (const { layer, entities } of layers) {
+    if (!layer.transform) continue;
+    transforms ??= new Map();
+    for (const e of entities) transforms.set(e, layer.transform);
+  }
+  return { w, h, scale, seed, layers, byKey, transforms };
 }
 
 /** Position with layer-parented-orbit resolution (matches the renderer). */
@@ -128,7 +139,8 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
       p.y += pp.y;
     }
   }
-  return p;
+  const tf = scene.transforms?.get(e);
+  return tf ? transformPoint(tf, p, scene.w, scene.h, scene.scale) : p;
 }
 
 /**
@@ -257,6 +269,8 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
@@ -371,7 +385,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   // decayed weights; the live frame calls it with alphaScale 1.
   const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = lifeAlphaAt(layer.life, tPass);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * layerOpacity(layer);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
@@ -380,7 +394,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
-      const sz = sizeAt(e, tPass);
+      const sz = layer.transform ? sizeAt(e, tPass) * transformSize(layer.transform) : sizeAt(e, tPass);
       const s = layer.sprite;
 
       if (s.kind === 'stroke') {
@@ -729,6 +743,7 @@ export interface TextSpriteInfo {
  * that blind spot analytically.
  */
 export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSpriteInfo[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const out: TextSpriteInfo[] = [];
@@ -805,6 +820,7 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
 function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
@@ -838,7 +854,8 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
   };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
-    const lifeA = lifeAlphaAt(layer.life, t);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * layerOpacity(layer);
+    const areaScale = layer.transform ? transformSize(layer.transform) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
     for (const e of entities) {
@@ -871,7 +888,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
-      area += entArea * a;
+      area += layer.transform ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
       // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
@@ -918,6 +935,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
  * identical in every other channel. See `cohesion.ts`.
  */
 export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
 }
@@ -931,27 +949,37 @@ export interface LayerMotionStats {
   moving: boolean;
 }
 
-/** Per-layer displacement between t and t+dt — choreography as numbers. */
+/**
+ * Per-layer displacement between t and t+dt — choreography as numbers.
+ *
+ * Samples the scene at both ends of the window separately (not just each
+ * entity's own position within one scene) so a `timeline`-driven layer
+ * `transform` — a camera pan or zoom with every entity otherwise static —
+ * registers as motion instead of vanishing between two reads of the same
+ * frozen transform.
+ */
 export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: number } = {}): LayerMotionStats[] {
-  const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const dt = opts.dt ?? 500;
-  const { w, h } = scene;
-  return scene.layers.map(({ layer, entities }, layerIndex) => {
+  const scene0 = buildScene(resolveTimelineAt(spec, t), opts);
+  const scene1 = spec.timeline ? buildScene(resolveTimelineAt(spec, t + dt), opts) : scene0;
+  const { w, h } = scene0;
+  return scene0.layers.map(({ layer, entities }, layerIndex) => {
+    const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
     let acc = 0;
     let max = 0;
     let n = 0;
-    for (const e of entities) {
-      const p0 = posOf(scene, e, t);
-      const p1 = posOf(scene, e, t + dt);
+    entities.forEach((e, i) => {
+      const p0 = posOf(scene0, e, t);
+      const p1 = posOf(scene1, entities1[i] ?? e, t + dt);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
-      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) continue; // wrap seam
+      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
       const speed = (Math.sqrt(dx * dx + dy * dy) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
-    }
+    });
     const meanSpeed = n ? acc / n : 0;
     return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, moving: meanSpeed > 0.5 };
   });
@@ -1080,6 +1108,7 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
     t: opts.t ?? 5000,
