@@ -26,7 +26,6 @@ import {
   Group,
   HemisphereLight,
   LinearToneMapping,
-  MathUtils,
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,

@@ -37,6 +37,11 @@ describe('shots', () => {
     expect(Math.hypot(m.tx - 40, m.tz - 30)).toBeLessThan(1e-9);
     expect(Math.hypot(m.x - m.tx, m.y - m.ty, m.z - m.tz)).toBeLessThan(100);
   });
+  it('macro falls back to a default framing when there is no landmark', () => {
+    const p = shotPose('macro', { ...base, landmark: null }, pose());
+    expect(Number.isFinite(p.x + p.y + p.z + p.tx + p.ty + p.tz)).toBe(true);
+    expect([p.tx, p.tz]).toEqual([0, 0]);
+  });
   it('azimuth turns every shot around its target; distance scales it', () => {
     const a = shotPose('hero', base, pose()), b = shotPose('hero', { ...base, azimuth: base.azimuth + 90 }, pose());
     expect(Math.hypot(a.x - a.tx, a.z - a.tz)).toBeCloseTo(Math.hypot(b.x - b.tx, b.z - b.tz), 9);
