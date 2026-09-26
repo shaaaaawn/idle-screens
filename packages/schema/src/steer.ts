@@ -72,6 +72,52 @@ export function readSpecPath(spec: unknown, path: string): unknown {
   return loc ? (loc.parent as Record<string | number, unknown>)[loc.key] : undefined;
 }
 
+const TRANSFORM_IDENTITY: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, rotate: 0 };
+
+/**
+ * When only one end of a spec lerp declares a layer's paint `opacity` or
+ * `transform`, give the other end the identity value (opacity 1, x/y/rotate 0,
+ * scale/scaleX 1) so the lerp glides from how the layer actually looks
+ * instead of stepping. Returns the inputs themselves when no layer differs —
+ * every spec without these fields lerps exactly as it always has.
+ */
+function alignPaintFields(a: unknown, b: unknown): [unknown, unknown] {
+  const la = (a as { layers?: unknown[] } | null)?.layers;
+  const lb = (b as { layers?: unknown[] } | null)?.layers;
+  if (!Array.isArray(la) || !Array.isArray(lb)) return [a, b];
+  let outA: unknown[] | null = null;
+  let outB: unknown[] | null = null;
+  const n = Math.min(la.length, lb.length);
+  for (let i = 0; i < n; i++) {
+    const x = la[i] as Record<string, unknown> | null;
+    const y = lb[i] as Record<string, unknown> | null;
+    if (!x || !y || typeof x !== 'object' || typeof y !== 'object') continue;
+    let nx = x;
+    let ny = y;
+    if ((x.opacity === undefined) !== (y.opacity === undefined)) {
+      if (x.opacity === undefined) nx = { ...nx, opacity: 1 };
+      else ny = { ...ny, opacity: 1 };
+    }
+    const tx = x.transform as Record<string, unknown> | undefined;
+    const ty = y.transform as Record<string, unknown> | undefined;
+    if (tx || ty) {
+      const fx: Record<string, unknown> = { ...(tx ?? {}) };
+      const fy: Record<string, unknown> = { ...(ty ?? {}) };
+      let changed = !tx || !ty;
+      for (const key of new Set([...Object.keys(fx), ...Object.keys(fy)])) {
+        const id = TRANSFORM_IDENTITY[key];
+        if (id === undefined) continue;
+        if (fx[key] === undefined) { fx[key] = id; changed = true; }
+        if (fy[key] === undefined) { fy[key] = id; changed = true; }
+      }
+      if (changed) { nx = { ...nx, transform: fx }; ny = { ...ny, transform: fy }; }
+    }
+    if (nx !== x) (outA ??= la.slice())[i] = nx;
+    if (ny !== y) (outB ??= lb.slice())[i] = ny;
+  }
+  return [outA ? { ...(a as object), layers: outA } : a, outB ? { ...(b as object), layers: outB } : b];
+}
+
 /** A steering delta as carried on a channel control-track. */
 export interface SteerDelta {
   t: number;
@@ -125,6 +171,7 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
  * timeline, so every stored morph and glide is unchanged.
  */
 export function lerpValue(from: unknown, to: unknown, k: number, specRoot = false): unknown {
+  if (specRoot) [from, to] = alignPaintFields(from, to);
   const kk = Math.max(0, Math.min(1, k));
   const walk = (a: unknown, b: unknown, key?: string | number, root = false): unknown => {
     if (typeof a === 'number' && typeof b === 'number') {

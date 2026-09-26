@@ -707,6 +707,10 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   value** — each lap is one closed cycle, lap 7 looks exactly like lap 1.
 - **Flash safety:** distinct key times on one path sit ≥ 200 ms apart
   (across the loop wrap too). Keys on different paths may share a beat.
+  Keys are also checked **together**: two keys that are each valid can
+  combine past a floor (a `clock.rate` and a `pulse.period` share one), so
+  the validator resolves the scene at every key's start, end and glide
+  quarter-points and rejects it there.
 - A key on a **structural** path rebuilds the scene at that key — a pop, and
   the validator warns `timeline-structural-key`. Animate paint: colours,
   `opacity`, `transform`, polygon `points` (a whole equal-length array
@@ -723,7 +727,12 @@ rule falls out of the scene itself, no mode flag:
 - a steer on a path **no key touches** is a sticky override — exactly today's
   behaviour on an ambient scene;
 - a steer on a path the **timeline animates** holds until that path's next
-  key, then glides back to the timeline over that key's `dur`.
+  key, then glides back to the timeline over that key's `dur` — from
+  wherever the steer's own glide had reached, if the key arrives mid-glide.
+
+A steer is rejected, as on any scene, when the scene it makes is invalid —
+judged with every live steer applied, now and at each key still ahead (a
+sticky steer outlives the keys).
 
 A channel's control track is not a timeline: its `t` is a wall-clock stamp the
 server writes, so it is never read as a schedule. Authored time lives here.
@@ -953,12 +962,18 @@ morph chain** — every segment morphs into the next and the last is a
 structural twin of the first — so every lap keeps the chain root's seed and
 entity placement; otherwise it is still a cut and the validator warns
 `wrap-morph-inactive` with the reason. With it, a looping ident is a closed
-cycle of poses. **Native:** tvOS cross-fades the wrap like any segment change.
+cycle of poses. A clicker jump to segment 0 (a `sequence.segment` steer)
+still cuts — it arrives from wherever the presenter was, not from the last
+segment. **Native:** tvOS cross-fades the wrap like any segment change.
 
 **Timelines in segments:** a segment's scene may carry a `timeline`; it runs
 on the segment's `localT`. A morph resolves each side on its own clock — the
 outgoing segment at `duration + localT`, the incoming at `localT` — and lerps
-the results, so a looping timeline keeps cycling through the morph.
+the results, so a looping timeline keeps cycling through the morph. The
+retained steers follow the steering rule on both ends (a steer the outgoing
+timeline has already taken back stays taken back), and a layer `opacity` or
+`transform` present on only one end glides from its identity (opacity 1,
+no transform) instead of stepping.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With

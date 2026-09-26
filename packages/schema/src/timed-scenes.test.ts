@@ -16,6 +16,7 @@ import { easeSmooth, lerpSpec, structuralSignature } from './steer';
 import { nextKeyAfter, resolveTimelineAt, timelineTracks, withoutTimeline } from './timeline';
 import { validateSequence, validateSpec } from './validate';
 import { dominanceRanking, luminanceGrid, motionStats } from './perceive';
+import { adviseSequence } from './advise';
 import type { IdleSequence, LayerSpec, SaverSpec, Timeline } from './types';
 import jsonSchema from '../saver-spec.schema.json';
 
@@ -687,5 +688,161 @@ describe('saver-spec.schema.json', () => {
     expect(check(scene({}, [dot({ opacity: 2 })]))).toBe(false);
     expect(check(scene({ timeline: { keys: [] } }))).toBe(false);
     expect(check(scene({ timeline: { keys: [{ t: 0, path: 'background.color', value: '#fff', ease: 'bounce' as never }] } }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA findings on PR #194 — each pinned so it cannot come back
+// ---------------------------------------------------------------------------
+
+describe('QA: composed validity (flash safety across keys and steers)', () => {
+  const pulsing = (extra: Partial<SaverSpec> = {}): SaverSpec => scene(extra, [dot({
+    key: 'a', count: 10, position: undefined, pulse: { amp: 0.5, period: 4000 }, clock: { rate: 0.5 }, opacity: 1,
+  })]);
+  const eff = (inst: SaverInstance): SaverSpec => (inst as unknown as { effSpec: SaverSpec }).effSpec;
+
+  it('two keys each valid alone that combine past the flash floor are rejected', () => {
+    const s = pulsing({ timeline: { keys: [
+      { t: 0, path: 'a.clock.rate', value: 4, dur: 0 },
+      { t: 0, path: 'a.pulse.period', value: 500, dur: 0 },
+    ] } });
+    const r = validateSpec(s);
+    expect(r.valid).toBe(false);
+    expect(r.errors.map((e) => e.path)).toContain('timeline');
+    expect(r.errors.find((e) => e.path === 'timeline')!.message).toMatch(/combine into an invalid scene/);
+  });
+
+  it('a live steer that is valid now but breaks at a later key is rejected (sticky steer + future key)', () => {
+    const inst = mount(pulsing({ timeline: { keys: [{ t: 3000, path: 'a.pulse.period', value: 500, dur: 0 }] } }));
+    inst.renderFrame!(1000, 1);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'a.clock.rate', value: 4, ease: 'step', dur: 0 }] } as never);
+    inst.renderFrame!(4000, 1);
+    expect(validateSpec(structuredClone(eff(inst))).valid).toBe(true);
+    expect(eff(inst).layers[0]!.clock!.rate).toBe(0.5);
+    inst.dispose();
+  });
+
+  it('a second live steer that breaks the floor together with a held first one is rejected', () => {
+    const inst = mount(pulsing({ timeline: { keys: [{ t: 9000, path: 'a.opacity', value: 1 }] } }));
+    inst.renderFrame!(1000, 1);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'a.clock.rate', value: 4, ease: 'step', dur: 0 }] } as never);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'a.clock.rate', value: 4, ease: 'step', dur: 0 }, { t: 2, path: 'a.pulse.period', value: 1000, ease: 'step', dur: 0 }] } as never);
+    inst.renderFrame!(1200, 1);
+    expect(validateSpec(structuredClone(eff(inst))).valid).toBe(true);
+    expect(eff(inst).layers[0]!.clock!.rate).toBe(4);
+    expect(eff(inst).layers[0]!.pulse!.period).toBe(4000);
+    // …and the same when the second steer arrives on its own (a host that sends only the new delta).
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 3, path: 'a.pulse.period', value: 1000, ease: 'step', dur: 0 }] } as never);
+    inst.renderFrame!(1300, 1);
+    expect(validateSpec(structuredClone(eff(inst))).valid).toBe(true);
+    expect(eff(inst).layers[0]!.pulse!.period).toBe(4000);
+    inst.dispose();
+  });
+});
+
+describe('QA: override glides', () => {
+  const opacitySpec = (): SaverSpec => scene({ timeline: { keys: [{ t: 5200, path: 'dot.opacity', value: 1, dur: 1000 }] } }, [dot({ opacity: 1 })]);
+  const op = (inst: SaverInstance, t: number): number => { inst.renderFrame!(t, 1); return (inst as unknown as { effSpec: SaverSpec }).effSpec.layers[0]!.opacity!; };
+
+  it('a key landing mid glide-in takes the path back from where the glide had reached (no jump)', () => {
+    const inst = mount(opacitySpec());
+    (inst as unknown as { paused: boolean }).paused = false; // a playing instance: steers glide
+    inst.renderFrame!(5000, 1);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'dot.opacity', value: 0, dur: 1000 }] } as never);
+    const before = op(inst, 5199);
+    const after = op(inst, 5201);
+    expect(Math.abs(after - before)).toBeLessThan(0.02);
+    expect(op(inst, 6300)).toBe(1);
+    inst.dispose();
+  });
+
+  it('a re-sent track carrying two deltas for one field does not re-arm a released hold', () => {
+    const inst = mount(opacitySpec());
+    inst.renderFrame!(1000, 1);
+    const deltas = [{ t: 10, path: 'dot.opacity', value: 0.2, ease: 'step', dur: 0 }, { t: 20, path: 'layers.0.opacity', value: 0.3, ease: 'step', dur: 0 }];
+    inst.applyTrack!({ program: 't', seed: 1, deltas } as never);
+    expect(op(inst, 2000)).toBe(0.3);
+    expect(op(inst, 7000)).toBe(1); // the 5200 key took it back
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [...deltas, { t: 30, path: 'background.color', value: '#101010', ease: 'step', dur: 0 }] } as never);
+    expect(op(inst, 7100)).toBe(1);
+    inst.dispose();
+  });
+});
+
+describe('QA: lerp of paint fields present on one side only', () => {
+  it('opacity and transform glide from their identity instead of stepping', () => {
+    const a = scene({}, [dot()]);
+    const b = scene({}, [dot({ opacity: 0, transform: { x: 0.5 } })]);
+    const mid = lerpSpec(a, b, 0.5).layers[0]!;
+    expect(mid.opacity).toBeCloseTo(0.5, 9);
+    expect(mid.transform!.x).toBeCloseTo(0.25, 9);
+    const back = lerpSpec(b, a, 0.5).layers[0]!;
+    expect(back.opacity).toBeCloseTo(0.5, 9);
+    expect(back.transform!.x).toBeCloseTo(0.25, 9);
+  });
+
+  it('specs without the fields lerp to the very same shape as before', () => {
+    const a = scene({}, [dot()]);
+    const b = scene({ background: { type: 'solid', color: '#ffffff' } }, [dot({ sprite: { kind: 'circle', radius: [0.1, 0.1], color: '#000000' } })]);
+    const mid = lerpSpec(a, b, 0.5);
+    expect('opacity' in mid.layers[0]!).toBe(false);
+    expect('transform' in mid.layers[0]!).toBe(false);
+  });
+});
+
+describe('QA: sequences', () => {
+  const sc = (c: string, extra: Partial<SaverSpec> = {}): SaverSpec => scene({ background: { type: 'solid', color: c }, ...extra });
+
+  it('a morph does not bring back a steer the outgoing timeline already took back', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, seed: 3, segments: [
+      { key: 'r', scene: sc('#000000', { timeline: { keys: [{ t: 2000, path: 'background.color', value: '#ffffff', dur: 0 }] } }), duration: 3000, transition: { type: 'morph', dur: 1000 } },
+      { key: 'g', scene: sc('#ffffff'), duration: 3000 },
+    ] };
+    const inst = mountSeq(s);
+    groundAt(inst, 1000);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 }] } as never);
+    expect(groundAt(inst, 1500)).toBe('#ff0000');
+    expect(groundAt(inst, 2500)).toBe('#ffffff');
+    // The outgoing end stays where its timeline took it (white) — no pop back to red…
+    expect(groundAt(inst, 3000)).toBe('#ffffff');
+    // …and glides to the incoming segment, which has no timeline, so the
+    // retained steer is sticky there (documented sequence behaviour).
+    expect(groundAt(inst, 3500)).toBe(mix('#ffffff', '#ff0000', easeSmooth(0.5)));
+    expect(groundAt(inst, 4100)).toBe('#ff0000');
+    inst.dispose();
+  });
+
+  it('with wrapMorph, a clicker jump to segment 0 cuts to it (no frame of the last segment)', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: true, wrapMorph: true, seed: 3, segments: [
+      { key: 'r', scene: sc('#ff0000'), duration: 3000, transition: { type: 'morph', dur: 1000 } },
+      { key: 'g', scene: sc('#00ff00'), duration: 3000, transition: { type: 'morph', dur: 1000 } },
+      { key: 'b', scene: sc('#0000ff'), duration: 3000, transition: { type: 'morph', dur: 1000 } },
+    ] };
+    const inst = mountSeq(s);
+    expect(groundAt(inst, 4500)).toBe('#00ff00');
+    clear();
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'sequence.segment', value: 0 }] } as never);
+    expect(rec.fillRects.at(-1)).toBe('#ff0000');
+    expect(groundAt(inst, 4516)).toBe('#ff0000');
+    inst.dispose();
+  });
+
+  it('a timeline key on finish.* reaches the sequence’s presented finish', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, segments: [
+      { key: 'a', scene: sc('#000000', { finish: { grain: 0.1 }, timeline: { keys: [{ t: 500, path: 'finish.grain', value: 0.3, dur: 0 }] } }), duration: 5000 },
+    ] };
+    expect(validateSequence(s).valid).toBe(true);
+    const inst = mountSeq(s);
+    inst.renderFrame!(2000, 1);
+    expect((inst as unknown as { frameFinish(): { grain?: number } }).frameFinish().grain).toBe(0.3);
+    inst.dispose();
+  });
+
+  it('boundary-luminance-jump judges the ground each side of the cut actually shows', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, segments: [
+      { key: 'a', scene: sc('#000000', { timeline: { keys: [{ t: 1000, path: 'background.color', value: '#ffffff', dur: 1000 }] } }), duration: 3000 },
+      { key: 'b', scene: sc('#000000'), duration: 3000 },
+    ] };
+    expect(adviseSequence(s).map((w) => w.code)).toContain('boundary-luminance-jump');
   });
 });

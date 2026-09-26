@@ -1,7 +1,7 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
 import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
-import { DEFAULT_KEY_DUR, withoutTimeline } from './timeline';
+import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, withoutTimeline } from './timeline';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -217,7 +217,9 @@ function validateSpecCore(spec: unknown): ValidationResult {
  * (across the wrap too, under `loop`) — the flash-safety floor that replaces a
  * sequence's 1 s segment minimum for change inside a scene.
  */
-function validateTimeline(spec: SaverSpec, err: (p: string, m: string) => void, warn: WarnFn): void {
+function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn): void {
+  let failed = false;
+  const err = (p: string, m: string): void => { failed = true; errOuter(p, m); };
   const tl = spec.timeline as unknown;
   if (!isObj(tl)) return err('timeline', 'must be an object {loop?, duration?, keys}');
   for (const k of unknownKeys(tl, KNOWN_TIMELINE)) warn(`timeline.${k}`, 'unknown-property', `unknown timeline property '${k}' — will be ignored`);
@@ -285,6 +287,21 @@ function validateTimeline(spec: SaverSpec, err: (p: string, m: string) => void, 
     if (tl.loop === true && isNum(tl.duration) && distinct.length > 1) {
       const wrapGap = tl.duration - distinct[distinct.length - 1]! + distinct[0]!;
       if (wrapGap < minGap) err('timeline.keys', `keys on '${path}' at ${distinct[distinct.length - 1]} ms and ${distinct[0]} ms (next lap) are closer than ${minGap} ms across the loop wrap (flash safety)`);
+    }
+  }
+  // Each key was checked applied alone; keys that are each valid can still
+  // combine into an invalid scene (a `clock.rate` and a `pulse.period` share
+  // one flash-safety floor). Check the composed scene where it can change:
+  // every key's start, end and glide quarter-points.
+  if (failed) return;
+  // Capped at 120 samples: this runs at every mount, and a 256-key timeline
+  // on the heaviest stored scene must stay a fraction of a second on a TV.
+  for (const t of timelineSampleTimes(spec, true, 120)) {
+    const r = validateSpec(resolveTimelineAt(spec, t));
+    if (!r.valid) {
+      const e = r.errors[0]!;
+      err('timeline', `at t = ${Math.round(t)} ms the keys combine into an invalid scene — ${e.path || '<root>'}: ${e.message}`);
+      return;
     }
   }
 }

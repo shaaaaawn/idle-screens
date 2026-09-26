@@ -35,6 +35,7 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
+import { layerOpacity, transformPoint, transformSize } from './paint';
 import { resolveTimelineAt } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type LayerTransform, type SaverSpec } from './types';
 
@@ -93,34 +94,6 @@ interface BuiltScene {
   transforms: Map<Entity, LayerTransform> | null;
 }
 
-/**
- * Where a layer `transform` puts a point — the renderer's canvas transform
- * (about the viewport centre, offsets in min(w,h) units) applied to one
- * position. Sprites are not rotated here; the maps model ink, not glyph angle.
- */
-function transformPoint(tf: LayerTransform, p: { x: number; y: number }, w: number, h: number, unit: number): { x: number; y: number } {
-  const s = tf.scale ?? 1;
-  const sx = s * (tf.scaleX ?? 1);
-  let x = (p.x - w / 2) * sx;
-  let y = (p.y - h / 2) * s;
-  if (tf.rotate) {
-    const r = (tf.rotate * Math.PI) / 180;
-    const c = Math.cos(r);
-    const n = Math.sin(r);
-    [x, y] = [x * c - y * n, x * n + y * c];
-  }
-  return { x: x + w / 2 + (tf.x ?? 0) * unit, y: y + h / 2 + (tf.y ?? 0) * unit };
-}
-
-/** A layer transform's linear size factor (the geometric mean of its two axes' scales). */
-function transformSize(tf: LayerTransform | undefined): number {
-  if (!tf) return 1;
-  const s = tf.scale ?? 1;
-  return s * Math.sqrt(Math.abs(tf.scaleX ?? 1));
-}
-
-/** A layer's paint `opacity` as a multiplier (1 when unset). */
-const layerOpacity = (layer: LayerSpec): number => (layer.opacity === undefined ? 1 : Math.max(0, Math.min(1, layer.opacity)));
 
 export interface PerceiveOptions {
   viewport?: { width: number; height: number };

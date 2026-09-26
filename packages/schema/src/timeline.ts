@@ -136,3 +136,44 @@ export function nextKeyAfter(spec: SaverSpec, path: string, t: number): { at: nu
   }
   return null;
 }
+
+/**
+ * Scene times (timeline-local; within one lap under `loop`) where the keys'
+ * combined state is worth checking: time 0, and every key's start, end and
+ * glide quarter-points. Two keys can each be valid alone and invalid together
+ * (a `clock.rate` and a `pulse.period` the flash floor bounds as a ratio), so
+ * validation samples the composed scene here. `dense: false` keeps only the
+ * starts and ends, for the per-steer check a live viewer runs. Capped (evenly
+ * subsampled) so a 256-key timeline stays cheap to check.
+ */
+export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = dense ? 300 : 64): number[] {
+  const tl = spec.timeline;
+  if (!tl) return [];
+  const fracs = dense ? [0, 0.25, 0.5, 0.75, 1] : [0, 1];
+  const set = new Set<number>([0]);
+  for (const k of tl.keys ?? []) {
+    if (!Number.isFinite(k.t)) continue;
+    const d = k.dur ?? DEFAULT_KEY_DUR;
+    for (const f of fracs) set.add(k.t + d * f);
+  }
+  const d = tl.duration ?? 0;
+  let times = [...set].filter(Number.isFinite);
+  if (tl.loop && d > 0) times = [...new Set(times.map((t) => ((t % d) + d) % d))];
+  times.sort((a, b) => a - b);
+  if (times.length <= cap) return times;
+  const step = times.length / cap;
+  return Array.from({ length: cap }, (_, i) => times[Math.floor(i * step)]!);
+}
+
+/** The absolute scene times at or after `now` where `timelineSampleTimes` fall — the next lap's occurrences under `loop`. */
+export function timelineSampleTimesAfter(spec: SaverSpec, now: number, dense = false): number[] {
+  const tl = spec.timeline;
+  if (!tl) return [];
+  const local = timelineSampleTimes(spec, dense);
+  const d = tl.duration ?? 0;
+  if (tl.loop && d > 0) {
+    const phase = ((now % d) + d) % d;
+    return local.map((s) => now + (((s - phase) % d) + d) % d).sort((a, b) => a - b);
+  }
+  return local.filter((s) => s > now);
+}
