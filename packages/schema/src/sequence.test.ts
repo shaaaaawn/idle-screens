@@ -1472,17 +1472,44 @@ describe('SequenceInstance — bed', () => {
 
   it('a segment\'s ghosting is ignored over a bed (one paint per frame, no warm-up replay)', () => {
     const ghosted: SaverSpec = { ...SCENE, ghosting: 0.9 };
-    // A fresh child paints once at construction (t = 0) and once for the frame.
+    // Over a bed a fresh child paints once — for the frame. (It used to paint
+    // a stray t = 0 frame at construction too, under the real one.)
     const withBed = mountSync(compileSequence(bedSeq({ segments: [{ key: 'a', scene: ghosted, duration: 5000 }] })));
     vi.mocked(mockCtx.fillText).mockClear();
     withBed.renderFrame!(3000, 1); // a non-contiguous seek: ghosting would replay up to 53 frames
-    expect(vi.mocked(mockCtx.fillText)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(mockCtx.fillText)).toHaveBeenCalledTimes(1);
     withBed.dispose();
     const alone = mountSync(compileSequence(seq({ segments: [{ key: 'a', scene: ghosted, duration: 5000 }] })));
     vi.mocked(mockCtx.fillText).mockClear();
     alone.renderFrame!(3000, 1);
     expect(vi.mocked(mockCtx.fillText).mock.calls.length).toBeGreaterThan(10);
     alone.dispose();
+  });
+
+  it('a cut over a bed never resizes (and so never wipes) the shared surface — no black frame at the boundary', () => {
+    const host = document.createElement('div');
+    const inst = mountSync(compileSequence(bedSeq()), saverCtx({ host, reducedMotion: true }));
+    inst.renderFrame!(1000, 1);
+    const surface = host.querySelector('canvas')!;
+    let w = surface.width;
+    let h = surface.height;
+    let sets = 0;
+    Object.defineProperty(surface, 'width', { configurable: true, get: () => w, set: (v: number) => { sets++; w = v; } });
+    Object.defineProperty(surface, 'height', { configurable: true, get: () => h, set: (v: number) => { sets++; h = v; } });
+    inst.renderFrame!(5500, 1); // cut into segment b: a new child mounts on the shared surface after the bed painted
+    inst.renderFrame!(8500, 1); // and into c
+    expect(sets).toBe(0);
+    inst.dispose();
+  });
+
+  it('a segment mounted over a bed draws its ink once on the first frame (no stray t = 0 frame under it)', () => {
+    const mover: SaverSpec = { ...SCENE, layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#ffffff' }, motion: { type: 'drift', speed: [0.1, 0.1], angle: 0 } }] };
+    const inst = mountSync(compileSequence(bedSeq({ segments: [{ key: 'a', scene: SCENE, duration: 5000 }, { key: 'b', scene: mover, duration: 5000 }] })), saverCtx({ reducedMotion: true }));
+    inst.renderFrame!(1000, 1);
+    vi.mocked(mockCtx.arc).mockClear();
+    inst.renderFrame!(7000, 1); // first frame of b: the bed orb + the mover, once each
+    expect(vi.mocked(mockCtx.arc)).toHaveBeenCalledTimes(2);
+    inst.dispose();
   });
 
   it("a crossfade morph's chain-root child, freshly mounted mid-morph over a bed, does not double-paint the outgoing words (1f)", () => {

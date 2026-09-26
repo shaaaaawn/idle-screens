@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "ambient-tidepool",
+  "label": "Ambient \u00b7 Tidepool (paint fields)",
+  "seed": 5,
+  "ghosting": 0.6,
+  "background": {
+    "type": "gradient",
+    "stops": [
+      {
+        "at": 0,
+        "color": "#021018"
+      },
+      {
+        "at": 1,
+        "color": "#04202a"
+      }
+    ],
+    "drift": {
+      "period": 30000,
+      "amount": 0.08
+    }
+  },
+  "layers": [
+    {
+      "key": "motes",
+      "count": 70,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.002,
+          0.006
+        ],
+        "color": "#8ff5e6",
+        "soft": true
+      },
+      "motion": {
+        "type": "wander",
+        "speed": [
+          0.004,
+          0.012
+        ],
+        "meander": 0.08
+      },
+      "alpha": [
+        0.2,
+        0.6
+      ],
+      "blend": "lighter",
+      "opacity": 0.8
+    },
+    {
+      "key": "bloom",
+      "count": 5,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.08,
+          0.16
+        ],
+        "color": "#1fb5a8",
+        "soft": true,
+        "colors": [
+          "#1fb5a8",
+          "#2e7bd6",
+          "#7a4bd6"
+        ]
+      },
+      "motion": {
+        "type": "drift",
+        "speed": [
+          0.003,
+          0.008
+        ],
+        "angle": 20,
+        "bidirectional": true
+      },
+      "alpha": [
+        0.06,
+        0.14
+      ],
+      "blend": "lighter",
+      "grow": {
+        "amp": 0.2,
+        "period": 11000
+      },
+      "opacity": 1,
+      "transform": {
+        "scale": 1,
+        "rotate": 0
+      }
+    },
+    {
+      "key": "ring",
+      "count": 1,
+      "sprite": {
+        "kind": "ring",
+        "radius": [
+          0.3,
+          0.3
+        ],
+        "color": "#b8fff4",
+        "width": 0.002
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha": [
+        0.35,
+        0.35
+      ],
+      "pulse": {
+        "amp": 0.2,
+        "period": 9000
+      },
+      "opacity": 0.6,
+      "transform": {
+        "scale": 1,
+        "scaleX": 1
+      }
+    }
+  ]
+}

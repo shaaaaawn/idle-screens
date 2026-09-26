@@ -42,7 +42,10 @@ the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
 `morph` (2026-09-08 — ambient presentations); `background: { type: 'field' }`
 (seeded, warped noise quantised into bands), the static per-entity
 `rotate`, and the print `finish` (grain + dither screen, spec- and
-sequence-level) (2026-09-10 — the print look).
+sequence-level) (2026-09-10 — the print look); `timeline` (keyframes on the
+scene's own clock), paint-level layer `opacity` and `transform`,
+`position.dx` / `dy`, `wrapMorph` on the sequence envelope and
+`text: 'dip'` on `morph` (2026-09-25 — timed scenes).
 
 ## Safety invariants
 
@@ -107,7 +110,8 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
   "finish": { "grain": 0.5, "dither": 0.3 },  // optional; print screen over the finished frame
   "background": { ... },         // optional; defaults to black
-  "layers": [ { ... }, ... ]     // 1..36, rendered back-to-front
+  "layers": [ { ... }, ... ],    // 1..36, rendered back-to-front
+  "timeline": { ... }            // optional; authored keyframes — see **Timeline**
 }
 ```
 
@@ -283,7 +287,9 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
-| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region` |
+| `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
+| `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
+| `transform` | `{x?, y?, scale?, scaleX?, rotate?}` | identity | **paint-level** transform of the whole layer about the viewport centre: translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -663,6 +669,91 @@ control-track (`step` | `linear` | `smooth`). Placement/motion changes trigger
 a deterministic rebuild (same seed → same stream). See `@idle-screens/core`
 for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
 
+Paths that are **paint** (colours, `alpha` inside a sprite's paint, layer
+`opacity` / `transform`, `textBlock.opacity`, `reveal.progress`, polygon
+`points`) glide; paths that are **structure** (`count`, `position`, `motion`,
+`size`, `layer.alpha`, …) rebuild — a deterministic re-seed, which reads as a
+pop. Prefer `opacity` over `alpha` and `transform` over `position` for
+anything that should move smoothly.
+
+## Timeline — keyframes on the scene's clock
+
+A SaverSpec can carry authored change on its **own** clock — the same clock
+its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
+
+```jsonc
+"timeline": {
+  "loop": true,             // optional; repeat every `duration` ms
+  "duration": 16000,        // required with loop; > the latest key's t
+  "keys": [                 // 1..256
+    { "t": 400,  "path": "sun.transform.y", "value": 0, "dur": 5200 },
+    { "t": 6000, "path": "title.opacity",   "value": 1, "dur": 1400, "ease": "linear" },
+    { "t": 11000, "path": "title.opacity",  "value": 0, "dur": 1200 }
+  ]
+}
+```
+
+- A key glides `path` from wherever it is at `t` to `value` over `dur` ms
+  (default 1000, the live-steer default; `0` is a cut), eased `smooth`
+  (default), `linear` or `step` (holds, then switches at the glide's end).
+  Keys address the same dot-paths as `setParam` — index or `key` form — and a
+  path must already exist on the spec (a key cannot add a field). The spec must
+  still validate with each key's value applied.
+- Overlapping keys on one path chain: the later glide starts from the earlier
+  one's in-flight value.
+- Without `loop`, a path holds the base spec's value before its first key and
+  its last key's value after it. With `loop`, the value depends only on
+  `t mod duration`, and **before a path's first key it has its last key's
+  value** — each lap is one closed cycle, lap 7 looks exactly like lap 1.
+- **Flash safety:** distinct key times on one path sit ≥ 200 ms apart
+  (across the loop wrap too). Keys on different paths may share a beat.
+  Keys are also checked **together**: two keys that are each valid can
+  combine past a floor (a `clock.rate` and a `pulse.period` share one), so
+  the validator resolves the scene at every key's start, end and glide
+  quarter-points and rejects it there.
+- A key on a **structural** path rebuilds the scene at that key — a pop, and
+  the validator warns `timeline-structural-key`. Animate paint: colours,
+  `opacity`, `transform`, polygon `points` (a whole equal-length array
+  lerps point by point), `reveal.progress`. A glide that runs past a loop's
+  lap warns `timeline-glide-overruns-lap`.
+- A timeline is **frame-addressable**: the scene at `t` is a pure function of
+  `(spec, t)`, so seeks, ghosting warm-ups and perception all resolve it at
+  their own time. `resolveTimelineAt(spec, t)` returns the plain spec at `t`
+  (the same object when there is no timeline).
+
+**Steering a scene with a timeline** — live steering layers on top, and the
+rule falls out of the scene itself, no mode flag:
+
+- a steer on a path **no key touches** is a sticky override — exactly today's
+  behaviour on an ambient scene;
+- a steer on a path the **timeline animates** holds until that path's next
+  key, then glides back to the timeline over that key's `dur` — from
+  wherever the steer's own glide had reached, if the key arrives mid-glide.
+
+A steer is rejected, as on any scene, when the scene it makes is invalid —
+judged with every live steer applied, now and at each key still ahead (a
+sticky steer outlives the keys).
+
+A channel's control track is not a timeline: its `t` is a wall-clock stamp the
+server writes, so it is never read as a schedule. Authored time lives here.
+
+Each steer is applied once per server stamp, so a host re-sending the whole
+track (idle-server does, on every steer) never re-arms a hold the timeline has
+taken back. A viewer that mounts later replays the stored track at its own
+mount: a steer on an animated path shows there until that path's next key
+after the mount, while screens that saw it live have already moved on. Until
+viewers share a clock (`sync: 'epoch'`, still unwired on the site), screens
+mounted at different times can briefly disagree on such a path.
+
+**One format for both use cases.** An ambient scene is a SaverSpec without a
+timeline — nothing about it changes. A timed piece (an ident, a film, a
+pre-roll) is a scene whose evolution is a timeline, and a sequence only where
+it genuinely cuts to a different set of layers.
+
+**Native:** tvOS ignores `timeline` and shows the base spec — so **author the
+base as the piece's rest state** (its end card), and a timed piece degrades
+to a valid ambient scene.
+
 ## Seeing without eyes — the perception API
 
 `src/perceive.ts` translates a spec into modalities a **non-vision agent** can
@@ -676,6 +767,11 @@ approximates but does not perfectly match canvas rendering — blend modes are
 simplified (`screen` ≈ `lighter`), wrapped link segments use straight
 interpolation, and background drift is sampled at rest. These are documented
 trade-offs for a zero-dependency, renderer-free analysis tool.
+
+A `timeline` is resolved at the sample time `t` before anything is measured,
+so every output below describes the scene as it is at that moment of the
+piece. Layer `opacity` scales a layer's ink and weight; a layer `transform`
+moves and scales its positions and sizes (sprite rotation is not modelled).
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
   **`t` is in milliseconds** (the MCP `previewScene` tool takes seconds and
@@ -797,7 +893,7 @@ the presenter never freezes. A durationless final segment holds regardless of
 `advance`.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
-`{ type: 'morph', dur: number, text?: 'step' | 'crossfade' }` interpolates
+`{ type: 'morph', dur: number, text?: 'step' | 'crossfade' | 'dip' }` interpolates
 **numbers and hex colours** (colour, alpha, pulse, `reveal.progress`, …) over
 `dur` ms when crossing into the next segment; **every other value — strings,
 and `textBlock.text` above all — switches on the first morph frame** under
@@ -811,7 +907,11 @@ lerped frame's paint (colour, `opacity` and layer alpha glide as usual). Only
 the differing text layers cost a second draw, and only for `dur`; layers
 whose words match, and every non-text layer, are untouched. It is an
 internal paint pass, not a spec field — no `opacity` appears on the `text`
-sprite. `text` is a morph option only (a `fade` already cross-fades whole
+sprite. **`text: 'dip'`** draws the same two passes one after the other
+instead: the outgoing words fade out over the first half of the morph
+(alpha `1 − 2k`) and the incoming fade in over the second (`2k − 1`), so two
+captions never overlap — the right choice when the words sit in the same
+place. `text` is a morph option only (a `fade` already cross-fades whole
 frames; a `cut` has no window) and the validator rejects it elsewhere.
 **Default `step` is today's behaviour byte for byte** — the sequence
 baseline pins it — and a flip to `crossfade` by default would be a major
@@ -825,7 +925,7 @@ warning. When the segments are structural twins whose only differences are
 values morph steps (a text-only change), the morph runs but every frame of it
 shows the incoming segment — it reads as a cut — and the validator emits a
 `morph-nothing-morphable` warning (never an error; stored sequences stay
-valid) — unless the transition declared `text: 'crossfade'` and the words
+valid) — unless the transition declared `text: 'crossfade'` or `'dip'` and the words
 differ, in which case the words are the thing that morphs and the warning is
 withheld. During a morph, entity placement inherits the outgoing segment's
 seed — the incoming segment's own seed is unused. `dur` must be between 200
@@ -852,6 +952,28 @@ the informational `fade-degrades-on-low-tier`. **Native:** tvOS already
 cross-fades on every segment change using the transition's `dur`, so `fade`
 matches the native player rather than diverging from it; native reads
 `fade.dur` where it reads the morph `dur` today.
+
+**Wrap morph:** under `loop: true` a morph declared on the **last** segment
+is ignored at the wrap — the lap cuts back to segment 0, and every stored
+sequence expects that. `wrapMorph: true` on the envelope honours it: the lap
+morphs back into segment 0 (from the second lap on; the first mount at
+`T = 0` is not a wrap). It takes effect only when the whole lap is **one
+morph chain** — every segment morphs into the next and the last is a
+structural twin of the first — so every lap keeps the chain root's seed and
+entity placement; otherwise it is still a cut and the validator warns
+`wrap-morph-inactive` with the reason. With it, a looping ident is a closed
+cycle of poses. A clicker jump to segment 0 (a `sequence.segment` steer)
+still cuts — it arrives from wherever the presenter was, not from the last
+segment. **Native:** tvOS cross-fades the wrap like any segment change.
+
+**Timelines in segments:** a segment's scene may carry a `timeline`; it runs
+on the segment's `localT`. A morph resolves each side on its own clock — the
+outgoing segment at `duration + localT`, the incoming at `localT` — and lerps
+the results, so a looping timeline keeps cycling through the morph. The
+retained steers follow the steering rule on both ends (a steer the outgoing
+timeline has already taken back stays taken back), and a layer `opacity` or
+`transform` present on only one end glides from its identity (opacity 1,
+no transform) instead of stepping.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
