@@ -220,6 +220,15 @@ export const METAQUARIUM_PARAMS = {
   interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** `live` puts the vents on a real bubble life: each one grows at the mouth,
+   *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
+   *  quiet for a minute now and then. `classic` is the looping puffs. */
+  bubbleStyle: { type: 'enum', default: 'classic', options: ['classic', 'live'], ease: 'step' },
+  /** Oxygen pearls: beads that grow on the flora's leaves over half a minute
+   *  or more, sway with the leaf, and let go. Needs `floraDensity`. */
+  pearling: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** A fine CO₂ mist of tiny bubbles from the vents, drifting on a current. */
+  co2Mist: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** The sky motif: voxel jellyfish lanterns drifting in the water overhead,
    *  pulsing as they rise and sink; a few hang far out as fogged silhouettes.
