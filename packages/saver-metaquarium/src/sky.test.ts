@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
 import type { Emitter } from './crystals';
-import { buildSky, LANTERN_VERTEX, lanternAt, lanternEmitters, type SkyOptions } from './sky';
+import { buildSky, LANTERN_BEAT, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternSurge, type SkyOptions } from './sky';
 
 const opts: SkyOptions = { density: 1, cap: 12, scale: 1, palette: ['#2dffb0', '#ffd34f'] };
 const arr = (g: { getAttribute(n: string): { array: ArrayLike<number> } }, n: string): number[] => Array.from(g.getAttribute(n).array);
@@ -41,7 +41,7 @@ describe('sky lanterns', () => {
   it('is a flotilla of species, and every bell voxel knows how high up the bell it is', () => {
     const s = buildSky(createRng(7), opts);
     expect(new Set(s.lanterns.map(l => l.species)).size).toBeGreaterThanOrEqual(2);
-    const bell = arr(s.geometry!, 'aBell'), hang = arr(s.geometry!, 'aJelly').filter((_, i) => i % 3 === 1);
+    const bell = arr(s.geometry!, 'aBell').filter((_, i) => i % 2 === 0), hang = arr(s.geometry!, 'aJelly').filter((_, i) => i % 3 === 1);
     expect(bell.every(b => b === -1 || (b >= 0 && b <= 1))).toBe(true);
     // whatever hangs is not bell, and the bell does not hang — both ways,
     // since the shader picks its branch on `bell >= 0`.
@@ -50,6 +50,30 @@ describe('sky lanterns', () => {
     expect(hang.some(h => h > 0)).toBe(true); // …and something does hang
     expect(bell.some(b => b === 1)).toBe(true);
     expect(buildSky(createRng(7), { ...opts, height: 0.3 }).lanterns.filter(l => !l.far).every(l => l.y < 60)).toBe(true);
+  });
+
+  it('is thrown up by each squeeze and sinks until the next: zero over a beat, quick up, slow down', () => {
+    const l = { phase: 0.7, rate: 1 };
+    const period = (Math.PI * 2) / LANTERN_BEAT;
+    const samples = Array.from({ length: 400 }, (_, i) => lanternSurge((i / 400) * period, l));
+    expect(Math.abs(samples.reduce((a, b) => a + b, 0) / samples.length)).toBeLessThan(0.01);
+    const rising = samples.filter((v, i) => samples[(i + 1) % 400]! > v).length;
+    expect(rising).toBeLessThan(160); // up takes ~30 % of the beat
+    expect(lanternSurge(3, l)).toBe(lanternSurge(3, l));
+    // small bells beat quicker than the far giants
+    const s = buildSky(createRng(8), opts);
+    const near = s.lanterns.filter((x) => !x.far), far = s.lanterns.filter((x) => x.far);
+    expect(Math.min(...near.map((x) => x.rate))).toBeGreaterThan(Math.max(...far.map((x) => x.rate)));
+  });
+
+  it('the light keeps each jelly\'s OWN beat: a quick bell flares quicker', () => {
+    // The shader squeezes at LANTERN_BEAT × rate; the JS mirror that drives the
+    // bloom card and the floor pool must use the same rate or it drifts off the bell.
+    const period = (Math.PI * 2) / LANTERN_BEAT;
+    expect(lanternBeat(0.22 * period, 0, 1)).toBeCloseTo(1, 5); //       peak of the squeeze
+    expect(lanternBeat(0.22 * period / 1.3, 0, 1.3)).toBeCloseTo(1, 5); // …which a 1.3× jelly reaches sooner
+    expect(lanternBeat(0.22 * period, 0, 1.3)).toBeLessThan(0.99);
+    expect(lanternBeat(5, 1.1)).toBe(lanternBeat(5, 1.1, 1)); //          rate defaults to 1
   });
 
   it('moves as a pure function of t, slowly, and the shader has no other clock', () => {

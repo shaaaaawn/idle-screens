@@ -20,11 +20,17 @@ struct SettingsView: View {
                     screensSection
                     keysSection
                     followingSection
-                    syncSection
                     aboutSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
+            }
+            // Screen presence and channel names are the two things here that
+            // go stale.
+            .refreshable {
+                async let screens: Void = app.refreshScreenStatuses()
+                async let gallery: Void = app.loadGallery()
+                _ = await (screens, gallery)
             }
             .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("settings")
@@ -46,12 +52,12 @@ struct SettingsView: View {
     // MARK: Screens
 
     private var screensSection: some View {
-        section("screens", footer: "Apple TVs, Macs and Linux displays you have paired. Push any channel to them from the feed.") {
+        section("screens & sync", footer: "Manage paired Apple TV, Mac and Linux screens, open a channel's controls on a computer, and see what syncs through iCloud.") {
             NavigationLink {
                 PairedTVView(embedded: true)
             } label: {
                 HStack {
-                    row(icon: "tv.badge.wifi", title: "Screens", detail: screensDetail)
+                    row(icon: "tv.badge.wifi", title: "Screens & sync", detail: screensDetail)
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.textTertiary)
@@ -106,10 +112,7 @@ struct SettingsView: View {
                 }
             }
             Button(role: .destructive) { removing = credential; confirmingRemoval = true } label: {
-                // Keychain items are synchronizable (see `KeychainHelper`):
-                // removing one removes it from every iCloud-Keychain device,
-                // not just this phone — say so.
-                Label("Remove from all devices", systemImage: "trash")
+                Label("Remove from this device", systemImage: "trash")
             }
         } label: {
             HStack(spacing: 12) {
@@ -156,16 +159,6 @@ struct SettingsView: View {
                     }
                 }
             }
-        }
-    }
-
-    // MARK: Sync
-
-    private var syncSection: some View {
-        section("sync", footer: "Keys and follows travel with iCloud Keychain to your other Apple devices, end-to-end encrypted — turn it on in iOS Settings → your name → iCloud → Passwords. There is no idle screens account; for anything outside Apple's sync, back a key up from its menu above.") {
-            row(icon: "key.icloud", title: "Keys", detail: "iCloud Keychain")
-            row(icon: "star", title: "Following", detail: "iCloud Keychain")
-            row(icon: "tv", title: "Paired screens", detail: "this device only")
         }
     }
 

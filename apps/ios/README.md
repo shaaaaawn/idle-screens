@@ -69,8 +69,24 @@ xcrun simctl io "$UDID" screenshot /tmp/shot.png    # output is in pixels, not p
 ```
 
 Debug launch arguments jump straight to one surface instead of walking there
-with the remote: `-channel <id>`, `-classic <warp|rainstorm>`, `-poster <id>`,
-`-pair`, `-settings`, `-fallback`.
+with the remote: `-channel <id>` (add `-past <n>` to step n scenes into its history),
+`-classic <warp|rainstorm|metaquarium>`, `-poster <id>`, `-pair`, `-settings`,
+`-search [-q <query>]`, `-fallback`.
+
+**In the player the remote is a dial.** Up/Down surf channels in the iPhone
+feed's order (most recently steered first, sleeping channels skipped);
+Left/Right step through the channel's own past scenes and back to live — the
+phone's two feed axes. Settings → Ambient adds an auto-rotate interval and
+"start where I left off".
+
+**What guards the TV build.** `RenderSmokeTests` draws real frames headlessly
+through every renderer (Canvas, SpriteKit, the classic ports) and asserts ink
+landed, so a crash or a blank frame in paint code fails the suite instead of
+being found on a television. `.github/workflows/apple-ci.yml` builds and tests
+both targets on every `apps/ios/**` change — the targets share `API/`,
+`Render/` and `Theme/` wholesale, so an iPhone-only file dropped in one of them
+breaks the TV; list such files under the TV target's `excludes:` in
+`project.yml`. `make app tvos ship` runs the suite as a gate before archiving.
 
 ## Architecture
 

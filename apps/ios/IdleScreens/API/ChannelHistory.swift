@@ -29,6 +29,37 @@ struct ChannelEvent: Decodable, Identifiable, Equatable, Sendable {
     let intent: String?
     /// Where the call came from — the harness or host.
     let harness: String?
+    /// The scene's name, lifted out of `detail.label` when the event has one.
+    /// `detail` itself is an arbitrary object and stays undecoded.
+    let label: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, at, kind, actor, summary, sceneId, model, intent, harness, detail
+    }
+    private struct Detail: Decodable { let label: String? }
+
+    init(id: Int, at: Double, kind: String, actor: String? = nil, summary: String? = nil,
+         sceneId: Int? = nil, model: String? = nil, intent: String? = nil,
+         harness: String? = nil, label: String? = nil) {
+        self.id = id; self.at = at; self.kind = kind; self.actor = actor
+        self.summary = summary; self.sceneId = sceneId; self.model = model
+        self.intent = intent; self.harness = harness; self.label = label
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        at = try c.decode(Double.self, forKey: .at)
+        kind = try c.decode(String.self, forKey: .kind)
+        actor = try c.decodeIfPresent(String.self, forKey: .actor)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        sceneId = try c.decodeIfPresent(Int.self, forKey: .sceneId)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        intent = try c.decodeIfPresent(String.self, forKey: .intent)
+        harness = try c.decodeIfPresent(String.self, forKey: .harness)
+        // Lenient on purpose: `detail` has been a string, an object and absent.
+        label = (try? c.decodeIfPresent(Detail.self, forKey: .detail))?.label
+    }
 
     var date: Date { Date(timeIntervalSince1970: at / 1000) }
 
@@ -36,6 +67,33 @@ struct ChannelEvent: Decodable, Identifiable, Equatable, Sendable {
     /// `setParam` with no attribution tells the reader nothing.
     var hasAttribution: Bool {
         (model?.isEmpty == false) || (intent?.isEmpty == false)
+    }
+}
+
+/// Who actually made a scene, when the event that aired it cannot say.
+///
+/// The nightly curator and the scheduler re-air saved scenes under their own
+/// name with no model, so a wall of channels all read "curator". The server
+/// does not carry the original credit forward — but the channel's own log
+/// often still holds the first publish of that scene, by name, with its model.
+enum SceneCredit {
+    /// Actors that put scenes on air without having made them.
+    static let relays: Set<String> = ["curator", "scheduler", "schedule", "nightly"]
+
+    static func isRelay(_ actor: String?) -> Bool {
+        guard let actor else { return false }
+        return relays.contains(actor.lowercased())
+    }
+
+    /// The earliest event for the same scene name that a real author signed:
+    /// a model, or a named actor that is not a relay. nil when the log holds
+    /// no such event — which is an honest "unknown", not an error.
+    static func original(for event: ChannelEvent, in events: [ChannelEvent]) -> ChannelEvent? {
+        guard isRelay(event.actor), let label = event.label?.lowercased(), !label.isEmpty else { return nil }
+        return events
+            .filter { $0.label?.lowercased() == label && !isRelay($0.actor) }
+            .filter { ($0.model?.isEmpty == false) || SteerLine.namedActor($0.actor) != nil }
+            .min { $0.at < $1.at }
     }
 }
 

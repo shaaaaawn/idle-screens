@@ -6,6 +6,9 @@
  * validates and rejects them; the runtime stays lenient).
  */
 import { LIMITS, type IdleSequence, type SaverSpec, type SpriteSpec } from './types';
+// Cycle (validate.ts imports structuralSignature from here) is safe: neither
+// module touches the other's exports at load time, only inside functions.
+import { ignoredPropertyPaths } from './validate';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -200,6 +203,12 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
  * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
  * they describe structure, not tuneable values.
  *
+ * Properties the validator flags as unknown or misplaced (e.g. `angle` on a
+ * gradient background, `blend` inside a sprite) are excluded too: the
+ * renderer never reads them, so advertising them invites a steer that
+ * silently does nothing. Same source of truth as validateSpec's
+ * "will be ignored" warnings (`ignoredPropertyPaths`).
+ *
  * Layer keys are NOT substituted: paths always use numeric indices.
  * Consumers can map to key-based paths via resolveSpecPath if needed.
  */
@@ -241,7 +250,9 @@ export function steerablePaths(spec: unknown): string[] {
     if (prefix) out.push(prefix);
   };
   walk(spec, '', '');
-  return out;
+  const ignored = ignoredPropertyPaths(spec);
+  if (ignored.length === 0) return out;
+  return out.filter((p) => !ignored.some((ig) => p === ig || p.startsWith(`${ig}.`)));
 }
 
 /**

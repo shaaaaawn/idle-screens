@@ -106,6 +106,7 @@ struct ChannelKeysSheet: View {
                     Text("Only to give the channel away. For sharing, make a key above — it can be revoked on its own.")
                 }
             }
+            .refreshable { await load() }
             .navigationTitle(credential.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

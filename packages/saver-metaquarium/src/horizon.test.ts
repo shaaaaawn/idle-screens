@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
-import { buildHorizon, HORIZON_FRAGMENT, HORIZON_RINGS } from './horizon';
+import { buildHorizon, HORIZON_FRAGMENT, HORIZON_RINGS, HORIZON_SAFE_R } from './horizon';
 
 const arr = (g: { getAttribute(n: string): { array: ArrayLike<number> } }, n: string): number[] => Array.from(g.getAttribute(n).array);
 
@@ -17,11 +17,14 @@ describe('horizon', () => {
     expect(a.triangles).toBeLessThan(6000);
     const pos = arr(a.geometry!, 'position');
     expect(pos.every(Number.isFinite)).toBe(true);
-    // Nothing inside the swim space, nothing past the camera's far plane.
+    // Nothing inside the swim space. Nothing past HORIZON_SAFE_R either: that's
+    // the real, generation-time-enforced bound (not just the far plane itself,
+    // 1400) that keeps every vertex inside the camera's far plane even from
+    // `cameraDistance`'s widest orbit (400) — HORIZON_SAFE_R + 400 < 1400.
     for (let i = 0; i < pos.length; i += 3) {
       const r = Math.hypot(pos[i]!, pos[i + 2]!);
       expect(r).toBeGreaterThan(330);
-      expect(r).toBeLessThan(1000);
+      expect(r).toBeLessThanOrEqual(HORIZON_SAFE_R);
       expect(pos[i + 1]!).toBeGreaterThanOrEqual(0);
     }
     expect(arr(buildHorizon(createRng(2), { amount: 1, palette: ['#ff67bc'] }).geometry!, 'position')).toEqual(pos);

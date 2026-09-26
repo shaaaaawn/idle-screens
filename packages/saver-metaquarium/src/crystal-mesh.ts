@@ -405,7 +405,7 @@ export function writePoolSlots(u: Uniforms, emitters: readonly Emitter[], from: 
     if (i >= MAX_POOLS) break;
     const k = 1 / (0.55 + 1.6 * (0.2126 * e.r + 0.7152 * e.g + 0.0722 * e.b));
     const p = i * 4, c = i * 3;
-    pos4[p] = e.x; pos4[p + 1] = e.y; pos4[p + 2] = e.z; pos4[p + 3] = e.reach * 0.55;
+    pos4[p] = e.x; pos4[p + 1] = e.y; pos4[p + 2] = e.z; pos4[p + 3] = e.reach;
     col3[c] = e.r * k; col3[c + 1] = e.g * k; col3[c + 2] = e.b * k;
     phases[i] = e.phase;
     i += 1;

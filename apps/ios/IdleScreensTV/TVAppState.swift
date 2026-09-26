@@ -107,16 +107,16 @@ final class TVAppState {
         return tier
     }
 
-    /// Raw hardware capability, ignoring the per-channel adaptive ladder.
-    /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
-    /// thumb-stream and schema-scene verdicts, and a broken server thumb
-    /// must not veto a fully local renderer.
     /// Compile ceiling for a fullscreen scene on this box.
     var sceneBudget: (layers: Int, entities: Int) {
         (layers: SpecSubset.Budget.fullscreen.layers,
          entities: renderClass.fullscreenEntityBudget)
     }
 
+    /// Raw hardware capability, ignoring the per-channel adaptive ladder.
+    /// The classic-saver ports gate on THIS: thumbFailed / learned caps are
+    /// thumb-stream and schema-scene verdicts, and a broken server thumb
+    /// must not veto a fully local renderer.
     var hardwareTier: CapabilityTier {
         tierOverride ?? detectedTier
     }
@@ -236,6 +236,8 @@ final class TVAppState {
         watchdogDowngraded = false
         complexityCap = nil
         stopSequence()
+        resetTimeline()
+        scheduleRotation()
         UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
         // Instant first frame: the gallery payload carries each channel's
         // inline spec, so render it immediately instead of holding a spinner
@@ -251,9 +253,203 @@ final class TVAppState {
         openSocket(channelId: channelId, watching: true)
     }
 
+    // MARK: Channel surfing
+
+    /// The channel `step` places along the feed from `current`, wrapping at
+    /// both ends — Up/Down on the remote, the oldest convention a TV has.
+    ///
+    /// Order is the iPhone feed's (`ChannelFeed.latestFirst`), so the two
+    /// devices flip through the same channels in the same order. Sleeping
+    /// channels are skipped: when you are surfing, a moon and a sentence is a
+    /// dud page. The current channel is kept in the ring even if it sleeps,
+    /// so there is always somewhere to step FROM.
+    static func surfTarget(from current: String?, step: Int,
+                           in channels: [PublicChannel]) -> String? {
+        let ring = ChannelFeed.latestFirst(channels)
+            .filter { $0.sleeping != true || $0.id == current }
+        guard ring.count > 1, step != 0 else { return nil }
+        guard let current, let i = ring.firstIndex(where: { $0.id == current }) else {
+            return ring.first?.id
+        }
+        let n = ring.count
+        return ring[((i + step) % n + n) % n].id
+    }
+
+    /// Where the current channel sits in the surf ring, for "3 of 61".
+    var surfPosition: (index: Int, count: Int)? {
+        let ring = ChannelFeed.latestFirst(channels)
+            .filter { $0.sleeping != true || $0.id == selectedChannelId }
+        guard let i = ring.firstIndex(where: { $0.id == selectedChannelId }) else { return nil }
+        return (i + 1, ring.count)
+    }
+
+    func surf(_ step: Int) {
+        guard let next = Self.surfTarget(from: selectedChannelId, step: step, in: channels)
+        else { return }
+        // Stay on whichever surface opened the player, so Back still returns there.
+        selectChannel(next, from: presentingSurface)
+    }
+
+    // MARK: Timeline — the channel's past (Left / Right)
+
+    /// Where the player is on the current channel's timeline.
+    enum Timeline: Equatable {
+        case live
+        /// Index into `historyStops`, 0 = the scene before the live one.
+        case past(Int)
+    }
+
+    private(set) var timeline: Timeline = .live
+    /// Past scenes of the current channel, newest first (the live one dropped).
+    private(set) var historyStops: [ChannelFeed.Stop] = []
+    /// The scene on screen when `timeline` is `.past`.
+    private(set) var pastScene: RecordedScene?
+    private var liveScene: (json: JSONValue, seed: Int?)?
+    private var liveClassicParams: [String: String] = [:]
+    private var historyTask: Task<Void, Never>?
+
+    /// One step along the timeline. Left goes older and stops at the oldest
+    /// known scene; Right comes back toward live and stops there. Pure, so
+    /// the edges are testable: the remote must never wrap from the oldest
+    /// scene back to live, or "keep pressing left" becomes a loop.
+    static func timelineStep(from current: Timeline, older: Bool, stops: Int) -> Timeline {
+        switch (current, older) {
+        case (.live, true): return stops > 0 ? .past(0) : .live
+        case (.live, false): return .live
+        case (.past(let i), true): return .past(Swift.min(i + 1, Swift.max(0, stops - 1)))
+        case (.past(let i), false): return i <= 0 ? .live : .past(i - 1)
+        }
+    }
+
+    /// Step into the past (or back). The first step fetches the channel's
+    /// history; every scene is fetched once and rendered by the same native
+    /// renderers as live — the format is deterministic, so a past scene is
+    /// reproduced, not replayed from a recording.
+    func stepTimeline(older: Bool) {
+        guard let channelId = selectedChannelId else { return }
+        historyTask?.cancel()
+        historyTask = Task { [weak self] in
+            guard let self else { return }
+            if self.historyStops.isEmpty, older {
+                let events = (try? await self.gallery.fetchHistory(channelId: channelId)) ?? []
+                guard !Task.isCancelled, self.selectedChannelId == channelId else { return }
+                self.historyStops = ChannelFeed.stops(from: events)
+            }
+            let target = Self.timelineStep(from: self.timeline, older: older,
+                                           stops: self.historyStops.count)
+            guard target != self.timeline else { return }
+            switch target {
+            case .live:
+                self.returnToLive()
+            case .past(let i):
+                let stop = self.historyStops[i]
+                guard let scene = try? await self.gallery.fetchScene(
+                    channelId: channelId, sceneId: stop.sceneId),
+                      !Task.isCancelled, self.selectedChannelId == channelId else { return }
+                self.timeline = target
+                self.pastScene = scene
+                self.show(scene)
+            }
+        }
+    }
+
+    func returnToLive() {
+        guard timeline != .live else { return }
+        timeline = .live
+        pastScene = nil
+        classicParams = liveClassicParams
+        if let live = liveScene { render(live.json, fallbackSeed: live.seed) }
+    }
+
+    private func resetTimeline() {
+        historyTask?.cancel()
+        timeline = .live
+        historyStops = []
+        pastScene = nil
+        liveScene = nil
+        liveClassicParams = [:]
+    }
+
+    private func show(_ scene: RecordedScene) {
+        stopSequence()
+        if let spec = scene.spec {
+            isClassicSpec = false
+            classicSaverId = nil
+            compiledScene = spec.compile(seed: scene.seed ?? spec.seed ?? 0, budget: sceneBudget)
+            specBackground = spec.background
+            specGhosting = spec.ghosting ?? 0
+            complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+        } else {
+            isClassicSpec = true
+            classicSaverId = scene.classicSaverId
+            // The live scene's steering does not belong to a past one.
+            classicParams = [:]
+            classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
+            compiledScene = []
+            specBackground = nil
+            specGhosting = 0
+        }
+    }
+
+    // MARK: Auto-rotate — an ambient display that changes on its own
+
+    static let rotateMinutesKey = "tv.rotate_minutes"
+    static let resumeOnLaunchKey = "tv.resume_on_launch"
+
+    /// Minutes between automatic channel changes; 0 = off.
+    var rotateMinutes: Int = UserDefaults.standard.integer(forKey: TVAppState.rotateMinutesKey) {
+        didSet {
+            UserDefaults.standard.set(rotateMinutes, forKey: Self.rotateMinutesKey)
+            scheduleRotation()
+        }
+    }
+
+    /// Reopen the last channel at launch instead of landing on the grid.
+    var resumeOnLaunch: Bool = UserDefaults.standard.bool(forKey: TVAppState.resumeOnLaunchKey) {
+        didSet { UserDefaults.standard.set(resumeOnLaunch, forKey: Self.resumeOnLaunchKey) }
+    }
+
+    /// The channel to reopen at launch, if the viewer asked for that and there
+    /// is one. nil on a first run — "default" is a socket fallback, not
+    /// somewhere the viewer chose to be.
+    var resumeChannelId: String? {
+        guard resumeOnLaunch else { return nil }
+        return UserDefaults.standard.string(forKey: Self.lastChannelKey)
+    }
+
+    private var rotationTask: Task<Void, Never>?
+
+    /// Rotation only fires on a live, selected channel. Someone who stepped
+    /// into a channel's past is looking at something on purpose; rotating
+    /// them away from it would be the app interrupting its own viewer.
+    static func shouldRotate(minutes: Int, selected: String?, timeline: Timeline) -> Bool {
+        minutes > 0 && selected != nil && timeline == .live
+    }
+
+    /// Re-armed on every channel change, so the interval always counts from
+    /// when THIS channel came up — surfing by hand resets the clock.
+    private func scheduleRotation() {
+        rotationTask?.cancel()
+        guard rotateMinutes > 0 else { return }
+        let interval = Double(rotateMinutes) * 60
+        rotationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(interval))
+            guard !Task.isCancelled, let self else { return }
+            if Self.shouldRotate(minutes: self.rotateMinutes,
+                                 selected: self.selectedChannelId,
+                                 timeline: self.timeline) {
+                self.surf(1)          // selectChannel re-arms the timer
+            } else {
+                self.scheduleRotation()
+            }
+        }
+    }
+
     func exitChannel() {
         selectedChannelId = nil
         overlayText = nil
+        resetTimeline()
+        rotationTask?.cancel()
         // Stay reachable: keep a socket on the last channel so a paired phone
         // can still push a switch while this TV sits on the grid.
         openSocket(channelId: lastChannelId, watching: false)
@@ -308,7 +504,11 @@ final class TVAppState {
             // The scene object carries the control track; resolvedSpec is the
             // bare saver ref. Harvest steered params BEFORE routing so a
             // classic scene's environment/fishMix reach the native renderer.
-            classicParams = Self.trackParams(from: snapshot.scene)
+            // Live steering is kept apart from what is on screen, so a
+            // snapshot arriving while the viewer is in the past neither
+            // restyles the past scene nor gets lost for the return.
+            liveClassicParams = Self.trackParams(from: snapshot.scene)
+            if timeline == .live { classicParams = liveClassicParams }
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: snapshot.epoch)
             }
@@ -378,6 +578,15 @@ final class TVAppState {
     }
 
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {
+        // The channel keeps living while someone is looking at its past: keep
+        // the newest live scene on hand, but don't yank the viewer out of the
+        // scene they deliberately stepped back to.
+        liveScene = (json, fallbackSeed)
+        guard timeline == .live else { return }
+        render(json, fallbackSeed: fallbackSeed)
+    }
+
+    private func render(_ json: JSONValue, fallbackSeed: Int?) {
         currentSpecJSON = json
         guard let data = try? JSONEncoder().encode(json) else { return }
         // Sequence envelope? Route to the timeline player — it carries no

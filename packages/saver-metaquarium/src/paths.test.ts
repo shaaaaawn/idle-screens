@@ -70,6 +70,7 @@ describe('paths', () => {
     for (const home of village.filter((v) => v.kind === 'home')) {
       // the walk that starts at this door ends on the door's side of the road, at its edge
       const first = net.segments.findIndex((g) => Math.hypot(g.x0 - home.x, g.z0 - home.z) < 0.01);
+      expect(first, `no segment starts at home ${home.x},${home.z}`).toBeGreaterThanOrEqual(0);
       let last = first;
       while (last + 1 < net.segments.length && Math.hypot(net.segments[last + 1]!.x0 - net.segments[last]!.x1, net.segments[last + 1]!.z0 - net.segments[last]!.z1) < 0.01) last++;
       const end = net.segments[last]!;

@@ -83,7 +83,7 @@ struct MyChannelsView: View {
             .navigationDestination(for: ChannelCredential.self) { credential in
                 ChannelDeckView(credential: credential)
             }
-            .navigationTitle("create")
+            .navigationTitle("your channels")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {

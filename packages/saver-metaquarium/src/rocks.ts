@@ -84,6 +84,11 @@ export function boulder(rng: CrystalRng, detail = 1): Tri[] {
  *   - shards of crystal stand in the breach round the crown;
  *   - and the light FLOWS: `flow` lets the shader send slow pulses downhill.
  */
+/** How many shards stand in the breach at a given `amount` (0..1) — exported
+ *  so callers (and tests) share this one source of truth instead of
+ *  restating the formula. */
+export const shardCount = (amount: number): number => 3 + Math.round(amount * 5);
+
 export function fissures(
   tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number, worldPerUnit = 12,
 ): { positions: number[]; colors: number[]; flow: number[]; seep: Vector3 | null } {
@@ -184,7 +189,7 @@ export function fissures(
 
   // The breach: shards standing round the crown, where the stone gave way.
   const root = band.clone().lerp(new Color('#ffffff'), 0.5);
-  const shards = 3 + Math.round(amount * 5);
+  const shards = shardCount(amount);
   for (let i = 0; i < shards; i += 1) {
     const a = rng.next() * Math.PI * 2, r = rng.range(0.05, 0.3);
     const base = new Vector3(crown.x + Math.cos(a) * r, crown.y - r * 0.35 - 0.04, crown.z + Math.sin(a) * r);

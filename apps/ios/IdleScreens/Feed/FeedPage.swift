@@ -33,10 +33,15 @@ struct FeedPage: View {
     @State private var captionEntered = false
     /// `"live"`, or a stop's key. Optional only because `scrollPosition` binds one.
     @State private var moment: String? = FeedPage.liveKey
+    /// Changes when the feed was pulled to refresh.
+    var refreshToken: Int = 0
     @Binding var chromeHidden: Bool
     @State private var showComposer = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
+    @State private var history: [ChannelEvent] = []
+    @State private var liveTank = TankLoadState()
+    @State private var liveTankLoading = false
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -50,6 +55,15 @@ struct FeedPage: View {
     /// Steering needs an editor or owner key. A viewer key opens a private
     /// channel and must not light up controls that would then be refused.
     private var canSteer: Bool { app.canEdit(channelId) }
+    /// One web engine at a time. While the moment on screen is a past scene
+    /// drawn by the web (a 3D tank), the live page gives its WebView up — two
+    /// three.js contexts is how a 13 Pro gets jettisoned. Coming back to live
+    /// pays a reload; that is the right side of the trade.
+    private var historyHoldsTheEngine: Bool {
+        guard let stop = currentStop else { return false }
+        return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.needsWebEngine == true
+    }
+
     private var isLive: Bool { moment == Self.liveKey || moment == nil }
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
     private var currentIndex: Int? { stops.firstIndex { Self.key($0) == moment } }
@@ -130,11 +144,15 @@ struct FeedPage: View {
         .sheet(isPresented: $showOverview) {
             ChannelOverviewSheet(channel: channel, stops: stops, liveEvent: liveEvent,
                                  liveLabel: session.sceneLabel ?? channel.saverLabel,
-                                 current: moment) { key in
+                                 current: moment,
+                                 onRefresh: { await loadHistory() }) { key in
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
         }
         .onAppear { if isActive { activate() } }
+        .onChange(of: refreshToken) { _, _ in
+            if isActive { Task { await loadHistory() } }
+        }
         .onChange(of: isActive) { _, nowActive in
             if nowActive { activate() } else { deactivate() }
         }
@@ -147,10 +165,20 @@ struct FeedPage: View {
         replayCaptionEntrance()
         session.start(channelId: channelId, seedSpec: channel.spec, source: .host)
         guard stops.isEmpty else { return }
-        Task {
+        Task { await loadHistory() }
+    }
+
+    /// Also the overview sheet's pull-to-refresh, and the feed's.
+    private func loadHistory() async {
+        do {
             // History is an enhancement. If it fails the channel still plays,
             // and the page simply has nothing to its right.
-            let events = (try? await app.gallery.fetchHistory(channelId: channelId)) ?? []
+            // Deep enough to reach the first publish of scenes the curator
+            // re-airs nightly — that is where the real credit lives.
+            let events = (try? await app.gallery.fetchHistory(channelId: channelId, limit: 200)) ?? []
+            // A failed refresh must not wipe a timeline that was already there.
+            if events.isEmpty && !stops.isEmpty { return }
+            history = events
             liveEvent = events.filter { $0.sceneId != nil }.max { $0.at < $1.at }
             stops = ChannelFeed.stops(from: events)
             prefetchAroundCurrent()
@@ -207,7 +235,7 @@ struct FeedPage: View {
     private var livePage: some View {
         ZStack {
             Color(hex: backdropHex).ignoresSafeArea()
-            if isActive {
+            if isActive && !historyHoldsTheEngine {
                 // The web engine draws; nothing in it can be touched.
                 WebSceneView(
                     channelId: channelId,
@@ -215,6 +243,7 @@ struct FeedPage: View {
                     token: app.token(for: channelId),
                     reloadCount: reloadCount,
                     onFrame: { session.ingest($0) },
+                    onAssets: { liveTank.report($0) },
                     onFailure: { session.hostFailed() }
                 )
                 .ignoresSafeArea()
@@ -229,7 +258,26 @@ struct FeedPage: View {
                     .ignoresSafeArea()
             }
             liveStateLayer
+            // A 3D tank mounts empty and fills over many seconds. Say so, in
+            // the scene's own language, until its cast has arrived.
+            if isActive && !historyHoldsTheEngine && isTank && liveTankLoading && !session.sleeping {
+                TankLoadingView(pending: liveTank.pending, scheme: topScheme)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
         }
+        .task(id: "\(isActive && !historyHoldsTheEngine && isTank)-\(reloadCount)") {
+            guard isActive, !historyHoldsTheEngine, isTank else { return }
+            liveTank = TankLoadState()
+            liveTankLoading = true
+            await TankLoadState.watch(state: { liveTank }, settle: { liveTank.markSettled() }) { loading in
+                withAnimation(.easeInOut(duration: 0.5)) { liveTankLoading = loading }
+            }
+        }
+    }
+
+    /// The channel is playing a scene only the web engine can draw in full.
+    private var isTank: Bool {
+        channel.classicSaverId.map(RecordedScene.webOnlySavers.contains) ?? false
     }
 
     /// Connecting, unreachable, sleeping — all native. A web error card inside
@@ -537,13 +585,23 @@ struct FeedPage: View {
     private func sceneFacts(for event: ChannelEvent?) -> some View {
         let recorded = currentStop.flatMap { app.scenes.scene(channelId: channelId, sceneId: $0.sceneId) }
         let spec = recorded?.spec ?? (isLive ? channel.spec : nil)
-        let rows: [(String, String)] = [
-            ("model", event?.model),
-            ("via", event?.harness),
-            ("aired", event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }),
-            ("layers", spec.map { "\($0.layers.count)" }),
-            ("seed", recorded?.seed.map(String.init)),
-        ].compactMap { label, value in
+        // Resolved once and typed explicitly: left inline, this literal takes
+        // the type checker past its time limit on CI's slower runners.
+        let original: ChannelEvent? = event.flatMap { SceneCredit.original(for: $0, in: history) }
+        let author: ChannelEvent? = original ?? event
+        let airedBy: String? = original == nil ? nil : event?.actor
+        let aired: String? = event.map { $0.date.formatted(date: .abbreviated, time: .shortened) }
+        let layerCount: String? = spec.map { "\($0.layers.count)" }
+        let seed: String? = recorded?.seed.map { String($0) }
+        let candidates: [(String, String?)] = [
+            ("model", author?.model),
+            ("via", author?.harness),
+            ("aired by", airedBy),
+            ("aired", aired),
+            ("layers", layerCount),
+            ("seed", seed),
+        ]
+        let rows: [(String, String)] = candidates.compactMap { label, value in
             guard let value, !value.isEmpty else { return nil }
             return (label, value)
         }
@@ -587,26 +645,42 @@ struct FeedPage: View {
     /// it. Four chips of equal weight read as a settings panel, not a credit.
     @ViewBuilder
     private func credits(for event: ChannelEvent?) -> some View {
-        let actor = SteerLine.namedActor(event?.actor ?? channel.lastSteer?.actor)
-        let model = SteerLine.distinct(event?.model ?? channel.lastSteer?.model, from: actor)
-        let harness = SteerLine.distinct(event?.harness ?? channel.lastSteer?.harness, from: actor, model)
+        // A relay (curator, scheduler) aired this but did not make it. When the
+        // log still holds the original publish, the artist is whoever signed
+        // that — and the relay drops to the small print as "aired by".
+        let origin = event.flatMap { SceneCredit.original(for: $0, in: history) }
+        let credited = origin ?? event
+        let relay = origin == nil ? nil : event?.actor
+        let actor = SteerLine.namedActor(credited?.actor ?? channel.lastSteer?.actor)
+        let model = SteerLine.distinct(credited?.model ?? channel.lastSteer?.model, from: actor)
+        let harness = SteerLine.distinct(credited?.harness ?? channel.lastSteer?.harness, from: actor, model)
         let when: String? = {
             if let event { return SteerLine.ago(Int(event.at)) }
             return channel.lastEventAt.map { SteerLine.ago($0) }
         }()
         let artist = actor ?? model
-        // The model is small print only when someone else took the credit.
-        let small = [actor == nil ? nil : model, harness.map { "via \($0)" }, when].compactMap { $0 }
+        // The model sits BESIDE the artist, in the same row, rather than in
+        // the small print where it was the first thing to be truncated. The
+        // row was already there; it just had one chip in it.
+        let modelChip = actor == nil ? nil : model
+        // What is left is short enough to never truncate: who aired it, how,
+        // and when. With a relay to name, the harness waits in the expansion.
+        let small = [relay.map { "aired by \($0)" }, relay == nil ? harness.map { "via \($0)" } : nil,
+                     when].compactMap { $0 }
 
         VStack(alignment: .leading, spacing: 5) {
-            if let artist {
-                Label(artist, systemImage: "paintbrush.pointed.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .glassPanel(shape: Capsule())
-                    .accessibilityLabel("Made by \(artist)")
+            HStack(spacing: 6) {
+                if let artist {
+                    // A brush for a named artist; a chip for a model signing
+                    // its own work.
+                    creditChip(artist, icon: actor == nil ? "cpu" : "paintbrush.pointed.fill", strong: true)
+                        .accessibilityLabel("Made by \(artist)")
+                        .layoutPriority(1)
+                }
+                if let modelChip {
+                    creditChip(modelChip, icon: "cpu", strong: false)
+                        .accessibilityLabel("Model \(modelChip)")
+                }
             }
             if !small.isEmpty {
                 Text(small.joined(separator: " · "))
@@ -615,6 +689,20 @@ struct FeedPage: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    private func creditChip(_ text: String, icon: String, strong: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption2.weight(.semibold))
+            Text(text)
+                .font(strong ? .subheadline.weight(.semibold) : .footnote.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .opacity(strong ? 1 : 0.9)
+        .padding(.horizontal, strong ? 11 : 9)
+        .padding(.vertical, 6)
+        .glassPanel(shape: Capsule())
     }
 
     /// Right-hand rail, under the thumb.
@@ -732,6 +820,14 @@ private struct HistoryMomentPage: View {
     /// Held while the scene loads: the channel's own colour, never bare black.
     let holdingColor: String
     @Environment(AppState.self) private var app
+    /// Granted a moment after the page settles, so flicking THROUGH a run of
+    /// tanks never boots an engine per page.
+    @State private var engineGranted = false
+    @State private var webReady = false
+    @State private var tank = TankLoadState()
+    @State private var tankLoading = true
+    /// Booted AND filled: the moment the 3D tank is worth showing.
+    private var tankIsIn: Bool { webReady && !tankLoading }
 
     private var scene: RecordedScene? {
         app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)
@@ -740,7 +836,51 @@ private struct HistoryMomentPage: View {
     var body: some View {
         ZStack {
             Color(hex: scene?.spec?.background?.primaryColor ?? holdingColor).ignoresSafeArea()
-            if let scene {
+            if let scene, scene.needsWebEngine {
+                // Neighbours stay a cheap native still; only the page you are
+                // ON gets the engine, and only once the swipe has settled.
+                // Placeholder until the real engine has painted.
+                // A tank's 2D stand-in is itself the loading scene: it swims,
+                // and the fish-ring over it says so. Any other scene's native
+                // frame may be the WRONG layout (that is why it is going to the
+                // web), so it holds still and dimmed rather than animating a
+                // version that is about to be replaced.
+                if !isShowing || !tankIsIn {
+                    RecordedSceneView(scene: scene, channelId: channelId,
+                                      animating: isShowing && scene.isTank)
+                        .ignoresSafeArea()
+                        .opacity(isShowing && !scene.isTank ? 0.55 : 1)
+                }
+                if isShowing && engineGranted {
+                    WebSceneView(
+                        channelId: channelId,
+                        baseURL: URL(string: Config.baseURL)!,
+                        token: app.token(for: channelId),
+                        sceneId: stop.sceneId,
+                        // The page's first socket frame is the proof it booted;
+                        // the stored scene mounts a beat after.
+                        onFrame: { _ in
+                            guard !webReady else { return }
+                            Task { @MainActor in
+                                // The pinned scene mounts a beat after the
+                                // socket's first frame; revealing sooner would
+                                // flash the channel's LIVE scene.
+                                try? await Task.sleep(for: .seconds(0.8))
+                                withAnimation(.easeInOut(duration: scene.isTank ? 0.6 : 0.35)) { webReady = true }
+                            }
+                        },
+                        onAssets: { tank.report($0) },
+                        onFailure: { engineGranted = false }
+                    )
+                    .ignoresSafeArea()
+                    .opacity(tankIsIn ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.9), value: tankIsIn)
+                }
+                if isShowing && !tankIsIn && scene.isTank {
+                    TankLoadingView(pending: tank.pending)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            } else if let scene {
                 RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -766,6 +906,27 @@ private struct HistoryMomentPage: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: scene != nil)
+        .task(id: isShowing) {
+            guard isShowing else {
+                engineGranted = false
+                webReady = false
+                return
+            }
+            tank = TankLoadState()
+            tankLoading = true
+            try? await Task.sleep(for: .seconds(0.45))
+            if Task.isCancelled { return }
+            engineGranted = true
+            // Only a tank waits for its models. Anything else is in the moment
+            // its first frame is (see onFrame) — no download rule, no grace.
+            guard scene?.isTank == true else {
+                tankLoading = false
+                return
+            }
+            await TankLoadState.watch(state: { tank }, settle: { tank.markSettled() }) { loading in
+                withAnimation(.easeInOut(duration: 0.5)) { tankLoading = loading }
+            }
+        }
         // The safety net under the prefetch: a page that somehow arrives
         // without its scene still asks for it.
         .task { await app.scenes.load(channelId: channelId, sceneId: stop.sceneId, from: app.gallery) }

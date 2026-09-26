@@ -49,7 +49,7 @@ describe('agent guide', () => {
     expect(new Set(bad.map((b) => b.path))).toEqual(new Set(['fishMix', 'propMix', 'spotRig', 'spotCues', 'vignette']));
     // …and the same vignette is fine once the world has homes.
     expect(validateMetaquariumParams({ vignette: '4s: a =home1, b =home2 | 6s: a >centre, b >centre | 6s: a >home1, b >home2', geodeHomes: 2 })).toEqual([]);
-    expect(validateMetaquariumParams({ vignette: 'a >gate', landmark: 'castle' }).filter((b) => /no mark/.test(b.message))).toEqual([]);
+    expect(validateMetaquariumParams({ vignette: '6s: a >gate', landmark: 'castle' })).toEqual([]);
   });
 
   it('the grammar names every DSL and lists the marks', () => {

@@ -185,8 +185,9 @@ export const RECIPES: readonly Recipe[] = [
 export const recipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
 
 /** A recipe (or any param set) as the control track `publishScene` takes: every value at t = 0. */
-export function recipeTrack(params: Readonly<Record<string, Value>>): { deltas: { t: number; path: string; value: Value }[] } {
-  return { deltas: Object.entries(params).map(([path, value]) => ({ t: 0, path, value })) };
+export function recipeTrack(params: Readonly<Record<string, Value>>, seed = 0):
+  { program: string; seed: number; deltas: { t: number; path: string; value: Value }[] } {
+  return { program: 'metaquarium', seed, deltas: Object.entries(params).map(([path, value]) => ({ t: 0, path, value })) };
 }
 
 export interface ParamProblem { path: string; message: string }

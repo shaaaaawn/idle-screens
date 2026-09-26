@@ -28,13 +28,28 @@ struct SettingsView: View {
                     Picker("Quality", selection: $app.tierOverride) {
                         Text("Automatic").tag(CapabilityTier?.none)
                         ForEach(CapabilityTier.allCases, id: \.self) { tier in
-                            Text(tierLabel(tier)).tag(CapabilityTier?.some(tier))
+                            Text(Self.tierLabel(tier)).tag(CapabilityTier?.some(tier))
                         }
                     }
                 } header: {
                     Text("Picture")
                 } footer: {
                     Text(tierFooter)
+                }
+
+                Section {
+                    Picker("Change channel", selection: $app.rotateMinutes) {
+                        Text("Never").tag(0)
+                        Text("Every 5 minutes").tag(5)
+                        Text("Every 15 minutes").tag(15)
+                        Text("Every 30 minutes").tag(30)
+                        Text("Every hour").tag(60)
+                    }
+                    Toggle("Start where I left off", isOn: $app.resumeOnLaunch)
+                } header: {
+                    Text("Ambient")
+                } footer: {
+                    Text("Leave it running and it moves through the channels on its own. In the player, Up and Down change channel; Left and Right step through a channel's past.")
                 }
 
                 Section {
@@ -55,8 +70,8 @@ struct SettingsView: View {
 
                 Section("Diagnostics") {
                     LabeledContent("Hardware", value: app.machine)
-                    LabeledContent("Rendering at", value: tierLabel(app.effectiveTier))
-                    LabeledContent("Graphics budget", value: classLabel(app.renderClass))
+                    LabeledContent("Rendering at", value: Self.tierLabel(app.effectiveTier))
+                    LabeledContent("Graphics budget", value: Self.classLabel(app.renderClass))
                     LabeledContent("Server", value: app.serverHost)
                     // The id a paired phone addresses switch pushes to —
                     // the first thing to compare when pairing misbehaves.
@@ -77,7 +92,7 @@ struct SettingsView: View {
 
     /// Plain language, not tier codes: "T2 — GPU sprites 30fps" told the
     /// viewer nothing about what they would see.
-    private func tierLabel(_ tier: CapabilityTier) -> String {
+    static func tierLabel(_ tier: CapabilityTier) -> String {
         switch tier {
         case .t3: return "High — smooth 60fps scenes"
         case .t2: return "Balanced — 30fps scenes"
@@ -89,7 +104,7 @@ struct SettingsView: View {
     /// What the box is allowed to spend, as opposed to which renderer it
     /// uses — worth showing because it is the number that changes on newer
     /// hardware.
-    private func classLabel(_ renderClass: RenderClass) -> String {
+    static func classLabel(_ renderClass: RenderClass) -> String {
         switch renderClass {
         case .high: return "High — newer Apple TV"
         case .standard: return "Standard — Apple TV 4K"
@@ -101,6 +116,6 @@ struct SettingsView: View {
         guard app.tierOverride == nil else {
             return "Fixed by you. Automatic adapts per channel if a scene runs heavy."
         }
-        return "Set from this Apple TV (\(app.machine)) and adjusted per channel if a scene runs heavy. Currently \(tierLabel(app.effectiveTier).lowercased())."
+        return "Set from this Apple TV (\(app.machine)) and adjusted per channel if a scene runs heavy. Currently \(Self.tierLabel(app.effectiveTier).lowercased())."
     }
 }

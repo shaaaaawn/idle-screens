@@ -22,7 +22,9 @@ import type { IdleSequence } from "../types";
  *   declaration the morph would still glide — colour alone gives it a
  *   `hasGlide` — just with the caption stepping on the first frame instead of
  *   fading; the validator only says `morph-nothing-morphable` for a pair
- *   whose *only* differences are strings, which this one isn't.
+ *   whose differences are all values morph cannot glide — strings
+ *   (`textBlock.text` above all), booleans, mismatched arrays — which this
+ *   one isn't.
  * - **fade.** Segments 2 → 3 have nothing structurally in common, so a morph
  *   is impossible and a `fade` is the honest transition: the outgoing scene
  *   keeps animating on its own canvas for 3000 ms while the incoming one

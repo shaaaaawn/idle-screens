@@ -108,4 +108,14 @@ describe('eye grid', () => {
     const [g] = analyseEyes(slab(['_..', '.#.', '...'], 1), centre, [0, 1, 0], [0, 0, 1]);
     expect(g!.signature).toBe('3x3 _../.#./...');
   });
+
+  it('does not let the pupil travel onto a notch: an absent cell is not a valid gaze', () => {
+    // The pupil sits one cell from the RIGHT edge of the 3x3 rectangle, so a
+    // bound that only checks the rectangle (not the actual shape) would let
+    // it travel one more step right — straight onto the absent corner.
+    const [g] = analyseEyes(slab(['...', '.#_', '...'], 1), centre, [0, 1, 0], [0, 0, 1]);
+    expect(g!.signature).toBe('3x3 .../.#_/...');
+    expect(g!.shiftX).toEqual([-1, 0]); // rightward travel is blocked by the notch, not just the rim
+    expect(g!.shiftY).toEqual([-1, 1]); // the row above/below is fully present, so that axis is untouched
+  });
 });

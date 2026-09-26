@@ -88,7 +88,9 @@ struct ScreenSaverView: View {
                 // Sequence segments rebuild the renderer identity and fade
                 // per the segment's transition (cut = instant, morph = timed
                 // crossfade — true spec-lerp morph is a follow-up).
-                .id(app.sequenceSegmentKey)
+                // …and a channel change dissolves too, so surfing reads as
+                // turning a dial rather than a hard reload.
+                .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")|\(timelineKey)")
                 .transition(.opacity)
             }
 
@@ -109,6 +111,12 @@ struct ScreenSaverView: View {
         .animation(.easeInOut(duration: 0.4), value: app.overlayText)
         .animation(.easeInOut(duration: max(0.001, app.sequenceCrossfade)),
                    value: app.sequenceSegmentKey)
+        .animation(.easeInOut(duration: 0.45), value: app.selectedChannelId)
+        .animation(.easeInOut(duration: 0.45), value: app.timeline)
+        // Stepping through time is slower than reading a label: keep the
+        // chrome up while the viewer is in the past, so "this is not live"
+        // never silently disappears.
+        .onChange(of: app.timeline) { revealChrome() }
         .animation(.easeInOut(duration: 0.8), value: app.sleeping)
         .animation(.easeInOut(duration: 0.25), value: showChrome)
         .ignoresSafeArea()
@@ -116,6 +124,20 @@ struct ScreenSaverView: View {
         // handle the exits explicitly — Menu/Back must never feel dead.
         .focusable()
         .onExitCommand { app.exitChannel() }
+        // Up/Down change the channel without leaving the player — the
+        // iPhone feed's vertical axis, and the oldest convention a TV has.
+        .onMoveCommand { direction in
+            switch direction {
+            case .up: app.surf(-1)
+            case .down: app.surf(1)
+            // The phone's other axis: sideways is time. Left steps into this
+            // channel's past, Right comes back toward what is live.
+            case .left: app.stepTimeline(older: true)
+            case .right: app.stepTimeline(older: false)
+            @unknown default: return
+            }
+            revealChrome()
+        }
         .onPlayPauseCommand { revealChrome() }
         .onTapGesture { revealChrome() }
         .onAppear { revealChrome() }
@@ -133,6 +155,19 @@ struct ScreenSaverView: View {
                         .font(.tvScreenTitle)
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                    // What is on, and who put it there — the product is
+                    // agents authoring these, so the credit belongs on screen.
+                    if case .past = app.timeline {
+                        Label(pastLine, systemImage: "clock.arrow.circlepath")
+                            .font(.tvMeta)
+                            .foregroundStyle(Color.appAccent)
+                            .lineLimit(1)
+                    } else if let credit = creditLine {
+                        Text(credit)
+                            .font(.tvMeta)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
                     if let viewers = app.viewers, viewers > 0 {
                         HStack(spacing: 10) {
                             Circle().fill(Color.appAccent).frame(width: 10, height: 10)
@@ -143,9 +178,17 @@ struct ScreenSaverView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Label("Press Back to browse", systemImage: "chevron.backward")
-                    .font(.tvMeta)
-                    .foregroundStyle(.white.opacity(0.75))
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let position = PlayerChrome.positionLine(timeline: app.timeline,
+                                                                stops: app.historyStops.count,
+                                                                surf: app.surfPosition) {
+                        Label(position, systemImage: app.timeline == .live
+                              ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
+                    }
+                    Label("Back to browse", systemImage: "chevron.backward")
+                }
+                .font(.tvMeta)
+                .foregroundStyle(.white.opacity(0.75))
             }
             .padding(.horizontal, 40)
             .padding(.vertical, 28)
@@ -155,6 +198,18 @@ struct ScreenSaverView: View {
             .padding(.horizontal, TV.gutter)
             .padding(.bottom, TV.gutter)
         }
+    }
+
+    private var creditLine: String? {
+        PlayerChrome.creditLine(for: app.channels.first { $0.id == app.selectedChannelId })
+    }
+
+    private var timelineKey: String { PlayerChrome.timelineKey(app.timeline) }
+
+    private var pastLine: String {
+        guard case .past(let i) = app.timeline, app.historyStops.indices.contains(i)
+        else { return "Earlier" }
+        return PlayerChrome.pastLine(stop: app.historyStops[i], sceneLabel: app.pastScene?.label)
     }
 
     private var channelLabel: String {
@@ -168,6 +223,7 @@ struct ScreenSaverView: View {
         chromeTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
             guard !Task.isCancelled else { return }
+            if case .past = app.timeline { return }   // "not live" stays said
             showChrome = false
         }
     }

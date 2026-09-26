@@ -110,6 +110,25 @@ struct RecordedScene: Decodable, Equatable, Sendable {
     /// carries one. Not yet consumed by the renderer (see the type's doc).
     let track: RecordedControlTrack?
 
+    /// Classic savers whose native port is only a stand-in: the aquarium is a
+    /// 2D sketch of a three.js tank, built for the Apple TV (no WebKit there).
+    static let webOnlySavers: Set<String> = ["metaquarium"]
+
+    /// Which past scenes the phone draws with the web engine: only the ones it
+    /// can merely impersonate. Schema scenes and ported classics re-render
+    /// natively and match the site (checked 2026-09-23 against a 3.9 table
+    /// scene — pixel-identical in layout, and just as still). A WebView per
+    /// history page would cost a live-page reload on every visit for nothing.
+    var needsWebEngine: Bool {
+        if let classicSaverId { return Self.webOnlySavers.contains(classicSaverId) }
+        // Nothing native can draw at all: better the real thing than a caption.
+        return spec == nil
+    }
+
+    /// A 3D aquarium: mounts empty and fills over 10–20 s, so it gets the
+    /// fish-ring loader and waits for its models, not just its first frame.
+    var isTank: Bool { classicSaverId.map(Self.webOnlySavers.contains) ?? false }
+
     private enum CodingKeys: String, CodingKey { case id, label, seed, publishedAt, author, spec, track }
     private struct ClassicProbe: Decodable { let id: String? }
 

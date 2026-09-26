@@ -6,9 +6,10 @@ const spec = (habit: GeodeSpec['habit'], over: Partial<GeodeSpec> = {}): GeodeSp
   ({ x: 10, y: 2, z: -30, facing: 0.3, habit, tint: '#ff3f9e', scale: 1, ...over });
 /** The whole home as numbers: every part's positions AND colours (the rind,
  *  teeth and chamber tints are seeded too), plus where it vents and lights. */
-const flat = (g: ReturnType<typeof buildGeode>): number[] => [
+const flat = (g: ReturnType<typeof buildGeode>): (number | string)[] => [
   ...[...g.stone, ...g.glow, ...g.voxels].flatMap((p) => [...p.getAttribute('position').array, ...p.getAttribute('color').array]),
-  g.vent.x, g.vent.y, g.vent.z, g.emitter.x, g.emitter.y, g.emitter.z, g.emitter.r, g.emitter.g, g.emitter.b, g.doorstep.x, g.doorstep.z,
+  g.vent.x, g.vent.y, g.vent.z, g.vent.color, g.emitter.x, g.emitter.y, g.emitter.z, g.emitter.r, g.emitter.g, g.emitter.b,
+  g.emitter.reach, g.emitter.phase, g.doorstep.x, g.doorstep.z,
 ];
 
 describe('geode homes', () => {

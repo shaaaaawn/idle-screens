@@ -18,11 +18,18 @@ enum SceneVisibility {
     /// score well above it; sub-pixel or dark-on-dark scenes score near zero.
     private static let minInkFraction = 0.0004
 
+    /// Above this luminance the background itself is doing the work: a
+    /// visibly bright fill (or gradient) is not a black/blank tile no matter
+    /// how sparse or dark-on-dark the layers drawn over it are.
+    private static let brightBackgroundLuminance = 0.35
+
     static func verdict(layers: [CompiledLayer],
                         background: SpecSubset.Background?,
                         canvas: CGSize = CGSize(width: 1920, height: 1080)) -> Verdict {
         let canvasArea = canvas.width * canvas.height
-        let bgLum = luminance(hex: background?.primaryColor ?? "000000")
+        let bgLum = backgroundLuminance(background)
+        if bgLum >= brightBackgroundLuminance { return .visible }
+        let referenceLum = luminance(hex: background?.primaryColor ?? "000000")
         var ink = 0.0
 
         for layer in layers {
@@ -102,14 +109,30 @@ enum SceneVisibility {
                 }
                 // Dark-on-dark is as invisible as sub-pixel: weight by
                 // luminance contrast against the background.
-                let contrast = abs(luminance(hex: entity.color) - bgLum)
-                // Cap any single entity at 4% of the canvas so one giant dim
-                // wash can't carry an otherwise-empty scene.
+                // Contrast is measured against the gradient's FIRST stop, the
+                // reference `minInkFraction` was calibrated on. `bgLum` above
+                // is the BRIGHTEST stop — right for "is the fill itself
+                // bright?", wrong here: one warm stop at the foot of a night
+                // gradient dragged every lantern's contrast down and a
+                // working channel was shown as "not broadcasting".
+                let contrast = abs(luminance(hex: entity.color) - referenceLum)
                 ink += min(area, canvasArea * 0.04) * entity.alpha * contrast
             }
         }
 
         return ink / canvasArea >= minInkFraction ? .visible : .invisible
+    }
+
+    /// Brightest color the background actually paints: the solid fill, or
+    /// the brightest of ALL gradient stops. `Background.primaryColor` only
+    /// looks at the first stop (or the solid color) — fine for a placeholder
+    /// tint, but it misses a bright stop further down the gradient, which is
+    /// exactly the case that lights up an otherwise sparse/dark-on-dark scene.
+    private static func backgroundLuminance(_ background: SpecSubset.Background?) -> Double {
+        guard let background else { return 0 }
+        if let color = background.color { return luminance(hex: color) }
+        guard let stops = background.stops, !stops.isEmpty else { return 0 }
+        return stops.map { luminance(hex: $0.color) }.max() ?? 0
     }
 
     /// Relative luminance (0…1) of a hex color, gamma-naive — fine for a

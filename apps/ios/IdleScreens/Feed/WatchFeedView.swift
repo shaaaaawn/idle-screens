@@ -43,7 +43,8 @@ struct WatchFeedView: View {
                     // so the page you are on stays put while its neighbours
                     // change.
                     ChannelFeedView(channels: feed,
-                                    start: feed.contains { $0.id == Self.launchChannel } ? Self.launchChannel : nil)
+                                    start: feed.contains { $0.id == Self.launchChannel } ? Self.launchChannel : nil,
+                                    onRefresh: { await app.loadGallery() })
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

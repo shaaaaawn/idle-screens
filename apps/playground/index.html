@@ -383,7 +383,11 @@
         animation: vp-loading 1.1s ease-in-out infinite;
       }
       @keyframes vp-loading { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
-      @media (prefers-reduced-motion: reduce) { .vp-layer { transition: none; } #viewport-loading { animation: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        .vp-layer { transition: none; }
+        #viewport-loading { animation: none; }
+        .vp-gizmo { transition: none; }
+      }
       /* — Viewport navigation (viewport-nav.ts) — */
       #viewport-host.vp-navigable { cursor: grab; touch-action: none; }
       #viewport-host.vp-orbiting { cursor: grabbing; }

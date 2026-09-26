@@ -22,6 +22,9 @@ export interface HorizonOptions {
   palette: readonly string[];
   /** False when the world already has its landmark: one grand thing, not two. */
   geode?: boolean;
+  /** The world's `crystalScale` — sizes and places the horizon like every
+   *  other piece of mineral-world geometry. Defaults to 1 (unscaled). */
+  scale?: number;
 }
 
 export interface Horizon {
@@ -39,6 +42,14 @@ export const HORIZON_RINGS: ReadonlyArray<{ r: number; haze: number; tall: numbe
 
 const FALLBACK = ['#49cfff', '#a17bff', '#ff67bc'];
 const ROCK = new Color('#8fa3c8');
+
+/** No generated vertex may sit farther than this from the origin. The camera
+ *  sits at most `CAMERA_FAR - HORIZON_SAFE_R` (tank.ts's `CAMERA_FAR`, 1400,
+ *  minus this) from the origin at `cameraDistance`'s widest orbit (400), so a
+ *  point this close to the origin stays inside the far plane even when the
+ *  camera is on its far side — with margin for the small vertical offset this
+ *  purely-radial bound ignores. */
+export const HORIZON_SAFE_R = 950;
 
 export const HORIZON_VERTEX = /* glsl */ `
   #include <begin_vertex>
@@ -93,6 +104,7 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
   const counts = { spires: 0, crystals: 0, geodes: 0 };
   if (opts.amount <= 0) return { geometry: null, counts, triangles: 0 };
   const palette = opts.palette.length ? opts.palette : FALLBACK;
+  const s = opts.scale ?? 1;
   const t = new Tris();
   const geodeBearing = rng.next() * Math.PI * 2;
   HORIZON_RINGS.forEach((ring, ri) => {
@@ -103,32 +115,59 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
       const a = (i / slots) * Math.PI * 2 + rr.range(-0.16, 0.16) + ri * 0.4;
       // The grand geode owns its stretch of the first ring.
       if (ri === 0 && opts.geode !== false && Math.abs(Math.atan2(Math.sin(a - geodeBearing), Math.cos(a - geodeBearing))) < 0.42) continue;
-      const rad = ring.r + rr.range(-45, 45);
+      // Clamped to HORIZON_SAFE_R: at large `crystalScale` the ring's own
+      // radius alone could otherwise sit past the far plane.
+      const rad = Math.min((ring.r + rr.range(-45, 45)) * s, HORIZON_SAFE_R);
       const x = Math.sin(a) * rad, z = Math.cos(a) * rad;
       if (rr.next() < 0.42) {
         // A stand of castle crystals: a tall one and its leaning court.
         const tint = new Color(palette[Math.floor(rr.next() * palette.length)]!);
         const n = 3 + Math.floor(rr.next() * 4);
-        const H = rr.range(130, 230) * ring.tall;
+        const H = rr.range(130, 230) * ring.tall * s;
         t.fade = H * 0.55;
         for (let c = 0; c < n; c++) {
           const h = c === 0 ? H : H * rr.range(0.35, 0.75);
-          const off = c === 0 ? 0 : rr.range(18, 46) * ring.tall, oa = rr.next() * 6.28;
-          const lean: [number, number] = c === 0 ? [rr.range(-0.05, 0.05), rr.range(-0.05, 0.05)] : [Math.cos(oa) * rr.range(0.12, 0.34), Math.sin(oa) * rr.range(0.12, 0.34)];
-          column(t, x + Math.cos(oa) * off, z + Math.sin(oa) * off, h, h * rr.range(0.07, 0.1), 6, rr.next() * 6.28, lean,
+          const offRaw = c === 0 ? 0 : rr.range(18, 46) * ring.tall * s;
+          const oa = rr.next() * 6.28;
+          const leanX = c === 0 ? rr.range(-0.05, 0.05) : Math.cos(oa) * rr.range(0.12, 0.34);
+          const leanZ = c === 0 ? rr.range(-0.05, 0.05) : Math.sin(oa) * rr.range(0.12, 0.34);
+          const rLocalRaw = h * rr.range(0.07, 0.1);
+          // What this ring position has left of HORIZON_SAFE_R's budget, then
+          // how much of it the lean eats (the apex can reach `|lean| * h`),
+          // then the footprint, then finally the offset from the stand's
+          // centre — each trimmed to what's left so no vertex of this column
+          // can clear HORIZON_SAFE_R, base crystal or leaning satellite alike.
+          const remaining = Math.max(0, HORIZON_SAFE_R - rad);
+          const leanReach = Math.hypot(leanX, leanZ) * h;
+          const rLocal = Math.min(rLocalRaw, Math.max(0, remaining - leanReach));
+          const off = Math.min(offRaw, Math.max(0, remaining - rLocal - leanReach));
+          column(t, x + Math.cos(oa) * off, z + Math.sin(oa) * off, h, rLocal, 6, rr.next() * 6.28, [leanX, leanZ],
             [[0.78, 1.0]], tint.clone().multiplyScalar(0.035), tint.clone().multiplyScalar(0.28), rr);
         }
         counts.crystals += 1;
       } else {
         // A rock spire: broad foot, a shoulder, a broken point.
-        const H = rr.range(90, 210) * ring.tall;
+        const H = rr.range(90, 210) * ring.tall * s;
         t.fade = H * 0.7;
         const foot = ROCK.clone().multiplyScalar(0.04), top = ROCK.clone().multiplyScalar(0.085);
-        column(t, x, z, H, H * rr.range(0.22, 0.36), 5, rr.next() * 6.28, [rr.range(-0.1, 0.1), rr.range(-0.1, 0.1)],
+        const spireLeanX = rr.range(-0.1, 0.1), spireLeanZ = rr.range(-0.1, 0.1);
+        const rLocalRaw = H * rr.range(0.22, 0.36);
+        const spin = rr.next() * 6.28;
+        // The main spire has no offset to trim, so its own radius is what
+        // gets capped to keep its widest (base) ring under HORIZON_SAFE_R.
+        const remaining = Math.max(0, HORIZON_SAFE_R - rad);
+        const rLocal = Math.min(rLocalRaw, Math.max(0, remaining - Math.hypot(spireLeanX, spireLeanZ) * H));
+        column(t, x, z, H, rLocal, 5, spin, [spireLeanX, spireLeanZ],
           [[0.32, 0.74], [0.62, 0.5], [0.86, 0.2]], foot, top, rr);
         if (rr.next() < 0.6) {
-          const oa = rr.next() * 6.28, off = H * 0.3;
-          column(t, x + Math.cos(oa) * off, z + Math.sin(oa) * off, H * rr.range(0.4, 0.62), H * 0.16, 5, rr.next() * 6.28, [0, 0],
+          const oa = rr.next() * 6.28;
+          const offRaw = H * 0.3;
+          const hCompanion = H * rr.range(0.4, 0.62), rCompanionRaw = H * 0.16;
+          const spin2 = rr.next() * 6.28;
+          // No lean on the companion, so its own radius is the whole reach.
+          const rCompanion = Math.min(rCompanionRaw, remaining);
+          const off = Math.min(offRaw, Math.max(0, remaining - rCompanion));
+          column(t, x + Math.cos(oa) * off, z + Math.sin(oa) * off, hCompanion, rCompanion, 5, spin2, [0, 0],
             [[0.4, 0.7], [0.8, 0.3]], foot, top, rr);
         }
         counts.spires += 1;
@@ -138,7 +177,11 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
   // The grand geode: the biggest home in the world, seen from the village.
   if (opts.amount >= 0.4 && opts.geode !== false) {
     const gr = rng.fork(40);
-    const R = 150, rad = HORIZON_RINGS[0]!.r + 30;
+    const R = 150 * s;
+    // Its own column has no lean, so its base ring (radius R) is the whole
+    // reach beyond its centre — cap that centre so the shell stays inside
+    // HORIZON_SAFE_R even at a large `crystalScale`.
+    const rad = Math.min((HORIZON_RINGS[0]!.r + 30) * s, Math.max(0, HORIZON_SAFE_R - R));
     const gx = Math.sin(geodeBearing) * rad, gz = Math.cos(geodeBearing) * rad;
     t.haz = 1; t.fade = R * 0.55;
     const shell = ROCK.clone().multiplyScalar(0.06), cap = ROCK.clone().multiplyScalar(0.11);
@@ -150,14 +193,16 @@ export function buildHorizon(rng: CrystalRng, opts: HorizonOptions): Horizon {
     const glow = tint.clone().lerp(new Color('#ffb860'), 0.75).multiplyScalar(0.3), dimGlow = glow.clone().multiplyScalar(0.5);
     const inX = -Math.sin(geodeBearing), inZ = -Math.cos(geodeBearing), sX = inZ, sZ = -inX;
     const face = (u: number, y: number, push: number): number[] => [gx + inX * push + sX * u, y, gz + inZ * push + sZ * u];
-    const rAt = (y: number): number => R * (y < R * 0.35 ? 0.99 : 0.9) + 2;
+    const rAt = (y: number): number => R * (y < R * 0.35 ? 0.99 : 0.9) + 2 * s;
     // Arched door: a stack of narrowing slabs.
     [[26, 0, 30], [24, 30, 50], [17, 50, 64], [8, 64, 72]].forEach(([w, y0, y1]) => {
-      t.quad(face(-w!, y0!, rAt(y0!)), face(w!, y0!, rAt(y0!)), face(w!, y1!, rAt(y1!)), face(-w!, y1!, rAt(y1!)), dimGlow, glow);
+      const sw = w! * s, sy0 = y0! * s, sy1 = y1! * s;
+      t.quad(face(-sw, sy0, rAt(sy0)), face(sw, sy0, rAt(sy0)), face(sw, sy1, rAt(sy1)), face(-sw, sy1, rAt(sy1)), dimGlow, glow);
     });
     [[-62, 58], [62, 66], [-38, 104], [30, 112]].forEach(([u, y]) => {
-      const push = Math.sqrt(Math.max(0, rAt(y!) ** 2 - u! * u!)) * 0.97;
-      t.quad(face(u! - 5, y! - 7, push), face(u! + 5, y! - 7, push), face(u! + 5, y! + 7, push), face(u! - 5, y! + 7, push), glow, glow);
+      const su = u! * s, sy = y! * s;
+      const push = Math.sqrt(Math.max(0, rAt(sy) ** 2 - su * su)) * 0.97;
+      t.quad(face(su - 5 * s, sy - 7 * s, push), face(su + 5 * s, sy - 7 * s, push), face(su + 5 * s, sy + 7 * s, push), face(su - 5 * s, sy + 7 * s, push), glow, glow);
     });
     counts.geodes = 1;
   }

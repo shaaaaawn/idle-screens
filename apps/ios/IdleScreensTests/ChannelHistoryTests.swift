@@ -67,3 +67,36 @@ final class ChannelHistoryTests: XCTestCase {
         XCTAssertEqual(page.events[0].date.timeIntervalSince1970, 1786749366.287, accuracy: 0.01)
     }
 }
+
+final class SceneCreditTests: XCTestCase {
+    private func event(_ id: Int, at: Double, actor: String?, model: String? = nil, label: String?) -> ChannelEvent {
+        ChannelEvent(id: id, at: at, kind: "publish", actor: actor, model: model, label: label)
+    }
+
+    func testLabelIsLiftedFromTheDetailObjectAndSurvivesOddDetails() throws {
+        let json = #"{"events":[{"id":1,"at":5,"kind":"publish","actor":"curator","detail":{"label":"Ember Drift","seed":7}},{"id":2,"at":6,"kind":"overlay","detail":"oops"},{"id":3,"at":7,"kind":"wake"}]}"#
+        let page = try JSONDecoder().decode(ChannelHistoryPage.self, from: Data(json.utf8))
+        XCTAssertEqual(page.events.map(\.label), ["Ember Drift", nil, nil])
+    }
+
+    func testARelayedSceneIsCreditedToItsFirstRealAuthor() {
+        let log = [
+            event(9, at: 900, actor: "curator", label: "Ember Drift"),
+            event(5, at: 500, actor: "Spin", model: "claude-fable-5-1", label: "ember drift"),
+            event(3, at: 300, actor: "agent", model: "glm-5.3", label: "Ember Drift"),
+            event(2, at: 200, actor: "curator", label: "Ember Drift"),
+            event(1, at: 100, actor: "Spin", model: "m", label: "Something Else"),
+        ]
+        XCTAssertEqual(SceneCredit.original(for: log[0], in: log)?.id, 3)
+    }
+
+    func testNoOriginalIsAnHonestNil() {
+        let relayOnly = [event(2, at: 2, actor: "curator", label: "Volt Drift"),
+                         event(1, at: 1, actor: "scheduler", label: "Volt Drift"),
+                         event(0, at: 0, actor: "agent", label: "Volt Drift")]
+        XCTAssertNil(SceneCredit.original(for: relayOnly[0], in: relayOnly))
+        // A scene a real author aired themselves needs no detective work.
+        let own = event(4, at: 4, actor: "Spin", model: "m", label: "Volt Drift")
+        XCTAssertNil(SceneCredit.original(for: own, in: relayOnly + [own]))
+    }
+}

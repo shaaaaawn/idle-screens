@@ -251,8 +251,27 @@ export function analyseEyes(soup: EyeSoup, fishCentre: Vec3, up: Vec3, fwd: Vec3
     const [rx0, rx1, ry0, ry1] = darkEye ? [wx0, wx1, wy0, wy1] : [bx0, bx1, by0, by1];
     const some = count > 0 && blob === count && (rx1 - rx0 + 1) * (ry1 - ry0 + 1) === count && count * 2 <= nb + nw;
     const [dx0, dx1, dy0, dy1] = darkEye ? [wx0, wx1, wy0, wy1] : [bx0, bx1, by0, by1];
-    const shiftX: [number, number] = some ? [0 - dx0, cols - 1 - dx1] : [0, 0];
-    const shiftY: [number, number] = some ? [0 - dy0, rows - 1 - dy1] : [0, 0];
+    // A notched eye (a cell missing inside the cols×rows rectangle, not just
+    // outside it) can leave `present` with holes the [0, cols) / [0, rows)
+    // bound above doesn't see. Shrink each direction to the first step where
+    // any translated detail cell would land off the actual shape, not just
+    // off the grid — the shader has no fallback for "inside the rectangle
+    // but not part of this eye".
+    const maxStep = (dx: number, dy: number): number => {
+      let m = 0;
+      stepping: for (let step = 1; ; step += 1) {
+        for (let y = dy0; y <= dy1; y += 1) {
+          for (let x = dx0; x <= dx1; x += 1) {
+            const tx = x + dx * step, ty = y + dy * step;
+            if (tx < 0 || tx >= cols || ty < 0 || ty >= rows || !((present >>> (ty * cols + tx)) & 1)) break stepping;
+          }
+        }
+        m = step;
+      }
+      return m;
+    };
+    const shiftX: [number, number] = some ? [-maxStep(-1, 0) || 0, maxStep(1, 0)] : [0, 0];
+    const shiftY: [number, number] = some ? [-maxStep(0, -1) || 0, maxStep(0, 1)] : [0, 0];
     const lines: string[] = [];
     for (let r = rows - 1; r >= 0; r--) {
       let s = '';

@@ -1,0 +1,88 @@
+name: Apple CI
+
+# The iPhone and Apple TV apps share IdleScreens/API, /Render and /Theme
+# wholesale, so a file written for one target can break the other without
+# anyone building it — the TV target sat uncompilable on develop that way.
+# This compiles both and runs both unit suites whenever apps/ios changes.
+#
+# Nothing here signs or ships: TestFlight goes out from a developer machine
+# (`make app tvos ship`), which runs the same suite as its own gate.
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["apps/ios/**", ".github/workflows/apple-ci.yml"]
+  pull_request:
+    paths: ["apps/ios/**", ".github/workflows/apple-ci.yml"]
+
+concurrency:
+  group: apple-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apple:
+    name: ${{ matrix.name }}
+    # The apps use the 26 SDKs (Liquid Glass behind #available), so this needs
+    # the Xcode 26 image; macos-15's Xcode 16 cannot compile them.
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: tvOS
+            scheme: IdleScreensTV
+            sdk: appletvsimulator
+            platform: tvOS Simulator
+            device: Apple TV
+          - name: iOS
+            scheme: IdleScreens
+            sdk: iphonesimulator
+            platform: iOS Simulator
+            device: iPhone
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          command -v xcodegen >/dev/null || brew install xcodegen
+
+      # Regenerate rather than trust the committed project: a source file
+      # missing from project.yml is otherwise silently absent from the target.
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          # Log to a file and exit on xcodebuild's own status: a `| grep`
+          # here would report grep's.
+          status=0
+          xcodebuild build-for-testing \
+            -project IdleScreens.xcodeproj -scheme "${{ matrix.scheme }}" \
+            -sdk "${{ matrix.sdk }}" -destination "generic/platform=${{ matrix.platform }}" \
+            -derivedDataPath build/dd > build.log 2>&1 || status=$?
+          grep -E "error:|\*\* BUILD|\*\* TEST" build.log | sort -u | tail -60 || true
+          exit $status
+
+      - name: Test
+        run: |
+          # Whatever simulator of this family the image ships; the suites
+          # are pure logic plus headless renders, so the model is irrelevant.
+          udid=$(xcrun simctl list devices available | grep -m1 "${{ matrix.device }}" | grep -oE '[0-9A-F-]{36}' || true)
+          if [ -z "$udid" ]; then
+            echo "::warning::no ${{ matrix.device }} simulator on this image — built, but tests did not run"
+            exit 0
+          fi
+          xcodebuild test-without-building \
+            -project IdleScreens.xcodeproj -scheme "${{ matrix.scheme }}" \
+            -destination "platform=${{ matrix.platform }},id=$udid" \
+            -derivedDataPath build/dd > test.log 2>&1 || status=$?
+          grep -E "error:|failed|XCTAssert|Executed .* tests|\*\* TEST" test.log | sort -u | tail -80 || true
+          exit ${status:-0}

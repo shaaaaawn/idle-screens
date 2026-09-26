@@ -145,11 +145,16 @@ export function parseVignette(script: string, marks: Marks): Vignette {
           const tg = target(word.slice(1));
           if (tg) for (const i of who) state[i] = { ...state[i]!, faceActor: tg.actor === i ? null : tg.actor, facePoint: tg.point };
         } else if (word === 'circle' || word === 'follow') {
-          const tg = target(words[w + 1] ?? '');
+          const targetName = words[w + 1] ?? '';
+          const tg = target(targetName);
           w += 1;
           if (!tg) continue;
+          if (word === 'follow' && tg.actor === null) {
+            problems.push(`beat ${bi + 1}: "follow ${targetName}" needs another actor, not a mark`);
+            continue;
+          }
           for (const i of who) {
-            if (word === 'follow' && tg.actor !== null && tg.actor !== i) state[i] = { ...state[i]!, follow: tg.actor };
+            if (word === 'follow' && tg.actor !== i) state[i] = { ...state[i]!, follow: tg.actor };
             else if (word === 'circle') state[i] = { ...state[i]!, circle: tg, faceActor: null };
           }
           // Joining a ring or a leader from across the room takes as long as
@@ -165,6 +170,14 @@ export function parseVignette(script: string, marks: Marks): Vignette {
         }
       }
     }
+    // A circle beat leaves the actor back where it started (`placeOf`'s ring
+    // eases out from `from` and back to it by u = 1) — `to` must say so, or
+    // the NEXT beat's `from` (which reads `prev.to`) starts from the stale
+    // `>` destination processed earlier in this same beat and the actor
+    // teleports across the beat boundary.
+    state.forEach((sb, i) => {
+      if (sb.circle) state[i] = { ...sb, to: at[i]! };
+    });
     // A follower ends the beat beside wherever its leader ended up.
     state.forEach((sb, i) => {
       if (sb.follow === null) return;

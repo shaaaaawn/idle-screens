@@ -35,6 +35,9 @@ actor GalleryClient {
             throw GalleryError.invalidResponse
         }
         try? data.write(to: cacheFileURL(), options: .atomic)
+        // Opportunistic cleanup of the pre-`v2` blob this version supersedes —
+        // a missing file or a failed removal doesn't affect the refresh.
+        try? FileManager.default.removeItem(at: legacyCacheFileURL())
         return channels
     }
 
@@ -89,6 +92,15 @@ actor GalleryClient {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"
         return dir.appendingPathComponent("channels-v2-\(host).json")
+    }
+
+    /// The pre-`v2` cache blob this version supersedes. Existing installs
+    /// wrote this filename before the bump above and it is now a dead file —
+    /// removed opportunistically once a fresh `v2` write succeeds.
+    private func legacyCacheFileURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("channels-\(host).json")
     }
 
     /// `GET /c/:channelId/state` — public read-only state.
