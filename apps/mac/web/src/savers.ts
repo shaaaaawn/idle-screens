@@ -19,6 +19,7 @@ import {
   LANTERNS_SPEC,
   MATRIX_RAIN_SPEC,
   NOSTALGHIA_CANDLE_SPEC,
+  OUTPOST_SPEC,
   ORRERY_SPEC,
   POLYGONS_SPEC,
   PROCESSION_SPEC,
@@ -63,6 +64,9 @@ export const SAVERS: SaverPlugin[] = [
   compileSaver(PROCESSION_SPEC),
   compileSaver(RAIN_SPEC),
   compileSaver(WARP_TUNNEL_SPEC),
+  // Declares a `crew` input: the Swift shell feeds it this Mac's coding agents
+  // (AgentPresence) through window.__idleScreensMac.feed — locally, no server.
+  compileSaver(OUTPOST_SPEC),
 ];
 
 export interface SaverEntry {

@@ -40,6 +40,7 @@ enum SaverCatalog {
     SaverEntry(id: "procession", label: "Night Procession"),
     SaverEntry(id: "rain", label: "Rain"),
     SaverEntry(id: "warp-tunnel", label: "Warp Tunnel"),
+    SaverEntry(id: "outpost", label: "Outpost"),
   ]
   static var ids: [String] { all.map(\.id) }
 }

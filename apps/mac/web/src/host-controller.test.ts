@@ -231,3 +231,58 @@ describe('createMacHostController', () => {
     expect(controller.currentId()).toBe('alpha');
   });
 });
+
+describe('scene inputs (SaverSpec `inputs`)', () => {
+  // A scene that declares a `builds` roster: one light per slot.
+  const spec = {
+    schemaVersion: 1, id: 'lights', label: 'Lights',
+    layers: [{ key: 'lamp', count: 2, layout: { type: 'table', columns: 2, gap: 0.2 }, region: { x: [0.5, 0.5], y: [0.5, 0.5] },
+      sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#222222', colors: ['#222222', '#222222'] }, motion: { type: 'static' } }],
+    inputs: { builds: { kind: 'roster', slots: 2, default: 'off',
+      states: { off: [{ path: 'lamp.sprite.colors.{i}', value: '#222222' }], red: [{ path: 'lamp.sprite.colors.{i}', value: '#ff0000' }] } } },
+  };
+  const fedPlugin = (id: string, withSpec: boolean) => {
+    const applyTrack = vi.fn();
+    const p: SaverPlugin = {
+      manifest: { id, label: id },
+      ...(withSpec ? { spec: { ...spec, id } } : {}),
+      mount: () => ({ setPaused: vi.fn(), resize: vi.fn(), dispose: vi.fn(), applyTrack }),
+    };
+    return { p, applyTrack };
+  };
+
+  it('feeds the mounted scene that declares the input, snapping on mount and gliding after', async () => {
+    const a = fedPlugin('lights', true);
+    const b = fedPlugin('plain', false);
+    const controller = createMacHostController({ host: document.createElement('div'), savers: [b.p, a.p], baseSeed: 1, reduceMotion: false, sleep: async () => {} });
+
+    // Fed before the scene exists: kept, and applied at dur 0 when it mounts.
+    controller.feed('builds', [{ slot: 1, state: 'red' }]);
+    await controller.mountSaver(0);
+    expect(b.applyTrack).not.toHaveBeenCalled(); // a scene without the input is never fed
+    await controller.mountSaver(1);
+    expect(a.applyTrack).toHaveBeenCalledTimes(1);
+    const onMount = a.applyTrack.mock.calls[0]![0];
+    expect(onMount.deltas.every((d: { dur: number }) => d.dur === 0)).toBe(true);
+    expect(onMount.deltas.find((d: { path: string }) => d.path === 'lamp.sprite.colors.1').value).toBe('#ff0000');
+
+    // A later feed glides.
+    controller.feed('builds', [{ slot: 0, state: 'red' }]);
+    const later = a.applyTrack.mock.calls[1]![0];
+    expect(later.deltas.find((d: { path: string }) => d.path === 'lamp.sprite.colors.0').value).toBe('#ff0000');
+    expect(later.deltas.find((d: { path: string }) => d.path === 'lamp.sprite.colors.1').value).toBe('#222222'); // slot 1 left
+    expect(later.deltas[0].dur).toBeGreaterThan(0);
+
+    // An input the scene doesn't declare is ignored.
+    controller.feed('weather', [{ slot: 0, state: 'rain' }]);
+    expect(a.applyTrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('the bridge exposes feed to the Swift shell', async () => {
+    const a = fedPlugin('lights', true);
+    const controller = createMacHostController({ host: document.createElement('div'), savers: [a.p], baseSeed: 1, reduceMotion: false, sleep: async () => {} });
+    await controller.mountSaver(0);
+    controller.createBridge(() => {}).feed('builds', [{ slot: 0, state: 'red' }]);
+    expect(a.applyTrack).toHaveBeenCalledTimes(1);
+  });
+});
