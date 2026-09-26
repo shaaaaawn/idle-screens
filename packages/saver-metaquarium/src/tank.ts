@@ -1039,7 +1039,7 @@ class TankInstance implements SaverInstance {
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
     this.roomSurface = can.water && preset.water ? preset.water.color : null;
-    this.roomRays = preset.rays ? preset.rays.color : null;
+    this.roomRays = can.rayCount > 0 && preset.rays ? preset.rays.color : null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
