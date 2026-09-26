@@ -1,7 +1,7 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
-import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, structuralSignature } from './steer';
+import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
-import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, withoutTimeline } from './timeline';
+import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -147,6 +147,49 @@ export function ignoredPropertyPaths(spec: unknown): string[] {
     .map((w) => w.path.replace(/\[(\d+)\]/g, '.$1'));
 }
 
+/**
+ * Validity of only the parts of a spec that `paths` (index-form dot-paths,
+ * as `canonicalSpecPath` spells them) live in: each touched layer, the
+ * background, the finish — plus the cross-layer entity cap. A layer's rules
+ * (the `clock`/`pulse`/`grow` flash floors, `emit`, orbit parents) are all
+ * judged inside that layer, so a change confined to layer N can only break
+ * layer N or the total. Any other top-level path falls back to the full
+ * `validateSpec`. For the timeline's composed-state checks, which run at every
+ * key boundary and on every live steer: the whole-spec check costs a
+ * full validation per sample, this one a layer or two.
+ */
+export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boolean {
+  const layers = new Set<number>();
+  let background = false;
+  let finish = false;
+  for (const p of paths) {
+    // A layer's `key`, `count` or `motion` is what another layer's orbit
+    // parent refers to — a change there can break a layer it doesn't live in.
+    if (/^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p)) return validateSpec(spec).valid;
+    const [head, idx] = p.split('.');
+    if (head === 'layers' && idx !== undefined && /^\d+$/.test(idx)) layers.add(Number(idx));
+    else if (head === 'background') background = true;
+    else if (head === 'finish') finish = true;
+    else return validateSpec(spec).valid;
+  }
+  let ok = true;
+  const err = (): void => { ok = false; };
+  const warn: WarnFn = () => undefined;
+  if (!Array.isArray(spec.layers)) return false;
+  for (const i of layers) {
+    const layer = spec.layers[i];
+    if (layer === undefined) return false;
+    validateLayer(layer, `layers[${i}]`, err, warn, spec);
+  }
+  if (background && spec.background !== undefined) validateBackground(spec.background, err, warn);
+  if (finish && spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  if (layers.size > 0) {
+    const total = spec.layers.reduce((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0);
+    if (total > LIMITS.maxTotal) ok = false;
+  }
+  return ok;
+}
+
 function validateSpecCore(spec: unknown): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
@@ -257,7 +300,9 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
     const t = key.t as number;
     latest = Math.max(latest, t);
     const applied = applyDeltasToSpec(base, [{ t: 0, path: cp, value: key.value }]);
-    const r = validateSpec(applied);
+    // The base is valid, so only the part the key changes can break; the full
+    // validation runs just to name the failure.
+    const r = validateSpecPaths(applied, [cp]) ? { valid: true, errors: [] as SpecError[] } : validateSpec(applied);
     if (!r.valid) {
       for (const e of r.errors) err(`${p}.value`, `applied at '${key.path}' → ${e.path || '<root>'}: ${e.message}`);
       return;
@@ -296,13 +341,18 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
   if (failed) return;
   // Every key boundary, plus up to 120 in-glide points: this runs at every
   // mount, so the glide sampling is budgeted — the settled states are not.
+  const keyed = [...timelineTracks(spec).keys()];
+  const seen = new Set<string>();
   for (const t of timelineSampleTimes(spec, true, 120)) {
-    const r = validateSpec(resolveTimelineAt(spec, t));
-    if (!r.valid) {
-      const e = r.errors[0]!;
-      err('timeline', `at t = ${Math.round(t)} ms the keys combine into an invalid scene — ${e.path || '<root>'}: ${e.message}`);
-      return;
-    }
+    const r = resolveTimelineAt(spec, t);
+    // Only the keyed values change between samples: skip a state already judged.
+    const state = JSON.stringify(keyed.map((p) => readSpecPath(r, p)));
+    if (seen.has(state)) continue;
+    seen.add(state);
+    if (validateSpecPaths(r, keyed)) continue;
+    const e = validateSpec(r).errors[0];
+    err('timeline', `at t = ${Math.round(t)} ms the keys combine into an invalid scene — ${e ? `${e.path || '<root>'}: ${e.message}` : 'invalid'}`);
+    return;
   }
 }
 

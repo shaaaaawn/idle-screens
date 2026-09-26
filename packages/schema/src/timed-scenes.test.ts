@@ -14,7 +14,7 @@ import { canWrapMorph } from './sequence';
 import { buildEntities } from './simulate';
 import { easeSmooth, lerpSpec, structuralSignature } from './steer';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { validateSequence, validateSpec } from './validate';
+import { validateSequence, validateSpec, validateSpecPaths } from './validate';
 import { dominanceRanking, luminanceGrid, motionStats } from './perceive';
 import { adviseSequence } from './advise';
 import type { IdleSequence, LayerSpec, SaverSpec, Timeline } from './types';
@@ -903,5 +903,47 @@ describe('QA round 2', () => {
     const mid = resolveTimelineAt(s, 1500).layers[0]!.transform!;
     expect(mid.x).toBeCloseTo(0.2, 9);
     expect(mid.scale).toBeCloseTo(1.5, 9);
+  });
+});
+
+describe('QA round 3', () => {
+  it('a steer made mid-morph with the whole track re-sent does not re-arm a steer the outgoing timeline took back', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, seed: 3, segments: [
+      { key: 'a', scene: scene({ timeline: { keys: [{ t: 2000, path: 'background.color', value: '#ffffff', dur: 0 }] } }), duration: 3000, transition: { type: 'morph', dur: 2000 } },
+      { key: 'b', scene: scene({ timeline: { keys: [{ t: 0, path: 'background.color', value: '#ffffff', dur: 0 }] } }), duration: 5000 },
+    ] };
+    const inst = mountSeq(s);
+    groundAt(inst, 1000);
+    const old = { t: 9, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 };
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [old] } as never);
+    expect(groundAt(inst, 2500)).toBe('#ffffff');
+    const before = groundAt(inst, 3100);
+    clear();
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [old, { t: 10, path: 'dot.sprite.color', value: '#00ff00', ease: 'step', dur: 0 }] } as never);
+    expect(rec.fillRects.at(-1)).toBe(before);
+    expect(groundAt(inst, 3200)).toBe(mix('#ffffff', '#ff0000', easeSmooth(200 / 2000)));
+    inst.dispose();
+  });
+
+  it('a hot swap that adds a timeline to a segment keeps its retained steers', () => {
+    const s: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, seed: 3, segments: [{ key: 'a', scene: scene(), duration: 10000 }] };
+    const inst = mountSeq(s);
+    groundAt(inst, 1000);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 9, path: 'background.color', value: '#ff0000', ease: 'step', dur: 0 }] } as never);
+    expect(groundAt(inst, 1500)).toBe('#ff0000');
+    const next = structuredClone(s);
+    next.segments[0]!.scene.timeline = { keys: [{ t: 8000, path: 'layers.0.sprite.color', value: '#eeeeee', dur: 0 }] };
+    expect((inst as unknown as { hotSwapSequence(n: IdleSequence): boolean }).hotSwapSequence(next)).toBe(true);
+    expect(groundAt(inst, 1600)).toBe('#ff0000');
+    expect(groundAt(inst, 3000)).toBe('#ff0000');
+    inst.dispose();
+  });
+
+  it('validateSpecPaths judges only the touched layers, and falls back to the full check for cross-layer fields', () => {
+    const s = scene({}, [dot({ key: 'a', pulse: { amp: 0.5, period: 500 }, clock: { rate: 4 } }), dot({ key: 'b', position: { x: 0.2, y: 0.2 } })]);
+    expect(validateSpec(structuredClone(s)).valid).toBe(false);
+    expect(validateSpecPaths(s, ['layers.1.sprite.color'])).toBe(true);
+    expect(validateSpecPaths(s, ['layers.0.sprite.color'])).toBe(false);
+    expect(validateSpecPaths(s, ['layers.1.count'])).toBe(false); // count → full check
   });
 });

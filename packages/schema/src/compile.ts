@@ -7,7 +7,7 @@ import {
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
-import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
+import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
 import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
@@ -247,6 +247,9 @@ function overrideValueAt(o: TimelineOverride, t: number, timelineValue: () => un
   return EXPIRED;
 }
 
+/** A steer's identity across re-sends: the server's stamp and the value (see `SpecInstance.seenSteers`). */
+const steerId = (d: SteerDelta): string => `${d.t}|${JSON.stringify(d.value)}`;
+
 /** Arm one steer on a timeline scene at scene time `now` — the steering rule: held until the path's next key, or sticky when no key will touch it. */
 function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number): TimelineOverride {
   const next = nextKeyAfter(authored, path, now);
@@ -275,11 +278,27 @@ function applyOverridesAt(resolved: SaverSpec, overrides: ReadonlyMap<string, Ti
  * two values each valid alone can break a flash-safety ratio together).
  */
 function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, TimelineOverride>, now: number): boolean {
-  for (const t of [now, ...timelineSampleTimesAfter(authored, now)]) {
+  // Only the layers (or background/finish) the overrides live in can be broken
+  // by them — the timeline alone was validated with the spec — so judge just
+  // those, and only at states not already judged.
+  const paths = [...overrides.keys()];
+  if (paths.length === 0) return true;
+  const groupOf = (p: string): string => p.split('.').slice(0, p.startsWith('layers.') ? 2 : 1).join('.');
+  const groups = [...new Set(paths.map(groupOf))];
+  // The keys that can combine with these steers are those in the same
+  // groups (or any, when a steer falls back to the full check).
+  const full = paths.some((p) => /^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p) || !/^(layers|background|finish)(\.|$)/.test(p));
+  const only = full ? undefined : (p: string): boolean => groups.includes(groupOf(p));
+  const seen = new Set<string>();
+  for (const t of [now, ...timelineSampleTimesAfter(authored, now, false, only)]) {
     const held = new Map<string, TimelineOverride>();
     // Judge each override at its held value (the glide-back runs between two valid values).
     for (const [p, o] of overrides) if (t < o.until) held.set(p, { ...o, t0: Number.NEGATIVE_INFINITY });
-    if (!validateSpec(applyOverridesAt(resolveTimelineAt(authored, t), held, t)).valid) return false;
+    const r = applyOverridesAt(resolveTimelineAt(authored, t), held, t);
+    const state = JSON.stringify(groups.map((g) => readSpecPath(r, g))) + '|' + [...held.keys()].join(',');
+    if (seen.has(state)) continue;
+    seen.add(state);
+    if (!validateSpecPaths(r, paths)) return false;
   }
   return true;
 }
@@ -993,8 +1012,11 @@ class SpecInstance implements SaverInstance {
    */
   applyDeltasNow(deltas: Iterable<SteerDelta>): void {
     if (this.authored) {
-      // Retained steers land per delta (as `applyRetainedDeltas` does), under the timeline's steering rule.
-      for (const d of deltas) this.overrideAuthored([d], 0);
+      // Retained steers land under the timeline's steering rule — as one
+      // batch when they validate together (one composed check), else per
+      // delta, skipping any that don't (as `applyRetainedDeltas` does).
+      const all = [...deltas];
+      if (!this.overrideAuthored(all, 0)) for (const d of all) this.overrideAuthored([d], 0);
       this.transition = null;
       this.lastRenderT = Number.NEGATIVE_INFINITY;
       return;
@@ -1148,7 +1170,7 @@ class SpecInstance implements SaverInstance {
     const next = new Map(this.overrides);
     const armed: Array<[string, string]> = [];
     for (const [path, d] of latest) {
-      const id = `${d.t}|${JSON.stringify(d.value)}`;
+      const id = steerId(d);
       if (this.seenSteers.get(path) === id) continue;
       armed.push([path, id]);
       next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide));
@@ -1165,6 +1187,11 @@ class SpecInstance implements SaverInstance {
   /** A copy of the live overrides — a sequence carries them into a morph's outgoing endpoint. */
   timelineOverrides(): Map<string, TimelineOverride> | null {
     return this.authored ? new Map(this.overrides) : null;
+  }
+
+  /** A copy of which server steers this child already applied, per field (see `seenSteers`). */
+  timelineSeen(): Map<string, string> {
+    return new Map(this.seenSteers);
   }
 
   /** The spec painted by the last frame (timeline and overrides resolved). */
@@ -1263,8 +1290,15 @@ class SpecInstance implements SaverInstance {
    * continuity is kept, so ghosting trails do not restart.
    */
   hotSwapKeepingSteers(spec: SaverSpec, retained: Iterable<SteerDelta>): void {
-    if (!spec.timeline || !this.authored) {
+    if (!spec.timeline) {
       this.hotSwapSpec(spec);
+      return;
+    }
+    if (!this.authored) {
+      // The swap adds a timeline: the old scene carried the retained steers
+      // baked in, the new one takes them as live steers from here.
+      this.hotSwapSpec(spec);
+      this.applyDeltasNow(retained);
       return;
     }
     this.adoptAuthored(spec, true);
@@ -1273,13 +1307,25 @@ class SpecInstance implements SaverInstance {
   }
 
   /** Arm a steer made while a sequence was mid-morph, on the outgoing end's override set, at that end's scene time. */
-  static armInto(authored: SaverSpec, overrides: Map<string, TimelineOverride>, deltas: readonly SteerDelta[], now: number): void {
+  static armInto(authored: SaverSpec, overrides: Map<string, TimelineOverride>, seen: Map<string, string>, deltas: readonly SteerDelta[], now: number): void {
     const at = resolveTimelineAt(authored, now);
+    // As `overrideAuthored`: the last delta per field is the steer, and a
+    // re-sent one (the host re-broadcasts the whole track) is not re-armed.
+    const latest = new Map<string, SteerDelta>();
     for (const d of deltas) {
       const path = canonicalSpecPath(at, d.path);
       if (!path) continue;
+      latest.delete(path);
+      latest.set(path, d);
+    }
+    for (const [path, d] of latest) {
+      const id = steerId(d);
+      if (seen.get(path) === id) continue;
       const trial = new Map(overrides).set(path, armOverride(authored, path, d.value, d.value, now, 0));
-      if (overridesStayValid(authored, trial, now)) overrides.set(path, trial.get(path)!);
+      if (overridesStayValid(authored, trial, now)) {
+        overrides.set(path, trial.get(path)!);
+        seen.set(path, id);
+      }
     }
   }
 
@@ -1435,7 +1481,7 @@ class SequenceInstance implements SequenceSaverInstance {
    */
   private pendingWrapFade = false;
   /** The morph in progress: its ends, and the override sets each end resolves with (see `morphEndpoint`). */
-  private morphEnds: { from: number; to: number; outT: number; out: Map<string, TimelineOverride> | null; in: Map<string, TimelineOverride> | null } | null = null;
+  private morphEnds: { from: number; to: number; outT: number; out: Map<string, TimelineOverride> | null; seenOut: Map<string, string>; in: Map<string, TimelineOverride> | null } | null = null;
   /**
    * Every non-`sequence.segment` delta this instance has been handed, last
    * wins per path, merged across `applyTrack` calls. Children are created
@@ -1716,14 +1762,14 @@ class SequenceInstance implements SequenceSaverInstance {
     if (ends && side === 'out') ends.outT = t;
     let ov = side === 'out' ? ends?.out ?? null : ends?.in ?? null;
     if (!ov) {
-      ov = this.armRetained(scene);
+      ov = this.armRetained(scene, side === 'out' ? ends?.seenOut : undefined);
       if (ends) { if (side === 'out') ends.out = ov; else ends.in = ov; }
     }
     return applyOverridesAt(resolveTimelineAt(scene, t), ov, t);
   }
 
   /** The retained steers that resolve (and validate) on a timeline scene, armed at segment time 0. */
-  private armRetained(scene: SaverSpec): Map<string, TimelineOverride> {
+  private armRetained(scene: SaverSpec, seen?: Map<string, string>): Map<string, TimelineOverride> {
     const out = new Map<string, TimelineOverride>();
     if (this.retainedDeltas.size === 0) return out;
     const at0 = resolveTimelineAt(scene, 0);
@@ -1731,7 +1777,10 @@ class SequenceInstance implements SequenceSaverInstance {
       const path = canonicalSpecPath(at0, d.path);
       if (!path) continue;
       const trial = new Map(out).set(path, armOverride(scene, path, d.value, d.value, 0, 0));
-      if (overridesStayValid(scene, trial, 0)) out.set(path, trial.get(path)!);
+      if (overridesStayValid(scene, trial, 0)) {
+        out.set(path, trial.get(path)!);
+        seen?.set(path, steerId(d));
+      }
     }
     return out;
   }
@@ -1901,7 +1950,8 @@ class SequenceInstance implements SequenceSaverInstance {
         // A new morph: carry the outgoing segment's live steers (held/expired
         // per the timeline rule, on its own clock) into the lerp, before its
         // child is released or hot-swapped to the lerped frame.
-        this.morphEnds = { from: morphFrom, to: index, outT: 0, out: this.children[morphFrom]?.timelineOverrides() ?? null, in: null };
+        const outChild = this.children[morphFrom];
+        this.morphEnds = { from: morphFrom, to: index, outT: 0, out: outChild?.timelineOverrides() ?? null, seenOut: outChild?.timelineSeen() ?? new Map(), in: null };
       }
       this.morphFromIndex = morphFrom;
       this.activeIndex = index;
@@ -2089,7 +2139,7 @@ class SequenceInstance implements SequenceSaverInstance {
         const ends = this.morphEnds;
         if (ends) {
           const outScene = this.childScene(ends.from);
-          if (ends.out && outScene.timeline) SpecInstance.armInto(outScene, ends.out, childDeltas, ends.outT);
+          if (ends.out && outScene.timeline) SpecInstance.armInto(outScene, ends.out, ends.seenOut, childDeltas, ends.outT);
           ends.in = null;
         }
         if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);

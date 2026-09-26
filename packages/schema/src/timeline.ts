@@ -146,7 +146,7 @@ export function nextKeyAfter(spec: SaverSpec, path: string, t: number): { at: nu
  * starts and ends, for the per-steer check a live viewer runs. Capped (evenly
  * subsampled) so a 256-key timeline stays cheap to check.
  */
-export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = 120): number[] {
+export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = 120, only?: (path: string) => boolean): number[] {
   const tl = spec.timeline;
   if (!tl) return [];
   const d = tl.duration ?? 0;
@@ -154,9 +154,12 @@ export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = 120): n
   // Every key's start and end is always checked (≤ 2 × 256): a settled state
   // must never be thinned away — the last key's end is the state a scene
   // stays in. Only the in-glide quarter-points share a budget (`cap`).
+  // `only` limits the keys to those on matching (index-form) paths.
   const bounds = new Set<number>([0]);
   const extras = new Set<number>();
-  for (const k of tl.keys ?? []) {
+  const keys: TimelineKey[] = [];
+  for (const [path, list] of timelineTracks(spec)) if (!only || only(path)) keys.push(...list);
+  for (const k of keys) {
     if (!Number.isFinite(k.t)) continue;
     const dur = k.dur ?? DEFAULT_KEY_DUR;
     bounds.add(fold(k.t));
@@ -172,10 +175,10 @@ export function timelineSampleTimes(spec: SaverSpec, dense = true, cap = 120): n
 }
 
 /** The absolute scene times at or after `now` where `timelineSampleTimes` fall — the next lap's occurrences under `loop`. */
-export function timelineSampleTimesAfter(spec: SaverSpec, now: number, dense = false): number[] {
+export function timelineSampleTimesAfter(spec: SaverSpec, now: number, dense = false, only?: (path: string) => boolean): number[] {
   const tl = spec.timeline;
   if (!tl) return [];
-  const local = timelineSampleTimes(spec, dense);
+  const local = timelineSampleTimes(spec, dense, 120, only);
   const d = tl.duration ?? 0;
   if (tl.loop && d > 0) {
     const phase = ((now % d) + d) % d;
