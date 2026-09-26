@@ -84,6 +84,7 @@ declare global {
       toast(text: string): void;
       currentId(): string;
       setActivity(sections: unknown): void;
+      feed(name: string, value: unknown): void;
     };
   }
 }
@@ -96,6 +97,7 @@ window.__idleScreensMac = {
   setActivity(sections: unknown) {
     if (activityEl && showActivity) renderActivity(activityEl, sections);
   },
+
 };
 
 // Hosts without native key routing (Linux windowed dev) handle browse + quit here.

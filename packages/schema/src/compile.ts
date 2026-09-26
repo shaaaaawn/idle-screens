@@ -8,6 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
+import { checkInputs } from './inputs';
 import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
@@ -1060,6 +1061,13 @@ class SpecInstance implements SaverInstance {
  */
 export function compileSaver(spec: unknown): SaverPlugin {
   const valid = assertValidSpec(spec);
+  // Input bindings are proven once here (every state resolves, stays paint,
+  // leaves a valid scene) so a feed can never be silently dropped later by
+  // applyTrack's per-steer validation.
+  if (valid.inputs) {
+    const bad = checkInputs(valid, validateSpec);
+    if (bad.length) throw new Error(`invalid saver spec inputs:\n${bad.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
+  }
   return {
     manifest: manifestFor(valid),
     mount: (ctx: SaverContext) => new SpecInstance(valid, ctx, { capabilityTier: (ctx as SpecMountContext).capabilityTier }),
