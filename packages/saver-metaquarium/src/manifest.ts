@@ -115,6 +115,12 @@ export const METAQUARIUM_PARAMS = {
   caustics: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Size of the caustic cells (1 = about two-thirds of a fish). */
   causticScale: { type: 'number', default: 1, min: 0.4, max: 3, ease: 'smooth' },
+  /** The water's surface seen from below: a window straight up to the light
+   *  (Snell's window), a mirror of the tank everywhere else. The high tier
+   *  reflects the real tank when it can be seen (the \`surface\` and \`low\`
+   *  shots); mid tier reflects the deep water; low tier: off. Needs an
+   *  environment with a surface (reef, kelp, ice, lagoon). */
+  surfaceMirror: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** How the fish move. `loop` is exactly the pre-style behaviour, so the
    *  default changes nothing. A small named set on purpose: a silhouette of
    *  movement you can name is one you can choose from. `auto` lets each

@@ -19,7 +19,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry, PointLight, Vector4,
+  CircleGeometry, PointLight, Vector4, Matrix4,
   Color,
   ConeGeometry,
   Fog,
@@ -57,6 +57,7 @@ import {
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
+import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
@@ -228,6 +229,11 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
       uColor: { value: new Color(color) },
       uOpacity: { value: opacity },
       ...causticUniforms(),
+      tMirror: { value: null },
+      uMirrorMatrix: { value: new Matrix4() },
+      uMirror: { value: new Vector3() },
+      uMirrorDeep: { value: new Color() },
+      uMirrorLit: { value: new Color() },
     },
     vertexShader: `
       uniform float uTime;
@@ -247,6 +253,7 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
       uniform float uOpacity;
       varying float vRipple;
       varying vec3 vW;
+      ${MIRROR_GLSL}
       void main() {
         // Caustic-ish banding: the ripple itself modulates brightness, so the
         // surface reads as moving water rather than a tinted sheet of glass.
@@ -262,12 +269,15 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
           alpha = uOpacity * band * mix(1.0, far, uMqCaustic.x);
         }
         gl_FragColor = vec4(uColor * band, alpha);
+        // From below, with the mirror on: Snell's window and the reflected tank.
+        if (uMirror.x > 0.0 && cameraPosition.y < vW.y) gl_FragColor = mqSurfaceUnderside(gl_FragColor.rgb, gl_FragColor.a);
       }`,
   });
   mat.userData.mqOwned = true;
   const mesh = new Mesh(geo, mat);
   mesh.position.y = y;
   mesh.frustumCulled = false;
+  mesh.userData.mqMirrorSkip = true;
   return { mesh, material: mat };
 }
 
@@ -419,6 +429,7 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
+    m.userData.mqMirrorSkip = true; // light in the water, not a thing the surface reflects
     const a = rng.next() * Math.PI * 2;
     const r = 45 + rng.next() * 130;
     m.position.set(Math.cos(a) * r, 72, Math.sin(a) * r);
@@ -555,6 +566,12 @@ class TankInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement;
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
+  /** The renderer's own render, kept before anything wraps it (the finish): the mirror pass draws with it. */
+  private readonly rawRender: (scene: Object3D, camera: import('three').Camera) => void;
+  /** The surface mirror (high tier), made the first frame it is asked for. */
+  private mirror: SurfaceMirror | null = null;
+  private mirrorDrawn = false;
+  private clockSec = 0;
   private quality: TankQuality;
   private govScale = 1;
   private frameTimes: number[] = [];
@@ -827,6 +844,7 @@ class TankInstance implements SaverInstance {
       stencil: false,
       powerPreference: 'high-performance',
     });
+    this.rawRender = this.renderer.render.bind(this.renderer);
     this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
@@ -1955,6 +1973,7 @@ class TankInstance implements SaverInstance {
 
   private setState(t: number): void {
     const tSec = t / 1000;
+    this.clockSec = tSec;
     this.applyParams(t);
     this.updateFinish();
     const speed = this.num('swimSpeed');
@@ -2695,6 +2714,7 @@ class TankInstance implements SaverInstance {
       // its default must not add one) and draw calls.
       render: { programs: this.renderer.info.programs?.length ?? 0, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles },
       shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor, this.camera) : null,
+      mirror: this.mirror ? { drawn: this.mirrorDrawn, latchedOff: this.mirror.off } : null,
       fish,
     };
   }
@@ -2753,7 +2773,53 @@ class TankInstance implements SaverInstance {
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
     this.applyWater();
+    this.renderMirror();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * The surface mirror (mirror.ts), before the main render: high tier draws
+   * the reflection when it can be seen; mid tier reflects the gradient; low
+   * tier and open water leave the surface as it was.
+   */
+  private renderMirror(): void {
+    const mat = this.waterMat;
+    if (!mat?.uniforms.uMirror) return;
+    const u = mat.uniforms;
+    const amount = this.num('surfaceMirror'), tier = this.quality.glowLights;
+    const on = amount > 0 && tier >= 3 && !!this.ceiling;
+    (u.uMirror!.value as Vector3).set(on ? amount : 0, 0, this.clockSec);
+    if (!on) return;
+    // The colours the window and the mid-tier mirror use (display space).
+    const tint = this.waterTint();
+    const lit = (u.uMirrorLit!.value as Color).set(tint || this.roomSurface || '#bfe9ff').multiplyScalar(1.25);
+    lit.convertLinearToSRGB();
+    // Mid tier reflects the water the light comes through: lit, with a tint.
+    const deep = (u.uMirrorDeep!.value as Color).copy(this.fogColor).lerp(this.floorMat.color, 0.35);
+    if (tint) deep.lerp(this.tintColor.set(tint), tintWeight(0.25));
+    deep.convertLinearToSRGB();
+    if (tier < 4) return;
+    if (!this.mirror) {
+      this.mirror = new SurfaceMirror();
+      this.camera.layers.enable(MIRROR_SKIP_LAYER);
+    }
+    if (this.govScale < 0.8) this.mirror.latchOff();
+    // What the mirror must not draw: the surface itself, the shafts, particles.
+    this.scene.traverse((o) => {
+      if (o.userData.mqMirrorSkip || (o as { isPoints?: boolean }).isPoints) o.layers.set(MIRROR_SKIP_LAYER);
+    });
+    const ceilingY = this.ceiling!.position.y;
+    // The reflected light really travels up into the lit water: flip the in-scatter for this pass.
+    const tintOn = TINT.value.w;
+    if (tintOn > 0) TINT.value.w = 2;
+    const drew = this.mirror.render(this.renderer, this.rawRender, this.scene, this.camera, ceilingY, { radius: BOUNDS.radius * 1.6, top: BOUNDS.yMax + 40 });
+    TINT.value.w = tintOn;
+    if (drew) {
+      u.tMirror!.value = this.mirror.texture;
+      (u.uMirrorMatrix!.value as Matrix4).copy(this.mirror.textureMatrix);
+      (u.uMirror!.value as Vector3).y = 1;
+    }
+    this.mirrorDrawn = drew;
   }
 
   /**
@@ -2982,6 +3048,7 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.finishPass?.dispose();
+    this.mirror?.dispose();
     this.stop();
     for (const f of this.fish) {
       if (!f) continue;
