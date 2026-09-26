@@ -79,6 +79,7 @@ import {
   isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
+import { applyCaustics, CAUSTIC, CAUSTIC_WINDOW } from './caustics';
 import {
   compileSwimPlan,
   PATH_SHAPES,
@@ -530,6 +531,9 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  /** Caustics: installed the first frame `caustics` goes above 0, then kept (0 multiplies by 1). */
+  private causticsInstalled = false;
+  private readonly causticState = new Vector4(0, 12, 0, 132);
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
@@ -1690,6 +1694,7 @@ class TankInstance implements SaverInstance {
 
     this.ensureStudio();
     this.reconcile();
+    this.updateCaustics(tSec);
 
     // Camera orbit
     const rotation = rateOffset(
@@ -2324,6 +2329,28 @@ class TankInstance implements SaverInstance {
       quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
       fish,
     };
+  }
+
+  /**
+   * Caustics (caustics.ts): the net of light from the surface on every
+   * opaque surface. Patched the first frame it is asked for, so `caustics: 0`
+   * compiles the stock programs; the shared uniform is written in the scene's
+   * onBeforeRender so crossfading tanks each draw with their own.
+   */
+  private updateCaustics(tSec: number): void {
+    const strength = this.num('caustics');
+    if (strength > 0 && !this.causticsInstalled) {
+      this.causticsInstalled = true;
+      this.scene.onBeforeRender = () => {
+        // The ceiling moves with waterY; read it at draw time.
+        this.causticState.w = this.ceiling ? this.ceiling.position.y : BOUNDS.yMax + 60;
+        CAUSTIC.value.copy(this.causticState);
+      };
+    }
+    if (!this.causticsInstalled) return;
+    this.causticState.set(strength, 12 * this.num('causticScale'), ((tSec % CAUSTIC_WINDOW) + CAUSTIC_WINDOW) % CAUSTIC_WINDOW, this.causticState.w);
+    // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
+    applyCaustics(this.scene, this.quality.glowLights >= 3 ? 2 : 1);
   }
 
   // ---- render ----

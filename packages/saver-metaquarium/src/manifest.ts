@@ -80,6 +80,12 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** Caustics: the net of light a rippled surface throws on the floor, rocks,
+   *  plants and fish — sharp near the surface, broad and dim deep down,
+   *  brightest on faces that look up. 0 compiles the stock programs. */
+  caustics: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Size of the caustic cells (1 = about two-thirds of a fish). */
+  causticScale: { type: 'number', default: 1, min: 0.4, max: 3, ease: 'smooth' },
   /** How the fish move. `loop` is exactly the pre-style behaviour, so the
    *  default changes nothing. A small named set on purpose: a silhouette of
    *  movement you can name is one you can choose from. `auto` lets each
