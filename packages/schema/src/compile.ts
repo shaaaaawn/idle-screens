@@ -277,13 +277,16 @@ class SpecInstance implements SaverInstance {
    */
   private overrides = new Map<string, TimelineOverride>();
   /**
-   * Steers already registered, as `path|t|value`. A host re-sends the whole
-   * channel track on every steer (idle-server broadcasts the full track so
-   * viewers converge), and a steer's `t` is the server's stamp — stable across
-   * re-sends. Without this, an unrelated later steer would re-arm a hold the
-   * timeline had already taken back.
+   * The last registered steer per path, as `t|value`. A host re-sends the
+   * whole channel track on every steer (idle-server broadcasts the full track
+   * so viewers converge), and a steer's `t` is the server's stamp — stable
+   * across re-sends. Without this, an unrelated later steer would re-arm a
+   * hold the timeline had already taken back. Keyed by path (not by the full
+   * `path|t|value` history) so a long-running instance re-steered thousands
+   * of times doesn't accumulate an unbounded set — only the most recent id
+   * per path can ever recur.
    */
-  private seenSteers = new Set<string>();
+  private seenSteers = new Map<string, string>();
   /** Raster short side for a `field` background — halved on the low tiers. */
   private readonly fieldShortSide: number;
   /** The `field` background's cached raster; null until a field is first painted. */
@@ -1088,9 +1091,9 @@ class SpecInstance implements SaverInstance {
     for (const d of deltas) {
       const path = canonicalSpecPath(shown, d.path);
       if (!path) continue;
-      const id = `${path}|${d.t}|${JSON.stringify(d.value)}`;
-      if (this.seenSteers.has(id)) continue;
-      this.seenSteers.add(id);
+      const id = `${d.t}|${JSON.stringify(d.value)}`;
+      if (this.seenSteers.get(path) === id) continue;
+      this.seenSteers.set(path, id);
       const next = nextKeyAfter(this.authored!, path, now);
       this.overrides.set(path, {
         from: glide > 0 ? readSpecPath(shown, path) : d.value,

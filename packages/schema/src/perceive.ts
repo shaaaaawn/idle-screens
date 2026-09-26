@@ -976,28 +976,37 @@ export interface LayerMotionStats {
   moving: boolean;
 }
 
-/** Per-layer displacement between t and t+dt — choreography as numbers. */
+/**
+ * Per-layer displacement between t and t+dt — choreography as numbers.
+ *
+ * Samples the scene at both ends of the window separately (not just each
+ * entity's own position within one scene) so a `timeline`-driven layer
+ * `transform` — a camera pan or zoom with every entity otherwise static —
+ * registers as motion instead of vanishing between two reads of the same
+ * frozen transform.
+ */
 export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: number } = {}): LayerMotionStats[] {
-  spec = resolveTimelineAt(spec, opts.t ?? 5000);
-  const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const dt = opts.dt ?? 500;
-  const { w, h } = scene;
-  return scene.layers.map(({ layer, entities }, layerIndex) => {
+  const scene0 = buildScene(resolveTimelineAt(spec, t), opts);
+  const scene1 = spec.timeline ? buildScene(resolveTimelineAt(spec, t + dt), opts) : scene0;
+  const { w, h } = scene0;
+  return scene0.layers.map(({ layer, entities }, layerIndex) => {
+    const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
     let acc = 0;
     let max = 0;
     let n = 0;
-    for (const e of entities) {
-      const p0 = posOf(scene, e, t);
-      const p1 = posOf(scene, e, t + dt);
+    entities.forEach((e, i) => {
+      const p0 = posOf(scene0, e, t);
+      const p1 = posOf(scene1, entities1[i] ?? e, t + dt);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
-      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) continue; // wrap seam
+      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
       const speed = (Math.sqrt(dx * dx + dy * dy) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
-    }
+    });
     const meanSpeed = n ? acc / n : 0;
     return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, moving: meanSpeed > 0.5 };
   });

@@ -533,6 +533,17 @@ describe('perception', () => {
     expect(luminanceGrid(moved).centroid!.x).toBeGreaterThan(0.6);
     expect(motionStats(moved)[0]!.moving).toBe(false);
   });
+
+  it('motionStats sees a timeline gliding a layer transform, not just an entity’s own motion', () => {
+    const s = scene({ timeline: { keys: [
+      { t: 0, path: 'dot.transform.x', value: 0, dur: 0 },
+      { t: 1000, path: 'dot.transform.x', value: 1, ease: 'linear', dur: 3000 },
+    ] } }, [dot({ transform: { x: 0 } })]);
+    expect(validateSpec(s).warnings ?? []).toEqual([]);
+    // Sampled mid-glide: the layer's own entity is static, so only the
+    // timeline-driven transform moves it between t and t+dt.
+    expect(motionStats(s, { t: 2000, dt: 500 })[0]!.moving).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

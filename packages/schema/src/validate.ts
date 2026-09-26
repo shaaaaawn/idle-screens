@@ -1,7 +1,7 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
 import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
-import { withoutTimeline } from './timeline';
+import { DEFAULT_KEY_DUR, withoutTimeline } from './timeline';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -212,7 +212,7 @@ function validateTimeline(spec: SaverSpec, err: (p: string, m: string) => void, 
     const list = times.get(cp) ?? [];
     list.push(t);
     times.set(cp, list);
-    const dur = isNum(key.dur) ? key.dur : 1000;
+    const dur = isNum(key.dur) ? key.dur : DEFAULT_KEY_DUR;
     if (tl.loop === true && isNum(tl.duration) && t + dur > tl.duration) {
       warn(`${p}.dur`, 'timeline-glide-overruns-lap', `this key's glide ends at ${t + dur} ms, after the ${tl.duration} ms lap — the wrap cuts it short`);
     }
