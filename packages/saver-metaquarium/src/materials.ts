@@ -152,11 +152,15 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         eye.userData.mqOwned = true;
         // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
+        eye.userData.mqNoCaustic = true; // a display, not a surface
         return eye;
       }
+      // A textured glow part keeps its template material; it is still light, not a lit surface.
+      if (isGlow(m)) m.userData.mqNoCaustic = true;
       if (isGlow(m) && !(m as Partial<MeshBasicMaterial>).map) {
         const glow = new MeshBasicMaterial({ color: glowColorOf(m, rng) });
         glow.name = m.name;
+        glow.userData.mqNoCaustic = true;
         // The halo pass reads this back so shell and core NEVER disagree —
         // resolving twice would replay the rng differently in the fallback.
         glow.userData.mqGlowColor = glow.color.getHex();

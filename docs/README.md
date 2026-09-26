@@ -1,7 +1,7 @@
 # Documentation
 
 Cross-cutting design docs for `idle-screens`. Repo mechanics live in
-[`CLAUDE.md`](../CLAUDE.md); the authoritative SaverSpec format is
+[`AGENTS.md`](../AGENTS.md); the authoritative SaverSpec format is
 [`packages/schema/FORMAT.md`](../packages/schema/FORMAT.md).
 
 `ls docs/` is the truth if this index drifts.

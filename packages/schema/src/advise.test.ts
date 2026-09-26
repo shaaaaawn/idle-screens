@@ -173,6 +173,17 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'density-mismatch' && x.path === 'density')).toBe(true);
   });
 
+  it('counts a polygon by its outline area, not its bounding square', () => {
+    // A thin band's bounding square is ~20% of the frame; the band itself is ~1%.
+    const band: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      density: 'sparse',
+      layers: [{ count: 1, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#fff', points: [[-1, -0.05], [1, -0.05], [1, 0.05], [-1, 0.05]] }, motion: { type: 'static' } }],
+    };
+    expect(adviseSpec(band, { width: 1920, height: 1080 }).map((x) => x.code)).not.toContain('density-mismatch');
+  });
+
   it('withholds dense-scene under density: dense, and flags a dense declaration on an empty scene', () => {
     const crowd: SaverSpec = {
       ...base,

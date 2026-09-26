@@ -9,7 +9,7 @@ Claude Code's iOS Simulator integration (the `mcp__Claude_Code_iOS_Simulator__*`
 tools — attach/launch/live panel) is for **iOS apps in the Simulator**. This
 app runs natively on the Mac itself; pointing the simulator tooling at it
 wastes the session and proves nothing. (The Apple TV target has the same rule
-for a different reason — see "Testing tvOS" in the mono CLAUDE.md.)
+for a different reason — see "Testing tvOS" in the mono AGENTS.md.)
 
 ## Verify with the MCPs and native tools instead
 

@@ -17,6 +17,8 @@ import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
+import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
+import { swayReach, type CanopyTip } from './canopy';
 
 export interface SceneryOptions {
   rocks: number;
@@ -25,6 +27,12 @@ export interface SceneryOptions {
   homes: number;
   flora: number;
   bubbles: number;
+  /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
+  bubbleStyle?: 'classic' | 'live';
+  /** 0..1 — oxygen pearls on the flora (needs flora). */
+  pearling?: number;
+  /** 0..1 — a CO₂ mist from the vents. */
+  mist?: number;
   snow: number;
   /** 0..1 — jellyfish lanterns in the water overhead. */
   lanterns?: number;
@@ -50,6 +58,8 @@ export interface Scenery {
   emitters: Emitter[];
   /** Light that MOVES (the lanterns) — rewritten in place by `setFrame`. */
   moving: Emitter[];
+  /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
+  canopyTips: CanopyTip[];
   /** Named places in this world a vignette can send a fish (gate, plaza, home doors). */
   marks: Record<string, { x: number; y: number; z: number }>;
   /** What the floor should paint: the path network, as segments. */
@@ -59,6 +69,8 @@ export interface Scenery {
   clearance(x: number, z: number): number;
   /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
+  /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
+  setSurface(y: number | null): void;
 }
 
 /** Each feature gets its own fork, so adding flora never rearranges a village. */
@@ -251,6 +263,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
+  // Read before the batch merges (and disposes) the parts.
+  const pearls = (opts.pearling ?? 0) > 0 ? pearlSites(field.parts, s) : [];
   const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
   // The light sweep is written in scale-1 units; this is the world's scale.
   const floraScale = { value: s };
@@ -276,6 +290,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     geometry.userData.mqOwned = true;
     const metal = new MeshStandardMaterial({ vertexColors: true, metalness: 1, roughness: 0.2, envMapIntensity: 1.7 });
     metal.userData.mqOwned = true;
+    metal.userData.mqNoCaustic = true; // the flora's lamps shine
     const clock = { value: 0 }; clocks.push(clock);
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
@@ -314,6 +329,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     for (const [name, pass, extra, order] of draws) {
       const material = new MeshBasicMaterial({ vertexColors: true, ...extra });
       material.userData.mqOwned = true;
+      material.userData.mqNoCaustic = true; // lanterns are light
       const uSkyPass = { value: pass };
       material.onBeforeCompile = shader => {
         shader.uniforms.uSkyTime = clock;
@@ -342,6 +358,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     far.geometry.userData.mqOwned = true;
     const material = new MeshBasicMaterial({ vertexColors: true, fog: false, side: DoubleSide });
     material.userData.mqOwned = true;
+    material.userData.mqNoCaustic = true; // silhouettes past the fog line
     material.onBeforeCompile = shader => {
       shader.uniforms.uHorizonFog = horizonFog;
       shader.vertexShader = 'attribute vec2 aHaze; varying float vHorizon;\n' + shader.vertexShader.replace('#include <begin_vertex>', HORIZON_VERTEX);
@@ -534,9 +551,21 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     points.frustumCulled = false;
     group.add(points);
   };
-  counts.bubbles = Math.round(opts.bubbles * opts.cap * 12);
+  const live = opts.bubbleStyle === 'live';
+  counts.bubbles = live ? 0 : Math.round(opts.bubbles * opts.cap * 12);
   counts.snow = Math.round(opts.snow * opts.cap * 25);
   particles(true, counts.bubbles);
+  let bubbleLayer: BubbleLayer | null = null;
+  if ((live && opts.bubbles > 0) || (opts.pearling ?? 0) > 0 || (opts.mist ?? 0) > 0) {
+    bubbleLayer = buildBubbles(sources, pearls, rng.fork(21), {
+      streams: live ? opts.bubbles : 0, pearling: opts.pearling ?? 0, mist: opts.mist ?? 0,
+      cap: opts.cap, scale: s, riseCap: opts.interior ? 55 : undefined,
+    }, { positions: lightPositions, colors: lightColors });
+    if (bubbleLayer.points) group.add(bubbleLayer.points);
+    counts.bubbleStreams = bubbleLayer.counts.streams;
+    counts.pearls = bubbleLayer.counts.pearls;
+    counts.mist = bubbleLayer.counts.mist;
+  }
   particles(false, counts.snow);
   // Closed solids draw front faces only — half the fragment work of the
   // DoubleSide everything used to wear; only the open geode throat needs both.
@@ -546,6 +575,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, stones, 'rock-formations', FrontSide);
   const lava = batch(group, veins, 'crystal-veins');
   if (lava) {
+    (lava.material as MeshBasicMaterial).userData.mqNoCaustic = true; // glowing veins
     const clock = { value: 0 }; clocks.push(clock);
     (lava.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uFlowTime = clock;
@@ -553,8 +583,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     };
     (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
   }
+  let bubbleSurface: number | null = null;
   return {
+    setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [],
+    canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
@@ -568,6 +601,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     },
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
+      bubbleLayer?.setFrame(t, bubbleSurface);
       if (fog) horizonFog.value.copy(fog.color);
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
