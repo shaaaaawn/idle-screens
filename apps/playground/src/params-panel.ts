@@ -123,6 +123,7 @@ const METAQUARIUM: PanelKnowledge = {
   owns: (saver) => saver.manifest.id === 'metaquarium' || saver.manifest.id.startsWith('metaquarium-'),
   sections: [
     ['camera', ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate']],
+    ['light', ['caustics', 'causticScale']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     // The renderer's look: on by default, listed so it can be turned off.
     ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife']],
@@ -130,7 +131,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
     ['formation', ['formationShape', 'formationBreathe']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
-    ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'caustics', 'causticScale', 'envProps']],
+    ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
     ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'floorColor', 'moteDensity', 'moteColor']],
