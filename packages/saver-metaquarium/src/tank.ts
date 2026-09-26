@@ -54,7 +54,8 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
-import { ORBIT_FOV, pickLandmark, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
+import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
+import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
@@ -674,20 +675,74 @@ class TankInstance implements SaverInstance {
   private shoalKey = '';
   private shoalPlan: SwimPlan | null = null;
   private shoalTau = 0;
-  private readonly shoalFloor = (x: number, z: number): number => this.floorHeightAt?.(x, z) ?? 0;
-  /** The school's centre at swim-time τ: a slower route of its own, its heading
-   *  a chord average (as the carrier does), kept inside the tank by its centre. */
-  private readonly shoalCarrier = (tau: number, along: number): Carrier => {
+  /** What the school keeps above: ground, rocks, crystals and the plants' swept tips (canopy.ts). */
+  private shoalCanopy: Canopy | null = null;
+  /** The canopy along the school's route (max over the next six lengths), sampled round the loop. */
+  private shoalLift: Float64Array | null = null;
+  private shoalSpeedTracked = false;
+  /** Travel time for the school at a moment, cached for the two instants a frame asks about. */
+  private shoalWarpMemo: [number, number, number, number] = [NaN, 0, NaN, 0];
+  private readonly shoalFloor = (x: number, z: number): number =>
+    this.shoalCanopy ? this.shoalCanopy.at(x, z) : this.floorHeightAt?.(x, z) ?? 0;
+  /** How far along its route the school has travelled by `tSec`: its own
+   *  `shoalSpeed`, not the cast's — integrated when steered, so a change glides. */
+  private shoalWarp(tSec: number): number {
+    const m = this.shoalWarpMemo;
+    if (m[0] === tSec) return m[1];
+    if (m[2] === tSec) return m[3];
+    const def = this.space.shoalSpeed;
+    const w = this.shoalSpeedTracked && this.track
+      ? integrateParam(this.space, this.track, 'shoalSpeed', tSec * 1000, {
+          ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
+        }) / 1000
+      : tSec * this.num('shoalSpeed');
+    m[2] = m[0]; m[3] = m[1]; m[0] = tSec; m[1] = w;
+    return w;
+  }
+  /** The school's centre at a moment, for a fish `along` its length: that fish
+   *  rides the route at its own distance (so the school bends through a turn),
+   *  lifted over the canopy a few lengths ahead of it, and kept in open water —
+   *  under a band top of the surface less two lengths (at most 110), not the
+   *  cast's 72, so a tall kelp bed does not squeeze the band shut. */
+  /** Per-instant memo: a frame asks for the same (t, along) from the position
+   *  solve and again from the heading, and each answer is several spline samples. */
+  private shoalCarrierMemo: [number, Map<number, Carrier>, number, Map<number, Carrier>] = [NaN, new Map(), NaN, new Map()];
+  private readonly shoalCarrier = (tSec: number, along: number): Carrier => {
+    const memo = this.shoalCarrierMemo;
+    let bucket = memo[0] === tSec ? memo[1] : memo[2] === tSec ? memo[3] : null;
+    if (!bucket) {
+      // Keep the newer instant, recycle the older map.
+      const recycled = memo[3]; recycled.clear();
+      memo[2] = memo[0]; memo[3] = memo[1]; memo[0] = tSec; memo[1] = recycled;
+      bucket = recycled;
+    }
+    const hit = bucket.get(along);
+    if (hit) return hit;
+    const out = this.shoalCarrierAt(tSec, along);
+    bucket.set(along, out);
+    return out;
+  };
+  private shoalCarrierAt(tSec: number, along: number): Carrier {
     const plan = this.shoalPlan!, L = this.shoal!.length, g = Math.cbrt(this.shoal!.count / 30);
-    const d = distanceAt(plan, tau, 0.8) + along;
+    const d = distanceAt(plan, this.shoalWarp(tSec), 0.8) + along;
     const c = swimPoseAtDistance(plan, d);
     const a = swimPoseAtDistance(plan, d + L * 2), b = swimPoseAtDistance(plan, d - L * 2);
     let fx = a.x - b.x, fz = a.z - b.z;
     if (Math.hypot(fx, fz) < 1e-3) { fx = c.fx; fz = c.fz; }
-    const reach = (2.2 * g + 1) * L, up = (1.8 * g + 1) * L;
+    const reach = (2.4 * g + 1) * L, up = (1.6 * g + 1) * L;
     const maxR = Math.max(0, BOUNDS.radius - reach), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
-    return { x: c.x * cs, y: Math.min(BOUNDS.yMax - up, Math.max(BOUNDS.yMin + up, c.y)), z: c.z * cs, fx, fz };
-  };
+    let y = c.y;
+    const lift = this.shoalLift;
+    if (lift) {
+      // The canopy along the route a few lengths ahead, precomputed at build.
+      const n = lift.length, f = ((((d / plan.totalLength) % 1) + 1) % 1) * n;
+      const i = Math.floor(f) % n, u = f - Math.floor(f);
+      y = Math.max(y, lift[i]! * (1 - u) + lift[(i + 1) % n]! * u + 1.2 * L + 1.6 * g * L * 0.6);
+    }
+    const top = Math.min(this.ceiling ? this.ceiling.position.y - 2 * L : Infinity, 110) - up * 0.5;
+    y = Math.max(BOUNDS.yMin + up, Math.min(top, y));
+    return { x: c.x * cs, y, z: c.z * cs, fx, fz };
+  }
   /** Shape every live plan was compiled on — setState recompiles when the
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
@@ -1470,7 +1525,13 @@ class TankInstance implements SaverInstance {
     // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
     const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
     const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
-    const key = `${count}|${kind}|${lit}`;
+    // In front of the camera: a crossing lane across the shot when nothing
+    // orbits; the figure of eight over the whole tank when the camera goes round.
+    const orbiting = this.num('autoRotate') !== 0 || this.autoRotateTracked;
+    const shot = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    const laneAz = Math.round(this.num('cameraAzimuth') + shotAzimuthOffset(shot));
+    const route = orbiting ? 'eight' : `crossing@${laneAz}`;
+    const key = `${count}|${kind}|${lit}|${route}|${this.sceneryKey}|${this.propsKey}`;
     if (key === this.shoalKey) return;
     this.shoalKey = key;
     if (this.shoal) {
@@ -1481,10 +1542,23 @@ class TankInstance implements SaverInstance {
       this.shoal = null;
     }
     if (count < 3) return;
-    // Its own route whatever the cast swims: a figure of eight over the whole
-    // tank — long runs and wide turns, which is how a school uses a room.
-    this.shoalPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight');
-    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32 });
+    // Its own route whatever the cast swims.
+    this.shoalPlan = orbiting
+      ? compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight')
+      : compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'crossing', { cameraAzimuthDeg: laneAz });
+    const ground = this.floorHeightAt ?? (() => 0);
+    this.shoalCanopy = buildCanopy(ground, this.scenery?.canopyTips ?? []);
+    {
+      // Where the school's centre actually goes: the route pulled in by the same radius clamp the carrier uses.
+      const plan = this.shoalPlan, L = FISH_LENGTH * 0.32, g = Math.cbrt(count / 30);
+      const maxR = Math.max(0, BOUNDS.radius - (2.4 * g + 1) * L);
+      this.shoalLift = shoalLiftTable(plan.totalLength, this.shoalCanopy, L, (d) => {
+        const c = swimPoseAtDistance(plan, d), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+        return { x: c.x * cs, z: c.z * cs };
+      });
+    }
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
+    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32, clear: 1.2 });
     this.scene.add(this.shoal.mesh);
   }
 
@@ -1912,8 +1986,9 @@ class TankInstance implements SaverInstance {
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
     this.buildShoal();
     if (this.shoal) {
-      this.shoalTau = warpSec;
-      this.shoal.update(warpSec, this.shoalCarrier, this.shoalFloor);
+      // Life (tails, breathing, excursions) on the real clock; travel on the school's own speed.
+      this.shoalTau = tSec;
+      this.shoal.update(tSec, this.shoalCarrier, this.shoalFloor);
     }
 
     const sceneStyleName = this.str('swimStyle');
@@ -2564,7 +2639,7 @@ class TankInstance implements SaverInstance {
       // What the GPU did for the last frame: compiled programs (a feature at
       // its default must not add one) and draw calls.
       render: { programs: this.renderer.info.programs?.length ?? 0, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles },
-      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor) : null,
+      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor, this.camera) : null,
       fish,
     };
   }
@@ -2713,6 +2788,9 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.shoalSpeedTracked = track.deltas.some((d) => d.path === 'shoalSpeed');
+    this.shoalWarpMemo = [NaN, 0, NaN, 0];
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
     this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');
     if (this.paused) this.renderStill();
   }

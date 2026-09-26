@@ -50,9 +50,9 @@ function framing(name: ShotName, i: ShotInput): Framing {
   const k = i.distance / 110; // the author's distance scales every framing
   const surfaceY = i.ceiling ?? 150;
   switch (name) {
-    case 'hero': return { target: [0, 32, 0], elevation: 17, distance: 128 * k, azimuth: -28, fov: 45 };
+    case 'hero': return { target: [0, 32, 0], elevation: 17, distance: 128 * k, azimuth: shotAzimuthOffset('hero'), fov: 45 };
     case 'front': return { target: [0, 36, 0], elevation: 3, distance: 150 * k, azimuth: 0, fov: 38 };
-    case 'low': return { target: [0, 46, 0], elevation: -12, distance: 88 * k, azimuth: 12, fov: 58 };
+    case 'low': return { target: [0, 46, 0], elevation: -12, distance: 88 * k, azimuth: shotAzimuthOffset('low'), fov: 58 };
     case 'top': return { target: [0, 18, 0], elevation: 58, distance: 125 * k, azimuth: 0, fov: 48 };
     case 'surface': {
       // Low and close, tipped right back: most of the frame is the water's underside.
@@ -70,6 +70,11 @@ function framing(name: ShotName, i: ShotInput): Framing {
     }
     default: return { target: [0, ORBIT_TARGET_Y, 0], elevation: i.elevation, distance: i.distance, azimuth: 0, fov: ORBIT_FOV };
   }
+}
+
+/** How far a shot swings off `cameraAzimuth` (degrees): lanes laid across the view use it. */
+export function shotAzimuthOffset(name: ShotName): number {
+  return name === 'hero' ? -28 : name === 'low' ? 12 : 0;
 }
 
 export function shotPose(name: ShotName, i: ShotInput, out: ShotPose): ShotPose {

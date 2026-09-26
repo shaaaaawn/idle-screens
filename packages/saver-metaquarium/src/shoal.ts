@@ -23,7 +23,7 @@
 
 import {
   BufferAttribute, BufferGeometry, Color, DynamicDrawUsage, InstancedBufferAttribute, InstancedMesh,
-  Matrix4, MeshBasicMaterial, MeshStandardMaterial, Quaternion, Vector3, type Material,
+  Frustum, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Quaternion, Vector3, type Camera, type Material,
 } from 'three';
 import type { CrystalRng } from './crystals';
 
@@ -132,12 +132,17 @@ export interface FishPose { x: number; y: number; z: number; hx: number; hy: num
 
 interface Member { seat: Seat; w: [number, number, number]; ph: [number, number, number]; burstW: number; burstPh: number; beat: number }
 
-export interface ShoalOptions { count: number; kind: ShoalKind; lit: boolean; length: number }
+export interface ShoalOptions {
+  count: number; kind: ShoalKind; lit: boolean; length: number;
+  /** Body lengths every fish keeps above the floor it is given (default 0.8). */
+  clear?: number;
+}
 
 export class Shoal {
   readonly mesh: InstancedMesh;
   readonly count: number;
   readonly length: number;
+  private readonly clear: number;
   private readonly members: Member[];
   private readonly salt: number;
   private readonly swim: InstancedBufferAttribute;
@@ -155,6 +160,7 @@ export class Shoal {
   constructor(rng: CrystalRng, o: ShoalOptions) {
     this.count = o.count;
     this.length = o.length;
+    this.clear = o.clear ?? 0.8;
     this.at = new Float64Array(o.count * 3);
     this.before = new Float64Array(o.count * 3);
     this.meta = new Float64Array(o.count * 3);
@@ -202,7 +208,7 @@ export class Shoal {
     // Right of the heading, on the level: (fz, -fx).
     out.x = c.x + fz * side * L;
     out.z = c.z - fx * side * L;
-    out.y = Math.max(c.y + up * L, floor(out.x, out.z) + 0.8 * L);
+    out.y = Math.max(c.y + up * L, floor(out.x, out.z) + this.clear * L);
     out.along = along * L;
     out.phase = Math.PI * 2 * f.beat * (1.6 * t + 3.4 * ib);
     out.amp = 0.03 + 0.09 * b * b;
@@ -216,7 +222,7 @@ export class Shoal {
    * the Amano sim's collision step without its history.
    */
   private solve(t: number, carrier: (t: number, along: number) => Carrier, floor: (x: number, z: number) => number, out: Float64Array, meta?: Float64Array): void {
-    const n = this.count, L = this.length, min = 0.8 * L;
+    const n = this.count, L = this.length, min = 0.8 * L; // separation, not clearance
     for (let i = 0; i < n; i++) {
       const a = this.poseAt(i, t, carrier, floor, this.pA);
       out[i * 3] = a.x; out[i * 3 + 1] = a.y; out[i * 3 + 2] = a.z;
@@ -235,7 +241,7 @@ export class Shoal {
         out[j * 3] += ux * k; out[j * 3 + 1] += uy * k * 0.6; out[j * 3 + 2] += uz * k;
       }
     }
-    for (let i = 0; i < n; i++) out[i * 3 + 1] = Math.max(out[i * 3 + 1]!, floor(out[i * 3]!, out[i * 3 + 2]!) + 0.8 * L);
+    for (let i = 0; i < n; i++) out[i * 3 + 1] = Math.max(out[i * 3 + 1]!, floor(out[i * 3]!, out[i * 3 + 2]!) + this.clear * L);
   }
 
   /**
@@ -281,7 +287,7 @@ export class Shoal {
   }
 
   /** Analytic view for inspect(): polarisation and the closest pair, in body lengths. */
-  stats(t: number, carrier: (t: number, along: number) => Carrier, floor: (x: number, z: number) => number): { count: number; out: number; nearest: number; polarisation: number } {
+  stats(t: number, carrier: (t: number, along: number) => Carrier, floor: (x: number, z: number) => number, camera?: Camera): { count: number; out: number; nearest: number; polarisation: number; inView: number | null } {
     const a = new Float64Array(this.count * 3), b = new Float64Array(this.count * 3), meta = new Float64Array(this.count * 3);
     this.solve(t, carrier, floor, a, meta);
     this.solve(t - 0.15, carrier, floor, b);
@@ -294,8 +300,19 @@ export class Shoal {
       this.heading(i, t, a, b, meta[i * 3 + 2]!, carrier, h, 0.15);
       hx += h.x; hy += h.y; hz += h.z;
     }
+    // The share of the school inside the camera's frustum: whether anyone can see it.
+    let inView: number | null = null;
+    if (camera) {
+      camera.updateMatrixWorld();
+      const f = new Frustum().setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      const p = new Vector3();
+      let seen = 0;
+      for (let i = 0; i < this.count; i++) if (f.containsPoint(p.set(a[i * 3]!, a[i * 3 + 1]!, a[i * 3 + 2]!))) seen++;
+      inView = Math.round((seen / Math.max(1, this.count)) * 100) / 100;
+    }
     return {
       count: this.count,
+      inView,
       out: excursionsOut(this.count, t, this.salt),
       nearest: Math.round(nearest * 100) / 100,
       polarisation: Math.round((Math.hypot(hx, hy, hz) / Math.max(1, this.count)) * 100) / 100,

@@ -18,6 +18,7 @@ import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from '
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
+import { swayReach, type CanopyTip } from './canopy';
 
 export interface SceneryOptions {
   rocks: number;
@@ -57,6 +58,8 @@ export interface Scenery {
   emitters: Emitter[];
   /** Light that MOVES (the lanterns) — rewritten in place by `setFrame`. */
   moving: Emitter[];
+  /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
+  canopyTips: CanopyTip[];
   /** Named places in this world a vignette can send a fish (gate, plaza, home doors). */
   marks: Record<string, { x: number; y: number; z: number }>;
   /** What the floor should paint: the path network, as segments. */
@@ -580,6 +583,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   return {
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [],
+    canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
