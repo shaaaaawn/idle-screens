@@ -728,6 +728,14 @@ rule falls out of the scene itself, no mode flag:
 A channel's control track is not a timeline: its `t` is a wall-clock stamp the
 server writes, so it is never read as a schedule. Authored time lives here.
 
+Each steer is applied once per server stamp, so a host re-sending the whole
+track (idle-server does, on every steer) never re-arms a hold the timeline has
+taken back. A viewer that mounts later replays the stored track at its own
+mount: a steer on an animated path shows there until that path's next key
+after the mount, while screens that saw it live have already moved on. Until
+viewers share a clock (`sync: 'epoch'`, still unwired on the site), screens
+mounted at different times can briefly disagree on such a path.
+
 **One format for both use cases.** An ambient scene is a SaverSpec without a
 timeline — nothing about it changes. A timed piece (an ident, a film, a
 pre-roll) is a scene whose evolution is a timeline, and a sequence only where
