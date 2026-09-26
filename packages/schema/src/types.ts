@@ -45,6 +45,12 @@ export interface SaverSpec {
    * Absent ⇒ the frame is presented exactly as drawn.
    */
   finish?: FinishSpec;
+  /**
+   * Authored keyframes on the scene's own clock — see `Timeline`. Absent ⇒
+   * the scene is exactly what it was before the field existed. **Native:**
+   * ignored ⇒ the base spec (author it as the piece's rest state).
+   */
+  timeline?: Timeline;
   /** Dimensional unit system. 'viewport' (default) = all sizes/speeds/distances are fractions of min(w,h). */
   units?: 'viewport' | 'px';
   /**
@@ -141,6 +147,54 @@ export interface BackgroundDrift {
   amount?: number;
 }
 
+/**
+ * A paint-level transform applied to a whole layer at draw time, about the
+ * viewport centre: translate by (`x`, `y`) in `min(w, h)` units, rotate by
+ * `rotate` degrees, scale by `scale` (× `scaleX` horizontally — `scaleX`
+ * toward 0 reads as a turn about the vertical axis). Kept out of the
+ * structural signature, so it glides under steering, a `timeline` key or a
+ * `morph` — a camera for timed pieces, a slow drift for ambient ones. Every
+ * field optional; an empty transform is the identity. **Native:** ignored ⇒
+ * identity.
+ */
+export interface LayerTransform {
+  x?: number;
+  y?: number;
+  scale?: number;
+  scaleX?: number;
+  rotate?: number;
+}
+
+/** One authored key of a `Timeline`: at scene time `t` (ms), glide `path` to `value` over `dur` ms. */
+export interface TimelineKey {
+  /** Scene time in ms (the instance's own clock — a sequence segment's `localT`). */
+  t: number;
+  /** A steering path (`layers.0.sprite.color`, `key.sprite.color`, `background.stops.1.color`, …). It must already exist on the spec, as for `setParam`. */
+  path: string;
+  /** The target value; the key must still validate when applied. */
+  value: unknown;
+  /** Default `smooth`. */
+  ease?: 'step' | 'linear' | 'smooth';
+  /** Glide length in ms, starting at `t`. Default 1000 (as live steering); 0 = a cut. */
+  dur?: number;
+}
+
+/**
+ * Authored change on the scene's own clock — keyframes. A scene without a
+ * timeline is unchanged (ambient, today's behaviour); with one, each key
+ * glides its path at its time, and the scene can loop. Distinct from the
+ * channel's live `track`, whose `t` is a wall-clock stamp: live steering still
+ * layers on top, and a steer on a path the timeline animates holds until that
+ * path's next key.
+ */
+export interface Timeline {
+  /** Repeat every `duration` ms. A looping path's value before its first key is its last key's value (the loop wraps). */
+  loop?: boolean;
+  /** Loop length in ms; required with `loop`, and at least the latest key's `t`. */
+  duration?: number;
+  keys: TimelineKey[];
+}
+
 export interface LayerSpec {
   count: number;
   sprite: SpriteSpec;
@@ -213,7 +267,31 @@ export interface LayerSpec {
    * Only valid when `count` is 1 — or, with a `list` / `table` layout, as the
    * top-left anchor of the whole block. Overrides `region` scatter placement.
    */
-  position?: { x: number; y: number };
+  position?: {
+    x: number;
+    y: number;
+    /**
+     * An offset from `x`/`y` in `min(w, h)` units (px under `units: 'px'`).
+     * `x`/`y` are fractions of width and height while every size is a fraction
+     * of `min(w, h)`, so parts placed at computed fractions only register at
+     * the aspect they were computed for; anchor on a shared fraction (the
+     * centre is the only aspect-safe one) and offset in size units instead.
+     * Placement, like `x`/`y` (structural). Absent ⇒ 0. **Native:** tvOS
+     * ignores the offset until it reads the field.
+     */
+    dx?: number;
+    dy?: number;
+  };
+  /**
+   * Paint-level layer opacity, 0..1 (default 1): multiplies the per-entity
+   * `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked
+   * into every entity at build), it is **paint** — kept out of the structural
+   * signature — so `setParam`, a `timeline` key or a sequence `morph` glides it
+   * instead of re-seeding the layer. **Native:** ignored ⇒ 1.
+   */
+  opacity?: number;
+  /** Paint-level transform of the whole layer — see `LayerTransform`. */
+  transform?: LayerTransform;
   /**
    * Inter-entity links. `mode` picks the wiring:
    * - 'nearest' (default): each entity's k nearest neighbors within maxDist.
@@ -639,6 +717,14 @@ export const LIMITS = {
   maxTransitionDur: 5000,
   minTransitionDur: 200,
   minEmitEvery: 1000, // ms — at most one event per second per entity (flash safety)
+  maxTimelineKeys: 256,
+  minTimelineKeyInterval: 200, // ms — distinct key times on one path (flash safety; the timeline design's floor)
+  maxTimelineKeyDur: 30000, // ms — one key's glide
+  maxTimelineDuration: 86400000, // ms — a looping timeline's lap (a day)
+  maxLayerTransformOffset: 2, // min(w,h) units — transform x/y and position dx/dy
+  maxLayerTransformOffsetPx: 17280, // px, under `units: 'px'` — twice the largest referenceViewport
+  maxLayerTransformScale: 8,
+  maxLayerTransformRotate: 3600, // degrees
   maxEmitEvery: 600000, // ms — ten minutes; longer silences than that are `life.enter`
   minEmitLife: 500, // ms — an event is a smooth envelope, never a cut
   maxEmitGrow: 8, // × base size across an event window
@@ -665,10 +751,13 @@ export type SequenceTransition =
    * identical) segment over `dur` ms. Strings step on the first frame —
    * unless `text: 'crossfade'`, which draws each `text` / `textBlock` layer
    * whose string(s) differ twice for the window: the outgoing string at
-   * `1 − k`, the incoming at `k` (k = the morph's eased progress). Default
-   * `'step'`, today's behaviour, byte for byte.
+   * `1 − k`, the incoming at `k` (k = the morph's eased progress). `'dip'`
+   * draws the same two passes one after the other instead — the outgoing
+   * words fade out over the first half, the incoming fade in over the second —
+   * so the two strings never overlap. Default `'step'`, today's behaviour,
+   * byte for byte.
    */
-  | { type: 'morph'; dur: number; text?: 'step' | 'crossfade' }
+  | { type: 'morph'; dur: number; text?: 'step' | 'crossfade' | 'dip' }
   /**
    * Cross-fade into the next segment over `dur` ms: the outgoing segment
    * stays alive on its own canvas and is composited over the incoming one
@@ -704,6 +793,16 @@ export interface IdleSequence {
    * lands mid-loop. `advance: 'input'` holds stay armed under either mode.
    */
   sync?: 'mount' | 'epoch';
+  /**
+   * Honour a `morph` declared on the last segment at the loop wrap (the lap
+   * morphs back into segment 0 instead of cutting). Opt-in: without it a
+   * last-segment morph stays a cut at the wrap, as every stored sequence
+   * expects. Takes effect only when the whole loop is one morph chain (every
+   * segment morphs into the next, and the last is a structural twin of the
+   * first) — so every lap reuses the same child and seed; otherwise it is a
+   * cut and the validator says why. Needs `loop: true`.
+   */
+  wrapMorph?: boolean;
   /**
    * A scene drawn under every segment on the sequence's **global** clock —
    * the ground that does not reset at a boundary or under a `sequence.segment`

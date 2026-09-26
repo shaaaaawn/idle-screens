@@ -75,7 +75,11 @@ export function polygonArea(pts: Array<{ x: number; y: number }>): number {
   return Math.abs(a) / 2;
 }
 
-/** Fraction of the circumscribed disc a polygon fills — the perception weight of a polygon splat. */
+/**
+ * Fraction of the circumscribed disc a polygon fills — the perception weight of
+ * a SMALL polygon splat. Polygons spanning more than a few grid cells are
+ * rasterized by their real outline instead (`luminanceGrid`).
+ */
 export function polygonFill(s: PolygonSprite, radius: number): number {
   if (radius <= 0) return 0;
   const disc = Math.PI * radius * radius;

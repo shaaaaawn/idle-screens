@@ -209,9 +209,10 @@ describe('validateSpec warnings', () => {
   });
 
   it('warns on unknown layer properties', () => {
-    const spec = { ...base(), layers: [{ ...base().layers[0], opacity: 0.5 }] };
+    // (`opacity` was this test's example until it became a real paint field.)
+    const spec = { ...base(), layers: [{ ...base().layers[0], glow: 0.5 }] };
     expect(warnCodes(spec)).toContain('unknown-property');
-    expect(warnPaths(spec)).toContain('layers[0].opacity');
+    expect(warnPaths(spec)).toContain('layers[0].glow');
   });
 
   it('warns when layer-level props are placed inside sprite', () => {

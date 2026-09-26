@@ -130,6 +130,24 @@ export function morphChainRoot(seq: IdleSequence, index: number): number {
   return i;
 }
 
+/**
+ * Whether a looping sequence's wrap (last segment → segment 0) plays the last
+ * segment's `morph`. Opt-in via `wrapMorph: true`, and only when the whole lap
+ * is one morph chain — every boundary morphs and the last segment is a
+ * structural twin of segment 0 — so the wrap keeps the chain root's seed and
+ * entity placement and nothing pops. Otherwise the wrap is the hard cut it has
+ * always been (the validator warns when `wrapMorph` asks for one it can't do).
+ */
+export function canWrapMorph(seq: IdleSequence): boolean {
+  if (seq.wrapMorph !== true || seq.loop !== true) return false;
+  const last = seq.segments.length - 1;
+  if (last < 1) return false;
+  const seg = seq.segments[last]!;
+  if (seg.transition?.type !== 'morph' || seg.duration == null) return false;
+  if (morphChainRoot(seq, last) !== 0) return false;
+  return structuralSignature(seg.scene) === structuralSignature(seq.segments[0]!.scene);
+}
+
 /** `SpecInstance`'s seed normalization: 0 is falsy, so a valid `seed: 0` lands on 1. */
 export function normalizeSeed(seed: number): number {
   return (seed >>> 0) || 1;

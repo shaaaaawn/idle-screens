@@ -16,6 +16,18 @@ export const METAQUARIUM_PARAMS = {
   cameraElevation: { type: 'number', default: 15, min: -5, max: 60, ease: 'smooth' },
   /** Camera distance from tank center, world units. */
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
+  /** A named framing: `orbit` (the classic camera), hero, front, low, top,
+   *  surface (looking up at the water's underside) or macro (close on the
+   *  landmark nearest the front). Azimuth and autoRotate still turn it;
+   *  distance scales it. A change is a cut. */
+  shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro'], ease: 'step' },
+  /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
+   *  camera. The orbit params are ignored while following. */
+  cameraFollow: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
+  /** How far behind the followed fish the camera rides, along the path it
+   *  swam. Under about one body length (18) it is the fish's own eye, and the
+   *  fish itself is hidden. */
+  followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },
@@ -50,6 +62,23 @@ export const METAQUARIUM_PARAMS = {
   /** Fog full-opacity distance. Kept under the camera far plane (1400);
    *  the tank enforces far > near + 20. */
   fogFar: { type: 'number', default: 500, min: 120, max: 1100, ease: 'smooth' },
+  /** Water instead of fog: red is lost with distance first, green next, blue
+   *  last (blue keeps today's fog curve, so everything still meets the
+   *  background at `fogFar`). 0 (default) is today's fog exactly. */
+  water: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** How clear the water is, when `water` is on: 0 murky (colour lost fast,
+   *  a short reach), 0.5 the water as it has been, 1 clear (colour kept, the
+   *  far fade pushed back half again). */
+  waterClarity: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+  /** The sunlit water, '#rrggbb' (empty = off): what distant things fade into
+   *  looking up toward the light, half of it on the level, none looking down
+   *  into the deep — and the background with it. With \`water\` on, a room's
+   *  own tint applies when this is empty. */
+  waterTint: { type: 'string', default: '', ease: 'step' },
+  /** Output dither (±½ of an 8-bit step) on every material: the cure for
+   *  banding in dark fogged gradients on TV panels. Costs nothing per frame;
+   *  off by default only because turning it on recompiles every material. */
+  dither: { type: 'enum', default: 'off', options: ['on', 'off'], ease: 'step' },
   /** Plankton mote density, 0-1 of the device tier's mote budget. Default 0
    *  = off, so the baseline look is untouched until steered. */
   moteDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
@@ -80,6 +109,18 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** Caustics: the net of light a rippled surface throws on the floor, rocks,
+   *  plants and fish — sharp near the surface, broad and dim deep down,
+   *  brightest on faces that look up. 0 compiles the stock programs. */
+  caustics: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Size of the caustic cells (1 = about two-thirds of a fish). */
+  causticScale: { type: 'number', default: 1, min: 0.4, max: 3, ease: 'smooth' },
+  /** The water's surface seen from below: a window straight up to the light
+   *  (Snell's window), a mirror of the tank everywhere else. The high tier
+   *  reflects the real tank when it can be seen (the \`surface\` and \`low\`
+   *  shots); mid tier reflects the deep water; low tier: off. Needs an
+   *  environment with a surface (reef, kelp, ice, lagoon). */
+  surfaceMirror: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** How the fish move. `loop` is exactly the pre-style behaviour, so the
    *  default changes nothing. A small named set on purpose: a silhouette of
    *  movement you can name is one you can choose from. `auto` lets each
@@ -139,6 +180,14 @@ export const METAQUARIUM_PARAMS = {
    *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
    *  to a fifth. Only ever expands, so the spacing guarantee holds. */
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** An ambient school of small voxel fish swimming as one body beside the
+   *  cast — relaxed formation, burst-and-coast tails, the odd fish wandering
+   *  out and back. The amount sets the count (up to 2.5× the tier's fish cap). */
+  shoal: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  shoalKind: { type: 'enum', default: 'neon', options: ['neon', 'rummynose', 'ember'], ease: 'step' },
+  /** How fast the school travels its route — its own speed, not the cast's `swimSpeed`,
+   *  so a slow, contemplative scene still has a school that goes somewhere. */
+  shoalSpeed: { type: 'number', default: 0.8, min: 0.3, max: 2, ease: 'smooth' },
   // ---- The look. These three are the RENDERER, not settings a scene must
   // carry: every tank is lit, glowing and reflective with no params at all,
   // and the room, the cast and the camera never need to know. Each exists only
@@ -154,6 +203,14 @@ export const METAQUARIUM_PARAMS = {
    *  a glowing fin colours the body beside it. `flat` is the original unlit
    *  look. Read at mount. */
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
+  /** The water's light on the fish (lit mode): the bright water above on
+   *  their backs, the water around on their flanks, the floor under their
+   *  bellies — and mirrored in silvered plates. 0 is the studio alone. */
+  fishAmbient: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The finish: one full-screen pass — a gentle grade, dither against
+   *  banding, and restrained bloom on high-end devices. 0 draws straight to
+   *  the screen as before; the low tier never runs it. */
+  finish: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is non-metallic instead —
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
@@ -166,6 +223,9 @@ export const METAQUARIUM_PARAMS = {
    *  stock eye program, byte for byte — because every param this saver adds
    *  defaults to the previous look; a scene opts in with 1. */
   eyeLife: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A body wave from nose to tail, beating with distance swum and curling
+   *  into turns. 0 keeps the legacy rigid wiggle and the stock programs. */
+  swimWave: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
@@ -209,6 +269,15 @@ export const METAQUARIUM_PARAMS = {
   interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** `live` puts the vents on a real bubble life: each one grows at the mouth,
+   *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
+   *  quiet for a minute now and then. `classic` is the looping puffs. */
+  bubbleStyle: { type: 'enum', default: 'classic', options: ['classic', 'live'], ease: 'step' },
+  /** Oxygen pearls: beads that grow on the flora's leaves over half a minute
+   *  or more, sway with the leaf, and let go. Needs `floraDensity`. */
+  pearling: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** A fine CO₂ mist of tiny bubbles from the vents, drifting on a current. */
+  co2Mist: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   marineSnow: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** The sky motif: voxel jellyfish lanterns drifting in the water overhead,
    *  pulsing as they rise and sink; a few hang far out as fogged silhouettes.

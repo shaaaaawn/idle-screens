@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -35,7 +35,9 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
+import { layerOpacity, transformPoint, transformSize } from './paint';
+import { resolveTimelineAt } from './timeline';
+import { LIMITS, type IdleSequence, type LayerSpec, type LayerTransform, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -76,6 +78,23 @@ const LINE_SALIENCE = 3.5;
  */
 const GHOST_TAPS = 12;
 
+/**
+ * A polygon whose bounding diameter spans at least this many grid cells is
+ * rasterized by its real outline; below it, it splats as its circumscribed
+ * disc weighted by `polygonFill`, exactly as before. The two do NOT agree at
+ * the boundary: the disc path lights every cell whose centre is within half a
+ * cell of the rim at full weight, so it over-reports a small glyph's ink (12
+ * hexagons just under 3 cells: mean deviation 0.022 against an analytic 0.014;
+ * the outline gives 0.013). Circles carry the same dilation, and keeping it
+ * for small polygons keeps a hexagon and a disc of one size reading alike.
+ * Above the threshold the disc is materially wrong for any non-round glyph — a
+ * full-width flat band reads as a circle, a ridge silhouette as a dome.
+ */
+const POLYGON_OUTLINE_CELLS = 3;
+
+/** Sub-scanlines per grid row when rasterizing a polygon outline. */
+const POLYGON_SCANLINES = 4;
+
 // ---------------------------------------------------------------------------
 // Shared scene construction (mirrors describeScene/adviseSpec)
 // ---------------------------------------------------------------------------
@@ -88,7 +107,10 @@ interface BuiltScene {
   seed: number;
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
+  /** Entities of layers with a paint `transform` — null (every scene without one) skips the lookup. */
+  transforms: Map<Entity, LayerTransform> | null;
 }
+
 
 export interface PerceiveOptions {
   viewport?: { width: number; height: number };
@@ -114,7 +136,13 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  return { w, h, scale, seed, layers, byKey };
+  let transforms: Map<Entity, LayerTransform> | null = null;
+  for (const { layer, entities } of layers) {
+    if (!layer.transform) continue;
+    transforms ??= new Map();
+    for (const e of entities) transforms.set(e, layer.transform);
+  }
+  return { w, h, scale, seed, layers, byKey, transforms };
 }
 
 /** Position with layer-parented-orbit resolution (matches the renderer). */
@@ -128,7 +156,8 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
       p.y += pp.y;
     }
   }
-  return p;
+  const tf = scene.transforms?.get(e);
+  return tf ? transformPoint(tf, p, scene.w, scene.h, scene.scale) : p;
 }
 
 /**
@@ -212,6 +241,88 @@ function textBlockRevealFraction(
 }
 
 // ---------------------------------------------------------------------------
+// Polygon outline rasterization
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of each cell in the window [c0..c1]×[r0..r1] that a polygon fills,
+ * row-major within the window. Scanline with the canvas's own `nonzero` rule:
+ * each sub-scanline collects signed edge crossings (half-open in y, so a
+ * horizontal edge or a vertex on the line is counted once), and the spans where
+ * the winding is nonzero are split exactly across the cells they cross. So
+ * coverage is exact horizontally and POLYGON_SCANLINES-sampled vertically, and
+ * a self-intersecting outline fills both lobes, as `ctx.fill()` does.
+ */
+function polygonCellCoverage(
+  pts: Array<{ x: number; y: number }>,
+  cellW: number,
+  cellH: number,
+  c0: number,
+  c1: number,
+  r0: number,
+  r1: number,
+): Float64Array {
+  const nc = c1 - c0 + 1;
+  const cov = new Float64Array(nc * (r1 - r0 + 1));
+  const xMin = c0 * cellW;
+  const xMax = (c1 + 1) * cellW;
+  const share = 1 / POLYGON_SCANLINES;
+  const hits: Array<{ x: number; dir: number }> = [];
+  const addSpan = (row: number, xa: number, xb: number): void => {
+    const a = Math.max(xMin, xa);
+    const b = Math.min(xMax, xb);
+    if (!(b > a)) return;
+    const first = Math.max(c0, Math.floor(a / cellW));
+    const last = Math.min(c1, Math.floor(b / cellW));
+    for (let c = first; c <= last; c++) {
+      const len = Math.min(b, (c + 1) * cellW) - Math.max(a, c * cellW);
+      if (len > 0) cov[row * nc + (c - c0)]! += (len / cellW) * share;
+    }
+  };
+  for (let r = r0; r <= r1; r++) {
+    for (let k = 0; k < POLYGON_SCANLINES; k++) {
+      const y = (r + (k + 0.5) / POLYGON_SCANLINES) * cellH;
+      hits.length = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]!;
+        const q = pts[(i + 1) % pts.length]!;
+        const down = p.y <= y && q.y > y;
+        if (!down && !(q.y <= y && p.y > y)) continue;
+        hits.push({ x: p.x + ((y - p.y) / (q.y - p.y)) * (q.x - p.x), dir: down ? 1 : -1 });
+      }
+      if (hits.length < 2) continue;
+      hits.sort((m, n) => m.x - n.x);
+      let wind = 0;
+      let start = 0;
+      for (const hit of hits) {
+        const before = wind;
+        wind += hit.dir;
+        if (before === 0 && wind !== 0) start = hit.x;
+        else if (before !== 0 && wind === 0) addSpan(r - r0, start, hit.x);
+      }
+    }
+  }
+  return cov;
+}
+
+/** Distance from (x, y) to the nearest edge of a closed outline. */
+function distanceToOutline(pts: Array<{ x: number; y: number }>, x: number, y: number): number {
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const ex = q.x - p.x;
+    const ey = q.y - p.y;
+    const len2 = ex * ex + ey * ey;
+    const u = len2 > 0 ? Math.max(0, Math.min(1, ((x - p.x) * ex + (y - p.y) * ey) / len2)) : 0;
+    const dx = x - (p.x + ex * u);
+    const dy = y - (p.y + ey * u);
+    best = Math.min(best, dx * dx + dy * dy);
+  }
+  return Math.sqrt(best);
+}
+
+// ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
 
@@ -251,12 +362,15 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
  * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
  * re-uses drawTrail's sampling — past positions with decaying alpha and
- * shrinking radius. Remaining approximations (documented, deliberate): soft
- * circles use a linear falloff, background drift is sampled at its rest
- * position. Good enough to perceive composition, focus, balance — and now
- * smear.
+ * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
+ * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Remaining approximations (documented, deliberate): soft circles use a linear
+ * falloff, background drift is sampled at its rest position. Good enough to
+ * perceive composition, focus, balance — and now smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
@@ -366,12 +480,75 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     }
   };
 
+  // A polygon painted by its real outline — the renderer's path, rotated by
+  // `rotationAt` about the entity — instead of its circumscribed disc. Weight
+  // per cell is the fraction of it the outline fills; `soft` is the renderer's
+  // radial gradient (centred on the entity, radius = circumradius) clipped to
+  // that outline. The additive halo spreads past the OUTLINE, not a disc: its
+  // band is GLOW_SPREAD − 1 times the glyph's thickness (2·area/perimeter —
+  // the radius for a disc, the apothem for a regular n-gon), so a soft
+  // `lighter` hexagon blooms about as far as the disc model did while a
+  // full-width band or ridge doesn't re-inflate into a screen-filling dome.
+  const splatPolygonOutline = (layer: LayerSpec, s: PolygonSprite, e: Entity, p: { x: number; y: number }, sz: number, a: number, lum: number, tPass: number): void => {
+    const radius = sz / 2;
+    const rot = rotationAt(e, tPass);
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
+    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+    const glow = !!s.soft && additive;
+    let band = 0;
+    if (glow) {
+      const perimeter = pts.reduce((acc, q, i) => { const n = pts[(i + 1) % pts.length]!; return acc + Math.hypot(n.x - q.x, n.y - q.y); }, 0);
+      band = perimeter > 0 ? (GLOW_SPREAD - 1) * ((2 * polygonArea(pts)) / perimeter) : 0;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const q of pts) {
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+    }
+    const c0 = Math.max(0, Math.floor((minX - band) / cellW));
+    const c1 = Math.min(cols - 1, Math.floor((maxX + band) / cellW));
+    const r0 = Math.max(0, Math.floor((minY - band) / cellH));
+    const r1 = Math.min(rows - 1, Math.floor((maxY + band) / cellH));
+    if (c0 > c1 || r0 > r1) return;
+    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
+    const nc = c1 - c0 + 1;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const f = cov[(r - r0) * nc + (c - c0)]!;
+        const x = (c + 0.5) * cellW;
+        const y = (r + 0.5) * cellH;
+        let wgt: number;
+        if (glow) {
+          // Outside the outline's box by more than the band: no halo reaches.
+          const outX = Math.max(0, minX - x, x - maxX);
+          const outY = Math.max(0, minY - y, y - maxY);
+          if (f >= 1) wgt = 1;
+          else if (outX * outX + outY * outY >= band * band) wgt = f;
+          else {
+            const k = band > 0 ? Math.max(0, 1 - distanceToOutline(pts, x, y) / band) : 0;
+            wgt = f + (1 - f) * k * k;
+          }
+        } else if (s.soft) {
+          wgt = f * Math.max(0.1, 1 - Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6));
+        } else {
+          wgt = f;
+        }
+        if (wgt > 0) compose(r * cols + c, lum, a * Math.min(1, wgt), layer.blend);
+      }
+    }
+  };
+
   // One composite pass at time tPass with all ink scaled by alphaScale — the
   // analytic mirror of the renderer's paintFrame. Ghost passes call this with
   // decayed weights; the live frame calls it with alphaScale 1.
   const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = lifeAlphaAt(layer.life, tPass);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * layerOpacity(layer);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
@@ -380,9 +557,13 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
-      const sz = sizeAt(e, tPass);
+      const sz = layer.transform ? sizeAt(e, tPass) * transformSize(layer.transform) : sizeAt(e, tPass);
       const s = layer.sprite;
 
+      if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+        splatPolygonOutline(layer, s, e, p, sz, a, lum, tPass);
+        continue;
+      }
       if (s.kind === 'stroke') {
         // Stamp along the sampled path, rotated like the renderer does.
         const pts = strokeSamples(s, sz / 2);
@@ -467,8 +648,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
-      // A polygon fills only part of its disc; a feathered rect only part of
-      // its box. Scale the splat weight rather than trace the outline.
+      // A small polygon (under POLYGON_OUTLINE_CELLS) fills only part of its
+      // disc; a feathered rect only part of its box. Scale the splat weight
+      // rather than trace the outline — large polygons took the outline path.
       const shapeWeight = s.kind === 'polygon'
         ? polygonFill(s, sz / 2)
         : s.kind === 'rect' && s.feather
@@ -729,6 +911,7 @@ export interface TextSpriteInfo {
  * that blind spot analytically.
  */
 export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSpriteInfo[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const out: TextSpriteInfo[] = [];
@@ -805,6 +988,7 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
 function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
@@ -838,7 +1022,8 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
   };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
-    const lifeA = lifeAlphaAt(layer.life, t);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * layerOpacity(layer);
+    const areaScale = layer.transform ? transformSize(layer.transform) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
     for (const e of entities) {
@@ -871,7 +1056,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
-      area += entArea * a;
+      area += layer.transform ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
       // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
@@ -918,6 +1103,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
  * identical in every other channel. See `cohesion.ts`.
  */
 export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
 }
@@ -931,27 +1117,37 @@ export interface LayerMotionStats {
   moving: boolean;
 }
 
-/** Per-layer displacement between t and t+dt — choreography as numbers. */
+/**
+ * Per-layer displacement between t and t+dt — choreography as numbers.
+ *
+ * Samples the scene at both ends of the window separately (not just each
+ * entity's own position within one scene) so a `timeline`-driven layer
+ * `transform` — a camera pan or zoom with every entity otherwise static —
+ * registers as motion instead of vanishing between two reads of the same
+ * frozen transform.
+ */
 export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: number } = {}): LayerMotionStats[] {
-  const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const dt = opts.dt ?? 500;
-  const { w, h } = scene;
-  return scene.layers.map(({ layer, entities }, layerIndex) => {
+  const scene0 = buildScene(resolveTimelineAt(spec, t), opts);
+  const scene1 = spec.timeline ? buildScene(resolveTimelineAt(spec, t + dt), opts) : scene0;
+  const { w, h } = scene0;
+  return scene0.layers.map(({ layer, entities }, layerIndex) => {
+    const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
     let acc = 0;
     let max = 0;
     let n = 0;
-    for (const e of entities) {
-      const p0 = posOf(scene, e, t);
-      const p1 = posOf(scene, e, t + dt);
+    entities.forEach((e, i) => {
+      const p0 = posOf(scene0, e, t);
+      const p1 = posOf(scene1, entities1[i] ?? e, t + dt);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
-      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) continue; // wrap seam
+      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
       const speed = (Math.sqrt(dx * dx + dy * dy) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
-    }
+    });
     const meanSpeed = n ? acc / n : 0;
     return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, moving: meanSpeed > 0.5 };
   });
@@ -1080,6 +1276,7 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
     t: opts.t ?? 5000,

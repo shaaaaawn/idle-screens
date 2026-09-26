@@ -11,6 +11,7 @@
  * floor is the closed-form field in `crystals.ts` mirrored as a shader loop.
  */
 
+import { WATER_FOG_GLSL, waterUniforms } from './water';
 import { MAX_PATH_SEGMENTS, PATH_FRAGMENT, PATH_MATERIALS, PATH_PARS, type PathSegment } from './paths';
 import {
   AdditiveBlending,
@@ -35,6 +36,8 @@ import {
   type Material,
 } from 'three';
 import { MAX_CLUSTERS, type Cluster, type Emitter, type ShardGeometry } from './crystals';
+import { CAUSTIC_FUNCS, causticUniforms } from './caustics';
+import { stackPatch } from './hooks';
 
 /** Floor-pool slots: every cluster, plus the glowing fish nearest the floor. */
 export const MAX_POOLS = MAX_CLUSTERS + 6;
@@ -43,6 +46,7 @@ const FOG_PARS = /* glsl */ `
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
+  ${WATER_FOG_GLSL}
 `;
 
 const SHARD_VERT = /* glsl */ `
@@ -75,6 +79,7 @@ const SHARD_VERT = /* glsl */ `
 
 const SHARD_FRAG = /* glsl */ `
   ${FOG_PARS}
+  ${CAUSTIC_FUNCS}
   uniform float uTime;
   uniform float uGlow;
   uniform float uPulse;
@@ -112,8 +117,14 @@ const SHARD_FRAG = /* glsl */ `
     vec3 glass = vColor * (0.03 + 0.07 * shade) + vColor * rim * 1.7
       + vec3(smoothstep(0.62, 0.95, facet) * rim * 1.4 + pow(fres, 6.0));
     vec3 col = mix(glow, glass, vLook.x);
-    float fog = smoothstep(uFogNear, uFogFar, vDepth);
-    gl_FragColor = vec4(mix(col, uFogColor, fog), 1.0);
+    // The surface net: a glass share (a crystal is mostly its own light).
+    col *= mix(1.0, mqCaustic(vW, n), 0.35);
+    vec3 fog = mqWaterFog(vDepth, uFogNear, uFogFar);
+    // Linear here (encoded below), so the tint goes in as it is: the same
+    // lit water the fog of everything else fades to.
+    vec3 fogTarget = uFogColor;
+    if (uMqTint.w > 0.0) fogTarget = mix(uFogColor, uMqTint.rgb, mqTintWeight(normalize(vW - cameraPosition)));
+    gl_FragColor = vec4(mix(col, fogTarget, fog), 1.0);
     #include <colorspace_fragment>
   }
 `;
@@ -128,9 +139,10 @@ const HALO_FRAG = /* glsl */ `
   varying float vDepth;
   void main() {
     float beat = 1.0 - uPulse * 0.15 * (0.5 + 0.5 * sin(uTime * 0.754 + vLook.y));
-    float fog = smoothstep(uFogNear, uFogFar, vDepth) ;
-    fog = max(fog, 1.0 - smoothstep(22.0, 70.0, vDepth));
+    vec3 fog = max(mqWaterFog(vDepth, uFogNear, uFogFar), vec3(1.0 - smoothstep(22.0, 70.0, vDepth)));
     // Additive, so fog FADES it rather than mixing toward the fog colour.
+    // Water: an additive layer only LOSES light with distance (red first);
+    // adding the in-scatter colour here would count the water twice.
     gl_FragColor = vec4(vColor * 0.11 * uGlow * beat * (1.0 - vLook.x) * (1.0 - fog), 1.0);
     #include <colorspace_fragment>
   }
@@ -180,7 +192,7 @@ const CARD_FRAG = /* glsl */ `
     if (d > 1.0) discard;
     float fall = (1.0 - d) * (1.0 - d);
     float beat = 1.0 - uPulse * 0.15 * (0.5 + 0.5 * sin(uTime * 0.754 + vLook.y));
-    float fog = smoothstep(uFogNear, uFogFar, vDepth);
+    vec3 fog = mqWaterFog(vDepth, uFogNear, uFogFar);
     // Pale palettes (ice) would sum to a white-out where cards overlap, and a
     // cluster the camera orbits past would fill the lens: normalise by the
     // colour's own brightness and let the card die away up close.
@@ -237,6 +249,8 @@ export function buildCrystalField(
     uFogColor: { value: new Color() },
     uFogNear: { value: 60 },
     uFogFar: { value: 500 },
+    ...waterUniforms(),
+    ...causticUniforms(),
   };
   const shardMat = owned(new ShaderMaterial({
     uniforms: { ...shared, uPush: { value: 0 } },
@@ -442,8 +456,9 @@ export function fillPoolUniforms(u: Uniforms, emitters: readonly Emitter[]): voi
 export function installFloorPools(mat: Material, pools: Uniforms): void {
   if (mat.userData.mqPools) return;
   mat.userData.mqPools = true;
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, pools);
+  // Stacked, like every other patch: water and caustics ride the same floor.
+  stackPatch(mat, 'mq-floor-pools-v7', (shader) => {
+    Object.assign(shader.uniforms, pools, causticUniforms());
     shader.vertexShader = `varying vec3 vMqW;\n${shader.vertexShader.replace(
       '#include <project_vertex>',
       '#include <project_vertex>\n\tvMqW = (modelMatrix * vec4(transformed, 1.0)).xyz;',
@@ -462,6 +477,7 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform vec4 uMqSpotShade[3];
       uniform float uMqSpotSoft[3];
       ${PATH_PARS}
+      ${CAUSTIC_FUNCS}
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -478,16 +494,13 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
           // gone well inside the emitter's own reach).
           diffuseColor.rgb += uMqPoolCol[i] * (uMqPoolGain * beat / (1.0 + q));
         }
-        // Follow-spot: a soft-edged pool with a caustic web moving inside it —
-        // two warped sine fields multiplied and sharpened, so the bright lines
-        // are thin and the cells dark, the way light through a rippled surface
-        // lands. Nothing is evaluated when the gain is 0.
+        // Follow-spot: a soft-edged pool with the caustic net moving inside it
+        // — the SAME net, clock and cell size the whole tank's caustics use
+        // (caustics.ts), sharp as it lands in a spotlit pool, so a spot inside
+        // a caustic-lit floor shows one pattern, not two at different scales.
+        // Nothing is evaluated when the gain is 0.
         if (uMqSpot[0].w + uMqSpot[1].w + uMqSpot[2].w > 0.0) {
-          vec2 cw = vMqW.xz * 0.085;
-          float ct = uMqPoolTime;
-          float ca = sin(cw.x * 1.7 + ct * 0.9 + sin(cw.y * 2.3 - ct * 0.7));
-          float cb = sin(cw.y * 1.9 - ct * 0.8 + sin(cw.x * 2.1 + ct * 0.6));
-          float web = pow(1.0 - abs(ca * cb), 5.0);
+          float web = clamp((mqCausticNet(vMqW, 9.0) - 0.4) / 1.25, 0.0, 1.5);
           // Pools ADD where they cross: a pink and a cyan spot meet in white.
           for (int k = 0; k < 3; k++) {
             float sd = length(vMqW.xz - uMqSpot[k].xy) / uMqSpot[k].z;
@@ -510,9 +523,7 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
           }
         }`,
       )}`;
-  };
-  mat.customProgramCacheKey = () => 'mq-floor-pools-v6';
-  mat.needsUpdate = true;
+  });
 }
 
 /**
@@ -534,6 +545,7 @@ export function buildGlowCards(capacity: number): GlowCards {
   const uniforms: Uniforms = {
     uTime: { value: 0 }, uGlow: { value: 1 }, uPulse: { value: 0 },
     uFogColor: { value: new Color() }, uFogNear: { value: 60 }, uFogFar: { value: 500 },
+    ...waterUniforms(),
     uLift: { value: 0.42 },
     // A fish is small and SUPPOSED to be seen close; only fade at the lens.
     uNear: { value: new Vector2(10, 34) },

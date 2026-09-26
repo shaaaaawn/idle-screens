@@ -226,6 +226,10 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     if (layer.position) {
       listX0 = layer.position.x * w;
       listY0 = layer.position.y * h;
+      // `dx`/`dy`: an offset in min(w,h) units (#71). Only added when set, so
+      // every existing anchor is the same float it always was.
+      if (layer.position.dx) listX0 += layer.position.dx * scale;
+      if (layer.position.dy) listY0 += layer.position.dy * scale;
     } else {
       const [rx0, rx1] = layer.region?.x ?? [0, 1];
       const [ry0, ry1] = layer.region?.y ?? [0, 1];
@@ -339,6 +343,8 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     if (layer.position && layer.count === 1) {
       x0 = layer.position.x * w;
       y0 = layer.position.y * h;
+      if (layer.position.dx) x0 += layer.position.dx * scale;
+      if (layer.position.dy) y0 += layer.position.dy * scale;
     } else if (layout?.type === 'list' || layout?.type === 'table') {
       // Reading order from the anchor. Burn the two scatter draws so toggling a
       // data layout on or off leaves the rest of this layer's stream intact.

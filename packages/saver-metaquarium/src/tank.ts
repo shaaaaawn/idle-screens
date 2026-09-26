@@ -1,3 +1,4 @@
+import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -18,7 +19,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry, PointLight, Vector4,
+  CircleGeometry, PointLight, Vector4, Matrix4,
   Color,
   ConeGeometry,
   Fog,
@@ -32,6 +33,7 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  BackSide,
   DoubleSide,
   PlaneGeometry,
   CylinderGeometry,
@@ -48,13 +50,19 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
-import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
+import { affordableLayers, environmentOf, roomColor, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
+import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
+import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
+import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -79,6 +87,7 @@ import {
   isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
+import { applyCaustics, CAUSTIC, CAUSTIC_FUNCS, CAUSTIC_LAYERS, CAUSTIC_WINDOW, causticUniforms } from './caustics';
 import {
   compileSwimPlan,
   PATH_SHAPES,
@@ -89,6 +98,7 @@ import {
   type SwimPose,
   type TankBounds,
 } from './plan';
+import { Shoal, SHOAL_KINDS, type Carrier, type ShoalKind } from './shoal';
 import {
   effectivePixelRatio,
   probeSoftwareGL,
@@ -98,6 +108,8 @@ import {
 import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
+/** How far back along its own path the follow camera reads a fish's recent direction. */
+const FOLLOW_TRAIL = FISH_LENGTH * 2;
 const CAMERA_FAR = 1400;
 /** Floor-pool slots kept free of fixed light, for the sources that move. */
 const MOVING_POOLS = 4;
@@ -216,32 +228,56 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
       uTime: { value: 0 },
       uColor: { value: new Color(color) },
       uOpacity: { value: opacity },
+      ...causticUniforms(),
+      tMirror: { value: null },
+      uMirrorMatrix: { value: new Matrix4() },
+      uMirror: { value: new Vector3() },
+      uMirrorDeep: { value: new Color() },
+      uMirrorLit: { value: new Color() },
     },
     vertexShader: `
       uniform float uTime;
       varying float vRipple;
+      varying vec3 vW;
       void main() {
         vec3 p = position;
         float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
         p.y += r * 6.0;
         vRipple = r;
+        vW = (modelMatrix * vec4(p, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor;
       uniform float uOpacity;
       varying float vRipple;
+      varying vec3 vW;
+      ${MIRROR_GLSL}
       void main() {
         // Caustic-ish banding: the ripple itself modulates brightness, so the
         // surface reads as moving water rather than a tinted sheet of glass.
         float band = 0.65 + 0.35 * vRipple;
-        gl_FragColor = vec4(uColor * band, uOpacity * band);
+        float alpha = uOpacity * band;
+        if (uMqCaustic.x > 0.0) {
+          // The same net the floor gets, seen from below where it is made —
+          // and the far sheet fades into the water instead of drawing a hard
+          // line to the horizon.
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 6.0);
+          band = mix(band, 0.35 + 0.45 * net, uMqCaustic.x);
+          float far = 1.0 - smoothstep(320.0, 900.0, length(vW - cameraPosition));
+          alpha = uOpacity * band * mix(1.0, far, uMqCaustic.x);
+        }
+        gl_FragColor = vec4(uColor * band, alpha);
+        // From below, with the mirror on: Snell's window and the reflected tank.
+        if (uMirror.x > 0.0 && cameraPosition.y < vW.y) gl_FragColor = mqSurfaceUnderside(gl_FragColor.rgb, gl_FragColor.a);
       }`,
   });
   mat.userData.mqOwned = true;
   const mesh = new Mesh(geo, mat);
   mesh.position.y = y;
   mesh.frustumCulled = false;
+  mesh.userData.mqMirrorSkip = true;
   return { mesh, material: mat };
 }
 
@@ -347,16 +383,20 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
     depthWrite: false,
     blending: AdditiveBlending,
     side: DoubleSide,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
     vertexShader: `
       varying float vY;
+      varying vec3 vW;
       void main() {
         vY = uv.y;
+        vW = (modelMatrix * vec4(position, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor; uniform float uStrength; uniform float uTime;
       varying float vY;
+      varying vec3 vW;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone.
@@ -365,7 +405,16 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
         // 0.13, not more: with the shaft finally IN frame, alpha is the whole
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.13 * breathe);
+        float a = fade * uStrength * 0.13 * breathe;
+        // With caustics on, a shaft is the same rippled light that lands on
+        // the floor: brighter where the net focuses at the surface above this
+        // streak, darker between, with slow bands running down it.
+        if (uMqCaustic.x > 0.0) {
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 3.0);
+          float band = 0.8 + 0.2 * sin(vW.y * 0.045 - uMqCaustic.z * ${((Math.PI * 2 * 118) / 1200).toFixed(8)} + vW.x * 0.03);
+          a *= mix(1.0, net * band, uMqCaustic.x * 0.8);
+        }
+        gl_FragColor = vec4(uColor, a);
       }`,
   });
   mat.userData.mqOwned = true;
@@ -380,6 +429,7 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
+    m.userData.mqMirrorSkip = true; // light in the water, not a thing the surface reflects
     const a = rng.next() * Math.PI * 2;
     const r = 45 + rng.next() * 130;
     m.position.set(Math.cos(a) * r, 72, Math.sin(a) * r);
@@ -464,6 +514,8 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
+  wave?: WaveRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -478,6 +530,8 @@ interface InspectFish {
   bond: string;
   /** Formation seat, or null for a free fish. */
   seat: number | null;
+  /** Whether the swim wave is bending this fish (false for a breed it skips, or `swimWave: 0`). */
+  waving: boolean;
   x: number;
   y: number;
   z: number;
@@ -512,6 +566,12 @@ class TankInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement;
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
+  /** The renderer's own render, kept before anything wraps it (the finish): the mirror pass draws with it. */
+  private readonly rawRender: (scene: Object3D, camera: import('three').Camera) => void;
+  /** The surface mirror (high tier), made the first frame it is asked for. */
+  private mirror: SurfaceMirror | null = null;
+  private mirrorDrawn = false;
+  private clockSec = 0;
   private quality: TankQuality;
   private govScale = 1;
   private frameTimes: number[] = [];
@@ -522,6 +582,9 @@ class TankInstance implements SaverInstance {
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
   private readonly floorMat: MeshBasicMaterial;
+  /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
+  private finishPass: FinishPass | null = null;
+  private finishAmount = 0;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -530,6 +593,9 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  /** Caustics: installed the first frame `caustics` goes above 0, then kept (0 multiplies by 1). */
+  private causticsInstalled = false;
+  private readonly causticState = new Vector4(0, 12, 0, 132);
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
@@ -558,7 +624,23 @@ class TankInstance implements SaverInstance {
   private readonly spotSeen = [false, false, false];
   /** Heading (xz) of each spotted fish, for its shadow. */
   private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
+  /** Follow camera (`cameraFollow`): where its fish is, which way it is headed,
+   *  and where it was a few lengths back along its own path. All three are
+   *  written by the fish loop from closed-form poses — never smoothed across
+   *  frames — so the shot at `t` is the same however you arrived at `t`. */
+  private readonly followAt = new Vector3();
+  private readonly followHead = new Vector3(0, 0, 1);
+  private readonly followTrail = new Vector3();
+  private followSeen = false;
+  private followHasTrail = false;
+  private followState: { slot: number; x: number; y: number; z: number } | null = null;
+  /** Named shots: the pose scratch, and the landmark `macro` frames (picked once per azimuth). */
+  private readonly shotScratch: ShotPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: ORBIT_FOV };
+  private landmark: { x: number; y: number; z: number; size: number } | null = null;
+  private landmarkKey = '';
   private readonly spotLevel = [0, 0, 0];
+  /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
+  private waterInstalled = false;
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
@@ -566,6 +648,8 @@ class TankInstance implements SaverInstance {
   private readonly spotLamp = new Vector3();
   private readonly spotHit = new Vector3();
   private readonly spotTint = new Color();
+  /** The swim wave's per-fish state, reused every frame. */
+  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
   private vignetteKey = '';
@@ -584,7 +668,19 @@ class TankInstance implements SaverInstance {
   private presetWaterY = 0;
   /** The active room's palette — consulted only where the author left the
    *  matching param at its manifest default. */
-  private roomPalette: { fog: string; floor: string; mote: string } | null = null;
+  private roomPalette: { fog: string; floor: string; mote: string; tint?: string } | null = null;
+  /** The room's surface and shaft colours: where the fish's light from above comes from, absent a tint. */
+  private roomSurface: string | null = null;
+  private roomRays: string | null = null;
+  /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
+  private houseLevel = 1;
+  private fishLightInstalled = false;
+  /** Params a control track steers: an authored value, so a room palette never overrides them. */
+  private trackedPaths = new Set<string>();
+  /** The background when a water tint is on: a dome shaded with the same in-scatter the fog fades to. */
+  private waterDome: Mesh | null = null;
+  private readonly tintColor = new Color();
+  private readonly horizonColor = new Color();
   private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
@@ -633,6 +729,79 @@ class TankInstance implements SaverInstance {
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
   private carrierPlan: SwimPlan;
+  /** The ambient school (`shoal`): its own route, rebuilt only when its key changes. */
+  private shoal: Shoal | null = null;
+  private shoalKey = '';
+  private shoalPlan: SwimPlan | null = null;
+  private shoalTau = 0;
+  /** What the school keeps above: ground, rocks, crystals and the plants' swept tips (canopy.ts). */
+  private shoalCanopy: Canopy | null = null;
+  /** The canopy along the school's route (max over the next six lengths), sampled round the loop. */
+  private shoalLift: Float64Array | null = null;
+  private shoalSpeedTracked = false;
+  /** Travel time for the school at a moment, cached for the two instants a frame asks about. */
+  private shoalWarpMemo: [number, number, number, number] = [NaN, 0, NaN, 0];
+  private readonly shoalFloor = (x: number, z: number): number =>
+    this.shoalCanopy ? this.shoalCanopy.at(x, z) : this.floorHeightAt?.(x, z) ?? 0;
+  /** How far along its route the school has travelled by `tSec`: its own
+   *  `shoalSpeed`, not the cast's — integrated when steered, so a change glides. */
+  private shoalWarp(tSec: number): number {
+    const m = this.shoalWarpMemo;
+    if (m[0] === tSec) return m[1];
+    if (m[2] === tSec) return m[3];
+    const def = this.space.shoalSpeed;
+    const w = this.shoalSpeedTracked && this.track
+      ? integrateParam(this.space, this.track, 'shoalSpeed', tSec * 1000, {
+          ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
+        }) / 1000
+      : tSec * this.num('shoalSpeed');
+    m[2] = m[0]; m[3] = m[1]; m[0] = tSec; m[1] = w;
+    return w;
+  }
+  /** The school's centre at a moment, for a fish `along` its length: that fish
+   *  rides the route at its own distance (so the school bends through a turn),
+   *  lifted over the canopy a few lengths ahead of it, and kept in open water —
+   *  under a band top of the surface less two lengths (at most 110), not the
+   *  cast's 72, so a tall kelp bed does not squeeze the band shut. */
+  /** Per-instant memo: a frame asks for the same (t, along) from the position
+   *  solve and again from the heading, and each answer is several spline samples. */
+  private shoalCarrierMemo: [number, Map<number, Carrier>, number, Map<number, Carrier>] = [NaN, new Map(), NaN, new Map()];
+  private readonly shoalCarrier = (tSec: number, along: number): Carrier => {
+    const memo = this.shoalCarrierMemo;
+    let bucket = memo[0] === tSec ? memo[1] : memo[2] === tSec ? memo[3] : null;
+    if (!bucket) {
+      // Keep the newer instant, recycle the older map.
+      const recycled = memo[3]; recycled.clear();
+      memo[2] = memo[0]; memo[3] = memo[1]; memo[0] = tSec; memo[1] = recycled;
+      bucket = recycled;
+    }
+    const hit = bucket.get(along);
+    if (hit) return hit;
+    const out = this.shoalCarrierAt(tSec, along);
+    bucket.set(along, out);
+    return out;
+  };
+  private shoalCarrierAt(tSec: number, along: number): Carrier {
+    const plan = this.shoalPlan!, L = this.shoal!.length, g = Math.cbrt(this.shoal!.count / 30);
+    const d = distanceAt(plan, this.shoalWarp(tSec), 0.8) + along;
+    const c = swimPoseAtDistance(plan, d);
+    const a = swimPoseAtDistance(plan, d + L * 2), b = swimPoseAtDistance(plan, d - L * 2);
+    let fx = a.x - b.x, fz = a.z - b.z;
+    if (Math.hypot(fx, fz) < 1e-3) { fx = c.fx; fz = c.fz; }
+    const reach = (2.4 * g + 1) * L, up = (1.6 * g + 1) * L;
+    const maxR = Math.max(0, BOUNDS.radius - reach), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    let y = c.y;
+    const lift = this.shoalLift;
+    if (lift) {
+      // The canopy along the route a few lengths ahead, precomputed at build.
+      const n = lift.length, f = ((((d / plan.totalLength) % 1) + 1) % 1) * n;
+      const i = Math.floor(f) % n, u = f - Math.floor(f);
+      y = Math.max(y, lift[i]! * (1 - u) + lift[(i + 1) % n]! * u + 1.2 * L + 1.6 * g * L * 0.6);
+    }
+    const top = Math.min(this.ceiling ? this.ceiling.position.y - 2 * L : Infinity, 110) - up * 0.5;
+    y = Math.max(BOUNDS.yMin + up, Math.min(top, y));
+    return { x: c.x * cs, y, z: c.z * cs, fx, fz };
+  }
   /** Shape every live plan was compiled on — setState recompiles when the
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
@@ -675,6 +844,7 @@ class TankInstance implements SaverInstance {
       stencil: false,
       powerPreference: 'high-performance',
     });
+    this.rawRender = this.renderer.render.bind(this.renderer);
     this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
@@ -839,7 +1009,7 @@ class TankInstance implements SaverInstance {
       ? (floorOverride as FloorKind)
       : preset.floor;
     if (kind !== 'flat') {
-      const floorHex = String(this.params.floorColor ?? preset.palette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const floorHex = String(this.paletteOr('floorColor', preset.palette?.floor) ?? '#0a1d33');
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
@@ -886,6 +1056,8 @@ class TankInstance implements SaverInstance {
     if (this.poolsInstalled) this.installPools();
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
+    this.roomSurface = can.water && preset.water ? preset.water.color : null;
+    this.roomRays = preset.rays ? preset.rays.color : null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
@@ -963,9 +1135,11 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
+    const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
+    const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -974,9 +1148,9 @@ class TankInstance implements SaverInstance {
       this.scenery = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
       this.scene.add(this.scenery.group);
     }
     // Homes are light sources too: their doors and windows join the same
@@ -1186,6 +1360,7 @@ class TankInstance implements SaverInstance {
     // The house comes down for the SHOW, not per lamp: it stays down through
     // a blackout cue, which is what makes the next spot an entrance.
     const show = rig.some((_, i) => this.spotSeen[i]) ? strength : 0;
+    this.houseLevel = 1 - 0.6 * show;
     if (this.studio) {
       this.studio.hemi.intensity = 1.15 * (1 - 0.6 * show);
       this.studio.key.intensity = 2.1 * (1 - 0.6 * show);
@@ -1257,6 +1432,89 @@ class TankInstance implements SaverInstance {
     if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
   }
 
+  /** The shot's camera, before the fish loop (follow, if on, overrides it after). */
+  private placeShot(azimuth: number): void {
+    const name = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    if (name === 'macro' && this.landmarkKey !== `${this.clusters.length}|${this.num('cameraAzimuth')}`) {
+      this.landmarkKey = `${this.clusters.length}|${this.num('cameraAzimuth')}`;
+      this.landmark = pickLandmark(this.clusters.map((c) => ({ x: c.x, y: c.y + c.height, z: c.z, size: Math.max(c.height, c.radius * 2) })), this.num('cameraAzimuth'));
+    }
+    const p = shotPose(name, {
+      azimuth, elevation: this.num('cameraElevation'), distance: this.num('cameraDistance'),
+      ceiling: this.ceiling ? this.ceiling.position.y : null,
+      floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0,
+      landmark: this.landmark,
+    }, this.shotScratch);
+    this.camera.position.set(p.x, p.y, p.z);
+    this.camera.lookAt(p.tx, p.ty, p.tz);
+    // Follow keeps the classic lens.
+    const fov = this.num('cameraFollow') >= 0 ? ORBIT_FOV : p.fov;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+  }
+
+  /**
+   * The follow camera. Placed after the fish loop (a fish's position is only
+   * known there) and before anything after it reads the camera — the glow's
+   * lift toward the lens, the spots, the scenery's cards. Eye glances and
+   * glow-light ordering inside the loop still see the orbit camera; both
+   * are cosmetic.
+   *
+   * Chase (`followDistance` ≥ a body length): `followDistance` behind it along
+   * the way it has been swimming, lifted a little, looking just past it.
+   * Eye (below that): at the fish, looking where it goes; the fish is hidden.
+   * Kept above the floor and any scenery, and inside the room.
+   */
+  private placeFollowCamera(slot: number, back: number, pov: boolean): void {
+    if (slot < 0 || !this.followSeen) { this.followState = null; return; }
+    const at = this.followAt, head = this.followHead, cam = this.camera.position;
+    const lift = pov ? 1.5 : FISH_LENGTH * 0.35 + back * 0.18;
+    if (pov) {
+      cam.set(at.x, at.y + lift, at.z);
+    } else {
+      // Behind it along the direction it has been swimming over its last
+      // couple of lengths — the chord to where it was a moment ago. Smoother
+      // than the instant tangent (a wiggle or a kick does not swing the shot),
+      // and unlike riding the path itself it keeps the fish dead ahead on a
+      // tight turn instead of sliding it to the side of the frame.
+      let dx = head.x, dz = head.z;
+      if (this.followHasTrail) {
+        const tx = at.x - this.followTrail.x, tz = at.z - this.followTrail.z, tl = Math.hypot(tx, tz);
+        if (tl > FISH_LENGTH * 0.4) { dx = tx / tl; dz = tz / tl; }
+      }
+      cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
+    }
+    // Inside the room, above the ground and whatever stands on it.
+    const r = Math.hypot(cam.x, cam.z), rMax = BOUNDS.radius * 2.2;
+    if (r > rMax) { cam.x *= rMax / r; cam.z *= rMax / r; }
+    const floor = this.floorHeightAt ? this.floorHeightAt(cam.x, cam.z) : 0;
+    cam.y = Math.max(cam.y, floor + 7);
+    if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
+    // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
+    const ahead = pov ? 60 : FISH_LENGTH * 0.5;
+    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : FISH_LENGTH * 0.12), at.z + head.z * ahead);
+    this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
+  }
+
+  /**
+   * The finish wraps the renderer's own render for THIS scene only (the
+   * passes it draws go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets it, and at 0 the call is the original.
+   * Mid and high tiers only; bloom on high.
+   */
+  private updateFinish(): void {
+    const amount = this.num('finish');
+    const tier = this.quality.glowLights;
+    this.finishAmount = tier >= 3 ? amount : 0;
+    if (this.finishAmount <= 0 || this.finishPass) return;
+    const pass = new FinishPass({ bloom: tier >= 4 });
+    this.finishPass = pass;
+    const raw = this.renderer.render.bind(this.renderer);
+    this.renderer.render = (scene, camera) => {
+      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      else raw(scene, camera);
+    };
+  }
+
   private installPools(): void {
     this.poolsInstalled = true;
     installFloorPools(this.floorMat, this.poolUniforms);
@@ -1320,6 +1578,51 @@ class TankInstance implements SaverInstance {
       t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
     }
     f.tinted = true;
+  }
+
+  /** The ambient school: count from `shoal` and the tier, look from `shoalKind`. */
+  private buildShoal(): void {
+    const count = Math.round(this.num('shoal') * this.quality.fishCap * 2.5);
+    const rawKind = this.str('shoalKind');
+    // str() is unvalidated (the classic lane is intake-unvalidated, MQ17),
+    // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
+    const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
+    const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    // In front of the camera: a crossing lane across the shot when nothing
+    // orbits; the figure of eight over the whole tank when the camera goes round.
+    const orbiting = this.num('autoRotate') !== 0 || this.autoRotateTracked;
+    const shot = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    const laneAz = Math.round(this.num('cameraAzimuth') + shotAzimuthOffset(shot));
+    const route = orbiting ? 'eight' : `crossing@${laneAz}`;
+    const key = `${count}|${kind}|${lit}|${route}|${this.sceneryKey}|${this.propsKey}`;
+    if (key === this.shoalKey) return;
+    this.shoalKey = key;
+    if (this.shoal) {
+      this.scene.remove(this.shoal.mesh);
+      disposeOwned(this.shoal.mesh);
+      // Its instance buffers are not the geometry's: free them too.
+      this.shoal.mesh.dispose();
+      this.shoal = null;
+    }
+    if (count < 3) return;
+    // Its own route whatever the cast swims.
+    this.shoalPlan = orbiting
+      ? compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight')
+      : compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'crossing', { cameraAzimuthDeg: laneAz });
+    const ground = this.floorHeightAt ?? (() => 0);
+    this.shoalCanopy = buildCanopy(ground, this.scenery?.canopyTips ?? []);
+    {
+      // Where the school's centre actually goes: the route pulled in by the same radius clamp the carrier uses.
+      const plan = this.shoalPlan, L = FISH_LENGTH * 0.32, g = Math.cbrt(count / 30);
+      const maxR = Math.max(0, BOUNDS.radius - (2.4 * g + 1) * L);
+      this.shoalLift = shoalLiftTable(plan.totalLength, this.shoalCanopy, L, (d) => {
+        const c = swimPoseAtDistance(plan, d), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+        return { x: c.x * cs, z: c.z * cs };
+      });
+    }
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
+    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32, clear: 1.2 });
+    this.scene.add(this.shoal.mesh);
   }
 
   /**
@@ -1564,6 +1867,7 @@ class TankInstance implements SaverInstance {
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
         this.str('fishLighting') !== 'flat' && !this.thumbnail);
+      tagFishMaterials(body);
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
@@ -1669,7 +1973,9 @@ class TankInstance implements SaverInstance {
 
   private setState(t: number): void {
     const tSec = t / 1000;
+    this.clockSec = tSec;
     this.applyParams(t);
+    this.updateFinish();
     const speed = this.num('swimSpeed');
     // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
     // glide (MQ11 — multiplying the whole elapsed integral teleported every
@@ -1690,24 +1996,18 @@ class TankInstance implements SaverInstance {
 
     this.ensureStudio();
     this.reconcile();
+    this.updateCaustics(tSec);
+    this.updateFishLight();
 
-    // Camera orbit
+    // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
     const rotation = rateOffset(
       this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
-    const az = MathUtils.degToRad(this.num('cameraAzimuth') + rotation);
-    const el = MathUtils.degToRad(this.num('cameraElevation'));
-    const dist = this.num('cameraDistance');
-    this.camera.position.set(
-      Math.cos(el) * Math.sin(az) * dist,
-      Math.max(10, 15 + Math.sin(el) * dist),
-      Math.cos(el) * Math.cos(az) * dist,
-    );
-    this.camera.lookAt(0, 35, 0);
+    this.placeShot(this.num('cameraAzimuth') + rotation);
 
     // Fog color
     const fogHex = String(
-      this.params.fogColor ?? this.roomPalette?.fog ?? this.space.fogColor?.default ?? '#030009',
+      this.paletteOr('fogColor', this.roomPalette?.fog) ?? '#030009',
     );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
@@ -1716,8 +2016,13 @@ class TankInstance implements SaverInstance {
     // this block is provably invisible until steered.
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
-    fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    const floorHex = String(this.params.floorColor ?? this.roomPalette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+    // Clarity stretches or closes the reach — only when water is on (at 0.5, ×1 exactly).
+    const reach = this.num('water') > 0 ? clarityReach(this.num('waterClarity')) : 1;
+    fog.far = Math.max(this.num('fogFar') * reach, fog.near + 20);
+    // A water tint replaces the flat background with a dome of the same in-scatter.
+    const tint = this.waterTint();
+    this.updateWaterDome(!!tint);
+    const floorHex = String(this.paletteOr('floorColor', this.roomPalette?.floor) ?? '#0a1d33');
     this.floorMat.color.set(floorHex);
     // Terrain follows floorColor as well — the environment supplies the SHAPE,
     // the author keeps the palette.
@@ -1729,7 +2034,7 @@ class TankInstance implements SaverInstance {
       this.motes.geometry.setDrawRange(0, active);
       this.moteMat.uniforms.uTime!.value = tSec;
       (this.moteMat.uniforms.uColor!.value as Color).set(
-        String(this.params.moteColor ?? this.roomPalette?.mote ?? this.space.moteColor?.default ?? '#7fd6ff'),
+        String(this.paletteOr('moteColor', this.roomPalette?.mote) ?? '#7fd6ff'),
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
@@ -1741,7 +2046,11 @@ class TankInstance implements SaverInstance {
     this.buildScenery();
     // After the scenery: a vignette may name the world's own marks (home doors, a gate).
     this.buildVignette();
-    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
+    this.scenery?.setSurface(this.ceiling ? this.ceiling.position.y : null);
+    // The horizon sits on the level, where the in-scatter is half tint.
+    if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
+    else this.horizonColor.copy(this.fogColor);
+    this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,
@@ -1749,6 +2058,12 @@ class TankInstance implements SaverInstance {
     }
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
+    this.buildShoal();
+    if (this.shoal) {
+      // Life (tails, breathing, excursions) on the real clock; travel on the school's own speed.
+      this.shoalTau = tSec;
+      this.shoal.update(tSec, this.shoalCarrier, this.shoalFloor);
+    }
 
     const sceneStyleName = this.str('swimStyle');
     // `auto` is not a style: each untagged fish resolves to its breed's
@@ -1848,8 +2163,14 @@ class TankInstance implements SaverInstance {
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
     const eyeLife = this.num('eyeLife');
+    const swimWave = this.num('swimWave');
     this.buildSpotRig();
     this.spotSeen.fill(false);
+    const followSlot = Math.round(this.num('cameraFollow'));
+    const followBack = Math.max(0, this.num('followDistance'));
+    // Close enough that the camera would sit inside the fish: it is the eye.
+    const followPov = followSlot >= 0 && followBack < FISH_LENGTH * 0.9;
+    this.followSeen = false; this.followHasTrail = false;
     const glowPulse = this.num('crystalPulse');
     let glowN = 0;
     this.fishEmitters.length = 0;
@@ -1922,6 +2243,8 @@ class TankInstance implements SaverInstance {
       // whose tails were out of step with its travel — fish moonwalking.
       let beat = effort;
       let pose;
+      // Where the fish's heading comes from, for the swim wave's C-bend.
+      let turnPlan: SwimPlan | null = null, turnD = 0;
       if (style.formation) {
         // Carrier school: ONE route, fish held in slots in its local frame, so
         // the shoal turns as a body.
@@ -1948,7 +2271,16 @@ class TankInstance implements SaverInstance {
         const cf = carrier ?? this.carrierFrame(
           extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
+        if (f.index === followSlot) {
+          // A schooled fish's own trail is the carrier's — the whole body
+          // turns together, so where the carrier was is close enough for the
+          // chase camera's chord (it does not chase the slot offset, same as
+          // the `rel` bonds below).
+          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - FOLLOW_TRAIL);
+          this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+        }
         beat = cf.lead;
+        turnPlan = this.carrierPlan; turnD = cf.lead;
         // A seated fish can lead too: a bonded fish after a school trails
         // the CARRIER route behind the whole formation, which is what
         // "follow the school" should mean. Retires any half-formed pair.
@@ -1993,6 +2325,11 @@ class TankInstance implements SaverInstance {
             flurryExtra = (1 - c) * 0.8;
           }
           pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          if (f.index === followSlot) {
+            const tr = swimPoseAtDistance(rel.plan, rel.d - lag - FOLLOW_TRAIL);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
+          turnPlan = rel.plan; turnD = rel.d - lag;
           beat = rel.effort - lag;
           const hl = Math.hypot(pose.fx, pose.fz) || 1;
           const rxn = pose.fz / hl, rzn = -pose.fx / hl;
@@ -2015,6 +2352,14 @@ class TankInstance implements SaverInstance {
           pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
         } else {
           pose = swimPoseAtDistance(f.plan, d);
+          if (f.index === followSlot) {
+            // Where this fish was `followBack` along its own path: the camera
+            // rides the path it swam, which smooths turns and threads the gaps
+            // the fish itself threaded.
+            const tr = swimPoseAtDistance(f.plan, d - FOLLOW_TRAIL);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
+          turnPlan = f.plan; turnD = d;
           // Light-seeking: each free fish is drawn toward ITS shaft (chosen
           // by index, so the choice never flips as it moves) by a per-fish
           // appetite. The loop shrinks toward the pool — still the same
@@ -2144,6 +2489,21 @@ class TankInstance implements SaverInstance {
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
       }
       f.group.position.set(px, y, pz);
+      if (f.index === followSlot) {
+        this.followAt.set(px, y, pz); this.followSeen = true;
+        this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
+        if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
+        this.followHead.normalize();
+        if (act && this.vignette) {
+          // An actor's trail is the script's own past, a beat behind.
+          const back = poseOf(this.vignette, f.index, tSec - FOLLOW_TRAIL / 17);
+          if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
+        }
+      }
+      // The eye does not see itself. The GROUP, not f.body: f.body is null
+      // BY DESIGN for a fallback (non-GLB) fish (see tintFish), so gating on
+      // it would leave the fallback blob visible right at the camera.
+      f.group.visible = !(followPov && f.index === followSlot);
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
           this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
@@ -2186,7 +2546,30 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
-      if (f.glow && f.body) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+
+      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
+      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
+      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
+      // move the meshes inside the fish frame the wave was measured in.
+      if (swimWave > 0 && f.body && f.wave === undefined) {
+        f.body.rotation.y = f.baseYaw;
+        if (f.mixer) f.mixer.setTime(0);
+        const breed = this.wantBreeds[f.index] ?? null;
+        f.wave = waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+      }
+      const waving = swimWave > 0 && !!f.wave;
+      if (f.wave) {
+        f.wave.ensure();
+        let turn = 0;
+        if (waving && turnPlan && !act) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
+          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        }
+        const flurry = mnv.flurry + flurryBoost;
+        f.wave.set(waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch));
+      }
 
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
@@ -2196,13 +2579,13 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        const w = Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
+        const w = waving ? 0 : Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
         f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          waving ? 0 : (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
@@ -2217,6 +2600,7 @@ class TankInstance implements SaverInstance {
         band: bandStyle.band,
         bond,
         seat: style.formation ? seat : null,
+        waving,
         x: Math.round(px * 10) / 10,
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
@@ -2225,6 +2609,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
       });
     }
+    this.placeFollowCamera(followSlot, followBack, followPov);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
     this.lastFish = report;
@@ -2255,6 +2640,9 @@ class TankInstance implements SaverInstance {
       saver: 'metaquarium',
       t: this.lastFrameT,
       camera: {
+        // Following a fish: the orbit params are ignored while this is set.
+        follow: this.followState,
+        shot: this.str('shot'),
         azimuth: this.num('cameraAzimuth'),
         elevation: this.num('cameraElevation'),
         distance: this.num('cameraDistance'),
@@ -2322,15 +2710,204 @@ class TankInstance implements SaverInstance {
         formationBreathe: this.num('formationBreathe'),
       },
       quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      // What the GPU did for the last frame: compiled programs (a feature at
+      // its default must not add one) and draw calls.
+      render: { programs: this.renderer.info.programs?.length ?? 0, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles },
+      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor, this.camera) : null,
+      mirror: this.mirror ? { drawn: this.mirrorDrawn, latchedOff: this.mirror.off } : null,
       fish,
     };
+  }
+
+  /**
+   * Caustics (caustics.ts): the net of light from the surface on every
+   * opaque surface. Patched the first frame it is asked for, so `caustics: 0`
+   * compiles the stock programs; the shared uniform is written in the scene's
+   * onBeforeRender so crossfading tanks each draw with their own.
+   */
+  private updateCaustics(tSec: number): void {
+    const strength = this.num('caustics');
+    // The clock runs whenever anything reads the net: the surfaces, or a
+    // follow-spot's web (which shares it), so the spot never freezes at 0.
+    const spotOn = this.spotRig.length > 0;
+    if ((strength > 0 || spotOn) && !this.causticsInstalled) {
+      this.causticsInstalled = true;
+      this.scene.onBeforeRender = () => {
+        // The ceiling moves with waterY; read it at draw time.
+        this.causticState.w = this.ceiling ? this.ceiling.position.y : BOUNDS.yMax + 60;
+        CAUSTIC.value.copy(this.causticState);
+      };
+    }
+    if (!this.causticsInstalled) return;
+    this.causticState.set(strength, 12 * this.num('causticScale'), ((tSec % CAUSTIC_WINDOW) + CAUSTIC_WINDOW) % CAUSTIC_WINDOW, this.causticState.w);
+    CAUSTIC_LAYERS.value = this.quality.glowLights >= 3 ? 2 : 1;
+    // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
+    if (strength > 0) applyCaustics(this.scene);
+  }
+
+  /**
+   * The fish's water light (fishlight.ts): patched onto the lit coats and
+   * plates the first frame `fishAmbient` is on, then fed the scene's colours
+   * every frame. Lit mode only — flat fish have no lights to add to.
+   */
+  private updateFishLight(): void {
+    const amount = this.num('fishAmbient');
+    if (amount > 0) this.fishLightInstalled = true;
+    if (!this.fishLightInstalled) return;
+    setFishWater({
+      tint: this.waterTint(), surface: this.roomSurface, rays: this.roomRays,
+      fog: this.fogColor, floor: this.floorMat.color,
+      caustics: this.num('caustics'), house: this.houseLevel, amount,
+    });
+    const patch = (o: Object3D): void => o.traverse((n) => {
+      const mat = (n as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) patchFishLight(m);
+    });
+    for (const f of this.fish) if (f) patch(f.group);
+    if (this.shoal) patch(this.shoal.mesh);
   }
 
   // ---- render ----
 
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
+    this.applyWater();
+    this.renderMirror();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * The surface mirror (mirror.ts), before the main render: high tier draws
+   * the reflection when it can be seen; mid tier reflects the gradient; low
+   * tier and open water leave the surface as it was.
+   */
+  private renderMirror(): void {
+    const mat = this.waterMat;
+    if (!mat?.uniforms.uMirror) return;
+    const u = mat.uniforms;
+    const amount = this.num('surfaceMirror'), tier = this.quality.glowLights;
+    const on = amount > 0 && tier >= 3 && !!this.ceiling;
+    (u.uMirror!.value as Vector3).set(on ? amount : 0, 0, this.clockSec);
+    if (!on) return;
+    // The colours the window and the mid-tier mirror use (display space).
+    const tint = this.waterTint();
+    const lit = (u.uMirrorLit!.value as Color).set(tint || this.roomSurface || '#bfe9ff').multiplyScalar(1.25);
+    lit.convertLinearToSRGB();
+    // Mid tier reflects the water the light comes through: lit, with a tint.
+    const deep = (u.uMirrorDeep!.value as Color).copy(this.fogColor).lerp(this.floorMat.color, 0.35);
+    if (tint) deep.lerp(this.tintColor.set(tint), tintWeight(0.25));
+    deep.convertLinearToSRGB();
+    if (tier < 4) return;
+    if (!this.mirror) {
+      this.mirror = new SurfaceMirror();
+      this.camera.layers.enable(MIRROR_SKIP_LAYER);
+    }
+    if (this.govScale < 0.8) this.mirror.latchOff();
+    // What the mirror must not draw: the surface itself, the shafts, particles.
+    this.scene.traverse((o) => {
+      if (o.userData.mqMirrorSkip || (o as { isPoints?: boolean }).isPoints) o.layers.set(MIRROR_SKIP_LAYER);
+    });
+    const ceilingY = this.ceiling!.position.y;
+    // The reflected light really travels up into the lit water: flip the in-scatter for this pass.
+    const tintOn = TINT.value.w;
+    if (tintOn > 0) TINT.value.w = 2;
+    const drew = this.mirror.render(this.renderer, this.rawRender, this.scene, this.camera, ceilingY, { radius: BOUNDS.radius * 1.6, top: BOUNDS.yMax + 40 });
+    TINT.value.w = tintOn;
+    if (drew) {
+      u.tMirror!.value = this.mirror.texture;
+      (u.uMirrorMatrix!.value as Matrix4).copy(this.mirror.textureMatrix);
+      (u.uMirror!.value as Vector3).y = 1;
+    }
+    this.mirrorDrawn = drew;
+  }
+
+  /**
+   * A room colour where the author left the param alone: not set in the
+   * scene (its resolved default is still the manifest's) and not steered by
+   * a track. The palettes were meant to work this way from the start — the
+   * `??` fallback never fired, because every param arrives pre-filled.
+   */
+  private paletteOr(path: 'fogColor' | 'floorColor' | 'moteColor', room: string | undefined): string | undefined {
+    return roomColor({
+      resolvedDefault: this.space[path]?.default, manifestDefault: METAQUARIUM_PARAMS[path].default,
+      tracked: this.trackedPaths.has(path), current: this.params[path],
+    }, room);
+  }
+
+  /** The tint in force: the author's `waterTint`, else the room's when water is on. */
+  private waterTint(): string {
+    const own = this.str('waterTint');
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(own)) return own;
+    return this.num('water') > 0 && this.roomPalette?.tint ? this.roomPalette.tint : '';
+  }
+
+  /** The background dome: shown (and the flat background hidden) only while a tint is on. */
+  private updateWaterDome(tinted: boolean): void {
+    if (tinted && !this.waterDome) {
+      const mat = new ShaderMaterial({
+        uniforms: { uFog: { value: new Color() }, ...waterUniforms() },
+        vertexShader: `
+          varying vec3 vDir;
+          void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position * ${(CAMERA_FAR * 0.9).toFixed(1)}, 1.0); }`,
+        fragmentShader: `
+          ${WATER_INSCATTER_GLSL}
+          uniform vec3 uFog;
+          varying vec3 vDir;
+          // Display space, like three's own fog mix: the far fade lands on exactly this.
+          void main() { gl_FragColor = vec4(mix(mqToDisplay(uFog), mqToDisplay(uMqTint.rgb), mqTintWeight(normalize(vDir))), 1.0); }`,
+        side: BackSide, depthWrite: false, depthTest: false, fog: false,
+      });
+      mat.userData.mqOwned = true;
+      const geo = new SphereGeometry(1, 32, 16);
+      geo.userData.mqOwned = true;
+      const dome = new Mesh(geo, mat);
+      dome.name = 'water-dome';
+      dome.frustumCulled = false;
+      dome.renderOrder = -1000;
+      // Centred on whichever camera draws it (the main one, a mirror, a still).
+      dome.onBeforeRender = (_r, _s, camera) => { dome.position.copy(camera.position); dome.updateMatrixWorld(); };
+      this.scene.add(dome);
+      this.waterDome = dome;
+    }
+    if (this.waterDome) {
+      this.waterDome.visible = tinted;
+      (this.waterDome.material as ShaderMaterial).uniforms.uFog!.value.copy(this.fogColor);
+    }
+    this.scene.background = tinted ? null : this.fogColor;
+  }
+
+  /**
+   * Water and dither, set right before THIS tank renders: `WATER` is one
+   * module uniform, and two tanks on a page (the Dev Tools crossfade) each
+   * write their own value and render with it in the same call.
+   *
+   * Materials are patched as they appear — fish arrive asynchronously, and a
+   * scenery rebuild makes new ones — so this walks the scene each frame and
+   * skips what it has seen. Water is installed only once it has been turned
+   * on: a tank that never asks for it compiles the stock fog.
+   */
+  private applyWater(): void {
+    const water = this.num('water');
+    const dither = this.str('dither') === 'on';
+    WATER.value = water;
+    const r = clarityRatio(this.num('waterClarity'));
+    RATIO.value[0] = r[0]; RATIO.value[1] = r[1]; RATIO.value[2] = r[2];
+    const tint = this.waterTint();
+    if (tint) {
+      this.tintColor.set(tint);
+      TINT.value.set(this.tintColor.r, this.tintColor.g, this.tintColor.b, 1);
+    } else TINT.value.w = 0;
+    if (water > 0 || tint) this.waterInstalled = true;
+    const install = this.waterInstalled;
+    this.scene.traverse((o) => {
+      const mat = (o as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        if (install) patchWater(m, dither);
+        else setDither(m, dither);
+      }
+    });
   }
 
   private start(): void {
@@ -2421,6 +2998,10 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.trackedPaths = new Set(track.deltas.map((d) => d.path));
+    this.shoalSpeedTracked = track.deltas.some((d) => d.path === 'shoalSpeed');
+    this.shoalWarpMemo = [NaN, 0, NaN, 0];
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
     this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');
     if (this.paused) this.renderStill();
   }
@@ -2466,6 +3047,8 @@ class TankInstance implements SaverInstance {
 
   dispose(): void {
     this.disposed = true;
+    this.finishPass?.dispose();
+    this.mirror?.dispose();
     this.stop();
     for (const f of this.fish) {
       if (!f) continue;
