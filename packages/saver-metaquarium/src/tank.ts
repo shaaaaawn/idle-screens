@@ -85,7 +85,7 @@ import {
   isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
-import { applyCaustics, CAUSTIC, CAUSTIC_WINDOW } from './caustics';
+import { applyCaustics, CAUSTIC, CAUSTIC_FUNCS, CAUSTIC_LAYERS, CAUSTIC_WINDOW, causticUniforms } from './caustics';
 import {
   compileSwimPlan,
   PATH_SHAPES,
@@ -226,26 +226,41 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
       uTime: { value: 0 },
       uColor: { value: new Color(color) },
       uOpacity: { value: opacity },
+      ...causticUniforms(),
     },
     vertexShader: `
       uniform float uTime;
       varying float vRipple;
+      varying vec3 vW;
       void main() {
         vec3 p = position;
         float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
         p.y += r * 6.0;
         vRipple = r;
+        vW = (modelMatrix * vec4(p, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor;
       uniform float uOpacity;
       varying float vRipple;
+      varying vec3 vW;
       void main() {
         // Caustic-ish banding: the ripple itself modulates brightness, so the
         // surface reads as moving water rather than a tinted sheet of glass.
         float band = 0.65 + 0.35 * vRipple;
-        gl_FragColor = vec4(uColor * band, uOpacity * band);
+        float alpha = uOpacity * band;
+        if (uMqCaustic.x > 0.0) {
+          // The same net the floor gets, seen from below where it is made —
+          // and the far sheet fades into the water instead of drawing a hard
+          // line to the horizon.
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 6.0);
+          band = mix(band, 0.35 + 0.45 * net, uMqCaustic.x);
+          float far = 1.0 - smoothstep(320.0, 900.0, length(vW - cameraPosition));
+          alpha = uOpacity * band * mix(1.0, far, uMqCaustic.x);
+        }
+        gl_FragColor = vec4(uColor * band, alpha);
       }`,
   });
   mat.userData.mqOwned = true;
@@ -357,16 +372,20 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
     depthWrite: false,
     blending: AdditiveBlending,
     side: DoubleSide,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
     vertexShader: `
       varying float vY;
+      varying vec3 vW;
       void main() {
         vY = uv.y;
+        vW = (modelMatrix * vec4(position, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor; uniform float uStrength; uniform float uTime;
       varying float vY;
+      varying vec3 vW;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone.
@@ -375,7 +394,16 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
         // 0.13, not more: with the shaft finally IN frame, alpha is the whole
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.13 * breathe);
+        float a = fade * uStrength * 0.13 * breathe;
+        // With caustics on, a shaft is the same rippled light that lands on
+        // the floor: brighter where the net focuses at the surface above this
+        // streak, darker between, with slow bands running down it.
+        if (uMqCaustic.x > 0.0) {
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 3.0);
+          float band = 0.8 + 0.2 * sin(vW.y * 0.045 - uMqCaustic.z * ${((Math.PI * 2 * 118) / 1200).toFixed(8)} + vW.x * 0.03);
+          a *= mix(1.0, net * band, uMqCaustic.x * 0.8);
+        }
+        gl_FragColor = vec4(uColor, a);
       }`,
   });
   mat.userData.mqOwned = true;
@@ -2667,7 +2695,10 @@ class TankInstance implements SaverInstance {
    */
   private updateCaustics(tSec: number): void {
     const strength = this.num('caustics');
-    if (strength > 0 && !this.causticsInstalled) {
+    // The clock runs whenever anything reads the net: the surfaces, or a
+    // follow-spot's web (which shares it), so the spot never freezes at 0.
+    const spotOn = this.spotRig.length > 0;
+    if ((strength > 0 || spotOn) && !this.causticsInstalled) {
       this.causticsInstalled = true;
       this.scene.onBeforeRender = () => {
         // The ceiling moves with waterY; read it at draw time.
@@ -2677,8 +2708,9 @@ class TankInstance implements SaverInstance {
     }
     if (!this.causticsInstalled) return;
     this.causticState.set(strength, 12 * this.num('causticScale'), ((tSec % CAUSTIC_WINDOW) + CAUSTIC_WINDOW) % CAUSTIC_WINDOW, this.causticState.w);
+    CAUSTIC_LAYERS.value = this.quality.glowLights >= 3 ? 2 : 1;
     // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
-    applyCaustics(this.scene, this.quality.glowLights >= 3 ? 2 : 1);
+    if (strength > 0) applyCaustics(this.scene);
   }
 
   // ---- render ----

@@ -25,7 +25,7 @@
 import { Vector4, type Material, type Scene } from 'three';
 import { stackPatch } from './hooks';
 
-export const CAUSTICS_TAG = 'mq-caustics-v1';
+export const CAUSTICS_TAG = 'mq-caustics-v2';
 /** The loop every rate divides. */
 export const CAUSTIC_WINDOW = 1200;
 /** (strength, cell size in world units, time mod window, surface y). */
@@ -33,9 +33,25 @@ export const CAUSTIC = { value: new Vector4(0, 12, 0, 132) };
 
 const W = (m: number): string => ((Math.PI * 2 * m) / CAUSTIC_WINDOW).toFixed(8);
 
-export const CAUSTIC_GLSL = /* glsl */ `
+/** 1 or 2 Voronoi layers (the tier): a uniform, not a define, so two patches
+ *  on one material can never disagree about a macro. */
+export const CAUSTIC_LAYERS = { value: 2 };
+
+/**
+ * The shared functions — for the surface patch below, the follow-spot pools,
+ * the shafts, the ceiling and the crystals. Include-guarded, so any number of
+ * patches on one material compile them once.
+ *
+ *   mqCausticNet(wp, sharp)  the raw net (mean ≈ 1) at a world point, on the
+ *                            one clock and cell size every consumer shares
+ *   mqCaustic(wp, n)         the factor a surface takes: the net softened and
+ *                            dimmed with depth, strongest facing up, × strength
+ */
+export const CAUSTIC_FUNCS = /* glsl */ `
+  #ifndef MQ_CAUSTIC_FUNCS
+  #define MQ_CAUSTIC_FUNCS
   uniform vec4 uMqCaustic;
-  varying vec3 vMqCausticW;
+  uniform float uMqCausticLayers;
   vec2 mqCausticHash(vec2 p) {
     p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
     return fract(sin(p) * 43758.5453);
@@ -51,26 +67,43 @@ export const CAUSTIC_GLSL = /* glsl */ `
     }
     return sqrt(f2) - sqrt(f1);
   }
-  // Mean ~1: 0.4 + 1.25 × (two edge layers, each ~0.24 on average).
-  float mqCaustic(vec3 wp, vec3 n) {
+  float mqCausticNet(vec3 wp, float sharp) {
     float depth = max(0.0, uMqCaustic.w - wp.y);
     // Down a slightly slanted sun: a rock top and the floor beside it share one net.
     vec2 s = (wp.xz + vec2(0.22, 0.13) * depth) / uMqCaustic.y;
     float t = uMqCaustic.z;
     s += 0.35 * vec2(sin(s.y * 0.35 + t * ${W(134)}), cos(s.x * 0.31 - t * ${W(115)}));
-    float sharp = mix(10.0, 4.0, clamp(depth / 160.0, 0.0, 1.0));
     float c = exp(-mqVoronoiEdge(s, t * ${W(172)}) * sharp);
-    #if MQ_CAUSTIC_LAYERS > 1
-      c += exp(-mqVoronoiEdge(s * 1.37 + 3.1, t * ${W(216)} + 1.7) * sharp);
-    #else
-      c *= 2.0;
-    #endif
+    if (uMqCausticLayers > 1.5) c += exp(-mqVoronoiEdge(s * 1.37 + 3.1, t * ${W(216)} + 1.7) * sharp);
+    else c *= 2.0;
+    // Mean ~1: 0.4 + 1.25 × (two edge layers, each ~0.24 on average).
+    return 0.4 + 1.25 * c;
+  }
+  // One layer, for the big soft consumers (the surface seen from below, the
+  // shafts): half the cost where the second layer would not be seen anyway.
+  float mqCausticNet1(vec3 wp, float sharp) {
+    float depth = max(0.0, uMqCaustic.w - wp.y);
+    vec2 s = (wp.xz + vec2(0.22, 0.13) * depth) / uMqCaustic.y;
+    float t = uMqCaustic.z;
+    s += 0.35 * vec2(sin(s.y * 0.35 + t * ${W(134)}), cos(s.x * 0.31 - t * ${W(115)}));
+    return 0.4 + 2.5 * exp(-mqVoronoiEdge(s, t * ${W(172)}) * sharp);
+  }
+  float mqCausticSharp(vec3 wp) { return mix(10.0, 4.0, clamp(max(0.0, uMqCaustic.w - wp.y) / 160.0, 0.0, 1.0)); }
+  float mqCaustic(vec3 wp, vec3 n) {
+    float depth = max(0.0, uMqCaustic.w - wp.y);
     float up = clamp(n.y, 0.0, 1.0);
     float face = n.y < -0.25 ? 0.0 : mix(0.33, 1.0, up);
     float k = uMqCaustic.x * face * exp(-depth / 260.0);
-    return mix(1.0, 0.4 + 1.25 * c, k);
+    if (k <= 0.0) return 1.0;
+    return mix(1.0, mqCausticNet(wp, mqCausticSharp(wp)), k);
   }
+  #endif
 `;
+
+/** The uniforms a hand-rolled shader shares to use `CAUSTIC_FUNCS`. */
+export function causticUniforms(): { uMqCaustic: typeof CAUSTIC; uMqCausticLayers: typeof CAUSTIC_LAYERS } {
+  return { uMqCaustic: CAUSTIC, uMqCausticLayers: CAUSTIC_LAYERS };
+}
 
 const VERTEX = /* glsl */ `
   #include <project_vertex>
@@ -104,25 +137,27 @@ const FRAGMENT = /* glsl */ `
  * light, not surfaces). Stacks with every other patch; returns whether it
  * patched.
  */
-export function patchCaustics(material: Material, layers: 1 | 2): boolean {
+export function patchCaustics(material: Material): boolean {
   const m = material as Material & { isShaderMaterial?: boolean; isPointsMaterial?: boolean; isSpriteMaterial?: boolean };
   if (m.isShaderMaterial || m.isPointsMaterial || m.isSpriteMaterial || m.transparent || m.blending !== 1) return false;
-  return stackPatch(m, `${CAUSTICS_TAG}-${layers}`, (shader) => {
+  // Light sources are not lit: glow parts, eyes, lantern cores, the horizon, lava, lamps.
+  if (m.userData.mqNoCaustic) return false;
+  return stackPatch(m, CAUSTICS_TAG, (shader) => {
     if (!shader.vertexShader.includes('#include <project_vertex>') || !shader.fragmentShader.includes('#include <opaque_fragment>')) return;
-    if (shader.fragmentShader.includes('mqVoronoiEdge')) return;
-    shader.uniforms.uMqCaustic = CAUSTIC;
+    if (shader.fragmentShader.includes('MQ_CAUSTIC_SURFACE')) return;
+    Object.assign(shader.uniforms, causticUniforms());
     shader.vertexShader = 'varying vec3 vMqCausticW;\n' + shader.vertexShader.replace('#include <project_vertex>', VERTEX);
-    shader.fragmentShader = `#define MQ_CAUSTIC_LAYERS ${layers}\n${CAUSTIC_GLSL}\n` + shader.fragmentShader.replace('#include <opaque_fragment>', FRAGMENT);
+    shader.fragmentShader = `#define MQ_CAUSTIC_SURFACE\nvarying vec3 vMqCausticW;\n${CAUSTIC_FUNCS}\n` + shader.fragmentShader.replace('#include <opaque_fragment>', FRAGMENT);
   });
 }
 
 /** Patch every surface in the scene (cheap once patched: a tag check per material). */
-export function applyCaustics(scene: Scene, layers: 1 | 2): number {
+export function applyCaustics(scene: Scene): number {
   let n = 0;
   scene.traverse((o) => {
     const mat = (o as { material?: Material | Material[] }).material;
     if (!mat) return;
-    for (const m of Array.isArray(mat) ? mat : [mat]) if (patchCaustics(m, layers)) n++;
+    for (const m of Array.isArray(mat) ? mat : [mat]) if (patchCaustics(m)) n++;
   });
   return n;
 }
