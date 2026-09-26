@@ -30,6 +30,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
+  finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
   fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3`. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
