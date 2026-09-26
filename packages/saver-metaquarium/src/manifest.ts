@@ -16,6 +16,11 @@ export const METAQUARIUM_PARAMS = {
   cameraElevation: { type: 'number', default: 15, min: -5, max: 60, ease: 'smooth' },
   /** Camera distance from tank center, world units. */
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
+  /** A named framing: `orbit` (the classic camera), hero, front, low, top,
+   *  surface (looking up at the water's underside) or macro (close on the
+   *  landmark nearest the front). Azimuth and autoRotate still turn it;
+   *  distance scales it. A change is a cut. */
+  shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro'], ease: 'step' },
   /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
    *  camera. The orbit params are ignored while following. */
   cameraFollow: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
