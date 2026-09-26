@@ -53,6 +53,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   shoalSpeed: 'How fast the school travels (0.3–2, default 0.8), independent of `swimSpeed`. It swims above the plants, across the front of the shot unless the camera orbits.',
   // look
   fishLighting: '`lit` (default) lights fish with a studio rig and their own glow parts; `flat` is the unlit original.',
+  fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
   swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, seahorse, crab, jellies and fish that already have a skeleton.',

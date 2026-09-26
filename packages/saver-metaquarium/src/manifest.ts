@@ -197,6 +197,10 @@ export const METAQUARIUM_PARAMS = {
    *  a glowing fin colours the body beside it. `flat` is the original unlit
    *  look. Read at mount. */
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
+  /** The water's light on the fish (lit mode): the bright water above on
+   *  their backs, the water around on their flanks, the floor under their
+   *  bellies — and mirrored in silvered plates. 0 is the studio alone. */
+  fishAmbient: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** The finish: one full-screen pass — a gentle grade, dither against
    *  banding, and restrained bloom on high-end devices. 0 draws straight to
    *  the screen as before; the low tier never runs it. */

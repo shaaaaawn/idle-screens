@@ -57,6 +57,7 @@ import {
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
+import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
@@ -651,6 +652,12 @@ class TankInstance implements SaverInstance {
   /** The active room's palette — consulted only where the author left the
    *  matching param at its manifest default. */
   private roomPalette: { fog: string; floor: string; mote: string; tint?: string } | null = null;
+  /** The room's surface and shaft colours: where the fish's light from above comes from, absent a tint. */
+  private roomSurface: string | null = null;
+  private roomRays: string | null = null;
+  /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
+  private houseLevel = 1;
+  private fishLightInstalled = false;
   /** Params a control track steers: an authored value, so a room palette never overrides them. */
   private trackedPaths = new Set<string>();
   /** The background when a water tint is on: a dome shaded with the same in-scatter the fog fades to. */
@@ -1031,6 +1038,8 @@ class TankInstance implements SaverInstance {
     if (this.poolsInstalled) this.installPools();
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
+    this.roomSurface = can.water && preset.water ? preset.water.color : null;
+    this.roomRays = preset.rays ? preset.rays.color : null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
   }
 
@@ -1333,6 +1342,7 @@ class TankInstance implements SaverInstance {
     // The house comes down for the SHOW, not per lamp: it stays down through
     // a blackout cue, which is what makes the next spot an entrance.
     const show = rig.some((_, i) => this.spotSeen[i]) ? strength : 0;
+    this.houseLevel = 1 - 0.6 * show;
     if (this.studio) {
       this.studio.hemi.intensity = 1.15 * (1 - 0.6 * show);
       this.studio.key.intensity = 2.1 * (1 - 0.6 * show);
@@ -1839,6 +1849,7 @@ class TankInstance implements SaverInstance {
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
         this.str('fishLighting') !== 'flat' && !this.thumbnail);
+      tagFishMaterials(body);
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
@@ -1967,6 +1978,7 @@ class TankInstance implements SaverInstance {
     this.ensureStudio();
     this.reconcile();
     this.updateCaustics(tSec);
+    this.updateFishLight();
 
     // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
     const rotation = rateOffset(
@@ -2711,6 +2723,29 @@ class TankInstance implements SaverInstance {
     CAUSTIC_LAYERS.value = this.quality.glowLights >= 3 ? 2 : 1;
     // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
     if (strength > 0) applyCaustics(this.scene);
+  }
+
+  /**
+   * The fish's water light (fishlight.ts): patched onto the lit coats and
+   * plates the first frame `fishAmbient` is on, then fed the scene's colours
+   * every frame. Lit mode only — flat fish have no lights to add to.
+   */
+  private updateFishLight(): void {
+    const amount = this.num('fishAmbient');
+    if (amount > 0) this.fishLightInstalled = true;
+    if (!this.fishLightInstalled) return;
+    setFishWater({
+      tint: this.waterTint(), surface: this.roomSurface, rays: this.roomRays,
+      fog: this.fogColor, floor: this.floorMat.color,
+      caustics: this.num('caustics'), house: this.houseLevel, amount,
+    });
+    const patch = (o: Object3D): void => o.traverse((n) => {
+      const mat = (n as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) patchFishLight(m);
+    });
+    for (const f of this.fish) if (f) patch(f.group);
+    if (this.shoal) patch(this.shoal.mesh);
   }
 
   // ---- render ----
