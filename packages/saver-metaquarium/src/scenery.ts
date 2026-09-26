@@ -290,6 +290,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     geometry.userData.mqOwned = true;
     const metal = new MeshStandardMaterial({ vertexColors: true, metalness: 1, roughness: 0.2, envMapIntensity: 1.7 });
     metal.userData.mqOwned = true;
+    metal.userData.mqNoCaustic = true; // the flora's lamps shine
     const clock = { value: 0 }; clocks.push(clock);
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
@@ -328,6 +329,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     for (const [name, pass, extra, order] of draws) {
       const material = new MeshBasicMaterial({ vertexColors: true, ...extra });
       material.userData.mqOwned = true;
+      material.userData.mqNoCaustic = true; // lanterns are light
       const uSkyPass = { value: pass };
       material.onBeforeCompile = shader => {
         shader.uniforms.uSkyTime = clock;
@@ -356,6 +358,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     far.geometry.userData.mqOwned = true;
     const material = new MeshBasicMaterial({ vertexColors: true, fog: false, side: DoubleSide });
     material.userData.mqOwned = true;
+    material.userData.mqNoCaustic = true; // silhouettes past the fog line
     material.onBeforeCompile = shader => {
       shader.uniforms.uHorizonFog = horizonFog;
       shader.vertexShader = 'attribute vec2 aHaze; varying float vHorizon;\n' + shader.vertexShader.replace('#include <begin_vertex>', HORIZON_VERTEX);
@@ -572,6 +575,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, stones, 'rock-formations', FrontSide);
   const lava = batch(group, veins, 'crystal-veins');
   if (lava) {
+    (lava.material as MeshBasicMaterial).userData.mqNoCaustic = true; // glowing veins
     const clock = { value: 0 }; clocks.push(clock);
     (lava.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uFlowTime = clock;
