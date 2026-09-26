@@ -311,6 +311,19 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
       cameraDistance: 260, cameraElevation: 42, cameraAzimuth: 0, autoRotate: 0.8,
     }, catalog: LOCAL_CATALOG,
   }),
+  // STUDY: ride along. The camera follows fish 0 through a busy village —
+  // homes, rocks, flora, lanterns overhead — a few lengths behind it, on the
+  // path it swam. `-eye` is the same ride from the fish's own eye.
+  ...([['follow', 45], ['follow-eye', 0]] as const).map(([name, back]) => createMetaquarium({
+    id: `metaquarium-study-${name}`, label: `Metaquarium (study ${name === 'follow' ? 'follow camera' : 'fish-eye view'})`,
+    params: {
+      cameraFollow: 0, followDistance: back,
+      geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.4, bubbleVents: 0.6, marineSnow: 0.5, skyLanterns: 0.6, horizon: 0.8, paths: 0.6,
+      propMix: 'crystal:2@spire/cyan,crystal:2@druse/hotpink,crystal:1@lotus/yellow', crystalTint: 0.5,
+      fishMix: '257:1@patrol,100:3@drift', swimSpeed: 0.7, pathShape: 'wander', fishGlow: 0.5,
+      fogColor: '#081428', floorColor: '#1c2238', fogNear: 110, fogFar: 700,
+    }, catalog: LOCAL_CATALOG,
+  })),
   // STUDY: the jellyfish lanterns, brought down to eye level — three species
   // (lantern, moon, comb), the squeeze rolling down the bell, the lines streaming.
   createMetaquarium({

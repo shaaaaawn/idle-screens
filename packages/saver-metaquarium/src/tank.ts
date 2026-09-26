@@ -103,6 +103,8 @@ import {
 import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
+/** How far back along its own path the follow camera reads a fish's recent direction. */
+const FOLLOW_TRAIL = FISH_LENGTH * 2;
 const CAMERA_FAR = 1400;
 /** Floor-pool slots kept free of fixed light, for the sources that move. */
 const MOVING_POOLS = 4;
@@ -573,6 +575,16 @@ class TankInstance implements SaverInstance {
   private readonly spotSeen = [false, false, false];
   /** Heading (xz) of each spotted fish, for its shadow. */
   private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
+  /** Follow camera (`cameraFollow`): where its fish is, which way it is headed,
+   *  and where it was a few lengths back along its own path. All three are
+   *  written by the fish loop from closed-form poses — never smoothed across
+   *  frames — so the shot at `t` is the same however you arrived at `t`. */
+  private readonly followAt = new Vector3();
+  private readonly followHead = new Vector3(0, 0, 1);
+  private readonly followTrail = new Vector3();
+  private followSeen = false;
+  private followHasTrail = false;
+  private followState: { slot: number; x: number; y: number; z: number } | null = null;
   private readonly spotLevel = [0, 0, 0];
   /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
   private waterInstalled = false;
@@ -1298,6 +1310,49 @@ class TankInstance implements SaverInstance {
   }
 
   /**
+   * The follow camera. Placed after the fish loop (a fish's position is only
+   * known there) and before anything after it reads the camera — the glow's
+   * lift toward the lens, the spots, the scenery's cards. Eye glances and
+   * glow-light ordering inside the loop still see the orbit camera; both
+   * are cosmetic.
+   *
+   * Chase (`followDistance` ≥ a body length): `followDistance` behind it along
+   * the way it has been swimming, lifted a little, looking just past it.
+   * Eye (below that): at the fish, looking where it goes; the fish is hidden.
+   * Kept above the floor and any scenery, and inside the room.
+   */
+  private placeFollowCamera(slot: number, back: number, pov: boolean): void {
+    if (slot < 0 || !this.followSeen) { this.followState = null; return; }
+    const at = this.followAt, head = this.followHead, cam = this.camera.position;
+    const lift = pov ? 1.5 : FISH_LENGTH * 0.35 + back * 0.18;
+    if (pov) {
+      cam.set(at.x, at.y + lift, at.z);
+    } else {
+      // Behind it along the direction it has been swimming over its last
+      // couple of lengths — the chord to where it was a moment ago. Smoother
+      // than the instant tangent (a wiggle or a kick does not swing the shot),
+      // and unlike riding the path itself it keeps the fish dead ahead on a
+      // tight turn instead of sliding it to the side of the frame.
+      let dx = head.x, dz = head.z;
+      if (this.followHasTrail) {
+        const tx = at.x - this.followTrail.x, tz = at.z - this.followTrail.z, tl = Math.hypot(tx, tz);
+        if (tl > FISH_LENGTH * 0.4) { dx = tx / tl; dz = tz / tl; }
+      }
+      cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
+    }
+    // Inside the room, above the ground and whatever stands on it.
+    const r = Math.hypot(cam.x, cam.z), rMax = BOUNDS.radius * 2.2;
+    if (r > rMax) { cam.x *= rMax / r; cam.z *= rMax / r; }
+    const floor = this.floorHeightAt ? this.floorHeightAt(cam.x, cam.z) : 0;
+    cam.y = Math.max(cam.y, floor + 7);
+    if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
+    // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
+    const ahead = pov ? 60 : FISH_LENGTH * 0.5;
+    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : FISH_LENGTH * 0.12), at.z + head.z * ahead);
+    this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
+  }
+
+  /**
    * The finish wraps the renderer's own render for THIS scene only (the
    * passes it draws go straight through), so every path that draws the tank —
    * the loop, stills, capture — gets it, and at 0 the call is the original.
@@ -1945,6 +2000,11 @@ class TankInstance implements SaverInstance {
     const swimWave = this.num('swimWave');
     this.buildSpotRig();
     this.spotSeen.fill(false);
+    const followSlot = Math.round(this.num('cameraFollow'));
+    const followBack = Math.max(0, this.num('followDistance'));
+    // Close enough that the camera would sit inside the fish: it is the eye.
+    const followPov = followSlot >= 0 && followBack < FISH_LENGTH * 0.9;
+    this.followSeen = false; this.followHasTrail = false;
     const glowPulse = this.num('crystalPulse');
     let glowN = 0;
     this.fishEmitters.length = 0;
@@ -2045,6 +2105,14 @@ class TankInstance implements SaverInstance {
         const cf = carrier ?? this.carrierFrame(
           extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
+        if (f.index === followSlot) {
+          // A schooled fish's own trail is the carrier's — the whole body
+          // turns together, so where the carrier was is close enough for the
+          // chase camera's chord (it does not chase the slot offset, same as
+          // the `rel` bonds below).
+          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - FOLLOW_TRAIL);
+          this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+        }
         beat = cf.lead;
         turnPlan = this.carrierPlan; turnD = cf.lead;
         // A seated fish can lead too: a bonded fish after a school trails
@@ -2091,6 +2159,10 @@ class TankInstance implements SaverInstance {
             flurryExtra = (1 - c) * 0.8;
           }
           pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          if (f.index === followSlot) {
+            const tr = swimPoseAtDistance(rel.plan, rel.d - lag - FOLLOW_TRAIL);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
           turnPlan = rel.plan; turnD = rel.d - lag;
           beat = rel.effort - lag;
           const hl = Math.hypot(pose.fx, pose.fz) || 1;
@@ -2114,6 +2186,13 @@ class TankInstance implements SaverInstance {
           pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
         } else {
           pose = swimPoseAtDistance(f.plan, d);
+          if (f.index === followSlot) {
+            // Where this fish was `followBack` along its own path: the camera
+            // rides the path it swam, which smooths turns and threads the gaps
+            // the fish itself threaded.
+            const tr = swimPoseAtDistance(f.plan, d - FOLLOW_TRAIL);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
           turnPlan = f.plan; turnD = d;
           // Light-seeking: each free fish is drawn toward ITS shaft (chosen
           // by index, so the choice never flips as it moves) by a per-fish
@@ -2244,6 +2323,21 @@ class TankInstance implements SaverInstance {
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
       }
       f.group.position.set(px, y, pz);
+      if (f.index === followSlot) {
+        this.followAt.set(px, y, pz); this.followSeen = true;
+        this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
+        if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
+        this.followHead.normalize();
+        if (act && this.vignette) {
+          // An actor's trail is the script's own past, a beat behind.
+          const back = poseOf(this.vignette, f.index, tSec - FOLLOW_TRAIL / 17);
+          if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
+        }
+      }
+      // The eye does not see itself. The GROUP, not f.body: f.body is null
+      // BY DESIGN for a fallback (non-GLB) fish (see tintFish), so gating on
+      // it would leave the fallback blob visible right at the camera.
+      f.group.visible = !(followPov && f.index === followSlot);
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
           this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
@@ -2286,7 +2380,7 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
-      if (f.glow && f.body) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // The swim wave (MQ: Amano study). Rigged on the first frame that asks
       // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
@@ -2349,6 +2443,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
       });
     }
+    this.placeFollowCamera(followSlot, followBack, followPov);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
     this.lastFish = report;
@@ -2379,6 +2474,8 @@ class TankInstance implements SaverInstance {
       saver: 'metaquarium',
       t: this.lastFrameT,
       camera: {
+        // Following a fish: the orbit params are ignored while this is set.
+        follow: this.followState,
         azimuth: this.num('cameraAzimuth'),
         elevation: this.num('cameraElevation'),
         distance: this.num('cameraDistance'),
