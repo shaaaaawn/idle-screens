@@ -173,6 +173,10 @@ export const METAQUARIUM_PARAMS = {
    *  a glowing fin colours the body beside it. `flat` is the original unlit
    *  look. Read at mount. */
   fishLighting: { type: 'enum', default: 'lit', options: ['lit', 'flat'], ease: 'step' },
+  /** The finish: one full-screen pass — a gentle grade, dither against
+   *  banding, and restrained bloom on high-end devices. 0 draws straight to
+   *  the screen as before; the low tier never runs it. */
+  finish: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is non-metallic instead —
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`

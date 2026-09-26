@@ -54,6 +54,7 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
@@ -530,6 +531,9 @@ class TankInstance implements SaverInstance {
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
   private readonly floorMat: MeshBasicMaterial;
+  /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
+  private finishPass: FinishPass | null = null;
+  private finishAmount = 0;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -1293,6 +1297,26 @@ class TankInstance implements SaverInstance {
     if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
   }
 
+  /**
+   * The finish wraps the renderer's own render for THIS scene only (the
+   * passes it draws go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets it, and at 0 the call is the original.
+   * Mid and high tiers only; bloom on high.
+   */
+  private updateFinish(): void {
+    const amount = this.num('finish');
+    const tier = this.quality.glowLights;
+    this.finishAmount = tier >= 3 ? amount : 0;
+    if (this.finishAmount <= 0 || this.finishPass) return;
+    const pass = new FinishPass({ bloom: tier >= 4 });
+    this.finishPass = pass;
+    const raw = this.renderer.render.bind(this.renderer);
+    this.renderer.render = (scene, camera) => {
+      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      else raw(scene, camera);
+    };
+  }
+
   private installPools(): void {
     this.poolsInstalled = true;
     installFloorPools(this.floorMat, this.poolUniforms);
@@ -1732,6 +1756,7 @@ class TankInstance implements SaverInstance {
   private setState(t: number): void {
     const tSec = t / 1000;
     this.applyParams(t);
+    this.updateFinish();
     const speed = this.num('swimSpeed');
     // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
     // glide (MQ11 — multiplying the whole elapsed integral teleported every
@@ -2615,6 +2640,7 @@ class TankInstance implements SaverInstance {
 
   dispose(): void {
     this.disposed = true;
+    this.finishPass?.dispose();
     this.stop();
     for (const f of this.fish) {
       if (!f) continue;
