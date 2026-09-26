@@ -457,14 +457,14 @@
             },
             "dx": {
               "type": "number",
-              "minimum": -2,
-              "maximum": 2,
-              "description": "Offset from x in min(w,h) units (px under units: 'px'). x/y are fractions of width and height, sizes are fractions of min(w,h) — anchor parts on a shared fraction (the centre is the only aspect-safe one) and offset them with dx/dy so they register on every aspect. Placement (structural). Native clients ignore it."
+              "minimum": -17280,
+              "maximum": 17280,
+              "description": "Offset from x in min(w,h) units, within ±2 (px under units: 'px', within ±17280; the runtime validator enforces the unit's bound). x/y are fractions of width and height, sizes are fractions of min(w,h) — anchor parts on a shared fraction (the centre is the only aspect-safe one) and offset them with dx/dy so they register on every aspect. Placement (structural). Native clients ignore it."
             },
             "dy": {
               "type": "number",
-              "minimum": -2,
-              "maximum": 2,
+              "minimum": -17280,
+              "maximum": 17280,
               "description": "Offset from y in min(w,h) units. See dx."
             }
           },
@@ -480,8 +480,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "x": { "type": "number", "minimum": -2, "maximum": 2, "description": "Translate in min(w,h) units." },
-            "y": { "type": "number", "minimum": -2, "maximum": 2, "description": "Translate in min(w,h) units." },
+            "x": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px'; the runtime validator enforces the unit's bound)." },
+            "y": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px')." },
             "scale": { "type": "number", "minimum": 0, "maximum": 8, "description": "Uniform scale about the viewport centre (default 1)." },
             "scaleX": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra horizontal scale; toward 0 reads as a turn about the vertical axis, negative mirrors (default 1)." },
             "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the viewport centre." }

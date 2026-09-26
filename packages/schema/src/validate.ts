@@ -76,6 +76,17 @@ function dimUnit(spec: unknown): string {
   return isObj(spec) && spec.units === 'px' ? 'px' : 'fractions of min(width, height)';
 }
 
+/**
+ * Bound and unit for a layer offset (`transform.x`/`y`, `position.dx`/`dy`):
+ * ±2 in min(w, h) units, or px under `units: 'px'` — where the renderer reads
+ * the same numbers as pixels.
+ */
+function offsetBound(spec: unknown): [number, string] {
+  return isObj(spec) && spec.units === 'px'
+    ? [LIMITS.maxLayerTransformOffsetPx, 'px']
+    : [LIMITS.maxLayerTransformOffset, 'min(w, h) units'];
+}
+
 /** "must be a [min,max] range of positive <unit>" — unit-aware (see dimUnit). */
 function rangeMsg(spec: unknown, note?: string): string {
   return `must be a [min,max] range of positive ${dimUnit(spec)}${note ? ` (${note})` : ''}`;
@@ -437,10 +448,10 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     if (!isObj(tf)) err(`${path}.transform`, 'must be an object {x?, y?, scale?, scaleX?, rotate?}');
     else {
       for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.transform.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
-      const off = LIMITS.maxLayerTransformOffset;
+      const [off, unit] = offsetBound(spec);
       const sc = LIMITS.maxLayerTransformScale;
       for (const axis of ['x', 'y'] as const) {
-        if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.transform.${axis}`, `must be a number within ±${off} (min(w, h) units)`);
+        if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.transform.${axis}`, `must be a number within ±${off} (${unit})`);
       }
       if (tf.scale !== undefined && (!isNum(tf.scale) || tf.scale < 0 || tf.scale > sc)) err(`${path}.transform.scale`, `must be a number 0..${sc}`);
       if (tf.scaleX !== undefined && (!isNum(tf.scaleX) || Math.abs(tf.scaleX) > sc)) err(`${path}.transform.scaleX`, `must be a number within ±${sc} (negative mirrors)`);
@@ -455,10 +466,11 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else {
       if (layer.position.x < 0 || layer.position.x > 1) err(`${path}.position.x`, 'must be 0..1');
       if (layer.position.y < 0 || layer.position.y > 1) err(`${path}.position.y`, 'must be 0..1');
+      const [off, unit] = offsetBound(spec);
       for (const axis of ['dx', 'dy'] as const) {
         const v = layer.position[axis];
-        if (v !== undefined && (!isNum(v) || Math.abs(v) > LIMITS.maxLayerTransformOffset)) {
-          err(`${path}.position.${axis}`, `must be a number within ±${LIMITS.maxLayerTransformOffset} (min(w, h) units)`);
+        if (v !== undefined && (!isNum(v) || Math.abs(v) > off)) {
+          err(`${path}.position.${axis}`, `must be a number within ±${off} (${unit})`);
         }
       }
       for (const k of unknownKeys(layer.position, KNOWN_POSITION)) warn(`${path}.position.${k}`, 'unknown-property', `unknown position property '${k}' — will be ignored`);

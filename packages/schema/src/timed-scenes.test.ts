@@ -318,6 +318,12 @@ describe('validate: opacity, transform, dx/dy', () => {
     expect(errs({ position: { x: 0.5, y: 0.5, dx: 2.5 } })).toEqual(['layers[0].position.dx']);
   });
 
+  it("under units: 'px' the offsets are pixels, bounded in px", () => {
+    const px = (l: Partial<LayerSpec>) => validateSpec({ ...scene({ units: 'px' }, [dot({ sprite: { kind: 'circle', radius: [20, 20], color: '#fff' }, ...l })]) });
+    expect(px({ transform: { x: 120, y: -40 }, position: { x: 0.5, y: 0.5, dx: 300, dy: -80 } }).errors).toEqual([]);
+    expect(px({ transform: { x: 20000 } }).errors.map((e) => e.message)).toEqual(['must be a number within ±17280 (px)']);
+  });
+
   it('opacity / transform / timeline are paint (outside the structural signature); dx/dy are placement', () => {
     const base = structuralSignature(scene());
     expect(structuralSignature(scene({}, [dot({ opacity: 0.2 })]))).toBe(base);

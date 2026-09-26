@@ -722,6 +722,7 @@ export const LIMITS = {
   maxTimelineKeyDur: 30000, // ms — one key's glide
   maxTimelineDuration: 86400000, // ms — a looping timeline's lap (a day)
   maxLayerTransformOffset: 2, // min(w,h) units — transform x/y and position dx/dy
+  maxLayerTransformOffsetPx: 17280, // px, under `units: 'px'` — twice the largest referenceViewport
   maxLayerTransformScale: 8,
   maxLayerTransformRotate: 3600, // degrees
   maxEmitEvery: 600000, // ms — ten minutes; longer silences than that are `life.enter`
