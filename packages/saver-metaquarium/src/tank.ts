@@ -54,6 +54,7 @@ import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { ORBIT_FOV, pickLandmark, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
@@ -585,6 +586,10 @@ class TankInstance implements SaverInstance {
   private followSeen = false;
   private followHasTrail = false;
   private followState: { slot: number; x: number; y: number; z: number } | null = null;
+  /** Named shots: the pose scratch, and the landmark `macro` frames (picked once per azimuth). */
+  private readonly shotScratch: ShotPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: ORBIT_FOV };
+  private landmark: { x: number; y: number; z: number; size: number } | null = null;
+  private landmarkKey = '';
   private readonly spotLevel = [0, 0, 0];
   /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
   private waterInstalled = false;
@@ -1309,6 +1314,26 @@ class TankInstance implements SaverInstance {
     if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
   }
 
+  /** The shot's camera, before the fish loop (follow, if on, overrides it after). */
+  private placeShot(azimuth: number): void {
+    const name = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    if (name === 'macro' && this.landmarkKey !== `${this.clusters.length}|${this.num('cameraAzimuth')}`) {
+      this.landmarkKey = `${this.clusters.length}|${this.num('cameraAzimuth')}`;
+      this.landmark = pickLandmark(this.clusters.map((c) => ({ x: c.x, y: c.y + c.height, z: c.z, size: Math.max(c.height, c.radius * 2) })), this.num('cameraAzimuth'));
+    }
+    const p = shotPose(name, {
+      azimuth, elevation: this.num('cameraElevation'), distance: this.num('cameraDistance'),
+      ceiling: this.ceiling ? this.ceiling.position.y : null,
+      floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0,
+      landmark: this.landmark,
+    }, this.shotScratch);
+    this.camera.position.set(p.x, p.y, p.z);
+    this.camera.lookAt(p.tx, p.ty, p.tz);
+    // Follow keeps the classic lens.
+    const fov = this.num('cameraFollow') >= 0 ? ORBIT_FOV : p.fov;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+  }
+
   /**
    * The follow camera. Placed after the fish loop (a fish's position is only
    * known there) and before anything after it reads the camera — the glow's
@@ -1834,19 +1859,11 @@ class TankInstance implements SaverInstance {
     this.reconcile();
     this.updateCaustics(tSec);
 
-    // Camera orbit
+    // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
     const rotation = rateOffset(
       this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
-    const az = MathUtils.degToRad(this.num('cameraAzimuth') + rotation);
-    const el = MathUtils.degToRad(this.num('cameraElevation'));
-    const dist = this.num('cameraDistance');
-    this.camera.position.set(
-      Math.cos(el) * Math.sin(az) * dist,
-      Math.max(10, 15 + Math.sin(el) * dist),
-      Math.cos(el) * Math.cos(az) * dist,
-    );
-    this.camera.lookAt(0, 35, 0);
+    this.placeShot(this.num('cameraAzimuth') + rotation);
 
     // Fog color
     const fogHex = String(
@@ -2476,6 +2493,7 @@ class TankInstance implements SaverInstance {
       camera: {
         // Following a fish: the orbit params are ignored while this is set.
         follow: this.followState,
+        shot: this.str('shot'),
         azimuth: this.num('cameraAzimuth'),
         elevation: this.num('cameraElevation'),
         distance: this.num('cameraDistance'),
@@ -2543,6 +2561,9 @@ class TankInstance implements SaverInstance {
         formationBreathe: this.num('formationBreathe'),
       },
       quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      // What the GPU did for the last frame: compiled programs (a feature at
+      // its default must not add one) and draw calls.
+      render: { programs: this.renderer.info.programs?.length ?? 0, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles },
       shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor) : null,
       fish,
     };
