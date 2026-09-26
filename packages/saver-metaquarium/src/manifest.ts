@@ -139,6 +139,11 @@ export const METAQUARIUM_PARAMS = {
    *  slow (~15 s) cycle. 0 (default) is the rigid lattice; 1 opens it by up
    *  to a fifth. Only ever expands, so the spacing guarantee holds. */
   formationBreathe: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** An ambient school of small voxel fish swimming as one body beside the
+   *  cast — relaxed formation, burst-and-coast tails, the odd fish wandering
+   *  out and back. The amount sets the count (up to 2.5× the tier's fish cap). */
+  shoal: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  shoalKind: { type: 'enum', default: 'neon', options: ['neon', 'rummynose', 'ember'], ease: 'step' },
   // ---- The look. These three are the RENDERER, not settings a scene must
   // carry: every tank is lit, glowing and reflective with no params at all,
   // and the room, the cast and the camera never need to know. Each exists only

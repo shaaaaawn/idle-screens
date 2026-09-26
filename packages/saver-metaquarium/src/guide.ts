@@ -44,6 +44,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   bodyWiggle: 'Body yaw while swimming, for models without an animation clip.',
   lightSeek: 'How much fish are drawn toward light sources.',
   formationBreathe: 'How much a formation swells and tightens.',
+  shoal: 'An ambient school of small fish swimming as one body beside the cast; the odd one wanders out and back (0 = none). Up to 2.5× the device\'s fish cap.',
+  shoalKind: 'Who the school is: `neon` (blue line, red rear), `rummynose` (red face, barred tail) or `ember` (orange).',
   // look
   fishLighting: '`lit` (default) lights fish with a studio rig and their own glow parts; `flat` is the unlit original.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
