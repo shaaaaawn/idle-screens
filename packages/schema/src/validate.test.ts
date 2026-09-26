@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateSpec, assertValidSpec } from './validate';
+import { validateSpec, assertValidSpec, ignoredPropertyPaths } from './validate';
 import type { SaverSpec } from './types';
 
 const base = (): SaverSpec => ({
@@ -455,5 +455,70 @@ describe("validateSpec — text role (#59, plan 1e)", () => {
   it('rejects any other role', () => {
     expect(paths(text({ role: 'shout' }))).toContain('layers[0].sprite.role');
     expect(paths(block({ role: 1 }))).toContain('layers[0].sprite.role');
+  });
+});
+
+describe('validateSpec — onboarding messages (cold-start papercuts, 2026-09-25)', () => {
+  const msg = (spec: unknown, path: string): string | undefined => validateSpec(spec).errors.find((e) => e.path === path)?.message;
+  const one = (sprite: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 1, id: 'o', label: 'O',
+    layers: [{ count: 3, sprite, motion: { type: 'drift', speed: [0.01, 0.02] }, ...extra }],
+  });
+
+  it('range messages name viewport fractions under the default units, px only under units: "px"', () => {
+    const vp = one({ kind: 'circle', radius: [0, 0.01], color: '#ffffff' });
+    expect(msg(vp, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
+    const px = { ...vp, units: 'px' };
+    expect(msg(px, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px');
+    // every range-of-size site goes through the same helper
+    expect(msg(one({ kind: 'streak', length: 3, color: '#ffffff' }), 'layers[0].sprite.length')).not.toMatch(/px/);
+    expect(msg(one({ kind: 'rect', width: 3, color: '#ffffff' }), 'layers[0].sprite.width')).not.toMatch(/px/);
+    expect(msg(one({ kind: 'polygon', radius: 3, color: '#ffffff' }), 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height) (circumradius)');
+    expect(msg({ ...one({ kind: 'polygon', radius: 3, color: '#ffffff' }), units: 'px' }, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px (circumradius)');
+    expect(msg(one({ kind: 'stroke', length: 3, points: [[0, 0], [1, 1]], color: '#ffffff' }), 'layers[0].sprite.length')).toMatch(/fractions of min\(width, height\) \(the mark's bounding size\)$/);
+    expect(msg(one({ kind: 'emoji', glyphs: ['x'] }, { size: [-1, 1] }), 'layers[0].size')).not.toMatch(/px/);
+    const orbit = { schemaVersion: 1, id: 'o', label: 'O', layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, motion: { type: 'orbit', speed: [10, 20], radius: 0.1 } }] };
+    expect(msg(orbit, 'layers[0].motion.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
+  });
+
+  it('a [min,max] range on a scalar-only size says so instead of "must be > 0"', () => {
+    const range = 'must be a single number > 0, not a [min,max] range';
+    expect(msg(one({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: [0.003, 0.006] }), 'layers[0].sprite.width')).toBe(range);
+    expect(msg(one({ kind: 'ring', radius: [0.01, 0.02], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
+    expect(msg(one({ kind: 'stroke', length: [0.01, 0.02], points: [[0, 0], [1, 1]], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
+    const bar = one({ kind: 'bar', values: [1, 2, 3], length: [0.1, 0.2], thickness: [0.01, 0.02], max: [1, 2], color: '#ffffff' });
+    expect(msg(bar, 'layers[0].sprite.length')).toBe(range);
+    expect(msg(bar, 'layers[0].sprite.thickness')).toBe(range);
+    expect(msg(bar, 'layers[0].sprite.max')).toBe(range);
+    expect(msg(one({ kind: 'text', strings: ['a'], maxWidth: [1, 2] }), 'layers[0].sprite.maxWidth')).toBe(range);
+    const links = one({ kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, { links: { k: 2, maxDist: [0.1, 0.2], width: [1, 2] } });
+    expect(msg(links, 'layers[0].links.maxDist')).toBe(range);
+    expect(msg(links, 'layers[0].links.width')).toBe(range);
+    const band = { ...one({ kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }), background: { type: 'gradient', stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#111111' }], band: { color: '#222222', height: [0.1, 0.2] } } };
+    expect(msg(band, 'background.band.height')).toBe(range);
+    const tb = { schemaVersion: 1, id: 'o', label: 'O', layers: [{ count: 1, sprite: { kind: 'textBlock', text: 'hi', maxWidth: [0.3, 0.5], fontSize: [0.03, 0.04] }, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } }] };
+    expect(msg(tb, 'layers[0].sprite.maxWidth')).toBe('must be a single number (viewport fraction), not a [min,max] range');
+    expect(msg(tb, 'layers[0].sprite.fontSize')).toBe('must be a single number (viewport fraction), not a [min,max] range');
+  });
+
+  it('a non-positive scalar keeps its original message', () => {
+    expect(msg(one({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: 0 }), 'layers[0].sprite.width')).toBe('must be > 0');
+    expect(msg(one({ kind: 'bar', values: [1], length: -1, thickness: 0.01, color: '#ffffff' }), 'layers[0].sprite.length')).toBe('must be > 0 (full-scale bar length)');
+    expect(msg(one({ kind: 'text', strings: ['a'], maxWidth: 0 }), 'layers[0].sprite.maxWidth')).toBe('must be a positive number');
+    expect(validateSpec(one({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: 0.004 })).valid).toBe(true);
+  });
+});
+
+describe('ignoredPropertyPaths', () => {
+  it('lists unknown and misplaced properties as dot-paths, without mutating the spec', () => {
+    const spec = {
+      schemaVersion: 1, id: 'i', label: 'I',
+      background: { type: 'gradient', angle: 180, stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#111111' }] },
+      layers: [{ count: 2, sprite: { kind: 'circle', radius: [0.01, 0.02], colors: ['#ff0000'], blend: 'lighter' }, motion: { type: 'static', wobble: 3 } }],
+    };
+    const before = JSON.stringify(spec);
+    expect(ignoredPropertyPaths(spec).sort()).toEqual(['background.angle', 'layers.0.motion.wobble', 'layers.0.sprite.blend']);
+    expect(JSON.stringify(spec)).toBe(before); // validateSpec would have written sprite.color
+    expect(ignoredPropertyPaths(null)).toEqual([]);
   });
 });

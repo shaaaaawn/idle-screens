@@ -171,6 +171,37 @@ describe('steerablePaths', () => {
     expect(paths).toContain('referenceViewport');
     expect(paths).toContain('layers.0.count');
   });
+
+  it('omits properties the validator reports as ignored (the renderer never reads them)', () => {
+    const withIgnored = {
+      schemaVersion: 1, id: 'g', label: 'G',
+      background: { type: 'gradient', angle: 180, stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#204060' }] },
+      layers: [{
+        count: 4,
+        sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff', blend: 'lighter', glow: { amount: 2 } },
+        motion: { type: 'drift', speed: [0.01, 0.02] },
+      }],
+    };
+    const paths = steerablePaths(withIgnored);
+    expect(paths).not.toContain('background.angle'); // gradients have no angle
+    expect(paths).not.toContain('layers.0.sprite.blend'); // misplaced: blend lives on the layer
+    expect(paths).not.toContain('layers.0.sprite.glow.amount'); // an unknown object drops its whole subtree
+    expect(paths).toContain('background.stops.0.color');
+    expect(paths).toContain('layers.0.sprite.color');
+    expect(paths).toContain('layers.0.sprite.radius');
+  });
+
+  it('does not mutate the spec it enumerates', () => {
+    const palette = {
+      schemaVersion: 1, id: 'p', label: 'P',
+      layers: [{ count: 2, sprite: { kind: 'circle', radius: [0.01, 0.02], colors: ['#ff0000', '#00ff00'] }, motion: { type: 'static' } }],
+    };
+    const before = JSON.stringify(palette);
+    const paths = steerablePaths(palette);
+    expect(JSON.stringify(palette)).toBe(before);
+    expect(paths).toContain('layers.0.sprite.colors');
+    expect(paths).not.toContain('layers.0.sprite.color');
+  });
 });
 
 describe('easeSmooth', () => {

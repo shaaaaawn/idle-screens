@@ -61,6 +61,32 @@ function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[]
 }
 
 /**
+ * The unit a spec's dimensional values are written in, for error messages.
+ * Mirrors the compiler: anything but an explicit `units: 'px'` is viewport
+ * units (fractions of min(width, height)), so a message must not say "px"
+ * to an author who never opted into px.
+ */
+function dimUnit(spec: unknown): string {
+  return isObj(spec) && spec.units === 'px' ? 'px' : 'fractions of min(width, height)';
+}
+
+/** "must be a [min,max] range of positive <unit>" — unit-aware (see dimUnit). */
+function rangeMsg(spec: unknown, note?: string): string {
+  return `must be a [min,max] range of positive ${dimUnit(spec)}${note ? ` (${note})` : ''}`;
+}
+
+/**
+ * A scalar-only positive number (ring/streak/stroke `width`, bar `length`,
+ * links `maxDist`, …). A [min,max] range here is the common slip — most size
+ * fields ARE ranges — and reporting "must be > 0" for `[0.003, 0.006]`
+ * (whose values are all > 0) sends the author hunting for the wrong bug.
+ */
+function positiveScalar(v: unknown, path: string, err: (p: string, m: string) => void, msg = 'must be > 0'): void {
+  if (Array.isArray(v)) err(path, 'must be a single number > 0, not a [min,max] range');
+  else if (!isNum(v) || v <= 0) err(path, msg);
+}
+
+/**
  * Validate an untrusted (agent- or JSON-authored) spec structurally + semantically.
  * Returns typed errors and warnings; never throws. `compileSaver` refuses to run an invalid spec.
  *
@@ -88,6 +114,23 @@ function normalizeColors(spec: unknown): void {
 
 export function validateSpec(spec: unknown): ValidationResult {
   normalizeColors(spec);
+  return validateSpecCore(spec);
+}
+
+/**
+ * Dot-paths (numeric layer indices, as `steerablePaths` spells them) of every
+ * property the validator flags as unknown or misplaced — i.e. fields the
+ * renderer never reads, so steering them does nothing. Pure: unlike
+ * `validateSpec` it never normalises colours into the caller's spec.
+ */
+export function ignoredPropertyPaths(spec: unknown): string[] {
+  if (!isObj(spec)) return [];
+  return (validateSpecCore(spec).warnings ?? [])
+    .filter((w) => w.code === 'unknown-property' || w.code === 'misplaced-property')
+    .map((w) => w.path.replace(/\[(\d+)\]/g, '.$1'));
+}
+
+function validateSpecCore(spec: unknown): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -202,7 +245,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       if (!isObj(bg.band)) err('background.band', 'must be an object');
       else {
         color(bg.band.color, 'background.band.color', err);
-        if (!isNum(bg.band.height) || bg.band.height <= 0) err('background.band.height', 'must be > 0');
+        positiveScalar(bg.band.height, 'background.band.height', err);
       }
     }
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
@@ -284,7 +327,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     err(`${path}.count`, `at most ${LIMITS.maxPerLayer} per layer`);
   }
   if (layer.size !== undefined && (!isRange(layer.size) || layer.size[0] <= 0)) {
-    err(`${path}.size`, 'must be a [min,max] range of positive px');
+    err(`${path}.size`, rangeMsg(spec));
   }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
@@ -383,16 +426,12 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (!isNum(layer.links.k) || !Number.isInteger(layer.links.k) || layer.links.k < 1 || layer.links.k > LIMITS.maxLinksK) {
         err(`${path}.links.k`, `must be an integer 1..${LIMITS.maxLinksK}`);
       }
-      if (!isNum(layer.links.maxDist) || layer.links.maxDist <= 0) {
-        err(`${path}.links.maxDist`, 'must be > 0');
-      }
+      positiveScalar(layer.links.maxDist, `${path}.links.maxDist`, err);
       if (layer.links.color !== undefined) color(layer.links.color, `${path}.links.color`, err);
       if (layer.links.alpha !== undefined && (!isNum(layer.links.alpha) || layer.links.alpha < 0 || layer.links.alpha > 1)) {
         err(`${path}.links.alpha`, 'must be 0..1');
       }
-      if (layer.links.width !== undefined && (!isNum(layer.links.width) || layer.links.width <= 0)) {
-        err(`${path}.links.width`, 'must be > 0');
-      }
+      if (layer.links.width !== undefined) positiveScalar(layer.links.width, `${path}.links.width`, err);
       if (layer.links.mode !== undefined && !['nearest', 'chain', 'random'].includes(layer.links.mode as string)) {
         err(`${path}.links.mode`, "must be 'nearest' | 'chain' | 'random'");
       }
@@ -557,11 +596,11 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       }
     }
   }
-  validateSprite(layer.sprite, `${path}.sprite`, err, warn);
+  validateSprite(layer.sprite, `${path}.sprite`, err, warn, spec);
   validateMotion(layer.motion, `${path}.motion`, err, warn, spec);
 }
 
-function validateSprite(sprite: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+function validateSprite(sprite: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec?: unknown): void {
   if (!isObj(sprite)) return err(path, 'must be an object');
 
   let knownSet: Set<string>;
@@ -586,32 +625,30 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.baseline !== undefined && !['top', 'middle', 'bottom'].includes(sprite.baseline as string)) {
       err(`${path}.baseline`, 'must be top | middle | bottom');
     }
-    if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
-      err(`${path}.maxWidth`, 'must be a positive number');
-    }
+    if (sprite.maxWidth !== undefined) positiveScalar(sprite.maxWidth, `${path}.maxWidth`, err, 'must be a positive number');
     validateTextRole(sprite, path, err);
     validateCycle(sprite, path, err);
   } else if (sprite.kind === 'circle') {
     knownSet = KNOWN_CIRCLE;
-    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'ring') {
     knownSet = KNOWN_RING;
-    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
-    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'streak') {
     knownSet = KNOWN_STREAK;
-    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
-    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'rect') {
     knownSet = KNOWN_RECT;
-    if (!isRange(sprite.width) || sprite.width[0] <= 0) err(`${path}.width`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.width) || sprite.width[0] <= 0) err(`${path}.width`, rangeMsg(spec));
     if (sprite.aspect !== undefined && (!isRange(sprite.aspect) || sprite.aspect[0] <= 0)) {
       err(`${path}.aspect`, 'must be a [min,max] range of positive height/width ratios');
     }
@@ -625,9 +662,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (!Array.isArray(sprite.values) || sprite.values.length === 0 || sprite.values.length > LIMITS.maxPerLayer || !sprite.values.every((v) => isNum(v) && v >= 0)) {
       err(`${path}.values`, `must be 1..${LIMITS.maxPerLayer} numbers >= 0`);
     }
-    if (!isNum(sprite.length) || sprite.length <= 0) err(`${path}.length`, 'must be > 0 (full-scale bar length)');
-    if (!isNum(sprite.thickness) || sprite.thickness <= 0) err(`${path}.thickness`, 'must be > 0');
-    if (sprite.max !== undefined && (!isNum(sprite.max) || sprite.max <= 0)) err(`${path}.max`, 'must be > 0');
+    positiveScalar(sprite.length, `${path}.length`, err, 'must be > 0 (full-scale bar length)');
+    positiveScalar(sprite.thickness, `${path}.thickness`, err);
+    if (sprite.max !== undefined) positiveScalar(sprite.max, `${path}.max`, err);
     if (sprite.direction !== undefined && !['right', 'left', 'up', 'down'].includes(sprite.direction as string)) {
       err(`${path}.direction`, "must be 'right' | 'left' | 'up' | 'down'");
     }
@@ -635,7 +672,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'polygon') {
     knownSet = KNOWN_POLYGON;
-    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px (circumradius)');
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec, 'circumradius'));
     if (sprite.sides !== undefined && sprite.points !== undefined) {
       err(`${path}.sides`, 'use sides (a regular polygon) or points (a custom one), not both');
     }
@@ -648,9 +685,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'stroke') {
     knownSet = KNOWN_STROKE;
-    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px (the mark\'s bounding size)');
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, rangeMsg(spec, "the mark's bounding size"));
     validateShapePoints(sprite.points, `${path}.points`, 2, err);
-    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
     if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
     if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
@@ -663,10 +700,14 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     } else if (sprite.text.length > LIMITS.maxTextBlockLength) {
       err(`${path}.text`, `must be at most ${LIMITS.maxTextBlockLength} characters`);
     }
-    if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
+    if (Array.isArray(sprite.maxWidth)) {
+      err(`${path}.maxWidth`, 'must be a single number (viewport fraction), not a [min,max] range');
+    } else if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
       err(`${path}.maxWidth`, `must be a positive number up to ${LIMITS.maxTextBlockMaxWidth} (viewport fraction)`);
     }
-    if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
+    if (Array.isArray(sprite.fontSize)) {
+      err(`${path}.fontSize`, 'must be a single number (viewport fraction), not a [min,max] range');
+    } else if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
       err(`${path}.fontSize`, `must be between ${LIMITS.minTextBlockFontSize} and ${LIMITS.maxTextBlockFontSize} (viewport fraction)`);
     }
     if (sprite.lineHeight !== undefined && (!isNum(sprite.lineHeight) || sprite.lineHeight < 0.5 || sprite.lineHeight > 4)) {
@@ -822,7 +863,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
         warn(`${path}.speed`, 'near-zero-speed', `orbit speed is near zero — entities will appear frozen. Typical range: 5–60 deg/sec`);
       }
     }
-    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     if (motion.center !== undefined) {
       if (!isObj(motion.center)) {
         err(`${path}.center`, 'must be {x, y} (0..1) or { layer: key }');
