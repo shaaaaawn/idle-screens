@@ -956,7 +956,7 @@ class TankInstance implements SaverInstance {
       ? (floorOverride as FloorKind)
       : preset.floor;
     if (kind !== 'flat') {
-      const floorHex = String(this.params.floorColor ?? preset.palette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const floorHex = String(this.paletteOr('floorColor', preset.palette?.floor) ?? '#0a1d33');
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       const terrain = buildTerrain(height, floorHex);
       terrain.position.y = -2;
