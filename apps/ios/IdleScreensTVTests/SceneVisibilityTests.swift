@@ -61,6 +61,19 @@ final class SceneVisibilityTests: XCTestCase {
     func testEmptySceneIsInvisible() {
         XCTAssertEqual(SceneVisibility.verdict(layers: [], background: nil), .invisible)
     }
+
+    func testABrightFieldBackgroundIsVisibleEvenWithSparseDarkLayers() {
+        // Regression: `backgroundLuminance` only looked at `color`/`stops`, so
+        // a `field` background (bands only, no `color`/`stops`) never took the
+        // "the fill itself is bright" fast path — the same bug the gradient
+        // fix addressed, just for the one background type it didn't cover.
+        let s = compile("""
+        {"background":{"type":"field","bands":["#101018","#eef2ff","#101018"]},
+         "layers":[{"count":4,"sprite":{"kind":"circle","radius":[1,2],"color":"#12131a"},
+                    "motion":{"type":"static"}}],"units":"px"}
+        """)
+        XCTAssertEqual(SceneVisibility.verdict(layers: s.layers, background: s.bg), .visible)
+    }
 }
 
 /// Two different questions about a gradient background must not share one

@@ -123,16 +123,24 @@ enum SceneVisibility {
         return ink / canvasArea >= minInkFraction ? .visible : .invisible
     }
 
-    /// Brightest color the background actually paints: the solid fill, or
-    /// the brightest of ALL gradient stops. `Background.primaryColor` only
-    /// looks at the first stop (or the solid color) — fine for a placeholder
-    /// tint, but it misses a bright stop further down the gradient, which is
-    /// exactly the case that lights up an otherwise sparse/dark-on-dark scene.
+    /// Brightest color the background actually paints: the solid fill, the
+    /// brightest of ALL gradient stops, or the brightest `field` band.
+    /// `Background.primaryColor` only looks at the first stop (or the solid
+    /// color, or the middle band) — fine for a placeholder tint, but it
+    /// misses a bright stop/band elsewhere, which is exactly the case that
+    /// lights up an otherwise sparse/dark-on-dark scene.
     private static func backgroundLuminance(_ background: SpecSubset.Background?) -> Double {
         guard let background else { return 0 }
         if let color = background.color { return luminance(hex: color) }
-        guard let stops = background.stops, !stops.isEmpty else { return 0 }
-        return stops.map { luminance(hex: $0.color) }.max() ?? 0
+        if let stops = background.stops, !stops.isEmpty {
+            return stops.map { luminance(hex: $0.color) }.max() ?? 0
+        }
+        // `field` backgrounds carry no `color`/`stops` — only `bands` — so
+        // without this branch a bright field (e.g. a light noise band) never
+        // takes the fast path above and a sparse/dark-on-dark scene over it
+        // reads as "not broadcasting" the same way the gradient bug did.
+        guard let bands = background.bands, !bands.isEmpty else { return 0 }
+        return bands.map { luminance(hex: $0) }.max() ?? 0
     }
 
     /// Relative luminance (0…1) of a hex color, gamma-naive — fine for a
