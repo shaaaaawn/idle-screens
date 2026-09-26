@@ -71,6 +71,14 @@ describe('Shoal', () => {
     // Two fish may brush past on an excursion, never sit inside each other.
     expect(worst).toBeGreaterThan(0.3);
   });
+  it('keeps every fish above the floor it is given by `clear` lengths', () => {
+    const high = new Shoal(createRng(5), { count: 20, kind: 'ember', lit: false, length: 6, clear: 1.2 });
+    const canopy = (x: number): number => 30 + Math.sin(x * 0.05) * 15;
+    for (let t = 0; t < 60; t += 3.1) {
+      const ys = high.positions(t, circle, canopy);
+      for (let i = 0; i < 20; i++) expect(ys[i * 3 + 1]).toBeGreaterThanOrEqual(canopy(ys[i * 3]!) + 1.2 * 6 - 1e-9);
+    }
+  });
   it('writes one instance per fish, and every kind builds a finite fish', () => {
     shoal.update(12, circle, flat);
     expect(shoal.mesh.count).toBe(30);

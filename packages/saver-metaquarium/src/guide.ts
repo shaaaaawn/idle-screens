@@ -50,6 +50,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   formationBreathe: 'How much a formation swells and tightens.',
   shoal: 'An ambient school of small fish swimming as one body beside the cast; the odd one wanders out and back (0 = none). Up to 2.5× the device\'s fish cap.',
   shoalKind: 'Who the school is: `neon` (blue line, red rear), `rummynose` (red face, barred tail) or `ember` (orange).',
+  shoalSpeed: 'How fast the school travels (0.3–2, default 0.8), independent of `swimSpeed`. It swims above the plants, across the front of the shot unless the camera orbits.',
   // look
   fishLighting: '`lit` (default) lights fish with a studio rig and their own glow parts; `flat` is the unlit original.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',

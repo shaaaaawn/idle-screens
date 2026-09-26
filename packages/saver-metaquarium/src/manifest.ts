@@ -170,6 +170,9 @@ export const METAQUARIUM_PARAMS = {
    *  out and back. The amount sets the count (up to 2.5× the tier's fish cap). */
   shoal: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   shoalKind: { type: 'enum', default: 'neon', options: ['neon', 'rummynose', 'ember'], ease: 'step' },
+  /** How fast the school travels its route — its own speed, not the cast's `swimSpeed`,
+   *  so a slow, contemplative scene still has a school that goes somewhere. */
+  shoalSpeed: { type: 'number', default: 0.8, min: 0.3, max: 2, ease: 'smooth' },
   // ---- The look. These three are the RENDERER, not settings a scene must
   // carry: every tank is lit, glowing and reflective with no params at all,
   // and the room, the cast and the camera never need to know. Each exists only

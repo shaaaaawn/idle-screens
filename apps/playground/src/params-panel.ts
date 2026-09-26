@@ -129,7 +129,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife', 'swimWave']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
-    ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind']],
+    ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
     ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
