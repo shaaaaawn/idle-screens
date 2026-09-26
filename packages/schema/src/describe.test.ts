@@ -31,4 +31,14 @@ describe('describeScene', () => {
     const d = describeScene(spec(2160), { viewport: { width: 2160, height: 2160 } });
     expect(d.snapshots[0]!.layers[0]!.count).toBe(10);
   });
+
+  it('measures polygon coverage by the outline area', () => {
+    const band: SaverSpec = {
+      ...spec(),
+      layers: [{ count: 1, sprite: { kind: 'polygon', radius: [0.5, 0.5], color: '#fff', points: [[-1, -0.1], [1, -0.1], [1, 0.1], [-1, 0.1]] }, motion: { type: 'static' } }],
+    };
+    const d = describeScene(band, { viewport: { width: 1000, height: 1000 } });
+    // 1000 × 100 px of a 1000 × 1000 frame.
+    expect(d.snapshots[0]!.layers[0]!.coverage).toBeCloseTo(0.1, 4);
+  });
 });

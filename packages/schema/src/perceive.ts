@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -77,6 +77,23 @@ const LINE_SALIENCE = 3.5;
  * smear's shape; the total energy is set by `g`, not by this constant.
  */
 const GHOST_TAPS = 12;
+
+/**
+ * A polygon whose bounding diameter spans at least this many grid cells is
+ * rasterized by its real outline; below it, it splats as its circumscribed
+ * disc weighted by `polygonFill`, exactly as before. The two do NOT agree at
+ * the boundary: the disc path lights every cell whose centre is within half a
+ * cell of the rim at full weight, so it over-reports a small glyph's ink (12
+ * hexagons just under 3 cells: mean deviation 0.022 against an analytic 0.014;
+ * the outline gives 0.013). Circles carry the same dilation, and keeping it
+ * for small polygons keeps a hexagon and a disc of one size reading alike.
+ * Above the threshold the disc is materially wrong for any non-round glyph — a
+ * full-width flat band reads as a circle, a ridge silhouette as a dome.
+ */
+const POLYGON_OUTLINE_CELLS = 3;
+
+/** Sub-scanlines per grid row when rasterizing a polygon outline. */
+const POLYGON_SCANLINES = 4;
 
 // ---------------------------------------------------------------------------
 // Shared scene construction (mirrors describeScene/adviseSpec)
@@ -224,6 +241,88 @@ function textBlockRevealFraction(
 }
 
 // ---------------------------------------------------------------------------
+// Polygon outline rasterization
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of each cell in the window [c0..c1]×[r0..r1] that a polygon fills,
+ * row-major within the window. Scanline with the canvas's own `nonzero` rule:
+ * each sub-scanline collects signed edge crossings (half-open in y, so a
+ * horizontal edge or a vertex on the line is counted once), and the spans where
+ * the winding is nonzero are split exactly across the cells they cross. So
+ * coverage is exact horizontally and POLYGON_SCANLINES-sampled vertically, and
+ * a self-intersecting outline fills both lobes, as `ctx.fill()` does.
+ */
+function polygonCellCoverage(
+  pts: Array<{ x: number; y: number }>,
+  cellW: number,
+  cellH: number,
+  c0: number,
+  c1: number,
+  r0: number,
+  r1: number,
+): Float64Array {
+  const nc = c1 - c0 + 1;
+  const cov = new Float64Array(nc * (r1 - r0 + 1));
+  const xMin = c0 * cellW;
+  const xMax = (c1 + 1) * cellW;
+  const share = 1 / POLYGON_SCANLINES;
+  const hits: Array<{ x: number; dir: number }> = [];
+  const addSpan = (row: number, xa: number, xb: number): void => {
+    const a = Math.max(xMin, xa);
+    const b = Math.min(xMax, xb);
+    if (!(b > a)) return;
+    const first = Math.max(c0, Math.floor(a / cellW));
+    const last = Math.min(c1, Math.floor(b / cellW));
+    for (let c = first; c <= last; c++) {
+      const len = Math.min(b, (c + 1) * cellW) - Math.max(a, c * cellW);
+      if (len > 0) cov[row * nc + (c - c0)]! += (len / cellW) * share;
+    }
+  };
+  for (let r = r0; r <= r1; r++) {
+    for (let k = 0; k < POLYGON_SCANLINES; k++) {
+      const y = (r + (k + 0.5) / POLYGON_SCANLINES) * cellH;
+      hits.length = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]!;
+        const q = pts[(i + 1) % pts.length]!;
+        const down = p.y <= y && q.y > y;
+        if (!down && !(q.y <= y && p.y > y)) continue;
+        hits.push({ x: p.x + ((y - p.y) / (q.y - p.y)) * (q.x - p.x), dir: down ? 1 : -1 });
+      }
+      if (hits.length < 2) continue;
+      hits.sort((m, n) => m.x - n.x);
+      let wind = 0;
+      let start = 0;
+      for (const hit of hits) {
+        const before = wind;
+        wind += hit.dir;
+        if (before === 0 && wind !== 0) start = hit.x;
+        else if (before !== 0 && wind === 0) addSpan(r - r0, start, hit.x);
+      }
+    }
+  }
+  return cov;
+}
+
+/** Distance from (x, y) to the nearest edge of a closed outline. */
+function distanceToOutline(pts: Array<{ x: number; y: number }>, x: number, y: number): number {
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const ex = q.x - p.x;
+    const ey = q.y - p.y;
+    const len2 = ex * ex + ey * ey;
+    const u = len2 > 0 ? Math.max(0, Math.min(1, ((x - p.x) * ex + (y - p.y) * ey) / len2)) : 0;
+    const dx = x - (p.x + ex * u);
+    const dy = y - (p.y + ey * u);
+    best = Math.min(best, dx * dx + dy * dy);
+  }
+  return Math.sqrt(best);
+}
+
+// ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
 
@@ -263,10 +362,11 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
  * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
  * re-uses drawTrail's sampling — past positions with decaying alpha and
- * shrinking radius. Remaining approximations (documented, deliberate): soft
- * circles use a linear falloff, background drift is sampled at its rest
- * position. Good enough to perceive composition, focus, balance — and now
- * smear.
+ * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
+ * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Remaining approximations (documented, deliberate): soft circles use a linear
+ * falloff, background drift is sampled at its rest position. Good enough to
+ * perceive composition, focus, balance — and now smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
@@ -380,6 +480,69 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     }
   };
 
+  // A polygon painted by its real outline — the renderer's path, rotated by
+  // `rotationAt` about the entity — instead of its circumscribed disc. Weight
+  // per cell is the fraction of it the outline fills; `soft` is the renderer's
+  // radial gradient (centred on the entity, radius = circumradius) clipped to
+  // that outline. The additive halo spreads past the OUTLINE, not a disc: its
+  // band is GLOW_SPREAD − 1 times the glyph's thickness (2·area/perimeter —
+  // the radius for a disc, the apothem for a regular n-gon), so a soft
+  // `lighter` hexagon blooms about as far as the disc model did while a
+  // full-width band or ridge doesn't re-inflate into a screen-filling dome.
+  const splatPolygonOutline = (layer: LayerSpec, s: PolygonSprite, e: Entity, p: { x: number; y: number }, sz: number, a: number, lum: number, tPass: number): void => {
+    const radius = sz / 2;
+    const rot = rotationAt(e, tPass);
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
+    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+    const glow = !!s.soft && additive;
+    let band = 0;
+    if (glow) {
+      const perimeter = pts.reduce((acc, q, i) => { const n = pts[(i + 1) % pts.length]!; return acc + Math.hypot(n.x - q.x, n.y - q.y); }, 0);
+      band = perimeter > 0 ? (GLOW_SPREAD - 1) * ((2 * polygonArea(pts)) / perimeter) : 0;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const q of pts) {
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+    }
+    const c0 = Math.max(0, Math.floor((minX - band) / cellW));
+    const c1 = Math.min(cols - 1, Math.floor((maxX + band) / cellW));
+    const r0 = Math.max(0, Math.floor((minY - band) / cellH));
+    const r1 = Math.min(rows - 1, Math.floor((maxY + band) / cellH));
+    if (c0 > c1 || r0 > r1) return;
+    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
+    const nc = c1 - c0 + 1;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const f = cov[(r - r0) * nc + (c - c0)]!;
+        const x = (c + 0.5) * cellW;
+        const y = (r + 0.5) * cellH;
+        let wgt: number;
+        if (glow) {
+          // Outside the outline's box by more than the band: no halo reaches.
+          const outX = Math.max(0, minX - x, x - maxX);
+          const outY = Math.max(0, minY - y, y - maxY);
+          if (f >= 1) wgt = 1;
+          else if (outX * outX + outY * outY >= band * band) wgt = f;
+          else {
+            const k = band > 0 ? Math.max(0, 1 - distanceToOutline(pts, x, y) / band) : 0;
+            wgt = f + (1 - f) * k * k;
+          }
+        } else if (s.soft) {
+          wgt = f * Math.max(0.1, 1 - Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6));
+        } else {
+          wgt = f;
+        }
+        if (wgt > 0) compose(r * cols + c, lum, a * Math.min(1, wgt), layer.blend);
+      }
+    }
+  };
+
   // One composite pass at time tPass with all ink scaled by alphaScale — the
   // analytic mirror of the renderer's paintFrame. Ghost passes call this with
   // decayed weights; the live frame calls it with alphaScale 1.
@@ -397,6 +560,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const sz = layer.transform ? sizeAt(e, tPass) * transformSize(layer.transform) : sizeAt(e, tPass);
       const s = layer.sprite;
 
+      if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+        splatPolygonOutline(layer, s, e, p, sz, a, lum, tPass);
+        continue;
+      }
       if (s.kind === 'stroke') {
         // Stamp along the sampled path, rotated like the renderer does.
         const pts = strokeSamples(s, sz / 2);
@@ -481,8 +648,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
-      // A polygon fills only part of its disc; a feathered rect only part of
-      // its box. Scale the splat weight rather than trace the outline.
+      // A small polygon (under POLYGON_OUTLINE_CELLS) fills only part of its
+      // disc; a feathered rect only part of its box. Scale the splat weight
+      // rather than trace the outline — large polygons took the outline path.
       const shapeWeight = s.kind === 'polygon'
         ? polygonFill(s, sz / 2)
         : s.kind === 'rect' && s.feather
