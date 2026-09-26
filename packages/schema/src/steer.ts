@@ -46,6 +46,29 @@ export function resolveSpecPath(spec: unknown, path: string): PathTarget | null 
   return exists ? { parent: node as PathTarget['parent'], key } : null;
 }
 
+/**
+ * The index form of a key-aware dot-path (`fireflies.sprite.color` →
+ * `layers.3.sprite.color`), or null when it does not resolve. Two paths that
+ * address the same field compare equal after this — how a live steer finds
+ * out whether a `timeline` key animates the field it touches.
+ */
+export function canonicalSpecPath(spec: unknown, path: string): string | null {
+  if (!resolveSpecPath(spec, path)) return null;
+  const parts = path.split('.');
+  const s = spec as { layers?: Array<Record<string, unknown>> };
+  if (parts[0] !== 'layers' && parts[0] !== 'background' && Array.isArray(s.layers)) {
+    const idx = s.layers.findIndex((l) => l && l.key === parts[0]);
+    if (idx !== -1) parts.splice(0, 1, 'layers', String(idx));
+  }
+  return parts.join('.');
+}
+
+/** Read the value at a dot-path, or undefined when it does not resolve. */
+export function readSpecPath(spec: unknown, path: string): unknown {
+  const loc = resolveSpecPath(spec, path);
+  return loc ? (loc.parent as Record<string | number, unknown>)[loc.key] : undefined;
+}
+
 /** A steering delta as carried on a channel control-track. */
 export interface SteerDelta {
   t: number;
@@ -87,7 +110,20 @@ function lerpHex(a: string, b: string, k: number): string {
  */
 export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
   const kk = Math.max(0, Math.min(1, k));
-  const walk = (a: unknown, b: unknown, key?: string | number): unknown => {
+  const out = lerpValue(from, to, kk, true) as SaverSpec;
+  return out;
+}
+
+/**
+ * The walk behind `lerpSpec`, for any value: numbers lerp, hex colours lerp
+ * per channel, equal-length arrays and objects recurse, everything else steps
+ * to the target at k > 0 (`count` rounds). At a spec's root a `timeline` steps
+ * too — two timelines' key times must never blend. No existing spec carries a
+ * timeline, so every stored morph and glide is unchanged.
+ */
+export function lerpValue(from: unknown, to: unknown, k: number, specRoot = false): unknown {
+  const kk = Math.max(0, Math.min(1, k));
+  const walk = (a: unknown, b: unknown, key?: string | number, root = false): unknown => {
     if (typeof a === 'number' && typeof b === 'number') {
       const v = a + (b - a) * kk;
       return key === 'count' ? Math.max(1, Math.round(v)) : v;
@@ -101,13 +137,15 @@ export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
     if (a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
       const out: Record<string, unknown> = {};
       for (const kName of Object.keys(b as Record<string, unknown>)) {
-        out[kName] = walk((a as Record<string, unknown>)[kName], (b as Record<string, unknown>)[kName], kName);
+        const av = (a as Record<string, unknown>)[kName];
+        const bv = (b as Record<string, unknown>)[kName];
+        out[kName] = root && kName === 'timeline' ? (kk > 0 ? bv : av) : walk(av, bv, kName);
       }
       return out;
     }
     return kk > 0 ? b : a; // non-interpolable → step to target
   };
-  return walk(from, to) as SaverSpec;
+  return walk(from, to, undefined, specRoot);
 }
 
 /**

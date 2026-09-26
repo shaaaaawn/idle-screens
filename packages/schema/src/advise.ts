@@ -4,6 +4,7 @@ import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
+import { resolveTimelineAt } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -58,6 +59,8 @@ export function adviseSpec(
    */
   opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
 ): SpecWarning[] {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
@@ -676,7 +679,8 @@ export function adviseSequence(
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
         });
-      } else if (morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' })) {
+      } else if (!seq.segments[i]!.scene.timeline && !seq.segments[i + 1]!.scene.timeline
+        && morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' || tr.text === 'dip' })) {
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-nothing-morphable',

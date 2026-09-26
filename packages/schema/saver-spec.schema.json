@@ -454,9 +454,39 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "dx": {
+              "type": "number",
+              "minimum": -2,
+              "maximum": 2,
+              "description": "Offset from x in min(w,h) units (px under units: 'px'). x/y are fractions of width and height, sizes are fractions of min(w,h) — anchor parts on a shared fraction (the centre is the only aspect-safe one) and offset them with dx/dy so they register on every aspect. Placement (structural). Native clients ignore it."
+            },
+            "dy": {
+              "type": "number",
+              "minimum": -2,
+              "maximum": 2,
+              "description": "Offset from y in min(w,h) units. See dx."
             }
           },
           "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Paint-level layer opacity (default 1): multiplies every entity's alpha and the life envelope at draw time. Unlike alpha (a range baked into entities), it is paint — setParam, a timeline key or a morph glide it without re-seeding. Native clients ignore it (1)."
+        },
+        "transform": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number", "minimum": -2, "maximum": 2, "description": "Translate in min(w,h) units." },
+            "y": { "type": "number", "minimum": -2, "maximum": 2, "description": "Translate in min(w,h) units." },
+            "scale": { "type": "number", "minimum": 0, "maximum": 8, "description": "Uniform scale about the viewport centre (default 1)." },
+            "scaleX": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra horizontal scale; toward 0 reads as a turn about the vertical axis, negative mirrors (default 1)." },
+            "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the viewport centre." }
+          },
+          "description": "Paint-level transform of the whole layer at draw time, about the viewport centre. Outside the structural signature, so it glides under setParam, a timeline key or a morph — a camera for timed pieces, a slow drift for ambient ones. Native clients ignore it (identity)."
         },
         "trail": {
           "type": "object",
@@ -1526,6 +1556,33 @@
         "finish": {
           "$ref": "#/definitions/finish"
         },
+        "timeline": {
+          "type": "object",
+          "required": ["keys"],
+          "additionalProperties": false,
+          "properties": {
+            "loop": { "type": "boolean", "description": "Repeat every duration ms. A looping path's value before its first key is its last key's value." },
+            "duration": { "type": "number", "exclusiveMinimum": 0, "maximum": 86400000, "description": "Lap length in ms; required with loop and greater than the latest key's t." },
+            "keys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "required": ["t", "path", "value"],
+                "additionalProperties": false,
+                "properties": {
+                  "t": { "type": "number", "minimum": 0, "description": "Scene time in ms (a sequence segment's own clock)." },
+                  "path": { "type": "string", "minLength": 1, "description": "A setParam dot-path that already exists on the spec (layers.0.sprite.color, key.opacity, background.stops.1.color, …)." },
+                  "value": { "description": "The target value; the spec must still validate with it applied." },
+                  "ease": { "enum": ["step", "linear", "smooth"], "description": "Default smooth." },
+                  "dur": { "type": "number", "minimum": 0, "maximum": 30000, "description": "Glide length in ms from t (default 1000; 0 = cut)." }
+                }
+              }
+            }
+          },
+          "description": "Authored keyframes on the scene's own clock. Each key glides its path to value at t; distinct key times on one path are >= 200 ms apart (flash safety). Live steering layers on top: a steer on a path no key touches is sticky (as on any scene); on an animated path it holds until that path's next key, then the timeline takes it back. Keys on structural paths rebuild (a pop) — animate paint (colour, opacity, transform, polygon points). Distinct from a channel track, whose t is a wall-clock stamp. Native clients ignore it and show the base spec — author the base as the piece's rest state."
+        },
         "layers": {
           "type": "array",
           "minItems": 1,
@@ -1585,6 +1642,10 @@
             "epoch"
           ],
           "description": "What the sequence clock is anchored to. 'mount' (default): every viewer starts at T = 0 when it mounts — a joiner sees segment 0 (pre-roll semantics). 'epoch': a viewer handed sequenceBaseT on its mount context (the host's Date.now() − epoch) starts its clock there, so every screen shows the same segment; a late joiner lands mid-loop. advance: 'input' holds stay armed under either. Native clients that anchor at their own mount behave as 'mount'."
+        },
+        "wrapMorph": {
+          "type": "boolean",
+          "description": "Honour a morph declared on the last segment at the loop wrap (the lap morphs back into segment 0 instead of cutting). Opt-in; takes effect only under loop: true when every segment morphs into the next and the last is a structural twin of the first (validateSequence warns wrap-morph-inactive otherwise). Native clients cut."
         },
         "bed": {
           "$ref": "#/definitions/saverSpec",
@@ -1658,8 +1719,8 @@
                   "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
                 },
                 "text": {
-                  "enum": ["step", "crossfade"],
-                  "description": "How text / textBlock strings change during the morph. 'step' (default, today's behaviour): the incoming string shows from the first frame. 'crossfade': each text layer whose string(s) differ is drawn twice for dur — the outgoing words at 1 − k, the incoming at k (k = the eased progress). Native clients step (tvOS already cross-fades whole frames on a segment change)."
+                  "enum": ["step", "crossfade", "dip"],
+                  "description": "How text / textBlock strings change during the morph. 'step' (default, today's behaviour): the incoming string shows from the first frame. 'crossfade': each text layer whose string(s) differ is drawn twice for dur — the outgoing words at 1 − k, the incoming at k (k = the eased progress). 'dip': the same two passes in turn — the outgoing words fade out over the first half, the incoming fade in over the second, never both at once. Native clients step (tvOS already cross-fades whole frames on a segment change)."
                 }
               },
               "required": ["type", "dur"],

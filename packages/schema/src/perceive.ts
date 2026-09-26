@@ -35,7 +35,8 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
+import { resolveTimelineAt } from './timeline';
+import { LIMITS, type IdleSequence, type LayerSpec, type LayerTransform, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -88,7 +89,38 @@ interface BuiltScene {
   seed: number;
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
+  /** Entities of layers with a paint `transform` — null (every scene without one) skips the lookup. */
+  transforms: Map<Entity, LayerTransform> | null;
 }
+
+/**
+ * Where a layer `transform` puts a point — the renderer's canvas transform
+ * (about the viewport centre, offsets in min(w,h) units) applied to one
+ * position. Sprites are not rotated here; the maps model ink, not glyph angle.
+ */
+function transformPoint(tf: LayerTransform, p: { x: number; y: number }, w: number, h: number, unit: number): { x: number; y: number } {
+  const s = tf.scale ?? 1;
+  const sx = s * (tf.scaleX ?? 1);
+  let x = (p.x - w / 2) * sx;
+  let y = (p.y - h / 2) * s;
+  if (tf.rotate) {
+    const r = (tf.rotate * Math.PI) / 180;
+    const c = Math.cos(r);
+    const n = Math.sin(r);
+    [x, y] = [x * c - y * n, x * n + y * c];
+  }
+  return { x: x + w / 2 + (tf.x ?? 0) * unit, y: y + h / 2 + (tf.y ?? 0) * unit };
+}
+
+/** A layer transform's linear size factor (the geometric mean of its two axes' scales). */
+function transformSize(tf: LayerTransform | undefined): number {
+  if (!tf) return 1;
+  const s = tf.scale ?? 1;
+  return s * Math.sqrt(Math.abs(tf.scaleX ?? 1));
+}
+
+/** A layer's paint `opacity` as a multiplier (1 when unset). */
+const layerOpacity = (layer: LayerSpec): number => (layer.opacity === undefined ? 1 : Math.max(0, Math.min(1, layer.opacity)));
 
 export interface PerceiveOptions {
   viewport?: { width: number; height: number };
@@ -114,7 +146,13 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  return { w, h, scale, seed, layers, byKey };
+  let transforms: Map<Entity, LayerTransform> | null = null;
+  for (const { layer, entities } of layers) {
+    if (!layer.transform) continue;
+    transforms ??= new Map();
+    for (const e of entities) transforms.set(e, layer.transform);
+  }
+  return { w, h, scale, seed, layers, byKey, transforms };
 }
 
 /** Position with layer-parented-orbit resolution (matches the renderer). */
@@ -128,7 +166,8 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
       p.y += pp.y;
     }
   }
-  return p;
+  const tf = scene.transforms?.get(e);
+  return tf ? transformPoint(tf, p, scene.w, scene.h, scene.scale) : p;
 }
 
 /**
@@ -257,6 +296,8 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
@@ -371,7 +412,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   // decayed weights; the live frame calls it with alphaScale 1.
   const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = lifeAlphaAt(layer.life, tPass);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * layerOpacity(layer);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
@@ -380,7 +421,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
-      const sz = sizeAt(e, tPass);
+      const sz = layer.transform ? sizeAt(e, tPass) * transformSize(layer.transform) : sizeAt(e, tPass);
       const s = layer.sprite;
 
       if (s.kind === 'stroke') {
@@ -729,6 +770,7 @@ export interface TextSpriteInfo {
  * that blind spot analytically.
  */
 export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSpriteInfo[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const out: TextSpriteInfo[] = [];
@@ -805,6 +847,7 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
 function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
@@ -838,7 +881,8 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
   };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
-    const lifeA = lifeAlphaAt(layer.life, t);
+    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * layerOpacity(layer);
+    const areaScale = layer.transform ? transformSize(layer.transform) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
     for (const e of entities) {
@@ -871,7 +915,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
-      area += entArea * a;
+      area += layer.transform ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
       // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
@@ -918,6 +962,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
  * identical in every other channel. See `cohesion.ts`.
  */
 export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
 }
@@ -933,6 +978,7 @@ export interface LayerMotionStats {
 
 /** Per-layer displacement between t and t+dt — choreography as numbers. */
 export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: number } = {}): LayerMotionStats[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const dt = opts.dt ?? 500;
@@ -1080,6 +1126,7 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
     t: opts.t ?? 5000,

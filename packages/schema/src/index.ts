@@ -10,4 +10,5 @@ export * from './perceive';
 export * from './field';
 export * from './finish';
 export * from './sequence';
+export * from './timeline';
 export * from './examples';

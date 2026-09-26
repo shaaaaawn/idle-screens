@@ -1,0 +1,590 @@
+{
+  "format": "idle-sequence",
+  "schemaVersion": 1,
+  "id": "wrap-ident",
+  "label": "Ident \u00b7 wrapMorph + dip",
+  "seed": 9,
+  "loop": true,
+  "wrapMorph": true,
+  "segments": [
+    {
+      "key": "circle",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "ident-circle",
+        "label": "Ident",
+        "seed": 9,
+        "background": {
+          "type": "solid",
+          "color": "#0a0e1a"
+        },
+        "layers": [
+          {
+            "key": "shape",
+            "count": 1,
+            "sprite": {
+              "kind": "polygon",
+              "radius": [
+                0.18,
+                0.18
+              ],
+              "points": [
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.9659,
+                  0.2588
+                ],
+                [
+                  0.866,
+                  0.5
+                ],
+                [
+                  0.7071,
+                  0.7071
+                ],
+                [
+                  0.5,
+                  0.866
+                ],
+                [
+                  0.2588,
+                  0.9659
+                ],
+                [
+                  0.0,
+                  1.0
+                ],
+                [
+                  -0.2588,
+                  0.9659
+                ],
+                [
+                  -0.5,
+                  0.866
+                ],
+                [
+                  -0.7071,
+                  0.7071
+                ],
+                [
+                  -0.866,
+                  0.5
+                ],
+                [
+                  -0.9659,
+                  0.2588
+                ],
+                [
+                  -1.0,
+                  0.0
+                ],
+                [
+                  -0.9659,
+                  -0.2588
+                ],
+                [
+                  -0.866,
+                  -0.5
+                ],
+                [
+                  -0.7071,
+                  -0.7071
+                ],
+                [
+                  -0.5,
+                  -0.866
+                ],
+                [
+                  -0.2588,
+                  -0.9659
+                ],
+                [
+                  -0.0,
+                  -1.0
+                ],
+                [
+                  0.2588,
+                  -0.9659
+                ],
+                [
+                  0.5,
+                  -0.866
+                ],
+                [
+                  0.7071,
+                  -0.7071
+                ],
+                [
+                  0.866,
+                  -0.5
+                ],
+                [
+                  0.9659,
+                  -0.2588
+                ]
+              ],
+              "color": "#e8f0ff"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              1,
+              1
+            ]
+          },
+          {
+            "key": "halo",
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.3,
+                0.3
+              ],
+              "color": "#7fb2ff",
+              "width": 0.004
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              0.8,
+              0.8
+            ],
+            "transform": {
+              "scaleX": 1,
+              "rotate": 0
+            }
+          },
+          {
+            "key": "cap",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "ambient",
+              "fontSize": 0.05,
+              "maxWidth": 1.2,
+              "anchor": "center",
+              "color": "#e8f0ff",
+              "font": "500 sans-serif"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": 0.34
+            }
+          }
+        ]
+      },
+      "duration": 4000,
+      "transition": {
+        "type": "morph",
+        "dur": 1600,
+        "text": "dip"
+      }
+    },
+    {
+      "key": "square",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "ident-square",
+        "label": "Ident",
+        "seed": 9,
+        "background": {
+          "type": "solid",
+          "color": "#0e0a1a"
+        },
+        "layers": [
+          {
+            "key": "shape",
+            "count": 1,
+            "sprite": {
+              "kind": "polygon",
+              "radius": [
+                0.18,
+                0.18
+              ],
+              "points": [
+                [
+                  1,
+                  0.0
+                ],
+                [
+                  1,
+                  0.3494
+                ],
+                [
+                  1,
+                  0.675
+                ],
+                [
+                  0.9546,
+                  0.9546
+                ],
+                [
+                  0.675,
+                  1
+                ],
+                [
+                  0.3494,
+                  1
+                ],
+                [
+                  0.0,
+                  1
+                ],
+                [
+                  -0.3494,
+                  1
+                ],
+                [
+                  -0.675,
+                  1
+                ],
+                [
+                  -0.9546,
+                  0.9546
+                ],
+                [
+                  -1,
+                  0.675
+                ],
+                [
+                  -1,
+                  0.3494
+                ],
+                [
+                  -1,
+                  0.0
+                ],
+                [
+                  -1,
+                  -0.3494
+                ],
+                [
+                  -1,
+                  -0.675
+                ],
+                [
+                  -0.9546,
+                  -0.9546
+                ],
+                [
+                  -0.675,
+                  -1
+                ],
+                [
+                  -0.3494,
+                  -1
+                ],
+                [
+                  -0.0,
+                  -1
+                ],
+                [
+                  0.3494,
+                  -1
+                ],
+                [
+                  0.675,
+                  -1
+                ],
+                [
+                  0.9546,
+                  -0.9546
+                ],
+                [
+                  1,
+                  -0.675
+                ],
+                [
+                  1,
+                  -0.3494
+                ]
+              ],
+              "color": "#e8f0ff"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              1,
+              1
+            ]
+          },
+          {
+            "key": "halo",
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.3,
+                0.3
+              ],
+              "color": "#7fb2ff",
+              "width": 0.004
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              0.8,
+              0.8
+            ],
+            "transform": {
+              "scaleX": 0.2,
+              "rotate": 0
+            }
+          },
+          {
+            "key": "cap",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "steerable",
+              "fontSize": 0.05,
+              "maxWidth": 1.2,
+              "anchor": "center",
+              "color": "#e8f0ff",
+              "font": "500 sans-serif"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": 0.34
+            }
+          }
+        ]
+      },
+      "duration": 4000,
+      "transition": {
+        "type": "morph",
+        "dur": 1600,
+        "text": "dip"
+      }
+    },
+    {
+      "key": "star",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "ident-star",
+        "label": "Ident",
+        "seed": 9,
+        "background": {
+          "type": "solid",
+          "color": "#1a0a12"
+        },
+        "layers": [
+          {
+            "key": "shape",
+            "count": 1,
+            "sprite": {
+              "kind": "polygon",
+              "radius": [
+                0.18,
+                0.18
+              ],
+              "points": [
+                [
+                  0.0,
+                  -1.0
+                ],
+                [
+                  0.1165,
+                  -0.4347
+                ],
+                [
+                  0.5,
+                  -0.866
+                ],
+                [
+                  0.3182,
+                  -0.3182
+                ],
+                [
+                  0.866,
+                  -0.5
+                ],
+                [
+                  0.4347,
+                  -0.1165
+                ],
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.4347,
+                  0.1165
+                ],
+                [
+                  0.866,
+                  0.5
+                ],
+                [
+                  0.3182,
+                  0.3182
+                ],
+                [
+                  0.5,
+                  0.866
+                ],
+                [
+                  0.1165,
+                  0.4347
+                ],
+                [
+                  0.0,
+                  1.0
+                ],
+                [
+                  -0.1165,
+                  0.4347
+                ],
+                [
+                  -0.5,
+                  0.866
+                ],
+                [
+                  -0.3182,
+                  0.3182
+                ],
+                [
+                  -0.866,
+                  0.5
+                ],
+                [
+                  -0.4347,
+                  0.1165
+                ],
+                [
+                  -1.0,
+                  0.0
+                ],
+                [
+                  -0.4347,
+                  -0.1165
+                ],
+                [
+                  -0.866,
+                  -0.5
+                ],
+                [
+                  -0.3182,
+                  -0.3182
+                ],
+                [
+                  -0.5,
+                  -0.866
+                ],
+                [
+                  -0.1165,
+                  -0.4347
+                ]
+              ],
+              "color": "#e8f0ff"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              1,
+              1
+            ]
+          },
+          {
+            "key": "halo",
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.3,
+                0.3
+              ],
+              "color": "#7fb2ff",
+              "width": 0.004
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": -0.04
+            },
+            "alpha": [
+              0.8,
+              0.8
+            ],
+            "transform": {
+              "scaleX": -1,
+              "rotate": 0
+            }
+          },
+          {
+            "key": "cap",
+            "count": 1,
+            "sprite": {
+              "kind": "textBlock",
+              "text": "timed",
+              "fontSize": 0.05,
+              "maxWidth": 1.2,
+              "anchor": "center",
+              "color": "#e8f0ff",
+              "font": "500 sans-serif"
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.5,
+              "y": 0.5,
+              "dy": 0.34
+            }
+          }
+        ]
+      },
+      "duration": 4000,
+      "transition": {
+        "type": "morph",
+        "dur": 1600,
+        "text": "dip"
+      }
+    }
+  ]
+}

@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 1,
+  "id": "timed-sunrise",
+  "label": "Timed \u00b7 Sunrise over the grid",
+  "seed": 11,
+  "background": {
+    "type": "gradient",
+    "stops": [
+      {
+        "at": 0,
+        "color": "#05060f"
+      },
+      {
+        "at": 0.62,
+        "color": "#0b0d24"
+      },
+      {
+        "at": 1,
+        "color": "#1a0d1f"
+      }
+    ]
+  },
+  "layers": [
+    {
+      "key": "stars",
+      "count": 90,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.0008,
+          0.002
+        ],
+        "color": "#dfe6ff",
+        "soft": true
+      },
+      "motion": {
+        "type": "drift",
+        "speed": [
+          0.002,
+          0.006
+        ],
+        "angle": 180
+      },
+      "region": {
+        "y": [
+          0,
+          0.6
+        ]
+      },
+      "alpha": [
+        0.25,
+        0.8
+      ],
+      "pulse": {
+        "amp": 0.3,
+        "period": 5000
+      },
+      "opacity": 1
+    },
+    {
+      "key": "glow",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.42,
+          0.42
+        ],
+        "color": "#ff7a3d",
+        "soft": true
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dy": 0.22
+      },
+      "alpha": [
+        0.35,
+        0.35
+      ],
+      "blend": "lighter",
+      "opacity": 0,
+      "transform": {
+        "scale": 0.6
+      }
+    },
+    {
+      "key": "sun",
+      "count": 1,
+      "sprite": {
+        "kind": "polygon",
+        "radius": [
+          0.16,
+          0.16
+        ],
+        "points": [
+          [
+            1.0,
+            0.0
+          ],
+          [
+            0.9659,
+            0.2588
+          ],
+          [
+            0.866,
+            0.5
+          ],
+          [
+            0.7071,
+            0.7071
+          ],
+          [
+            0.5,
+            0.866
+          ],
+          [
+            0.2588,
+            0.9659
+          ],
+          [
+            0.0,
+            1.0
+          ],
+          [
+            -0.2588,
+            0.9659
+          ],
+          [
+            -0.5,
+            0.866
+          ],
+          [
+            -0.7071,
+            0.7071
+          ],
+          [
+            -0.866,
+            0.5
+          ],
+          [
+            -0.9659,
+            0.2588
+          ],
+          [
+            -1.0,
+            0.0
+          ],
+          [
+            -0.9659,
+            -0.2588
+          ],
+          [
+            -0.866,
+            -0.5
+          ],
+          [
+            -0.7071,
+            -0.7071
+          ],
+          [
+            -0.5,
+            -0.866
+          ],
+          [
+            -0.2588,
+            -0.9659
+          ],
+          [
+            -0.0,
+            -1.0
+          ],
+          [
+            0.2588,
+            -0.9659
+          ],
+          [
+            0.5,
+            -0.866
+          ],
+          [
+            0.7071,
+            -0.7071
+          ],
+          [
+            0.866,
+            -0.5
+          ],
+          [
+            0.9659,
+            -0.2588
+          ]
+        ],
+        "color": "#ffb347"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dy": 0.22
+      },
+      "alpha": [
+        1,
+        1
+      ],
+      "opacity": 1,
+      "transform": {
+        "y": 0.3,
+        "scale": 0.9
+      }
+    },
+    {
+      "key": "horizon",
+      "count": 1,
+      "sprite": {
+        "kind": "rect",
+        "width": [
+          3,
+          3
+        ],
+        "aspect": [
+          0.2,
+          0.2
+        ],
+        "color": "#05060f"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dy": 0.52
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "title",
+      "count": 1,
+      "sprite": {
+        "kind": "textBlock",
+        "text": "first light",
+        "fontSize": 0.07,
+        "maxWidth": 1.2,
+        "anchor": "center",
+        "color": "#fff4e0",
+        "font": "300 serif",
+        "opacity": 1
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dy": -0.28
+      },
+      "opacity": 0,
+      "transform": {
+        "scale": 0.92
+      }
+    }
+  ],
+  "timeline": {
+    "loop": true,
+    "duration": 16000,
+    "keys": [
+      {
+        "t": 0,
+        "path": "sun.transform.y",
+        "value": 0.3,
+        "dur": 0
+      },
+      {
+        "t": 400,
+        "path": "sun.transform.y",
+        "value": 0,
+        "dur": 5200
+      },
+      {
+        "t": 12800,
+        "path": "sun.transform.y",
+        "value": 0.3,
+        "dur": 2800
+      },
+      {
+        "t": 0,
+        "path": "glow.opacity",
+        "value": 0,
+        "dur": 0
+      },
+      {
+        "t": 1600,
+        "path": "glow.opacity",
+        "value": 1,
+        "dur": 4000
+      },
+      {
+        "t": 12400,
+        "path": "glow.opacity",
+        "value": 0,
+        "dur": 3000
+      },
+      {
+        "t": 1600,
+        "path": "glow.transform.scale",
+        "value": 1.15,
+        "dur": 6000
+      },
+      {
+        "t": 12400,
+        "path": "glow.transform.scale",
+        "value": 0.6,
+        "dur": 3000
+      },
+      {
+        "t": 0,
+        "path": "background.stops.1.color",
+        "value": "#0b0d24",
+        "dur": 0
+      },
+      {
+        "t": 2000,
+        "path": "background.stops.1.color",
+        "value": "#3a1e3f",
+        "dur": 5000
+      },
+      {
+        "t": 12400,
+        "path": "background.stops.1.color",
+        "value": "#0b0d24",
+        "dur": 3200
+      },
+      {
+        "t": 0,
+        "path": "stars.opacity",
+        "value": 1,
+        "dur": 0
+      },
+      {
+        "t": 2400,
+        "path": "stars.opacity",
+        "value": 0.25,
+        "dur": 4000
+      },
+      {
+        "t": 12400,
+        "path": "stars.opacity",
+        "value": 1,
+        "dur": 3200
+      },
+      {
+        "t": 0,
+        "path": "title.opacity",
+        "value": 0,
+        "dur": 0
+      },
+      {
+        "t": 6000,
+        "path": "title.opacity",
+        "value": 1,
+        "dur": 1400
+      },
+      {
+        "t": 6000,
+        "path": "title.transform.scale",
+        "value": 1,
+        "dur": 6000,
+        "ease": "linear"
+      },
+      {
+        "t": 11000,
+        "path": "title.opacity",
+        "value": 0,
+        "dur": 1200
+      },
+      {
+        "t": 12400,
+        "path": "title.transform.scale",
+        "value": 0.92,
+        "dur": 0
+      }
+    ]
+  }
+}
