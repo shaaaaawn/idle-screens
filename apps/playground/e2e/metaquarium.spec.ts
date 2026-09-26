@@ -6,16 +6,15 @@ declare global {
   }
 }
 
-/** `inspect().shoal` (shoal.ts `stats()`), or null before the first frame reports one. */
-async function shoalStats(
-  page: Page,
-): Promise<{ count: number; inView: number | null; out: number; nearest: number; polarisation: number } | null> {
-  return page.evaluate(
-    () =>
-      (document.querySelector('idle-screen') as unknown as { inspect(): Record<string, unknown> | null }).inspect()?.[
-        'shoal'
-      ] as { count: number; inView: number | null; out: number; nearest: number; polarisation: number } | null ?? null,
-  );
+/** The shape `shoal.ts`'s `stats()` reports at `inspect().shoal`. */
+type ShoalStats = { count: number; inView: number | null; out: number; nearest: number; polarisation: number };
+
+/** `inspect().shoal`, or null before the first frame reports one. */
+async function shoalStats(page: Page): Promise<ShoalStats | null> {
+  return page.evaluate(() => {
+    const el = document.querySelector('idle-screen') as unknown as { inspect(): Record<string, unknown> | null };
+    return (el.inspect()?.['shoal'] as ShoalStats | null) ?? null;
+  });
 }
 
 /** The saver host inside <idle-screen>'s shadow root. */
@@ -357,9 +356,10 @@ test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturab
 /**
  * Ambient shoal + canopy (canopy.ts, tank.ts's shoalCarrier/buildShoal): the
  * school mounts over a dense flora bed without erroring, and inspect().shoal
- * — the PR's own inView metric — comes back well-formed rather than
- * NaN/undefined from a broken canopy lookup or lift-table sample. Neither
- * this path nor the `shoal` param is otherwise exercised anywhere in e2e.
+ * — including its camera-frustum inView metric — comes back well-formed
+ * rather than NaN/undefined from a broken canopy lookup or lift-table
+ * sample. Neither this path nor the `shoal` param is otherwise exercised
+ * anywhere in e2e.
  */
 test('MQ11: shoal mounts over a dense canopy and reports a sane inspect().shoal', async ({ page }) => {
   const pageErrors: string[] = [];
