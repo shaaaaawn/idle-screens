@@ -1356,6 +1356,8 @@ class TankInstance implements SaverInstance {
     if (this.shoal) {
       this.scene.remove(this.shoal.mesh);
       disposeOwned(this.shoal.mesh);
+      // Its instance buffers are not the geometry's: free them too.
+      this.shoal.mesh.dispose();
       this.shoal = null;
     }
     if (count < 3) return;
