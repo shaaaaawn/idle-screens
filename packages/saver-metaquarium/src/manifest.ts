@@ -174,6 +174,9 @@ export const METAQUARIUM_PARAMS = {
    *  stock eye program, byte for byte — because every param this saver adds
    *  defaults to the previous look; a scene opts in with 1. */
   eyeLife: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A body wave from nose to tail, beating with distance swum and curling
+   *  into turns. 0 keeps the legacy rigid wiggle and the stock programs. */
+  swimWave: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },

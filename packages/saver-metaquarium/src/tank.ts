@@ -56,6 +56,7 @@ import {
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -465,6 +466,8 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
+  wave?: WaveRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -479,6 +482,8 @@ interface InspectFish {
   bond: string;
   /** Formation seat, or null for a free fish. */
   seat: number | null;
+  /** Whether the swim wave is bending this fish (false for a breed it skips, or `swimWave: 0`). */
+  waving: boolean;
   x: number;
   y: number;
   z: number;
@@ -569,6 +574,8 @@ class TankInstance implements SaverInstance {
   private readonly spotLamp = new Vector3();
   private readonly spotHit = new Vector3();
   private readonly spotTint = new Color();
+  /** The swim wave's per-fish state, reused every frame. */
+  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
   private vignetteKey = '';
@@ -1851,6 +1858,7 @@ class TankInstance implements SaverInstance {
     const report: InspectFish[] = [];
     const fishGlow = this.num('fishGlow');
     const eyeLife = this.num('eyeLife');
+    const swimWave = this.num('swimWave');
     this.buildSpotRig();
     this.spotSeen.fill(false);
     const glowPulse = this.num('crystalPulse');
@@ -1925,6 +1933,8 @@ class TankInstance implements SaverInstance {
       // whose tails were out of step with its travel — fish moonwalking.
       let beat = effort;
       let pose;
+      // Where the fish's heading comes from, for the swim wave's C-bend.
+      let turnPlan: SwimPlan | null = null, turnD = 0;
       if (style.formation) {
         // Carrier school: ONE route, fish held in slots in its local frame, so
         // the shoal turns as a body.
@@ -1952,6 +1962,7 @@ class TankInstance implements SaverInstance {
           extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
         );
         beat = cf.lead;
+        turnPlan = this.carrierPlan; turnD = cf.lead;
         // A seated fish can lead too: a bonded fish after a school trails
         // the CARRIER route behind the whole formation, which is what
         // "follow the school" should mean. Retires any half-formed pair.
@@ -1996,6 +2007,7 @@ class TankInstance implements SaverInstance {
             flurryExtra = (1 - c) * 0.8;
           }
           pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          turnPlan = rel.plan; turnD = rel.d - lag;
           beat = rel.effort - lag;
           const hl = Math.hypot(pose.fx, pose.fz) || 1;
           const rxn = pose.fz / hl, rzn = -pose.fx / hl;
@@ -2018,6 +2030,7 @@ class TankInstance implements SaverInstance {
           pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
         } else {
           pose = swimPoseAtDistance(f.plan, d);
+          turnPlan = f.plan; turnD = d;
           // Light-seeking: each free fish is drawn toward ITS shaft (chosen
           // by index, so the choice never flips as it moves) by a per-fish
           // appetite. The loop shrinks toward the pool — still the same
@@ -2191,6 +2204,29 @@ class TankInstance implements SaverInstance {
       f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
       if (f.glow && f.body) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
+      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
+      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
+      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
+      // move the meshes inside the fish frame the wave was measured in.
+      if (swimWave > 0 && f.body && f.wave === undefined) {
+        f.body.rotation.y = f.baseYaw;
+        if (f.mixer) f.mixer.setTime(0);
+        const breed = this.wantBreeds[f.index] ?? null;
+        f.wave = waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+      }
+      const waving = swimWave > 0 && !!f.wave;
+      if (f.wave) {
+        f.wave.ensure();
+        let turn = 0;
+        if (waving && turnPlan && !act) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
+          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        }
+        const flurry = mnv.flurry + flurryBoost;
+        f.wave.set(waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch));
+      }
+
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
       // A distance-driven yaw on the body fixes the whole library at once and
@@ -2199,13 +2235,13 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        const w = Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
+        const w = waving ? 0 : Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
         f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          waving ? 0 : (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
@@ -2220,6 +2256,7 @@ class TankInstance implements SaverInstance {
         band: bandStyle.band,
         bond,
         seat: style.formation ? seat : null,
+        waving,
         x: Math.round(px * 10) / 10,
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
