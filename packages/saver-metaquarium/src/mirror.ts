@@ -76,8 +76,6 @@ export function mirrorVisible(camera: Camera, surfaceY: number, radius: number, 
   return f.intersectsBox(box);
 }
 
-export interface MirrorFrame { rendered: boolean }
-
 export class SurfaceMirror {
   /** What the ceiling samples: the copied reflection, and the matrix that projects a world point into it. */
   texture = new FramebufferTexture(1, 1);
