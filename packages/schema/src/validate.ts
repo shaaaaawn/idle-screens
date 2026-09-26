@@ -180,6 +180,10 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
     const layer = spec.layers[i];
     if (layer === undefined) return false;
     validateLayer(layer, `layers[${i}]`, err, warn, spec);
+    // The one spec-level rule a layer change can break: textBlock sizes are
+    // viewport fractions, so `units: 'px'` rejects a textBlock layer (see
+    // validateSpecCore).
+    if (spec.units === 'px' && isObj(layer) && isObj(layer.sprite) && layer.sprite.kind === 'textBlock') ok = false;
   }
   if (background && spec.background !== undefined) validateBackground(spec.background, err, warn);
   if (finish && spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);

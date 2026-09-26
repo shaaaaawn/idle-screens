@@ -946,4 +946,10 @@ describe('QA round 3', () => {
     expect(validateSpecPaths(s, ['layers.0.sprite.color'])).toBe(false);
     expect(validateSpecPaths(s, ['layers.1.count'])).toBe(false); // count → full check
   });
+
+  it("a key that turns a layer into a textBlock under units: 'px' is rejected (the spec-level rule)", () => {
+    const s = scene({ units: 'px', timeline: { keys: [{ t: 1000, path: 't.sprite', value: { kind: 'textBlock', text: 'hi', maxWidth: 0.5, fontSize: 0.05, color: '#ffffff' } }] } },
+      [dot({ key: 't', sprite: { kind: 'circle', radius: [20, 20], color: '#ffffff' } })]);
+    expect(validateSpec(s).valid).toBe(false);
+  });
 });
