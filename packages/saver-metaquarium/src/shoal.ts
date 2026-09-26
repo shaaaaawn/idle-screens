@@ -390,6 +390,8 @@ function shoalMaterial(lit: boolean): Material {
   const mat = lit
     ? new MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.35, envMapIntensity: 1.2 })
     : new MeshBasicMaterial({ vertexColors: true });
+  // Lit tetras take the water's light too (fishlight.ts).
+  if (lit) mat.userData.mqFish = true;
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = 'attribute vec2 aSwim; attribute float aGlow; varying float vMqGlow;\n'
       + shader.vertexShader.replace('#include <begin_vertex>', SHOAL_VERTEX);

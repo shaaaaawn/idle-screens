@@ -126,7 +126,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['light', ['caustics', 'causticScale']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     // The renderer's look: on by default, listed so it can be turned off.
-    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife', 'swimWave']],
+    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife', 'swimWave', 'fishAmbient']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
