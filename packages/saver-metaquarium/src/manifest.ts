@@ -66,6 +66,15 @@ export const METAQUARIUM_PARAMS = {
    *  last (blue keeps today's fog curve, so everything still meets the
    *  background at `fogFar`). 0 (default) is today's fog exactly. */
   water: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** How clear the water is, when `water` is on: 0 murky (colour lost fast,
+   *  a short reach), 0.5 the water as it has been, 1 clear (colour kept, the
+   *  far fade pushed back half again). */
+  waterClarity: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
+  /** The sunlit water, '#rrggbb' (empty = off): what distant things fade into
+   *  looking up toward the light, half of it on the level, none looking down
+   *  into the deep — and the background with it. With \`water\` on, a room's
+   *  own tint applies when this is empty. */
+  waterTint: { type: 'string', default: '', ease: 'step' },
   /** Output dither (±½ of an 8-bit step) on every material: the cure for
    *  banding in dark fogged gradients on TV panels. Costs nothing per frame;
    *  off by default only because turning it on recompiles every material. */

@@ -1,4 +1,4 @@
-import { patchWater, setDither, WATER } from './water';
+import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -33,6 +33,7 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  BackSide,
   DoubleSide,
   PlaneGeometry,
   CylinderGeometry,
@@ -49,7 +50,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
-import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
+import { affordableLayers, environmentOf, roomColor, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
   anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
@@ -621,7 +622,13 @@ class TankInstance implements SaverInstance {
   private presetWaterY = 0;
   /** The active room's palette — consulted only where the author left the
    *  matching param at its manifest default. */
-  private roomPalette: { fog: string; floor: string; mote: string } | null = null;
+  private roomPalette: { fog: string; floor: string; mote: string; tint?: string } | null = null;
+  /** Params a control track steers: an authored value, so a room palette never overrides them. */
+  private trackedPaths = new Set<string>();
+  /** The background when a water tint is on: a dome shaded with the same in-scatter the fog fades to. */
+  private waterDome: Mesh | null = null;
+  private readonly tintColor = new Color();
+  private readonly horizonColor = new Color();
   private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
@@ -1941,7 +1948,7 @@ class TankInstance implements SaverInstance {
 
     // Fog color
     const fogHex = String(
-      this.params.fogColor ?? this.roomPalette?.fog ?? this.space.fogColor?.default ?? '#030009',
+      this.paletteOr('fogColor', this.roomPalette?.fog) ?? '#030009',
     );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
@@ -1950,8 +1957,13 @@ class TankInstance implements SaverInstance {
     // this block is provably invisible until steered.
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
-    fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    const floorHex = String(this.params.floorColor ?? this.roomPalette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+    // Clarity stretches or closes the reach — only when water is on (at 0.5, ×1 exactly).
+    const reach = this.num('water') > 0 ? clarityReach(this.num('waterClarity')) : 1;
+    fog.far = Math.max(this.num('fogFar') * reach, fog.near + 20);
+    // A water tint replaces the flat background with a dome of the same in-scatter.
+    const tint = this.waterTint();
+    this.updateWaterDome(!!tint);
+    const floorHex = String(this.paletteOr('floorColor', this.roomPalette?.floor) ?? '#0a1d33');
     this.floorMat.color.set(floorHex);
     // Terrain follows floorColor as well — the environment supplies the SHAPE,
     // the author keeps the palette.
@@ -1963,7 +1975,7 @@ class TankInstance implements SaverInstance {
       this.motes.geometry.setDrawRange(0, active);
       this.moteMat.uniforms.uTime!.value = tSec;
       (this.moteMat.uniforms.uColor!.value as Color).set(
-        String(this.params.moteColor ?? this.roomPalette?.mote ?? this.space.moteColor?.default ?? '#7fd6ff'),
+        String(this.paletteOr('moteColor', this.roomPalette?.mote) ?? '#7fd6ff'),
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
@@ -1976,7 +1988,10 @@ class TankInstance implements SaverInstance {
     // After the scenery: a vignette may name the world's own marks (home doors, a gate).
     this.buildVignette();
     this.scenery?.setSurface(this.ceiling ? this.ceiling.position.y : null);
-    this.scenery?.setFrame(tSec, { color: this.fogColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
+    // The horizon sits on the level, where the in-scatter is half tint.
+    if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
+    else this.horizonColor.copy(this.fogColor);
+    this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     if (this.crystals) {
       this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
         color: this.fogColor, near: fog.near, far: fog.far,
@@ -2675,6 +2690,61 @@ class TankInstance implements SaverInstance {
   }
 
   /**
+   * A room colour where the author left the param alone: not set in the
+   * scene (its resolved default is still the manifest's) and not steered by
+   * a track. The palettes were meant to work this way from the start — the
+   * `??` fallback never fired, because every param arrives pre-filled.
+   */
+  private paletteOr(path: 'fogColor' | 'floorColor' | 'moteColor', room: string | undefined): string | undefined {
+    return roomColor({
+      resolvedDefault: this.space[path]?.default, manifestDefault: METAQUARIUM_PARAMS[path].default,
+      tracked: this.trackedPaths.has(path), current: this.params[path],
+    }, room);
+  }
+
+  /** The tint in force: the author's `waterTint`, else the room's when water is on. */
+  private waterTint(): string {
+    const own = this.str('waterTint');
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(own)) return own;
+    return this.num('water') > 0 && this.roomPalette?.tint ? this.roomPalette.tint : '';
+  }
+
+  /** The background dome: shown (and the flat background hidden) only while a tint is on. */
+  private updateWaterDome(tinted: boolean): void {
+    if (tinted && !this.waterDome) {
+      const mat = new ShaderMaterial({
+        uniforms: { uFog: { value: new Color() }, ...waterUniforms() },
+        vertexShader: `
+          varying vec3 vDir;
+          void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position * ${(CAMERA_FAR * 0.9).toFixed(1)}, 1.0); }`,
+        fragmentShader: `
+          ${WATER_INSCATTER_GLSL}
+          uniform vec3 uFog;
+          varying vec3 vDir;
+          // Display space, like three's own fog mix: the far fade lands on exactly this.
+          void main() { gl_FragColor = vec4(mix(mqToDisplay(uFog), mqToDisplay(uMqTint.rgb), mqTintWeight(normalize(vDir))), 1.0); }`,
+        side: BackSide, depthWrite: false, depthTest: false, fog: false,
+      });
+      mat.userData.mqOwned = true;
+      const geo = new SphereGeometry(1, 32, 16);
+      geo.userData.mqOwned = true;
+      const dome = new Mesh(geo, mat);
+      dome.name = 'water-dome';
+      dome.frustumCulled = false;
+      dome.renderOrder = -1000;
+      // Centred on whichever camera draws it (the main one, a mirror, a still).
+      dome.onBeforeRender = (_r, _s, camera) => { dome.position.copy(camera.position); dome.updateMatrixWorld(); };
+      this.scene.add(dome);
+      this.waterDome = dome;
+    }
+    if (this.waterDome) {
+      this.waterDome.visible = tinted;
+      (this.waterDome.material as ShaderMaterial).uniforms.uFog!.value.copy(this.fogColor);
+    }
+    this.scene.background = tinted ? null : this.fogColor;
+  }
+
+  /**
    * Water and dither, set right before THIS tank renders: `WATER` is one
    * module uniform, and two tanks on a page (the Dev Tools crossfade) each
    * write their own value and render with it in the same call.
@@ -2688,7 +2758,14 @@ class TankInstance implements SaverInstance {
     const water = this.num('water');
     const dither = this.str('dither') === 'on';
     WATER.value = water;
-    if (water > 0) this.waterInstalled = true;
+    const r = clarityRatio(this.num('waterClarity'));
+    RATIO.value[0] = r[0]; RATIO.value[1] = r[1]; RATIO.value[2] = r[2];
+    const tint = this.waterTint();
+    if (tint) {
+      this.tintColor.set(tint);
+      TINT.value.set(this.tintColor.r, this.tintColor.g, this.tintColor.b, 1);
+    } else TINT.value.w = 0;
+    if (water > 0 || tint) this.waterInstalled = true;
     const install = this.waterInstalled;
     this.scene.traverse((o) => {
       const mat = (o as Mesh).material as Material | Material[] | undefined;
@@ -2788,6 +2865,7 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.trackedPaths = new Set(track.deltas.map((d) => d.path));
     this.shoalSpeedTracked = track.deltas.some((d) => d.path === 'shoalSpeed');
     this.shoalWarpMemo = [NaN, 0, NaN, 0];
     this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];

@@ -54,7 +54,7 @@ export interface EnvironmentPreset {
   seedSalt: number;
   /** Room palette, applied ONLY where the author left the matching param at
    *  its manifest default. An authored color always wins over the room's. */
-  palette?: { fog: string; floor: string; mote: string };
+  palette?: { fog: string; floor: string; mote: string; /** The sunlit water (`waterTint`) when `water` is on. */ tint?: string };
 }
 
 /**
@@ -80,19 +80,19 @@ export const ENVIRONMENTS: readonly EnvironmentPreset[] = [
     palette: { fog: '#02030a', floor: '#05070f', mote: '#4fd4a8' } },
   { name: 'reef', label: 'Reef', water: { y: 150, color: '#2ad4ff', opacity: 0.18 },
     floor: 'dunes', rays: { strength: 0.5, color: '#bfefff', y: 900 }, seedSalt: 0x0a2,
-    palette: { fog: '#0a3d5c', floor: '#123c50', mote: '#bfe8ff' } },
+    palette: { fog: '#0a3d5c', floor: '#123c50', mote: '#bfe8ff', tint: '#6fd6ff' } },
   { name: 'kelp', label: 'Kelp forest', water: { y: 170, color: '#1e6f5c', opacity: 0.2 },
     floor: 'ridges', rays: { strength: 0.4, color: '#9ef5d0', y: 820 }, seedSalt: 0x0a3,
-    palette: { fog: '#07271e', floor: '#0c2f22', mote: '#a5f2c6' } },
+    palette: { fog: '#07271e', floor: '#0c2f22', mote: '#a5f2c6', tint: '#8fd07a' } },
   { name: 'ice', label: 'Under ice', water: { y: 132, color: '#cfefff', opacity: 0.32 },
     floor: 'flat', rays: { strength: 0.6, color: '#eaf8ff', y: 1000 }, seedSalt: 0x0a4,
-    palette: { fog: '#12283c', floor: '#1b3d59', mote: '#d8f2ff' } },
+    palette: { fog: '#12283c', floor: '#1b3d59', mote: '#d8f2ff', tint: '#cdeeff' } },
   { name: 'vent', label: 'Hydrothermal vent', water: null, floor: 'ridges', seedSalt: 0x0a5,
     rays: { strength: 0.45, color: '#ff7a3c', y: -520 },
     palette: { fog: '#170502', floor: '#4a1a0a', mote: '#ff8a3c' } },
   { name: 'lagoon', label: 'Lagoon', water: { y: 118, color: '#7ff3d0', opacity: 0.22 },
     floor: 'dunes', rays: { strength: 0.55, color: '#fff3b0', y: 950 }, seedSalt: 0x0a6,
-    palette: { fog: '#0d453f', floor: '#6e4457', mote: '#eafff4' } },
+    palette: { fog: '#0d453f', floor: '#6e4457', mote: '#eafff4', tint: '#7ff0d8' } },
   { name: 'universe', label: 'Universe', water: null, floor: 'ridges', seedSalt: 0x0a7,
     rays: { strength: 0.3, color: '#c39bff', y: 1200 },
     palette: { fog: '#0d0618', floor: '#171030', mote: '#cfa8ff' } },
@@ -144,4 +144,18 @@ export function affordableLayers(budget: number, preset: EnvironmentPreset): {
     rayCount = left >= LAYER_COST.rays ? RAY_COUNT.full : RAY_COUNT.reduced;
   }
   return { floor: true, water, rayCount };
+}
+
+/**
+ * A room colour, where the author left the param alone: not set in the scene
+ * (its resolved default still equals the manifest's) and not steered by a
+ * track. Otherwise the param's current value.
+ */
+export function roomColor(
+  p: { resolvedDefault: unknown; manifestDefault: unknown; tracked: boolean; current: unknown },
+  room: string | undefined,
+): string | undefined {
+  const authored = p.resolvedDefault !== p.manifestDefault || p.tracked;
+  if (room && !authored) return room;
+  return p.current === undefined ? undefined : String(p.current);
 }

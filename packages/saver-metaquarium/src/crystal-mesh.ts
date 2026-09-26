@@ -115,7 +115,11 @@ const SHARD_FRAG = /* glsl */ `
       + vec3(smoothstep(0.62, 0.95, facet) * rim * 1.4 + pow(fres, 6.0));
     vec3 col = mix(glow, glass, vLook.x);
     vec3 fog = mqWaterFog(vDepth, uFogNear, uFogFar);
-    gl_FragColor = vec4(mix(col, uFogColor, fog), 1.0);
+    // Linear here (encoded below), so the tint goes in as it is: the same
+    // lit water the fog of everything else fades to.
+    vec3 fogTarget = uFogColor;
+    if (uMqTint.w > 0.0) fogTarget = mix(uFogColor, uMqTint.rgb, mqTintWeight(normalize(vW - cameraPosition)));
+    gl_FragColor = vec4(mix(col, fogTarget, fog), 1.0);
     #include <colorspace_fragment>
   }
 `;
