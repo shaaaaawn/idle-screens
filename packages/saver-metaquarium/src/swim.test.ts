@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
+  anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, BREED_SIZE, breedSize, FISH_LENGTH, fishSizeMul, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
   SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf, fitBreath,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
@@ -32,7 +32,6 @@ describe('swim styles', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     // ...but phase and anchor still spread, deliberately: see fishVariation.
     const phases = [0, 1, 2, 3, 4, 5].map((i) => fishVariation(i, 0).phase);
@@ -93,6 +92,43 @@ describe('swim styles', () => {
       Array.from({ length: 6 }, (_, i) => formationSlot(i, 6, 0, undefined, shape))
         .map((s2) => `${Math.round(s2.side)},${Math.round(s2.up)},${Math.round(s2.back)}`).join('|');
     expect(new Set(FORMATION_SHAPES.map(sig)).size).toBe(FORMATION_SHAPES.length);
+  });
+  it('the law holds at any body length: a school of sharks spaces like sharks', () => {
+    for (const shape of FORMATION_SHAPES) {
+      for (const k of [0.45, 2.2, 3]) {
+        const L = FISH_LENGTH * k;
+        for (const count of [2, 8, 24]) {
+          const slots = Array.from({ length: count }, (_, i) => formationSlot(i, count, 1, undefined, shape, L));
+          for (let i = 0; i < count; i += 1) {
+            for (let j = i + 1; j < count; j += 1) {
+              const a = slots[i]!; const b = slots[j]!;
+              expect(Math.hypot(a.side - b.side, a.up - b.up, a.back - b.back), `${shape} ×${k} ${count} ${i},${j}`)
+                .toBeGreaterThanOrEqual(L);
+            }
+          }
+        }
+      }
+    }
+  });
+  it('breeds have their own length, and fish their own size within it', () => {
+    expect(breedSize('shark')).toBeGreaterThan(2);
+    expect(breedSize('babyfish')).toBeLessThan(0.5);
+    expect(breedSize('Angelfish')).toBe(1);
+    expect(breedSize('unicorn')).toBe(1);
+    expect(breedSize(undefined)).toBe(1);
+    for (const v of Object.values(BREED_SIZE)) expect(v).toBeGreaterThan(0);
+    // Variance 0: every fish its breed's size.
+    expect(fishSizeMul(5, 0)).toBe(1);
+    // Seeded, bounded, and log-symmetric: as many a third smaller as a third bigger.
+    const at1 = Array.from({ length: 400 }, (_, i) => fishSizeMul(i, 1));
+    expect(fishSizeMul(17, 0.7)).toBe(fishSizeMul(17, 0.7));
+    expect(Math.min(...at1)).toBeGreaterThanOrEqual(2 ** -0.8 - 1e-9);
+    expect(Math.max(...at1)).toBeLessThanOrEqual(2 ** 0.8 + 1e-9);
+    const meanLog = at1.reduce((a, x) => a + Math.log2(x), 0) / at1.length;
+    expect(Math.abs(meanLog)).toBeLessThan(0.08);
+    // No five-step cycle: neighbouring slots do not repeat a size.
+    const at5 = Array.from({ length: 20 }, (_, i) => fishSizeMul(i, 0.5));
+    expect(new Set(at5.map((x) => x.toFixed(3))).size).toBe(20);
   });
   it('no two fish in a formation are inside one body length', () => {
     // The enforceable version of "a school does not collide". A review
@@ -225,7 +261,6 @@ describe('per-fish uniqueness', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     expect(METAQUARIUM_PARAMS.swimVariance.default).toBe(0);
   });
@@ -234,8 +269,6 @@ describe('per-fish uniqueness', () => {
       const v = fishVariation(i, 1);
       expect(v.speedMul).toBeGreaterThan(0.55);
       expect(v.speedMul).toBeLessThan(1.45);
-      expect(v.scaleMul).toBeGreaterThan(0.7);
-      expect(v.scaleMul).toBeLessThan(1.3);
     }
   });
   it('a fish varies by INDEX, not by spawn order or rebuild count', () => {

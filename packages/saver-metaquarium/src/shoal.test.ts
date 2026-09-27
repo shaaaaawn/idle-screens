@@ -90,4 +90,38 @@ describe('Shoal', () => {
       expect(g.userData.mqOwned).toBe(true);
     }
   });
+  it('no two same-facing faces of a tetra z-fight (coincident or within 0.01 units, overlapping)', () => {
+    // Every box face is 6 vertices (two triangles), axis-aligned. Two faces that
+    // face the same way and lie on (or a hair off) the same plane with overlapping
+    // extent resolve by depth-buffer noise: the shimmering comb the lateral line
+    // used to draw.
+    type Face = { axis: number; sign: number; at: number; lo: [number, number]; hi: [number, number] };
+    for (const k of SHOAL_KINDS) {
+      const pos = shoalFishGeometry(k).getAttribute('position').array;
+      const faces: Face[] = [];
+      for (let f = 0; f < pos.length / 18; f++) {
+        const v = [0, 1, 2, 3, 4, 5].map((i) => [pos[f * 18 + i * 3]!, pos[f * 18 + i * 3 + 1]!, pos[f * 18 + i * 3 + 2]!]);
+        const axis = [0, 1, 2].find((a) => v.every((p) => Math.abs(p[a]! - v[0]![a]!) < 1e-9))!;
+        const [u, w] = [0, 1, 2].filter((a) => a !== axis) as [number, number];
+        const e1 = v[1]!.map((x, i) => x - v[0]![i]!), e2 = v[2]!.map((x, i) => x - v[0]![i]!);
+        const n = [e1[1]! * e2[2]! - e1[2]! * e2[1]!, e1[2]! * e2[0]! - e1[0]! * e2[2]!, e1[0]! * e2[1]! - e1[1]! * e2[0]!];
+        faces.push({
+          axis, sign: Math.sign(n[axis]!), at: v[0]![axis]!,
+          lo: [Math.min(...v.map((p) => p[u]!)), Math.min(...v.map((p) => p[w]!))],
+          hi: [Math.max(...v.map((p) => p[u]!)), Math.max(...v.map((p) => p[w]!))],
+        });
+      }
+      const fights: string[] = [];
+      for (let i = 0; i < faces.length; i++) {
+        for (let j = i + 1; j < faces.length; j++) {
+          const a = faces[i]!, b = faces[j]!;
+          if (a.axis !== b.axis || a.sign !== b.sign || Math.abs(a.at - b.at) >= 0.01) continue;
+          const ou = Math.min(a.hi[0], b.hi[0]) - Math.max(a.lo[0], b.lo[0]);
+          const ow = Math.min(a.hi[1], b.hi[1]) - Math.max(a.lo[1], b.lo[1]);
+          if (ou > 1e-9 && ow > 1e-9) fights.push(`${k}: faces ${i}/${j} on axis ${a.axis} at ${a.at.toFixed(4)}/${b.at.toFixed(4)}`);
+        }
+      }
+      expect(fights.slice(0, 5)).toEqual([]);
+    }
+  });
 });

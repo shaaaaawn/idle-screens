@@ -476,6 +476,11 @@
           "maximum": 1,
           "description": "Paint-level layer opacity (default 1): multiplies every entity's alpha and the life envelope at draw time. Unlike alpha (a range baked into entities), it is paint — setParam, a timeline key or a morph glide it without re-seeding. Native clients ignore it (1)."
         },
+        "group": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+          "description": "The name of a groups entry this layer paints through (its transform wraps the layer's, its opacity multiplies)."
+        },
         "transform": {
           "type": "object",
           "additionalProperties": false,
@@ -484,7 +489,8 @@
             "y": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px')." },
             "scale": { "type": "number", "minimum": 0, "maximum": 8, "description": "Uniform scale about the viewport centre (default 1)." },
             "scaleX": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra horizontal scale; toward 0 reads as a turn about the vertical axis, negative mirrors (default 1)." },
-            "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the viewport centre." }
+            "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the transform's origin." },
+            "origin": { "enum": ["viewport", "anchor"], "description": "What scale/scaleX/rotate turn about: 'viewport' (default) the viewport centre — a camera; 'anchor' the layer's own position point (with dx/dy; a list/table block's anchor; else the centre of its region) — a word punches in place on every aspect." }
           },
           "description": "Paint-level transform of the whole layer at draw time, about the viewport centre. Outside the structural signature, so it glides under setParam, a timeline key or a morph — a camera for timed pieces, a slow drift for ambient ones. Native clients ignore it (identity)."
         },
@@ -1555,6 +1561,32 @@
         },
         "finish": {
           "$ref": "#/definitions/finish"
+        },
+        "groups": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Multiplies every member layer's opacity." },
+              "transform": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number", "minimum": -17280, "maximum": 17280 },
+                  "y": { "type": "number", "minimum": -17280, "maximum": 17280 },
+                  "scale": { "type": "number", "minimum": 0, "maximum": 8 },
+                  "scaleX": { "type": "number", "minimum": -8, "maximum": 8 },
+                  "rotate": { "type": "number", "minimum": -3600, "maximum": 3600 },
+                  "origin": { "const": "viewport" }
+                },
+                "description": "Wraps every member's own transform; turns about the viewport centre (a camera)."
+              }
+            }
+          },
+          "description": "Named layer groups: members (layer.group) paint through the group's transform and opacity, so one steer, timeline key or morph moves a multi-layer subject as one thing. Paint, outside the structural signature. Native clients ignore it (identity, opacity 1)."
         },
         "timeline": {
           "type": "object",

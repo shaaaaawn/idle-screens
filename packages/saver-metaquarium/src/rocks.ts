@@ -1,20 +1,28 @@
 /**
- * Rocks with crystal fissures — why the crystals are here at all.
+ * Rocks the crystals have burst out of — why the crystals are here at all.
  *
- * A crystal standing on a plane is an ornament. A crystal at the end of a
- * glowing crack in a boulder is geology: the light is IN the rock, it has
- * split the stone to get out, and the cluster on top is just where it made it.
+ * A crystal standing on a plane is an ornament. A crystal breaking out of a
+ * boulder is geology: the mineral grew inside the stone until the stone gave,
+ * and what shows is where it made it through.
  *
- * The fissure is not drawn on the rock, it is cut from it: the crack is the
- * exact intersection of the rock's own triangles with a plane that wobbles as
- * it goes, so every segment lies on a facet, bends at every edge the way a
- * real fracture does, and never floats or sinks. A second plane, kept to one
- * side of the first, forks it. Each segment is two ribbons — a wide band in
- * the crystal's colour and a narrow white-hot core — and here and there a
- * small crystal has grown out along the facet's normal.
+ * So the crystal is not drawn on the rock. The crown is HEAVED into a pit
+ * (the stone pushed down and apart where the growth broke through), a few
+ * angular chips of that stone lie tumbled round the rim, short dark fractures
+ * run a little way down the flanks from the breach, and the host plants a
+ * REAL crystal colony in the pit — `growCluster` shards, the same geometry,
+ * material, pulse, fog and halo as every `propMix` crystal, roots sunk below
+ * the stone. Only the fractures' throats glow, and only near the breach: the
+ * light is in the crystal, not painted on the rock.
+ *
+ * Fourth attempt, and what the first three taught: a bright tube right round
+ * the stone was neon wire; a thin dark split was honest but dead; lava
+ * rivulets running the whole flank read from a low camera as a spider's legs
+ * over the rock, and the flat three-triangle "shards" at the crown were a
+ * different species from the real crystals beside them.
  *
  * Works on any triangle soup (boulders, the arch, a ridge), is fully seeded,
- * and costs nothing per frame: it all lands in the scenery's two batches.
+ * and costs nothing per frame: stone and chips land in the stone batch, the
+ * fracture throats in the glow batch, the colony in the rock crystal field.
  */
 
 import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Matrix4, Quaternion, Vector3 } from 'three';
@@ -31,17 +39,26 @@ export interface RockSpec {
   /** Half-extents. */
   rx: number; ry: number; rz: number;
   tint: string;
-  /** 0..1 — how fractured: forks, width, how many crystals have pushed out. */
+  /** 0..1 — how hard the crystal broke through: pit depth, chips, fractures. */
   veins: number;
+  /** A host rock: a `propMix` cluster already stands at its centre, so the
+   *  breach is dug under THAT and the rock grows no colony of its own. */
+  host?: boolean;
 }
+
+/** Where a rock's own colony roots, in world space: sunk below the pit floor,
+ *  growing along `normal`. `size` is a world length for the colony. */
+export interface RockCrystal { x: number; y: number; z: number; normal: Vector3; size: number }
 
 export interface RockParts {
   stone: BufferGeometry;
   /** Null when `veins` is 0. */
   glow: BufferGeometry | null;
   triangles: number;
-  /** Where the fissure is widest — a bubble vent, if the world wants one. */
+  /** The breach — a bubble vent, if the world wants one. */
   seep: Vector3 | null;
+  /** Null for a host rock, or when `veins` is 0. */
+  crystal: RockCrystal | null;
 }
 
 /** A unit boulder: displaced icosphere, flat-bottomed, never the same twice. */
@@ -64,48 +81,115 @@ export function boulder(rng: CrystalRng, detail = 1): Tri[] {
 }
 
 /**
- * Cut fissures into a surface. `tris` are in the space the wobble is tuned
- * for (roughly unit). Returns loose coloured triangles plus a per-vertex
- * `flow` coordinate (distance from the source) for the shader to run light
- * down the channels.
+ * The breach: where the crystal broke through, in the stone's unit space.
  *
- * Third attempt, and what each taught: a bright tube right round the stone was
- * neon wire on a rock; a thin dark split was honest but dead. What this wants
- * to be is LAVA ON A MOUNTAIN — the crystals have burst out of the crown and
- * the light runs downhill from them in rivulets, like a creek finding its way:
- *
- *   - every channel starts at the crown and runs DOWN a flank (each is the
- *     stone cut by a vertical plane through the summit, kept on one side);
- *   - three to five of them at uneven angles, of uneven length, so the rock
- *     reads as split from the top rather than drawn on;
- *   - molten section: dark chilled banks, a wide glowing body, a white-hot
- *     thread down the middle — brightest at the source, cooling as it goes;
- *   - they wander, narrow toward the toe, and some fork once on the way down;
- *   - shards of crystal stand in the breach round the crown;
- *   - and the light FLOWS: `flow` lets the shader send slow pulses downhill.
+ * `site` is the crown (the highest point), or, for a host rock, the top of
+ * its centre line, where the host's cluster already stands. Every vertex of
+ * the upper half within `R` of the site in plan is pushed DOWN by a bowl
+ * profile (a pit the colony stands in), the ring just outside is lifted a
+ * little (the heaved rim), and 3–7 angular chips of the same stone are laid
+ * on the rim, tipped as if thrown off. The displacement is a pure function
+ * of position, so a vertex shared by several triangles moves once and the
+ * stone stays closed.
  */
-/** How many shards stand in the breach at a given `amount` (0..1) — exported
- *  so callers (and tests) share this one source of truth instead of
- *  restating the formula. */
-export const shardCount = (amount: number): number => 3 + Math.round(amount * 5);
+export interface Breach { tris: Tri[]; chips: Tri[]; site: Vector3; floor: number; normal: Vector3 }
 
+export function breach(tris: readonly Tri[], rng: CrystalRng, amount: number, opts: { centre?: boolean; pit?: number } = {}): Breach {
+  let top = tris[0]![0];
+  for (const t of tris) for (const v of t) if (v.y > top.y) top = v;
+  let site = top.clone();
+  if (opts.centre) {
+    // The host's cluster stands on the centre line: dig there, at the height
+    // the stone reaches near it.
+    let y = -Infinity;
+    for (const t of tris) for (const v of t) if (Math.hypot(v.x, v.z) < 0.45 && v.y > y) y = v.y;
+    site = new Vector3(0, Number.isFinite(y) ? y : top.y, 0);
+  }
+  const R = 0.42 + 0.12 * amount;
+  const pit = (opts.pit ?? 0.34) * (0.55 + 0.45 * amount);
+  const rim = pit * 0.22;
+  const heave = (v: Vector3): Vector3 => {
+    const out = v.clone();
+    if (v.y <= site.y - 0.9) return out; // the upper crown only: the base stays where it sits
+    const d = Math.hypot(v.x - site.x, v.z - site.z) / R;
+    if (d < 1) out.y -= pit * (1 - d * d);
+    else if (d < 1.6) out.y += rim * (1 - Math.abs(d - 1.3) / 0.3) * (d < 1.3 ? (d - 1) / 0.3 : 1);
+    return out;
+  };
+  const heaved: Tri[] = tris.map(([a, b, c]) => [heave(a), heave(b), heave(c)]);
+
+  // The colony grows along the crown's own lean, pulled mostly upright.
+  const normal = new Vector3();
+  const ab = new Vector3(), ac = new Vector3(), n = new Vector3();
+  for (const [a, b, c] of tris) {
+    const mx = (a.x + b.x + c.x) / 3, mz = (a.z + b.z + c.z) / 3;
+    if (Math.hypot(mx - site.x, mz - site.z) > R * 1.4) continue;
+    n.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a));
+    if (n.y > 0) normal.add(n.normalize());
+  }
+  if (normal.lengthSq() < 1e-6) normal.set(0, 1, 0);
+  normal.normalize().lerp(new Vector3(0, 1, 0), 0.55).normalize();
+
+  // Height of the heaved stone under (x, z), from the top: where a chip rests.
+  const surfaceAt = (x: number, z: number): number => {
+    let best = -Infinity;
+    for (const [a, b, c] of heaved) {
+      const d = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+      if (Math.abs(d) < 1e-9) continue;
+      const w1 = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d;
+      const w2 = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / d;
+      const w3 = 1 - w1 - w2;
+      if (w1 < -1e-6 || w2 < -1e-6 || w3 < -1e-6) continue;
+      best = Math.max(best, w1 * a.y + w2 * b.y + w3 * c.y);
+    }
+    return best;
+  };
+
+  // Chips: octahedra of the same stone, jittered, tipped, half-sunk on the rim.
+  const chips: Tri[] = [];
+  const count = 3 + Math.round(amount * 4);
+  const q = new Quaternion(), e = new Vector3();
+  const octa = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const;
+  const faces = [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4], [2, 0, 5], [1, 2, 5], [3, 1, 5], [0, 3, 5]] as const;
+  for (let i = 0; i < count; i += 1) {
+    const a = rng.next() * Math.PI * 2, r = R * rng.range(0.85, 1.45);
+    const x = site.x + Math.cos(a) * r, z = site.z + Math.sin(a) * r;
+    const y = surfaceAt(x, z);
+    if (!Number.isFinite(y)) continue;
+    const size = rng.range(0.06, 0.13) * (0.7 + 0.5 * amount);
+    q.setFromAxisAngle(e.set(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1)).normalize(), rng.next() * Math.PI);
+    const verts = octa.map(([ox, oy, oz]) => new Vector3(ox * rng.range(0.7, 1.3), oy * rng.range(0.5, 1), oz * rng.range(0.7, 1.3))
+      .multiplyScalar(size).applyQuaternion(q).add(new Vector3(x, y + size * 0.25, z)));
+    for (const [i0, i1, i2] of faces) chips.push([verts[i0]!.clone(), verts[i1]!.clone(), verts[i2]!.clone()]);
+  }
+  return { tris: heaved, chips, site, floor: site.y - pit, normal };
+}
+
+/**
+ * Short dark fractures running a little way down the flanks from the breach.
+ * The stone cut by a wandering vertical plane through `origin` (one side
+ * only), so every segment lies on a facet and bends at its edges; each is a
+ * dark split with a glowing throat that is brightest at the breach and gone
+ * within the first half of its length. Returns loose coloured triangles plus
+ * a per-vertex `flow` (distance from the breach) for the shader's slow pulse.
+ */
 export function fissures(
-  tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number, worldPerUnit = 12,
+  tris: readonly Tri[], rng: CrystalRng, tint: string, amount: number, worldPerUnit = 12, origin?: Vector3,
 ): { positions: number[]; colors: number[]; flow: number[]; seep: Vector3 | null } {
   const positions: number[] = [], colors: number[] = [], flow: number[] = [];
   // Nothing to cut: no stone, no crown — and no seep for the vents to use.
   if (amount <= 0 || !tris.length) return { positions, colors, flow, seep: null };
-  const band = new Color(tint);
-  const core = band.clone().lerp(new Color('#ffffff'), 0.82);
+  // Only the throat glows, a dimmed tint, and only right at the breach.
+  const band = new Color(tint).multiplyScalar(0.62);
   const bank = new Color('#04060a');
   const put = (p: Vector3, c: Color, k: number, f: number): void => {
     positions.push(p.x, p.y, p.z); colors.push(c.r * k, c.g * k, c.b * k); flow.push(f);
   };
 
-  // The summit: where the crystals broke out.
+  // The breach, or failing that the summit.
   let crown = tris[0]![0];
   for (const t of tris) for (const v of t) if (v.y > crown.y) crown = v;
-  crown = crown.clone();
+  crown = origin ? origin.clone() : crown.clone();
 
   interface Seg { p: Vector3; q: Vector3; normal: Vector3; side: Vector3 }
   const ab = new Vector3(), ac = new Vector3();
@@ -158,26 +242,27 @@ export function fissures(
         const a = f0 + dp, b = f0 + dq;
         put(p0, c, kp, a); put(q0, c, kq, b); put(q1, c, kq, b); put(p0, c, kp, a); put(q1, c, kq, b); put(p1, c, kp, a);
       };
-      quad(width * 1.75, 0.008, bank, 1, 1); //                                   chilled banks
-      quad(width, 0.014, band, heat * (0.35 + 0.65 * fp), heat * (0.35 + 0.65 * fq)); //  the molten body
-      quad(width * 0.34, 0.02, core, heat * fp ** 1.4, heat * fq ** 1.4); //          the white-hot thread
+      quad(width * 1.6, 0.008, bank, 1, 1); //                                    the split
+      quad(width * 0.6, 0.014, band, heat * fp ** 3, heat * fq ** 3); //             a throat of colour, only at the breach
     }
   };
 
-  // Rivulets off the summit, at uneven angles and of uneven length.
-  const count = 2 + Math.round(amount * 3);
+  // Fractures radiating off the breach, at uneven angles and lengths — short
+  // and dark: they say the stone split, not that light runs down it. A long
+  // one under a colony reads as a stalk.
+  const count = 3 + Math.round(amount * 2);
   const spin = rng.next() * Math.PI * 2;
   // Width is a WORLD size: a channel on a 25-unit ridge rock is no wider than
   // one on a 9-unit boulder. Scaled with the stone, big rocks wore flat stripes
   // a fish-length across — decals, from close up.
-  const width = (0.03 + amount * 0.03) * Math.min(1.3, 12 / worldPerUnit);
+  const width = (0.022 + amount * 0.018) * Math.min(1.3, 12 / worldPerUnit);
   for (let i = 0; i < count; i += 1) {
     const az = spin + (i / count) * Math.PI * 2 + rng.range(-0.45, 0.45);
-    const reach = rng.range(0.75, 1.55) * (0.65 + amount * 0.45);
+    const reach = rng.range(0.22, 0.45) * (0.6 + amount * 0.4);
     const segs = cut(crown, az, rng.next() * 6.28);
     lay(segs, crown, reach, width * rng.range(0.8, 1.2), 1, 0);
     // A fork: a thinner stream leaving part-way down, bearing off to one side.
-    if (segs.length > 3 && rng.next() < 0.35 + amount * 0.4) {
+    if (segs.length > 3 && rng.next() < 0.1 * amount) {
       const from = segs[Math.floor(segs.length * rng.range(0.25, 0.55))]!.p;
       const fd = from.distanceTo(crown);
       if (fd < reach * 0.7 && fd > 0.15) {
@@ -187,18 +272,6 @@ export function fissures(
     }
   }
 
-  // The breach: shards standing round the crown, where the stone gave way.
-  const root = band.clone().lerp(new Color('#ffffff'), 0.5);
-  const shards = shardCount(amount);
-  for (let i = 0; i < shards; i += 1) {
-    const a = rng.next() * Math.PI * 2, r = rng.range(0.05, 0.3);
-    const base = new Vector3(crown.x + Math.cos(a) * r, crown.y - r * 0.35 - 0.04, crown.z + Math.sin(a) * r);
-    const len = rng.range(0.12, 0.3) * (1 - r);
-    const tip = base.clone().add(new Vector3(Math.cos(a) * len * 0.55, len, Math.sin(a) * len * 0.55));
-    const w = len * 0.24;
-    const foot = [0, 1, 2].map((k) => new Vector3(base.x + Math.cos(a + k * 2.094) * w, base.y, base.z + Math.sin(a + k * 2.094) * w));
-    for (let k = 0; k < 3; k += 1) { put(foot[k]!, root, 1, 0); put(tip, band, 1.15, 0); put(foot[(k + 1) % 3]!, root, 1, 0); }
-  }
   return { positions, colors, flow, seep: crown };
 }
 
@@ -245,17 +318,35 @@ export const FISSURE_FLOW = /* glsl */ `
 `;
 
 export function buildRock(spec: RockSpec, rng: CrystalRng): RockParts {
-  const tris = boulder(rng.fork(1), spec.rx > 16 ? 2 : 1);
+  const raw = boulder(rng.fork(1), spec.rx > 16 ? 2 : 1);
   const place = new Matrix4().compose(
     new Vector3(spec.x, spec.y + spec.ry * 0.3, spec.z),
     new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), rng.next() * Math.PI * 2),
     new Vector3(spec.rx, spec.ry, spec.rz),
   );
-  const cut = fissures(tris, rng.fork(2), spec.tint, spec.veins, (spec.rx + spec.ry + spec.rz) / 3);
+  if (spec.veins <= 0) {
+    return { stone: paintStone(raw, place, rng.fork(3)), glow: null, triangles: raw.length, seep: null, crystal: null };
+  }
+  const br = breach(raw, rng.fork(4), spec.veins, { centre: spec.host });
+  // Fractures run from the pit floor (the site itself is the old crown, now air).
+  const cut = fissures(br.tris, rng.fork(2), spec.tint, spec.veins, (spec.rx + spec.ry + spec.rz) / 3, br.site.clone().setY(br.floor));
+  const stoneTris = [...br.tris, ...br.chips];
+  const seep = br.site.clone().setY(br.floor).applyMatrix4(place);
+  let crystal: RockCrystal | null = null;
+  if (!spec.host) {
+    // Roots below the pit floor, so the colony comes OUT of the stone.
+    const root = br.site.clone().setY(br.floor - 0.12).applyMatrix4(place);
+    // A normal through a non-uniform scale: the inverse-transpose, i.e. divide
+    // by the scale, then rotate.
+    const rot = new Quaternion(); place.decompose(new Vector3(), rot, new Vector3());
+    const normal = new Vector3(br.normal.x / spec.rx, br.normal.y / spec.ry, br.normal.z / spec.rz).applyQuaternion(rot).normalize();
+    crystal = { x: root.x, y: root.y, z: root.z, normal, size: spec.ry * (1.15 + 0.7 * spec.veins) };
+  }
   return {
-    stone: paintStone(tris, place, rng.fork(3)),
+    stone: paintStone(stoneTris, place, rng.fork(3)),
     glow: glowGeometry(cut.positions, cut.colors, place, cut.flow),
-    triangles: tris.length + cut.positions.length / 9,
-    seep: cut.seep ? cut.seep.applyMatrix4(place) : null,
+    triangles: stoneTris.length + cut.positions.length / 9,
+    seep,
+    crystal,
   };
 }
