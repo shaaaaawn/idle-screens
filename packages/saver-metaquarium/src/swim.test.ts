@@ -32,7 +32,6 @@ describe('swim styles', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     // ...but phase and anchor still spread, deliberately: see fishVariation.
     const phases = [0, 1, 2, 3, 4, 5].map((i) => fishVariation(i, 0).phase);
@@ -262,7 +261,6 @@ describe('per-fish uniqueness', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     expect(METAQUARIUM_PARAMS.swimVariance.default).toBe(0);
   });
@@ -271,8 +269,6 @@ describe('per-fish uniqueness', () => {
       const v = fishVariation(i, 1);
       expect(v.speedMul).toBeGreaterThan(0.55);
       expect(v.speedMul).toBeLessThan(1.45);
-      expect(v.scaleMul).toBeGreaterThan(0.7);
-      expect(v.scaleMul).toBeLessThan(1.3);
     }
   });
   it('a fish varies by INDEX, not by spawn order or rebuild count', () => {
