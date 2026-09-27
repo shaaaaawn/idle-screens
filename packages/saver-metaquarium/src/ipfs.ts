@@ -39,28 +39,38 @@ export const FISH_CATALOG: FishEntry[] = [
 
 export const DEFAULT_FISH = FISH_CATALOG[0]!;
 
+/** URL scheme of a breed bundled INSIDE this package (src/breeds, generated
+ *  by breeds/intake.mjs): no network, no gateway, no decoder. The tank
+ *  resolves it; everything else treats it as an opaque URL. */
+export const BUNDLED_BREED_SCHEME = 'mq-breed:';
+
 /**
- * The unminted breeds — the original aquarium's NPC set, brought in as
- * catalog entries with synthetic ids above the 512 supply. No token, no
- * IPFS pin yet (`ipfs3d` empty), so they resolve only where a host serves
- * the bundled GLBs (`localGlb`) — the playground/studio today. Pinning them
- * and filling `ipfs3d` is what makes them wall-ready; until then the DSL
- * reports them as unhosted rather than spawning a dead URL.
+ * The unminted breeds — the original aquarium's NPC set, catalog entries with
+ * synthetic ids above the 512 supply. They have no token and no IPFS pin:
+ * the package BUNDLES them (breeds/README.md — the intake that optimised
+ * them), so they swim on every host, the wall included, with nothing to
+ * fetch. `fishMix` takes their breed name or id in the default catalog.
  *
- * All are clip-less and unrigged — they swim on `bodyWiggle`. Their
- * materials use the NPC naming (PrimaryColor, SecondaryColor, EYES-, GLOW-),
- * so every instance gets the seeded two-tone coat and glow halos.
+ * All are clip-less and unrigged — they swim on the body wave. Their
+ * materials carry the role names (PrimaryColor, SecondaryColor, EYES-,
+ * GLOW-, KEEP-), so every instance gets the seeded two-tone coat, glow
+ * halos, and its authored colour where the intake said to keep it.
  */
 export const NPC_CATALOG: FishEntry[] = [
-  { id: 601, name: 'Blowfish', breed: 'blowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-blowfish.glb' },
-  { id: 602, name: 'Hackerfish', breed: 'hackerfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-hackerfish.glb' },
-  { id: 603, name: 'Glowfish', breed: 'glowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-glowfish.glb' },
-  { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-babyfish.glb' },
-  { id: 605, name: 'Shark', breed: 'shark', ipfs3d: '', localGlb: '/assets/metaquarium/shark3.glb' },
-  { id: 606, name: 'Crab', breed: 'crab', ipfs3d: '', localGlb: '/assets/metaquarium/npc-crab.glb' },
-  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-jellyfish.glb' },
-  { id: 608, name: 'Dori', breed: 'dori', ipfs3d: '', localGlb: '/assets/metaquarium/npc-dori.glb' },
+  { id: 601, name: 'Blowfish', breed: 'blowfish', ipfs3d: `${BUNDLED_BREED_SCHEME}blowfish`, localGlb: '' },
+  { id: 602, name: 'Hackerfish', breed: 'hackerfish', ipfs3d: `${BUNDLED_BREED_SCHEME}hackerfish`, localGlb: '' },
+  { id: 603, name: 'Glowfish', breed: 'glowfish', ipfs3d: `${BUNDLED_BREED_SCHEME}glowfish`, localGlb: '' },
+  { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}babyfish`, localGlb: '' },
+  { id: 605, name: 'Shark', breed: 'shark', ipfs3d: `${BUNDLED_BREED_SCHEME}shark`, localGlb: '' },
+  { id: 606, name: 'Crab', breed: 'crab', ipfs3d: `${BUNDLED_BREED_SCHEME}crab`, localGlb: '' },
+  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}jellyfish`, localGlb: '' },
+  { id: 608, name: 'Dori', breed: 'dori', ipfs3d: `${BUNDLED_BREED_SCHEME}dori`, localGlb: '' },
 ];
+
+/** The default catalog's lookup: minted samples first, then the bundled breeds. */
+const findInDefault = (key: string): FishEntry | undefined => /^\d+$/.test(key)
+  ? FISH_CATALOG.find((f) => f.id === Number(key)) ?? NPC_CATALOG.find((f) => f.id === Number(key))
+  : FISH_CATALOG.find((f) => f.breed.toLowerCase() === key) ?? NPC_CATALOG.find((f) => f.breed.toLowerCase() === key);
 
 import { SWIM_STYLE_NAMES, type SwimStyle } from './swim';
 import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
@@ -140,6 +150,7 @@ export function parseFishMix(
       if (!Number.isInteger(count) || count < 1) return false;
     }
     const key = (idRaw ?? '').trim().toLowerCase();
+    if (catalog === FISH_CATALOG && findInDefault(key)) return true;
     if (/^\d+$/.test(key)) {
       if (catalog.some((fish) => fish.id === Number(key))) return true;
       return catalog === FISH_CATALOG
@@ -194,9 +205,11 @@ export function parseFishMix(
       continue;
     }
     const key = (idRaw ?? '').trim().toLowerCase();
-    let fish = /^\d+$/.test(key)
-      ? catalog.find((f) => f.id === Number(key))
-      : catalog.find((f) => f.breed.toLowerCase() === key);
+    let fish = catalog === FISH_CATALOG
+      ? findInDefault(key)
+      : /^\d+$/.test(key)
+        ? catalog.find((f) => f.id === Number(key))
+        : catalog.find((f) => f.breed.toLowerCase() === key);
     // Farm fallback is only for the default catalog. A custom catalog is a
     // closed world (playground offline e2e, a future pack) — leaking a minted
     // id out to IPFS would silently undo that constraint.
@@ -209,7 +222,8 @@ export function parseFishMix(
     if (!fish) {
       // Name what THIS catalog offers, not a hardcoded minted list — a studio
       // catalog carries the NPC breeds too, and the message should say so.
-      const breeds = [...new Set(catalog.map((f) => f.breed))].join(', ');
+      const offered = catalog === FISH_CATALOG ? [...BREEDS.filter((b) => b.minted).map((b) => b.breed), ...NPC_CATALOG.map((f) => f.breed)] : catalog.map((f) => f.breed);
+      const breeds = [...new Set(offered)].join(', ');
       problems.push(
         /^\d+$/.test(key)
           ? catalog === FISH_CATALOG

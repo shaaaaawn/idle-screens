@@ -83,7 +83,7 @@ never changes because a dependency was bumped.
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
 | fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
-| fishMix | string | `""` | Mixed population DSL: `id[:count][@style]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | `""` | Mixed population DSL: `id[:count][@style]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
 
 ### Motion
