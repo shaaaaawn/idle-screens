@@ -46,6 +46,20 @@ describe('metaquarium material contract', () => {
     );
   });
 
+  it('KEEP-* keeps its authored colour, flat or lit (the breed intake names these)', () => {
+    for (const lit of [false, true]) {
+      const geo = new SphereGeometry(1, 4, 4);
+      const screen = new Mesh(geo, new MeshStandardMaterial({ color: 0x0a0a0a }));
+      screen.material.name = 'KEEP-Screen';
+      const root = new Group(); root.add(screen);
+      applyNpcMaterials(root, createRng(7).fork(9), true, lit);
+      const mat = screen.material as unknown as MeshBasicMaterial | MeshLambertMaterial;
+      expect(mat).toBeInstanceOf(lit ? MeshLambertMaterial : MeshBasicMaterial);
+      expect(mat.color.getHex()).toBe(new Color(0x0a0a0a).getHex());
+      expect(mat.name).toBe('KEEP-Screen');
+    }
+  });
+
   it('GLOW-* becomes colored emissive basic (unlit, no scene lights)', () => {
     const { root, glow } = npcFish();
     applyNpcMaterials(root, createRng(7).fork(1));

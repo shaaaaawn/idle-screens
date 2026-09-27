@@ -133,6 +133,7 @@ function colorLuminance(m: Material): number {
  * - PrimaryColor/SecondaryColor (NPC set) → a two-tone coat: two DISTINCT
  *   seeded picks, so an NPC reads as one animal in two colors rather than a
  *   patchwork of independent picks.
+ * - KEEP-<part> → the authored colour, kept (the breed intake names these).
  * - other untextured → seeded palette coat; textured → untouched (the atlas
  *   IS the look).
  */
@@ -218,6 +219,15 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
           return atlas;
         }
         return m;
+      }
+      // KEEP-: the intake (breeds/breeds.json) said this part's authored
+      // colour IS the look — a hacker fish's black screen, a shark's teeth.
+      if (/^KEEP-/.test(m.name)) {
+        const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
+        const kept = lit ? new MeshLambertMaterial({ color: own }) : new MeshBasicMaterial({ color: own });
+        kept.name = m.name;
+        kept.userData.mqOwned = true;
+        return kept;
       }
       const coat = /primary/i.test(m.name)
         ? coatA

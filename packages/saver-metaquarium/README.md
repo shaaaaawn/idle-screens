@@ -83,7 +83,7 @@ never changes because a dependency was bumped.
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
 | fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
-| fishMix | string | `""` | Mixed population DSL: `id[:count][@style]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
 
 ### Motion
@@ -94,7 +94,9 @@ never changes because a dependency was bumped.
 | swimStyle | enum | `loop` | `loop` (pre-style), `school`, `drift`, `hover`, `patrol`, `bottom`, `surface`; relationship styles `follow` / `pair` / `chase` bond a fish to the nearest preceding unbonded fish; `auto` gives each untagged token its breed's default |
 | pathShape | enum | `wander` | The shape a loop is drawn on: `wander`, `orbit`, `eight`, `helix`, `canyon`, `crossing` (camera-relative parade lane) |
 | formationShape | enum | `phalanx` | How a `school` holds together: `phalanx`, `line`, `ring`, `wedge`, `ball`, `wheel`. Ignored by non-formation styles |
-| swimVariance | number | 0 | Per-fish spread, 0–1: 0 a uniform shoal, 1 every fish its own animal (±40% speed, ±25% size, own phase) |
+| swimVariance | number | 0 | Per-fish spread in how they swim, 0–1: 0 a uniform shoal, 1 every fish its own animal (±40% speed, own phase). Size has its own dial |
+| fishSize | number | 1 | Every fish bigger or smaller (0.3–3, smooth), over each breed's nominal length (`BREED_SIZE`: shark 2.2, seaturtle 1.35, seahorse 0.8, babyfish 0.45 …) |
+| sizeVariance | number | 0.5 | How much fish of one breed differ in size, 0–1 (smooth, seeded per fish): 0 all alike, 0.5 ≈ ×0.76–×1.32, 1 ≈ ×0.57–×1.74. Formations, bonds, the follow camera and spot shadows all space in the actual fish's length |
 | bodyWiggle | number | 0 | Procedural body yaw for models with no animation clip, 0–1. Clipped models ignore it; 0.3–0.4 recommended for a clip-less cast |
 | maneuver | enum | `none` | Named event layered over the swim style: `dart`, `startle`, `graze`, `curious`, `zoomies`. Each fish runs its own seeded schedule |
 | maneuverRate | number | 0.5 | How often events fire, 0–3: 0 never, 1 the maneuver's own tempo (~14–20 s per fish), 3 nearly back to back |
@@ -178,7 +180,7 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | Parameter | Range | Effect |
 | --- | --- | --- |
 | `rockDensity` | 0–1 | Crystal-root boulders, sparse satellite rocks, a distant ridge and an open arch. Any positive value provides foundations; density adds satellites. |
-| `rockVeins` | 0–1 (0.7) | How fractured the stone is. Fissures are cut from the rock's own facets (so they always lie on the surface), fork, carry a white-hot core, and sprout small crystals. 0 is plain stone. |
+| `rockVeins` | 0–1 (0.7) | How hard the crystals broke out of the stone. Each rock's crown is heaved into a pit with chips of stone on the rim and a few short dark fractures, and a colony of real crystals (druse or spire, the same shards, material, pulse and halo as `propMix`) grows out of it, rooted inside the rock. A rock under a `propMix` cluster is broken open under that cluster instead. More veins, more rocks split, and bigger colonies. The colonies add no floor light. 0 is plain stone. |
 | `geodeHomes` | 0–3 | Geode homes: a broken boulder with an agate rind and a throat of crystal teeth, and a voxel house recessed inside — round door, lit window, lamp, steps, a chimney that vents bubbles. Habits cycle cottage / hall / tower; each home lights the floor at its door. Weak devices retain at most two. |
 | `interior` | `none` · `geode` | Sets the scene INSIDE a geode home: crystal-lined dome with agate strata, plank floor and rug, voxel furniture, a chandelier / lamp / stove / window that light the floor and the fish. Use with the `void` environment; the default orbit camera stays indoors (keep `cameraDistance` ≲ 130). |
 | `followSpot` | -1…23 | A follow-spot on one fish (its cast slot; -1 off): a beam from the rig, a pool of moving caustics on the floor beneath it, a light that rides with the fish, and the house lights down — a performer on a stage. `spotStrength` 0–1, `spotColor`. Closed-form: it follows the fish's own deterministic path. |

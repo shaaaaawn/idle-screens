@@ -59,6 +59,12 @@ const ACCENT: Readonly<Record<string, string>> = {
   orange: 'yellow', cyan: 'seafoam', white: 'cyan', glass: 'cyan',
 };
 
+/** The accent a cluster of this hex colour wears (its own colour if unnamed). */
+export function accentOf(hex: string): string {
+  const name = Object.keys(CRYSTAL_COLORS).find((k) => CRYSTAL_COLORS[k]!.toLowerCase() === hex.toLowerCase());
+  return name ? CRYSTAL_COLORS[ACCENT[name] ?? name] ?? hex : hex;
+}
+
 const RAINBOW = ['hotpink', 'orange', 'yellow', 'seafoam', 'cyan', 'blue', 'purple'];
 
 /** What a room's crystals look like when the token says `env` (the default). */
@@ -263,7 +269,7 @@ const HABIT_RINGS: Readonly<Record<CrystalHabit, ReadonlyArray<readonly [number,
   coral: [[1, 0], [4, 22], [6, 46]],
 };
 /** Spire length in world units at crystalScale 1 (a fish is 18 long). */
-const HABIT_LENGTH: Readonly<Record<CrystalHabit, number>> = {
+export const HABIT_LENGTH: Readonly<Record<CrystalHabit, number>> = {
   lotus: 40, spire: 58, druse: 22, scatter: 32, coral: 46,
 };
 
@@ -437,13 +443,20 @@ export function growCluster(
   const cap = Math.round(opts.shardCap * 1.25);
   if (shards.length > cap) shards.length = cap;
 
+  const { radius, height } = measureShards(shards);
+  return { shards, radius, height };
+}
+
+/** A shard's tip is its root plus its axis scaled by its length. Used to size
+ * the footprint (radius) and clearance (height) a cluster of shards needs. */
+export function measureShards(shards: readonly Shard[]): { radius: number; height: number } {
   let radius = 0;
   let height = 0;
   for (const sh of shards) {
     radius = Math.max(radius, Math.hypot(sh.x + sh.ax * sh.length, sh.z + sh.az * sh.length));
     height = Math.max(height, sh.y + sh.ay * sh.length);
   }
-  return { shards, radius, height };
+  return { radius, height };
 }
 
 export interface LayoutOptions extends ClusterOptions {

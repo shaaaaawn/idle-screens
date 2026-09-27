@@ -5,7 +5,7 @@ import {
   Matrix4, Points, PointsMaterial, Vector4,
   DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
-import { emittersOf, type Cluster, type CrystalRng, type Emitter } from './crystals';
+import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
@@ -16,14 +16,21 @@ import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
-import { buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type Tri } from './rocks';
+import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
 
 export interface SceneryOptions {
   rocks: number;
-  /** 0..1 — how fractured the stone is: fissure width, forks, crystals in the crack. */
+  /** 0..1 — how hard the crystals broke out of the stone: how many rocks
+   *  carry a colony, how big, how deep the breach, how far it fractured. */
   veins: number;
+  /** `crystalWild` — the rock colonies are individuals like every other cluster. */
+  wild?: number;
+  /** Shards one cluster may have on this tier (the props budget). */
+  shardCap?: number;
+  /** Shard-geometry variants the crystal field carries. */
+  variants?: number;
   homes: number;
   flora: number;
   bubbles: number;
@@ -60,6 +67,10 @@ export interface Scenery {
   moving: Emitter[];
   /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
   canopyTips: CanopyTip[];
+  /** Crystal colonies that burst out of the rocks — REAL clusters, for the
+   *  host to build with the same field as `propMix` (no light of their own:
+   *  they do not join the floor pools). */
+  rockClusters: Cluster[];
   /** Named places in this world a vignette can send a fish (gate, plaza, home doors). */
   marks: Record<string, { x: number; y: number; z: number }>;
   /** What the floor should paint: the path network, as segments. */
@@ -99,19 +110,62 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const s = opts.scale;
   let rockIndex = 0;
   const seeps: SceneryAnchor[] = [];
-  const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string): void => {
-    const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins }, rockRng.fork(100 + rockIndex++));
+  // Colonies that broke out of the stone. Each rock draws its OWN fork, so
+  // whether one grows never shifts another's shape.
+  const rockClusters: Cluster[] = [];
+  const colonyRng = rng.fork(22);
+  const up = new Vector3(0, 1, 0);
+  const colony = (site: RockCrystal, color: string, key: number, clear = true): void => {
+    const crng = colonyRng.fork(key);
+    // Not every stone split: at veins 0.7 about four in five did.
+    if (crng.next() >= 0.35 + 0.65 * opts.veins) return;
+    // A crust or a stand of columns: mineral habits. A lotus rosette at this
+    // size, over a split in the stone, read as a flower on a stem.
+    const habit: CrystalHabit = crng.next() < 0.6 ? 'druse' : 'spire';
+    const grown = growCluster(habit, crng, {
+      shardCap: Math.min(12, opts.shardCap ?? 12), variants: opts.variants ?? 3,
+      scale: site.size / HABIT_LENGTH[habit] * crng.range(0.8, 1.15), wild: opts.wild ?? 0.7,
+    });
+    // Grown upright, then leaned with the stone it came out of.
+    const lean = new Quaternion().setFromUnitVectors(up, site.normal);
+    const v = new Vector3();
+    for (const sh of grown.shards) {
+      // Roots a little deeper than a floor cluster's: in the stone, not on it.
+      v.set(sh.x, sh.y - sh.length * 0.12, sh.z).applyQuaternion(lean); sh.x = v.x; sh.y = v.y; sh.z = v.z;
+      v.set(sh.ax, sh.ay, sh.az).applyQuaternion(lean);
+      // Out of the breach and UP: a near-flat shard on a small stone overhangs
+      // its edge and shows its cut base, and one pointing down hangs off the
+      // flank like a pendant. About 20° above the horizon at the least.
+      v.y = Math.max(0.35, v.y);
+      v.normalize(); sh.ax = v.x; sh.ay = v.y; sh.az = v.z;
+    }
+    // Measured again after the lean: the footprint and height fish clear.
+    const { radius, height } = measureShards(grown.shards);
+    rockClusters.push({
+      id: null, habit, x: site.x, y: site.y, z: site.z,
+      color, accent: accentOf(color), glass: false, phase: crng.next() * Math.PI * 2,
+      shards: grown.shards, radius, height,
+    });
+    // Its own dome, centred on the colony (a crown is rarely the rock's middle).
+    // Not for one on the arch: a dome rises from the floor and would fill the
+    // opening the fish swim through, under a colony far over their heads.
+    if (clear) obstacles.push({ x: site.x, y: site.y, z: site.z, r: radius, h: height });
+  };
+  const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string, host = false): void => {
+    const key = 100 + rockIndex++;
+    const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins, host }, rockRng.fork(key));
     stones.push(built.stone);
     if (built.glow) veins.push(built.glow);
-    // The widest part of a big rock's fissure seeps bubbles.
+    // A big rock's breach seeps bubbles.
     if (built.seep && rx > 15 * s) seeps.push({ x: built.seep.x, y: built.seep.y, z: built.seep.z, color });
+    if (built.crystal) colony(built.crystal, color, key);
     obstacles.push({ x, y, z, r: Math.max(rx, rz), h: ry * 1.3 });
     counts.rocks!++;
   };
   if (opts.rocks > 0) {
     const n = Math.min(anchors.length, opts.cap);
     for (const a of anchors.slice(0, n)) {
-      rock(a.x, a.y, a.z, 18 * s, 8 * s, 15 * s, a.color);
+      rock(a.x, a.y, a.z, 18 * s, 8 * s, 15 * s, a.color, clusters.length > 0);
       for (let j = 0; j < Math.ceil(opts.rocks * 2); j++) {
         const x = a.x + rockRng.range(-23, 23) * s, z = a.z + rockRng.range(-20, 20) * s;
         rock(x, terrain(x, z), z, rockRng.range(8, 14) * s, rockRng.range(5, 11) * s, 10 * s, a.color);
@@ -134,16 +188,24 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     for (let i = 0; i < tp.count; i += 3) archTris.push([av(i), av(i + 1), av(i + 2)]);
     torus.dispose();
     const archPlace = new Matrix4().compose(new Vector3(x, y, z), new Quaternion(), new Vector3(24 * s, 35 * s, 24 * s));
-    stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
-    const archCut = fissures(archTris, archRng.fork(2), '#947cff', opts.veins, 28 * s);
-    const archGlow = glowGeometry(archCut.positions, archCut.colors, archPlace, archCut.flow);
-    if (archGlow) veins.push(archGlow);
+    const archTint = anchors[0]?.color ?? '#947cff';
+    if (opts.veins > 0) {
+      // The crown of the arch broke too: a shallow breach (the span is thin)
+      // and a colony standing on the keystone.
+      const br = breach(archTris, archRng.fork(4), opts.veins, { pit: 0.1 });
+      stones.push(paintStone([...br.tris, ...br.chips], archPlace, archRng.fork(1), '#384960'));
+      // No fractures down the span: on a thin arch one reads as a stalk.
+      const root = br.site.clone().setY(br.floor - 0.03).applyMatrix4(archPlace);
+      colony({ x: root.x, y: root.y, z: root.z, normal: up.clone(), size: 11 * s * (0.9 + 0.5 * opts.veins) }, archTint, 950, false);
+    } else {
+      stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
+    }
     counts.arches = 1;
-    for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, '#947cff');
+    for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, archTint);
     // Low back ridge frames the settlement without sealing off its centre.
     for (let i = 0; i < (opts.castle ? 0 : 4); i++) {
       const rx = (i - 1.5) * 30 * s, rz = -115 * s;
-      rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, '#567fae');
+      rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, anchors[i % Math.max(1, anchors.length)]?.color ?? '#567fae');
     }
   }
   // Homes: a loose crescent opening toward the default camera, habits cycled
@@ -583,10 +645,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     };
     (lava.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-fissures-v3';
   }
+  counts.rockCrystals = rockClusters.length;
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [],
+    group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [], rockClusters,
     canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh

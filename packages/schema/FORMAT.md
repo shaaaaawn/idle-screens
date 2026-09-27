@@ -45,7 +45,8 @@ the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
 sequence-level) (2026-09-10 — the print look); `timeline` (keyframes on the
 scene's own clock), paint-level layer `opacity` and `transform`,
 `position.dx` / `dy`, `wrapMorph` on the sequence envelope and
-`text: 'dip'` on `morph` (2026-09-25 — timed scenes).
+`text: 'dip'` on `morph` (2026-09-25 — timed scenes); layer `groups` and
+`transform.origin` (2026-09-26 — groups and origin).
 
 ## Safety invariants
 
@@ -111,7 +112,8 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "finish": { "grain": 0.5, "dither": 0.3 },  // optional; print screen over the finished frame
   "background": { ... },         // optional; defaults to black
   "layers": [ { ... }, ... ],    // 1..36, rendered back-to-front
-  "timeline": { ... }            // optional; authored keyframes — see **Timeline**
+  "timeline": { ... },           // optional; authored keyframes — see **Timeline**
+  "groups": { "moon": { ... } }  // optional; named paint groups — see **Groups**
 }
 ```
 
@@ -289,7 +291,8 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
 | `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
-| `transform` | `{x?, y?, scale?, scaleX?, rotate?}` | identity | **paint-level** transform of the whole layer about the viewport centre: translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
+| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
+| `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** ignored |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -754,6 +757,34 @@ it genuinely cuts to a different set of layers.
 base as the piece's rest state** (its end card), and a timed piece degrades
 to a valid ambient scene.
 
+## Groups — one handle for a multi-layer subject
+
+A subject drawn from several layers (a character's body, eyes and mouth; a
+record's grooves and label) can be moved, scaled and faded as one thing:
+
+```jsonc
+"groups": { "moon": { "transform": { "scale": 1, "y": 0 }, "opacity": 1 } },
+"layers": [ { "key": "face", "group": "moon", ... }, { "key": "eyes", "group": "moon", ... } ]
+```
+
+- A member paints through its group: the group's `transform` wraps the
+  layer's own (a point lands at *group(layer(p))*), and the group's `opacity`
+  multiplies the layer's. A group's transform always turns about the viewport
+  centre — it is a camera; `origin: "anchor"` is for a layer's own transform.
+- Up to 16 groups; names are 1–32 letters, digits, `-` or `_`, starting with a
+  letter. A layer's `group` must name one of them.
+- **Paint**, outside the structural signature: `setParam("groups.moon.opacity", 0)`,
+  a `timeline` key on `groups.moon.transform.scale`, or a sequence `morph`
+  glides the whole subject — one path instead of one per layer. A group present
+  on only one end of a morph glides from the identity (no transform, opacity 1).
+- Membership is fixed per scene: `layers.N.group` is not a steer or `timeline`
+  target. A sequence `morph` where a layer joins or leaves a group glides (the
+  end without the group paints it at the identity); moving a layer from one
+  group to another steps on the morph's first frame.
+
+**Native:** ignored ⇒ identity transform, opacity 1 — author the base so the
+subject reads without the group's paint.
+
 ## Seeing without eyes — the perception API
 
 `src/perceive.ts` translates a spec into modalities a **non-vision agent** can
@@ -818,7 +849,10 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
   `perceiveScene().text`.)
-- `adviseSpec(spec)` — non-blocking advisories (also on
+- `adviseSpec(spec)` — non-blocking advisories (a layer whose paint opacity —
+  its own × its group's — is 0 in the base scene and at every key boundary of
+  its `timeline` never shows, so it is not judged and its entities do not count
+  toward `dense-scene`; coverage is weighed by paint opacity) (also on
   `perceiveScene().advisories`). Two of them are **spatial**, for static text:
   `text-off-screen` (a text/textBlock box crosses the viewport edge by more
   than 1%) and `text-overlap` (two static text layers share more than 10% of
