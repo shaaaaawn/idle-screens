@@ -165,25 +165,30 @@ describe('resolveIpfsUrls', () => {
   });
 });
 
-describe('NPC breeds (unminted set)', () => {
-  it('covers all eight designed breeds with synthetic ids above the supply', () => {
+describe('NPC breeds (unminted set, bundled)', () => {
+  it('covers all eight designed breeds with synthetic ids above the supply, each bundled', () => {
     expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(
       ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark'],
     );
     for (const f of NPC_CATALOG) {
       expect(f.id).toBeGreaterThan(512); // never collides with a minted token
-      expect(f.localGlb).toMatch(/^\/assets\/metaquarium\//);
-      expect(f.ipfs3d).toBe(''); // no pin yet — hosts map localGlb in
+      expect(f.ipfs3d).toBe(`mq-breed:${f.breed}`); // in the package: nothing to host
     }
   });
-  it('a mapped catalog resolves NPC breeds; an unmapped one says not hosted', () => {
-    const mapped = NPC_CATALOG.map((f) => ({ ...f, ipfs3d: `http://x${f.localGlb}` }));
-    const ok = parseFishMix('shark:2,jellyfish:1', mapped);
+  it('the DEFAULT catalog casts them by breed or id, as species (counts, not individuals)', () => {
+    const ok = parseFishMix('shark:2,jellyfish:1,606@bottom');
     expect(ok.problems).toEqual([]);
-    expect(ok.entries.map((e) => e.count)).toEqual([2, 1]);
-    const un = parseFishMix('shark:1', NPC_CATALOG);
-    expect(un.entries).toEqual([]);
-    expect(un.problems[0]).toContain('not hosted here');
+    expect(ok.entries.map((e) => [e.breed, e.count, e.url])).toEqual([
+      ['shark', 2, 'mq-breed:shark'], ['jellyfish', 1, 'mq-breed:jellyfish'], ['crab', 1, 'mq-breed:crab'],
+    ]);
+    expect(ok.entries[2]!.style).toBe('bottom');
+    // Minted fish in the same mix keep their uniqueness rules.
+    expect(parseFishMix('257:2,dori:3').entries.map((e) => e.id)).toEqual([257, 258, 608]);
+  });
+  it('the default catalog names every breed it offers when one is misspelt', () => {
+    const r = parseFishMix('sharkk:1');
+    expect(r.problems[0]).toContain('shark');
+    expect(r.problems[0]).toContain('angelfish');
   });
   it('the breed error names what the ACTIVE catalog offers', () => {
     const r = parseFishMix('unicorn:1', NPC_CATALOG.map((f) => ({ ...f, ipfs3d: 'x' })));

@@ -75,7 +75,8 @@ import {
   buildCrystalField, buildGlowCards, buildSpotBeam, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePaths, writePoolSlots,
   type CrystalField, type GlowCards, type SpotBeam,
 } from './crystal-mesh';
-import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { BUNDLED_BREED_SCHEME, expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { BUNDLED_BREEDS } from './breeds';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
@@ -130,6 +131,14 @@ interface FishTemplate {
   draco: boolean;
 }
 
+
+/** A bundled breed's GLB, from the base64 its chunk carries. */
+function bundledGlb(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
 
 /** One decoder per decoder path, created on first use and kept for the page.
  *  Keyed by path so two tanks with different `dracoPath` values do not share
@@ -1815,6 +1824,12 @@ class TankInstance implements SaverInstance {
           // one flaky gateway degrades to the next instead of to a fallback
           // blob. Non-ipfs URLs have a single candidate.
           const buf = await (async (): Promise<ArrayBuffer> => {
+            // A bundled breed: its own lazy chunk, decoded in place — no fetch.
+            if (url.startsWith(BUNDLED_BREED_SCHEME)) {
+              const load = BUNDLED_BREEDS[url.slice(BUNDLED_BREED_SCHEME.length)];
+              if (!load) throw new Error(`no bundled breed ${url}`);
+              return bundledGlb((await load()).default);
+            }
             let lastErr: unknown = new Error('no gateway candidates');
             for (const candidate of resolveIpfsUrls(url)) {
               const ctl = new AbortController();
