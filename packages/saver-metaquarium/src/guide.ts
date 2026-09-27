@@ -85,7 +85,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   crystalPulse: 'Slow breathing of that light (0.12 Hz, ≤15 % — flash-safe).',
   crystalTint: 'How much nearby light sources colour a passing fish. 0.5–0.7 ties the cast to the place.',
   rockDensity: 'Faceted boulders, an arch and a back ridge around the crystals.',
-  rockVeins: 'Glowing fissures in the rock, like lava or a creek down a mountainside.',
+  rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal: grass, tube anemones, bulbs, sea fans, kelp — swaying, lit, shedding spores.',
