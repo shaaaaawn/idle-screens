@@ -4,7 +4,7 @@ import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
-import { mapBox, paintMap, paintOpacity } from './paint';
+import { groupOf, mapBox, paintMap, paintOpacity } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
@@ -544,7 +544,7 @@ function brightestAdditivePlate(
     const entities = allEntities[lj]!;
     // Only a layer that is actually moved at draw time (its own or its
     // group's transform) may reach anywhere; opacity alone moves nothing.
-    const moved = paintMap(spec, layer, w, h, Math.min(w, h)) !== null;
+    const moved = layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined;
     for (const e of entities) {
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
