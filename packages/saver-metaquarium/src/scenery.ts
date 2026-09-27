@@ -5,7 +5,7 @@ import {
   Matrix4, Points, PointsMaterial, Vector4,
   DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
-import { accentOf, emittersOf, growCluster, HABIT_LENGTH, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
+import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
@@ -16,7 +16,7 @@ import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
-import { breach, buildRock, FISSURE_FLOW, fissures, glowGeometry, paintStone, type RockCrystal, type Tri } from './rocks';
+import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
 
@@ -140,11 +140,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       v.normalize(); sh.ax = v.x; sh.ay = v.y; sh.az = v.z;
     }
     // Measured again after the lean: the footprint and height fish clear.
-    let radius = 0, height = 0;
-    for (const sh of grown.shards) {
-      radius = Math.max(radius, Math.hypot(sh.x + sh.ax * sh.length, sh.z + sh.az * sh.length));
-      height = Math.max(height, sh.y + sh.ay * sh.length);
-    }
+    const { radius, height } = measureShards(grown.shards);
     rockClusters.push({
       id: null, habit, x: site.x, y: site.y, z: site.z,
       color, accent: accentOf(color), glass: false, phase: crng.next() * Math.PI * 2,

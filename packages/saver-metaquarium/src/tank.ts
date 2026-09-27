@@ -2073,11 +2073,12 @@ class TankInstance implements SaverInstance {
     if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
     else this.horizonColor.copy(this.fogColor);
     this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
-    for (const field of [this.crystals, this.rockCrystals]) {
-      field?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
-        color: this.fogColor, near: fog.near, far: fog.far,
-      });
-    }
+    this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
+    this.rockCrystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
     this.buildShoal();

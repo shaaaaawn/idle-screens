@@ -443,13 +443,20 @@ export function growCluster(
   const cap = Math.round(opts.shardCap * 1.25);
   if (shards.length > cap) shards.length = cap;
 
+  const { radius, height } = measureShards(shards);
+  return { shards, radius, height };
+}
+
+/** A shard's tip is its root plus its axis scaled by its length. Used to size
+ * the footprint (radius) and clearance (height) a cluster of shards needs. */
+export function measureShards(shards: readonly Shard[]): { radius: number; height: number } {
   let radius = 0;
   let height = 0;
   for (const sh of shards) {
     radius = Math.max(radius, Math.hypot(sh.x + sh.ax * sh.length, sh.z + sh.az * sh.length));
     height = Math.max(height, sh.y + sh.ay * sh.length);
   }
-  return { shards, radius, height };
+  return { radius, height };
 }
 
 export interface LayoutOptions extends ClusterOptions {
