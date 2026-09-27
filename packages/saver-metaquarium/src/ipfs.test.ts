@@ -196,3 +196,23 @@ describe('NPC breeds (unminted set, bundled)', () => {
     expect(r.problems[0]).toContain('jellyfish');
   });
 });
+
+describe('fishMix *size', () => {
+  it('scales one token, rides after @style, and reaches the slots', () => {
+    const r = parseFishMix('257:2@school*1.5,100:1*0.6');
+    expect(r.problems).toEqual([]);
+    expect(r.entries.map((e) => [e.id, e.style, e.size])).toEqual([[257, 'school', 1.5], [258, 'school', 1.5], [100, undefined, 0.6]]);
+    const slots = expandFishMixSlots(r.entries, 24);
+    expect(slots.map((s) => s.size)).toEqual([1.5, 1.5, 0.6]);
+    expect(parseFishMix('100:1').entries[0]!.size).toBeUndefined();
+  });
+  it('clamps to 0.25–4 and degrades a bad size to the breed size, never dropping the fish', () => {
+    const big = parseFishMix('100*9');
+    expect(big.entries[0]!.size).toBe(4);
+    expect(big.problems[0]).toContain('clamped');
+    const bad = parseFishMix('100*huge');
+    expect(bad.entries).toHaveLength(1);
+    expect(bad.entries[0]!.size).toBeUndefined();
+    expect(bad.problems[0]).toContain('size must be');
+  });
+});

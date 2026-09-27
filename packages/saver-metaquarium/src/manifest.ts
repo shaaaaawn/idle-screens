@@ -143,10 +143,18 @@ export const METAQUARIUM_PARAMS = {
    *  non-formation style; the same no-pair-inside-a-body-length law holds
    *  for all of them. */
   formationShape: { type: 'enum', default: 'phalanx', options: [...FORMATION_SHAPES], ease: 'step' },
-  /** Per-fish spread: 0 a uniform shoal, 1 every fish visibly its own animal
-   *  (±40% speed, ±25% size, own phase). The uniqueness dial — one number
-   *  instead of per-fish values nobody wants to author. */
+  /** Per-fish spread in how they swim: 0 a uniform shoal, 1 every fish
+   *  visibly its own animal (±40% speed, own phase). Size has its own dial,
+   *  `sizeVariance` — a big fish is not a fast one. */
   swimVariance: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Every fish, bigger or smaller: a multiplier over each breed's own size
+   *  (a shark is 2.2 minted fish long, a babyfish 0.45) and each fish's own.
+   *  Smooth — a glide grows the whole cast. */
+  fishSize: { type: 'number', default: 1, min: 0.3, max: 3, ease: 'smooth' },
+  /** How much individual fish of one breed differ in size: 0 all alike, 0.5
+   *  (default) about ×0.76–×1.32, 1 about ×0.57–×1.74. Seeded per fish, so a
+   *  scene is stable; smooth, so a glide swells or evens out the cast. */
+  sizeVariance: { type: 'number', default: 0.5, min: 0, max: 1, ease: 'smooth' },
   /** Named event layered over the swim style — the thing that turns uniform
    *  cruising into behaviour a viewer recognizes. Each fish runs its own
    *  seeded schedule of the chosen event; displacement-based, so frames stay

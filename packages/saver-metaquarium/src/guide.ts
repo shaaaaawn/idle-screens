@@ -41,7 +41,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
   pathShape: 'The shape of free-swimming paths.',
   formationShape: 'The figure a `school` holds.',
-  swimVariance: 'How differently individual fish swim from one another.',
+  swimVariance: 'How differently individual fish swim from one another (speed, phase).',
+  fishSize: 'Every fish bigger or smaller, over each breed\'s own size (a shark is 2.2× a minted fish, a babyfish 0.45×).',
+  sizeVariance: 'How much fish of one breed differ in size: 0 all alike, 1 from about half to nearly double.',
   maneuver: 'Which set-piece moves the cast may break into.',
   maneuverRate: 'How often maneuvers happen.',
   maneuverIntensity: 'How big they are.',
@@ -111,11 +113,11 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
 };
 
 export const GRAMMAR = `
-fishMix   id[:count][@style], …        100:2@drift, 257:1, seahorse:3
+fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab jellyfish dori glowfish babyfish hackerfish blowfish. Styles: loop school drift hover patrol
-          bottom surface follow pair chase.
+          crab jellyfish dori glowfish babyfish hackerfish blowfish. *size scales that token over its
+          breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24

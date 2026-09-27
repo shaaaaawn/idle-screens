@@ -83,7 +83,7 @@ never changes because a dependency was bumped.
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
 | fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
-| fishMix | string | `""` | Mixed population DSL: `id[:count][@style]` comma-separated, catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
 
 ### Motion
@@ -94,7 +94,9 @@ never changes because a dependency was bumped.
 | swimStyle | enum | `loop` | `loop` (pre-style), `school`, `drift`, `hover`, `patrol`, `bottom`, `surface`; relationship styles `follow` / `pair` / `chase` bond a fish to the nearest preceding unbonded fish; `auto` gives each untagged token its breed's default |
 | pathShape | enum | `wander` | The shape a loop is drawn on: `wander`, `orbit`, `eight`, `helix`, `canyon`, `crossing` (camera-relative parade lane) |
 | formationShape | enum | `phalanx` | How a `school` holds together: `phalanx`, `line`, `ring`, `wedge`, `ball`, `wheel`. Ignored by non-formation styles |
-| swimVariance | number | 0 | Per-fish spread, 0–1: 0 a uniform shoal, 1 every fish its own animal (±40% speed, ±25% size, own phase) |
+| swimVariance | number | 0 | Per-fish spread in how they swim, 0–1: 0 a uniform shoal, 1 every fish its own animal (±40% speed, own phase). Size has its own dial |
+| fishSize | number | 1 | Every fish bigger or smaller (0.3–3, smooth), over each breed's nominal length (`BREED_SIZE`: shark 2.2, seaturtle 1.35, seahorse 0.8, babyfish 0.45 …) |
+| sizeVariance | number | 0.5 | How much fish of one breed differ in size, 0–1 (smooth, seeded per fish): 0 all alike, 0.5 ≈ ×0.76–×1.32, 1 ≈ ×0.57–×1.74. Formations, bonds, the follow camera and spot shadows all space in the actual fish's length |
 | bodyWiggle | number | 0 | Procedural body yaw for models with no animation clip, 0–1. Clipped models ignore it; 0.3–0.4 recommended for a clip-less cast |
 | maneuver | enum | `none` | Named event layered over the swim style: `dart`, `startle`, `graze`, `curious`, `zoomies`. Each fish runs its own seeded schedule |
 | maneuverRate | number | 0.5 | How often events fire, 0–3: 0 never, 1 the maneuver's own tempo (~14–20 s per fish), 3 nearly back to back |

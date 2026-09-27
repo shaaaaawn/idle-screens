@@ -52,7 +52,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { needsDraco } from './tank-draco';
 import { affordableLayers, environmentOf, roomColor, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  anchorFraction, bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES,
+  anchorFraction, bandRange, breedSize, FISH_LENGTH, fishHash, fishSizeMul, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
@@ -109,8 +109,6 @@ import {
 import { LogicalClock, rateOffset } from './runtime';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
-/** How far back along its own path the follow camera reads a fish's recent direction. */
-const FOLLOW_TRAIL = FISH_LENGTH * 2;
 const CAMERA_FAR = 1400;
 /** Floor-pool slots kept free of fixed light, for the sources that move. */
 const MOVING_POOLS = 4;
@@ -546,6 +544,8 @@ interface InspectFish {
   z: number;
   /** Compass heading in the ground plane, degrees (0 = +z, 90 = +x). */
   heading: number;
+  /** Body length against a minted fish: breed × token `*size` × this fish's own × `fishSize`. */
+  size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
 }
@@ -563,6 +563,8 @@ interface LeaderFrame {
   phase: number;
   pullX: number;
   pullZ: number;
+  /** The leader's body length now — a follower keeps station in ITS lengths. */
+  len: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -706,6 +708,10 @@ class TankInstance implements SaverInstance {
   private wantStyles: Array<SwimStyleSpec | null> = [];
   /** Per-slot breed from the mix, for `swimStyle: 'auto'` (MQ33). */
   private wantBreeds: string[] = [];
+  /** Per-slot `*size` from the mix (1 when the token has none). */
+  private wantSizes: number[] = [];
+  /** The body length (units) of the fish each spot follows, for its shadow. */
+  private readonly spotLen = [FISH_LENGTH, FISH_LENGTH, FISH_LENGTH];
   /** Ground-plane centres of the room's light shafts — what `lightSeek`
    *  pulls toward (MQ32). Empty when the room has no rays. */
   private rayPools: Array<[number, number]> = [];
@@ -1426,7 +1432,7 @@ class TankInstance implements SaverInstance {
       // Its shadow: the fish's plan, magnified by how far above the floor it
       // swims (the lamp is a point), and softened the same way.
       const lift = Math.max(0, f.y - floorY), grow = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
-      const half = FISH_LENGTH * 0.5 * grow * this.num('spotShadow');
+      const half = this.spotLen[i]! * 0.5 * grow * this.num('spotShadow');
       const h = this.spotHead[i]!;
       (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.set(h.x, h.z, half, half * 0.42);
       (this.poolUniforms.uMqSpotSoft!.value as number[])[i] = Math.min(0.6, 0.1 + lift / 160);
@@ -1483,6 +1489,14 @@ class TankInstance implements SaverInstance {
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
   }
 
+  /** A fish's body length against a minted fish, now: its breed's nominal
+   *  size × its token's `*size` × its own seeded spread (`sizeVariance`) ×
+   *  `fishSize`. Everything that spaces fish in body lengths reads this. */
+  private fishSizeAt(i: number): number {
+    return breedSize(this.wantBreeds[i]) * (this.wantSizes[i] ?? 1)
+      * fishSizeMul(i, this.num('sizeVariance')) * this.num('fishSize');
+  }
+
   /**
    * The follow camera. Placed after the fish loop (a fish's position is only
    * known there) and before anything after it reads the camera — the glow's
@@ -1495,10 +1509,10 @@ class TankInstance implements SaverInstance {
    * Eye (below that): at the fish, looking where it goes; the fish is hidden.
    * Kept above the floor and any scenery, and inside the room.
    */
-  private placeFollowCamera(slot: number, back: number, pov: boolean): void {
+  private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH): void {
     if (slot < 0 || !this.followSeen) { this.followState = null; return; }
     const at = this.followAt, head = this.followHead, cam = this.camera.position;
-    const lift = pov ? 1.5 : FISH_LENGTH * 0.35 + back * 0.18;
+    const lift = pov ? 1.5 : len * 0.35 + back * 0.18;
     if (pov) {
       cam.set(at.x, at.y + lift, at.z);
     } else {
@@ -1510,7 +1524,7 @@ class TankInstance implements SaverInstance {
       let dx = head.x, dz = head.z;
       if (this.followHasTrail) {
         const tx = at.x - this.followTrail.x, tz = at.z - this.followTrail.z, tl = Math.hypot(tx, tz);
-        if (tl > FISH_LENGTH * 0.4) { dx = tx / tl; dz = tz / tl; }
+        if (tl > len * 0.4) { dx = tx / tl; dz = tz / tl; }
       }
       cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
     }
@@ -1521,8 +1535,8 @@ class TankInstance implements SaverInstance {
     cam.y = Math.max(cam.y, floor + 7);
     if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
     // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
-    const ahead = pov ? 60 : FISH_LENGTH * 0.5;
-    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : FISH_LENGTH * 0.12), at.z + head.z * ahead);
+    const ahead = pov ? 60 : len * 0.5;
+    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
     this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
   }
 
@@ -1744,6 +1758,7 @@ class TankInstance implements SaverInstance {
     let want: string[] = [];
     let styles: Array<SwimStyleSpec | null> = [];
     let breeds: string[] = [];
+    let sizes: number[] = [];
     this.mixMode = false;
     if (mixStr !== '') {
       const parsed = parseFishMix(mixStr, this.catalog);
@@ -1756,6 +1771,7 @@ class TankInstance implements SaverInstance {
       want = slots.map((sl) => sl.url);
       styles = slots.map((sl) => (sl.style ? swimStyleOf(sl.style) : null));
       breeds = slots.map((sl) => sl.breed);
+      sizes = slots.map((sl) => sl.size ?? 1);
       this.mixMode = want.length > 0;
     }
     if (!this.mixMode) {
@@ -1772,6 +1788,7 @@ class TankInstance implements SaverInstance {
     this.wantUrls = want;
     this.wantStyles = this.mixMode ? styles : [];
     this.wantBreeds = this.mixMode ? breeds : [];
+    this.wantSizes = this.mixMode ? sizes : [];
     this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
     if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
     else delete this.ctxSaver.host.dataset.mqMix;
@@ -1938,7 +1955,9 @@ class TankInstance implements SaverInstance {
       tail = tailMesh;
     }
 
-    const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
+    // Size is `fishSizeAt` (breed × token × this fish's own × fishSize); the
+    // old index cycle (0.8…1.2 by slot) made every fifth fish the same size.
+    const baseScale = plan.cruise > 10 ? 1.1 : 1;
     group.scale.multiplyScalar(baseScale);
     // Hidden until setState has placed it. A group joins the scene at the
     // ORIGIN, so a fish that finished loading after this frame's setState was
@@ -2173,7 +2192,10 @@ class TankInstance implements SaverInstance {
     }
     const fcount = formationSeat.size;
     const formationStyle = fcount > 0 ? styleAt(formationSeat.keys().next().value as number) : null;
-    const extent0 = fcount > 0 ? formationExtent(fcount, variance, fshape) : null;
+    // A school spaces in its BIGGEST member's lengths, so no pair interpenetrates.
+    let formLen = FISH_LENGTH;
+    for (const i of formationSeat.keys()) formLen = Math.max(formLen, FISH_LENGTH * this.fishSizeAt(i));
+    const extent0 = fcount > 0 ? formationExtent(fcount, variance, fshape, formLen) : null;
     // Breathing scales seats AND extent together, so the carrier's inward
     // pull still measures the shoal it is actually keeping in the glass —
     // and only as far as the glass allows (fitBreath: a full breath on a
@@ -2205,9 +2227,12 @@ class TankInstance implements SaverInstance {
     this.buildSpotRig();
     this.spotSeen.fill(false);
     const followSlot = Math.round(this.num('cameraFollow'));
-    const followBack = Math.max(0, this.num('followDistance'));
+    // `followDistance` is quoted for a minted fish: the camera stands as many
+    // of THIS fish's lengths back, so a shark is framed like a shark.
+    const followLen = followSlot >= 0 ? FISH_LENGTH * this.fishSizeAt(followSlot) : FISH_LENGTH;
+    const followBack = Math.max(0, this.num('followDistance')) * (followLen / FISH_LENGTH);
     // Close enough that the camera would sit inside the fish: it is the eye.
-    const followPov = followSlot >= 0 && followBack < FISH_LENGTH * 0.9;
+    const followPov = followSlot >= 0 && followBack < followLen * 0.9;
     this.followSeen = false; this.followHasTrail = false;
     const glowPulse = this.num('crystalPulse');
     let glowN = 0;
@@ -2232,6 +2257,8 @@ class TankInstance implements SaverInstance {
       // Style + per-fish variation. Both are pure functions of (index, t), so
       // a scene stays frame-addressable no matter how varied it looks.
       const varn = fishVariation(f.index, variance);
+      const size = this.fishSizeAt(f.index);
+      const L = FISH_LENGTH * size;
       const styleSpeed = style.speedMul * varn.speedMul;
       // `effort` is how hard the fish is working; `d` is where that puts it.
       // They differ for styles that hold station: a hovering fish still beats
@@ -2259,7 +2286,7 @@ class TankInstance implements SaverInstance {
       // twitching on its own private clock. Free fish keep their own schedule.
       let seatDelay: number | null = null;
       if (spec?.contagious && style.formation) {
-        const slot0 = formationSlot(seat, fcount, variance, undefined, fshape);
+        const slot0 = formationSlot(seat, fcount, variance, undefined, fshape, formLen);
         seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
       } else if (spec?.contagious) {
         // Undisplaced position — where the fish would be with no event in
@@ -2273,7 +2300,7 @@ class TankInstance implements SaverInstance {
         }
       }
       const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
-      const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
+      const d = anchor + effort * style.travel + mnv.along * L;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what
@@ -2298,23 +2325,23 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(seat, fcount, variance, undefined, fshape);
+        const slot = formationSlot(seat, fcount, variance, undefined, fshape, formLen);
         slot.side *= breath;
         slot.up *= breath;
         slot.back *= breath;
         // A seated fish darts AHEAD of its slot and settles back — the
         // closing displacement, because the permanent one would walk it out
         // of the school forever.
-        const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
+        const seatBack = slot.back - mnv.alongBump * L;
         const cf = carrier ?? this.carrierFrame(
-          extent ?? formationExtent(fcount, variance, fshape), formationStyle ?? style, tSec, warpSec, speed,
+          extent ?? formationExtent(fcount, variance, fshape, formLen), formationStyle ?? style, tSec, warpSec, speed,
         );
         if (f.index === followSlot) {
           // A schooled fish's own trail is the carrier's — the whole body
           // turns together, so where the carrier was is close enough for the
           // chase camera's chord (it does not chase the slot offset, same as
           // the `rel` bonds below).
-          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - FOLLOW_TRAIL);
+          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - L * 2);
           this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
         }
         beat = cf.lead;
@@ -2324,7 +2351,7 @@ class TankInstance implements SaverInstance {
         // "follow the school" should mean. Retires any half-formed pair.
         leader = {
           plan: this.carrierPlan, style, d: cf.lead - (extent?.back ?? 0), effort: cf.lead,
-          phase: varn.phase, pullX: 0, pullZ: 0,
+          phase: varn.phase, pullX: 0, pullZ: 0, len: formLen,
         };
         followRank = 0;
         pendingPair = null;
@@ -2356,15 +2383,15 @@ class TankInstance implements SaverInstance {
           // closes; a follower keeps a fixed station in the file.
           let lag = 0;
           if (bond === 'follow') {
-            lag = FISH_LENGTH * 1.7 * (followRank + 1);
+            lag = Math.max(L, rel.len) * 1.7 * (followRank + 1);
           } else if (bond === 'chase') {
             const c = 0.5 + 0.5 * Math.sin(tSec * 0.7 + varn.phase);
-            lag = FISH_LENGTH * (1.3 + 1.6 * c);
+            lag = Math.max(L, rel.len) * (1.3 + 1.6 * c);
             flurryExtra = (1 - c) * 0.8;
           }
           pose = swimPoseAtDistance(rel.plan, rel.d - lag);
           if (f.index === followSlot) {
-            const tr = swimPoseAtDistance(rel.plan, rel.d - lag - FOLLOW_TRAIL);
+            const tr = swimPoseAtDistance(rel.plan, rel.d - lag - L * 2);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
           }
           turnPlan = rel.plan; turnD = rel.d - lag;
@@ -2375,14 +2402,15 @@ class TankInstance implements SaverInstance {
           if (bond === 'pair') {
             // The second of the pair, opposite its partner on the shared orbit.
             const th = tSec * 0.6 + rel.phase + Math.PI;
-            const R = FISH_LENGTH * 1.1;
+            // The first of the pair set the orbit; ride it at the larger size.
+            const R = Math.max(L, rel.len) * 1.1;
             ox += rxn * R * Math.cos(th);
             oz += rzn * R * Math.cos(th);
             oy = R * 0.5 * Math.sin(th);
             pendingPair = null;
           } else {
             // Off the leader's exact line, so a file is not a stack.
-            const off = (fishHash(f.index, 61) - 0.5) * FISH_LENGTH * (bond === 'follow' ? 0.8 : 0.5);
+            const off = (fishHash(f.index, 61) - 0.5) * L * (bond === 'follow' ? 0.8 : 0.5);
             ox += rxn * off;
             oz += rzn * off;
             followRank += 1;
@@ -2394,7 +2422,7 @@ class TankInstance implements SaverInstance {
             // Where this fish was `followBack` along its own path: the camera
             // rides the path it swam, which smooths turns and threads the gaps
             // the fish itself threaded.
-            const tr = swimPoseAtDistance(f.plan, d - FOLLOW_TRAIL);
+            const tr = swimPoseAtDistance(f.plan, d - L * 2);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
           }
           turnPlan = f.plan; turnD = d;
@@ -2416,13 +2444,13 @@ class TankInstance implements SaverInstance {
             pullX = (pose.x + tx) * ts - pose.x;
             pullZ = (pose.z + tz) * ts - pose.z;
           }
-          const me: LeaderFrame = { plan: f.plan, style, d, effort, phase: varn.phase, pullX, pullZ };
+          const me: LeaderFrame = { plan: f.plan, style, d, effort, phase: varn.phase, pullX, pullZ, len: L };
           let oy = 0;
           if (bond === 'pair') {
             // First of a pair: takes one side of the shared orbit and waits
             // for a partner. An odd pair fish simply swims its own route.
             const th = tSec * 0.6 + varn.phase;
-            const R = FISH_LENGTH * 1.1;
+            const R = L * 1.1;
             const hl = Math.hypot(pose.fx, pose.fz) || 1;
             pullX += (pose.fz / hl) * R * Math.cos(th);
             pullZ += (-pose.fx / hl) * R * Math.cos(th);
@@ -2534,7 +2562,7 @@ class TankInstance implements SaverInstance {
         this.followHead.normalize();
         if (act && this.vignette) {
           // An actor's trail is the script's own past, a beat behind.
-          const back = poseOf(this.vignette, f.index, tSec - FOLLOW_TRAIL / 17);
+          const back = poseOf(this.vignette, f.index, tSec - (L * 2) / 17);
           if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
         }
       }
@@ -2544,7 +2572,7 @@ class TankInstance implements SaverInstance {
       f.group.visible = !(followPov && f.index === followSlot);
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
-          this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true;
+          this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true; this.spotLen[si] = L;
           this.spotHead[si]!.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz).normalize();
         }
       }
@@ -2583,7 +2611,7 @@ class TankInstance implements SaverInstance {
       }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
-      f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+      f.group.scale.setScalar(f.baseScale * breathe * size);
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // The swim wave (MQ: Amano study). Rigged on the first frame that asks
@@ -2645,9 +2673,10 @@ class TankInstance implements SaverInstance {
         // The facing the frame shows: the script's, for an actor.
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
+        size: Math.round(size * 100) / 100,
       });
     }
-    this.placeFollowCamera(followSlot, followBack, followPov);
+    this.placeFollowCamera(followSlot, followBack, followPov, followLen);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
     this.lastFish = report;

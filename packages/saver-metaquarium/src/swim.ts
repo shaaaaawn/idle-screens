@@ -155,10 +155,11 @@ export function fishHash(index: number, salt: number): number {
 }
 
 /**
- * Per-fish spread. `variance` 0 means a uniform shoal in the things an author
- * is asking about — size and pace; 1 means every fish is visibly its own
- * animal. This is the "expandable uniqueness" dial: one number an author
- * turns up, rather than per-fish values nobody wants to write.
+ * Per-fish spread in how a fish swims. `variance` 0 means a uniform shoal in
+ * pace; 1 means every fish is visibly its own animal. Size has its own dial,
+ * `sizeVariance` (see `fishSizeMul`) — a big fish is not a fast one. This is
+ * the "expandable uniqueness" dial: one number an author turns up, rather
+ * than per-fish values nobody wants to write.
  *
  * Two fields deliberately IGNORE `variance` — `phase` and `anchor`. Both are
  * desynchronisation, not flavour: a shoal that bobs and beats its tail in
@@ -167,14 +168,13 @@ export function fishHash(index: number, salt: number): number {
  * variance to 0 should give you a uniform population, not a chorus line.
  */
 export function fishVariation(index: number, variance: number): {
-  speedMul: number; scaleMul: number; phase: number; anchor: number;
+  speedMul: number; phase: number; anchor: number;
 } {
   const v = Math.max(0, Math.min(1, variance));
   return {
-    // ±40% speed and ±25% size at full variance — enough to read as a mixed
-    // population, not so much that one fish looks broken.
+    // ±40% speed at full variance — enough to read as a mixed population,
+    // not so much that one fish looks broken.
     speedMul: 1 + (fishHash(index, 1) - 0.5) * 0.8 * v,
-    scaleMul: 1 + (fishHash(index, 2) - 0.5) * 0.5 * v,
     // Independent of `variance` — see the note above; synchronised bobbing is
     // a machine, not a shoal.
     phase: fishHash(index, 3) * Math.PI * 2,
@@ -217,6 +217,32 @@ export function anchorFraction(style: SwimStyleSpec, index: number, variance: nu
  *  neighbour inside one body length when the pitch was a bare number. */
 export const FISH_LENGTH = 18;
 
+/**
+ * Nominal body length of each breed, against a minted fish (1). Every model
+ * is normalised to FISH_LENGTH on load, which made a shark the size of a
+ * babyfish; this gives each breed its length back. Unknown breeds are 1.
+ * (Bundled breeds record theirs in breeds/breeds.json too — keep the two in
+ * step when a breed comes in.)
+ */
+export const BREED_SIZE: Readonly<Record<string, number>> = {
+  betafish: 1, angelfish: 1, seahorse: 0.8, seaturtle: 1.35,
+  shark: 2.2, crab: 0.9, jellyfish: 0.8, dori: 0.9, glowfish: 0.8, babyfish: 0.45, hackerfish: 0.85, blowfish: 0.8,
+};
+export function breedSize(breed: string | null | undefined): number {
+  return (breed && BREED_SIZE[breed.toLowerCase()]) || 1;
+}
+
+/**
+ * One fish's own size, around its breed's: a seeded spread, log-symmetric so
+ * as many fish come out a third smaller as a third bigger. `variance` 0 is
+ * every fish at its breed size; 0.5 spans ≈ ×0.76–×1.32; 1 spans ≈ ×0.57–×1.74.
+ * Independent of speed variance — a big fish is not a fast one.
+ */
+export function fishSizeMul(index: number, variance: number): number {
+  const v = Math.max(0, Math.min(1, variance));
+  return 2 ** ((fishHash(index, 8) - 0.5) * 1.6 * v);
+}
+
 /** Half-width the formation lattice is allowed to occupy, in tank units. The
  *  tank still clamps the final position — this keeps the shape sane, the
  *  clamp keeps it legal. */
@@ -249,8 +275,12 @@ export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', '
 
 export function formationSlot(
   index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
-  shape: FormationShape = 'phalanx',
+  shape: FormationShape = 'phalanx', length = FISH_LENGTH,
 ): { side: number; up: number; back: number } {
+  // Every spacing below is quoted in body lengths — of THIS school's biggest
+  // member, so a school of sharks spaces like sharks. Its room grows with it.
+  const L = length;
+  halfWidth *= Math.max(1, L / FISH_LENGTH);
   const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
   if (shape === 'line') {
     // Nose to tail with a seeded weave bounded well under half a body
@@ -265,20 +295,20 @@ export function formationSlot(
     const within = index % FILE;
     const fileLen = Math.min(FILE, count - col * FILE);
     return {
-      side: (col - (files - 1) / 2) * FISH_LENGTH * 1.6
-        + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.4 * j,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
-      back: (within - (fileLen - 1) / 2) * FISH_LENGTH * 1.7,
+      side: (col - (files - 1) / 2) * L * 1.6
+        + (fishHash(index, 4) - 0.5) * L * 0.4 * j,
+      up: (fishHash(index, 5) - 0.5) * L * 0.5 * j,
+      back: (within - (fileLen - 1) / 2) * L * 1.7,
     };
   }
   if (shape === 'ring') {
     // Evenly seated carousel; radius grows with the cast so seats keep a
     // body length of arc between them.
-    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const r = Math.max(L * 1.6, (count * L * 1.35) / (Math.PI * 2));
     const a = (index / Math.max(1, count)) * Math.PI * 2;
     return {
       side: Math.cos(a) * r,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      up: (fishHash(index, 5) - 0.5) * L * 0.6 * j,
       back: Math.sin(a) * r,
     };
   }
@@ -290,11 +320,11 @@ export function formationSlot(
     // `ring` render exactly as before. Horizontal spacing is the ring's, so
     // the arc-length law holds; the vertical reach is capped so the
     // carrier's y-clamp keeps the top seat under the lid.
-    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const r = Math.max(L * 1.6, (count * L * 1.35) / (Math.PI * 2));
     const a = (index / Math.max(1, count)) * Math.PI * 2;
     return {
       side: Math.cos(a) * r,
-      up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.3 * j,
+      up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * L * 0.3 * j,
       back: Math.sin(a) * r,
     };
   }
@@ -314,23 +344,34 @@ export function formationSlot(
     // CENTRED on the mean rank so it never grows the vertical extent: the
     // point rides high, the wings low, the average unmoved. Same offset at
     // the same rank in every layer, so inter-layer spacing is untouched.
-    const droop = (rank - 2) * FISH_LENGTH * (layers === 1 ? 0.24 : 0.12);
+    const droop = (rank - 2) * L * (layers === 1 ? 0.24 : 0.12);
     // Multi-layer pitch drops to 1.2 body lengths (same-rank vertical gap
     // 21.6 minus worst-case jitter closure still clears one body length) so
     // three stacked Vs plus droop fit the water column.
     const pitch = layers === 1 ? 1.5 : 1.2;
     const jit = layers === 1 ? 0.2 : 0.15;
     return {
-      side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
-      up: (layer - (layers - 1) / 2) * FISH_LENGTH * pitch
-        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * jit * j - droop,
-      back: (rank - 2) * FISH_LENGTH * 1.35,
+      side: wing * rank * L * 1.25 + (fishHash(index, 4) - 0.5) * L * 0.3 * j,
+      up: (layer - (layers - 1) / 2) * L * pitch
+        + (fishHash(index, 5) - 0.5) * L * jit * j - droop,
+      back: (rank - 2) * L * 1.35,
     };
   }
   if (shape === 'ball') {
     // Fibonacci-sphere seats: the classic even shell. Radius grows with the
     // cast so nearest seats stay a body length apart.
-    const r = FISH_LENGTH * (1.1 + 0.34 * Math.sqrt(count));
+    const r = L * (1.1 + 0.34 * Math.sqrt(count));
+    // Big fish cannot stack in a 57-unit water column: when the height cap
+    // would squash the shell tighter than it squashes a minted-fish ball, the
+    // ball of big fish is what physics leaves it — a flat sunflower disc,
+    // seats a body length apart. (A minted-size ball never takes this path.)
+    const r0 = FISH_LENGTH * (1.1 + 0.34 * Math.sqrt(count));
+    if (L > FISH_LENGTH && Math.min(r * 0.62, 28) / (r * 0.62) < Math.min(r0 * 0.62, 28) / (r0 * 0.62) - 1e-9) {
+      const g = (1 + Math.sqrt(5)) / 2;
+      const a = (2 * Math.PI * index) / (g * g);
+      const rr = L * 1.2 * Math.sqrt(index + 0.5);
+      return { side: rr * Math.cos(a), up: (fishHash(index, 5) - 0.5) * Math.min(L * 0.3, 20) * j, back: rr * Math.sin(a) };
+    }
     const g = (1 + Math.sqrt(5)) / 2;
     const u = count <= 1 ? 0 : index / (count - 1);
     const incl = Math.acos(1 - 2 * u);
@@ -355,20 +396,20 @@ export function formationSlot(
   // pitch rather than a fixed number of units. Both matter: a bare 26/22 was
   // narrower than a fish is long once jitter ate into it, so the shoal
   // interpenetrated at every variance including 0.
-  const pitch = Math.min(FISH_LENGTH * 1.9, (halfWidth * 2) / span);
+  const pitch = Math.min(L * 1.9, (halfWidth * 2) / span);
   // Jitter is bounded so the CLOSEST possible pair still clears a body
   // length: adjacent columns are `pitch` apart and jitter can close at most
-  // `jit`, so pitch - jit must stay above FISH_LENGTH. That is the whole
+  // `jit`, so pitch - jit must stay above L. That is the whole
   // reason the spacing is quoted in body lengths at all.
   const jit = pitch * 0.35;
   const rows = Math.ceil(Math.max(1, count) / cols);
   return {
     side: (col - (cols - 1) / 2) * pitch + (fishHash(index, 4) - 0.5) * jit * j,
-    up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * j,
+    up: (fishHash(index, 5) - 0.5) * L * j,
     // Centred fore-aft like every other shape — a 24-fish lattice trailing
     // its whole depth behind the carrier pushed the extent past what the
     // centre-clamp could absorb.
-    back: (row - (rows - 1) / 2) * FISH_LENGTH * 1.6 + fishHash(index, 6) * FISH_LENGTH * 0.4 * j,
+    back: (row - (rows - 1) / 2) * L * 1.6 + fishHash(index, 6) * L * 0.4 * j,
   };
 }
 
@@ -379,11 +420,11 @@ export function formationSlot(
  * legal lattice back into a pile.
  */
 export function formationExtent(
-  count: number, variance: number, shape: FormationShape = 'phalanx',
+  count: number, variance: number, shape: FormationShape = 'phalanx', length = FISH_LENGTH,
 ): { side: number; up: number; back: number; reach: number } {
   let side = 0, up = 0, back = 0, reach = 0;
   for (let i = 0; i < count; i += 1) {
-    const s = formationSlot(i, count, variance, undefined, shape);
+    const s = formationSlot(i, count, variance, undefined, shape, length);
     side = Math.max(side, Math.abs(s.side));
     up = Math.max(up, Math.abs(s.up));
     back = Math.max(back, Math.abs(s.back));

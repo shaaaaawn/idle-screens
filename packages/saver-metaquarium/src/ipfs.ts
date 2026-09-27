@@ -87,6 +87,8 @@ export interface FishMixEntry {
    *  `swimStyle`. This is what turns a monoculture into a community:
    *  `457:3@hover, 257:6@school, 497:1@surface`. */
   style?: SwimStyle;
+  /** Per-token size (`*1.5`), multiplying the breed's own. Absent = 1. */
+  size?: number;
 }
 
 /** One spawn slot: the URL to load and, if the token said so, how it swims. */
@@ -94,6 +96,8 @@ export interface FishSlot {
   url: string;
   breed: string;
   style?: SwimStyle;
+  /** Per-token size (`*1.5`), multiplying the breed's own. Absent = 1. */
+  size?: number;
 }
 
 export interface FishMixResult {
@@ -174,8 +178,21 @@ export function parseFishMix(
     return null;
   };
   for (const rawToken of mix.split(',')) {
-    const token = rawToken.trim();
+    let token = rawToken.trim();
     if (token === '') continue;
+    // `*size` comes off the very end, before `@style`: `shark:1@patrol*1.5`.
+    let size: number | undefined;
+    const star = token.lastIndexOf('*');
+    if (star >= 0) {
+      const n = Number(token.slice(star + 1).trim());
+      if (Number.isFinite(n) && n > 0) {
+        size = Math.min(4, Math.max(0.25, n));
+        if (size !== n) problems.push(`"${token}": size clamped to ${size} (0.25–4)`);
+      } else {
+        problems.push(`"${token}": size must be a number 0.25–4 — swimming at its breed's size`);
+      }
+      token = token.slice(0, star).trim();
+    }
     // `@style` is parsed off the END first so `id:count` stays exactly as
     // documented; an unknown style is a problem but the fish still swims,
     // on the scene's style — degrade the tag, never drop the fish.
@@ -261,12 +278,12 @@ export function parseFishMix(
     // Minted individuals are unique per scene; everything else (custom
     // catalogs, NPC species) keeps plain count semantics.
     if (!unique || fish.id > TOTAL_SUPPLY) {
-      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}) });
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}), ...(size ? { size } : {}) });
       continue;
     }
     const breed = breedOf(fish.id);
     if (!breed) {
-      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}) });
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}), ...(size ? { size } : {}) });
       continue;
     }
     // Breed aliases spread across the whole range for variety; numeric ids
@@ -293,7 +310,7 @@ export function parseFishMix(
         problems.push(`fish ${got}: no asset URL`);
         continue;
       }
-      entries.push({ id: got, breed: fish.breed, url: gotUrl, count: 1, ...(style ? { style } : {}) });
+      entries.push({ id: got, breed: fish.breed, url: gotUrl, count: 1, ...(style ? { style } : {}), ...(size ? { size } : {}) });
     }
   }
   return { entries, problems };
@@ -313,7 +330,7 @@ export function expandFishMixSlots(entries: FishMixEntry[], cap: number): FishSl
   const slots: FishSlot[] = [];
   for (const e of entries) {
     for (let i = 0; i < e.count && slots.length < cap; i++) {
-      slots.push(e.style ? { url: e.url, breed: e.breed, style: e.style } : { url: e.url, breed: e.breed });
+      slots.push({ url: e.url, breed: e.breed, ...(e.style ? { style: e.style } : {}), ...(e.size ? { size: e.size } : {}) });
     }
   }
   return slots;
