@@ -48,6 +48,9 @@ import { buildGallery, type GalleryGroup } from './gallery';
 import { createPreviewOverlay, type PreviewEntry } from './preview-overlay';
 import { STAGES, mountStage, mirrorPage, type MountedStage } from './stages';
 import { wirePerceptionHarness } from './frame-perception';
+// The Draco proof's model: the shark AS DELIVERED (Draco-required), which now
+// lives with the breed intake's sources rather than in public/.
+import dracoShark from '../../../packages/saver-metaquarium/breeds/source/shark.glb?url';
 
 const SCHEMA_IDS = new Set(['aquarium', 'rain', 'snowfall', 'lanterns', 'sakura', 'dev-dashboard', 'orrery', 'constellation', 'comets', 'aurora', 'warp-tunnel', 'polygons', 'matrix-rain', 'procession', 'nostalghia-candle', 'haiku', 'pings', 'facets', 'relay-board']);
 
@@ -582,14 +585,16 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     params: { fishMix: '257:2,100:1' },
     catalog: LOCAL_CATALOG,
   }),
-  // Draco proof: bundled shark3 is KHR_draco_mesh_compression-required
+  // Draco proof: the source shark is KHR_draco_mesh_compression-required
   // (62KB vs the 2MB plain shark). Without a decoder this silently renders
-  // fallback blobs. Local GLB + /draco/ so MQ6 stays hermetic.
+  // fallback blobs. The bundled breeds are decoded at intake and never need
+  // it, but any host URL may be Draco — so MQ6 keeps proving the decoder,
+  // on the untouched source file + /draco/, hermetic.
   createMetaquarium({
     id: 'metaquarium-draco',
     label: 'Metaquarium (Draco)',
     params: {
-      fishUrl: asset('/assets/metaquarium/shark3.glb'),
+      fishUrl: dracoShark,
       fishCount: 3,
       cameraDistance: 200,
       // Dev serves the workspace package from src/, where the decoder is not;

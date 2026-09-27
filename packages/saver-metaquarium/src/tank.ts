@@ -75,7 +75,8 @@ import {
   buildCrystalField, buildGlowCards, buildSpotBeam, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePaths, writePoolSlots,
   type CrystalField, type GlowCards, type SpotBeam,
 } from './crystal-mesh';
-import { expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { BUNDLED_BREED_SCHEME, expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { BUNDLED_BREEDS } from './breeds';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
@@ -128,6 +129,14 @@ interface FishTemplate {
   draco: boolean;
 }
 
+
+/** A bundled breed's GLB, from the base64 its chunk carries. */
+function bundledGlb(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
 
 /** One decoder per decoder path, created on first use and kept for the page.
  *  Keyed by path so two tanks with different `dracoPath` values do not share
@@ -606,6 +615,10 @@ class TankInstance implements SaverInstance {
   private scenery: Scenery | null = null;
   private sceneryKey = "";
   private crystals: CrystalField | null = null;
+  /** The colonies that burst out of the rocks: the same field, fed by the scenery. */
+  private rockCrystals: CrystalField | null = null;
+  /** The shard shapes this scene's crystals wear — rock colonies wear them too. */
+  private shardVariants: ReturnType<typeof shardGeometry>[] | null = null;
   private clusters: Cluster[] = [];
   private emitters: Emitter[] = [];
   /** The fixed emitters that hold a floor-pool slot: the light field has no
@@ -1124,6 +1137,7 @@ class TankInstance implements SaverInstance {
     this.clusters = layout.clusters;
     this.emitters = emittersOf(this.clusters);
     const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
+    this.shardVariants = variants;
     this.crystals = buildCrystalField(
       this.clusters, variants, this.emitters, { halo: budget.halo }, this.poolUniforms,
     );
@@ -1153,11 +1167,28 @@ class TankInstance implements SaverInstance {
       disposeOwned(this.scenery.group);
       this.scenery = null;
     }
+    if (this.rockCrystals) {
+      this.scene.remove(this.rockCrystals.group);
+      disposeOwned(this.rockCrystals.group);
+      this.rockCrystals = null;
+    }
     const terrain = this.terrainAt ?? (() => 0);
     if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale') });
+        { rocks, veins, homes, flora, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
+          wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);
+      // What broke out of the rocks is the same crystal as `propMix`: same
+      // shard shapes, material, pulse, fog and halo — one more instanced
+      // field, no new program. It lends no light to the floor (a throwaway
+      // pool set), so night floors keep their colour.
+      const colonies = this.scenery.rockClusters;
+      if (colonies.length) {
+        const variants = this.shardVariants
+          ?? Array.from({ length: 3 }, (_, i) => shardGeometry(this.ctxSaver.rng.fork(0x70c5).fork(0x100 + i)));
+        this.rockCrystals = buildCrystalField(colonies, variants, [], { halo: this.quality.props.halo }, emptyPoolUniforms());
+        this.scene.add(this.rockCrystals.group);
+      }
     }
     // Homes are light sources too: their doors and windows join the same
     // field the crystals feed, so they pool on the floor and tint a fish
@@ -1810,6 +1841,12 @@ class TankInstance implements SaverInstance {
           // one flaky gateway degrades to the next instead of to a fallback
           // blob. Non-ipfs URLs have a single candidate.
           const buf = await (async (): Promise<ArrayBuffer> => {
+            // A bundled breed: its own lazy chunk, decoded in place — no fetch.
+            if (url.startsWith(BUNDLED_BREED_SCHEME)) {
+              const load = BUNDLED_BREEDS[url.slice(BUNDLED_BREED_SCHEME.length)];
+              if (!load) throw new Error(`no bundled breed ${url}`);
+              return bundledGlb((await load()).default);
+            }
             let lastErr: unknown = new Error('no gateway candidates');
             for (const candidate of resolveIpfsUrls(url)) {
               const ctl = new AbortController();
@@ -2070,11 +2107,12 @@ class TankInstance implements SaverInstance {
     if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
     else this.horizonColor.copy(this.fogColor);
     this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
-    if (this.crystals) {
-      this.crystals.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
-        color: this.fogColor, near: fog.near, far: fog.far,
-      });
-    }
+    this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
+    this.rockCrystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
     this.buildShoal();
@@ -2706,8 +2744,8 @@ class TankInstance implements SaverInstance {
         propMix: this.str('propMix'),
         envProps: this.str('envProps'),
         budget: this.quality.props,
-        drawCalls: (this.crystals?.drawCalls ?? 0) + (this.scenery?.drawCalls ?? 0),
-        triangles: (this.crystals?.triangles ?? 0) + (this.scenery?.triangles ?? 0),
+        drawCalls: (this.crystals?.drawCalls ?? 0) + (this.rockCrystals?.drawCalls ?? 0) + (this.scenery?.drawCalls ?? 0),
+        triangles: (this.crystals?.triangles ?? 0) + (this.rockCrystals?.triangles ?? 0) + (this.scenery?.triangles ?? 0),
         clusters: this.clusters.map((c) => ({
           id: c.id, kind: 'crystal', habit: c.habit, color: c.color, glass: c.glass,
           x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z),

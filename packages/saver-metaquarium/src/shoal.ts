@@ -359,9 +359,14 @@ export function shoalFishGeometry(kind: ShoalKind): BufferGeometry {
     const h = 0.06 + 0.16 * Math.pow(Math.max(0, 1 - u * u), 0.6);
     const w = 0.045 + 0.02 * (1 - u);
     const rear = k < slices / 2;
-    box(-w, w, 0, h, z0, z1, pal.back); //                                  back
-    box(-w, w, -h * 0.4, 0, z0, z1, rear ? pal.low : pal.belly); //           belly (red rear on a neon)
-    box(-w * 1.02, w * 1.02, -h * 0.05, h * 0.3, z0, z1, pal.stripe, pal.glow); // the lateral line
+    // Three bands stacked flush, never overlapping. The lateral line used to
+    // be a box 2 % wider than the body laid over it: its faces sat ~0.001
+    // units off the body's (and coincident on the slice ends), inside the
+    // depth buffer's resolution at viewing distance, so the stripe and the
+    // body fought pixel by pixel — a shimmering comb along every tetra.
+    box(-w, w, h * 0.3, h, z0, z1, pal.back); //                             back
+    box(-w, w, -h * 0.05, h * 0.3, z0, z1, pal.stripe, pal.glow); //          the lateral line
+    box(-w, w, -h * 0.4, -h * 0.05, z0, z1, rear ? pal.low : pal.belly); //  belly (red rear on a neon)
   }
   box(-0.04, 0.04, -0.07, 0.09, 0.32, 0.5, pal.nose); //                     head
   box(-0.008, 0.008, -0.13, 0.13, -0.66, -0.5, pal.tail); //                 caudal fin

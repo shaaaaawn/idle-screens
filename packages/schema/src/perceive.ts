@@ -35,9 +35,9 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { layerOpacity, transformPoint, transformSize } from './paint';
+import { paintMap, paintOpacity, paintSize, type Pt } from './paint';
 import { resolveTimelineAt } from './timeline';
-import { LIMITS, type IdleSequence, type LayerSpec, type LayerTransform, type SaverSpec } from './types';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -108,7 +108,7 @@ interface BuiltScene {
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
   /** Entities of layers with a paint `transform` — null (every scene without one) skips the lookup. */
-  transforms: Map<Entity, LayerTransform> | null;
+  transforms: Map<Entity, (p: Pt) => Pt> | null;
 }
 
 
@@ -136,11 +136,13 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  let transforms: Map<Entity, LayerTransform> | null = null;
+  let transforms: Map<Entity, (p: Pt) => Pt> | null = null;
   for (const { layer, entities } of layers) {
-    if (!layer.transform) continue;
+    // Layer transform (about its origin) wrapped by its group's — see paint.ts.
+    const map = paintMap(spec, layer, w, h, scale);
+    if (!map) continue;
     transforms ??= new Map();
-    for (const e of entities) transforms.set(e, layer.transform);
+    for (const e of entities) transforms.set(e, map);
   }
   return { w, h, scale, seed, layers, byKey, transforms };
 }
@@ -156,8 +158,8 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
       p.y += pp.y;
     }
   }
-  const tf = scene.transforms?.get(e);
-  return tf ? transformPoint(tf, p, scene.w, scene.h, scene.scale) : p;
+  const map = scene.transforms?.get(e);
+  return map ? map(p) : p;
 }
 
 /**
@@ -548,7 +550,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   // decayed weights; the live frame calls it with alphaScale 1.
   const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * layerOpacity(layer);
+    const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * paintOpacity(spec, layer);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
@@ -557,7 +559,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
-      const sz = layer.transform ? sizeAt(e, tPass) * transformSize(layer.transform) : sizeAt(e, tPass);
+      const sz = layer.transform || layer.group !== undefined ? sizeAt(e, tPass) * paintSize(spec, layer) : sizeAt(e, tPass);
       const s = layer.sprite;
 
       if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
@@ -1022,8 +1024,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
   };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
-    const lifeA = layer.opacity === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * layerOpacity(layer);
-    const areaScale = layer.transform ? transformSize(layer.transform) ** 2 : 1;
+    const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * paintOpacity(spec, layer);
+    const painted = layer.transform !== undefined || layer.group !== undefined;
+    const areaScale = painted ? paintSize(spec, layer) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
     for (const e of entities) {
@@ -1056,7 +1059,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
-      area += layer.transform ? entArea * areaScale * a : entArea * a;
+      area += painted ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
       // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.

@@ -1,0 +1,43 @@
+{
+  "$comment": "Breed intake manifest — see README.md. roles: source material name → role name the tank reads (materials.ts). size: nominal body length relative to a minted fish (1 = FISH_LENGTH). motion: how the breed should move (wiggle = the tank's body wave).",
+  "breeds": {
+    "babyfish": {
+      "source": "source/babyfish.glb", "kind": "voxel", "size": 0.45, "motion": "wiggle",
+      "roles": { "primaryColor2": "SecondaryColor2", "primaryColor4": "SecondaryColor4", "mouth": "KEEP-Mouth" },
+      "notes": "Rainbow bands authored as primaryColor…primaryColor4; the tank would paint every 'primary' one coat and lose the banding, so alternate bands become coat B."
+    },
+    "blowfish": {
+      "source": "source/blowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle", "roles": {},
+      "notes": "Already role-named. Spiky silhouette — greedy meshing helps least here."
+    },
+    "crab": {
+      "source": "source/crab.glb", "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
+      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Legs want a scuttle, not a body wave — motion follow-up."
+    },
+    "dori": {
+      "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",
+      "roles": { "Material.008": "PrimaryColor", "Material.003": "SecondaryColor", "Material.007": "EYES-White", "Black": "EYES-Black", "Material.002": "GLOW-Yellow" },
+      "notes": "Unnamed materials (Material.00x) all painted a random coat before. GPU-instanced parts, baked."
+    },
+    "glowfish": {
+      "source": "source/glowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle",
+      "roles": { "Eyes": "GLOW-Red", "Mouth": "KEEP-Teeth" },
+      "notes": "An anglerfish: the emissive red eyes would have been repainted as black pupils; they glow red instead. The lure is GLOW-White."
+    },
+    "hackerfish": {
+      "source": "source/hackerfish.glb", "kind": "voxel", "size": 0.85, "motion": "wiggle",
+      "roles": { "Material.007": "PrimaryColor", "Material.008": "SecondaryColor", "Material.002": "KEEP-Screen", "Material.006": "GLOW-Pink" },
+      "notes": "A little computer: the black screen keeps its colour, the face pixels glow. No EYE material — eyeLife leaves it alone."
+    },
+    "jellyfish": {
+      "source": "source/jellyfish.glb", "kind": "smooth", "triBudget": 2500, "error": 0.01, "size": 0.8, "motion": "pulse",
+      "roles": { "": "KEEP-Jellyfish" }, "metal": 0, "roughness": 0.8,
+      "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
+    },
+    "shark": {
+      "source": "source/shark.glb", "kind": "voxel", "size": 2.2, "motion": "wiggle",
+      "roles": { "mouth": "KEEP-Mouth" },
+      "notes": "The heaviest source (28.8k tris). Big on purpose: the size follow-up gives it its length back."
+    }
+  }
+}

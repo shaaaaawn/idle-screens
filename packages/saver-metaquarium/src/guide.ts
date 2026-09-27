@@ -35,7 +35,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3`. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab jellyfish dori glowfish babyfish hackerfish blowfish). Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -87,7 +87,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   crystalPulse: 'Slow breathing of that light (0.12 Hz, ≤15 % — flash-safe).',
   crystalTint: 'How much nearby light sources colour a passing fish. 0.5–0.7 ties the cast to the place.',
   rockDensity: 'Faceted boulders, an arch and a back ridge around the crystals.',
-  rockVeins: 'Glowing fissures in the rock, like lava or a creek down a mountainside.',
+  rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal: grass, tube anemones, bulbs, sea fans, kelp — swaying, lit, shedding spores.',
@@ -115,8 +115,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
 export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
-          individuals: a count casts DISTINCT neighbours. *size scales that token over its breed's own
-          size. Styles: loop school drift hover patrol bottom surface follow pair chase.
+          individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
+          crab jellyfish dori glowfish babyfish hackerfish blowfish. *size scales that token over its
+          breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
