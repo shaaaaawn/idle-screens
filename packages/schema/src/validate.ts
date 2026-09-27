@@ -11,14 +11,16 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish', 'timeline']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish', 'timeline', 'groups']);
 const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life', 'emit', 'clock', 'rotate', 'opacity', 'transform',
+  'layout', 'life', 'emit', 'clock', 'rotate', 'opacity', 'transform', 'group',
 ]);
-const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate']);
+const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate', 'origin']);
+const KNOWN_GROUP = new Set(['transform', 'opacity']);
+const GROUP_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const KNOWN_POSITION = new Set(['x', 'y', 'dx', 'dy']);
 const KNOWN_TIMELINE = new Set(['loop', 'duration', 'keys']);
 const KNOWN_TIMELINE_KEY = new Set(['t', 'path', 'value', 'ease', 'dur']);
@@ -162,6 +164,7 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
   const layers = new Set<number>();
   let background = false;
   let finish = false;
+  let groups = false;
   for (const p of paths) {
     // A layer's `key`, `count` or `motion` is what another layer's orbit
     // parent refers to — a change there can break a layer it doesn't live in.
@@ -170,6 +173,7 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
     if (head === 'layers' && idx !== undefined && /^\d+$/.test(idx)) layers.add(Number(idx));
     else if (head === 'background') background = true;
     else if (head === 'finish') finish = true;
+    else if (head === 'groups') groups = true;
     else return validateSpec(spec).valid;
   }
   let ok = true;
@@ -187,6 +191,8 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
   }
   if (background && spec.background !== undefined) validateBackground(spec.background, err, warn);
   if (finish && spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  // A group's paint cannot break a member layer's rules — only the group itself.
+  if (groups && spec.groups !== undefined) validateGroups(spec.groups, err, warn, spec);
   if (layers.size > 0) {
     const total = spec.layers.reduce((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0);
     if (total > LIMITS.maxTotal) ok = false;
@@ -238,6 +244,7 @@ function validateSpecCore(spec: unknown): ValidationResult {
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
   if (spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  if (spec.groups !== undefined) validateGroups(spec.groups, err, warn, spec);
 
   if (!Array.isArray(spec.layers) || spec.layers.length === 0) {
     err('layers', 'must be a non-empty array');
@@ -255,6 +262,42 @@ function validateSpecCore(spec: unknown): ValidationResult {
   if (spec.timeline !== undefined && errors.length === 0) validateTimeline(spec as unknown as SaverSpec, err, warn);
 
   return { valid: errors.length === 0, errors, warnings };
+}
+
+/** A paint `transform` (a layer's, or a group's — `anchorOk: false` forbids `origin: 'anchor'`). */
+function validateTransform(tf: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown, anchorOk: boolean): void {
+  if (!isObj(tf)) return err(path, 'must be an object {x?, y?, scale?, scaleX?, rotate?, origin?}');
+  for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
+  const [off, unit] = offsetBound(spec);
+  const sc = LIMITS.maxLayerTransformScale;
+  for (const axis of ['x', 'y'] as const) {
+    if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.${axis}`, `must be a number within ±${off} (${unit})`);
+  }
+  if (tf.scale !== undefined && (!isNum(tf.scale) || tf.scale < 0 || tf.scale > sc)) err(`${path}.scale`, `must be a number 0..${sc}`);
+  if (tf.scaleX !== undefined && (!isNum(tf.scaleX) || Math.abs(tf.scaleX) > sc)) err(`${path}.scaleX`, `must be a number within ±${sc} (negative mirrors)`);
+  if (tf.rotate !== undefined && (!isNum(tf.rotate) || Math.abs(tf.rotate) > LIMITS.maxLayerTransformRotate)) {
+    err(`${path}.rotate`, `must be a number of degrees within ±${LIMITS.maxLayerTransformRotate}`);
+  }
+  if (tf.origin !== undefined) {
+    if (tf.origin !== 'viewport' && tf.origin !== 'anchor') err(`${path}.origin`, "must be 'viewport' | 'anchor'");
+    else if (tf.origin === 'anchor' && !anchorOk) err(`${path}.origin`, "a group transform always turns about the viewport centre — 'anchor' is for a layer's own transform");
+  }
+}
+
+/** `groups`: named paint sets — see `LayerGroup`. */
+function validateGroups(groups: unknown, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown): void {
+  if (!isObj(groups)) return err('groups', 'must be an object of named groups {name: {transform?, opacity?}}');
+  const names = Object.keys(groups);
+  if (names.length > LIMITS.maxGroups) err('groups', `at most ${LIMITS.maxGroups} groups`);
+  for (const name of names) {
+    const p = `groups.${name}`;
+    if (!GROUP_NAME.test(name)) err(p, 'group names are 1–32 letters, digits, - or _, starting with a letter');
+    const g = groups[name];
+    if (!isObj(g)) { err(p, 'must be an object {transform?, opacity?}'); continue; }
+    for (const k of unknownKeys(g, KNOWN_GROUP)) warn(`${p}.${k}`, 'unknown-property', `unknown group property '${k}' — will be ignored`);
+    if (g.opacity !== undefined && (!isNum(g.opacity) || g.opacity < 0 || g.opacity > 1)) err(`${p}.opacity`, 'must be a number 0..1');
+    if (g.transform !== undefined) validateTransform(g.transform, `${p}.transform`, err, warn, spec, false);
+  }
 }
 
 /**
@@ -514,22 +557,11 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.opacity !== undefined && (!isNum(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) {
     err(`${path}.opacity`, 'must be a number 0..1');
   }
-  if (layer.transform !== undefined) {
-    const tf = layer.transform;
-    if (!isObj(tf)) err(`${path}.transform`, 'must be an object {x?, y?, scale?, scaleX?, rotate?}');
-    else {
-      for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.transform.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
-      const [off, unit] = offsetBound(spec);
-      const sc = LIMITS.maxLayerTransformScale;
-      for (const axis of ['x', 'y'] as const) {
-        if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.transform.${axis}`, `must be a number within ±${off} (${unit})`);
-      }
-      if (tf.scale !== undefined && (!isNum(tf.scale) || tf.scale < 0 || tf.scale > sc)) err(`${path}.transform.scale`, `must be a number 0..${sc}`);
-      if (tf.scaleX !== undefined && (!isNum(tf.scaleX) || Math.abs(tf.scaleX) > sc)) err(`${path}.transform.scaleX`, `must be a number within ±${sc} (negative mirrors)`);
-      if (tf.rotate !== undefined && (!isNum(tf.rotate) || Math.abs(tf.rotate) > LIMITS.maxLayerTransformRotate)) {
-        err(`${path}.transform.rotate`, `must be a number of degrees within ±${LIMITS.maxLayerTransformRotate}`);
-      }
-    }
+  if (layer.transform !== undefined) validateTransform(layer.transform, `${path}.transform`, err, warn, spec, true);
+  if (layer.group !== undefined) {
+    const groups = isObj(spec) && isObj(spec.groups) ? spec.groups : undefined;
+    if (!isStr(layer.group)) err(`${path}.group`, 'must be the name of a `groups` entry');
+    else if (!groups || !isObj(groups[layer.group])) err(`${path}.group`, `'${layer.group}' is not in \`groups\` — declare it there first`);
   }
   if (layer.position !== undefined) {
     if (!isObj(layer.position) || !isNum(layer.position.x) || !isNum(layer.position.y)) {

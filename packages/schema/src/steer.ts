@@ -16,7 +16,7 @@ interface PathTarget {
 }
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport', 'finish']);
+const STEERABLE_ROOT_KEYS = new Set(['ghosting', 'referenceViewport', 'finish', 'groups']);
 
 /** Resolve a dot-path (key-aware) to its parent + final key; null if absent. */
 export function resolveSpecPath(spec: unknown, path: string): PathTarget | null {
@@ -130,7 +130,41 @@ function alignPaintFields(a: unknown, b: unknown): [unknown, unknown] {
     if (nx !== x) (outA ??= la.slice())[i] = nx;
     if (ny !== y) (outB ??= lb.slice())[i] = ny;
   }
-  return [outA ? { ...(a as object), layers: outA } : a, outB ? { ...(b as object), layers: outB } : b];
+  let ra: unknown = outA ? { ...(a as object), layers: outA } : a;
+  let rb: unknown = outB ? { ...(b as object), layers: outB } : b;
+  // Groups: a group present on only one end glides from the identity (no
+  // transform, opacity 1); so does a group opacity set on one end only.
+  const ga = (a as { groups?: Record<string, Record<string, unknown>> }).groups;
+  const gb = (b as { groups?: Record<string, Record<string, unknown>> }).groups;
+  if (ga || gb) {
+    const na: Record<string, Record<string, unknown>> = { ...(ga ?? {}) };
+    const nb: Record<string, Record<string, unknown>> = { ...(gb ?? {}) };
+    let changed = !ga || !gb;
+    for (const name of new Set([...Object.keys(na), ...Object.keys(nb)])) {
+      const x = na[name] ?? {};
+      const y = nb[name] ?? {};
+      if (!na[name] || !nb[name]) changed = true;
+      let nx = x;
+      let ny = y;
+      if ((x.opacity === undefined) !== (y.opacity === undefined)) {
+        if (x.opacity === undefined) nx = { ...nx, opacity: 1 };
+        else ny = { ...ny, opacity: 1 };
+        changed = true;
+      }
+      if (!x.transform !== !y.transform) {
+        if (!x.transform) nx = { ...nx, transform: {} };
+        else ny = { ...ny, transform: {} };
+        changed = true;
+      }
+      na[name] = nx;
+      nb[name] = ny;
+    }
+    if (changed) {
+      ra = { ...(ra as object), groups: na };
+      rb = { ...(rb as object), groups: nb };
+    }
+  }
+  return [ra, rb];
 }
 
 /** A steering delta as carried on a channel control-track. */
@@ -315,7 +349,11 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
  */
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
-  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer']);
+  // `group` (membership) and `origin` are enums that step, not knobs; the
+  // `timeline` is authored structure, not a steer target (resolveSpecPath
+  // refuses it), so none of them are advertised.
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer', 'group', 'origin']);
+  const SKIP_ROOT = new Set(['timeline']);
   // `bands` (a field background's palette) is indexed like `stops`, so
   // `background.bands.2` is a hex paint path that glides.
   const INDEXED = new Set(['layers', 'stops', 'bands']);
@@ -343,7 +381,7 @@ export function steerablePaths(spec: unknown): string[] {
     if (node && typeof node === 'object') {
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
         if (SKIP.has(k)) continue;
-        if (!prefix && shadowedRootKeys.has(k)) continue;
+        if (!prefix && (shadowedRootKeys.has(k) || SKIP_ROOT.has(k))) continue;
         walk(v, prefix ? `${prefix}.${k}` : k, k);
       }
       return;

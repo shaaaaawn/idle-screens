@@ -21,6 +21,7 @@ import {
   textStringsDiffer,
   type SteerDelta,
 } from './steer';
+import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
 import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
@@ -1091,13 +1092,20 @@ class SpecInstance implements SaverInstance {
     for (let li = 0; li < this.layers.length; li++) {
       const built = this.layers[li]!;
       const opacity = built.layer.opacity;
-      const lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
+      // A grouped layer paints through its group too (`groups`): opacity
+      // multiplies, the group's transform wraps the layer's own. Ungrouped
+      // layers take exactly the path they always have.
+      const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
+      let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
+      if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
       if (lifeA <= 0) continue;
       const parentE = this.parentEntityFor(built);
       const tf = built.layer.transform;
-      if (tf) {
+      const gtf = group?.transform;
+      if (tf || gtf) {
         ctx.save();
-        this.applyLayerTransform(tf);
+        if (gtf) this.applyLayerTransform(gtf, null);
+        if (tf) this.applyLayerTransform(tf, built.layer);
       }
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       this.drawLinks(built, t, lifeA, parentE);
@@ -1117,18 +1125,21 @@ class SpecInstance implements SaverInstance {
         if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
         if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
       }
-      if (tf) ctx.restore();
+      if (tf || gtf) ctx.restore();
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  /** A layer `transform`, about the viewport centre, in min(w,h) units (px under `units: 'px'`). */
-  private applyLayerTransform(tf: LayerTransform): void {
+  /**
+   * A `transform`, in min(w,h) units (px under `units: 'px'`), about the
+   * viewport centre — or, with `origin: 'anchor'`, about `layer`'s own anchor
+   * (a group's transform passes no layer: always the viewport centre).
+   */
+  private applyLayerTransform(tf: LayerTransform, layer: LayerSpec | null): void {
     const { ctx, w, h } = this;
     const unit = this.effSpec.units === 'px' ? 1 : Math.min(w, h);
-    const cx = w / 2;
-    const cy = h / 2;
+    const { x: cx, y: cy } = transformOrigin(tf, layer, w, h, unit);
     ctx.translate(cx + (tf.x ?? 0) * unit, cy + (tf.y ?? 0) * unit);
     if (tf.rotate) ctx.rotate((tf.rotate * Math.PI) / 180);
     const s = tf.scale ?? 1;
