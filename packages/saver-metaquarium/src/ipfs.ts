@@ -233,10 +233,10 @@ export function parseFishMix(
       );
       continue;
     }
-    // ipfs3d stays the ONE spawnable URL. NPC entries ship with it empty —
-    // a host that serves the bundled GLBs maps localGlb into it (the
-    // playground's asset() rebase); anywhere else the honest answer is
-    // "not hosted here", never a root-relative path that 404s on the wall.
+    // ipfs3d stays the ONE spawnable URL. Every default-catalog entry
+    // (minted or bundled NPC breed) carries one; this only still fires for
+    // a caller-supplied catalog whose entry genuinely has none — the honest
+    // answer is "not hosted here", never a root-relative path that 404s.
     const url = fish.ipfs3d;
     if (!url) {
       problems.push(`"${key}": model not hosted here (catalog carries no URL for it)`);
