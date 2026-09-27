@@ -155,10 +155,11 @@ export function fishHash(index: number, salt: number): number {
 }
 
 /**
- * Per-fish spread. `variance` 0 means a uniform shoal in the things an author
- * is asking about — size and pace; 1 means every fish is visibly its own
- * animal. This is the "expandable uniqueness" dial: one number an author
- * turns up, rather than per-fish values nobody wants to write.
+ * Per-fish spread in how a fish swims. `variance` 0 means a uniform shoal in
+ * pace; 1 means every fish is visibly its own animal. Size has its own dial,
+ * `sizeVariance` (see `fishSizeMul`) — a big fish is not a fast one. This is
+ * the "expandable uniqueness" dial: one number an author turns up, rather
+ * than per-fish values nobody wants to write.
  *
  * Two fields deliberately IGNORE `variance` — `phase` and `anchor`. Both are
  * desynchronisation, not flavour: a shoal that bobs and beats its tail in
@@ -167,14 +168,13 @@ export function fishHash(index: number, salt: number): number {
  * variance to 0 should give you a uniform population, not a chorus line.
  */
 export function fishVariation(index: number, variance: number): {
-  speedMul: number; scaleMul: number; phase: number; anchor: number;
+  speedMul: number; phase: number; anchor: number;
 } {
   const v = Math.max(0, Math.min(1, variance));
   return {
-    // ±40% speed and ±25% size at full variance — enough to read as a mixed
-    // population, not so much that one fish looks broken.
+    // ±40% speed at full variance — enough to read as a mixed population,
+    // not so much that one fish looks broken.
     speedMul: 1 + (fishHash(index, 1) - 0.5) * 0.8 * v,
-    scaleMul: 1 + (fishHash(index, 2) - 0.5) * 0.5 * v,
     // Independent of `variance` — see the note above; synchronised bobbing is
     // a machine, not a shoal.
     phase: fishHash(index, 3) * Math.PI * 2,
