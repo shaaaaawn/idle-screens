@@ -35,6 +35,10 @@ export function resolveSpecPath(spec: unknown, path: string): PathTarget | null 
       return null;
     }
   }
+  // Group membership and a transform's `origin` are enums that can only step
+  // — a steer or key on them would jump — so they are not steer targets.
+  if (parts[0] === 'layers' && parts.length === 3 && parts[2] === 'group') return null;
+  if (parts.length >= 2 && parts[parts.length - 1] === 'origin' && parts[parts.length - 2] === 'transform') return null;
   let node: unknown = spec;
   for (let i = 0; i < parts.length - 1; i++) {
     if (node === null || typeof node !== 'object') return null;
@@ -109,6 +113,13 @@ function alignPaintFields(a: unknown, b: unknown): [unknown, unknown] {
     if (!x || !y || typeof x !== 'object' || typeof y !== 'object') continue;
     let nx = x;
     let ny = y;
+    // A layer that joins or leaves a group keeps the membership through the
+    // lerp; the group branch below gives the end without that group an
+    // identity entry, so the group's paint glides instead of dropping.
+    if ((x.group === undefined) !== (y.group === undefined)) {
+      if (x.group === undefined) nx = { ...nx, group: y.group };
+      else ny = { ...ny, group: x.group };
+    }
     if ((x.opacity === undefined) !== (y.opacity === undefined)) {
       if (x.opacity === undefined) nx = { ...nx, opacity: 1 };
       else ny = { ...ny, opacity: 1 };
@@ -380,7 +391,8 @@ export function steerablePaths(spec: unknown): string[] {
     }
     if (node && typeof node === 'object') {
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-        if (SKIP.has(k)) continue;
+        // Group names are user-chosen: a group called `label` is still a group.
+        if (SKIP.has(k) && prefix !== 'groups') continue;
         if (!prefix && (shadowedRootKeys.has(k) || SKIP_ROOT.has(k))) continue;
         walk(v, prefix ? `${prefix}.${k}` : k, k);
       }

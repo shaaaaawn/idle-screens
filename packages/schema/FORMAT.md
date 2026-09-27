@@ -291,7 +291,7 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
 | `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
-| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect: translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
+| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
 | `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** ignored |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
@@ -777,7 +777,10 @@ record's grooves and label) can be moved, scaled and faded as one thing:
   a `timeline` key on `groups.moon.transform.scale`, or a sequence `morph`
   glides the whole subject — one path instead of one per layer. A group present
   on only one end of a morph glides from the identity (no transform, opacity 1).
-- Membership is fixed per scene (not steerable).
+- Membership is fixed per scene: `layers.N.group` is not a steer or `timeline`
+  target. A sequence `morph` where a layer joins or leaves a group glides (the
+  end without the group paints it at the identity); moving a layer from one
+  group to another steps on the morph's first frame.
 
 **Native:** ignored ⇒ identity transform, opacity 1 — author the base so the
 subject reads without the group's paint.

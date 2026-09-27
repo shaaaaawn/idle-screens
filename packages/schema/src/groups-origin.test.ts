@@ -202,3 +202,51 @@ describe('advisories honour paint opacity (#80)', () => {
     expect(codes(scene({}, [crowd(0), more]))).not.toContain('dense-scene@layers');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('review fixes', () => {
+  it('a layer visible only between key boundaries is still judged (value-based hidden check)', () => {
+    const dim = dot({ key: 'dim', sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#010101' }, opacity: 0 });
+    const s = scene({ timeline: { keys: [{ t: 1000, path: 'dim.opacity', value: 1, dur: 400 }, { t: 1400, path: 'dim.opacity', value: 0, dur: 0 }] } }, [dot({ key: 'lit' }), dim]);
+    expect(adviseSpec(s).map((w) => `${w.code}@${w.path}`)).toContain('low-contrast-layer@layers[1].sprite');
+  });
+
+  it('a whole-`groups` key that drops a referenced group is rejected', () => {
+    const s = scene({ groups: { g: {} }, timeline: { keys: [{ t: 1000, path: 'groups', value: {} }] } }, [dot({ group: 'g' })]);
+    expect(validateSpec(s).valid).toBe(false);
+  });
+
+  it('a layer leaving its group keeps the membership through a morph, so the group glides', () => {
+    const a = scene({ groups: { g: { transform: { scale: 2 }, opacity: 0.5 } } }, [dot({ group: 'g' })]);
+    const b = scene({}, [dot()]);
+    const mid = lerpSpec(a, b, 0.5);
+    expect(mid.layers[0]!.group).toBe('g');
+    expect(mid.groups!.g!.transform!.scale).toBeCloseTo(1.5, 9);
+    expect(mid.groups!.g!.opacity).toBeCloseTo(0.75, 9);
+  });
+
+  it('membership and origin are not steer or key targets', () => {
+    const s = scene({ groups: { g: {}, h: {} } }, [dot({ group: 'g', transform: { scale: 1, origin: 'anchor' } })]);
+    expect(steerablePaths(s).filter((p) => p.endsWith('.group') || p.endsWith('.origin'))).toEqual([]);
+    expect(validateSpec({ ...s, timeline: { keys: [{ t: 0, path: 'dot.group', value: 'h' }] } }).errors[0]!.message).toMatch(/fixed per scene/);
+    expect(validateSpec({ ...s, timeline: { keys: [{ t: 0, path: 'dot.transform.origin', value: 'viewport' }] } }).valid).toBe(false);
+    const inst = mount(s);
+    inst.applyTrack!({ program: 't', seed: 1, deltas: [{ t: 1, path: 'layers.0.group', value: 'h', ease: 'step', dur: 0 }] } as never);
+    expect((inst as unknown as { effSpec: SaverSpec }).effSpec.layers[0]!.group).toBe('g');
+    inst.dispose();
+  });
+
+  it('a whole-transform key that changes origin warns', () => {
+    const s = scene({ timeline: { keys: [{ t: 1000, path: 'dot.transform', value: { scale: 2, origin: 'anchor' } }] } }, [dot({ transform: { scale: 1 } })]);
+    expect((validateSpec(s).warnings ?? []).map((w) => w.code)).toContain('timeline-origin-steps');
+  });
+
+  it("a `group` of '__proto__' is not a declared group", () => {
+    expect(validateSpec(scene({ groups: { a: {} } }, [dot({ group: '__proto__' })])).valid).toBe(false);
+  });
+
+  it('groups named like reserved words are still advertised', () => {
+    const s = scene({ groups: { label: { opacity: 1 }, origin: { opacity: 1 }, ok: { opacity: 1 } } }, [dot({ group: 'label' })]);
+    expect(steerablePaths(s)).toEqual(expect.arrayContaining(['groups.label.opacity', 'groups.origin.opacity', 'groups.ok.opacity']));
+  });
+});

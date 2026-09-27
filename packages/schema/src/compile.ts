@@ -288,7 +288,7 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
   const groups = [...new Set(paths.map(groupOf))];
   // The keys that can combine with these steers are those in the same
   // groups (or any, when a steer falls back to the full check).
-  const full = paths.some((p) => /^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p) || !/^(layers|background|finish)(\.|$)/.test(p));
+  const full = paths.some((p) => /^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p) || p === 'groups' || !/^(layers|background|finish|groups)(\.|$)/.test(p));
   const only = full ? undefined : (p: string): boolean => groups.includes(groupOf(p));
   const seen = new Set<string>();
   for (const t of [now, ...timelineSampleTimesAfter(authored, now, false, only)]) {

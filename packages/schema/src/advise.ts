@@ -5,7 +5,7 @@ import { barFraction, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { mapBox, paintMap, paintOpacity } from './paint';
-import { resolveTimelineAt, timelineSampleTimes } from './timeline';
+import { resolveTimelineAt, timelineTracks } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -542,6 +542,9 @@ function brightestAdditivePlate(
     if (blend !== 'lighter' && blend !== 'screen') continue;
     if (lj === box.li) continue;
     const entities = allEntities[lj]!;
+    // Only a layer that is actually moved at draw time (its own or its
+    // group's transform) may reach anywhere; opacity alone moves nothing.
+    const moved = paintMap(spec, layer, w, h, Math.min(w, h)) !== null;
     for (const e of entities) {
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
@@ -549,7 +552,7 @@ function brightestAdditivePlate(
       const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
       if (maxDim < box.fs) continue;
       // A transformed layer is moved at draw time: treat it like a moving one (it may reach anywhere).
-      if (!layer.transform && layer.group === undefined && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
+      if (!moved && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
       const a = layer.opacity === undefined && layer.group === undefined ? Math.min(1, e.alpha + e.pulseAmp) : Math.min(1, e.alpha + e.pulseAmp) * paintOpacity(spec, layer);
       if (a <= 0) continue;
       const plate = additivePlate(ground, hexRgb(hex), a, blend);
@@ -648,14 +651,32 @@ function textBlockBoxAt(
 }
 
 /**
- * Per layer, whether it never shows: paint opacity (layer × group) 0 in the
- * base scene and at every key boundary of its timeline. Null when no layer
- * uses `opacity` or `groups` (nothing can be hidden — the common case).
+ * Per layer, whether it never shows: its own `opacity`, or its group's, is
+ * pinned to 0 — 0 in the base scene and every `timeline` key on that path
+ * (and no whole-object key above it) sets 0 too. A glide between zeros stays
+ * at zero, so this is exact at every instant, not just at key boundaries,
+ * and costs no timeline resolution. Membership is fixed per scene (not
+ * steerable or keyable), so a group's pin covers its members. Null when no
+ * layer uses `opacity` or `groups` (nothing can be hidden — the common case).
  */
 function hiddenLayers(spec: SaverSpec): boolean[] | null {
   if (!spec.groups && !spec.layers.some((l) => l.opacity !== undefined)) return null;
-  const states = spec.timeline ? [0, ...timelineSampleTimes(spec, false)].map((t) => resolveTimelineAt(spec, t)) : [spec];
-  const out = spec.layers.map((_, i) => states.every((st) => { const l = st.layers[i]; return !!l && paintOpacity(st, l) <= 0; }));
+  const tracks = spec.timeline ? timelineTracks(spec) : null;
+  const pinnedZero = (path: string, base: unknown, ancestors: string[]): boolean => {
+    if (base !== 0) return false;
+    if (!tracks) return true;
+    for (const [p, keys] of tracks) {
+      if (p === path && keys.some((k) => k.value !== 0)) return false;
+      if (ancestors.includes(p)) return false; // a whole-object key could set anything
+    }
+    return true;
+  };
+  const out = spec.layers.map((l, i) => {
+    const lp = `layers.${i}`;
+    if (pinnedZero(`${lp}.opacity`, l.opacity, ['layers', lp])) return true;
+    const g = l.group !== undefined && spec.groups && Object.prototype.hasOwnProperty.call(spec.groups, l.group) ? spec.groups[l.group] : undefined;
+    return !!g && pinnedZero(`groups.${l.group}.opacity`, g.opacity, ['groups', `groups.${l.group}`]);
+  });
   return out.some(Boolean) ? out : null;
 }
 

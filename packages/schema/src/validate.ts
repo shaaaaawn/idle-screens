@@ -169,6 +169,8 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
     // A layer's `key`, `count` or `motion` is what another layer's orbit
     // parent refers to — a change there can break a layer it doesn't live in.
     if (/^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p)) return validateSpec(spec).valid;
+    // Replacing `groups` whole can drop a name a member still references.
+    if (p === 'groups') return validateSpec(spec).valid;
     const [head, idx] = p.split('.');
     if (head === 'layers' && idx !== undefined && /^\d+$/.test(idx)) layers.add(Number(idx));
     else if (head === 'background') background = true;
@@ -338,8 +340,12 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
     if (!('value' in key)) { err(`${p}.value`, 'is required'); ok = false; }
     const cp = isStr(key.path) ? canonicalSpecPath(base, key.path) : null;
     if (!isStr(key.path) || key.path.trim() === '') { err(`${p}.path`, 'must be a non-empty dot-path'); ok = false; }
+    else if (/\.group$/.test(key.path) || /\.transform\.origin$/.test(key.path)) {
+      err(`${p}.path`, `'${key.path}' is an enum that can only step — group membership and a transform's origin are fixed per scene`);
+      ok = false;
+    }
     else if (!cp) { err(`${p}.path`, `'${key.path}' does not resolve on the spec — a key can only animate a field the spec already has`); ok = false; }
-    else if (cp.split('.').includes('timeline') || cp === 'schemaVersion' || cp === 'id' || cp === 'label' || cp === 'seed') {
+    else if (cp === 'timeline' || cp.startsWith('timeline.') || cp === 'schemaVersion' || cp === 'id' || cp === 'label' || cp === 'seed') {
       err(`${p}.path`, `'${key.path}' is not animatable`);
       ok = false;
     }
@@ -353,6 +359,14 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
     if (!r.valid) {
       for (const e of r.errors) err(`${p}.value`, `applied at '${key.path}' → ${e.path || '<root>'}: ${e.message}`);
       return;
+    }
+    // `origin` is an enum: a whole-`transform` key that changes it switches
+    // the pivot on the key's first frame — a jump, not a glide.
+    if (isObj(key.value) && cp.endsWith('transform')) {
+      const before = readSpecPath(base, cp);
+      const o0 = isObj(before) ? before.origin ?? 'viewport' : 'viewport';
+      const o1 = (key.value as Record<string, unknown>).origin ?? 'viewport';
+      if (o0 !== o1) warn(`${p}.value`, 'timeline-origin-steps', `this key changes the transform's origin (${String(o0)} → ${String(o1)}): the pivot switches on the key's first frame, so the layer jumps — keep one origin per layer`);
     }
     if (structuralSignature(applied) !== baseSig) {
       warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
@@ -561,7 +575,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.group !== undefined) {
     const groups = isObj(spec) && isObj(spec.groups) ? spec.groups : undefined;
     if (!isStr(layer.group)) err(`${path}.group`, 'must be the name of a `groups` entry');
-    else if (!groups || !isObj(groups[layer.group])) err(`${path}.group`, `'${layer.group}' is not in \`groups\` — declare it there first`);
+    else if (!groups || !Object.prototype.hasOwnProperty.call(groups, layer.group) || !isObj(groups[layer.group])) err(`${path}.group`, `'${layer.group}' is not in \`groups\` — declare it there first`);
   }
   if (layer.position !== undefined) {
     if (!isObj(layer.position) || !isNum(layer.position.x) || !isNum(layer.position.y)) {
