@@ -1,5 +1,89 @@
 # @idle-screens/saver-metaquarium
 
+## 0.12.0
+
+### Minor Changes
+
+- eaf84f7: The eight unminted creatures now swim anywhere the package runs, the wall included: shark, crab, jellyfish, dori, glowfish, babyfish, hackerfish and blowfish. Before this they only loaded in the playground, which served their models from its own folder.
+  
+  **What they are now.** Each breed is bundled in its own lazy chunk (`src/breeds/<breed>.ts`), so a scene pays only for the breeds it casts. There is no IPFS pin, no host asset route and no Draco decoder to serve. `fishMix` takes them by name or id 601–608 in the default catalog; they are species, so a count is copies.
+  
+  **What a new breed goes through.** They come in through a standard intake, documented in `breeds/README.md` and run by the `metaquarium-breed-intake` skill:
+  
+  - **Audit** each model and review it in the new playground breed lab (`/breeds.html`).
+  - **Decode Draco, bake GPU instancing and node transforms, and join primitives by material.**
+  - **Greedy-mesh voxel models.**
+    - Merging happens across the swim axis only, so the body wave can't crack a face.
+    - Eye primitives are left untouched.
+    - Body faces lying under an eye decal are dropped.
+  - **Decimate smooth ones.**
+  - **Rename every material to the role the tank reads.**
+  
+  Results:
+  
+  | breed | triangles before | after |
+  |---|---|---|
+  | shark | 28.8k | 5.7k |
+  | crab | 24.5k | 6.0k |
+  | jellyfish | 13.5k | 2.5k |
+  | blowfish | 9.4k | 2.3k |
+  | hackerfish | 7.6k | 1.3k |
+  | glowfish | 5.9k | 1.2k |
+  | dori | 3.9k | 1.7k |
+  | babyfish | 1.0k | 336 |
+  
+  Materials the tank couldn't read before now have roles:
+  - **dori and hackerfish:** their materials were all `Material.00x`, which the tank painted a random patchwork.
+  - **anglerfish (glowfish):** its red eyes would have been repainted as black pupils; they now glow.
+  - **jellyfish:** it shipped fully metallic (black in dark rooms) and without normals; both are fixed.
+  
+  **Also new: the `KEEP-<part>` material role.** A part named this way keeps its authored colour; the hackerfish's screen and the shark's teeth use it. Any other unrecognised name still gets a random coat.
+- eaf84f7: Fish come in sizes. **This changes the default look of every tank.**
+  
+  Before this change:
+  - every model was normalised to one fish length, so a shark was the size of a babyfish;
+  - the only spread was a five-step cycle by cast slot (0.8 → 1.2), so every fifth fish matched.
+  
+  Now a fish's length is four factors multiplied together:
+  
+  - **Its breed's nominal length** (`BREED_SIZE`): shark 2.2, seaturtle 1.35, crab 0.9, dori 0.9, hackerfish 0.85, seahorse, jellyfish, glowfish and blowfish 0.8, babyfish 0.45, minted betafish and angelfish 1.
+  - **Its token's `*size`** in `fishMix`, for example `shark:1@patrol*1.5`. The range is 0.25–4; values outside it are clamped, and a malformed size is reported without dropping the fish.
+  - **Its own seeded spread**, set by the new `sizeVariance` (0–1, default 0.5, smooth). The spread is log-symmetric: 0.5 gives about ×0.76–×1.32, 1 about ×0.57–×1.74. It is independent of speed, so `swimVariance` no longer changes size.
+  - **`fishSize`**, a new global multiplier (0.3–3, default 1, smooth). Gliding it grows or shrinks the whole cast.
+  
+  Everything that spaced fish in one fixed body length now uses the actual fish's length:
+  
+  - **Formation seating:** a school spaces in its biggest member's lengths, so the no-pair-inside-a-body-length law holds at any size. A `ball` of big fish that the 57-unit water column would squash lays out as a flat sunflower disc instead.
+  - **Bonds:** follow and chase lags, and pair orbits.
+  - **Maneuver displacements.**
+  - **The follow camera:** `followDistance` is now in minted-fish lengths of the followed fish, and so are the eye-view threshold and the camera lift.
+  - **Spotlight shadows.**
+  
+  `inspect()` reports each fish's `size`.
+- eaf84f7: Rocks look like the crystals burst out of them. **This changes the default look of every scene with `rockDensity` > 0**, because `rockVeins` defaults to 0.7.
+  
+  What was there before:
+  - glowing lava rivulets running the length of each boulder, which from a low camera read as a spider's legs draped over the stone;
+  - a few flat three-triangle "shards" at each crown, a different species from the real crystals beside them.
+  
+  What replaces them:
+  - **A breach in each crown.** The stone is pushed down into a pit with a lifted rim, and angular chips of the same stone lie on the rim.
+  - **Fractures:** a few short, dark splits, with colour only right at the breach.
+  - **A real crystal colony.** Each rock grows a druse crust or a stand of spires from its pit: `growCluster` shards in the same geometry variants, material, pulse, fog and halo as `propMix`, rooted inside the stone and leaned with the crown.
+  - **Host rocks:** a rock under a `propMix` cluster is broken open under that cluster and grows no colony of its own.
+  - **The arch** is crowned the same way.
+  
+  The colonies are built as a second instanced crystal field driven by the same per-frame call:
+  - no new shader programs;
+  - about 7 extra draw calls;
+  - no floor light: they join no pools, so night floors keep their colour.
+  
+  Fish clear each colony with its own clearance dome, except the arch's, which stands over the opening they swim through. More `rockVeins` means more rocks split, deeper breaches and bigger colonies. 0 is still plain stone.
+
+### Patch Changes
+
+- eaf84f7: The shoal's tetras no longer shimmer. Each slice of a shoal fish built its lateral line as a box 2 % wider than the body, laid over it: the stripe's side faces sat ~0.001 units off the body's and its slice ends were coincident with them, inside the depth buffer's resolution at viewing distance, so stripe and body fought pixel by pixel — a flickering comb of blue teeth along every neon (and a torn silver line on rummy-nose and ember). The back, lateral line and belly are now three bands stacked flush with no overlap; the look is otherwise identical (same colours, same bands, same vertex count, no shader change). A geometry test now fails on any pair of same-facing faces that are coincident or within 0.01 units with overlapping extent.
+
 ## 0.11.0
 
 ### Minor Changes
