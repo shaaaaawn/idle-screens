@@ -12,7 +12,8 @@
  *   and a gliding one slows — closed-form, like everything else.
  * - Which fish: not a model with a skeleton (the betafish already bends),
  *   and not a sea turtle, seahorse, crab or jellyfish (flippers, an upright
- *   body, legs, a bell — a sideways body wave is wrong on all of them).
+ *   body, legs, a bell — a sideways body wave is wrong on all of them). The
+ *   seahorse has its own rig instead (seahorse.ts): fin, tail, nod.
  */
 
 import { Box3, Matrix4, Vector2, Vector3, type Material, type Mesh, type Object3D, type SkinnedMesh } from 'three';
@@ -39,7 +40,11 @@ export const STRIDE = 0.7;
 /** Wavelength of the body wave, in body lengths. */
 export const WAVELENGTH = 0.95;
 
-export interface WaveState { phase: number; amp: number; bend: number }
+export interface WaveState {
+  phase: number; amp: number; bend: number;
+  /** Seconds — for rigs whose motion is not swum distance (the seahorse's fin and tail, seahorse.ts). */
+  t?: number;
+}
 
 /**
  * The wave at this moment, from closed-form inputs only.
