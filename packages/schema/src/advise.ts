@@ -4,8 +4,8 @@ import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
-import { layerOpacity, transformBox } from './paint';
-import { resolveTimelineAt } from './timeline';
+import { groupOf, mapBox, paintMap, paintOpacity } from './paint';
+import { resolveTimelineAt, timelineTracks } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -60,6 +60,12 @@ export function adviseSpec(
    */
   opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
 ): SpecWarning[] {
+  // Which layers never show in this scene — paint opacity (the layer's own ×
+  // its group's) 0 at every key boundary of its timeline, or simply 0 without
+  // one. A timed piece keeps every prop in every act and hides the unused
+  // ones; judging those would bury the real advisories. Without `opacity` or
+  // `groups` no layer is hidden and every check below runs as it always has.
+  const hidden = hiddenLayers(spec);
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
@@ -95,6 +101,7 @@ export function adviseSpec(
   let motionLayerCount = 0;
 
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const entities = allEntities[li]!;
     totalEntities += entities.length;
@@ -182,8 +189,11 @@ export function adviseSpec(
   // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled"
   let totalCoverage = 0;
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const entities = allEntities[li]!;
+    // Paint opacity weighs coverage like alpha does (unset ⇒ exactly as before).
+    const paintA = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of entities) {
       const r = e.size / 2;
       let pixArea: number;
@@ -215,7 +225,7 @@ export function adviseSpec(
         const g2 = (ga * ga + ga * gb + gb * gb) / 3;
         duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
       }
-      totalCoverage += (pixArea * e.alpha * duty) / (w * h);
+      totalCoverage += paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {
@@ -225,7 +235,7 @@ export function adviseSpec(
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
       const lwPx = (layer.links.width ?? defaultWidth) * scale;
       const la = layer.links.alpha ?? 1;
-      for (const edge of edges) totalCoverage += (edge.dist * lwPx * la) / (w * h);
+      for (const edge of edges) totalCoverage += paintA === 1 ? (edge.dist * lwPx * la) / (w * h) : (edge.dist * lwPx * la * paintA) / (w * h);
     }
   }
 
@@ -278,6 +288,7 @@ export function adviseSpec(
   // Link starvation: links layer where few edges actually form.
   // Chain mode always forms its edges — only distance-gated modes can starve.
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     if (!layer.links || layer.links.mode === 'chain') continue;
     const entities = allEntities[li]!;
@@ -296,6 +307,7 @@ export function adviseSpec(
 
   // Motion variety: all entities in a layer have nearly identical velocity
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     if (layer.motion.type === 'static') continue;
     const entities = allEntities[li]!;
@@ -317,7 +329,8 @@ export function adviseSpec(
   // whole viewport (bounce, warp, path) have transient spawn positions that say
   // nothing about composition — exclude them from the centroid.
   const composed = spec.layers
-    .map((l, li) => ({ l, ents: allEntities[li]! }))
+    .map((l, li) => ({ l, li, ents: allEntities[li]! }))
+    .filter(({ li }) => !hidden?.[li])
     .filter(({ l }) => !['bounce', 'warp', 'path'].includes(l.motion.type))
     // Layer-parented orbits position relative to their parent (resolved at render
     // time) — their raw positionAt is an offset around (0,0), not a screen position.
@@ -345,6 +358,7 @@ export function adviseSpec(
   // estimate is the renderer's own idea of the text, not a separate guess.
   const textBoxes: TextBoxAt[] = [];
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const s = layer.sprite;
     if (layer.motion.type !== 'static') continue;
@@ -354,7 +368,8 @@ export function adviseSpec(
       const p = positionAt(e, 0, w, h);
       const raw = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
       // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
-      const box = layer.transform ? { ...raw, ...transformBox(layer.transform, raw, w, h, scale) } : raw;
+      const map = paintMap(spec, layer, w, h, scale);
+      const box = map ? { ...raw, ...mapBox(map, raw) } : raw;
       // What the layer guarantees it paints, worst case: base alpha minus its
       // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
       // duty cycle is a readability question, not an ink-colour one; sampling
@@ -362,7 +377,7 @@ export function adviseSpec(
       // times a textBlock's own `opacity` — so faint or invisible
       // `role: 'read'` text can't hide behind an unmeasured alpha.
       const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
-      const alpha = layer.opacity === undefined ? baseAlpha : baseAlpha * layerOpacity(layer);
+      const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
       textBoxes.push({ li, label, alpha, ...box });
     }
   }
@@ -527,6 +542,9 @@ function brightestAdditivePlate(
     if (blend !== 'lighter' && blend !== 'screen') continue;
     if (lj === box.li) continue;
     const entities = allEntities[lj]!;
+    // Only a layer that is actually moved at draw time (its own or its
+    // group's transform) may reach anywhere; opacity alone moves nothing.
+    const moved = layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined;
     for (const e of entities) {
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
@@ -534,8 +552,8 @@ function brightestAdditivePlate(
       const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
       if (maxDim < box.fs) continue;
       // A transformed layer is moved at draw time: treat it like a moving one (it may reach anywhere).
-      if (!layer.transform && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
-      const a = layer.opacity === undefined ? Math.min(1, e.alpha + e.pulseAmp) : Math.min(1, e.alpha + e.pulseAmp) * layerOpacity(layer);
+      if (!moved && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
+      const a = layer.opacity === undefined && layer.group === undefined ? Math.min(1, e.alpha + e.pulseAmp) : Math.min(1, e.alpha + e.pulseAmp) * paintOpacity(spec, layer);
       if (a <= 0) continue;
       const plate = additivePlate(ground, hexRgb(hex), a, blend);
       const lum = relativeLuminance(plate);
@@ -630,6 +648,36 @@ function textBlockBoxAt(
   // Anchor moves the whole block the same way the renderer does (0,0 when absent).
   const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
   return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH, fs: fsPx };
+}
+
+/**
+ * Per layer, whether it never shows: its own `opacity`, or its group's, is
+ * pinned to 0 — 0 in the base scene and every `timeline` key on that path
+ * (and no whole-object key above it) sets 0 too. A glide between zeros stays
+ * at zero, so this is exact at every instant, not just at key boundaries,
+ * and costs no timeline resolution. Membership is fixed per scene (not
+ * steerable or keyable), so a group's pin covers its members. Null when no
+ * layer uses `opacity` or `groups` (nothing can be hidden — the common case).
+ */
+function hiddenLayers(spec: SaverSpec): boolean[] | null {
+  if (!spec.groups && !spec.layers.some((l) => l.opacity !== undefined)) return null;
+  const tracks = spec.timeline ? timelineTracks(spec) : null;
+  const pinnedZero = (path: string, base: unknown, ancestors: string[]): boolean => {
+    if (base !== 0) return false;
+    if (!tracks) return true;
+    for (const [p, keys] of tracks) {
+      if (p === path && keys.some((k) => k.value !== 0)) return false;
+      if (ancestors.includes(p)) return false; // a whole-object key could set anything
+    }
+    return true;
+  };
+  const out = spec.layers.map((l, i) => {
+    const lp = `layers.${i}`;
+    if (pinnedZero(`${lp}.opacity`, l.opacity, ['layers', lp])) return true;
+    const g = l.group !== undefined && spec.groups && Object.prototype.hasOwnProperty.call(spec.groups, l.group) ? spec.groups[l.group] : undefined;
+    return !!g && pinnedZero(`groups.${l.group}.opacity`, g.opacity, ['groups', `groups.${l.group}`]);
+  });
+  return out.some(Boolean) ? out : null;
 }
 
 /**

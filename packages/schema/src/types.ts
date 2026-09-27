@@ -51,6 +51,8 @@ export interface SaverSpec {
    * ignored ⇒ the base spec (author it as the piece's rest state).
    */
   timeline?: Timeline;
+  /** Named layer groups — see `LayerGroup`. Absent ⇒ no layer is grouped (today's behaviour). */
+  groups?: Record<string, LayerGroup>;
   /** Dimensional unit system. 'viewport' (default) = all sizes/speeds/distances are fractions of min(w,h). */
   units?: 'viewport' | 'px';
   /**
@@ -163,6 +165,29 @@ export interface LayerTransform {
   scale?: number;
   scaleX?: number;
   rotate?: number;
+  /**
+   * What `scale` / `scaleX` / `rotate` turn about. `'viewport'` (default) is
+   * the viewport centre — a camera move. `'anchor'` is the layer's own
+   * `position` point (with `dx`/`dy`; for a `list`/`table` layout, the block's
+   * anchor; without `position`, the centre of its `region`) — a slam word
+   * punches in place, on every aspect. Group transforms always turn about the
+   * viewport centre. **Native:** ignored with the rest of `transform`.
+   */
+  origin?: 'viewport' | 'anchor';
+}
+
+/**
+ * A named set of layers painted through one shared `transform` and
+ * `opacity` (`SaverSpec.groups`, joined by `LayerSpec.group`): the group's
+ * transform wraps each member's own (it turns about the viewport centre, a
+ * camera), and its opacity multiplies theirs. Paint — outside the structural
+ * signature — so a steer (`groups.<name>.transform.scale`), a `timeline` key
+ * or a `morph` glides a whole multi-layer subject as one thing. **Native:**
+ * ignored ⇒ identity, opacity 1.
+ */
+export interface LayerGroup {
+  transform?: LayerTransform;
+  opacity?: number;
 }
 
 /** One authored key of a `Timeline`: at scene time `t` (ms), glide `path` to `value` over `dur` ms. */
@@ -292,6 +317,8 @@ export interface LayerSpec {
   opacity?: number;
   /** Paint-level transform of the whole layer — see `LayerTransform`. */
   transform?: LayerTransform;
+  /** The name of a `SaverSpec.groups` entry this layer is painted through (see `LayerGroup`). */
+  group?: string;
   /**
    * Inter-entity links. `mode` picks the wiring:
    * - 'nearest' (default): each entity's k nearest neighbors within maxDist.
@@ -725,6 +752,7 @@ export const LIMITS = {
   maxLayerTransformOffsetPx: 17280, // px, under `units: 'px'` — twice the largest referenceViewport
   maxLayerTransformScale: 8,
   maxLayerTransformRotate: 3600, // degrees
+  maxGroups: 16,
   maxEmitEvery: 600000, // ms — ten minutes; longer silences than that are `life.enter`
   minEmitLife: 500, // ms — an event is a smooth envelope, never a cut
   maxEmitGrow: 8, // × base size across an event window
