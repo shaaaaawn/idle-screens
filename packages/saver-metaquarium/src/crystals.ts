@@ -59,6 +59,12 @@ const ACCENT: Readonly<Record<string, string>> = {
   orange: 'yellow', cyan: 'seafoam', white: 'cyan', glass: 'cyan',
 };
 
+/** The accent a cluster of this hex colour wears (its own colour if unnamed). */
+export function accentOf(hex: string): string {
+  const name = Object.keys(CRYSTAL_COLORS).find((k) => CRYSTAL_COLORS[k]!.toLowerCase() === hex.toLowerCase());
+  return name ? CRYSTAL_COLORS[ACCENT[name] ?? name] ?? hex : hex;
+}
+
 const RAINBOW = ['hotpink', 'orange', 'yellow', 'seafoam', 'cyan', 'blue', 'purple'];
 
 /** What a room's crystals look like when the token says `env` (the default). */
@@ -263,7 +269,7 @@ const HABIT_RINGS: Readonly<Record<CrystalHabit, ReadonlyArray<readonly [number,
   coral: [[1, 0], [4, 22], [6, 46]],
 };
 /** Spire length in world units at crystalScale 1 (a fish is 18 long). */
-const HABIT_LENGTH: Readonly<Record<CrystalHabit, number>> = {
+export const HABIT_LENGTH: Readonly<Record<CrystalHabit, number>> = {
   lotus: 40, spire: 58, druse: 22, scatter: 32, coral: 46,
 };
 

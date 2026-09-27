@@ -15,6 +15,28 @@ const buffers = (world: ReturnType<typeof build>) => world.group.children.map(o 
 });
 
 describe('mineral world', () => {
+  it('grows real crystal colonies out of the rocks: rooted in the stone, pointing up, cleared by fish', () => {
+    const world = build({ ...off, rocks: 1, veins: 0.7 });
+    const colonies = world.rockClusters;
+    expect(colonies.length).toBeGreaterThan(3);
+    expect(world.counts.rockCrystals).toBe(colonies.length);
+    for (const c of colonies) {
+      // The mineral habits only: a lotus rosette over a split read as a flower.
+      expect(['druse', 'spire']).toContain(c.habit);
+      expect(c.shards.length).toBeGreaterThan(0);
+      expect(c.shards.length).toBeLessThanOrEqual(15); // ≤ 12 × 1.25, the rock budget
+      // Out of the breach and up: never flat over a small stone's edge, never down.
+      for (const sh of c.shards) expect(sh.ay).toBeGreaterThan(0.3); // ≈ 20° above the horizon at least
+    }
+    // Fish ride over a rock's colony, not through it (the arch's stands over their heads).
+    const onRocks = colonies.filter((c) => world.clearance(c.x, c.z) < c.y);
+    expect(onRocks.length).toBeLessThanOrEqual(1);
+    for (const c of colonies) if (!onRocks.includes(c)) expect(world.clearance(c.x, c.z)).toBeGreaterThanOrEqual(c.y + c.height * 0.99);
+    // Veins 0: plain stone, nothing grows.
+    expect(build({ ...off, rocks: 1, veins: 0 }).rockClusters).toHaveLength(0);
+    // Seeded.
+    expect(build({ ...off, rocks: 1, veins: 0.7 }).rockClusters).toEqual(colonies);
+  });
   it('leaves old scenes empty and without collision volumes', () => {
     const world = build(off);
     expect(world.group.children).toHaveLength(0);
