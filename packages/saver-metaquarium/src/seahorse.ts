@@ -25,7 +25,7 @@
 
 import { Box3, Matrix4, Vector3, Vector4, type Material, type Mesh, type Object3D, type SkinnedMesh } from 'three';
 import { cloneWithHooks, hasPatch, stackPatch } from './hooks';
-import type { WaveRig, WaveState } from './swimwave';
+import { CRUISE_AMP, type WaveRig, type WaveState } from './swimwave';
 
 /** Anatomy, as fractions of the fish-frame box (see the header). */
 export const SEAHORSE = {
@@ -171,9 +171,9 @@ export function rigSeahorse(group: Object3D, body: Object3D, phase: number): Wav
   return {
     meshes: parts.length,
     set(w: WaveState) {
-      // Effort from the wave state: ~1 cruising (amp 0.08 at swimWave 1), more when it works.
+      // Effort from the wave state: ~1 cruising (amp CRUISE_AMP at swimWave 1), more when it works.
       st.t = w.t ?? 0;
-      st.amount = w.amp / 0.08;
+      st.amount = w.amp / CRUISE_AMP;
       sea.value.set(st.t, st.amount, phase, tailCurl(st));
     },
     ensure() { for (const p of parts) if (!hasPatch(p.m.material as Material, SEAHORSE_TAG)) attach(p); },

@@ -39,6 +39,8 @@ export function waveProfile(breed: string | null | undefined, model: Object3D): 
 export const STRIDE = 0.7;
 /** Wavelength of the body wave, in body lengths. */
 export const WAVELENGTH = 0.95;
+/** Tail amplitude cruising, at `swimWave` 1 and no maneuver effort: ~8 % of body length. Also the seahorse rig's unit of effort (seahorse.ts), since it reads `amp` off this same wave state. */
+export const CRUISE_AMP = 0.08;
 
 export interface WaveState {
   phase: number; amp: number; bend: number;
@@ -55,7 +57,7 @@ export interface WaveState {
 export function waveState(beat: number, length: number, flurry: number, turn: number, amount: number, out: WaveState): WaveState {
   out.phase = (beat / (length * STRIDE)) * Math.PI * 2;
   // Tail amplitude as a fraction of body length: ~8 % cruising, more when it works.
-  out.amp = amount * (0.08 + 0.07 * Math.min(1, flurry));
+  out.amp = amount * (CRUISE_AMP + 0.07 * Math.min(1, flurry));
   // The C-bend: a body lying along its own curved path. A point half a body
   // from the centre sits turn/8 of a length inside the tangent, nose and tail
   // alike; capped so a hairpin curls the fish rather than folding it.
