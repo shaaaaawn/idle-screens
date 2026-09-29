@@ -6,17 +6,28 @@
  * rule), and voxel means CUBES ON A GRID. The first flora was stretched boxes
  * with horizontal rungs, and read as ladders and aerials; a plant made of
  * cubes reads as a plant because its curves are stair-steps and its leaves
- * climb. Five species, planted as a garden round each crystal — low at the
- * skirt, tall behind:
+ * climb. Thirteen species, planted as a garden round each crystal — low at
+ * the skirt, tall behind:
  *
- *   grass  tufts of short blades at the crystal's feet (the ground cover)
- *   tube   a cluster of tube sponges, each mouth lit from inside
- *   bulb   a short stem carrying a lantern, capped in brass
- *   fan    a sea fan: a flat branching tree that faces its crystal
- *   kelp   a tall meandering stalk with stair-step blades and a lit bud
+ *   grass     tufts of short blades at the crystal's feet (the ground cover)
+ *   tube      a cluster of tube sponges, each mouth lit from inside
+ *   bulb      a short stem carrying a lantern, capped in brass
+ *   fan       a sea fan: a flat branching tree that faces its crystal
+ *   kelp      a tall meandering stalk with stair-step blades and a lit bud
+ *   anemone   a squat column crowned with climbing tentacles, each tip a bead of light
+ *   staghorn  antler coral, forking in every direction, some tips lit
+ *   brain     a low dome whose skin is a maze of ridges and grooves
+ *   whip      a stand of thin bright rods: all height, so the liveliest sway
+ *   barrel    a hollow banded vase with light pooled in the bottom
+ *   shelf     glow caps: wide flat caps whose gills shine down the stalk
+ *   seapen    a quill with a feather of paired leaves, every other edge lit
+ *   clam      a giant clam gaping at the light, its mantle vivid — a specimen, two at most
  *
- * They take their crystal's colour and lean TOWARD it — that is what feeding
- * on the light looks like. All motion is in the vertex shader (one draw, zero
+ * The room chooses the garden (coral on a reef, kelp and whips in the kelp
+ * forest, glow caps in the abyss) unless `floraMix` does. Each plant carries
+ * its own colour, mixed with its crystal's, and leans TOWARD the crystal —
+ * that is what feeding on the light looks like. Solids (a brain, a barrel, a
+ * cap, a clam) draw only the faces that touch water. All motion is in the vertex shader (one draw, zero
  * CPU per frame, pure in the tank clock): a sway that grows with height², a
  * gust whose phase comes from the root's position so it crosses the field,
  * and lights that breathe. Geometry is written straight into arrays — a
@@ -27,8 +38,12 @@
 import { BufferAttribute, BufferGeometry, Color } from 'three';
 import type { CrystalRng } from './crystals';
 
-export type FloraSpecies = 'grass' | 'tube' | 'bulb' | 'fan' | 'kelp';
-export const FLORA_SPECIES: readonly FloraSpecies[] = ['grass', 'tube', 'bulb', 'fan', 'kelp'];
+export type FloraSpecies =
+  | 'grass' | 'tube' | 'bulb' | 'fan' | 'kelp'
+  | 'anemone' | 'staghorn' | 'brain' | 'whip' | 'barrel' | 'shelf' | 'seapen' | 'clam';
+export const FLORA_SPECIES: readonly FloraSpecies[] = [
+  'grass', 'tube', 'bulb', 'fan', 'kelp', 'anemone', 'staghorn', 'brain', 'whip', 'barrel', 'shelf', 'seapen', 'clam',
+];
 
 export interface FloraAnchor { x: number; y: number; z: number; color: string }
 
@@ -38,6 +53,10 @@ export interface FloraOptions {
   scale: number;
   /** True where something solid already stands (a home, a boulder). */
   blocked(x: number, z: number): boolean;
+  /** Relative weights by species (`floraMix`); anything unnamed is left out. Empty = the default garden. */
+  mix?: Partial<Record<FloraSpecies, number>>;
+  /** The room (`environment`): with no `mix`, it chooses the garden — coral on a reef, kelp in the kelp forest. */
+  environment?: string;
 }
 
 export interface FloraField {
@@ -50,6 +69,8 @@ export interface FloraField {
   bySpecies: Record<FloraSpecies, number>;
   /** Where the lamps are — what sheds spores. `root` is the plant's foot. */
   lights: { x: number; y: number; z: number; root: number; phase: number; gust: number; color: string }[];
+  /** Every plant's crown, lit or not: what the shoal keeps above (canopy.ts). */
+  tips: { x: number; y: number; z: number; root: number }[];
 }
 
 /** Voxel-art face values: top brightest, the two side pairs apart, bottom dark. */
@@ -65,34 +86,59 @@ class VoxelWriter {
   readonly glow: number[] = [];
   count = 0;
   root = 0; phase = 0; gust = 0;
+  /** The highest point drawn since `top` was last reset (a plant's crown). */
+  top = 0;
   last: [number, number, number] = [0, 0, 0];
 
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, lit: number, flat = false): void {
-    const hx = sx / 2, hy = sy / 2, hz = sz / 2;
-    for (const [nx, ny, nz, shade] of FACES) {
-      // Two in-plane axes for this face.
-      const ax = ny !== 0 ? [1, 0, 0] : nx !== 0 ? [0, 0, 1] : [1, 0, 0];
-      const bx = ny !== 0 ? [0, 0, 1] : [0, 1, 0];
-      const flip = (nx + ny + nz) * (ny !== 0 ? -1 : nx !== 0 ? -1 : 1) < 0;
-      const corner = (s: number, t: number): [number, number, number] => [
-        cx + nx * hx + ax[0]! * s * hx + bx[0]! * t * hx,
-        cy + ny * hy + ax[1]! * s * hy + bx[1]! * t * hy,
-        cz + nz * hz + ax[2]! * s * hz + bx[2]! * t * hz,
-      ];
-      const q = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
-      const order = flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
-      const k = flat ? 1 : shade;
-      for (const i of order) {
-        const p = q[i]!;
-        this.pos.push(p[0], p[1], p[2]);
-        this.nor.push(nx, ny, nz);
-        this.col.push(c.r * k, c.g * k, c.b * k);
-        this.sway.push(this.root, this.phase, this.gust);
-        this.glow.push(lit);
-      }
-    }
+    for (let f = 0; f < 6; f += 1) this.face(f, cx, cy, cz, sx / 2, sy / 2, sz / 2, c, lit, flat);
     this.count += 1;
     this.last = [cx, cy, cz];
+    if (cy + sy / 2 > this.top) this.top = cy + sy / 2;
+  }
+
+  /**
+   * A solid on the voxel grid: every cell a cube of `size`, but only the faces
+   * that touch open water — the inside of a brain coral or a barrel's wall is
+   * never drawn. `cells` maps `i,j,k` (x, y, z steps from `origin`) to a colour.
+   */
+  solid(origin: readonly [number, number, number], size: number, cells: ReadonlyMap<string, Color>, lit: number, flat = false): void {
+    const h = size / 2;
+    for (const [key, c] of cells) {
+      const [i, j, k] = key.split(',').map(Number) as [number, number, number];
+      const cx = origin[0] + i * size, cy = origin[1] + j * size, cz = origin[2] + k * size;
+      for (let f = 0; f < 6; f += 1) {
+        const [nx, ny, nz] = FACES[f]!;
+        if (!cells.has(`${i + nx},${j + ny},${k + nz}`)) this.face(f, cx, cy, cz, h, h, h, c, lit, flat);
+      }
+      this.count += 1;
+      this.last = [cx, cy, cz];
+      if (cy + h > this.top) this.top = cy + h;
+    }
+  }
+
+  private face(f: number, cx: number, cy: number, cz: number, hx: number, hy: number, hz: number, c: Color, lit: number, flat: boolean): void {
+    const [nx, ny, nz, shade] = FACES[f]!;
+    // Two in-plane axes for this face.
+    const ax = ny !== 0 ? [1, 0, 0] : nx !== 0 ? [0, 0, 1] : [1, 0, 0];
+    const bx = ny !== 0 ? [0, 0, 1] : [0, 1, 0];
+    const flip = (nx + ny + nz) * (ny !== 0 ? -1 : nx !== 0 ? -1 : 1) < 0;
+    const corner = (s: number, t: number): [number, number, number] => [
+      cx + nx * hx + ax[0]! * s * hx + bx[0]! * t * hx,
+      cy + ny * hy + ax[1]! * s * hy + bx[1]! * t * hy,
+      cz + nz * hz + ax[2]! * s * hz + bx[2]! * t * hz,
+    ];
+    const q = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+    const order = flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+    const k = flat ? 1 : shade;
+    for (const i of order) {
+      const p = q[i]!;
+      this.pos.push(p[0], p[1], p[2]);
+      this.nor.push(nx, ny, nz);
+      this.col.push(c.r * k, c.g * k, c.b * k);
+      this.sway.push(this.root, this.phase, this.gust);
+      this.glow.push(lit);
+    }
   }
 
   geometry(): BufferGeometry[] {
@@ -107,50 +153,46 @@ class VoxelWriter {
   }
 }
 
-/** How far out each species lives (in units of scale), and its share of a garden. */
-const HABITAT: Readonly<Record<FloraSpecies, { near: number; far: number; share: number }>> = {
-  grass: { near: 9, far: 24, share: 0.34 },
-  tube: { near: 13, far: 25, share: 0.14 },
-  bulb: { near: 14, far: 30, share: 0.14 },
-  fan: { near: 19, far: 36, share: 0.16 },
-  kelp: { near: 24, far: 46, share: 0.22 },
-};
+/** One plant's plot: where it roots, what light it feeds on, and the pens it draws with. */
+interface Plot {
+  x: number; z: number; root: number;
+  /** The voxel, and the world scale it was cut at. */
+  V: number; s: number;
+  rng: CrystalRng;
+  /** The nearest crystal's colour, and the stem colour grown from it. */
+  light: Color; stem: Color;
+  /** Unit vector toward the light, on the floor. */
+  lx: number; lz: number;
+  phase: number;
+  body: VoxelWriter; lamp: VoxelWriter;
+  /** The stem colour shaded for height `h` (0 root .. 1 tip). */
+  tone(h: number, k?: number): Color;
+}
 
-export function buildFlora(
-  anchors: readonly FloraAnchor[], terrain: (x: number, z: number) => number,
-  rng: CrystalRng, opts: FloraOptions,
-): FloraField {
-  const bySpecies: Record<FloraSpecies, number> = { grass: 0, tube: 0, bulb: 0, fan: 0, kelp: 0 };
-  const body = new VoxelWriter(), lamp = new VoxelWriter();
-  const s = opts.scale;
-  const want = Math.round(opts.density * opts.cap * 9);
-  const lights: FloraField['lights'] = [];
-  if (!want || !anchors.length) return { parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights };
-  const V = 1.7 * s; // the voxel
-  const white = new Color('#ffffff'), leafGreen = new Color('#2f9d7c'), brassBase = new Color('#c9a15a');
+interface SpeciesDef {
+  /** How far out it lives from its crystal (in units of scale). */
+  near: number; far: number;
+  /** Its share of a garden when nothing says otherwise. */
+  share: number;
+  /** The most one garden holds, for a specimen (a giant clam is an event, not a lawn). */
+  max?: number;
+  /** What its stem is grown from, mixed with its crystal's light. */
+  leaf?: readonly string[];
+  grow(p: Plot): void;
+}
 
-  let plants = 0;
-  for (let i = 0; i < want * 3 && plants < want; i += 1) {
-    const home = anchors[i % anchors.length]!;
-    // Species by share, so a garden keeps its proportions at any density.
-    let pick = rng.next(), species: FloraSpecies = 'grass';
-    for (const sp of FLORA_SPECIES) { if (pick < HABITAT[sp].share) { species = sp; break; } pick -= HABITAT[sp].share; }
-    const hab = HABITAT[species];
-    const angle = rng.range(0, Math.PI * 2);
-    const radius = (hab.near + (hab.far - hab.near) * rng.next() ** 1.4) * s;
-    const x = home.x + Math.cos(angle) * radius, z = home.z + Math.sin(angle) * radius;
-    if (opts.blocked(x, z)) continue;
-    const near = anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b), home);
-    const root = terrain(x, z);
-    const light = new Color(near.color);
-    const stem = light.clone().lerp(leafGreen, 0.62);
-    const dx = near.x - x, dz = near.z - z, dl = Math.hypot(dx, dz) || 1;
-    const lx = dx / dl, lz = dz / dl; // toward the light
-    const phase = rng.range(0, Math.PI * 2), gust = x * 0.021 + z * 0.015;
-    for (const w of [body, lamp]) { w.root = root; w.phase = phase; w.gust = gust; }
-    const tone = (h: number, k = 1): Color => stem.clone().multiplyScalar((0.34 + 0.62 * h) * k);
+const pick = <T,>(rng: CrystalRng, list: readonly T[]): T => list[Math.min(list.length - 1, Math.floor(rng.next() * list.length))]!;
+/** A voxel-grid cell's key: `i,j,k` steps along x, y, z. */
+const cellKey = (i: number, j: number, k: number): string => `${i},${j},${k}`;
 
-    if (species === 'grass') {
+const WHITE = new Color('#ffffff'), LEAF_GREEN = '#2f9d7c', BRASS = new Color('#c9a15a');
+
+const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
+  grass: {
+    near: 9, far: 24, share: 0.2,
+    // Mostly green; now and then a tuft of red algae.
+    leaf: [LEAF_GREEN, LEAF_GREEN, '#4fae4a', '#8fae3a', '#b0443c'],
+    grow({ x, z, root, V, s, rng, body, tone }) {
       const blades = 4 + Math.floor(rng.next() * 5);
       for (let b = 0; b < blades; b += 1) {
         const bx = x + rng.range(-3.2, 3.2) * s, bz = z + rng.range(-3.2, 3.2) * s;
@@ -160,9 +202,13 @@ export function buildFlora(
           body.cube(bx + Math.round(lean * j) * V * 0.5, root + (j + 0.5) * V * 0.8, bz, V * 0.55, V * 0.8, V * 0.55, tone(h, 1.05), 0);
         }
       }
-    } else if (species === 'tube') {
+    },
+  },
+  tube: {
+    near: 13, far: 25, share: 0.07,
+    grow({ x, z, root, V, s, rng, light, body, lamp }) {
       const tubes = 3 + Math.floor(rng.next() * 3);
-      const hue = light.clone().lerp(new Color('#ff7aa8'), 0.35);
+      const hue = light.clone().lerp(new Color(pick(rng, ['#ff7aa8', '#ffb35c', '#9f7aff', '#5cd6ff'])), 0.55);
       for (let t = 0; t < tubes; t += 1) {
         const a = (t / tubes) * Math.PI * 2 + rng.next(), r = (t === 0 ? 0 : rng.range(2.2, 4.2)) * s;
         const tx = x + Math.cos(a) * r, tz = z + Math.sin(a) * r;
@@ -173,9 +219,14 @@ export function buildFlora(
         }
         // The lit mouth: a lip, and light down inside it.
         body.cube(tx, root + (n + 0.25) * V, tz, w * 1.25, V * 0.5, w * 1.25, hue.clone().multiplyScalar(0.95), 0);
-        lamp.cube(tx, root + (n + 0.3) * V, tz, w * 0.7, V * 0.45, w * 0.7, light.clone().lerp(white, 0.35), 1, true);
+        lamp.cube(tx, root + (n + 0.3) * V, tz, w * 0.7, V * 0.45, w * 0.7, light.clone().lerp(WHITE, 0.35), 1, true);
       }
-    } else if (species === 'bulb') {
+    },
+  },
+  bulb: {
+    near: 14, far: 30, share: 0.07,
+    leaf: [LEAF_GREEN, '#4fae4a', '#6a8f3a'],
+    grow({ x, z, root, V, rng, light, lx, lz, body, lamp, tone }) {
       const n = 3 + Math.floor(rng.next() * 3);
       let tx = x, tz = z;
       for (let j = 0; j < n; j += 1) {
@@ -184,19 +235,23 @@ export function buildFlora(
         body.cube(tx, root + (j + 0.5) * V, tz, V * 0.8, V, V * 0.8, tone(h), 0);
       }
       const top = root + n * V, head = V * 2;
-      const brass = light.clone().lerp(brassBase, 0.6).multiplyScalar(0.6);
+      const brass = light.clone().lerp(BRASS, 0.6).multiplyScalar(0.6);
       for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         body.cube(tx + ax * head * 0.62, top + head * 0.35, tz + az * head * 0.62, V * 0.7, head * 0.7, V * 0.7, tone(0.9, 0.85), 0);
       }
       lamp.cube(tx, top + head * 0.18, tz, head * 1.05, head * 0.16, head * 1.05, brass, 1, true);
-      lamp.cube(tx, top + head * 0.75, tz, head * 0.9, head * 0.9, head * 0.9, light.clone().lerp(white, 0.35), 1, true);
+      lamp.cube(tx, top + head * 0.75, tz, head * 0.9, head * 0.9, head * 0.9, light.clone().lerp(WHITE, 0.35), 1, true);
       lamp.cube(tx, top + head * 1.3, tz, head * 1.15, head * 0.18, head * 1.15, brass, 1, true);
       lamp.cube(tx, top + head * 1.5, tz, head * 0.4, head * 0.24, head * 0.4, brass, 1, true);
-    } else if (species === 'fan') {
+    },
+  },
+  fan: {
+    near: 19, far: 36, share: 0.08,
+    grow({ x, z, root, V, rng, light, lx, lz, body, lamp }) {
       // A sea fan: a flat tree in the plane that faces its crystal, grown on
       // the voxel grid so every limb is a run of cubes.
       const px = -lz, pz = lx; // the fan's plane runs across the light
-      const coral = light.clone().lerp(new Color('#ff6f91'), 0.45);
+      const coral = light.clone().lerp(new Color(pick(rng, ['#ff6f91', '#ff9f45', '#c86bff', '#ffd166', '#ff4f4f'])), 0.6);
       const seen = new Set<string>();
       const grow = (gu: number, gv: number, du: number, len: number, depth: number): void => {
         for (let k = 0; k < len; k += 1) {
@@ -209,17 +264,25 @@ export function buildFlora(
           body.cube(x + px * gu * V, root + (gv - 0.5) * V, z + pz * gu * V, V, V, V * 0.8, coral.clone().multiplyScalar(0.32 + 0.62 * h), 0);
           if (depth > 0 && k > 1 && rng.next() < 0.42) grow(gu, gv, du === 0 ? (rng.next() < 0.5 ? -1 : 1) : -du, Math.max(3, len - k - 1), depth - 1);
         }
-        if (depth <= 1) lamp.cube(x + px * gu * V, root + (gv + 0.4) * V, z + pz * gu * V, V * 0.85, V * 0.85, V * 0.85, light.clone().lerp(white, 0.3), 1, true);
+        if (depth <= 1) lamp.cube(x + px * gu * V, root + (gv + 0.4) * V, z + pz * gu * V, V * 0.85, V * 0.85, V * 0.85, light.clone().lerp(WHITE, 0.3), 1, true);
       };
-      const tall = 7 + Math.floor(rng.next() * 6);
+      // One fan in eight is an old one, half as tall again.
+      const tall = 7 + Math.floor(rng.next() * 6) + (rng.next() < 0.125 ? 5 : 0);
       grow(0, 0, 0, 3, 0);
       grow(0, 3, -1, tall, 2);
       grow(0, 3, 1, tall - 1, 2);
       grow(0, 3, 0, tall + 1, 1);
-    } else {
+    },
+  },
+  kelp: {
+    near: 24, far: 46, share: 0.14,
+    // Green, and the golds and olives of real kelp.
+    leaf: [LEAF_GREEN, '#8a6a2a', '#5f7d2e', '#3a8f6a'],
+    grow({ x, z, root, V, rng, light, lx, lz, phase, body, lamp, tone }) {
       // Kelp: a stalk that meanders on the grid and leans to the light, with
       // blades that CLIMB away from it in two-cube stair-steps.
-      const n = 12 + Math.floor(rng.next() * 14);
+      // One in ten is a giant, reaching for the surface.
+      const n = 12 + Math.floor(rng.next() * 14) + (rng.next() < 0.1 ? 12 : 0);
       const wander = rng.range(0.25, 0.5), lean = rng.range(0.1, 0.24);
       let tx = x, tz = z;
       for (let j = 0; j < n; j += 1) {
@@ -238,13 +301,316 @@ export function buildFlora(
           }
         }
       }
-      lamp.cube(tx, root + (n + 0.45) * V, tz, V * 1.15, V * 1.15, V * 1.15, light.clone().lerp(white, 0.3), 1, true);
+      lamp.cube(tx, root + (n + 0.45) * V, tz, V * 1.15, V * 1.15, V * 1.15, light.clone().lerp(WHITE, 0.3), 1, true);
+    },
+  },
+  anemone: {
+    near: 10, far: 26, share: 0.08,
+    grow({ x, z, root, V, rng, light, body, lamp }) {
+      // A squat column, an oral disc, and a crown of tentacles that climb
+      // outward in stair-steps, each tipped with a bead of light.
+      const hue = light.clone().lerp(new Color(pick(rng, ['#ff5fa2', '#ff9a3c', '#b884ff', '#5fe0ff', '#ff6a5c'])), 0.78);
+      const base = 2 + Math.floor(rng.next() * 3);
+      for (let j = 0; j < base; j += 1) body.cube(x, root + (j + 0.5) * V, z, V * 2.2, V, V * 2.2, hue.clone().multiplyScalar(0.3 + 0.2 * (j / base)), 0);
+      const top = root + base * V;
+      body.cube(x, top + V * 0.25, z, V * 3.2, V * 0.5, V * 3.2, hue.clone().multiplyScalar(0.62), 0);
+      const arms = 7 + Math.floor(rng.next() * 4), tip = hue.clone().lerp(WHITE, 0.45);
+      for (let a = 0; a < arms; a += 1) {
+        const ang = (a / arms) * Math.PI * 2 + rng.range(-0.15, 0.15);
+        const ca = Math.cos(ang), sa = Math.sin(ang), len = 3 + Math.floor(rng.next() * 3);
+        let out = V * 1.3, up = top + V * 0.5;
+        for (let k = 0; k < len; k += 1) {
+          out += k < 2 ? V * 0.6 : V * 0.3;
+          up += V * 0.75;
+          body.cube(x + ca * out, up, z + sa * out, V * 0.55, V * 0.75, V * 0.55, hue.clone().lerp(WHITE, 0.1 + 0.2 * (k / len)).multiplyScalar(0.72 + 0.28 * (k / len)), 0);
+        }
+        lamp.cube(x + ca * (out + V * 0.2), up + V * 0.55, z + sa * (out + V * 0.2), V * 0.6, V * 0.6, V * 0.6, tip, 1, true);
+      }
+      // The mouth glows last: it is what sheds the spores.
+      lamp.cube(x, top + V * 0.6, z, V * 1.1, V * 0.35, V * 1.1, light.clone().lerp(WHITE, 0.4), 1, true);
+    },
+  },
+  staghorn: {
+    near: 16, far: 34, share: 0.07,
+    grow({ x, z, root, V, rng, light, body, lamp }) {
+      // Antler coral: branches fork in every direction (a fan forks in one
+      // plane), stubby, pale at the growing tips, some tips lit.
+      const hue = light.clone().lerp(new Color(pick(rng, ['#e8b27a', '#c98bdc', '#8fd6c8', '#f2a0a0', '#d8e07a'])), 0.75);
+      const seen = new Set<string>();
+      const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]] as const;
+      const branch = (gi: number, gj: number, gk: number, di: number, dk: number, len: number, depth: number): void => {
+        for (let k = 0; k < len; k += 1) {
+          gj += 1;
+          const h = Math.min(1, gj / 12), c = hue.clone().multiplyScalar(0.36 + 0.5 * h);
+          if (k % 2 === 1) {
+            // A sideways step keeps an elbow, so the limb is one run of cubes, not a dotted line.
+            if (!seen.has(cellKey(gi, gj, gk))) { seen.add(cellKey(gi, gj, gk)); body.cube(x + gi * V, root + (gj - 0.5) * V, z + gk * V, V * 0.8, V, V * 0.8, c, 0); }
+            gi += di; gk += dk;
+          }
+          const key = cellKey(gi, gj, gk);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          body.cube(x + gi * V, root + (gj - 0.5) * V, z + gk * V, V * 0.8, V, V * 0.8, c, 0);
+          if (depth > 0 && k >= 2 && rng.next() < 0.26) {
+            const [ni, nk] = pick(rng, DIRS);
+            branch(gi, gj, gk, ni, nk, Math.max(2, len - k - 1), depth - 1);
+          }
+        }
+        // The growing tip is pale, and one in three is lit.
+        if (rng.next() < 0.34) lamp.cube(x + gi * V, root + (gj + 0.35) * V, z + gk * V, V * 0.7, V * 0.7, V * 0.7, light.clone().lerp(WHITE, 0.5), 1, true);
+        else body.cube(x + gi * V, root + (gj + 0.3) * V, z + gk * V, V * 0.75, V * 0.6, V * 0.75, hue.clone().lerp(WHITE, 0.55), 0);
+      };
+      const arms = 3 + Math.floor(rng.next() * 2), trunk = 1 + Math.floor(rng.next() * 2);
+      for (let j = 0; j < trunk; j += 1) body.cube(x, root + (j + 0.5) * V, z, V * 1.1, V, V * 1.1, hue.clone().multiplyScalar(0.34), 0);
+      const first = Math.floor(rng.next() * DIRS.length);
+      for (let a = 0; a < arms; a += 1) {
+        const [di, dk] = DIRS[(first + a * 3) % DIRS.length]!;
+        branch(0, trunk, 0, di, dk, 6 + Math.floor(rng.next() * 5), 2);
+      }
+    },
+  },
+  brain: {
+    near: 11, far: 28, share: 0.06,
+    grow({ x, z, root, V, rng, light, body }) {
+      // A brain coral: a low dome, its surface a maze of ridges and grooves.
+      // Solid, so only its skin is drawn.
+      const base = light.clone().lerp(new Color(pick(rng, ['#d9c27a', '#9fcf7a', '#e59a7a', '#a7b7e8', '#e0a8c8'])), 0.8);
+      const R = 2.4 + rng.next() * 1.8, squash = 0.62, seed = rng.range(0, 9);
+      const ridge = base.clone().lerp(WHITE, 0.18), groove = base.clone().multiplyScalar(0.45);
+      const cells = new Map<string, Color>();
+      const n = Math.ceil(R);
+      for (let i = -n; i <= n; i += 1) for (let k = -n; k <= n; k += 1) for (let j = 0; j <= n; j += 1) {
+        if ((i * i + k * k) / (R * R) + (j * j) / (R * R * squash * squash) > 1) continue;
+        const maze = Math.sin(i * 1.9 + Math.sin(k * 1.3 + seed) * 1.6) * Math.cos(k * 1.7 + Math.sin(i * 1.1 + seed) * 1.4);
+        cells.set(cellKey(i, j, k), (maze > 0 ? ridge : groove).clone().multiplyScalar(0.55 + 0.45 * (j / n)));
+      }
+      // Sunk a little into the floor, as if it grew there.
+      body.solid([x, root + V * 0.2, z], V, cells, 0);
+    },
+  },
+  whip: {
+    near: 18, far: 40, share: 0.08,
+    grow({ x, z, root, V, s, rng, light, lx, lz, body, lamp }) {
+      // Sea whips: a stand of thin, bright rods. They are all height, so the
+      // sway (which grows with height²) makes them the liveliest thing here.
+      const hue = light.clone().lerp(new Color(pick(rng, ['#ff4a3d', '#ff9f1c', '#ffd23f', '#c77dff', '#ff5c8a'])), 0.82);
+      const whips = 3 + Math.floor(rng.next() * 3);
+      let tallest = -1, tip: [number, number, number] = [x, root, z];
+      for (let w = 0; w < whips; w += 1) {
+        const bx = x + (w === 0 ? 0 : rng.range(-2.6, 2.6)) * s, bz = z + (w === 0 ? 0 : rng.range(-2.6, 2.6)) * s;
+        const n = 8 + Math.floor(rng.next() * 11), la = rng.range(0, Math.PI * 2), lean = rng.range(0.15, 0.4);
+        const ex = Math.cos(la) * 0.6 + lx * 0.4, ez = Math.sin(la) * 0.6 + lz * 0.4;
+        let tx = bx, tz = bz;
+        for (let j = 0; j < n; j += 1) {
+          const h = (j + 0.5) / n, off = Math.round(h * h * lean * n);
+          tx = bx + ex * off * V * 0.5; tz = bz + ez * off * V * 0.5;
+          body.cube(tx, root + (j + 0.5) * V, tz, V * 0.5, V, V * 0.5, hue.clone().multiplyScalar(0.4 + 0.6 * h), 0);
+        }
+        if (n > tallest) { tallest = n; tip = [tx, root + (n + 0.35) * V, tz]; }
+      }
+      lamp.cube(tip[0], tip[1], tip[2], V * 0.7, V * 0.7, V * 0.7, light.clone().lerp(WHITE, 0.4), 1, true);
+    },
+  },
+  barrel: {
+    near: 16, far: 32, share: 0.04,
+    grow({ x, z, root, V, rng, light, body, lamp }) {
+      // A barrel sponge: a hollow, flaring vase banded in rings, with light
+      // pooled in the bottom of it.
+      const base = light.clone().lerp(new Color(pick(rng, ['#b5653a', '#8f5a9e', '#c28a4a', '#7a8f5a', '#a8484a'])), 0.8);
+      const H = 5 + Math.floor(rng.next() * 4), r0 = 1.4 + rng.next() * 0.4, r1 = r0 + 1.2 + rng.next() * 0.8;
+      const cells = new Map<string, Color>();
+      const n = Math.ceil(r1) + 1;
+      for (let j = 0; j < H; j += 1) {
+        const r = r0 + (r1 - r0) * (j / (H - 1));
+        const band = (j % 2 ? 0.8 : 1) * (0.45 + 0.55 * (j / H));
+        for (let i = -n; i <= n; i += 1) for (let k = -n; k <= n; k += 1) {
+          const d = Math.hypot(i, k);
+          if (j === 0 ? d <= r + 0.5 : Math.abs(d - r) < 0.62) cells.set(cellKey(i, j, k), base.clone().multiplyScalar(band));
+        }
+      }
+      body.solid([x, root + V * 0.5, z], V, cells, 0);
+      lamp.cube(x, root + V * 1.1, z, V * r0 * 1.4, V * 0.25, V * r0 * 1.4, light.clone().lerp(WHITE, 0.3), 1, true);
+    },
+  },
+  shelf: {
+    near: 12, far: 30, share: 0.05,
+    grow({ x, z, root, V, s, rng, light, body, lamp }) {
+      // Glow caps: mushroom-like, with a wide flat cap whose gills shine down
+      // onto the stalk. A clump of one to three, the tallest in the middle.
+      const cap = light.clone().lerp(new Color(pick(rng, ['#e0d6ff', '#ffd6a8', '#b8f0ff', '#ffb3d9', '#d6ffb8'])), 0.72);
+      const stalkC = cap.clone().lerp(WHITE, 0.3).multiplyScalar(0.55), gill = light.clone().lerp(WHITE, 0.45);
+      const count = 1 + Math.floor(rng.next() * 3);
+      const order = Array.from({ length: count }, (_, m) => m).reverse(); // the tallest (m = 0) last: its gills shed the spores
+      for (const m of order) {
+        const a = rng.range(0, Math.PI * 2), d = m === 0 ? 0 : rng.range(2.5, 4) * s;
+        const mx = x + Math.cos(a) * d, mz = z + Math.sin(a) * d;
+        const tall = (m === 0 ? 5 : 2) + Math.floor(rng.next() * (m === 0 ? 5 : 3)), R = m === 0 ? 2.2 + rng.next() : 1.3 + rng.next() * 0.8;
+        for (let j = 0; j < tall; j += 1) body.cube(mx, root + (j + 0.5) * V, mz, V * 0.8, V, V * 0.8, stalkC.clone().multiplyScalar(0.6 + 0.4 * (j / tall)), 0);
+        const cells = new Map<string, Color>(), n = Math.ceil(R);
+        for (let i = -n; i <= n; i += 1) for (let k = -n; k <= n; k += 1) {
+          const d2 = Math.hypot(i, k);
+          if (d2 <= R) cells.set(cellKey(i, 0, k), cap.clone().multiplyScalar(0.7 + 0.3 * (1 - d2 / (R + 1))));
+          if (d2 <= R * 0.55) cells.set(cellKey(i, 1, k), cap.clone().lerp(WHITE, 0.12));
+        }
+        const capY = root + (tall + 0.5) * V;
+        body.solid([mx, capY, mz], V, cells, 0);
+        lamp.cube(mx, capY - V * 0.62, mz, V * (R * 2 - 0.4), V * 0.25, V * (R * 2 - 0.4), gill, 1, true);
+      }
+    },
+  },
+  seapen: {
+    near: 20, far: 40, share: 0.04,
+    grow({ x, z, root, V, rng, light, lx, lz, body, lamp }) {
+      // A sea pen: a quill standing on the floor, its feather a ladder of
+      // paired leaves that sweep upward, widest in the middle, the edge of
+      // every other leaf lit.
+      const hue = light.clone().lerp(new Color(pick(rng, ['#ffb46b', '#ff7b7b', '#f0e6c8', '#d7a8ff'])), 0.75);
+      const px = -lz, pz = lx; // the feather faces the light
+      const n = 9 + Math.floor(rng.next() * 6), from = Math.floor(n * 0.3);
+      const bead = light.clone().lerp(WHITE, 0.45);
+      for (let j = 0; j < n; j += 1) {
+        const h = (j + 0.5) / n, y = root + (j + 0.5) * V;
+        body.cube(x, y, z, V * 0.6, V, V * 0.6, hue.clone().multiplyScalar(0.35 + 0.5 * h), 0);
+        if (j < from) continue;
+        const reach = 1 + Math.round(Math.sin(Math.PI * (j - from + 0.5) / (n - from)) * 2.4);
+        for (const side of [-1, 1]) {
+          for (let k = 1; k <= reach; k += 1) {
+            body.cube(x + px * side * k * V * 0.8, y + k * V * 0.3, z + pz * side * k * V * 0.8, V * 0.8, V * 0.35, V * 0.8, hue.clone().lerp(WHITE, 0.15).multiplyScalar(0.55 + 0.45 * h), 0);
+          }
+          if ((j - from) % 2 === 0) lamp.cube(x + px * side * (reach + 0.7) * V * 0.8, y + (reach + 0.5) * V * 0.3, z + pz * side * (reach + 0.7) * V * 0.8, V * 0.45, V * 0.45, V * 0.45, bead, 1, true);
+        }
+      }
+      lamp.cube(x, root + (n + 0.3) * V, z, V * 0.7, V * 0.7, V * 0.7, bead, 1, true);
+    },
+  },
+  clam: {
+    // A giant clam: a specimen, not a lawn — at most two to a garden.
+    near: 12, far: 22, share: 0.02, max: 2,
+    grow({ x, z, root, V, rng, light, lx, lz, body, lamp }) {
+      // Two ribbed valves hinged at the back and gaping toward the light,
+      // the mantle between them a band of vivid, spotted colour. On the grid:
+      // u runs along the hinge, w from the hinge to the lip, j up.
+      const alongX = Math.abs(lx) > Math.abs(lz), face = Math.sign(alongX ? lx : lz) || 1;
+      const at = (u: number, w: number): [number, number] => alongX ? [w * face, u] : [u, w * face];
+      const shell = new Color(pick(rng, ['#d8d2c0', '#c8d8d0', '#e0cdb8'])).lerp(light, 0.15);
+      const mantleA = new Color(pick(rng, ['#3fd0ff', '#7a5cff', '#34f5a0', '#ff5fd2'])).lerp(light, 0.25);
+      const mantleB = mantleA.clone().lerp(WHITE, 0.5);
+      const W = 4 + Math.floor(rng.next() * 2), D = 5;
+      const valves = new Map<string, Color>(), mantle = new Map<string, Color>();
+      const put = (m: Map<string, Color>, u: number, j: number, w: number, c: Color): void => {
+        const [i, k] = at(u, w);
+        m.set(cellKey(i, j, k), c);
+      };
+      for (let u = -W; u <= W; u += 1) {
+        const edge = 1 - (u / (W + 0.5)) ** 2;
+        const lipH = Math.max(1, Math.round(1 + 2 * edge)); // the lower valve deepens to the middle
+        const rib = u % 2 === 0 ? shell.clone().lerp(WHITE, 0.2) : shell.clone().multiplyScalar(0.7);
+        for (let w = 0; w <= D; w += 1) {
+          // The lower valve: a bowl rising to a scalloped lip.
+          const hw = Math.round(lipH * (w / D));
+          for (let j = 0; j <= hw; j += 1) put(valves, u, j, w, rib.clone().multiplyScalar(0.55 + 0.45 * (w / D)));
+          if (w === D && u % 2 === 0) put(valves, u, hw + 1, w, rib);
+          // The upper valve: hinged at the back, lifted open toward the light.
+          const uj = lipH + 1 + Math.round(w * 0.9 * edge);
+          put(valves, u, uj, w - 1, rib.clone().multiplyScalar(0.8 + 0.2 * (w / D)));
+          // The mantle fills the gape at the front.
+          if (w >= D - 1) for (let j = hw + 1 + (w === D && u % 2 === 0 ? 1 : 0); j < uj; j += 1) put(mantle, u, j, w, (u + j) % 3 === 0 ? mantleB : mantleA);
+        }
+      }
+      for (const key of mantle.keys()) valves.delete(key);
+      body.solid([x, root + V * 0.4, z], V, valves, 0);
+      lamp.solid([x, root + V * 0.4, z], V, mantle, 1, true);
+    },
+  },
+};
+
+/** The default garden in each room, as weights (anything unnamed does not grow there). */
+export const FLORA_BY_ENVIRONMENT: Readonly<Partial<Record<string, Partial<Record<FloraSpecies, number>>>>> = {
+  reef: { grass: 0.1, fan: 0.12, staghorn: 0.14, brain: 0.12, anemone: 0.12, tube: 0.08, barrel: 0.08, kelp: 0.04, whip: 0.08, clam: 0.03, seapen: 0.03, bulb: 0.03, shelf: 0.02 },
+  kelp: { kelp: 0.34, grass: 0.22, whip: 0.12, seapen: 0.08, bulb: 0.06, fan: 0.06, anemone: 0.06, shelf: 0.03, tube: 0.03 },
+  vent: { tube: 0.26, barrel: 0.14, anemone: 0.14, shelf: 0.14, grass: 0.1, whip: 0.08, brain: 0.06, bulb: 0.08 },
+  ice: { whip: 0.18, seapen: 0.14, anemone: 0.12, grass: 0.2, brain: 0.08, fan: 0.1, kelp: 0.1, tube: 0.05, clam: 0.03 },
+  lagoon: { grass: 0.24, brain: 0.12, staghorn: 0.12, anemone: 0.12, fan: 0.1, kelp: 0.08, whip: 0.08, tube: 0.05, barrel: 0.04, clam: 0.05 },
+  abyss: { shelf: 0.2, bulb: 0.18, seapen: 0.16, anemone: 0.12, tube: 0.12, grass: 0.1, whip: 0.06, kelp: 0.06 },
+  universe: { shelf: 0.18, bulb: 0.18, seapen: 0.14, anemone: 0.12, tube: 0.1, grass: 0.1, kelp: 0.1, fan: 0.08 },
+};
+
+/**
+ * `floraMix`: `species[:weight]`, comma-separated — `kelp:3, anemone, clam:0.5`.
+ * Weights are relative; a bare name is 1. Empty = the room's own garden.
+ */
+export function parseFloraMix(src: string): { mix: Partial<Record<FloraSpecies, number>>; problems: string[] } {
+  const mix: Partial<Record<FloraSpecies, number>> = {}, problems: string[] = [];
+  for (const raw of src.split(',')) {
+    const part = raw.trim();
+    if (!part) continue;
+    const m = /^([a-z]+)\s*(?::\s*([0-9]*\.?[0-9]+))?$/i.exec(part);
+    const name = m?.[1]?.toLowerCase() as FloraSpecies | undefined;
+    if (!m || !name || !(FLORA_SPECIES as readonly string[]).includes(name)) {
+      problems.push(`"${part}": expected species[:weight] with species one of ${FLORA_SPECIES.join(', ')}`);
+      continue;
     }
-    if (species !== 'grass') lights.push({ x: lamp.last[0], y: lamp.last[1], z: lamp.last[2], root, phase, gust, color: near.color });
+    const w = m[2] === undefined ? 1 : Number(m[2]);
+    mix[name] = (mix[name] ?? 0) + w;
+  }
+  return { mix, problems };
+}
+
+/** Weights for a garden: `mix` if it names anything, else the room's garden, else every species at its own share. */
+function weightsOf(mix: FloraOptions['mix'], environment?: string): Array<[FloraSpecies, number]> {
+  const named = (m: FloraOptions['mix']): Array<[FloraSpecies, number]> =>
+    FLORA_SPECIES.map((sp): [FloraSpecies, number] => [sp, Math.max(0, m?.[sp] ?? 0)]).filter(([, w]) => w > 0);
+  const own = named(mix);
+  if (own.length) return own;
+  const room = named(FLORA_BY_ENVIRONMENT[environment ?? '']);
+  return room.length ? room : FLORA_SPECIES.map(sp => [sp, SPECIES[sp].share]);
+}
+
+export function buildFlora(
+  anchors: readonly FloraAnchor[], terrain: (x: number, z: number) => number,
+  rng: CrystalRng, opts: FloraOptions,
+): FloraField {
+  const bySpecies = Object.fromEntries(FLORA_SPECIES.map(sp => [sp, 0])) as Record<FloraSpecies, number>;
+  const body = new VoxelWriter(), lamp = new VoxelWriter();
+  const s = opts.scale;
+  const want = Math.round(opts.density * opts.cap * 9);
+  const lights: FloraField['lights'] = [];
+  const tips: FloraField['tips'] = [];
+  if (!want || !anchors.length) return { parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips };
+  const V = 1.7 * s; // the voxel
+  const weights = weightsOf(opts.mix, opts.environment);
+  const total = weights.reduce((a, [, w]) => a + w, 0);
+
+  let plants = 0;
+  for (let i = 0; i < want * 3 && plants < want; i += 1) {
+    const home = anchors[i % anchors.length]!;
+    // Species by share, so a garden keeps its proportions at any density.
+    let roll = rng.next() * total, species = weights[0]![0];
+    for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
+    const def = SPECIES[species];
+    if (def.max !== undefined && bySpecies[species] >= def.max) continue;
+    const angle = rng.range(0, Math.PI * 2);
+    const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;
+    const x = home.x + Math.cos(angle) * radius, z = home.z + Math.sin(angle) * radius;
+    if (opts.blocked(x, z)) continue;
+    const near = anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b), home);
+    const root = terrain(x, z);
+    const light = new Color(near.color);
+    const stem = light.clone().lerp(new Color(def.leaf ? pick(rng, def.leaf) : LEAF_GREEN), 0.62);
+    const dx = near.x - x, dz = near.z - z, dl = Math.hypot(dx, dz) || 1;
+    const phase = rng.range(0, Math.PI * 2), gust = x * 0.021 + z * 0.015;
+    for (const w of [body, lamp]) { w.root = root; w.phase = phase; w.gust = gust; w.top = root; }
+    const lampsBefore = lamp.count;
+    def.grow({
+      x, z, root, V, s, rng, light, stem, lx: dx / dl, lz: dz / dl, phase, body, lamp,
+      tone: (h, k = 1) => stem.clone().multiplyScalar((0.34 + 0.62 * h) * k),
+    });
+    if (lamp.count > lampsBefore) lights.push({ x: lamp.last[0], y: lamp.last[1], z: lamp.last[2], root, phase, gust, color: near.color });
+    tips.push({ x, z, y: Math.max(body.top, lamp.top), root });
     bySpecies[species] += 1;
     plants += 1;
   }
-  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights };
+  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips };
 }
 
 /** The sway, as shader text — one function shared by the plants, their lamps

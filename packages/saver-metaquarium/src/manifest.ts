@@ -276,6 +276,11 @@ export const METAQUARIUM_PARAMS = {
    *  fish swim the room. Pairs with the default `void` environment. */
   interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Which plants grow: `species[:weight]`, comma-separated (`kelp:3, anemone, clam`).
+   *  Thirteen species: grass tube bulb fan kelp anemone staghorn brain whip barrel
+   *  shelf seapen clam. Empty (default) plants the room's own garden: coral on a
+   *  reef, kelp and whips in the kelp forest, glow caps in the abyss. */
+  floraMix: { type: 'string', default: '', ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

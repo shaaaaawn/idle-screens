@@ -10,12 +10,13 @@
  *   RECIPES      named scenes. The playground mounts every one of them as-is
  *                (its "recipes" shelf), so what an agent can publish is what a
  *                person can look at. Channel-safe: minted ids, no local paths.
- *   GRAMMAR      the small DSLs (fishMix, propMix, spotRig, spotCues, vignette).
+ *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, spotRig, spotCues, vignette).
  *   validateMetaquariumParams   every DSL parser at once, for publish advisories.
  *   recipeTrack  a recipe as the control track `publishScene` takes.
  */
 
 import { parsePropMix } from './crystals';
+import { parseFloraMix } from './flora';
 import { parseFishMix } from './ipfs';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
@@ -90,7 +91,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
-  floraDensity: 'Voxel plants around each crystal: grass, tube anemones, bulbs, sea fans, kelp — swaying, lit, shedding spores.',
+  floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
+  floraMix: 'Which plants: `species[:weight]`, comma-separated. grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam (a giant clam is a specimen: two at most). `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s own garden. Needs floraDensity > 0.',
   bubbleVents: 'Bubbles from chimneys, fissures and crystals.',
   bubbleStyle: 'How vent bubbles live: `classic` loops puffs; `live` grows each bubble at the vent, lets it go, rises it to the water surface (if the environment has one) and pops it, and rests a vent for a minute now and then. Distant bubbles dim instead of fattening.',
   pearling: 'Oxygen pearls on the plants: beads grow on the leaves over half a minute or more, sway with them and let go (0 = none). Needs floraDensity > 0; with no flora there is nothing to pearl on.',
@@ -120,6 +122,8 @@ fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, 
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
+floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
+          grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam (empty = the room's garden)
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
 vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
@@ -221,6 +225,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   const push = (path: string, problems: readonly string[]): void => { for (const message of problems) out.push({ path, message }); };
   if (str('fishMix')) push('fishMix', parseFishMix(str('fishMix')).problems);
   if (str('propMix')) push('propMix', parsePropMix(str('propMix')).problems);
+  if (str('floraMix')) push('floraMix', parseFloraMix(str('floraMix')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
   if (str('spotCues')) {

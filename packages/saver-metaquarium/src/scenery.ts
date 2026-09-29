@@ -8,7 +8,7 @@ import {
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, type FloraSpecies, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
@@ -33,6 +33,10 @@ export interface SceneryOptions {
   variants?: number;
   homes: number;
   flora: number;
+  /** `floraMix`, parsed: relative weights by species. Empty = the room's garden. */
+  floraMix?: Partial<Record<FloraSpecies, number>>;
+  /** The room (`environment`), which picks the garden when `floraMix` is empty. */
+  environment?: string;
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -321,7 +325,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     group.add(cards.mesh);
   }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
-    density: opts.flora, cap: opts.cap, scale: s,
+    density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
@@ -650,7 +654,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   return {
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [], rockClusters,
-    canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
+    canopyTips: field.tips.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
