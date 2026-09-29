@@ -1051,7 +1051,7 @@ exports[`timed-scenes baseline > dx-mark.json: animated values and entity placem
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=0 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣯⣯⣿⣿⣿⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
@@ -1060,7 +1060,7 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=3000 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣯⣯⣿⣿⣿⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
@@ -1069,7 +1069,7 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣯⣯⣿⣿⣿⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
@@ -1077,8 +1077,8 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=0 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣏⣯⣿⠀⠀⠀⠀⠀⠀⠀
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
@@ -1086,8 +1086,8 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=3000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣏⣯⣿⠀⠀⠀⠀⠀⠀⠀
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
@@ -1095,8 +1095,8 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=8000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣏⣯⣿⠀⠀⠀⠀⠀⠀⠀
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
@@ -2202,25 +2202,25 @@ exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snap
   "braille": "⠔⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⡄⠄⠄⠄⠆⠆⠄⠄
 ⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠧⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.4375,
+  "coverage": 0.2708,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=3000 1`] = `
 {
-  "braille": "⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⡔⠄⠄⠄⠆⠄⠄⠄
-⠇⠧⠧⠧⠧⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠯⠧⠧⠧⠇
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠂⠀⠀⠀
+⠇⠇⠇⠇⠧⠧⠧⠧⣧⣧⣧⣧⡧⠧⠧⠯⠇⠇⠧⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.5729,
+  "coverage": 0.4271,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
   "braille": "⠀⠀⠄⠄⠄⠄⢄⣄⣄⣄⣄⣄⣄⡄⠄⠄⠄⠄⠀⠀
-⠇⠇⠇⠇⠇⠇⠏⠯⠯⠯⠯⠯⠏⠇⠇⠇⠇⠇⠇⠇
+⠇⠇⠇⠇⠇⠇⠏⡯⡯⡯⡯⡯⡏⠇⠇⠇⠇⠇⠇⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.8292,
+  "coverage": 0.7917,
 }
 `;
 
@@ -2228,17 +2228,17 @@ exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snap
 {
   "braille": "⠔⠄⠦⠄⠼⠄⠄⡅⠄⠌⠄⠄⡄⠆⠄⠆⠖⠆⡄⠌
 ⡇⡇⡇⡇⡧⡇⡇⡇⡇⡇⡇⡇⡏⡗⡇⡇⡗⡇⡯⡇
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.4083,
+⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁",
+  "coverage": 0.325,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1920x1080 t=3000 1`] = `
 {
-  "braille": "⠄⠄⠆⠄⠄⠄⠄⡅⡅⡅⡅⡅⡕⡄⠄⠄⠆⠄⡄⠄
-⡇⡇⡧⡇⡇⡧⣯⣿⣿⣿⣿⣿⣿⡧⡏⡏⡇⡇⡧⡇
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.5188,
+  "braille": "⠄⠄⠆⠄⠄⠄⠄⡅⡅⡅⡅⡅⡄⠄⠄⠄⠆⠄⡄⠄
+⡇⡇⡧⡇⡇⡇⡧⡿⡿⡿⡿⡿⡯⡧⡇⡏⡇⡇⡧⡇
+⠁⠁⠁⠁⠁⠁⠉⠉⠉⠉⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁",
+  "coverage": 0.4479,
 }
 `;
 
@@ -2246,8 +2246,8 @@ exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snap
 {
   "braille": "⠀⠀⠅⠅⠅⠅⠅⡅⣥⣥⣧⣥⡇⠅⠅⠅⠅⠅⠀⠀
 ⠅⠅⠇⡇⡇⡇⡇⡇⣇⣧⣇⡇⡇⡇⡇⡇⡇⡇⠇⠅
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.9,
+⠁⠁⠁⠁⠁⠁⠁⠁⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁⠁⠁",
+  "coverage": 0.8792,
 }
 `;
 

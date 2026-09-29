@@ -75,6 +75,59 @@ describe('luminanceGrid', () => {
   });
 });
 
+describe('rect and bar splat by area (fillRect coverage)', () => {
+  const mean = (g: { cells: ArrayLike<number> }): number => Array.from(g.cells).reduce((s, v) => s + v, 0) / g.cells.length;
+
+  it('270 thin scan lines over grey read as a light texture, not a black veil', () => {
+    // 270 rows × 0.002 × 1080 px = 54 % of the frame, 35 % black. Chromium
+    // paints this at mean 0.406; the whole-cell splat read 0.035.
+    const s: SaverSpec = {
+      schemaVersion: 1,
+      id: 'scan',
+      label: 'Scan',
+      background: { type: 'solid', color: '#808080' },
+      layers: [{
+        count: 270,
+        region: { x: [0.5, 0.5], y: [0, 1] },
+        layout: { type: 'grid', columns: 1 },
+        sprite: { kind: 'rect', width: [2, 2], aspect: [0.001, 0.001], color: '#000000' },
+        alpha: [0.35, 0.35],
+        motion: { type: 'static' },
+      }],
+    };
+    const g = luminanceGrid(s, { viewport: { width: 1920, height: 1080 }, cols: 80, rows: 48 });
+    expect(mean(g)).toBeCloseTo((128 / 255) * (1 - 0.35 * 0.54), 1);
+    expect(Math.abs(mean(g) - 0.406)).toBeLessThan(0.02);
+  });
+
+  it('a sub-cell line straddling a row boundary splits its ink and conserves it', () => {
+    // 20 × 20 px cells; a 4 px line centred on the y = 400 boundary.
+    const s = spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'rect', width: [1200, 1200], aspect: [4 / 1200, 4 / 1200], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    const ink = Array.from(g.cells).reduce((acc, v) => acc + v, 0) * 20 * 20;
+    expect(ink).toBeCloseTo(1200 * 4, -1);
+    expect(g.cells[19 * 80 + 40]).toBeCloseTo(0.1, 5);
+    expect(g.cells[20 * 80 + 40]).toBeCloseTo(0.1, 5);
+  });
+
+  it('a large rect still fills its interior cells at full weight', () => {
+    const s = spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'rect', width: [810, 810], aspect: [410 / 810, 410 / 810], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    expect(g.cells[20 * 80 + 40]).toBe(1);
+    // 810 × 410 px over 20 px cells: the edge columns and rows are a quarter covered.
+    expect(g.cells[20 * 80 + 19]).toBeCloseTo(0.25, 5);
+    expect(g.cells[9 * 80 + 40]).toBeCloseTo(0.25, 5);
+  });
+
+  it('a thin bar row is weighted by its thickness too', () => {
+    const s = spec([{ count: 1, position: { x: 0.1, y: 0.5 }, sprite: { kind: 'bar', length: 800, thickness: 2, values: [1], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    // 800 × 2 px of white, not 800 × 20 px: the whole-cell splat lit ten times the ink.
+    const ink = Array.from(g.cells).reduce((acc, v) => acc + v, 0) * 20 * 20;
+    expect(ink).toBeCloseTo(800 * 2, -1);
+  });
+});
+
 describe('polygon outline rasterization', () => {
   // The flat-band repro: a 1.2-wide, 0.12-tall rectangle authored as `points`.
   // Its circumradius is 0.6, so the old disc splat lit a full circle.
@@ -96,8 +149,8 @@ describe('polygon outline rasterization', () => {
       if (r === 4 || r === 5) expect(band.rowProfile[r]).toBeGreaterThan(0.1);
       else expect(band.rowProfile[r]).toBe(0);
     }
-    // The rect paints every cell it touches whole; the outline lights only the
-    // sliver of each end cell it crosses — same bar, give or take those four.
+    // Both paint by area now; coverage thresholds the end cells, so allow
+    // the four of them to land either side of it.
     expect(Math.abs(band.coverage - rect.coverage)).toBeLessThanOrEqual(4 / (GRID.cols * GRID.rows) + 1e-9);
     expect(band.coverage).toBeLessThan(0.2); // the disc model reported 0.63
     expect(band.centroid!.x).toBeCloseTo(0.5, 5);

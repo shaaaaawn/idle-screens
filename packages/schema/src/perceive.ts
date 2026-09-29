@@ -673,7 +673,14 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
         * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1) : 1);
+      // rect and bar are fillRect: the canvas paints each cell in proportion
+      // to the area the box covers. Without this a 2 px scan line darkened
+      // its whole 22 px grid row at full alpha, and 270 of them read as a
+      // black veil (mean 0.035 where the canvas paints 0.41).
+      const byArea = s.kind === 'rect' || s.kind === 'bar';
       for (let r = r0; r <= r1; r++) {
+        const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
+        if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
           const dy = (r + 0.5) * cellH - centerY;
@@ -697,6 +704,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
               wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             }
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
+          } else if (byArea) {
+            const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
+            if (fx > 0) compose(r * cols + c, lum, a * shapeWeight * fx * fy, layer.blend);
           } else {
             compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
