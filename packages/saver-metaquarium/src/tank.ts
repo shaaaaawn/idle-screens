@@ -63,6 +63,7 @@ import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
+import { rigSeahorse } from './seahorse';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -2622,7 +2623,9 @@ class TankInstance implements SaverInstance {
         f.body.rotation.y = f.baseYaw;
         if (f.mixer) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
-        f.wave = waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+        // A seahorse does not wave: it flutters its fin, coils its tail and nods.
+        f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+          : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
       }
       const waving = swimWave > 0 && !!f.wave;
       if (f.wave) {
@@ -2634,7 +2637,9 @@ class TankInstance implements SaverInstance {
           turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
         }
         const flurry = mnv.flurry + flurryBoost;
-        f.wave.set(waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch));
+        const ws = waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch);
+        ws.t = tSec;
+        f.wave.set(ws);
       }
 
       // Most of the breed library carries NO animation clip, so those fish
