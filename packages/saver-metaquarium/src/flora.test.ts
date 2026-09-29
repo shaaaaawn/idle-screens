@@ -194,3 +194,12 @@ describe('flora', () => {
     expect(SPORE_VERTEX).toMatch(/mqFloraSway/); // spores leave from where the tip IS
   });
 });
+
+describe('flora-mix', () => {
+  it('stays three-free: the package entry reaches it through guide.ts, on the TV\'s 2D path too', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./flora-mix.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/from ['"]three/);
+    expect(src).not.toMatch(/from ['"]\.\/(?!crystals')/); // imports nothing that could pull three in
+  });
+});

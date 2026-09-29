@@ -16,7 +16,7 @@
  */
 
 import { parsePropMix } from './crystals';
-import { parseFloraMix } from './flora';
+import { parseFloraMix } from './flora-mix';
 import { parseFishMix } from './ipfs';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
