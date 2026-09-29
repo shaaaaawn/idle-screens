@@ -1,7 +1,8 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
 import { pearlSites } from './bubbles';
-import { buildFlora, FLORA_BY_ENVIRONMENT, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
+import { buildFlora, FLORA_BY_ENVIRONMENT, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, MAX_FLORA_FISH, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
+import { parseFloraPalette, worldPalette } from './flora-mix';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
 const opts: FloraOptions = { density: 1, cap: 8, scale: 1, blocked: () => false };
@@ -147,6 +148,76 @@ describe('flora', () => {
     expect(pearlSites(stone.parts, 1)).toHaveLength(0);
     const leaves = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { kelp: 1 } });
     expect(pearlSites(leaves.parts, 1).length).toBeGreaterThan(10);
+  });
+
+  it('answers a passing fish: crowns fold, worms duck, pens pull down, pods swell', () => {
+    const reactOf = (sp: string, which: 'parts' | 'lamps' = 'parts'): number[] => {
+      const f = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { [sp]: 1 } });
+      const g = f[which][0]!;
+      return [...new Set(arr(g, 'aPlant').filter((_, i) => i % 4 === 2).map((v) => +v.toFixed(2)))].sort();
+    };
+    expect(reactOf('anemone')).toEqual([0, 1]); // the column stands; the tentacles fold
+    expect(reactOf('tube')).toEqual([0]); //       the tube stands…
+    expect(reactOf('tube', 'lamps')).toEqual([1]); // …and the worm's light ducks into it
+    expect(reactOf('seapen')).toEqual([0.8]);
+    expect(reactOf('clam', 'lamps')).toEqual([1]);
+    expect(reactOf('kelp')).toEqual([0]); //       kelp does not flinch
+    // A pod swells about its own middle, above its root.
+    const pod = buildFlora(anchors, flat, createRng(4), { ...opts, mix: { pod: 1 } });
+    const ap = arr(pod.parts[0]!, 'aPlant'), sw = arr(pod.parts[0]!, 'aSway');
+    let swell = 0;
+    for (let v = 0; v < ap.length / 4; v += 1) if (ap[v * 4 + 2] === -1) { swell += 1; expect(ap[v * 4 + 3]!).toBeGreaterThan(sw[v * 3]!); }
+    expect(swell).toBeGreaterThan(0);
+    // The shader measures once, flares lamps, and folds only what reacts.
+    expect(FLORA_COLOR).toMatch(/mqStartle = mqStartleAt\(position\)/);
+    expect(FLORA_COLOR).toMatch(/aGlow \* mqStartle/);
+    expect(FLORA_VERTEX).toMatch(/if \(mqStartle > 0\.0 && aPlant\.z != 0\.0\)/);
+    expect(MAX_FLORA_FISH).toBe(24);
+  });
+
+  it('dimorphic: some siblings grow as the small form of their species', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { kelp: 1 } });
+    const h = f.tips.map((t) => t.y - t.root);
+    // A full-grown kelp is at least 12 voxels (20 units); a sapling is under that.
+    expect(h.filter((v) => v < 18).length).toBeGreaterThan(2);
+    expect(h.filter((v) => v >= 20).length).toBeGreaterThan(h.length / 2);
+    // Specimens are never small.
+    const clam = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { clam: 1 } });
+    expect(Math.min(...clam.tips.map((t) => t.y - t.root))).toBeGreaterThan(5);
+  });
+
+  it('grows the fiddlehead and the pod in both its forms', () => {
+    const curl = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { curl: 1 } });
+    expect(curl.lights.length).toBe(curl.plants); // a bead at every coil's heart
+    let orb = 0, whirl = 0;
+    for (let seed = 1; seed <= 6; seed += 1) {
+      const p = buildFlora(anchors, flat, createRng(seed), { ...opts, mix: { pod: 1 } });
+      const swells = arr(p.parts[0]!, 'aPlant').some((v, i) => i % 4 === 2 && v === -1);
+      if (swells) orb += 1; else whirl += 1;
+    }
+    expect(orb).toBeGreaterThan(0);
+    expect(orb + whirl).toBe(6);
+  });
+
+  it('a world palette pulls every colony toward one scheme', () => {
+    expect(parseFloraPalette('')).toEqual({ palette: undefined, problems: [] });
+    expect(parseFloraPalette('world', 0.25).palette).toEqual(worldPalette(0.25));
+    expect(worldPalette(0.25)).toHaveLength(3);
+    expect(worldPalette(0.25)).toEqual(worldPalette(1.25));
+    expect(parseFloraPalette('#FF00FF, #00ff88').palette).toEqual(['#ff00ff', '#00ff88']);
+    const bad = parseFloraPalette('#ff00ff, blue, #12');
+    expect(bad.palette).toEqual(['#ff00ff']);
+    expect(bad.problems).toHaveLength(2);
+    const mean = (f: ReturnType<typeof buildFlora>, ch: number): number => {
+      const c = arr(f.parts[0]!, 'color');
+      let t = 0;
+      for (let i = ch; i < c.length; i += 3) t += c[i]!;
+      return t / (c.length / 3);
+    };
+    const natural = buildFlora(anchors, flat, createRng(3), opts);
+    const magenta = buildFlora(anchors, flat, createRng(3), { ...opts, palette: ['#ff00ff'] });
+    expect(mean(magenta, 1)).toBeLessThan(mean(natural, 1) * 0.8); // far less green
+    expect(mean(magenta, 0)).toBeGreaterThan(mean(magenta, 1) * 1.5);
   });
 
   it('parses floraMix', () => {

@@ -1,6 +1,7 @@
 import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix } from './flora';
+import { parseFloraPalette } from './flora-mix';
 import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -632,6 +633,9 @@ class TankInstance implements SaverInstance {
   private propsKey = '';
   private warnedProps = '';
   private warnedFlora = '';
+  /** Scratch for the garden's view of the cast (setFish), reused every frame. */
+  private readonly floraFish = Array.from({ length: 24 }, () => ({ x: 0, y: 0, z: 0, r: 0 }));
+  private readonly floraFishAt = new Vector3();
   private readonly poolUniforms = emptyPoolUniforms();
   private readonly lightScratch: [number, number, number] = [0, 0, 0];
   // Fish glow: built on the first glowing fish, never for a cast without one.
@@ -1169,12 +1173,12 @@ class TankInstance implements SaverInstance {
     const veins = this.num('rockVeins');
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
-    const floraMix = this.str('floraMix').trim(), environment = this.str('environment');
+    const floraMix = this.str('floraMix').trim(), environment = this.str('environment'), floraPalette = this.str('floraPalette').trim();
     const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${floraMix}|${flora > 0 ? environment : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${floraMix}|${floraPalette}|${flora > 0 ? environment : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1190,7 +1194,7 @@ class TankInstance implements SaverInstance {
     const terrain = this.terrainAt ?? (() => 0);
     if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
+        { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: parseFloraPalette(floraPalette, this.ctxSaver.rng.fork(0xf1a).next()).palette, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);
       // Plants take the crystal and spot light on the tiers that can afford
@@ -2124,6 +2128,18 @@ class TankInstance implements SaverInstance {
     // The horizon sits on the level, where the in-scatter is half tint.
     if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
     else this.horizonColor.copy(this.fogColor);
+    // The garden answers the cast: crowns fold, worms duck, pods swell as a fish passes.
+    if (this.scenery) {
+      let n = 0;
+      for (const f of this.fish) {
+        if (!f || !f.group.visible || n >= this.floraFish.length) continue;
+        f.group.getWorldPosition(this.floraFishAt);
+        const slot = this.floraFish[n++]!;
+        slot.x = this.floraFishAt.x; slot.y = this.floraFishAt.y; slot.z = this.floraFishAt.z;
+        slot.r = 12 + FISH_LENGTH * 0.9; // about a fish and a half: close enough to startle, not the whole bed
+      }
+      this.scenery.setFish(this.floraFish.slice(0, n));
+    }
     this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
       color: this.fogColor, near: fog.near, far: fog.far,
