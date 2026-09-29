@@ -1,5 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
+import { pearlSites } from './bubbles';
 import { buildFlora, FLORA_BY_ENVIRONMENT, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
@@ -26,7 +27,7 @@ describe('flora', () => {
     for (const g of [...f.parts, ...f.lamps]) {
       const n = g.getAttribute('position').count;
       expect(n % 6).toBe(0); // whole quads (a solid draws only the faces that touch water)
-      for (const name of ['normal', 'color', 'aSway', 'aGlow']) expect(g.getAttribute(name).count).toBe(n);
+      for (const name of ['normal', 'color', 'aSway', 'aGlow', 'aMat']) expect(g.getAttribute(name).count).toBe(n);
       expect(arr(g, 'position').every(Number.isFinite)).toBe(true);
       const nor = arr(g, 'normal');
       for (let i = 0; i < nor.length; i += 3) expect(Math.abs(nor[i]!) + Math.abs(nor[i + 1]!) + Math.abs(nor[i + 2]!)).toBe(1);
@@ -59,6 +60,7 @@ describe('flora', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { clam: 1 } });
     expect(f.bySpecies.clam).toBe(2);
     expect(f.lights).toHaveLength(2); // the mantle glows
+    expect(f.tips.every((t) => t.flex === 0)).toBe(true); // and it is stone
   });
 
   it('each room grows its own garden when floraMix is empty', () => {
@@ -78,6 +80,73 @@ describe('flora', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { brain: 1 } });
     const tris = f.parts[0]!.getAttribute('position').count / 3;
     expect(tris).toBeLessThan(f.voxels * 12 * 0.5);
+  });
+
+  it('stone does not sway: each species has its own stiffness', () => {
+    const flexOf = (sp: string): number[] => {
+      const f = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { [sp]: 1 } });
+      const m = arr(f.parts[0]!, 'aMat');
+      return [...new Set(m.filter((_, i) => i % 2 === 0).map((v) => +v.toFixed(3)))].sort();
+    };
+    expect(flexOf('brain')).toEqual([0]);
+    expect(flexOf('clam')).toEqual([0]);
+    expect(flexOf('staghorn')).toEqual([0.12]);
+    expect(flexOf('kelp')).toEqual([1]);
+    // The anemone: a still column, tentacles that writhe from the crown.
+    expect(flexOf('anemone')).toEqual([0.2, 2.4]);
+    const an = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { anemone: 1 } });
+    const mat = arr(an.parts[0]!, 'aMat'), sw = arr(an.parts[0]!, 'aSway'), pos = arr(an.parts[0]!, 'position');
+    for (let v = 0; v < mat.length / 2; v += 1) {
+      // A tentacle is rooted at its crown, above the floor, so it never pulls off the column.
+      if (mat[v * 2]! > 2) { expect(sw[v * 3]!).toBeGreaterThan(0); expect(pos[v * 3 + 1]!).toBeGreaterThanOrEqual(sw[v * 3]! - 1e-6); }
+    }
+    expect(Math.max(...an.tips.map((t) => t.flex))).toBe(2.4); // the canopy knows the crown sways
+  });
+
+  it('plants grow in colonies that share a colour', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12 });
+    expect(f.colonies).toBeGreaterThan(f.plants / 6);
+    expect(f.colonies).toBeLessThan(f.plants * 0.8);
+    // A one-species garden of whips: siblings share a hue, so far fewer
+    // distinct tip colours than stands.
+    const w = buildFlora(anchors, flat, createRng(9), { ...opts, mix: { whip: 1 } });
+    const col = arr(w.parts[0]!, 'color'), nor = arr(w.parts[0]!, 'normal');
+    const hues = new Set<string>();
+    for (let v = 0; v < col.length / 3; v += 1) if (nor[v * 3 + 1] === 1) {
+      const r = col[v * 3]!, g = col[v * 3 + 1]!, b = col[v * 3 + 2]!, m = Math.max(r, g, b);
+      hues.add(`${(r / m).toFixed(1)},${(g / m).toFixed(1)},${(b / m).toFixed(1)}`);
+    }
+    expect(hues.size).toBeLessThan(w.plants * 4);
+  });
+
+  it('about one colony in thirty is a rare morph, and it gleams', () => {
+    let rare = 0, plants = 0;
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const f = buildFlora(anchors, flat, createRng(seed), { ...opts, cap: 12 });
+      rare += f.rare; plants += f.plants;
+      if (f.rare) {
+        const sheen = arr(f.parts[0]!, 'aMat').filter((_, i) => i % 2 === 1);
+        expect(sheen.some((v) => v === 1)).toBe(true);
+      }
+    }
+    expect(rare / plants).toBeGreaterThan(0.01);
+    expect(rare / plants).toBeLessThan(0.12);
+  });
+
+  it('the elder is one great tree, out past the garden', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { elder: 1 } });
+    expect(f.bySpecies.elder).toBe(1);
+    const t = f.tips[0]!;
+    expect(t.y - t.root).toBeGreaterThan(35);
+    expect(Math.min(...anchors.map((a) => Math.hypot(t.x - a.x, t.z - a.z)))).toBeGreaterThanOrEqual(29);
+    expect(f.lights).toHaveLength(1);
+  });
+
+  it('pearls rise only off leaves', () => {
+    const stone = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { brain: 1, staghorn: 1, clam: 1 } });
+    expect(pearlSites(stone.parts, 1)).toHaveLength(0);
+    const leaves = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { kelp: 1 } });
+    expect(pearlSites(leaves.parts, 1).length).toBeGreaterThan(10);
   });
 
   it('parses floraMix', () => {

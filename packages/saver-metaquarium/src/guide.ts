@@ -92,7 +92,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
-  floraMix: 'Which plants: `species[:weight]`, comma-separated. grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam (a giant clam is a specimen: two at most). `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s own garden. Needs floraDensity > 0.',
+  floraMix: 'Which plants: `species[:weight]`, comma-separated. grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder (a giant clam is a specimen, two at most; the elder, a blossom tree hung with lanterns, one). Plants grow in colonies that share a colour; about one colony in thirty is a rare nacreous morph. `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s own garden. Needs floraDensity > 0.',
   bubbleVents: 'Bubbles from chimneys, fissures and crystals.',
   bubbleStyle: 'How vent bubbles live: `classic` loops puffs; `live` grows each bubble at the vent, lets it go, rises it to the water surface (if the environment has one) and pops it, and rests a vent for a minute now and then. Distant bubbles dim instead of fattening.',
   pearling: 'Oxygen pearls on the plants: beads grow on the leaves over half a minute or more, sway with them and let go (0 = none). Needs floraDensity > 0; with no flora there is nothing to pearl on.',
@@ -123,7 +123,7 @@ fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, 
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
-          grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam (empty = the room's garden)
+          grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder (empty = the room's garden)
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
 vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2

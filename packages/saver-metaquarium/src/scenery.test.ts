@@ -258,8 +258,8 @@ describe('mineral world', () => {
       if (!Object.prototype.hasOwnProperty.call(material, 'customProgramCacheKey')) continue;
       keys.set(object.name, material.customProgramCacheKey());
     }
-    expect(keys.get('voxel-light-flora')).toBe('mineral-flora-v3');
-    expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v2');
+    expect(keys.get('voxel-light-flora')).toBe('mineral-flora-v4');
+    expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v3');
     expect(keys.get('crystal-veins')).toBe('mineral-fissures-v3');
     expect(keys.size).toBeGreaterThanOrEqual(6); // + spores, vents, snow, lanterns, horizon
     // One key per distinct PATCH. The glass lanterns are three draws of one

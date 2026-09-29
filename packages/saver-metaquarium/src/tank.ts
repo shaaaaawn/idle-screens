@@ -1,6 +1,7 @@
 import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
 import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix } from './flora';
+import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
@@ -1192,6 +1193,9 @@ class TankInstance implements SaverInstance {
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);
+      // Plants take the crystal and spot light on the tiers that can afford
+      // one more light loop per vertex; the low tier keeps the baked colour.
+      if (this.quality.glowLights >= 3) for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
       // What broke out of the rocks is the same crystal as `propMix`: same
       // shard shapes, material, pulse, fog and halo — one more instanced
       // field, no new program. It lends no light to the floor (a throwaway
