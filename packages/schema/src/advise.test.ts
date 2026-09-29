@@ -738,6 +738,30 @@ describe('adviseSequence', () => {
     expect(warnings.some((w) => w.code === 'boundary-luminance-jump')).toBe(true);
   });
 
+  it('does not warn on a luminance jump the outgoing segment declares a fade across (the documented remedy)', () => {
+    const dark: SaverSpec = { ...scene, background: { type: 'solid', color: '#000000' } };
+    const bright: SaverSpec = { ...scene, background: { type: 'solid', color: '#ffffff' } };
+    const jumps = (transition?: IdleSequence['segments'][number]['transition']): number => adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene: dark, duration: 5000, transition },
+        { key: 'b', scene: bright, duration: 5000 },
+      ],
+    })).filter((w) => w.code === 'boundary-luminance-jump').length;
+    expect(jumps({ type: 'fade', dur: 800 })).toBe(0);
+    expect(jumps({ type: 'cut' })).toBe(1);
+    // The fade belongs to the outgoing segment: one declared on the incoming
+    // side governs the next boundary, not this one.
+    const w = adviseSequence(mkSeq({
+      segments: [
+        { key: 'a', scene: dark, duration: 5000 },
+        { key: 'b', scene: bright, duration: 5000, transition: { type: 'fade', dur: 800 } },
+        { key: 'c', scene: dark, duration: 5000 },
+      ],
+    })).filter((x) => x.code === 'boundary-luminance-jump');
+    expect(w.map((x) => x.path)).toEqual(['segments[0]']);
+    expect(w[0]!.message).toMatch(/type: 'fade'/);
+  });
+
   it('warns on morph structural mismatch', () => {
     const diffScene: SaverSpec = {
       ...scene,

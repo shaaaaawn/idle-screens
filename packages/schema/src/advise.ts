@@ -715,21 +715,24 @@ export function adviseSequence(
   }
 
   for (let i = 0; i < seq.segments.length - 1; i++) {
+    const tr = seq.segments[i]!.transition;
     // The ground each side of the cut actually shows: the outgoing segment at
     // its end, the incoming at its start (a timeline may end on a different
     // colour than it began; without one these are the scenes themselves).
+    // A declared `fade` is the documented remedy — the jump is ramped over
+    // `dur`, not cut — so it is not raised there (low tiers that play the
+    // fade as a cut are covered by `fade-degrades-on-low-tier`).
     const lumaA = backgroundLuma(resolveTimelineAt(seq.segments[i]!.scene, seq.segments[i]!.duration ?? 0));
     const lumaB = backgroundLuma(resolveTimelineAt(seq.segments[i + 1]!.scene, 0));
     const delta = Math.abs(lumaA - lumaB);
-    if (delta > 0.5) {
+    if (delta > 0.5 && tr?.type !== 'fade') {
       warnings.push({
         path: `segments[${i}]`,
         code: 'boundary-luminance-jump',
-        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut`,
+        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut; declare transition: { type: 'fade', dur } on segments[${i}] to ramp it`,
       });
     }
 
-    const tr = seq.segments[i]!.transition;
     if (tr?.type === 'morph') {
       const sigA = structuralSignature(seq.segments[i]!.scene);
       const sigB = structuralSignature(seq.segments[i + 1]!.scene);
