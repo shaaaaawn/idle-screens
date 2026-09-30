@@ -75,6 +75,8 @@ export interface FloraOptions {
   environment?: string;
   /** A world palette (`floraPalette`): colours every colony is pulled toward. None = each species' own. */
   palette?: readonly string[];
+  /** `garden` (default) grows round the crystals; `gallery` plants one of each species in its own plot, in rows (`floraLayout`). */
+  layout?: 'garden' | 'gallery';
 }
 
 export interface FloraField {
@@ -791,6 +793,12 @@ function weightsOf(mix: FloraOptions['mix'], environment?: string): Array<[Flora
   return room.length ? room : FLORA_SPECIES.map(sp => [sp, SPECIES[sp].share]);
 }
 
+/** The gallery's order: its front row holds the low species, its back row the tall ones, shortest first. */
+export const GALLERY_ROWS: readonly (readonly FloraSpecies[])[] = [
+  ['grass', 'bubble', 'brain', 'clam', 'anemone', 'tube', 'bulb', 'barrel', 'shelf'],
+  ['pod', 'curl', 'staghorn', 'seapen', 'elder', 'whip', 'fan', 'kelp'],
+];
+
 export function buildFlora(
   anchors: readonly FloraAnchor[], terrain: (x: number, z: number) => number,
   rng: CrystalRng, opts: FloraOptions,
@@ -798,53 +806,26 @@ export function buildFlora(
   const bySpecies = Object.fromEntries(FLORA_SPECIES.map(sp => [sp, 0])) as Record<FloraSpecies, number>;
   const body = new VoxelWriter(), lamp = new VoxelWriter();
   const s = opts.scale;
+  const gallery = opts.layout === 'gallery';
   const want = Math.round(opts.density * opts.cap * 9);
   const lights: FloraField['lights'] = [];
   const tips: FloraField['tips'] = [];
-  if (!want || !anchors.length) return { parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips, rare: 0, colonies: 0 };
+  const empty = (): FloraField => ({ parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips, rare: 0, colonies: 0 });
+  if (!want || (!anchors.length && !gallery)) return empty();
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
   const palette = opts.palette?.length ? opts.palette : null;
   const total = weights.reduce((a, [, w]) => a + w, 0);
-  // Plants grow in colonies, the way a reef does: a founder, then siblings of
-  // the same species and the same genes (colour) standing round it. It is
-  // what makes a garden read as grown rather than scattered.
-  const colonies = new Map<number, { species: FloraSpecies; gene: number; rare: boolean; x: number; z: number; left: number }>();
-
   let plants = 0, rare = 0, founded = 0;
-  for (let i = 0; i < want * 3 && plants < want; i += 1) {
-    const slot = i % anchors.length, home = anchors[slot]!;
-    const col = colonies.get(slot);
-    let species: FloraSpecies, x: number, z: number, genes: number, isRare: boolean;
-    const sibling = !!col && col.left > 0 && rng.next() < 0.62;
-    if (sibling && col) {
-      species = col.species; genes = col.gene; isRare = col.rare;
-      const a = rng.range(0, Math.PI * 2), r = rng.range(0.55, 1) * (SPECIES[species].spread ?? 5) * s;
-      x = col.x + Math.cos(a) * r; z = col.z + Math.sin(a) * r;
-    } else {
-      // Species by share, so a garden keeps its proportions at any density.
-      let roll = rng.next() * total;
-      species = weights[0]![0];
-      for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
-      const def = SPECIES[species];
-      const angle = rng.range(0, Math.PI * 2);
-      const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;
-      x = home.x + Math.cos(angle) * radius; z = home.z + Math.sin(angle) * radius;
-      genes = Math.floor(rng.next() * 0x7fffffff);
-      // About one colony in thirty is a rare morph.
-      isRare = rng.next() < 1 / 30;
-    }
+
+  /** Grow one plant of `species` rooted at (x, z). */
+  const growOne = (species: FloraSpecies, x: number, z: number, genes: number, isRare: boolean, sibling: boolean): void => {
     const def = SPECIES[species];
-    if (def.max !== undefined && bySpecies[species] >= def.max) continue;
-    if (opts.blocked(x, z)) continue;
-    if (sibling && col) col.left -= 1;
-    else {
-      const [lo, hi] = def.colony ?? [1, 3];
-      colonies.set(slot, { species, gene: genes, rare: isRare, x, z, left: lo + Math.floor(rng.next() * (hi - lo + 1)) });
-      founded += 1;
-    }
     const gene = geneRng(genes);
-    const near = anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b), home);
+    // It feeds on the nearest crystal's light; a gallery with none leans to the front.
+    const near = anchors.length
+      ? anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b))
+      : { x, y: 0, z: z + 100, color: '#bfe8ff' };
     const root = terrain(x, z);
     const light = new Color(near.color);
     // Every plant ramps from a deeper base to a brighter tip, the tip's hue
@@ -889,6 +870,67 @@ export function buildFlora(
     bySpecies[species] += 1;
     plants += 1;
     if (isRare) rare += 1;
+  };
+
+  if (gallery) {
+    // A specimen gallery: one of each species (the ones `floraMix` names, or
+    // all of them), each in its own plot, in two rows across the front of the
+    // tank — the low ones before the tall — so every kind can be seen at once.
+    const named = opts.mix && Object.values(opts.mix).some((w) => (w ?? 0) > 0);
+    const rows = GALLERY_ROWS.map((row) => row.filter((sp) => !named || (opts.mix?.[sp] ?? 0) > 0)).filter((row) => row.length);
+    rows.forEach((row, r) => {
+      const gap = (r === 0 ? 23 : 29) * s, rowZ = (rows.length === 1 ? 0 : r === 0 ? 24 : -26) * s;
+      row.forEach((sp, i) => {
+        const x = (i - (row.length - 1) / 2) * gap;
+        // A plot that lands on a crystal steps out of its way — forward for
+        // the front row, back for the back — so nothing stands inside one.
+        let z = rowZ;
+        const away = r === 0 && rows.length > 1 ? 1 : -1;
+        while (anchors.some((c) => Math.hypot(x - c.x, z - c.z) < 14 * s) && Math.abs(z - rowZ) < 60 * s) z += away * 8 * s;
+        if (opts.blocked(x, z)) return;
+        growOne(sp, x, z, Math.floor(rng.next() * 0x7fffffff), false, false);
+        founded += 1;
+      });
+    });
+    return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, rare, colonies: founded };
+  }
+
+  // Plants grow in colonies, the way a reef does: a founder, then siblings of
+  // the same species and the same genes (colour) standing round it. It is
+  // what makes a garden read as grown rather than scattered.
+  const colonies = new Map<number, { species: FloraSpecies; gene: number; rare: boolean; x: number; z: number; left: number }>();
+  for (let i = 0; i < want * 3 && plants < want; i += 1) {
+    const slot = i % anchors.length, home = anchors[slot]!;
+    const col = colonies.get(slot);
+    let species: FloraSpecies, x: number, z: number, genes: number, isRare: boolean;
+    const sibling = !!col && col.left > 0 && rng.next() < 0.62;
+    if (sibling && col) {
+      species = col.species; genes = col.gene; isRare = col.rare;
+      const a = rng.range(0, Math.PI * 2), r = rng.range(0.55, 1) * (SPECIES[species].spread ?? 5) * s;
+      x = col.x + Math.cos(a) * r; z = col.z + Math.sin(a) * r;
+    } else {
+      // Species by share, so a garden keeps its proportions at any density.
+      let roll = rng.next() * total;
+      species = weights[0]![0];
+      for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
+      const def = SPECIES[species];
+      const angle = rng.range(0, Math.PI * 2);
+      const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;
+      x = home.x + Math.cos(angle) * radius; z = home.z + Math.sin(angle) * radius;
+      genes = Math.floor(rng.next() * 0x7fffffff);
+      // About one colony in thirty is a rare morph.
+      isRare = rng.next() < 1 / 30;
+    }
+    const def = SPECIES[species];
+    if (def.max !== undefined && bySpecies[species] >= def.max) continue;
+    if (opts.blocked(x, z)) continue;
+    if (sibling && col) col.left -= 1;
+    else {
+      const [lo, hi] = def.colony ?? [1, 3];
+      colonies.set(slot, { species, gene: genes, rare: isRare, x, z, left: lo + Math.floor(rng.next() * (hi - lo + 1)) });
+      founded += 1;
+    }
+    growOne(species, x, z, genes, isRare, sibling);
   }
   return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, rare, colonies: founded };
 }

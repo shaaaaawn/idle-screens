@@ -285,6 +285,10 @@ export const METAQUARIUM_PARAMS = {
    *  (a hero hue, its neighbour and an accent), or up to six `#rrggbb`. Empty
    *  (default) lets every species keep its own colours. */
   floraPalette: { type: 'string', default: '', ease: 'step' },
+  /** `garden` (default) grows the flora round the crystals; `gallery` plants
+   *  one of each species (every one, or those `floraMix` names) in its own
+   *  plot, low ones in a front row and tall ones behind — to see them all. */
+  floraLayout: { type: 'enum', default: 'garden', options: ['garden', 'gallery'], ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

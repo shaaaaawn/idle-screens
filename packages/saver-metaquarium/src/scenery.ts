@@ -39,6 +39,8 @@ export interface SceneryOptions {
   environment?: string;
   /** `floraPalette`, resolved: the colours every colony is pulled toward. */
   floraPalette?: string[];
+  /** `floraLayout`: round the crystals, or one of each species in rows. */
+  floraLayout?: 'garden' | 'gallery';
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -331,7 +333,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     group.add(cards.mesh);
   }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
-    density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette,
+    density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette, layout: opts.floraLayout,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });

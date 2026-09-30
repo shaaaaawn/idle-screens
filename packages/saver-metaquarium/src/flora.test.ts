@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
 import { pearlSites } from './bubbles';
-import { buildFlora, FLORA_BY_ENVIRONMENT, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, MAX_FLORA_FISH, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
+import { buildFlora, FLORA_BY_ENVIRONMENT, GALLERY_ROWS, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, MAX_FLORA_FISH, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
 import { parseFloraPalette, worldPalette } from './flora-mix';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
@@ -218,6 +218,25 @@ describe('flora', () => {
     const magenta = buildFlora(anchors, flat, createRng(3), { ...opts, palette: ['#ff00ff'] });
     expect(mean(magenta, 1)).toBeLessThan(mean(natural, 1) * 0.8); // far less green
     expect(mean(magenta, 0)).toBeGreaterThan(mean(magenta, 1) * 1.5);
+  });
+
+  it('the gallery plants one of each species in its own plot, low in front and tall behind', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, layout: 'gallery' });
+    expect(GALLERY_ROWS.flat().sort()).toEqual([...FLORA_SPECIES].sort()); // every species has a place
+    expect(f.plants).toBe(FLORA_SPECIES.length);
+    for (const sp of FLORA_SPECIES) expect(f.bySpecies[sp], sp).toBe(1);
+    // Plots are apart, and none stands inside a crystal.
+    for (let i = 0; i < f.tips.length; i += 1) for (let j = i + 1; j < f.tips.length; j += 1) {
+      expect(Math.hypot(f.tips[i]!.x - f.tips[j]!.x, f.tips[i]!.z - f.tips[j]!.z)).toBeGreaterThan(15);
+    }
+    for (const t of f.tips) for (const c of anchors) expect(Math.hypot(t.x - c.x, t.z - c.z)).toBeGreaterThanOrEqual(14);
+    // The front row is nearer (+z) than the back.
+    const zOf = (sp: string): number => f.tips[[...GALLERY_ROWS.flat()].indexOf(sp as never)]!.z;
+    expect(zOf('grass')).toBeGreaterThan(zOf('kelp'));
+    // floraMix narrows it to what it names; no crystals is no problem.
+    const two = buildFlora([], flat, createRng(3), { ...opts, layout: 'gallery', mix: { clam: 1, elder: 2 } });
+    expect(two.plants).toBe(2);
+    expect(two.bySpecies.clam + two.bySpecies.elder).toBe(2);
   });
 
   it('parses floraMix', () => {
