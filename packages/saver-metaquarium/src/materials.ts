@@ -189,7 +189,8 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       }
       if (isGlow(m) && neonColor && !(m as Partial<MeshBasicMaterial>).map
         && (mesh.geometry.boundingSphere?.radius ?? 0) > modelR * 0.35) {
-        const dark = glowColorOf(m, rng).multiplyScalar(0.08).lerp(NEON_DARK, 0.5);
+        // Darker than a coat: the neon's own light sits right beside it.
+        const dark = glowColorOf(m, rng).multiplyScalar(0.05).lerp(NEON_DARK, 0.75);
         const part = lit ? new MeshLambertMaterial({ color: dark }) : new MeshBasicMaterial({ color: dark });
         // Not GLOW any more: no halo, no bloom, no light of its own.
         part.name = `DARK-${m.name.replace(/^glow[\s_-]*/i, '')}`;
