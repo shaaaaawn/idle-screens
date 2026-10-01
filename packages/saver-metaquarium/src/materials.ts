@@ -151,6 +151,14 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
   const coatB = rng.pick(BODY_COATS.filter((c) => c !== coatA));
   // Drawn only for the neon look, so a natural fish's picks are what they always were.
   const neonColor = neon ? new Color(rng.pick(NEON_COLORS)) : null;
+  // Neon keeps SMALL glow lit (a lure, a fin's accent) and darkens a glow part
+  // that is a big piece of the animal (a crab's claws): in blacklight the
+  // light is the eyes, not the armour.
+  let modelR = 0;
+  if (neonColor) root.traverse((o) => {
+    const g = (o as Mesh).isMesh ? (o as Mesh).geometry : null;
+    if (g) { g.computeBoundingSphere(); modelR = Math.max(modelR, g.boundingSphere?.radius ?? 0); }
+  });
   root.traverse((node) => {
     const mesh = node as Mesh;
     if (!mesh.isMesh || !mesh.material) return;
@@ -178,6 +186,15 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
         eye.userData.mqNoCaustic = true; // a display, not a surface
         return eye;
+      }
+      if (isGlow(m) && neonColor && !(m as Partial<MeshBasicMaterial>).map
+        && (mesh.geometry.boundingSphere?.radius ?? 0) > modelR * 0.35) {
+        const dark = glowColorOf(m, rng).multiplyScalar(0.08).lerp(NEON_DARK, 0.5);
+        const part = lit ? new MeshLambertMaterial({ color: dark }) : new MeshBasicMaterial({ color: dark });
+        // Not GLOW any more: no halo, no bloom, no light of its own.
+        part.name = `DARK-${m.name.replace(/^glow[\s_-]*/i, '')}`;
+        part.userData.mqOwned = true;
+        return part;
       }
       // A textured glow part keeps its template material; it is still light, not a lit surface.
       if (isGlow(m)) m.userData.mqNoCaustic = true;

@@ -550,8 +550,20 @@ describe('the neon look (fishLook: neon)', () => {
     const halos: string[] = [];
     f.root.traverse((o) => { if (o.userData.mqHalo) halos.push(String(o.userData.mqHaloOf)); });
     expect(halos).toContain('GLOW-Neon');
-    expect(halos).toContain('GLOW-claws');
-    expect((f.glow.material as MeshBasicMaterial).name).toBe('GLOW-claws');
+    // The claws are a big piece of the animal: in blacklight they go dark, no halo.
+    expect((f.glow.material as MeshLambertMaterial).name).toBe('DARK-claws');
+    const claws = (f.glow.material as MeshLambertMaterial).color;
+    expect(claws.r + claws.g + claws.b).toBeLessThan(0.15);
+    expect(halos).not.toContain('GLOW-claws');
+  });
+  it('a small glow part (a lure) stays lit in neon', () => {
+    const f = crabLike();
+    const lure = new Mesh(new SphereGeometry(0.2, 4, 4), new MeshStandardMaterial());
+    lure.material.name = 'GLOW-Lure';
+    f.root.add(lure);
+    applyNpcMaterials(f.root, createRng(9), true, true, true);
+    expect((lure.material as unknown as MeshBasicMaterial).name).toBe('GLOW-Lure');
+    expect(lure.material).toBeInstanceOf(MeshBasicMaterial);
   });
 });
 
