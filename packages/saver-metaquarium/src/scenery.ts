@@ -86,6 +86,8 @@ export interface Scenery {
   canopyTips: CanopyTip[];
   /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
   floraMaterials: Material[];
+  /** The wild geodes' material, which takes the light field too. */
+  geodeMaterials: Material[];
   /** Where the fish are this frame (x, y, z, reach): the garden answers them (flora.ts). */
   setFish(fish: ReadonlyArray<{ x: number; y: number; z: number; r: number }>): void;
   /** Crystal colonies that burst out of the rocks — REAL clusters, for the
@@ -116,8 +118,6 @@ export function sceneryAnchors(clusters: readonly Cluster[], rng: CrystalRng,
     return { x, y: terrain(x, z), z, color: ['#49cfff', '#a17bff', '#ff67bc'][i % 3]! };
   });
 }
-
-const WHITE_SKY = new Color('#ffffff');
 
 export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   terrain: (x: number, z: number) => number, opts: SceneryOptions): Scenery {
@@ -350,11 +350,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // the crystals, the homes and the roads.
   let geodeMesh: Mesh | null = null;
   const geodeClock = { value: 0 };
-  // The water's colour, lightened: the geodes' ambient (they light themselves, lit tank or flat).
-  const geodeSky = { value: new Color('#6f8fb8') };
+  // The crystals' own glow and pulse, which the geodes' crystals share.
+  const geodeGlow = { value: 1 }, geodePulse = { value: 0.35 };
+  // Where geodes glow: flora grows round them and feeds on them, as on a crystal.
+  const geodeAnchors: SceneryAnchor[] = [];
   if ((opts.geodes ?? 0) > 0 && !opts.interior) {
     const gf = buildGeodeField(rng.fork(31), {
       amount: opts.geodes ?? 0, cap: opts.cap, scale: s, mix: opts.geodeMix, minerals: opts.geodeMinerals, layout: opts.geodeLayout, terrain,
+      anchors: clusters.map(c => ({ x: c.x, z: c.z, color: c.color })),
       blocked: (x, z, r) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
         || clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
         || pathClearance(keepClear, x, z) < r * 0.6,
@@ -366,13 +369,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       clocks.push(geodeClock);
       material.onBeforeCompile = shader => {
         shader.uniforms.uGeoTime = geodeClock;
-        shader.uniforms.uGeoSky = geodeSky;
+        shader.uniforms.uGeoGlow = geodeGlow;
+        shader.uniforms.uGeoPulse = geodePulse;
         shader.uniforms.uMqFloraFishN = floraFishN;
         shader.uniforms.uMqFloraFish = floraFish;
         shader.vertexShader = GEODE_PARS + MQ_FISH_GLSL + shader.vertexShader.replace('#include <project_vertex>', GEODE_VERTEX);
         shader.fragmentShader = GEODE_FRAGMENT_PARS + shader.fragmentShader.replace('#include <color_fragment>', GEODE_SHADE);
       };
-      material.customProgramCacheKey = () => 'wild-geodes-v2';
+      material.customProgramCacheKey = () => 'wild-geodes-v3';
       geodeMesh = new Mesh(gf.geometry, material);
       geodeMesh.name = 'wild-geodes';
       geodeMesh.frustumCulled = false;
@@ -383,11 +387,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
         const c = new Color(l.color);
         homeLights.push({ x: l.x, y: l.y, z: l.z, r: c.r, g: c.g, b: c.b, reach: l.reach, phase: rng.next() * 6.28 });
       }
+      for (const l of gf.lights) geodeAnchors.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, color: l.color });
       counts.geodes = gf.geodes;
       counts.geodeAura = gf.aura;
     }
   }
-  const field = buildFlora(anchors, terrain, rng.fork(4), {
+  const field = buildFlora(geodeAnchors.length ? [...anchors, ...geodeAnchors] : anchors, terrain, rng.fork(4), {
     density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette, layout: opts.floraLayout,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
@@ -724,6 +729,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [], rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
+    geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     setFish(fish) {
       const n = Math.min(fish.length, MAX_FLORA_FISH);
       for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);
@@ -744,7 +750,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);
-      if (fog) { horizonFog.value.copy(fog.color); geodeSky.value.copy(fog.color).lerp(WHITE_SKY, 0.35); }
+      if (fog) horizonFog.value.copy(fog.color);
+      geodeGlow.value = glow; geodePulse.value = pulse;
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
       // to draw (fog is the card pass's business): a caller that only asks

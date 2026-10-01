@@ -189,7 +189,7 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `floraPalette` | string | One colour scheme for the garden: `world` (seeded) or up to six `#rrggbb`. Empty = each species' own colours. |
 | `geodes` | 0–1 | Wild geodes, few and made properly: split geodes (one in three a thunder egg), amethyst cathedrals, crystal clusters and one mega cavern geode. Agate banding drawn per pixel, crystals in real quartz habit and colour-zoned root to tip, twinkling druse, self-lit so they read in a flat tank; one in twenty is an iridescent aura morph, and their crystals wake when a fish comes close. |
 | `geodeMix` | string | Which kinds: `kind[:weight]` — `geode cathedral cluster cavern`. |
-| `geodeMineral` | string | `amethyst agate celestine citrine carnelian rose emerald quartz smoky`; empty = all by how common, `world` = two from the seed. |
+| `geodeMineral` | string | `amethyst agate celestine citrine carnelian rose emerald quartz smoky`; empty = the colour of each geode's nearest crystal, `world` = two from the seed. |
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
 | `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |

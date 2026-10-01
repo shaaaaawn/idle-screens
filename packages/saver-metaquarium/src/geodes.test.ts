@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
-import { buildGeodeField, galleryRows, GEODE_FRAGMENT_PARS, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, MINERALS, PART, type GeodeFieldOptions } from './geodes';
+import { buildGeodeField, galleryRows, GEODE_FRAGMENT_PARS, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, mineralNear, MINERALS, PART, type GeodeFieldOptions } from './geodes';
 
 const opts: GeodeFieldOptions = { amount: 1, cap: 8, scale: 1, blocked: () => false, terrain: () => 0 };
 type Field = ReturnType<typeof buildGeodeField>;
@@ -61,8 +61,8 @@ describe('wild geodes', () => {
     for (let i = 1; i < front.length; i += 1) expect(front[i]!.x - front[i - 1]!.x).toBeGreaterThan(45);
     // A scene's own minerals choose the columns.
     expect(galleryRows(['citrine', 'rose']).filter((r) => r[0]!.kind !== 'cavern').every((r) => r.length === 2)).toBe(true);
-    // Cathedrals and the cavern light the floor.
-    expect(g.lights).toHaveLength(MINERALS.length + 1);
+    // Everything with a hollow glows (thunder eggs are solid): what flora grows round.
+    expect(g.lights).toHaveLength(g.geodes - g.thundereggs);
   });
 
   it('agate is a band field: 0 at the crust, 1 at the hollow, past 1 into a thunder egg\'s star', () => {
@@ -119,6 +119,23 @@ describe('wild geodes', () => {
     expect(amethyst[2]).toBeGreaterThan(amethyst[1]); // violet
   });
 
+  it('belongs to its world: the mineral of the crystal nearest it, the world\'s stone, room for flora', () => {
+    expect(mineralNear('#ff4fd0')).toBe('rose'); //    hot pink
+    expect(mineralNear('#a855ff')).toBe('amethyst'); // purple
+    expect(mineralNear('#ffb020')).toBe('citrine'); //  orange-gold
+    expect(mineralNear('#ffffff')).toBe('quartz'); //   white
+    const anchors = [{ x: -400, z: 0, color: '#ff4fd0' }, { x: 400, z: 0, color: '#a855ff' }];
+    const f = buildGeodeField(createRng(3), { ...opts, anchors });
+    const tips = arr(f, 'aColB'), crystals = ofPart(f, PART.crystal);
+    // Every crystal is pink or violet, the colours of its crystals.
+    for (const i of crystals) expect(tips[i * 3]! + tips[i * 3 + 2]!).toBeGreaterThan(tips[i * 3 + 1]! * 1.6);
+    // The crust is the world's slate (cool, dark), not a brown photo rock.
+    const crust = ofPart(f, PART.crust)[0]!, cA = arr(f, 'color');
+    expect(cA[crust * 3 + 2]!).toBeGreaterThan(cA[crust * 3]!);
+    // Every geode with a hollow or a cluster glows: what flora grows round.
+    expect(f.lights.length).toBeGreaterThanOrEqual(f.geodes - f.thundereggs);
+  });
+
   it('parses geodeMix and geodeMineral, and stays three-free for the TV', () => {
     expect(parseGeodeMix('cathedral:2, geode, cluster, geode:0.5')).toEqual({ mix: { cathedral: 2, geode: 1.5, cluster: 1 }, problems: [] });
     expect(parseGeodeMix('cathedral, nodule').problems).toHaveLength(1);
@@ -139,8 +156,10 @@ describe('wild geodes', () => {
     expect(GEODE_VERTEX).toMatch(/mqStartleAt\(vGeoW\)/);
     expect(GEODE_SHADE).toMatch(/dFdx\(vGeoW\)/); // crisp facets
     expect(GEODE_SHADE).toMatch(/float nb = 8\.0/); // the agate's bands
-    expect(GEODE_SHADE).toMatch(/smoothstep\(0\.12, 0\.95, t\)/); // colour zoned root to tip
-    expect(GEODE_FRAGMENT_PARS).toMatch(/uniform vec3 uGeoSky/);
+    // The world's rules: its key (up, left, from behind), its crystal (white-hot root), its glow and pulse.
+    expect(GEODE_SHADE).toMatch(/vec3\(-0\.45, 0\.78, -0\.43\)/);
+    expect(GEODE_SHADE).toMatch(/float hot = \(1\.0 - t\) \* \(1\.0 - t\) \* 0\.9/);
+    expect(GEODE_FRAGMENT_PARS).toMatch(/uniform float uGeoGlow; uniform float uGeoPulse;/);
     for (const src of [GEODE_VERTEX, GEODE_SHADE]) expect(src).not.toMatch(/random\(/);
   });
 });

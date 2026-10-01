@@ -1203,7 +1203,11 @@ class TankInstance implements SaverInstance {
       this.scene.add(this.scenery.group);
       // Plants take the crystal and spot light on the tiers that can afford
       // one more light loop per vertex; the low tier keeps the baked colour.
-      if (this.quality.glowLights >= 3) for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
+      if (this.quality.glowLights >= 3) {
+        for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
+        // The geodes stand in the same light: a crystal tints the stone and agate beside it.
+        for (const m of this.scenery.geodeMaterials) installFloraLight(m, this.poolUniforms, false);
+      }
       // What broke out of the rocks is the same crystal as `propMix`: same
       // shard shapes, material, pulse, fog and halo — one more instanced
       // field, no new program. It lends no light to the floor (a throwaway

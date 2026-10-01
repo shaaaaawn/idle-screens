@@ -84,6 +84,10 @@ export interface GeodeFieldOptions {
   layout?: 'field' | 'gallery';
   /** True where something already stands, for a footprint of radius `r`. */
   blocked(x: number, z: number, r: number): boolean;
+  /** The scene's crystals: with no `minerals`, a geode is made of whatever
+   *  mineral is nearest in colour to the crystal nearest it — the way flora
+   *  and homes take their crystal's colour — so it belongs to its world. */
+  anchors?: ReadonlyArray<{ x: number; z: number; color: string }>;
   terrain(x: number, z: number): number;
 }
 
@@ -154,6 +158,8 @@ class GeoWriter {
 }
 
 const UP = new Vector3(0, 1, 0);
+/** The world's stone: the slate every rock is painted (rocks.ts paintStone). */
+const STONE = new Color('#33435a');
 
 /** A closed outline (unit, local XZ) with a seeded wobble; `point` draws it to a point at -z (a cathedral's top). */
 function outline(rng: CrystalRng, n: number, a: number, b: number, rough: number, point = 0): Array<[number, number]> {
@@ -277,7 +283,8 @@ function half(w: GeoWriter, rng: CrystalRng, o: HalfOpts): void {
   const n = o.out.length, R = o.R;
   const bump = knobs(rng, 18);
   // ---- the crust: a knobbled dome -------------------------------------
-  w.kind = PART.crust; w.a.set(o.m.crust); w.b.set(o.m.crust2); w.v = o.band; w.phase = 0; w.glow = 0;
+  // The crust is the world's stone (paintStone's slate), only a hint of its own mineral in it.
+  w.kind = PART.crust; w.a.set(STONE).lerp(new Color(o.m.crust), 0.18); w.b.copy(w.a); w.v = o.band; w.phase = 0; w.glow = 0;
   const nu = 8;
   const dome: Vector3[][] = [];
   for (let k = 0; k <= nu; k += 1) {
@@ -363,6 +370,21 @@ function half(w: GeoWriter, rng: CrystalRng, o: HalfOpts): void {
     (u) => 0.55 + 0.75 * u, -0.012 * R);
 }
 
+/** The mineral whose crystals are nearest in hue (and lightness) to `hex`. */
+export function mineralNear(hex: string): MineralName {
+  const want = { h: 0, s: 0, l: 0 }, got = { h: 0, s: 0, l: 0 };
+  new Color(hex).getHSL(want);
+  let best: MineralName = 'quartz', score = Infinity;
+  for (const name of Object.keys(MINERAL) as MineralName[]) {
+    new Color(MINERAL[name].tip).getHSL(got);
+    const dh = Math.min(Math.abs(want.h - got.h), 1 - Math.abs(want.h - got.h));
+    // A grey or white crystal wants quartz: weigh hue by how saturated both are.
+    const d = dh * 2 * Math.min(want.s, got.s) + Math.abs(want.s - got.s) * 0.6 + Math.abs(want.l - got.l) * 0.3;
+    if (d < score) { score = d; best = name; }
+  }
+  return best;
+}
+
 function pickMineral(rng: CrystalRng, allowed: readonly MineralName[] | undefined): MineralName {
   const names = allowed?.length ? allowed : (Object.keys(MINERAL) as MineralName[]);
   const weight = (m: MineralName): number => (allowed?.length ? 1 : MINERAL_WEIGHT[m]);
@@ -404,10 +426,10 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
     w.place = placeAt(R * 1.08, R * 0.15, Math.PI / 2 - rng.range(0.3, 0.55), rng.range(-0.25, 0.1));
     half(w, rng.fork(2), { ...opts, out: out.map(([a, b]) => [-a, b] as [number, number]) });
     w.settle(from, floor, R * 0.14);
-    return { r: R * 2.2, h: R * 2.1, star };
+    return { r: R * 1.6, h: R * 2.1, star, light: star ? undefined : { y: R * 0.5, reach: R * 2.2 } };
   }
   if (kind === 'cathedral') {
-    const R = rng.range(12, 15) * s;
+    const R = rng.range(10, 12.5) * s;
     const out = outline(rng, 44, 1, rng.range(2.1, 2.5), 0.08, 0.38);
     const from = w.mark;
     w.place = placeAt(0, 0, Math.PI / 2);
@@ -438,7 +460,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
       const j = (i + 1) % out.length, A = ringsV[k]!, B = ringsV[k + 1]!;
       const top = k >= nu / 2;
       w.kind = top ? PART.hollow : PART.crust;
-      if (top) { w.a.set(m.wall).lerp(new Color(m.root), 0.35); w.b.set(m.spark); } else { w.a.set(m.crust); w.b.set(m.crust2); }
+      if (top) { w.a.set(m.wall).lerp(new Color(m.root), 0.35); w.b.set(m.spark); } else { w.a.set(STONE).lerp(new Color(m.crust), 0.18); w.b.copy(w.a); }
       w.v = band; w.glow = top ? 1 : 0;
       const u = top ? 0.2 : 0;
       w.tri(A[i]!, u, B[j]!, u, A[j]!, u);
@@ -451,7 +473,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
       (p) => p.clone().sub(mid).setY(0).multiplyScalar(0.06).add(new Vector3(0, 1, 0)).normalize(),
       (u) => 0.5 + 0.7 * u);
     w.settle(from, floor, R * depth * 0.3);
-    return { r: R * 1.3, h: R * 1.6 };
+    return { r: R * 1.1, h: R * 1.6, light: { y: R * 0.6, reach: R * 2.2 } };
   }
   // The cavern: a geode so big it is a cave, stood open toward the middle of
   // the tank and buried to its waist, with blades of selenite across its mouth.
@@ -553,7 +575,12 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
       placed.push({ x, z, r: room });
       // Opening toward the front of the tank, where the camera usually is, give or take.
       const yaw = Math.atan2(-x, 320 * s - z) + (mega ? 0 : rng.range(-0.45, 0.45));
-      put(kind, x, z, yaw, mega && !minerals ? 'amethyst' : pickMineral(rng, minerals), rng.next() < 0.05);
+      // Its mineral: what the scene chose, else the colour of the crystal nearest it, else any.
+      const near = !minerals && opts.anchors?.length
+        ? opts.anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b))
+        : null;
+      const mineral = near ? mineralNear(near.color) : mega && !minerals ? 'amethyst' : pickMineral(rng, minerals);
+      put(kind, x, z, yaw, mineral, rng.next() < 0.05);
     }
   }
   const geometry = w.geometry();
@@ -574,7 +601,7 @@ export const GEODE_VERTEX = /* glsl */ `
 
 /** Fragment side: the noise the stone and the agate are drawn from. */
 export const GEODE_FRAGMENT_PARS = /* glsl */ `
-  uniform float uGeoTime; uniform vec3 uGeoSky;
+  uniform float uGeoTime; uniform float uGeoGlow; uniform float uGeoPulse;
   varying vec3 vGeoW; varying float vGeoPart; varying vec4 vGeo; varying vec3 vColB; varying float vGeoWake;
   float gH(vec3 p) { p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
   float gN(vec3 x) {
@@ -587,68 +614,61 @@ export const GEODE_FRAGMENT_PARS = /* glsl */ `
 export const GEODE_SHADE = /* glsl */ `
   #include <color_fragment>
   {
-    // Facet normals from the surface itself: every face reads crisp.
+    // The world's rules, so a geode belongs to it: the same fixed key the
+    // terrain, the rocks and the crystals are lit by (up, left, from behind),
+    // faceted shading with a per-facet offset (what reads as "cut"), and its
+    // crystals the world's crystal: emissive, white-hot at the root,
+    // saturated at the tip, pulsing with crystalGlow / crystalPulse.
     vec3 gNrm = normalize(cross(dFdx(vGeoW), dFdy(vGeoW)));
     vec3 gV = normalize(cameraPosition - vGeoW);
     if (dot(gNrm, gV) < 0.0) gNrm = -gNrm;
-    vec3 gL = normalize(vec3(-0.45, 0.78, 0.43));
-    vec3 gHv = normalize(gL + gV);
-    float gLam = max(dot(gNrm, gL), 0.0);
-    vec3 gAmb = mix(uGeoSky * 0.22 + 0.05, uGeoSky * 0.7 + 0.2, 0.5 + 0.5 * gNrm.y);
-    float gFres = pow(1.0 - max(dot(gNrm, gV), 0.0), 3.0);
+    vec3 gL = normalize(vec3(-0.45, 0.78, -0.43));
+    float gKey = max(dot(gNrm, gL), 0.0);
+    float gFacet = fract(sin(dot(gNrm, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    float gFres = pow(1.0 - abs(dot(gNrm, gV)), 2.5);
+    float gBeat = 1.0 - uGeoPulse * 0.15 * (0.5 + 0.5 * sin(uGeoTime * 0.754 + vGeo.y * 6.28));
     vec3 gA = diffuseColor.rgb, gB = vColB, gC;
     if (vGeoPart < 0.5) {
-      // The crust: mottled, rough stone.
-      float m = gF(vGeoW * 0.22);
-      vec3 alb = mix(gA, gB, smoothstep(0.38, 0.68, m)) * (0.8 + 0.4 * gN(vGeoW * 1.9));
-      gC = alb * (gAmb + gLam * 0.85);
+      // Crust: the world's stone, baked the way paintStone bakes a rock.
+      gC = gA * (0.36 + 0.64 * gKey) * (0.9 + 0.2 * gFacet);
     } else if (vGeoPart < 1.5) {
-      // Agate: bands from the band coordinate, warped by noise so they wander
-      // the way real ones do, a white thread at each edge, polished.
+      // Agate, in the world's key: bands from the noise-warped band field,
+      // a pale thread at each edge, a little glow of its own (agate is
+      // translucent; the cut catches the light of the hollow behind it).
       float t = vGeo.x;
       float warp = (gF(vGeoW * 0.15 + vGeo.y * 7.0) - 0.5) * 0.24 + (gN(vGeoW * 0.85) - 0.5) * 0.035;
-      // Inside a thunder egg's star (t > 1) the bands are tight: warp them less.
       float tt = clamp(t + warp * (t > 1.0 ? 0.3 : 0.2 + 0.8 * t), 0.0, 1.8);
       vec3 alb;
-      if (tt < 0.055) alb = mix(gA * 0.25 + vec3(0.2, 0.19, 0.18), vec3(0.45, 0.43, 0.4), tt / 0.055);
-      else if (tt < 0.095) alb = vec3(0.93, 0.92, 0.9);
+      if (tt < 0.06) alb = gA * 0.22 + vec3(0.12, 0.13, 0.16);
+      else if (tt < 0.095) alb = mix(gB, vec3(0.85), 0.5);
       else {
         float nb = 8.0 + floor(vGeo.y * 10.0);
         float b = (tt - 0.095) / 0.905 * nb;
         float k = floor(b), f = fract(b);
         float pick = gH(vec3(k, vGeo.y * 31.0, 3.0));
-        alb = pick < 0.44 ? gA : (pick < 0.86 ? gB : vec3(0.95, 0.95, 0.97));
+        alb = pick < 0.5 ? gA : (pick < 0.88 ? gB : mix(gB, vec3(1.0), 0.6));
         alb = mix(alb, mix(gA, gB, 0.5), step(0.68, gH(vec3(k, 2.0, vGeo.y))) * 0.6);
         float edge = 1.0 - smoothstep(0.0, 0.08, min(f, 1.0 - f));
-        alb = mix(alb, vec3(0.97), edge * 0.5);
-        alb *= 0.85 + 0.25 * tt;
+        alb = mix(alb, mix(gB, vec3(1.0), 0.5), edge * 0.4);
+        alb *= 0.8 + 0.3 * min(tt, 1.0);
       }
-      gC = alb * (gAmb * 0.5 + 0.52 + gLam * 0.32) + pow(max(dot(gNrm, gHv), 0.0), 70.0) * 0.4;
+      gC = alb * (0.42 + 0.34 * gKey + 0.2 * gFres) * gBeat * (0.7 + 0.3 * uGeoGlow);
     } else if (vGeoPart < 2.5) {
-      // The hollow: darker the deeper it goes; its sugar twinkles cell by cell.
-      float ao = mix(1.0, 0.3, vGeo.x);
+      // The hollow: a dark glass body (the world's glass), its druse catching
+      // the light cell by cell, deeper darker.
+      float ao = mix(1.0, 0.35, vGeo.x);
       float h = gH(floor(vGeoW * 3.2));
       float tw = pow(max(0.0, sin(h * 91.0 + dot(gV, vec3(4.1, 3.3, 2.7)) * 5.0 + uGeoTime * 0.7)), 26.0) * step(0.7, h);
-      gC = gA * ao * (gAmb + 0.35 + gLam * 0.45) + gB * tw * 1.5 * (0.4 + ao);
-    } else if (vGeoPart < 3.5) {
-      // A crystal: colour zoned root to tip, a crisp highlight on each facet,
-      // a rim of its tip colour, an inner glow toward the point, a glint.
-      float t = vGeo.x;
-      vec3 alb = mix(gA, gB, smoothstep(0.12, 0.95, t));
-      if (vGeo.z > 9.0) alb = mix(alb, 0.55 + 0.45 * cos(6.2832 * (gFres * 1.4 + t * 0.5 + vec3(0.0, 0.33, 0.67))), 0.75);
-      float spec = pow(max(dot(gNrm, gHv), 0.0), 80.0);
-      float tw = pow(max(0.0, sin(vGeo.z * 37.0 + dot(gV, gNrm) * 11.0 + uGeoTime * 0.8)), 36.0);
-      vec3 hl = mix(vec3(1.0), gB, 0.35);
-      gC = alb * (gAmb * 0.6 + 0.3 + gLam * 0.55) + alb * t * 0.22 + gB * gFres * 0.45 + hl * (spec * 0.8 + tw * 0.45);
+      gC = gA * ao * (0.35 + 0.4 * gKey) + gB * tw * 1.3 * (0.4 + ao) * (0.5 + 0.5 * uGeoGlow);
     } else {
-      // Selenite: glass, lit at the rim.
-      // Selenite: glass, its body clouding toward the far end, lit at the rim.
-      // Milky and lit from within, the way Naica's beams glow in a lamp: a
-      // luminous body, banded along its length, brighter at the edges.
-      float streak = 0.88 + 0.12 * sin(vGeo.x * 23.0 + vGeo.y * 40.0);
-      vec3 body = mix(gA, gB, 0.2 + 0.45 * vGeo.x) * streak;
-      // Real light and shade on each face, so a beam reads as a solid prism.
-      gC = body * (0.25 + gLam * 0.7 + gAmb * 0.35) + vec3(pow(max(dot(gNrm, gHv), 0.0), 90.0) * 0.9) + gB * gFres * 0.5;
+      // A crystal is the world's crystal: emissive, white-hot at the root.
+      float t = vGeo.x;
+      vec3 c = gB;
+      if (vGeo.z > 9.0) c = 0.55 + 0.45 * cos(6.2832 * (gFres * 1.4 + t * 0.5 + vec3(0.0, 0.33, 0.67)));
+      float shade = 0.46 + 0.5 * gKey + (gFacet - 0.5) * 0.36;
+      float hot = (1.0 - t) * (1.0 - t) * 0.9 * (0.55 + 0.45 * gKey);
+      gC = mix(c, vec3(1.0), hot) * shade * (0.85 + 0.4 * gFres) * gBeat * (0.5 + 0.5 * uGeoGlow);
+      gC += vec3(smoothstep(0.62, 0.95, gFacet) * gFres * gFres * 0.8);
     }
     diffuseColor.rgb = gC * (1.0 + vGeoWake * 0.8);
   }

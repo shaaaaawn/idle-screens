@@ -43,4 +43,16 @@ describe('flora light', () => {
     m.onBeforeCompile(shader as never, {} as never);
     expect(shader.vertexShader).toBe('void main() {}');
   });
+
+  it('lights a geode too, without the flora\'s sheen (a geode has no aMat)', () => {
+    const plain = new MeshBasicMaterial({ vertexColors: true }), pools = emptyPoolUniforms();
+    expect(installFloraLight(plain, pools, false)).toBe(true);
+    const sh = compile(plain);
+    expect(sh.vertexShader).toContain('uniform vec4 uMqPoolPos[');
+    expect(sh.vertexShader).not.toContain('#define MQ_SHEEN');
+    const leafy = new MeshBasicMaterial({ vertexColors: true });
+    installFloraLight(leafy, pools);
+    expect(compile(leafy).vertexShader).toContain('#define MQ_SHEEN');
+    expect(plain.customProgramCacheKey()).not.toBe(leafy.customProgramCacheKey());
+  });
 });

@@ -295,8 +295,9 @@ export const METAQUARIUM_PARAMS = {
   geodes: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Which kinds: `kind[:weight]`, comma-separated (`geode:3, cathedral, cluster`). */
   geodeMix: { type: 'string', default: '', ease: 'step' },
-  /** What they are made of: empty = every mineral by how common it is;
-   *  `world` = two chosen from the seed; or a list (`amethyst, citrine`). */
+  /** What they are made of: empty = the mineral nearest in colour to each
+   *  geode's nearest crystal; `world` = two chosen from the seed; or a list
+   *  (`amethyst, citrine`). */
   geodeMineral: { type: 'string', default: '', ease: 'step' },
   /** `field` (default) scatters them round the tank; `gallery` stands one of each kind in rows. */
   geodeLayout: { type: 'enum', default: 'field', options: ['field', 'gallery'], ease: 'step' },

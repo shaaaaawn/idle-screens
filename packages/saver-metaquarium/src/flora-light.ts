@@ -76,11 +76,13 @@ export const FLORA_LIGHT_VERTEX = /* glsl */ `
     // pastel beside a blazing crystal glows brighter pink, not white.
     float mqTop = max(vColor.r, max(vColor.g, vColor.b));
     if (mqTop > 1.0) vColor.rgb /= mqTop;
+    #ifdef MQ_SHEEN
     if (aMat.y > 0.0) {
       float fr = pow(1.0 - abs(dot(mqN, normalize(cameraPosition - mqW))), 2.0);
       vec3 irid = 0.5 + 0.5 * cos(6.2832 * (fr * 1.3 + aSway.y * 0.05 + vec3(0.0, 0.33, 0.67)));
       vColor.rgb += aMat.y * fr * irid * 0.55;
     }
+    #endif
   }
 `;
 
@@ -89,12 +91,13 @@ export const FLORA_LIGHT_VERTEX = /* glsl */ `
  * take the light field in `pools` — the tank's one stable uniform set, so a
  * re-layout never recompiles it. Returns false if it already had the patch.
  */
-export function installFloraLight(material: Material, pools: Uniforms): boolean {
-  return stackPatch(material, FLORA_LIGHT_TAG, (shader) => {
+export function installFloraLight(material: Material, pools: Uniforms, sheen = true): boolean {
+  return stackPatch(material, FLORA_LIGHT_TAG + (sheen ? '' : '-plain'), (shader) => {
     if (!shader.vertexShader.includes('#include <project_vertex>') || shader.vertexShader.includes('uMqPoolN')) return;
     for (const k of ['uMqPoolN', 'uMqPoolPos', 'uMqPoolCol', 'uMqPoolPhase', 'uMqPoolGain', 'uMqPoolTime', 'uMqPoolPulse', 'uMqSpot', 'uMqSpotColor']) {
       shader.uniforms[k] = pools[k]!;
     }
-    shader.vertexShader = PARS + shader.vertexShader.replace('#include <project_vertex>', FLORA_LIGHT_VERTEX);
+    // Sheen reads the flora's aMat; anything else (a geode) takes only the light.
+    shader.vertexShader = (sheen ? '#define MQ_SHEEN\n' : '') + PARS + shader.vertexShader.replace('#include <project_vertex>', FLORA_LIGHT_VERTEX);
   });
 }
