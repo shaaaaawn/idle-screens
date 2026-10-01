@@ -93,8 +93,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
-  geodes: 'Wild geodes about the floor (0 = none), after real ones and No Man\'s Sky: split nodule pairs with agate-banded cut faces, thunder eggs with star cores, amethyst cathedrals, druse crystal clusters, floating orbs that turn as they bob, ikaite tufa columns, and one mega cavern geode lined with beams of selenite. Their druse glints as the view swings; one in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
-  geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. nodule thunderegg cathedral druse orb column cavern (the cavern is one at most; orbs three).',
+  geodes: 'Wild geodes about the floor (0 = none), few and made properly: split geodes (one half cut-face up, its twin leaning beside it; one in three a thunder egg with a star core), amethyst cathedrals, crystal clusters, and one mega cavern geode with crystals the size of trees. Agate banding drawn per pixel, crystals in real quartz habit and colour-zoned root to tip, druse that twinkles; they light themselves, so they read in a flat tank too. One in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
+  geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = all, by how common; `world` = two from the seed, one scheme for the whole world; or a list.',
   geodeLayout: '`field` (default) scatters them; `gallery` stands one of each kind in two rows, minerals dealt in turn, to see them all.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
@@ -131,7 +131,7 @@ propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@drus
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
-geodeMix  kind[:weight], …   nodule thunderegg cathedral druse orb column cavern     cathedral:2, nodule, orb
+geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
 geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24

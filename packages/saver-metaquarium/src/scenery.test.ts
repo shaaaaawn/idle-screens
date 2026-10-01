@@ -304,7 +304,8 @@ describe('wild geodes in the scenery', () => {
     expect(world.counts.geodes).toBeGreaterThan(5);
     const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
     (geodes.material as Material).onBeforeCompile(shader as never, {} as WebGLRenderer);
-    expect(shader.vertexShader).toContain('mqStartleAt(gW)');
+    expect(shader.vertexShader).toContain('mqStartleAt(vGeoW)');
+    expect(shader.fragmentShader).toContain('float nb = 8.0');
     expect(shader.vertexShader.match(/#include <project_vertex>/g)).toHaveLength(1);
     world.setFish([{ x: 1, y: 2, z: 3, r: 28 }]);
     expect(shader.uniforms.uMqFloraFishN!.value).toBe(1);

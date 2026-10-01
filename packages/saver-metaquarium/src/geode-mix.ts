@@ -4,13 +4,14 @@
  * minerals, and the `geodeMix` / `geodeMineral` parsers. Builders: geodes.ts.
  */
 
-export type GeodeKind = 'nodule' | 'thunderegg' | 'cathedral' | 'druse' | 'orb' | 'column' | 'cavern';
-export const GEODE_KINDS: readonly GeodeKind[] = ['nodule', 'thunderegg', 'cathedral', 'druse', 'orb', 'column', 'cavern'];
+/** Few, and each made well: a split geode (sometimes a thunder egg), a standing cathedral, a crystal cluster, and the mega cavern. */
+export type GeodeKind = 'geode' | 'cathedral' | 'cluster' | 'cavern';
+export const GEODE_KINDS: readonly GeodeKind[] = ['geode', 'cathedral', 'cluster', 'cavern'];
 
 export type MineralName = 'amethyst' | 'agate' | 'celestine' | 'citrine' | 'carnelian' | 'rose' | 'emerald' | 'quartz' | 'smoky';
 export const MINERALS: readonly MineralName[] = ['amethyst', 'agate', 'celestine', 'citrine', 'carnelian', 'rose', 'emerald', 'quartz', 'smoky'];
 
-/** `geodeMix`: `kind[:weight]`, comma-separated — `cathedral:2, nodule, orb`. Empty = the default spread. */
+/** `geodeMix`: `kind[:weight]`, comma-separated — `geode:3, cathedral, cluster`. Empty = the default spread. */
 export function parseGeodeMix(src: string): { mix: Partial<Record<GeodeKind, number>>; problems: string[] } {
   const mix: Partial<Record<GeodeKind, number>> = {}, problems: string[] = [];
   for (const raw of src.split(',')) {

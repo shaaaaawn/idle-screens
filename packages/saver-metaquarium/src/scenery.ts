@@ -10,7 +10,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
-import { buildGeodeField, GEODE_LOOK, GEODE_PARS, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
+import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_PARS, GEODE_SHADE, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
@@ -116,6 +116,8 @@ export function sceneryAnchors(clusters: readonly Cluster[], rng: CrystalRng,
     return { x, y: terrain(x, z), z, color: ['#49cfff', '#a17bff', '#ff67bc'][i % 3]! };
   });
 }
+
+const WHITE_SKY = new Color('#ffffff');
 
 export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   terrain: (x: number, z: number) => number, opts: SceneryOptions): Scenery {
@@ -348,6 +350,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // the crystals, the homes and the roads.
   let geodeMesh: Mesh | null = null;
   const geodeClock = { value: 0 };
+  // The water's colour, lightened: the geodes' ambient (they light themselves, lit tank or flat).
+  const geodeSky = { value: new Color('#6f8fb8') };
   if ((opts.geodes ?? 0) > 0 && !opts.interior) {
     const gf = buildGeodeField(rng.fork(31), {
       amount: opts.geodes ?? 0, cap: opts.cap, scale: s, mix: opts.geodeMix, minerals: opts.geodeMinerals, layout: opts.geodeLayout, terrain,
@@ -362,13 +366,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       clocks.push(geodeClock);
       material.onBeforeCompile = shader => {
         shader.uniforms.uGeoTime = geodeClock;
+        shader.uniforms.uGeoSky = geodeSky;
         shader.uniforms.uMqFloraFishN = floraFishN;
         shader.uniforms.uMqFloraFish = floraFish;
-        shader.vertexShader = GEODE_PARS + MQ_FISH_GLSL + shader.vertexShader
-          .replace('#include <begin_vertex>', GEODE_VERTEX)
-          .replace('#include <project_vertex>', GEODE_LOOK);
+        shader.vertexShader = GEODE_PARS + MQ_FISH_GLSL + shader.vertexShader.replace('#include <project_vertex>', GEODE_VERTEX);
+        shader.fragmentShader = GEODE_FRAGMENT_PARS + shader.fragmentShader.replace('#include <color_fragment>', GEODE_SHADE);
       };
-      material.customProgramCacheKey = () => 'wild-geodes-v1';
+      material.customProgramCacheKey = () => 'wild-geodes-v2';
       geodeMesh = new Mesh(gf.geometry, material);
       geodeMesh.name = 'wild-geodes';
       geodeMesh.frustumCulled = false;
@@ -740,7 +744,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);
-      if (fog) horizonFog.value.copy(fog.color);
+      if (fog) { horizonFog.value.copy(fog.color); geodeSky.value.copy(fog.color).lerp(WHITE_SKY, 0.35); }
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
       // to draw (fog is the card pass's business): a caller that only asks
