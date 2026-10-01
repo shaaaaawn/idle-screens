@@ -10,7 +10,7 @@
  *   RECIPES      named scenes. The playground mounts every one of them as-is
  *                (its "recipes" shelf), so what an agent can publish is what a
  *                person can look at. Channel-safe: minted ids, no local paths.
- *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, spotRig, spotCues, vignette).
+ *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, floraPalette, geodeMix, geodeMineral, spotRig, spotCues, vignette).
  *   validateMetaquariumParams   every DSL parser at once, for publish advisories.
  *   recipeTrack  a recipe as the control track `publishScene` takes.
  */
@@ -74,7 +74,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
-  floorKind: 'Flat floor or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
+  floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Light shafts from the surface.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
@@ -96,7 +96,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodes: 'Wild geodes about the floor (0 = none): split geodes (one in three a thunder egg), amethyst cathedrals, crystal clusters, one mega cavern geode. They follow the world\'s rules — slate crust lit by the same key as the rocks, crystals that glow and pulse like the crystals (crystalGlow, crystalPulse), the mineral of the crystal nearest them, the crystals\' light on their stone — and flora grows round them as round a crystal. Agate banding is drawn per pixel; one in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
   geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
-  fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, light that draws fish with lightSeek, and a vignette mark `fountain`.',
+  fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
   geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',

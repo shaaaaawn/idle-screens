@@ -110,7 +110,7 @@ const views: Array<[string, (d: number) => Vector3]> = [
         rig?.set({ phase: rigName === 'crab' ? t * 2.2 : 0, amp: 0.08 * Number(q.get('effort') ?? 1), bend: 0, t });
         // side (default), or ¾ from behind-left where the fin's sideways ripple shows.
         if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7);
-        else if (q.get('view') === 'top') cam.position.set(span * 1.2, span * 1.9, span * 1.2);
+        else if (q.get('view') === 'top') cam.position.set(0, span * 2.2, span * 0.01);
         else cam.position.set(span * 2.4, 0, 0);
         cam.lookAt(0, 0, 0);
         const x = c * CELL, y = (rows.length - 1 - row) * CELL;

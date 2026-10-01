@@ -31,8 +31,8 @@ export interface WalkGroundOptions {
   soft?: ReadonlySet<Material>;
 }
 
-const solidMaterial = (m: Material | Material[], soft: ReadonlySet<Material>): boolean => {
-  const one = Array.isArray(m) ? m[0] : m;
+const solidMaterial = (m: Material | Material[], soft: ReadonlySet<Material>, index = 0): boolean => {
+  const one = Array.isArray(m) ? m[index] : m;
   if (!one || !one.visible || soft.has(one)) return false;
   // Glow cards, halos, mist, bubbles: light, not ground.
   return !one.transparent && one.depthWrite !== false;
@@ -46,16 +46,19 @@ export class WalkGround {
   private readonly down = new Vector3(0, -1, 0);
   private readonly cell: number;
   private readonly top: number;
+  private readonly soft: ReadonlySet<Material>;
 
   constructor(roots: readonly Object3D[], private readonly terrain: (x: number, z: number) => number, opts: WalkGroundOptions = {}) {
     this.cell = opts.cell ?? 1.5;
     this.top = opts.top ?? 400;
-    const soft = opts.soft ?? new Set<Material>();
+    const soft = this.soft = opts.soft ?? new Set<Material>();
     for (const root of roots) {
       root.updateMatrixWorld(true);
       root.traverse((o) => {
         const m = o as Mesh;
-        if (m.isMesh && o.visible && m.geometry && solidMaterial(m.material, soft)) this.meshes.push(m);
+        // A multi-material mesh is kept if any of its materials is solid; each hit is judged by its own face.
+        const slots = Array.isArray(m.material) ? m.material.length : 1;
+        if (m.isMesh && o.visible && m.geometry && Array.from({ length: slots }, (_, i) => solidMaterial(m.material, soft, i)).some(Boolean)) this.meshes.push(m);
       });
     }
   }
@@ -75,6 +78,7 @@ export class WalkGround {
       if (this.meshes.length) {
         this.ray.set(this.origin.set(ix * this.cell, this.top, iz * this.cell), this.down);
         for (const hit of this.ray.intersectObjects(this.meshes, false)) {
+          if (!solidMaterial((hit.object as Mesh).material, this.soft, hit.face?.materialIndex ?? 0)) continue;
           // A downward ray meets a front face only if it faces up; a
           // double-sided part also reports its underside — keep the top.
           if (!s.length || s[s.length - 1]! - hit.point.y > 0.25) s.push(hit.point.y);

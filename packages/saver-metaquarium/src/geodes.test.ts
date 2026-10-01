@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
-import { buildGeodeField, galleryRows, GEODE_FRAGMENT_PARS, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, mineralNear, MINERALS, PART, type GeodeFieldOptions } from './geodes';
+import { buildGeodeField, galleryRows, GEODE_FRAGMENT_PARS, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, mineralNear, MINERALS, PART, type GeodeFieldOptions, type MineralName } from './geodes';
 
 const opts: GeodeFieldOptions = { amount: 1, cap: 8, scale: 1, blocked: () => false, terrain: () => 0 };
 type Field = ReturnType<typeof buildGeodeField>;
@@ -97,7 +97,7 @@ describe('wild geodes', () => {
     const geo = arr(f, 'aGeo');
     expect(ofPart(f, PART.crystal).every((i) => geo[i * 4 + 3] === 1)).toBe(true);
     expect(ofPart(f, PART.crust).every((i) => geo[i * 4 + 3] === 0)).toBe(true); // stone sleeps
-    // Thirty fields (~360 geodes) pin a 1-in-20 rate well inside these
+    // Thirty fields (~300 geodes) pin a 1-in-20 rate well inside these
     // bounds; sixty took ten seconds under coverage on a loaded machine.
     let aura = 0, total = 0, checked = false;
     for (let seed = 1; seed <= 30; seed += 1) {
@@ -112,7 +112,7 @@ describe('wild geodes', () => {
 
   it('a mineral list chooses what they are made of', () => {
     const tipsOf = (m: string): [number, number, number] => {
-      const f = buildGeodeField(createRng(3), { ...opts, minerals: [m as never], mix: { cluster: 1 } });
+      const f = buildGeodeField(createRng(3), { ...opts, minerals: [m as MineralName], mix: { cluster: 1 } });
       const cB = arr(f, 'aColB'), t: [number, number, number] = [0, 0, 0];
       for (const i of ofPart(f, PART.crystal)) { t[0] += cB[i * 3]!; t[1] += cB[i * 3 + 1]!; t[2] += cB[i * 3 + 2]!; }
       return t;
@@ -142,6 +142,7 @@ describe('wild geodes', () => {
   it('parses geodeMix and geodeMineral, and stays three-free for the TV', () => {
     expect(parseGeodeMix('cathedral:2, geode, cluster, geode:0.5')).toEqual({ mix: { cathedral: 2, geode: 1.5, cluster: 1 }, problems: [] });
     expect(parseGeodeMix('cathedral, nodule').problems).toHaveLength(1);
+    expect(parseGeodeMix(`geode:1${'0'.repeat(400)}`).problems).toHaveLength(1); // overflows to Infinity
     expect(parseGeodeMineral('')).toEqual({ minerals: undefined, problems: [] });
     const w = parseGeodeMineral('world', 0.42).minerals!;
     expect(w).toHaveLength(2);

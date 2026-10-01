@@ -434,7 +434,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
     w.place = placeAt(R * 1.08, R * 0.15, Math.PI / 2 - rng.range(0.3, 0.55), rng.range(-0.25, 0.1));
     half(w, rng.fork(2), { ...opts, out: out.map(([a, b]) => [-a, b] as [number, number]) });
     w.settle(from, floor, R * 0.14);
-    return { r: R * 1.6, h: R * 2.1, star, light: star ? undefined : { y: R * 0.5, reach: R * 2.2 } };
+    return { r: R * 2.2, h: R * 2.1, star, light: star ? undefined : { y: R * 0.5, reach: R * 2.2 } };
   }
   if (kind === 'cathedral') {
     const R = rng.range(10, 12.5) * s;
@@ -443,7 +443,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
     w.place = placeAt(0, 0, Math.PI / 2);
     half(w, rng.fork(3), { out, R, depth: rng.range(0.8, 0.95), m, hollow: 0.8, hollowDepth: 0.9, crystals: 420, crystalScale: 0.75, aura, band });
     w.settle(from, floor, R * 0.2);
-    return { r: R * 1.2, h: R * 4.7, light: { y: R * 2.2, reach: R * 3 } };
+    return { r: R * 1.2, h: R * 6.4, light: { y: R * 2.2, reach: R * 3 } };
   }
   if (kind === 'cluster') {
     // A matrix stone, its crown sugary with druse, and points radiating from
@@ -523,7 +523,7 @@ export function galleryRows(minerals: readonly MineralName[] = MINERALS): Galler
     each((mineral) => ({ kind: 'geode', mineral, variant: 'hollow' })),
     each((mineral) => ({ kind: 'cluster', mineral })),
     each((mineral) => ({ kind: 'cathedral', mineral })),
-    [{ kind: 'cavern', mineral: minerals.includes('amethyst') ? 'amethyst' : minerals[0]! }],
+    [{ kind: 'cavern', mineral: minerals.includes('amethyst') ? 'amethyst' : (minerals[0] ?? 'quartz') }],
   ].filter((row) => row.length) as GallerySpecimen[][];
 }
 
@@ -578,7 +578,7 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
     if (grown.star) thundereggs += 1;
   };
   const minerals = opts.minerals?.length ? opts.minerals : undefined;
-  if (opts.layout === 'gallery') {
+  if (opts.layout === 'gallery' && opts.amount > 0) {
     // Columns a mineral each, rows a kind each, spaced so nothing touches;
     // the mega geode stands behind the lot.
     const rows = galleryRows(minerals ?? MINERALS);
@@ -590,14 +590,16 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
         // The cathedrals leave an empty slot in the middle, so the mega geode
         // shows between them; every other row is centred.
         const slot = tall && i >= Math.ceil(row.length / 2) ? i + 1 : i;
-        const x = (slot - (tall ? row.length : row.length - 1) / 2) * gap;
+        const x = (slot - (tall && row.length > 1 ? row.length : row.length - 1) / 2) * gap;
         put(g.kind, x, z, 0, g.mineral, !!g.aura, g.kind === 'cluster' ? s * 1.6 : s, g.variant);
       });
     });
   } else {
     // Fewer, and better: a geode is a find, not gravel.
-    const want = Math.round(opts.amount * opts.cap * 0.8);
     const named = opts.mix && Object.values(opts.mix).some((v) => (v ?? 0) > 0);
+    // A mix that names kinds but weights none of them (`cavern:0`) asks for nothing, not for the default.
+    const nothing = !!opts.mix && Object.keys(opts.mix).length > 0 && !named;
+    const want = nothing ? 0 : Math.round(opts.amount * opts.cap * 0.8);
     const weights = GEODE_KINDS.map((k) => [k, named ? Math.max(0, opts.mix?.[k] ?? 0) : KIND[k].share] as const).filter(([, v]) => v > 0);
     const total = weights.reduce((a, [, v]) => a + v, 0);
     const placed: Array<{ x: number; z: number; r: number }> = [];

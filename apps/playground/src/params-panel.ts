@@ -146,6 +146,10 @@ const METAQUARIUM: PanelKnowledge = {
     fishUrl: fishPicker,
   },
   presets: {
+    floraMix: ['kelp:3, anemone, clam', 'whip, seapen, curl'],
+    floraPalette: ['world', '#ff6ec7, #7dd7ff'],
+    geodeMix: ['geode:3, cathedral, cluster', 'cavern'],
+    geodeMineral: ['world', 'amethyst, citrine'],
     vignette: ['tea', 'bedtime', 'seek', 'a =table, b =door | b >table @a | a @b talk, b @a nod | b @a talk, a @b wiggle | a b circle rug'],
     propMix: [
       'crystal#hero:1@lotus/hotpink',

@@ -12,7 +12,7 @@
     },
     "crab": {
       "source": "source/crab.glb", "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
-      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Legs want a scuttle, not a body wave — motion follow-up."
+      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Legs want a scuttle, not a body wave — built (src/crab.ts)."
     },
     "dori": {
       "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",

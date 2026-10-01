@@ -23,7 +23,10 @@ export function parseGeodeMix(src: string): { mix: Partial<Record<GeodeKind, num
       problems.push(`"${part}": expected kind[:weight] with kind one of ${GEODE_KINDS.join(', ')}`);
       continue;
     }
-    mix[name] = (mix[name] ?? 0) + (m[2] === undefined ? 1 : Number(m[2]));
+    const sum = (mix[name] ?? 0) + (m[2] === undefined ? 1 : Number(m[2]));
+    // A weight that overflows to Infinity would make the pick deterministic, not weighted.
+    if (!Number.isFinite(sum)) { problems.push(`"${part}": weight is too large`); continue; }
+    mix[name] = sum;
   }
   return { mix, problems };
 }

@@ -682,14 +682,17 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         const R = o === 0 ? rng.range(1.4, 2.1) : rng.range(0.8, 1.6);
         const ox = x + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s, oz = z + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s;
         const cells = new Map<string, Color>(), n = Math.ceil(R);
+        let low = 0;
         for (let i = -n; i <= n; i += 1) for (let j = -n; j <= n; j += 1) for (let k = -n; k <= n; k += 1) {
           if (i * i + j * j + k * k > R * R + 0.3) continue;
           // Lit from above: a highlight cell at the crown, darker below.
           const c = j === n && i === 0 && k === 0 ? hue.clone().lerp(WHITE, 0.55) : hue.clone().multiplyScalar(0.55 + 0.45 * ((j + n) / (2 * n)));
           cells.set(cellKey(i, j, k), c);
+          if (j < low) low = j;
         }
         const size = V * 0.7;
-        body.solid([ox, root + n * size * 0.85, oz], size, cells, 0);
+        // The lowest occupied cell sits on the floor, however the radius rounds.
+        body.solid([ox, root + (0.5 - low) * size - size * 0.15, oz], size, cells, 0);
       }
     },
   },
@@ -859,7 +862,6 @@ export function buildFlora(
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
   const palette = opts.palette?.length ? opts.palette : null;
-  const total = weights.reduce((a, [, w]) => a + w, 0);
   let plants = 0, rare = 0, founded = 0;
 
   /** Grow one plant of `species` rooted at (x, z). */
@@ -963,9 +965,12 @@ export function buildFlora(
       x = col.x + Math.cos(a) * r; z = col.z + Math.sin(a) * r;
     } else {
       // Species by share, so a garden keeps its proportions at any density.
-      let roll = rng.next() * total;
-      species = weights[0]![0];
-      for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
+      // A species at its cap leaves the draw, or its rolls would eat the planting attempts.
+      const open = weights.filter(([sp]) => { const m = SPECIES[sp].max; return m === undefined || bySpecies[sp] < m; });
+      if (!open.length) break;
+      let roll = rng.next() * open.reduce((a, [, w]) => a + w, 0);
+      species = open[0]![0];
+      for (const [sp, w] of open) { if (roll < w) { species = sp; break; } roll -= w; }
       const def = SPECIES[species];
       const angle = rng.range(0, Math.PI * 2);
       const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;

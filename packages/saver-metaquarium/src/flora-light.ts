@@ -81,6 +81,9 @@ export const FLORA_LIGHT_VERTEX = /* glsl */ `
       float fr = pow(1.0 - abs(dot(mqN, normalize(cameraPosition - mqW))), 2.0);
       vec3 irid = 0.5 + 0.5 * cos(6.2832 * (fr * 1.3 + aSway.y * 0.05 + vec3(0.0, 0.33, 0.67)));
       vColor.rgb += aMat.y * fr * irid * 0.55;
+      // The sheen can push a bright vertex past 1 too: scale it back whole, keeping its hue.
+      mqTop = max(vColor.r, max(vColor.g, vColor.b));
+      if (mqTop > 1.0) vColor.rgb /= mqTop;
     }
     #endif
   }
