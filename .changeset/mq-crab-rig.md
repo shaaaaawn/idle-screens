@@ -9,3 +9,5 @@ The crab lives on the seabed now. It used to swim the floor band like a fish, ri
 - **On the ground, over the rocks.** It stands on the terrain, on the boulders' real top surface (`ground.ts` rasterises their stone, so it neither hovers on a fish's padded dome nor sinks in), and on a low mound over a crystal colony, tilting with the slope. Crabs give each other room.
 
 Everything is a closed form in t, like the rest of the tank. Scenes without a crab are unchanged.
+
+The crab's mouth (and the dori's eyes) no longer flicker. The breed intake drops a body face that lies under an eye decal, but it keyed faces by an unsnapped plane, and the delivered models put the body a hair (0.0002) off the decal's plane, so the two stayed and z-fought. Planes snap to the lattice now; a breed test holds every voxel breed to no body face under a decal.

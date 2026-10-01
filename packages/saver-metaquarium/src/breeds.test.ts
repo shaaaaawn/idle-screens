@@ -71,6 +71,37 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
   });
 
+  it('no body face lies under an eye decal: the two would z-fight (the crab\'s mouth flickered)', async () => {
+    for (const [name, spec] of Object.entries(manifest.breeds)) {
+      if (spec.kind !== 'voxel') continue;
+      const doc = await new NodeIO().read(here(`../breeds/${name}.glb`).pathname);
+      // Each triangle's centroid, keyed by the plane it faces out of: a body
+      // triangle sharing a key with an eye triangle covers the same spot.
+      const eye = new Set<string>(), body: string[] = [];
+      for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+        const isEye = /eye/i.test(p.getMaterial()?.getName() ?? '');
+        const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        const n = idx ? idx.getCount() : pos.getCount();
+        for (let t = 0; t < n; t += 3) {
+          const c = [0, 1, 2].map((k) => pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]);
+          const u = c[1]!.map((v, i) => v - c[0]![i]!), v = c[2]!.map((x, i) => x - c[0]![i]!);
+          const nrm = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+          const ax = [0, 1, 2].reduce((b, i) => (Math.abs(nrm[i]!) > Math.abs(nrm[b]!) ? i : b), 0);
+          const [a1, a2] = [0, 1, 2].filter((i) => i !== ax) as [number, number];
+          const lo = [Math.min(...c.map((q) => q[a1]!)), Math.min(...c.map((q) => q[a2]!))];
+          const hi = [Math.max(...c.map((q) => q[a1]!)), Math.max(...c.map((q) => q[a2]!))];
+          // Sample the triangle's rectangle on a fine grid (a greedy rectangle
+          // and a voxel quad cover the same cells, whatever their sizes).
+          for (let x = lo[0]! + 0.25; x < hi[0]!; x += 0.5) for (let y = lo[1]! + 0.25; y < hi[1]!; y += 0.5) {
+            const key = `${ax}|${Math.sign(nrm[ax]!)}|${Math.round(c[0]![ax]! * 20)}|${Math.round(x * 4)}|${Math.round(y * 4)}`;
+            if (isEye) eye.add(key); else body.push(key);
+          }
+        }
+      }
+      expect(body.filter((k) => eye.has(k)), name).toEqual([]);
+    }
+  });
+
   it('the server-side manifest never pulls model bytes in', () => {
     // manifest.ts → ipfs.ts is what idle-server imports to validate a mix.
     for (const file of ['./manifest.ts', './ipfs.ts']) {

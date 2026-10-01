@@ -130,7 +130,10 @@ function greedy(doc, voxel, swim) {
   // Decoded Draco positions carry float noise (2.9985 for 3), so the phase is
   // snapped to 1/40 of a voxel — two faces on one lattice must share a key.
   const phase = (x) => { const step = voxel / 40; const m = ((Math.round(x / step) * step) % voxel + voxel) % voxel; return m > voxel - step / 2 ? 0 : +m.toFixed(4); };
-  const planeKey = (f) => `${f.axis}|${f.sign}|${f.plane.toFixed(4)}|${phase(f.u0)}|${phase(f.v0)}`;
+  // The plane snaps too: the crab's mouth sat at z -10.0000 over body faces at
+  // -9.9998, so the decal rule never matched them and the two z-fought.
+  const snap = (x) => { const step = voxel / 40; return (Math.round(x / step) * step).toFixed(4); };
+  const planeKey = (f) => `${f.axis}|${f.sign}|${snap(f.plane)}|${phase(f.u0)}|${phase(f.v0)}`;
   const cellsOf = (f) => {
     const pu = phase(f.u0), pv = phase(f.v0), out = [];
     for (let i = Math.round((f.u0 - pu) / voxel); i < Math.round((f.u1 - pu) / voxel); i++) {
