@@ -134,16 +134,19 @@ describe('bundled breeds (breeds/README.md)', () => {
     let tris = 0;
     const json = gltfJson(readFileSync(here('../breeds/shark.glb')));
     for (const mesh of json.meshes) for (const p of mesh.primitives) tris += json.accessors[p.indices ?? p.attributes.POSITION]!.count / 3;
-    expect(tris).toBeLessThan(2500); // was 5,726 before the cull
+    expect(tris).toBeLessThan(4000); // was 5,726 before the cull; the soft spine's bending faces merge only across the body
   });
 
   it('no body face lies under an eye decal: the two would z-fight (the crab\'s mouth flickered)', async () => {
     for (const [name, spec] of Object.entries(manifest.breeds)) {
       if (spec.kind !== 'voxel') continue;
       const doc = await new NodeIO().read(here(`../breeds/${name}.glb`).pathname);
-      // Each triangle's centroid, keyed by the plane it faces out of: a body
-      // triangle sharing a key with an eye triangle covers the same spot.
-      const eye = new Set<string>(), body: string[] = [];
+      // Each triangle's rectangle, keyed by the plane it faces out of: a body
+      // rectangle overlapping an eye's on one plane covers the same spot. Exact
+      // overlap, not cells: the shark's eye sits a third of a voxel off the
+      // head's lattice, and shares no cell with the face it covers.
+      type Rect = [number, number, number, number];
+      const eye = new Map<string, Rect[]>(), body: [string, Rect][] = [];
       for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
         const isEye = /eye|GLOW-Orbs/i.test(p.getMaterial()?.getName() ?? '');
         const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
@@ -154,17 +157,15 @@ describe('bundled breeds (breeds/README.md)', () => {
           const nrm = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
           const ax = [0, 1, 2].reduce((b, i) => (Math.abs(nrm[i]!) > Math.abs(nrm[b]!) ? i : b), 0);
           const [a1, a2] = [0, 1, 2].filter((i) => i !== ax) as [number, number];
-          const lo = [Math.min(...c.map((q) => q[a1]!)), Math.min(...c.map((q) => q[a2]!))];
-          const hi = [Math.max(...c.map((q) => q[a1]!)), Math.max(...c.map((q) => q[a2]!))];
-          // Sample the triangle's rectangle on a fine grid (a greedy rectangle
-          // and a voxel quad cover the same cells, whatever their sizes).
-          for (let x = lo[0]! + 0.25; x < hi[0]!; x += 0.5) for (let y = lo[1]! + 0.25; y < hi[1]!; y += 0.5) {
-            const key = `${ax}|${Math.sign(nrm[ax]!)}|${Math.round(c[0]![ax]! * 20)}|${Math.round(x * 4)}|${Math.round(y * 4)}`;
-            if (isEye) eye.add(key); else body.push(key);
-          }
+          const r: Rect = [Math.min(...c.map((q) => q[a1]!)), Math.max(...c.map((q) => q[a1]!)), Math.min(...c.map((q) => q[a2]!)), Math.max(...c.map((q) => q[a2]!))];
+          const key = `${ax}|${Math.sign(nrm[ax]!)}|${Math.round(c[0]![ax]! * 20)}`;
+          if (isEye) (eye.get(key) ?? eye.set(key, []).get(key)!).push(r); else body.push([key, r]);
         }
       }
-      expect(body.filter((k) => eye.has(k)), name).toEqual([]);
+      // Overlapping on both axes, past the sources' float noise (a dori eye sits 0.012 off its grid).
+      const overlaps = (a: Rect, b: Rect): boolean => Math.min(a[1], b[1]) - Math.max(a[0], b[0]) > 0.1 && Math.min(a[3], b[3]) - Math.max(a[2], b[2]) > 0.1;
+      const under = body.filter(([k, r]) => (eye.get(k) ?? []).some((e) => overlaps(r, e)));
+      expect(under.map(([k, r]) => `${k} ${r.map((x) => x.toFixed(2)).join(',')}`), name).toEqual([]);
     }
   });
 

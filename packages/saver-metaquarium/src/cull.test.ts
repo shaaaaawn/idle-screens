@@ -86,10 +86,10 @@ describe('jointsOf', () => {
     expect(jointsOf(prim)).toEqual([2, 2]);
   });
 
-  it('refuses a vertex whose weight is shared with another slot', () => {
+  it('marks a triangle whose weight is shared as blending (-1), not rigid', () => {
     const { doc } = build([{ joint: 2, faces: [{ cell: [0, 0, 0], side: [0, 1] }] }]);
     const prim = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!;
-    prim.getAttribute('WEIGHTS_0')!.setElement(0, [0.9999, 0.0001 + 0.001, 0, 0]);
-    expect(() => jointsOf(prim)).toThrow(/not rigidly skinned/);
+    prim.getAttribute('WEIGHTS_0')!.setElement(0, [0.5, 0.5, 0, 0]);
+    expect(jointsOf(prim)).toEqual([-1, 2]);
   });
 });

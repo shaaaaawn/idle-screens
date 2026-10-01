@@ -9,21 +9,29 @@ export function trianglesOf(p) {
   return out;
 }
 
-/** The joint each triangle is skinned to (rigged models are rigid: one joint,
- *  weight 1, per triangle — breeds/rig/*.py writes them that way), or null. */
+/** The joint each triangle is skinned to, or null for no rig. A rigid part's
+ *  triangle rides one joint at weight 1; a triangle that BLENDS (the shark's
+ *  spine bends across a zone at each joint) is -1, and passes through the
+ *  intake exactly as authored. */
 export function jointsOf(p) {
   const j = p.getAttribute('JOINTS_0'), w = p.getAttribute('WEIGHTS_0'); if (!j) return null;
   const idx = p.getIndices(); const n = idx ? idx.getCount() : j.getCount(); const out = [];
   for (let t = 0; t < n / 3; t++) {
     const ids = [0, 1, 2].map((k) => (idx ? idx.getScalar(t * 3 + k) : t * 3 + k));
     const js = ids.map((i) => j.getElement(i, [])[0]);
-    // One joint at full weight, the other three slots empty (a weight of 1 in
-    // a later slot, or a stray share, is not a rigid part).
-    const rigid = (i) => { const [w0, ...rest] = w.getElement(i, []); return Math.abs(w0 - 1) <= 1e-4 && rest.every((x) => Math.abs(x) <= 1e-4); };
-    if (js[1] !== js[0] || js[2] !== js[0] || !ids.every(rigid)) {
-      throw new Error(`${p.getMaterial()?.getName()}: triangle ${t} is not rigidly skinned to one joint`);
-    }
-    out.push(js[0]);
+    const rigid = js[1] === js[0] && js[2] === js[0] && ids.every((i) => Math.abs(w.getElement(i, [])[0] - 1) < 1e-3);
+    out.push(rigid ? js[0] : -1);
+  }
+  return out;
+}
+
+/** The joint each triangle mostly rides (its first corner's heaviest). */
+export function dominantOf(p) {
+  const j = p.getAttribute('JOINTS_0'), w = p.getAttribute('WEIGHTS_0'); if (!j) return null;
+  const out = [];
+  for (let t = 0; t < j.getCount() / 3; t++) {
+    const js = j.getElement(t * 3, []), ws = w.getElement(t * 3, []);
+    out.push(js[ws.indexOf(Math.max(...ws))]);
   }
   return out;
 }
@@ -59,14 +67,16 @@ export function cullHidden(doc, voxel) {
   // A flat plate (a face with no cube behind it) must not bury what it faces.
   const sides = new Map();
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
-    const joints = jointsOf(p);
+    const joints = jointsOf(p), dominant = dominantOf(p);
     // Only a face exactly one voxel square: a bigger one (a source built
     // partly from boxes, as the shark's is) is not one cell, and the one cell
     // in front of its middle says nothing about the rest of it.
     const unit = (f) => Math.abs(f.u1 - f.u0 - voxel) < voxel * 0.01 && Math.abs(f.v1 - f.v0 - voxel) < voxel * 0.01;
     const faces = trianglesOf(p).map((tri, t) => {
       const f = faceOf(tri); if (!f || !unit(f)) return null;
-      const j = joints ? joints[t] : 0;
+      // A blending face counts as the joint it mostly rides: buried inside a
+      // bending body, it and what buries it bend together.
+      const j = joints ? (joints[t] >= 0 ? joints[t] : dominant[t]) : 0;
       const inside = `${key(at(f, -1))}|${j}`;
       (sides.get(inside) ?? sides.set(inside, new Set()).get(inside)).add(`${f.axis}${f.sign}`);
       return { front: key(at(f, 1)), j };

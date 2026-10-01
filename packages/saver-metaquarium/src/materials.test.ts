@@ -495,13 +495,18 @@ describe('METAL- parts (a glowfish\'s teeth)', () => {
     const root = new Group(); root.add(part);
     return { root, part };
   };
-  it('lit: a polished plate that takes the environment, tinted only a little by its authored colour', () => {
+  it('lit: a satin metal plate that takes the environment, tinted only a little by its authored colour', () => {
     const { root, part } = fishWith('METAL-Teeth');
     applyNpcMaterials(root, createRng(1), true, true);
     const m = part.material as MeshStandardMaterial;
     expect(m).toBeInstanceOf(MeshStandardMaterial);
-    expect(m.metalness).toBeGreaterThan(0.8);
-    expect(m.roughness).toBeLessThan(0.3);
+    expect(m.metalness).toBeGreaterThan(0.6);
+    // Not a mirror: a flat face reflecting one direction flips white ↔ black
+    // as the jaw swings (the shark's teeth flickered). Blurred, with a floor.
+    expect(m.roughness).toBeGreaterThan(0.3);
+    expect(m.roughness).toBeLessThan(0.5);
+    expect(m.emissive.r + m.emissive.g + m.emissive.b).toBeGreaterThan(0.5);
+    expect(m.polygonOffset).toBe(true);
     expect(m.color.r + m.color.g + m.color.b).toBeGreaterThan(2); // steel, not the dark purple it was authored
     expect(m.userData.mqOwned).toBe(true);
   });

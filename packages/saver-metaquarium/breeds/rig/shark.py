@@ -15,6 +15,10 @@ is +X.
     body     the trunk and the dorsal fin, -25 < y < 5
     tail     three links back to the caudal fin: tail1 (5..20), tail2 (20..32),
              caudal (y > 32) — the swim is a wave that grows down them
+
+The spine BENDS: rigid links would open a wedge at every joint (the body
+reads as three pieces), so across a zone at each joint the vertices blend
+between the two links (`soften`). The jaw, eyes and fins stay rigid parts.
     fins     the pectorals, beyond the flanks (|x| > 16), hinged at the body
 
 Clips (30 fps; the tank sets their times and weights, never update(dt)):
@@ -33,8 +37,44 @@ import bpy
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, apply_pose, bake, begin, build_armature, env, export, in_scene, lattice, load_source, out_path, segment, track,
+    Pose, apply_pose, bake, begin, build_armature, ease, env, export, in_scene, lattice, load_source, out_path, segment,
+    track,
 )
+
+SPINE = ['head', 'body', 'tail1', 'tail2', 'caudal']
+# Where each pair of links meets (y), and the half-width of the zone it bends over.
+BENDS = [(-25.0, 5.2), (5.0, 5.2), (20.0, 3.9), (32.0, 2.6)]
+
+
+def spine_weights(y):
+    for i, (yj, h) in enumerate(BENDS):
+        if abs(y - yj) < h:
+            s = ease((y - (yj - h)) / (2 * h))
+            return {SPINE[i]: 1 - s, SPINE[i + 1]: s}
+    k = sum(1 for yj, _ in BENDS if y >= yj)
+    return {SPINE[k]: 1.0}
+
+
+def soften(meshes):
+    """Re-weight every spine vertex by where it lies along the body."""
+    blended = 0
+    for o in meshes:
+        groups = {g.name: g for g in o.vertex_groups}
+        idx = {g.index: g.name for g in o.vertex_groups}
+        for v in o.data.vertices:
+            names = [idx[g.group] for g in v.groups]
+            if not names or names[0] not in SPINE:
+                continue
+            w = spine_weights(v.co.y)
+            for n in SPINE:
+                if n in groups:
+                    groups[n].remove([v.index])
+            for n, x in w.items():
+                if n not in groups:
+                    groups[n] = o.vertex_groups.new(name=n)
+                groups[n].add([v.index], x, 'REPLACE')
+            blended += len(w) > 1
+    return blended
 
 
 def bone_of(x, y, z, mat):
@@ -91,7 +131,7 @@ def swim(t, T=1.2):
     p = Pose()
     w = 2 * math.pi * t / T
     wave(p, w)
-    gape(p, 0.06 + 0.02 * math.sin(2 * w))
+    gape(p, 0.03 + 0.015 * math.sin(2 * w))
     for side, m in (('R', 1), ('L', -1)):
         p.turn(f'fin.{side}', 'y', m * 0.05 * math.sin(w + 0.8))
     return p
@@ -100,7 +140,7 @@ def swim(t, T=1.2):
 def bite(t, T=1.8):
     p = Pose()
     rear = env(t, 0.0, 0.35, 0.42, 0.55)                      # snout up, jaw wide
-    jaw = track(t, [(0, 0.06), (0.35, 0.6), (0.44, 0.62), (0.5, -0.02), (0.62, 0.05), (1.2, 0.08), (T, 0.06)])
+    jaw = track(t, [(0, 0.03), (0.35, 0.6), (0.44, 0.62), (0.5, -0.02), (0.62, 0.04), (1.2, 0.05), (T, 0.03)])
     gape(p, jaw)
     p.turn('head', 'x', -0.16 * rear)
     lunge = env(t, 0.3, 0.46, 0.55, 1.1)
@@ -131,6 +171,7 @@ def main():
         pitch, _ = lattice(meshes)
         assert pitch == 2.6, pitch
         counts = segment(meshes, bone_of, pitch, (0, 0, 0), by_point=True)
+        counts['blended vertices'] = soften(meshes)
         rig = build_armature('Shark', meshes, bone_table())
         keyed = {}
         for pb in rig.pose.bones:
