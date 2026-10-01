@@ -135,7 +135,7 @@ describe('flora', () => {
     expect(lampsGleam).toBe(true);
     expect(rare / plants).toBeGreaterThan(0.01);
     expect(rare / plants).toBeLessThan(0.12);
-  });
+  }, 30_000); // thirty whole gardens: a rate needs a sample, and coverage slows every voxel
 
   it('the elder is one great tree, out past the garden', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { elder: 1 } });
