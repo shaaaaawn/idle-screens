@@ -13,6 +13,8 @@ swims on every host: the wall, the Mac app and the playground.
 breeds/
   source/<breed>.glb   the model as delivered, untouched (Draco, instancing, whatever it came with)
   rig/<breed>.py       a rigged breed's Blender script: source in, rig/<breed>.glb (skeleton + clips) out
+  rig/common.py        what every rig script shares: load, lattice, segment, armature, pose, bake, export
+  rig/build.py         every rig into one .blend (a scene per breed); rig/export.py ships a hand edit from it
   breeds.json          the intake manifest: roles, kind, size, motion, notes
   intake.mjs           the pipeline (pnpm --filter @idle-screens/saver-metaquarium breeds [names…])
   <breed>.glb          the optimised result: what the lab reviews and the tests pin
@@ -41,6 +43,7 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    | `EYES-White` / `EYES-Black` | unlit sclera and pupil; `eyeLife` rigs them from their voxel grid |
    | `GLOW-<colour>` | unlit in its own colour, plus the halo shells and bloom card |
    | `KEEP-<part>` | the authored colour, kept (a screen, teeth) |
+   | `METAL-<part>` | polished metal: a reflective plate when lit, chrome when flat (`fishMetal: 'off'` makes it the authored colour, matte) |
    | anything else | **a random coat**: almost never what you want |
 
    Also set `metal`/`roughness` if the source shipped glTF's default of
@@ -85,15 +88,32 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
 ## Rigged breeds
 
 Hand-authored motion (legs with real joints, a claw that opens) is a
-skeleton and clips made in Blender. The crab is the first:
-`rig/crab.py` imports `source/crab.glb`, rigs it and bakes its clips, and
-writes `rig/crab.glb`, which `breeds.json` names as the intake's source (the
-delivered model stays as `delivered`).
+skeleton and clips made in Blender:
+
+| breed | rig | driver | clips |
+|---|---|---|---|
+| crab | `rig/crab.py`: 23 parts, legs placed by two-bone IK | `src/crab.ts` walks it on the seabed | walk idle pinch forage wave cheer |
+| glowfish | `rig/glowfish.py`: jaw, flip-top head, tail, blinking eyes, three-link lure | `src/angler.ts` (the tank swims it) | swim lure chomp blink |
+
+A breed's script imports `source/<breed>.glb`, rigs it, bakes its clips and
+writes `rig/<breed>.glb`, which `breeds.json` names as the intake's source
+(the delivered model stays as `delivered`). The shared machinery is
+`rig/common.py`; a script is only anatomy (which bone a voxel belongs to,
+where the bones sit) and clips (functions of seconds).
 
 ```
-blender -b -P breeds/rig/crab.py       # from packages/saver-metaquarium; or exec it in a live Blender
-pnpm --filter @idle-screens/saver-metaquarium breeds crab
+blender -b -P breeds/rig/glowfish.py                       # one rig (from packages/saver-metaquarium)
+blender -b -P breeds/rig/build.py -- /path/breeds.blend    # every rig, and one .blend to open
+pnpm --filter @idle-screens/saver-metaquarium breeds glowfish
 ```
+
+**Editing by hand.** `build.py` writes a .blend with a scene per breed: its
+rig, its clips as `<breed>:<clip>` actions on muted NLA tracks, a camera and
+lights. Edit a clip there, then ship it with `rig/export.py` (from the
+Scripting tab with that scene open, or `blender file.blend -b -P
+breeds/rig/export.py -- <breed>`) and run the intake. The scripts stay the
+source of truth: port the edit into `<breed>.py`, or the next `build.py`
+overwrites it.
 
 The rules a rig keeps, so the intake and the tank can trust it:
 
@@ -106,16 +126,25 @@ The rules a rig keeps, so the intake and the tank can trust it:
   merges, since the body wave never bends a skinned mesh), and keeps
   `JOINTS_0`/`WEIGHTS_0`.
 - **Pivots on voxel boundaries**, so a joint opens the smallest seam.
-- **Clips are named actions**, exported sampled; a loop's last key is its
-  first. The intake drops channels a clip never moves and resamples the rest.
+- **Clips are named actions** (`<breed>:<clip>`, one NLA track each),
+  exported sampled; a loop's last key is its first. The intake drops channels
+  a clip never moves and resamples the rest. A blink is SCALE keys on the eye
+  bones only, so it layers over any other clip.
 - **Facts the tank needs ride as extras** on the armature node: the crab's
   `mqStride` is the body's travel per walk cycle, so the tank sets the gait's
   phase from distance and the feet never slide.
 
-The tank side is a module per rigged breed (`src/crab.ts`): it picks which
-clip plays, when and where, and sets every action's time and weight each
-frame, so the tank stays a pure function of t. `breeds.test.ts` holds the
-crab's skin, clips and joint assignment.
+- **Glow parts that ride one bone** (a lure) have their bloom card and light
+  placed from that bone each frame (`materials.ts` `partBone`); a rig's driver
+  can set a light level per glow material (the lure breathes, beckons and goes
+  dark at the strike). Flash-safe: no faster than 1.5 Hz, tested.
+- **Never put `eye` in a glow role's name**: `isEyes()` would make it a
+  black-and-white eye display. The glowfish's glowing eyes are `GLOW-Orbs`.
+
+The tank side is a module per rigged breed (`src/crab.ts`, `src/angler.ts`):
+it picks which clip plays and when, and sets every action's time and weight
+each frame, so the tank stays a pure function of t. `breeds.test.ts` holds
+each rig's skin, clips and joint assignment.
 
 ## Budgets
 

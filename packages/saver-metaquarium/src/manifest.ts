@@ -224,6 +224,12 @@ export const METAQUARIUM_PARAMS = {
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
    *  for the original unlit atlas look. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+  /** The bundled creatures' look. `neon` is the blacklight poster: coats near
+   *  black, the dark of the eyes (and a crab's mouth) a seeded neon that glows
+   *  and blooms, glow parts as they are. The glowing eyes are light, not an eye
+   *  display, so `eyeLife` leaves them be. Minted fish keep their atlases.
+   *  Best in a dark room with `finish`. Read when a fish spawns. */
+  fishLook: { type: 'enum', default: 'natural', options: ['natural', 'neon'], ease: 'step' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.

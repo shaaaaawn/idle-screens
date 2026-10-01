@@ -3,9 +3,9 @@ Rig and animate the crab: breeds/source/crab.glb in, breeds/rig/crab.glb out.
 
     blender -b -P breeds/rig/crab.py            (from packages/saver-metaquarium)
 
-or paste `exec(open('<abs path>/breeds/rig/crab.py').read())` into a live
-Blender (the Blender MCP does exactly that), which leaves the rig in the scene
-to look at.
+or run it in a live Blender (build.py runs every rig into one .blend). The
+shared machinery — load, lattice, segment, armature, bake, export — is
+common.py; this file is the crab's anatomy and its clips.
 
 The model is never edited. Every vertex keeps its position, material and
 colour; the rig only says which part each voxel face belongs to. The bind pose
@@ -47,21 +47,18 @@ and out of idle without a pop.
 """
 import math
 import os
-import re
+import sys
 
-import bmesh
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-try:
-    HERE = os.path.dirname(os.path.abspath(__file__))
-except NameError:  # exec()'d from a live session
-    HERE = globals().get('CRAB_RIG_DIR') or '/'.join(__import__('inspect').stack()[0].filename.split('/')[:-1])
-BREEDS = os.path.dirname(HERE)
-SRC = os.path.join(BREEDS, 'source', 'crab.glb')
-OUT = os.path.join(HERE, 'crab.glb')
+sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from common import (  # noqa: E402
+    Pose as BasePose, apply_pose, bake, begin, in_scene, build_armature, ease, env, export, lattice, load_source,
+    out_path, qa, segment, to_local, track,
+)
 
-FPS = 30
 STRIDE = 6.0     # model units a planted foot sweeps during its stance
 LIFT = 3.2       # swing height of a foot
 MID_X = 11.0     # the crab's mirror plane
@@ -71,25 +68,6 @@ LEG_ROWS = {7: 1, 8: 1, 11: 2, 12: 2, 15: 3, 16: 3, 19: 4, 20: 4}
 
 def mirror_x(x):
     return 2 * MID_X - x
-
-
-# --------------------------------------------------------------------------
-# Scene
-# --------------------------------------------------------------------------
-
-def load_source():
-    for o in list(bpy.data.objects):
-        bpy.data.objects.remove(o, do_unlink=True)
-    for a in list(bpy.data.actions):
-        bpy.data.actions.remove(a)
-    for coll in (bpy.data.armatures, bpy.data.meshes, bpy.data.materials):
-        for d in list(coll):
-            coll.remove(d)
-    bpy.ops.import_scene.gltf(filepath=SRC)
-    meshes = [o for o in bpy.data.objects if o.type == 'MESH']
-    for o in meshes:
-        assert o.matrix_world == Matrix.Identity(4), f'{o.name} carries a transform'
-    return meshes
 
 
 def bone_of(ix, iy, iz, mat):
@@ -106,30 +84,6 @@ def bone_of(ix, iy, iz, mat):
         return f'eye.{side}'
     return 'body'
 
-
-def segment(meshes):
-    """A vertex group per part; returns face counts per bone."""
-    counts = {}
-    for o in meshes:
-        me = o.data
-        mat = re.sub(r'\.\d{3}$', '', me.materials[0].name)
-        bm = bmesh.new()
-        bm.from_mesh(me)
-        bm.faces.ensure_lookup_table()
-        owner = {}
-        for f in bm.faces:
-            c = f.calc_center_median() - f.normal * 1.0
-            ix, iy, iz = math.floor((c.x - 1) / 2), math.floor(c.y / 2), math.floor((c.z - 1) / 2)
-            b = bone_of(ix, iy, iz, mat)
-            counts[b] = counts.get(b, 0) + 1
-            for v in f.verts:
-                prev = owner.setdefault(v.index, b)
-                assert prev == b, f'vertex {v.index} of {o.name} shared by {prev} and {b}'
-        bm.free()
-        for b in sorted(set(owner.values())):
-            g = o.vertex_groups.new(name=b)
-            g.add([i for i, ob in owner.items() if ob == b], 1.0, 'REPLACE')
-    return counts
 
 
 # Bone heads/tails in model space. Pivots sit on voxel boundaries, where a
@@ -150,81 +104,15 @@ def bone_table():
     return t
 
 
-def build_armature(meshes):
-    arm = bpy.data.armatures.new('CrabRig')
-    rig = bpy.data.objects.new('Crab', arm)
-    bpy.context.scene.collection.objects.link(rig)
-    bpy.context.view_layer.objects.active = rig
-    bpy.ops.object.mode_set(mode='EDIT')
-    table = bone_table()
-    for name, (h, tl, _) in table.items():
-        eb = arm.edit_bones.new(name)
-        eb.head, eb.tail = Vector(h), Vector(tl)
-        eb.roll = 0
-    for name, (_, _, parent) in table.items():
-        if parent:
-            arm.edit_bones[name].parent = arm.edit_bones[parent]
-            arm.edit_bones[name].use_connect = False
-    arm.edit_bones['root'].use_deform = False
-    bpy.ops.object.mode_set(mode='OBJECT')
-    for o in meshes:
-        o.parent = rig
-        mod = o.modifiers.new('Armature', 'ARMATURE')
-        mod.object = rig
-    for pb in rig.pose.bones:
-        pb.rotation_mode = 'QUATERNION'
-    return rig
-
-
-# --------------------------------------------------------------------------
-# Posing: every rotation is authored as a WORLD axis + angle about the bone's
-# head, relative to its parent (they compose), and converted to bone space.
-# --------------------------------------------------------------------------
-
-AX = {'x': Vector((1, 0, 0)), 'y': Vector((0, 1, 0)), 'z': Vector((0, 0, 1))}
-
-
-def qa(axis, angle):
-    return Quaternion(AX[axis], angle)
-
-
-def to_local(rig, name, q_world):
-    r = rig.data.bones[name].matrix_local.to_quaternion()
-    return r.inverted() @ q_world @ r
-
-
-def ease(x):
-    x = min(1.0, max(0.0, x))
-    return x * x * (3 - 2 * x)
-
-
-def env(t, a, b, c, d):
-    """0 before a, eases to 1 over a..b, holds, eases back to 0 over c..d."""
-    return ease((t - a) / max(1e-6, b - a)) * (1 - ease((t - c) / max(1e-6, d - c)))
-
-
-def track(t, keys):
-    """Piecewise eased value through [(time, value), ...]."""
-    if t <= keys[0][0]:
-        return keys[0][1]
-    for (t0, v0), (t1, v1) in zip(keys, keys[1:]):
-        if t <= t1:
-            return v0 + (v1 - v0) * ease((t - t0) / max(1e-6, t1 - t0))
-    return keys[-1][1]
-
-
-class Pose:
-    """One frame: body offset/rotation, foot targets (ground frame), and
-    extra rotations per bone (world axis, relative to the parent)."""
+class Pose(BasePose):
+    """A crab's frame: the body's offset and rotation, foot targets (ground
+    frame), and extra rotations per bone."""
 
     def __init__(self):
+        super().__init__()
         self.body_off = Vector((0, 0, 0))
         self.body_rot = Quaternion()
         self.feet = {}   # (leg, side) -> (dx, dy, dz) from the rest foot, ground frame
-        self.rot = {}    # bone -> Quaternion
-
-    def turn(self, bone, axis, angle):
-        self.rot[bone] = qa(axis, angle) @ self.rot.get(bone, Quaternion())
 
 
 def claw(p, side, lift=0.0, out=0.0, inward=0.0, jaw=0.0):
@@ -275,9 +163,6 @@ def solve_leg(rig, leg, side, foot_ground, body_mat):
 
 def apply(rig, p):
     pbs = rig.pose.bones
-    for pb in pbs:
-        pb.rotation_quaternion = Quaternion()
-        pb.location = Vector()
     body = rig.data.bones['body']
     pivot = body.head_local
     body_mat = Matrix.Translation(p.body_off + pivot) @ p.body_rot.to_matrix().to_4x4() @ Matrix.Translation(-pivot)
@@ -290,8 +175,7 @@ def apply(rig, p):
             q1, q2 = solve_leg(rig, leg, side, rest + Vector((dx, dy, dz)), body_mat)
             pbs[f'thigh{leg}.{side}'].rotation_quaternion = to_local(rig, f'thigh{leg}.{side}', q1)
             pbs[f'shin{leg}.{side}'].rotation_quaternion = to_local(rig, f'shin{leg}.{side}', q2)
-    for name, q in p.rot.items():
-        pbs[name].rotation_quaternion = to_local(rig, name, q)
+    apply_pose(rig, p)
 
 
 # --------------------------------------------------------------------------
@@ -419,94 +303,27 @@ CLIPS = [('walk', walk, 1.0), ('idle', idle, 4.0), ('pinch', pinch, 2.0),
          ('forage', forage, 3.0), ('wave', wave, 3.0), ('cheer', cheer, 2.5)]
 
 
-def bake(rig):
-    scene = bpy.context.scene
-    scene.render.fps = FPS
-    rig.animation_data_create()
-    track_names = []
-    for name, fn, T in CLIPS:
-        act = bpy.data.actions.new(name)
-        act.use_fake_user = True
-        rig.animation_data.action = act
-        frames = int(round(T * FPS))
-        loop = name in ('walk', 'idle')
-        for f in range(frames + 1):
-            # A loop's last key IS its first, so the wrap never pops.
-            apply(rig, fn((f % frames if loop else f) / FPS, T))
-            for pb in rig.pose.bones:
-                if pb.name == 'root':
-                    continue
-                pb.keyframe_insert('rotation_quaternion', frame=f)
-                if pb.name == 'body':
-                    pb.keyframe_insert('location', frame=f)
-        for fc in _fcurves(act):
-            for kp in fc.keyframe_points:
-                kp.interpolation = 'LINEAR'
-        nt = rig.animation_data.nla_tracks.new()
-        nt.name = name
-        nt.strips.new(name, 0, act)
-        nt.mute = True
-        track_names.append(name)
-        rig.animation_data.action = None
-    for pb in rig.pose.bones:
-        pb.rotation_quaternion = Quaternion()
-        pb.location = Vector()
-    return track_names
-
-
-def _fcurves(act):
-    if hasattr(act, 'fcurves') and len(getattr(act, 'fcurves', [])):
-        return list(act.fcurves)
-    out = []
-    for layer in getattr(act, 'layers', []):
-        for strip in layer.strips:
-            for bag in strip.channelbags:
-                out.extend(bag.fcurves)
-    return out
-
-
-def export(rig):
-    rig['mqRig'] = 1
-    # The body's travel per walk cycle: a planted foot sweeps STRIDE while the
-    # body walks past it for the stance's DUTY of the cycle, so a whole cycle
-    # carries the body STRIDE / DUTY. The tank sets the clip's phase from
-    # distance with this, and the feet stay put.
-    rig['mqStride'] = STRIDE / DUTY
-    rig['mqFps'] = FPS
-    bpy.ops.object.select_all(action='DESELECT')
-    rig.select_set(True)
-    for o in rig.children:
-        o.select_set(True)
-    bpy.ops.export_scene.gltf(
-        filepath=OUT, export_format='GLB', use_selection=True,
-        export_yup=True, export_apply=False, export_skins=True,
-        export_animations=True, export_animation_mode='ACTIONS',
-        export_force_sampling=True, export_frame_step=1,
-        export_optimize_animation_size=True, export_def_bones=True,
-        export_extras=True,
-        # Draco keeps the committed rig small (the intake decodes it). Positions
-        # at Draco's finest (30 bits, ~5e-8 units): the delivered vertices come
-        # back as authored, so the intake's result is the same as from an
-        # uncompressed export. Joints and weights ride along losslessly.
-        export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=7,
-        export_draco_position_quantization=30, export_draco_normal_quantization=10,
-        export_draco_generic_quantization=16,
-        export_normals=True, export_texcoords=False, export_attributes=False,
-        export_materials='EXPORT', export_rest_position_armature=True,
-    )
-    return OUT
-
-
 def main():
-    meshes = load_source()
-    counts = segment(meshes)
-    rig = build_armature(meshes)
-    clips = bake(rig)
-    out = export(rig)
-    return {'faces_per_bone': counts, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
-            'bytes': os.path.getsize(out)}
+    scene = bpy.data.scenes.get('crab') or bpy.data.scenes.new('crab')
+    with in_scene(scene):
+        begin('crab')
+        meshes = load_source('crab')
+        pitch, phase = lattice(meshes)
+        assert (pitch, phase) == (2.0, (1.0, 0.0, 1.0)), (pitch, phase)
+        counts = segment(meshes, bone_of, pitch, phase)
+        rig = build_armature('Crab', meshes, bone_table())
+        keyed = {pb.name: ['rotation_quaternion'] + (['location'] if pb.name == 'body' else [])
+                 for pb in rig.pose.bones if pb.name != 'root'}
+        clips = bake(rig, 'crab', CLIPS, apply, ('walk', 'idle'), keyed)
+        # The body's travel per walk cycle: a planted foot sweeps STRIDE while the
+        # body walks past it for the stance's DUTY of the cycle, so a whole cycle
+        # carries the body STRIDE / DUTY. The tank sets the clip's phase from
+        # distance with this, and the feet stay put.
+        out = export(rig, out_path('crab'), {'mqStride': STRIDE / DUTY})
+        return {'faces_per_bone': counts, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
+                'bytes': os.path.getsize(out)}
 
 
-if __name__ == '__main__' or globals().get('CRAB_RIG_RUN'):
+if __name__ == '__main__':
     result = main()
     print(result)

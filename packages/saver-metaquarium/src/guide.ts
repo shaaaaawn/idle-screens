@@ -58,6 +58,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
+  fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
   swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab, jellies and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room

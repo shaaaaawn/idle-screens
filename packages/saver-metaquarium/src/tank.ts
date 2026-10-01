@@ -65,6 +65,7 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
+import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { rigSeahorse } from './seahorse';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
@@ -126,7 +127,7 @@ const GLB_CONCURRENCY = 3;
 interface FishTemplate {
   scene: Object3D;
   clip: AnimationClip | null;
-  /** Every clip the model carries, by name (a rigged breed: the crab's six). */
+  /** Every clip the model carries, by name (a rigged breed's: the crab's six, the glowfish's four). */
   clips: AnimationClip[];
   norm: number;
   yaw: number;
@@ -528,8 +529,11 @@ interface Fish {
   eyes?: EyeRig | null;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
-  /** The crab's legs and gestures (crab.ts): it walks the floor instead of swimming. */
-  crab?: CrabRig | null;
+  /** A breed rigged in Blender, driven by its own module: it, not the generic
+   *  clip path, sets the mixer. The crab walks the floor instead of swimming
+   *  (crab.ts); the glowfish fishes with its lure (angler.ts). `lights` are
+   *  this frame's levels for its glowing parts, by material name. */
+  rig?: { crab?: CrabRig; angler?: AnglerRig; lights: Record<string, number> } | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -555,7 +559,7 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
-  /** A crab's current business (crab.ts): walk, turn, forage, pinch, wave, cheer, look, idle. */
+  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts). */
   doing?: string;
 }
 
@@ -1229,6 +1233,15 @@ class TankInstance implements SaverInstance {
    * enter it in the light field. The fish's GLOW parts are SOURCES — that is
    * what the original renders say and what a flat unlit colour never did.
    */
+  /** Body-local → world, by hand: the scene graph's matrices are a frame
+   *  stale here. The body may sit off the group's origin (a crab stands its
+   *  feet on it), so its position counts. */
+  private bodyToWorld(f: Fish, x: number, y: number, z: number, out: Vector3): Vector3 {
+    const body = f.body!;
+    out.set(x, y, z).multiplyScalar(body.scale.x).applyAxisAngle(Y_AXIS, body.rotation.y).add(body.position);
+    return out.multiplyScalar(f.group.scale.x).applyQuaternion(f.group.quaternion).add(f.group.position);
+  }
+
   private glowFish(f: Fish, n: number, amount: number, pulse: number, tSec: number): number {
     const g = f.glow!;
     const body = f.body!;
@@ -1240,13 +1253,18 @@ class TankInstance implements SaverInstance {
     // White-hot core: emissive without HDR. The halo and card stay saturated,
     // so the part reads as brighter than its own colour.
     const hot = 0.34 * amount;
+    // A rigged breed's light lives with it (angler.ts: the lure breathes,
+    // beckons, goes dark at the strike): its level per part, by material.
+    const lights = f.rig?.lights;
     for (const c of g.cores) {
+      const lvl = beat * (lights?.[c.mat.name] ?? 1);
       c.mat.color.setRGB(
-        (c.base.r + (1 - c.base.r) * hot) * beat,
-        (c.base.g + (1 - c.base.g) * hot) * beat,
-        (c.base.b + (1 - c.base.b) * hot) * beat,
+        (c.base.r + (1 - c.base.r) * hot) * lvl,
+        (c.base.g + (1 - c.base.g) * hot) * lvl,
+        (c.base.b + (1 - c.base.b) * hot) * lvl,
       );
     }
+    if (lights) for (const h of g.halos) h.mat.opacity = h.opacity * (lights[h.of] ?? 1);
     if (amount <= 0) return n;
     // Body-local → world, by hand: the scene graph's matrices are a frame
     // stale here, and updating 24 skinned hierarchies to read a few points
@@ -1261,9 +1279,13 @@ class TankInstance implements SaverInstance {
     // One card PER glowing part, in the part's own colour: the bloom hugs the
     // fin that glows instead of fogging the whole fish.
     for (const part of g.parts) {
-      p.set(part.x, part.y, part.z).multiplyScalar(body.scale.x);
-      p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
-      p.applyQuaternion(f.group.quaternion).add(f.group.position);
+      if (part.bone && part.offset) {
+        // A part riding a bone (a glowfish's lure) is where the bone has
+        // swung it, not where the bind pose had it. The group was placed this
+        // frame and the clip set, so its chain's matrices are brought up to date.
+        part.bone.updateWorldMatrix(true, false);
+        p.copy(part.offset).applyMatrix4(part.bone.matrixWorld);
+      } else this.bodyToWorld(f, part.x, part.y, part.z, p);
       // A COAT (a glow part that is most of the silhouette — the angelfish's
       // whole fin outline) is not a lamp. Sized and lit like an accent it
       // washed a quarter of the frame in its colour, in every scene, from a
@@ -1271,20 +1293,18 @@ class TankInstance implements SaverInstance {
       const size = part.coat
         ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
         : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
-      const k = g.gain * (part.coat ? 0.5 : 1);
+      const k = g.gain * (part.coat ? 0.5 : 1) * (lights?.[part.name] ?? 1);
       this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
       n += 1;
       if (this.studio?.lights.length && !part.coat) {
         this.lightBids.push({
           d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
           x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
-          size, power: amount * g.gain * beat,
+          size, power: amount * g.gain * beat * (lights?.[part.name] ?? 1),
         });
       }
     }
-    p.set(g.cx, g.cy, g.cz).multiplyScalar(body.scale.x);
-    p.applyAxisAngle(Y_AXIS, body.rotation.y).multiplyScalar(f.group.scale.x);
-    p.applyQuaternion(f.group.quaternion).add(f.group.position);
+    this.bodyToWorld(f, g.cx, g.cy, g.cz, p);
     // The floor takes light from accents only, over a fish-sized reach. The
     // source is as strong as the dial says: what it throws on the floor and
     // on a neighbour scales with `fishGlow` like the bloom does.
@@ -1929,16 +1949,18 @@ class TankInstance implements SaverInstance {
     let clipDuration = 0;
     let fishGlow: FishGlow | null = null;
     let crab: CrabRig | null = null;
+    let angler: AnglerRig | null = null;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
       // Rigged at identity, before the tank scales and turns the body.
       if (this.wantBreeds[index] === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
+      if (this.wantBreeds[index] === 'glowfish') angler = rigAngler(body, tpl.clips);
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
-        this.str('fishLighting') !== 'flat' && !this.thumbnail);
+        this.str('fishLighting') !== 'flat' && !this.thumbnail, this.str('fishLook') === 'neon');
       tagFishMaterials(body);
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
@@ -1953,6 +1975,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(crab.anchor).multiplyScalar(-tpl.norm);
         mixer = crab.mixer;
+      } else if (angler) {
+        mixer = angler.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2001,7 +2025,7 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      crab,
+      rig: crab || angler ? { ...(crab ? { crab } : {}), ...(angler ? { angler } : {}), lights: {} } : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
     if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
@@ -2269,7 +2293,7 @@ class TankInstance implements SaverInstance {
     const crabSpots = this.crabSpots;
     crabSpots.length = 0;
     for (const f of this.fish) {
-      if (!f?.crab || f.index >= visible) continue;
+      if (!f?.rig?.crab || f.index >= visible) continue;
       const s = crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index));
       crabSpots.push(f.index, s.x, s.z);
     }
@@ -2280,7 +2304,7 @@ class TankInstance implements SaverInstance {
     let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
     if (followSlot >= 0) {
       const ff = this.fish[followSlot];
-      if (ff?.crab && !followPov) {
+      if (ff?.rig?.crab && !followPov) {
         const s = crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index));
         crabCamX = s.x - s.fx * followBack; crabCamZ = s.z - s.fz * followBack;
       } else { crabCamX = NaN; crabCamZ = NaN; }
@@ -2600,14 +2624,18 @@ class TankInstance implements SaverInstance {
       }
       // A crab walks the floor on its own legs (crab.ts) and takes over its
       // place and facing; a script's actor or a seated one just idles.
-      const crab = f.crab && !act && !style.formation
-        ? crabFrame(f.crab, {
+      const crabRig = f.rig?.crab;
+      const crab = crabRig && !act && !style.formation
+        ? crabFrame(crabRig, {
             t: tSec, index: f.index, plan: f.plan, start: crabStart(f.plan, f.index), len: L,
-            scale: f.crab.norm * f.baseScale * size, ground: this.crabGround,
+            scale: crabRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
           }, this.crabOut)
         : null;
-      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (f.crab) crabIdle(f.crab, tSec, f.index);
+      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (crabRig) crabIdle(crabRig, tSec, f.index);
+      // A glowfish swims where the tank puts it; its module sets its clips and its light.
+      const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
+      if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         this.followAt.set(px, y, pz); this.followSeen = true;
@@ -2677,10 +2705,11 @@ class TankInstance implements SaverInstance {
       // move the meshes inside the fish frame the wave was measured in.
       if (swimWave > 0 && f.body && f.wave === undefined) {
         f.body.rotation.y = f.baseYaw;
-        if (f.mixer && !f.crab) f.mixer.setTime(0);
+        if (f.mixer && !f.rig) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
         // A seahorse does not wave: it flutters its fin, coils its tail and nods.
-        f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+        // A rigged breed's skeleton is its motion (crab.ts, angler.ts).
+        f.wave = f.rig ? null : breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
           : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
       }
       const waving = swimWave > 0 && !!f.wave;
@@ -2735,7 +2764,7 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(crab ? { doing: crab.doing } : {}),
+        ...(crab ? { doing: crab.doing } : angler ? { doing: angler.doing } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

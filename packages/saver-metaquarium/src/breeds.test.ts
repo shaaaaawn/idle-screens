@@ -14,7 +14,7 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   const len = dv.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
-const ROLE = /eye|glow|^KEEP-|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|primary|secondary/i;
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -68,6 +68,35 @@ describe('bundled breeds (breeds/README.md)', () => {
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone).toMatch(parts[name]!);
+    }
+  });
+
+  it('glowfish: the angler rig survives the intake — eight bones, four clips, each part on its own', async () => {
+    const doc = await new NodeIO().read(here('../breeds/glowfish.glb').pathname);
+    const root = doc.getRoot();
+    expect(root.listSkins()).toHaveLength(1);
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'eye.L', 'eye.R', 'head', 'lure1', 'lure2', 'lure3', 'tail']);
+    const anims = root.listAnimations();
+    expect(anims.map((a) => a.getName()).sort()).toEqual(['blink', 'chomp', 'lure', 'swim']);
+    // The blink squashes the eyes: scale, on the eyes and nothing else.
+    const blink = anims.find((a) => a.getName() === 'blink')!;
+    expect(new Set(blink.listChannels().map((c) => `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`)))
+      .toEqual(new Set(['eye.L.scale', 'eye.R.scale']));
+    const parts: Record<string, RegExp> = {
+      PrimaryColor: /^(body|tail)$/, SecondaryColor: /^(head|lure[123])$/, 'GLOW-Orbs': /^eye\.[LR]$/,
+      'GLOW-Lure': /^lure3$/, 'METAL-Teeth': /^body$/,
+    };
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+      const used = new Set<string>();
+      for (let i = 0; i < j.getCount(); i++) {
+        const [j0] = j.getElement(i, []) as number[];
+        expect((w.getElement(i, []) as number[])[0]).toBe(1);
+        used.add(joints[j0!]!);
+      }
+      for (const bone of used) expect(bone, name).toMatch(parts[name]!);
     }
   });
 

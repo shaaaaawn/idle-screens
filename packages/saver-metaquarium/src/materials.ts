@@ -6,12 +6,13 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   MeshMatcapMaterial,
+  MeshStandardMaterial,
   SRGBColorSpace,
   Vector3,
   type Material,
   type Mesh,
-  type MeshStandardMaterial,
   type Object3D,
+  type SkinnedMesh,
 } from 'three';
 import { MIAMI_VICE_COLORS, BLOOM_COLORS } from './manifest';
 
@@ -26,6 +27,11 @@ function materialsOf(mesh: Mesh): Material[] {
 function isEyes(m: Material): boolean {
   return m.name.startsWith('EYES-') || /eye/i.test(m.name);
 }
+
+/** The neon look's lights, one per fish: acid, aqua, magenta, sodium, violet, ember. */
+export const NEON_COLORS = ['#b6ff00', '#00ffd5', '#ff2bd6', '#ffe600', '#8f5bff', '#ff6a00'] as const;
+/** What the neon look paints dark: not pure black, so a lit face still turns. */
+const NEON_DARK = new Color('#06040c');
 
 export function isGlow(m: Material): boolean {
   return m.name.startsWith('GLOW-') || /glow/i.test(m.name);
@@ -134,16 +140,33 @@ function colorLuminance(m: Material): number {
  *   seeded picks, so an NPC reads as one animal in two colors rather than a
  *   patchwork of independent picks.
  * - KEEP-<part> → the authored colour, kept (the breed intake names these).
+ * - METAL-<part> → polished metal (a glowfish's teeth): a reflective plate
+ *   that takes the studio environment when lit, chrome matcap when flat;
+ *   `reflective` off (fishMetal: 'off') keeps it the authored colour, matte.
  * - other untextured → seeded palette coat; textured → untouched (the atlas
  *   IS the look).
  */
-export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, lit = false): void {
+export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, lit = false, neon = false): void {
   const coatA = rng.pick(BODY_COATS);
   const coatB = rng.pick(BODY_COATS.filter((c) => c !== coatA));
+  // Drawn only for the neon look, so a natural fish's picks are what they always were.
+  const neonColor = neon ? new Color(rng.pick(NEON_COLORS)) : null;
   root.traverse((node) => {
     const mesh = node as Mesh;
     if (!mesh.isMesh || !mesh.material) return;
     const replaced = materialsOf(mesh).map((m) => {
+      if (isEyes(m) && neonColor) {
+        // Neon: the dark of the eye glows (and so does a crab's mouth, which
+        // shares its material); the light of it goes dark with the coat. Light,
+        // not an eye display — named GLOW so the halo and bloom passes take it.
+        const white = /black/i.test(m.name) ? false : /white/i.test(m.name) || colorLuminance(m) >= 0.5;
+        const part = new MeshBasicMaterial({ color: white ? NEON_DARK : neonColor });
+        part.name = white ? `${m.name}-dark` : 'GLOW-Neon';
+        part.userData.mqOwned = true;
+        part.userData.mqNoCaustic = true;
+        if (!white) part.userData.mqGlowColor = neonColor.getHex();
+        return part;
+      }
       if (isEyes(m)) {
         const white = /black/i.test(m.name)
           ? false
@@ -220,9 +243,20 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         }
         return m;
       }
+      // METAL-: polished, whatever its authored colour — which only tints it.
+      if (/^METAL-/.test(m.name) && reflective) {
+        const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
+        const steel = new Color('#e4e8f2').lerp(own, 0.15);
+        const metal = lit
+          ? new MeshStandardMaterial({ color: steel, metalness: 0.9, roughness: 0.22, envMapIntensity: 1.5 })
+          : new MeshMatcapMaterial({ color: steel, matcap: chromeMatcap() });
+        metal.name = m.name;
+        metal.userData.mqOwned = true;
+        return metal;
+      }
       // KEEP-: the intake (breeds/breeds.json) said this part's authored
       // colour IS the look — a hacker fish's black screen, a shark's teeth.
-      if (/^KEEP-/.test(m.name)) {
+      if (/^(KEEP|METAL)-/.test(m.name)) {
         const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
         const kept = lit ? new MeshLambertMaterial({ color: own }) : new MeshBasicMaterial({ color: own });
         kept.name = m.name;
@@ -234,6 +268,14 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         : /secondary/i.test(m.name)
         ? coatB
         : rng.pick(BODY_COATS);
+      if (neonColor) {
+        // Near black, with a breath of the coat's hue so the two tones still read.
+        const dark = new Color(coat).multiplyScalar(0.07).lerp(NEON_DARK, 0.4);
+        const body = lit ? new MeshLambertMaterial({ color: dark }) : new MeshBasicMaterial({ color: dark });
+        body.name = m.name;
+        body.userData.mqOwned = true;
+        return body;
+      }
       // LIT: a coat that takes light, so every voxel face shades by where it
       // points — the single biggest difference between our flat fish and the
       // original renders. Lambert: one dot product, no specular to fight the
@@ -337,6 +379,7 @@ export function addGlowHalos(root: Object3D, rng: Rng): number {
       const halo = mesh.clone();
       halo.material = haloMaterial(color, modelR * k, opacity * dim);
       halo.userData.mqHalo = true;
+      halo.userData.mqHaloOf = (mesh.material as Material).name; // whose light it is (a rig's light animation)
       halo.renderOrder = 2;
       mesh.parent?.add(halo);
       added++;
@@ -393,15 +436,45 @@ export interface FishGlow {
   /** Untextured glow materials this fish owns, with their authored colour —
    *  the ones the core pulse may repaint. Textured glow keeps its atlas. */
   cores: Array<{ mat: MeshBasicMaterial; base: Color }>;
+  /** The halo shells, with their own opacity and the glow material they bloom:
+   *  a rig's light animation dims them with their part. */
+  halos: Array<{ mat: MeshBasicMaterial; opacity: number; of: string }>;
   /** The glowing parts themselves, largest first (body-local), each in its own
    *  colour — bloom hugs the fin that glows, not the fish that owns it. */
-  parts: Array<{ x: number; y: number; z: number; radius: number; r: number; g: number; b: number; coat: boolean }>;
+  parts: Array<{
+    x: number; y: number; z: number; radius: number; r: number; g: number; b: number; coat: boolean;
+    /** The glow material's name: a rig's light animation picks its parts by it. */
+    name: string;
+    /** A rigged part that rides one bone (a glowfish's lure): its centre in that
+     *  bone's frame, so its bloom and its light follow the bone, not the bind pose. */
+    bone?: Object3D;
+    offset?: Vector3;
+  }>;
+}
+
+/** The bone a skinned part rides, if at least 80% of its vertices ride one —
+ *  and the part's centre in that bone's frame. */
+function partBone(mesh: Mesh, centre: Vector3): { bone: Object3D; offset: Vector3 } | null {
+  const sk = mesh as unknown as SkinnedMesh;
+  if (!sk.isSkinnedMesh || !sk.skeleton) return null;
+  const idx = mesh.geometry.getAttribute('skinIndex'), wt = mesh.geometry.getAttribute('skinWeight');
+  if (!idx || !wt) return null;
+  const count = new Map<number, number>();
+  for (let i = 0; i < idx.count; i++) if (wt.getX(i) > 0.5) count.set(idx.getX(i), (count.get(idx.getX(i)) ?? 0) + 1);
+  let best = -1, most = 0;
+  for (const [j, c] of count) if (c > most) { best = j; most = c; }
+  const bone = sk.skeleton.bones[best];
+  if (!bone || most < idx.count * 0.8) return null;
+  // Skinned world = bone.matrixWorld · boneInverse · bindMatrix · position.
+  const offset = centre.clone().applyMatrix4(sk.bindMatrix).applyMatrix4(sk.skeleton.boneInverses[best]!);
+  return { bone, offset };
 }
 
 /** Runs after applyNpcMaterials. null = this fish has nothing that glows. */
 export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
   const cores: FishGlow['cores'] = [];
   const parts: FishGlow['parts'] = [];
+  const halos: FishGlow['halos'] = [];
   const seen = new Set<Material>();
   let cx = 0, cy = 0, cz = 0, w = 0, radius = 0;
   root.updateMatrixWorld(true);
@@ -418,6 +491,11 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
   let accent = false, lamps = false;
   root.traverse((node) => {
     const mesh = node as Mesh;
+    if (mesh.isMesh && mesh.userData.mqHalo) {
+      const mat = mesh.material as MeshBasicMaterial;
+      halos.push({ mat, opacity: mat.opacity, of: String(mesh.userData.mqHaloOf ?? '') });
+      return;
+    }
     if (!mesh.isMesh || !mesh.material || mesh.userData.mqHalo || Array.isArray(mesh.material)) return;
     const m = mesh.material as MeshBasicMaterial;
     if (!isGlow(m)) return;
@@ -448,7 +526,10 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
       // is a colour that earns little bloom, not a bulb.
       const lamp = r < modelR * 0.3 && hi > 0.5 && (sat < 0.12 || /white/i.test(m.name));
       if (lamp) { k = 1.15; pc.lerp(new Color('#ffe9c4'), 0.35); lamps = true; }
-      parts.push({ x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k, coat: large });
+      parts.push({
+        x: centre.x, y: centre.y, z: centre.z, radius: r, r: pc.r * k, g: pc.g * k, b: pc.b * k, coat: large, name: m.name,
+        ...partBone(mesh, sphere.center),
+      });
     }
     radius = Math.max(radius, r);
     if (!large && !m.map && m.userData.mqOwned && !seen.has(m)) {
@@ -463,5 +544,5 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
   const hi = Math.max(c.r, c.g, c.b);
   const sat = hi > 0 ? (hi - Math.min(c.r, c.g, c.b)) / hi : 0;
   const gain = (accent ? 1 : 0.45) * (0.08 + 0.92 * Math.max(sat, lamps ? 0.8 : 0));
-  return { gain, parts, r: c.r, g: c.g, b: c.b, cx: cx / w, cy: cy / w, cz: cz / w, radius, cores };
+  return { gain, parts, r: c.r, g: c.g, b: c.b, cx: cx / w, cy: cy / w, cz: cz / w, radius, cores, halos };
 }

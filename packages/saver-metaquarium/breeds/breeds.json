@@ -21,9 +21,10 @@
       "notes": "Unnamed materials (Material.00x) all painted a random coat before. GPU-instanced parts, baked."
     },
     "glowfish": {
-      "source": "source/glowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle",
-      "roles": { "Eyes": "GLOW-Red", "Mouth": "KEEP-Teeth" },
-      "notes": "An anglerfish: the emissive red eyes would have been repainted as black pupils; they glow red instead. The lure is GLOW-White."
+      "source": "rig/glowfish.glb", "delivered": "source/glowfish.glb", "rig": "rig/glowfish.py",
+      "kind": "voxel", "size": 0.8, "motion": "angler",
+      "roles": { "Eyes": "GLOW-Orbs", "GLOW-White": "GLOW-Lure", "Mouth": "METAL-Teeth" },
+      "notes": "An anglerfish, rigged in Blender by rig/glowfish.py from the delivered source/glowfish.glb (never edited): the lower jaw, a head that flips open, a tail, two eyes that blink, and a three-link lure; clips swim, lure, chomp, blink. src/angler.ts drives them. The eyes glow rather than read as pupils, and neither glow role names a colour (nor contains 'eye', which the tank would read as an eye display): each fish draws its own. The teeth are metal."
     },
     "hackerfish": {
       "source": "source/hackerfish.glb", "kind": "voxel", "size": 0.85, "motion": "wiggle",
