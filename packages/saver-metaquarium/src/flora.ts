@@ -155,6 +155,8 @@ class VoxelWriter {
   last: [number, number, number] = [0, 0, 0];
   /** Every cell drawn, centre by centre (x, y, z) — where a plant's lamps are. */
   readonly cells: number[] = [];
+  /** Each cell's sway (root, phase, gust, flex), as its vertices have it: a spore leaves with the tip it came off. */
+  readonly cellSway: number[] = [];
 
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, lit: number, flat = false): void {
     for (let f = 0; f < 6; f += 1) this.face(f, cx, cy, cz, sx / 2, sy / 2, sz / 2, c, lit, flat);
@@ -162,6 +164,7 @@ class VoxelWriter {
     this.count += 1;
     this.last = [cx, cy, cz];
     this.cells.push(cx, cy, cz);
+    this.cellSway.push(this.root, this.phase, this.gust, this.flex);
     if (cy + sy / 2 > this.top) this.top = cy + sy / 2;
   }
 
@@ -182,6 +185,7 @@ class VoxelWriter {
       this.count += 1;
       this.last = [cx, cy, cz];
       this.cells.push(cx, cy, cz);
+      this.cellSway.push(this.root, this.phase, this.gust, this.flex);
       if (cy + h > this.top) this.top = cy + h;
     }
     if (cells.size && this.flex > this.maxFlex) this.maxFlex = this.flex;
@@ -229,6 +233,7 @@ class VoxelWriter {
       this.cells[c] = x + (this.cells[c]! - x) * k;
       this.cells[c + 1] = root + (this.cells[c + 1]! - root) * k;
       this.cells[c + 2] = z + (this.cells[c + 2]! - z) * k;
+      this.cellSway[(c / 3) * 4] = root + (this.cellSway[(c / 3) * 4]! - root) * k;
     }
     this.last = [x + (this.last[0] - x) * k, root + (this.last[1] - root) * k, z + (this.last[2] - z) * k];
   }
@@ -908,7 +913,9 @@ export function buildFlora(
     // lamps apart are lamps apart. Each lights from its last cell drawn (its
     // crown); the last-drawn lamps first, and no more than four a plant.
     for (const c of lampHeads(lamp.cells, lampsBefore, lamp.count, (1.8 * V) ** 2, LAMPS_PER_PLANT)) {
-      lights.push({ x: lamp.cells[c * 3]!, y: lamp.cells[c * 3 + 1]!, z: lamp.cells[c * 3 + 2]!, root: lamp.root, phase: phase + lights.length * 2.1, gust, color: near.color, flex: lamp.flex });
+      // Swaying as that cell's vertices do: its own root, phase, gust and flex.
+      const w = c * 4;
+      lights.push({ x: lamp.cells[c * 3]!, y: lamp.cells[c * 3 + 1]!, z: lamp.cells[c * 3 + 2]!, root: lamp.cellSway[w]!, phase: lamp.cellSway[w + 1]!, gust: lamp.cellSway[w + 2]!, color: near.color, flex: lamp.cellSway[w + 3]! });
     }
     tips.push({ x, z, y: Math.max(body.top, lamp.top), root, flex });
     bySpecies[species] += 1;

@@ -294,7 +294,9 @@ describe('the garden answers the cast', () => {
     world.setFish([]);
     expect(shader.uniforms.uMqFloraFishN!.value).toBe(0);
     // The lamps are their own program: they flare at the same cast.
-    const lamps = world.group.children.find((o) => o.name === 'flora-lamps') as Mesh;
+    const lamps = world.group.children.find((o) => o.name === 'flora-lamps') as Mesh | undefined;
+    expect(lamps, 'the full garden grows lamps').toBeDefined();
+    if (!lamps) return;
     const lampShader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
     (lamps.material as Material).onBeforeCompile(lampShader as never, {} as WebGLRenderer);
     world.setFish(Array.from({ length: 40 }, (_, i) => ({ x: i, y: 0, z: 0, r: 10 })));

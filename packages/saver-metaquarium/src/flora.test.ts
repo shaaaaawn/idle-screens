@@ -282,6 +282,25 @@ describe('flora', () => {
     expect(Math.max(...whips.tips.map(t => t.y - t.root))).toBeGreaterThan(20);
   });
 
+  it('a spore sways with the lamp it leaves: that lamp\'s own root, flex and phase', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { anemone: 1, elder: 1 } });
+    const g = f.lamps[0]!, pos = arr(g, 'position'), sway = arr(g, 'aSway'), mat = arr(g, 'aMat');
+    expect(f.lights.length).toBeGreaterThan(0);
+    const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-3;
+    for (const l of f.lights) {
+      // Some corner of the cell it was taken from (siblings' tips can sit
+      // closer than a cell's own corners, so not simply the nearest vertex)
+      // sways exactly as the light does. Within 3: an elder's blossom cell
+      // reaches 1.6 to its corners.
+      let match = false;
+      for (let v = 0; v < pos.length / 3 && !match; v += 1) {
+        const q = (pos[v * 3]! - l.x) ** 2 + (pos[v * 3 + 1]! - l.y) ** 2 + (pos[v * 3 + 2]! - l.z) ** 2;
+        match = q < 9 && near(l.root, sway[v * 3]!) && near(l.phase, sway[v * 3 + 1]!) && near(l.gust, sway[v * 3 + 2]!) && near(l.flex, mat[v * 2]!);
+      }
+      expect(match, `light at ${l.x.toFixed(1)},${l.y.toFixed(1)},${l.z.toFixed(1)}`).toBe(true);
+    }
+  });
+
   it('tells a plant\'s lamps apart by whether their cells touch', () => {
     // Cells 0-2 a run along x (one lamp), 3 alone, 4-5 a pair: drawn in that order.
     const cells = [0, 0, 0, 1, 0, 0, 2, 0, 0, 10, 5, 0, 20, 0, 0, 20, 1, 0];
