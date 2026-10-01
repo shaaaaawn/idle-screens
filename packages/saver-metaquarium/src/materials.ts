@@ -34,6 +34,19 @@ export const NEON_COLORS = ['#b6ff00', '#00ffd5', '#ff2bd6', '#ffe600', '#8f5bff
 /** What the neon look paints dark: not pure black, so a lit face still turns. */
 const NEON_DARK = new Color('#06040c');
 
+/**
+ * A part painted ON the body — an eye, a mouth, teeth — wins any tie for depth
+ * with the body face it lies on. Where the two share voxel cells the intake
+ * drops the face underneath; but some models' parts sit off the lattice (the
+ * shark's eyes and teeth overlap body faces by fractions of a voxel), and there
+ * only a depth bias stops the black-white z-fight. A pupil outranks its white.
+ */
+function decal(m: Material, rank: number): void {
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -rank;
+  m.polygonOffsetUnits = -rank;
+}
+
 export function isGlow(m: Material): boolean {
   return m.name.startsWith('GLOW-') || /glow/i.test(m.name);
 }
@@ -194,6 +207,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
         eye.userData.mqNoCaustic = true; // a display, not a surface
+        decal(eye, white ? 1 : 2);
         return eye;
       }
       if (isGlow(m) && neonColor && !(m as Partial<MeshBasicMaterial>).map
@@ -274,11 +288,15 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       if (/^METAL-/.test(m.name) && reflective) {
         const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
         const steel = new Color('#e4e8f2').lerp(own, 0.15);
+        // Not a mirror: a flat voxel face reflects ONE direction of the room, so
+        // a polished one flips sky-white ↔ floor-black as the jaw swings. A
+        // satin roughness blurs that, and a little light of its own sets a floor.
         const metal = lit
-          ? new MeshStandardMaterial({ color: steel, metalness: 0.9, roughness: 0.22, envMapIntensity: 1.5 })
+          ? new MeshStandardMaterial({ color: steel, metalness: 0.75, roughness: 0.38, envMapIntensity: 1.3, emissive: steel.clone().multiplyScalar(0.28) })
           : new MeshMatcapMaterial({ color: steel, matcap: chromeMatcap() });
         metal.name = m.name;
         metal.userData.mqOwned = true;
+        decal(metal, 1);
         return metal;
       }
       // KEEP-: the intake (breeds/breeds.json) said this part's authored
@@ -288,6 +306,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         const kept = lit ? new MeshLambertMaterial({ color: own }) : new MeshBasicMaterial({ color: own });
         kept.name = m.name;
         kept.userData.mqOwned = true;
+        decal(kept, 1);
         return kept;
       }
       const coat = /primary/i.test(m.name)

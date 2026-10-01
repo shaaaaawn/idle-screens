@@ -80,18 +80,29 @@ function trianglesOf(p) {
   return out;
 }
 
-/** The joint each triangle is skinned to (rigged models are rigid: one joint,
- *  weight 1, per triangle — breeds/rig/*.py writes them that way), or null. */
+/** The joint each triangle is skinned to, or null for no rig. A rigid part's
+ *  triangle rides one joint at weight 1; a triangle that BLENDS (the shark's
+ *  spine bends across a zone at each joint) is -1, and passes through the
+ *  intake exactly as authored. */
 function jointsOf(p) {
   const j = p.getAttribute('JOINTS_0'), w = p.getAttribute('WEIGHTS_0'); if (!j) return null;
   const idx = p.getIndices(); const n = idx ? idx.getCount() : j.getCount(); const out = [];
   for (let t = 0; t < n / 3; t++) {
     const ids = [0, 1, 2].map((k) => (idx ? idx.getScalar(t * 3 + k) : t * 3 + k));
     const js = ids.map((i) => j.getElement(i, [])[0]);
-    if (js[1] !== js[0] || js[2] !== js[0] || ids.some((i) => Math.abs(w.getElement(i, [])[0] - 1) > 1e-4)) {
-      throw new Error(`${p.getMaterial()?.getName()}: triangle ${t} is not rigidly skinned to one joint`);
-    }
-    out.push(js[0]);
+    const rigid = js[1] === js[0] && js[2] === js[0] && ids.every((i) => Math.abs(w.getElement(i, [])[0] - 1) < 1e-3);
+    out.push(rigid ? js[0] : -1);
+  }
+  return out;
+}
+
+/** The joint each triangle mostly rides (its first corner's heaviest). */
+function dominantOf(p) {
+  const j = p.getAttribute('JOINTS_0'), w = p.getAttribute('WEIGHTS_0'); if (!j) return null;
+  const out = [];
+  for (let t = 0; t < j.getCount() / 3; t++) {
+    const js = j.getElement(t * 3, []), ws = w.getElement(t * 3, []);
+    out.push(js[ws.indexOf(Math.max(...ws))]);
   }
   return out;
 }
@@ -140,14 +151,16 @@ function cullHidden(doc, voxel) {
   // A flat plate (a face with no cube behind it) must not bury what it faces.
   const sides = new Map();
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
-    const joints = jointsOf(p);
+    const joints = jointsOf(p), dominant = dominantOf(p);
     // Only a face exactly one voxel square: a bigger one (a source built
     // partly from boxes, as the shark's is) is not one cell, and the one cell
     // in front of its middle says nothing about the rest of it.
     const unit = (f) => Math.abs(f.u1 - f.u0 - voxel) < voxel * 0.01 && Math.abs(f.v1 - f.v0 - voxel) < voxel * 0.01;
     const faces = trianglesOf(p).map((tri, t) => {
       const f = faceOf(tri); if (!f || !unit(f)) return null;
-      const j = joints ? joints[t] : 0;
+      // A blending face counts as the joint it mostly rides: buried inside a
+      // bending body, it and what buries it bend together.
+      const j = joints ? (joints[t] >= 0 ? joints[t] : dominant[t]) : 0;
       const inside = `${key(at(f, -1))}|${j}`;
       (sides.get(inside) ?? sides.set(inside, new Set()).get(inside)).add(`${f.axis}${f.sign}`);
       return { front: key(at(f, 1)), j };
@@ -177,7 +190,14 @@ function cullHidden(doc, voxel) {
  * wave bends along (never merged along). Eye primitives are left exactly as
  * authored; body cells under an eye cell are dropped.
  */
-function greedy(doc, voxel, swim) {
+/** Skin weights as normalized bytes that still sum to exactly 255. */
+function bytes(w) {
+  const b = [...w].map((x) => Math.round(x * 255));
+  b[b.indexOf(Math.max(...b))] += 255 - b.reduce((a, x) => a + x, 0);
+  return b;
+}
+
+function greedy(doc, voxel, swim, spine = swim) {
   // Parts are not all on one lattice (baked instances sit at offsets like
   // 5.91), so each plane's grid carries its own phase along both of its axes.
   // Decoded Draco positions carry float noise (2.9985 for 3), so the phase is
@@ -194,32 +214,89 @@ function greedy(doc, voxel, swim) {
     }
     return out;
   };
-  // Cells every eye covers, so the body under them can go.
-  const eyeCells = new Set();
+  // Decals. Where two materials lie on one cell, facing one way, they
+  // z-fight: the crab's mouth on its body, the shark's teeth on its jaw. The
+  // decal wins — an eye always, else the smaller material — and the face under
+  // it goes. In a rig only within one part (a face on another part is
+  // uncovered the moment the parts move), except under an eye: an eye rides
+  // its own bone flush on the head, and the face beneath it would z-fight.
+  const claims = new Map(); const area = new Map();
+  for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+    const name = p.getMaterial()?.getName() ?? '';
+    const joints = jointsOf(p);
+    trianglesOf(p).forEach((tri, t) => {
+      const f = faceOf(tri); if (!f) return;
+      const j = isEye(name) ? '*' : joints ? joints[t] : 0;
+      for (const c of cellsOf(f)) {
+        const k = `${planeKey(f)}|${c}|${j}`;
+        (claims.get(k) ?? claims.set(k, new Set()).get(k)).add(name);
+        area.set(name, (area.get(name) ?? 0) + 1);
+      }
+    });
+  }
+  const rank = (name) => (isEye(name) ? -1 : area.get(name) ?? 0);
+  // An eye off the body's lattice (the shark's sits a third of a voxel over)
+  // shares no cell with the face under it, yet covers most of it. Those
+  // rectangles are cut around the eye instead.
+  const eyeRects = new Map();
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
     if (!isEye(p.getMaterial()?.getName() ?? '')) continue;
     for (const tri of trianglesOf(p)) {
       const f = faceOf(tri); if (!f) continue;
-      for (const c of cellsOf(f)) eyeCells.add(`${planeKey(f)}|${c}`);
+      const k = `${f.axis}|${f.sign}|${snap(f.plane)}`;
+      (eyeRects.get(k) ?? eyeRects.set(k, []).get(k)).push([f.u0, f.u1, f.v0, f.v1]);
     }
   }
+  const eps = voxel / 40;
+  // R minus every eye rectangle on its plane: up to four strips per cut.
+  const cut = (R, eyes) => {
+    let out = [R];
+    for (const [a0, a1, b0, b1] of eyes) {
+      const next = [];
+      for (const [u0, u1, v0, v1] of out) {
+        if (a0 >= u1 - eps || a1 <= u0 + eps || b0 >= v1 - eps || b1 <= v0 + eps) { next.push([u0, u1, v0, v1]); continue; }
+        const lo = Math.max(u0, a0), hi = Math.min(u1, a1);
+        if (lo - u0 > eps) next.push([u0, lo, v0, v1]);
+        if (u1 - hi > eps) next.push([hi, u1, v0, v1]);
+        if (b0 - v0 > eps) next.push([lo, hi, v0, b0]);
+        if (v1 - b1 > eps) next.push([lo, hi, b1, v1]);
+      }
+      out = next;
+    }
+    return out;
+  };
+  const covered = (name, key, c, j) => [j, '*'].some((jj) => [...(claims.get(`${key}|${c}|${jj}`) ?? [])].some((o) => o !== name && rank(o) < rank(name)));
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
-    if (isEye(p.getMaterial()?.getName() ?? '')) continue;
+    const name = p.getMaterial()?.getName() ?? '';
+    if (isEye(name)) continue;
     const planes = new Map(); const loose = [];
+    const jAttr = p.getAttribute('JOINTS_0'), wAttr = p.getAttribute('WEIGHTS_0');
+    const skinAt = new Map();
+    const posKey = (q) => q.map((x) => Math.round(x / (voxel / 40))).join(',');
     // Rigged: a part per joint, each merged on its own.
     const joints = jointsOf(p);
     trianglesOf(p).forEach((tri, t) => {
       const bone = joints ? joints[t] : 0;
       const f = faceOf(tri);
-      if (!f) { loose.push({ tri, bone }); return; } // off-grid geometry passes through untouched
+      // Off-grid geometry, and a blending face (its corners weigh differently),
+      // pass through untouched, with their own skin.
+      const skin = () => [0, 1, 2].map((k) => ({ j: jAttr.getElement(t * 3 + k, []), w: wAttr.getElement(t * 3 + k, []) }));
+      if (!f) { loose.push({ tri, bone, skin: joints && bone < 0 ? skin() : null }); return; }
+      if (bone < 0) {
+        // A bending face: remember each corner's skin by where it is. Merged
+        // rectangles take their corners' skins from here, and never merge
+        // along the swim axis, the one the spine bends along.
+        skin().forEach((c, k) => skinAt.set(posKey(tri[k]), c));
+      }
       const key = planeKey(f);
       let pl = planes.get(`${key}|${bone}`); if (!pl) { pl = { f, bone, cells: new Set() }; planes.set(`${key}|${bone}`, pl); }
       // A triangle is half its rectangle; its twin marks the same cells.
-      for (const c of cellsOf(f)) if (!eyeCells.has(`${key}|${c}`)) pl.cells.add(c);
+      for (const c of cellsOf(f)) if (!covered(name, key, c, bone)) pl.cells.add(c);
     });
-    const pos = [], jnt = [];
+    const pos = [], jnt = [], wgt = [];
     for (const { f, bone, cells } of planes.values()) {
-      const canU = f.ua !== swim, canV = f.va !== swim;
+      const bends = bone < 0;
+      const canU = f.ua !== swim && (!bends || f.ua !== spine), canV = f.va !== swim && (!bends || f.va !== spine);
       const used = new Set();
       const order = [...cells].map((k) => k.split('|').map(Number)).sort((A, B) => A[1] - B[1] || A[0] - B[0]);
       for (const [i, j] of order) {
@@ -230,20 +307,49 @@ function greedy(doc, voxel, swim) {
         if (canV) grow: for (;;) { for (let k = 0; k < w; k++) if (!free(i + k, j + h)) break grow; h++; }
         for (let a = 0; a < w; a++) for (let b = 0; b < h; b++) used.add(`${i + a}|${j + b}`);
         const pu = phase(f.u0), pv = phase(f.v0);
-        const corner = (uu, vv) => { const q = [0, 0, 0]; q[f.axis] = f.plane; q[f.ua] = pu + uu * voxel; q[f.va] = pv + vv * voxel; return q; };
-        const q = [corner(i, j), corner(i + w, j), corner(i + w, j + h), corner(i, j + h)];
-        // Wind so the face points the way the source's did.
-        const e1 = [0, 1, 2].map((k) => q[1][k] - q[0][k]), e2 = [0, 1, 2].map((k) => q[2][k] - q[0][k]);
-        const nz = e1[(f.axis + 1) % 3] * e2[(f.axis + 2) % 3] - e1[(f.axis + 2) % 3] * e2[(f.axis + 1) % 3];
-        for (const o of Math.sign(nz) === f.sign ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]) { pos.push(...q[o]); jnt.push(bone, 0, 0, 0); }
+        const R = [pu + i * voxel, pu + (i + w) * voxel, pv + j * voxel, pv + (j + h) * voxel];
+        const corner = (uu, vv) => { const q = [0, 0, 0]; q[f.axis] = f.plane; q[f.ua] = uu; q[f.va] = vv; return q; };
+        const eyes = eyeRects.get(`${f.axis}|${f.sign}|${snap(f.plane)}`) ?? [];
+        // A bending rectangle's corners take the source's skins; a corner a cut
+        // makes blends its rectangle's four, as the skin does across the face.
+        const at = (q) => {
+          const sk = skinAt.get(posKey(q)); if (sk) return sk;
+          const tu = (q[f.ua] - R[0]) / (R[1] - R[0]), tv = (q[f.va] - R[2]) / (R[3] - R[2]);
+          const mix = new Map();
+          for (const [uu, vv, k] of [[R[0], R[2], (1 - tu) * (1 - tv)], [R[1], R[2], tu * (1 - tv)], [R[1], R[3], tu * tv], [R[0], R[3], (1 - tu) * tv]]) {
+            const c = skinAt.get(posKey(corner(uu, vv)));
+            if (!c) throw new Error(`${name}: a bending rectangle's corner has no source vertex at ${corner(uu, vv)}`);
+            c.j.forEach((jj, i) => mix.set(jj, (mix.get(jj) ?? 0) + k * c.w[i]));
+          }
+          const top = [...mix.entries()].filter(([, w]) => w > 1e-6).sort((a, b) => b[1] - a[1]).slice(0, 4);
+          const sum = top.reduce((a, [, w]) => a + w, 0);
+          while (top.length < 4) top.push([0, 0]);
+          return { j: top.map(([jj]) => jj), w: top.map(([, w]) => w / sum) };
+        };
+        for (const [u0, u1, v0, v1] of eyes.length ? cut(R, eyes) : [R]) {
+          const q = [corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1)];
+          // Wind so the face points the way the source's did.
+          const e1 = [0, 1, 2].map((k) => q[1][k] - q[0][k]), e2 = [0, 1, 2].map((k) => q[2][k] - q[0][k]);
+          const nz = e1[(f.axis + 1) % 3] * e2[(f.axis + 2) % 3] - e1[(f.axis + 2) % 3] * e2[(f.axis + 1) % 3];
+          for (const o of Math.sign(nz) === f.sign ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]) {
+            pos.push(...q[o]);
+            if (!bends) { jnt.push(bone, 0, 0, 0); wgt.push(255, 0, 0, 0); continue; }
+            const sk = at(q[o]);
+            jnt.push(...sk.j); wgt.push(...bytes(sk.w));
+          }
+        }
       }
     }
-    for (const { tri, bone } of loose) for (const c of tri) { pos.push(...c); jnt.push(bone, 0, 0, 0); }
+    for (const { tri, bone, skin } of loose) tri.forEach((c, k) => {
+      pos.push(...c);
+      if (!skin) { jnt.push(Math.max(0, bone), 0, 0, 0); wgt.push(255, 0, 0, 0); return; }
+      jnt.push(...skin[k].j); wgt.push(...bytes(skin[k].w));
+    });
     p.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pos)));
     if (joints) {
       p.setAttribute('JOINTS_0', doc.createAccessor().setType('VEC4').setArray(new Uint8Array(jnt)));
-      // Normalized bytes: the weight is always exactly 1 (255/255).
-      p.setAttribute('WEIGHTS_0', doc.createAccessor().setType('VEC4').setNormalized(true).setArray(new Uint8Array(jnt.map((_, i) => (i % 4 === 0 ? 255 : 0)))));
+      // Normalized bytes: a rigid part's weight is exactly 1 (255/255).
+      p.setAttribute('WEIGHTS_0', doc.createAccessor().setType('VEC4').setNormalized(true).setArray(new Uint8Array(wgt)));
     }
     p.setIndices(null);
   }
@@ -341,7 +447,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     if (buried) console.log(`${breed.padEnd(11)} culled ${buried} buried faces`);
     // The swim-axis rule protects the body wave, which never bends a skinned
     // mesh (swimwave.ts): a rig's parts are rigid, so they merge every way.
-    greedy(doc, pitchOf(doc), rigged ? -1 : swim);
+    greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim);
   } else {
     await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, spec.triBudget / before.tris), error: spec.error ?? 0.002, lockBorder: false }), unweld());
   }

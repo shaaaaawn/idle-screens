@@ -60,8 +60,11 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
        because the body wave bends per vertex and a face merged along the
        body would stay rigid and crack.
      - It never touches eye primitives.
-     - It drops body faces lying under an eye face, because the source's
-       coplanar decals z-fight.
+     - Where two materials claim one face of one cell (the source's
+       coplanar decals: eyes, a mouth, teeth on a jaw), the smaller
+       material wins and the other face is dropped, eyes always; they
+       would z-fight. At runtime eye, `METAL-` and `KEEP-` parts also get
+       a polygon offset, so a decal on a neighbouring face never ties.
      - The voxel pitch is measured, not assumed; the shark's source node
        carried a 1.3 scale.
    - `smooth`: anything else. Meshopt simplification to `triBudget` at
@@ -125,11 +128,15 @@ The rules a rig keeps, so the intake and the tank can trust it:
 - **The model is never edited.** Vertices, materials and colours are the
   delivered ones; the rig only says which part each face belongs to. The bind
   pose is the delivered model.
-- **Rigid parts.** Every face is weighted 1.0 to exactly one bone, chosen by
-  the voxel it skins. The intake checks it, greedy-meshes each part on its own
-  (so a merged rectangle never spans two parts that move apart, and every axis
-  merges, since the body wave never bends a skinned mesh), and keeps
-  `JOINTS_0`/`WEIGHTS_0`.
+- **Rigid parts, or a soft spine.** Every face is weighted 1.0 to exactly one
+  bone, chosen by the voxel it skins, except where a spine bends: the shark's
+  body vertices blend between neighbouring spine bones across a few voxels
+  (`spine_weights` in `rig/shark.py`), so the bite and the swim bend one body
+  instead of cracking it into pieces. Jaw, teeth, eyes and fins stay rigid.
+  The intake greedy-meshes each rigid part on its own (so a merged rectangle
+  never spans two parts that move apart; every axis merges), merges blended
+  faces only across the body (never along the axis it bends on), culls a
+  blended face against its dominant bone, and keeps `JOINTS_0`/`WEIGHTS_0`.
 - **Pivots on voxel boundaries**, so a joint opens the smallest seam.
 - **Clips are named actions** (`<breed>:<clip>`, one NLA track each),
   exported sampled; a loop's last key is its first. The intake drops channels
