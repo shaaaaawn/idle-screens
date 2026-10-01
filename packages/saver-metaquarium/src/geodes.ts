@@ -523,7 +523,7 @@ export function galleryRows(minerals: readonly MineralName[] = MINERALS): Galler
     each((mineral) => ({ kind: 'geode', mineral, variant: 'hollow' })),
     each((mineral) => ({ kind: 'cluster', mineral })),
     each((mineral) => ({ kind: 'cathedral', mineral })),
-    [{ kind: 'cavern', mineral: minerals.includes('amethyst') ? 'amethyst' : minerals[0]! }],
+    [{ kind: 'cavern', mineral: minerals.includes('amethyst') ? 'amethyst' : (minerals[0] ?? 'quartz') }],
   ].filter((row) => row.length) as GallerySpecimen[][];
 }
 

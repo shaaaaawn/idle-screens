@@ -97,8 +97,7 @@ export const METAQUARIUM_PARAMS = {
    *  tier-budgeted. Palette params (fog, floor colour, motes) stay yours —
    *  an environment never overrides them. */
   environment: { type: 'enum', default: 'void', options: [...ENVIRONMENT_NAMES], ease: 'step' },
-  /** Override the environment's terrain. `auto` follows the environment. */
-  /** The floor's shape. `shelf` raises the town on a plateau with a terraced
+  /** Override the environment's terrain. `auto` follows the environment. `shelf` raises the town on a plateau with a terraced
    *  lip; `trench` cuts a meandering channel across the front; `terraces`
    *  steps the floor up in tiers behind the town. */
   floorKind: { type: 'enum', default: 'auto', options: ['auto', 'flat', 'dunes', 'ridges', 'basin', 'shelf', 'trench', 'terraces'], ease: 'step' },
