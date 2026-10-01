@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
-import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_GALLERY, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, MINERALS, PART, type GeodeFieldOptions } from './geodes';
+import { buildGeodeField, galleryRows, GEODE_FRAGMENT_PARS, GEODE_KINDS, GEODE_SHADE, GEODE_VERTEX, MINERALS, PART, type GeodeFieldOptions } from './geodes';
 
 const opts: GeodeFieldOptions = { amount: 1, cap: 8, scale: 1, blocked: () => false, terrain: () => 0 };
 type Field = ReturnType<typeof buildGeodeField>;
@@ -42,24 +42,36 @@ describe('wild geodes', () => {
     }
   });
 
-  it('the gallery stands every kind in two rows, specimens in front', () => {
+  it('the gallery is a lineup: a row per kind, a column per mineral, the mega geode behind', () => {
+    const rows = galleryRows();
+    expect(rows.map((r) => r[0]!.kind)).toEqual(['geode', 'geode', 'geode', 'cluster', 'cathedral', 'cavern']);
+    for (const row of rows.slice(1, 5)) expect(row.map((g) => g.mineral)).toEqual([...MINERALS]);
+    expect(rows[0]!.every((g) => g.aura)).toBe(true);
     const g = buildGeodeField(createRng(3), { ...opts, layout: 'gallery' });
-    expect(g.geodes).toBe(GEODE_GALLERY.flat().length);
+    expect(g.geodes).toBe(rows.flat().length);
     for (const k of GEODE_KINDS) expect(g.byKind[k], k).toBeGreaterThan(0);
-    expect(g.thundereggs).toBe(2);
-    const front = g.obstacles.slice(0, GEODE_GALLERY[0]!.length), back = g.obstacles.slice(GEODE_GALLERY[0]!.length);
-    expect(Math.min(...front.map((o) => o.z))).toBeGreaterThan(Math.max(...back.map((o) => o.z)));
+    expect(g.thundereggs).toBe(MINERALS.length);
+    expect(g.aura).toBe(3);
+    // Rows run front to back; the mega geode is behind everything.
+    const zs = g.obstacles.map((o) => o.z), cavern = zs[zs.length - 1]!;
+    expect(Math.max(...zs.slice(0, -1).filter((_, i) => i >= rows.flat().length - 1 - MINERALS.length))).toBeGreaterThan(cavern);
+    expect(Math.min(...zs)).toBe(cavern);
+    // Nothing overlaps its neighbour in a row.
+    const front = g.obstacles.slice(3, 3 + MINERALS.length);
+    for (let i = 1; i < front.length; i += 1) expect(front[i]!.x - front[i - 1]!.x).toBeGreaterThan(45);
+    // A scene's own minerals choose the columns.
+    expect(galleryRows(['citrine', 'rose']).filter((r) => r[0]!.kind !== 'cavern').every((r) => r.length === 2)).toBe(true);
     // Cathedrals and the cavern light the floor.
-    expect(g.lights).toHaveLength(3);
+    expect(g.lights).toHaveLength(MINERALS.length + 1);
   });
 
   it('agate is a band field: 0 at the crust, 1 at the hollow, past 1 into a thunder egg\'s star', () => {
     const g = buildGeodeField(createRng(3), { ...opts, layout: 'gallery' });
     const geo = arr(g, 'aGeo');
     const t = ofPart(g, PART.cut).map((i) => geo[i * 4]!);
-    expect(Math.min(...t)).toBe(0);
-    expect(t.some((v) => v === 1)).toBe(true);
-    expect(Math.max(...t)).toBeGreaterThan(1.5); // the star's fortification bands
+    expect(t.reduce((a, v) => Math.min(a, v), Infinity)).toBe(0);
+    expect(t.some((v) => Math.abs(v - 1) < 1e-6)).toBe(true);
+    expect(t.reduce((a, v) => Math.max(a, v), -Infinity)).toBeGreaterThan(1.5); // the star's fortification bands
     // A hollow geode's band field stops at the hollow.
     const hollow = buildGeodeField(createRng(3), { ...opts, layout: 'gallery', minerals: ['amethyst'] });
     expect(ofPart(hollow, PART.cut).length).toBeGreaterThan(0);

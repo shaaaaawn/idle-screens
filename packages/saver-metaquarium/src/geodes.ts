@@ -41,7 +41,7 @@
 
 import { BufferAttribute, BufferGeometry, Color, Matrix4, Quaternion, Vector3 } from 'three';
 import type { CrystalRng } from './crystals';
-import { GEODE_KINDS, type GeodeKind, type MineralName } from './geode-mix';
+import { GEODE_KINDS, MINERALS, type GeodeKind, type MineralName } from './geode-mix';
 
 export { GEODE_KINDS, MINERALS, parseGeodeMix, parseGeodeMineral, type GeodeKind, type MineralName } from './geode-mix';
 
@@ -477,18 +477,25 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
   return { r: R * 1.3, h: R * 1.7, light: { y: R * 0.5, reach: R * 2.5 } };
 }
 
-/** The gallery: specimens in front, the tall ones and the mega geode behind. */
-export const GEODE_GALLERY: ReadonlyArray<ReadonlyArray<{ kind: GeodeKind; mineral: MineralName; variant?: 'star' | 'hollow' }>> = [
-  [
-    { kind: 'geode', mineral: 'amethyst', variant: 'hollow' }, { kind: 'geode', mineral: 'agate', variant: 'star' },
-    { kind: 'cluster', mineral: 'amethyst' }, { kind: 'geode', mineral: 'citrine', variant: 'hollow' },
-    { kind: 'geode', mineral: 'rose', variant: 'star' },
-  ],
-  [
-    { kind: 'cathedral', mineral: 'amethyst' }, { kind: 'cluster', mineral: 'quartz' }, { kind: 'cavern', mineral: 'amethyst' },
-    { kind: 'cluster', mineral: 'citrine' }, { kind: 'cathedral', mineral: 'celestine' },
-  ],
-];
+/** One gallery specimen. */
+export interface GallerySpecimen { kind: GeodeKind; mineral: MineralName; variant?: 'star' | 'hollow'; aura?: boolean }
+
+/**
+ * The gallery: a lineup of every kind in every mineral, a row per kind —
+ * aura morphs in front, then thunder eggs, hollow geodes, clusters and
+ * cathedrals going back, the mega geode behind them all.
+ */
+export function galleryRows(minerals: readonly MineralName[] = MINERALS): GallerySpecimen[][] {
+  const each = (f: (m: MineralName) => GallerySpecimen): GallerySpecimen[] => minerals.map(f);
+  return [
+    (['quartz', 'amethyst', 'agate'] as MineralName[]).filter((m) => minerals.includes(m)).map((mineral) => ({ kind: 'geode', mineral, variant: 'hollow', aura: true })),
+    each((mineral) => ({ kind: 'geode', mineral, variant: 'star' })),
+    each((mineral) => ({ kind: 'geode', mineral, variant: 'hollow' })),
+    each((mineral) => ({ kind: 'cluster', mineral })),
+    each((mineral) => ({ kind: 'cathedral', mineral })),
+    [{ kind: 'cavern', mineral: minerals.includes('amethyst') ? 'amethyst' : minerals[0]! }],
+  ].filter((row) => row.length) as GallerySpecimen[][];
+}
 
 export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): GeodeField {
   const w = new GeoWriter();
@@ -509,13 +516,19 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
   };
   const minerals = opts.minerals?.length ? opts.minerals : undefined;
   if (opts.layout === 'gallery') {
-    GEODE_GALLERY.forEach((row, r) => {
-      const gap = (r === 0 ? 46 : 64) * s, rowZ = (r === 0 ? 30 : -60) * s;
+    // Columns a mineral each, rows a kind each, spaced so nothing touches;
+    // the mega geode stands behind the lot.
+    const rows = galleryRows(minerals ?? MINERALS);
+    const gap = 52 * s, rowGap = 56 * s;
+    rows.forEach((row, r) => {
+      const mega = row[0]!.kind === 'cavern', tall = row[0]!.kind === 'cathedral';
+      const z = (2.2 - r) * rowGap - (mega ? 150 * s : 0);
       row.forEach((g, i) => {
-        const x = (i - (row.length - 1) / 2) * gap;
-        const z = g.kind === 'cavern' ? rowZ - 80 * s : rowZ;
-        const mineral = minerals ? minerals[(r * 5 + i) % minerals.length]! : g.mineral;
-        put(g.kind, x, z, Math.atan2(-x, 420 * s), mineral, false, g.kind === 'cavern' ? s : s * 1.3, g.variant);
+        // The cathedrals leave an empty slot in the middle, so the mega geode
+        // shows between them; every other row is centred.
+        const slot = tall && i >= Math.ceil(row.length / 2) ? i + 1 : i;
+        const x = (slot - (tall ? row.length : row.length - 1) / 2) * gap;
+        put(g.kind, x, z, 0, g.mineral, !!g.aura, g.kind === 'cluster' ? s * 1.6 : s, g.variant);
       });
     });
   } else {
