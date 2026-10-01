@@ -1,6 +1,6 @@
 import { AnimationClip, BoxGeometry, Bone, Color, Group, Mesh, NumberKeyframeTrack, Vector4 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { HACKER_CLIPS, hackerCrashes, hackerCycle, hackerFrame, hackerMoment, moodAt, rigHacker } from './hacker';
+import { BOOT, DEAD, GLITCH, HACKER_CLIPS, TYPE, hackerCrashes, hackerCycle, hackerFrame, hackerMoment, moodAt, rigHacker } from './hacker';
 import { GLYPH_NAMES, GLYPHS, PHOSPHORS, rigScreen, screenMaterial, setScreen, type ScreenState } from './screen';
 
 const DUR: Record<string, number> = { swim: 1, type: 2.4, glitch: 1 };
@@ -64,11 +64,11 @@ describe('the hackerfish (hacker.ts)', () => {
     expect(hackerMoment(0, at(1)).screen.mode).toBe('rain');
     expect(hackerMoment(0, at(1)).doing).toBe('hack');
     expect(hackerMoment(0, at(1)).weights.type).toBeCloseTo(1, 6);
-    const g = 2.4 + 1.5;
-    expect(hackerMoment(0, at(g + 0.5)).screen.mode).toBe('glitch');
-    expect(hackerMoment(0, at(g + 1.5)).screen.to).toBe('dead');
-    expect(hackerMoment(0, at(g + 2.5)).screen.mode).toBe('boot');
-    const back = hackerMoment(0, at(g + 1 + 0.7 + 1.8 + 0.5)).screen;
+    const g = TYPE + 1.5; // the crash starts 1.5 s after the typing
+    expect(hackerMoment(0, at(g + GLITCH / 2)).screen.mode).toBe('glitch');
+    expect(hackerMoment(0, at(g + GLITCH + DEAD / 2)).screen.to).toBe('dead');
+    expect(hackerMoment(0, at(g + GLITCH + DEAD + BOOT / 2)).screen.mode).toBe('boot');
+    const back = hackerMoment(0, at(g + GLITCH + DEAD + BOOT + 0.5)).screen;
     expect([back.mode, back.to]).toEqual(['face', 'happy']);
     const strikes = Array.from({ length: 40 }, (_, k) => hackerCrashes(2, k));
     expect(strikes).toContain(true);

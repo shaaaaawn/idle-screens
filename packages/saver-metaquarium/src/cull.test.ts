@@ -1,6 +1,6 @@
 import { Document } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
-import { cullHidden, trianglesOf } from '../breeds/cull.mjs';
+import { cullHidden, jointsOf, trianglesOf } from '../breeds/cull.mjs';
 
 const V = 2; // voxel pitch
 
@@ -76,5 +76,20 @@ describe('cullHidden', () => {
     const { doc, tris } = build([{ joint: 3, faces: [...cube([0, 0, 0]), ...cube([0, 1, 0])] }]);
     expect(cullHidden(doc, V)).toBe(4);
     expect(tris()).toBe(20);
+  });
+});
+
+describe('jointsOf', () => {
+  it('reads one joint per triangle of a rigid part', () => {
+    const { doc } = build([{ joint: 2, faces: [{ cell: [0, 0, 0], side: [0, 1] }] }]);
+    const prim = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!;
+    expect(jointsOf(prim)).toEqual([2, 2]);
+  });
+
+  it('refuses a vertex whose weight is shared with another slot', () => {
+    const { doc } = build([{ joint: 2, faces: [{ cell: [0, 0, 0], side: [0, 1] }] }]);
+    const prim = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!;
+    prim.getAttribute('WEIGHTS_0')!.setElement(0, [0.9999, 0.0001 + 0.001, 0, 0]);
+    expect(() => jointsOf(prim)).toThrow(/not rigidly skinned/);
   });
 });

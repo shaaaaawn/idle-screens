@@ -201,7 +201,7 @@ describe('crab: the frame', () => {
     expect(wall.y).toBeGreaterThanOrEqual(5 * wall.x + 5 * wall.z - 1e-9);
   });
 
-  it('keeps its own pace: a glide of size (or of swimSpeed, which it ignores) never flings it along its route', () => {
+  it('keeps its own pace: a glide of size never flings it along its route', () => {
     const rig = rigged();
     for (const t of [5, 120, 900]) {
       const small = crabFrame(rig, input(t, 4), blank());

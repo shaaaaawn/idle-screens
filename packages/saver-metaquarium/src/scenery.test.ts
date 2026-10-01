@@ -47,6 +47,8 @@ describe('mineral world', () => {
     }
     expect(onStone).toBeGreaterThan(world.rockClusters.length / 2);
     expect(world.groundAt(900, 900)).toBe(-Infinity);
+    // In the world but between boulders (anchors sit 55–95 out): terrain, not stone.
+    expect(world.groundAt(0, 0)).toBe(-Infinity);
     expect(build({ ...off }).groundAt(0, 0)).toBe(-Infinity);
   });
   it('leaves old scenes empty and without collision volumes', () => {

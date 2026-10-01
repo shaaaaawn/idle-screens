@@ -17,7 +17,10 @@ export function jointsOf(p) {
   for (let t = 0; t < n / 3; t++) {
     const ids = [0, 1, 2].map((k) => (idx ? idx.getScalar(t * 3 + k) : t * 3 + k));
     const js = ids.map((i) => j.getElement(i, [])[0]);
-    if (js[1] !== js[0] || js[2] !== js[0] || ids.some((i) => Math.abs(w.getElement(i, [])[0] - 1) > 1e-4)) {
+    // One joint at full weight, the other three slots empty (a weight of 1 in
+    // a later slot, or a stray share, is not a rigid part).
+    const rigid = (i) => { const [w0, ...rest] = w.getElement(i, []); return Math.abs(w0 - 1) <= 1e-4 && rest.every((x) => Math.abs(x) <= 1e-4); };
+    if (js[1] !== js[0] || js[2] !== js[0] || !ids.every(rigid)) {
       throw new Error(`${p.getMaterial()?.getName()}: triangle ${t} is not rigidly skinned to one joint`);
     }
     out.push(js[0]);

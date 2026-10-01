@@ -105,6 +105,7 @@ def load_source(breed):
     for o in meshes:
         mw = o.matrix_world.copy()
         o.parent = None
+        o.data = o.data.copy()  # instanced nodes share one datablock: bake each its own
         o.data.transform(mw)
         o.matrix_world = Matrix.Identity(4)
     for o in [o for o in scene.objects if o not in before and o.type == 'EMPTY']:

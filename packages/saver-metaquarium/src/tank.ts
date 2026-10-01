@@ -1259,8 +1259,9 @@ class TankInstance implements SaverInstance {
     // so the part reads as brighter than its own colour.
     const hot = 0.34 * amount;
     // A rigged breed's light lives with it (angler.ts: the lure breathes,
-    // beckons, goes dark at the strike): its level per part, by material.
-    const lights = f.rig?.lights;
+    // beckons, goes dark at the strike): its level per part, by material. Not
+    // at `fishGlow: 0`, which is the authored colour, static.
+    const lights = amount > 0 ? f.rig?.lights : undefined;
     for (const c of g.cores) {
       const lvl = beat * (lights?.[c.mat.name] ?? 1);
       c.mat.color.setRGB(
@@ -1569,10 +1570,13 @@ class TankInstance implements SaverInstance {
       // it. Measured from where the fish is heading NOW, not the chord: a long
       // fish's chord (a shark's is 80 units) can lie far off its heading, and a
       // side or face camera must be square to the animal.
+      // The reference fades from the chord (angle 0) to the heading (90 and on)
+      // with the cosine, and the blend is swung round: an eased angle never snaps the shot.
       const turn = (this.num('followAngle') * Math.PI) / 180;
       if (turn !== 0) {
-        const c = Math.cos(turn), s = Math.sin(turn);
-        [dx, dz] = [head.x * c - head.z * s, head.x * s + head.z * c];
+        const w = Math.max(0, Math.cos(turn)), c = Math.cos(turn), s = Math.sin(turn);
+        const bx = dx * w + head.x * (1 - w), bz = dz * w + head.z * (1 - w), bl = Math.hypot(bx, bz) || 1;
+        [dx, dz] = [(bx * c - bz * s) / bl, (bx * s + bz * c) / bl];
       }
       cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
     }
@@ -1973,11 +1977,14 @@ class TankInstance implements SaverInstance {
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      // Rigged at identity, before the tank scales and turns the body.
-      if (this.wantBreeds[index] === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
-      if (this.wantBreeds[index] === 'glowfish') angler = rigAngler(body, tpl.clips);
-      if (this.wantBreeds[index] === 'hackerfish') hacker = rigHacker(body, tpl.clips);
-      if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
+      // Rigged at identity, before the tank scales and turns the body. The
+      // breed is the mix's, or — single-breed fishUrl mode — the bundled one the url names.
+      const url = this.wantUrls[index] ?? '';
+      const rigged = this.wantBreeds[index] ?? (url.startsWith(BUNDLED_BREED_SCHEME) ? url.slice(BUNDLED_BREED_SCHEME.length) : null);
+      if (rigged === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
+      if (rigged === 'glowfish') angler = rigAngler(body, tpl.clips);
+      if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
+      if (rigged === 'shark') shark = rigShark(body, tpl.clips);
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
@@ -2795,7 +2802,7 @@ class TankInstance implements SaverInstance {
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
         // The facing the frame shows: the script's, for an actor.
-        heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
+        heading: Math.round(((Math.atan2(crab ? crab.fx : act ? act.fx : pose.fx, crab ? crab.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(crab ? { doing: crab.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),
