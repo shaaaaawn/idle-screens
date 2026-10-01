@@ -590,14 +590,16 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
         // The cathedrals leave an empty slot in the middle, so the mega geode
         // shows between them; every other row is centred.
         const slot = tall && i >= Math.ceil(row.length / 2) ? i + 1 : i;
-        const x = (slot - (tall ? row.length : row.length - 1) / 2) * gap;
+        const x = (slot - (tall && row.length > 1 ? row.length : row.length - 1) / 2) * gap;
         put(g.kind, x, z, 0, g.mineral, !!g.aura, g.kind === 'cluster' ? s * 1.6 : s, g.variant);
       });
     });
   } else {
     // Fewer, and better: a geode is a find, not gravel.
-    const want = Math.round(opts.amount * opts.cap * 0.8);
     const named = opts.mix && Object.values(opts.mix).some((v) => (v ?? 0) > 0);
+    // A mix that names kinds but weights none of them (`cavern:0`) asks for nothing, not for the default.
+    const nothing = !!opts.mix && Object.keys(opts.mix).length > 0 && !named;
+    const want = nothing ? 0 : Math.round(opts.amount * opts.cap * 0.8);
     const weights = GEODE_KINDS.map((k) => [k, named ? Math.max(0, opts.mix?.[k] ?? 0) : KIND[k].share] as const).filter(([, v]) => v > 0);
     const total = weights.reduce((a, [, v]) => a + v, 0);
     const placed: Array<{ x: number; z: number; r: number }> = [];

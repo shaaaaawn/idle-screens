@@ -72,7 +72,7 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    - `size` is the breed's nominal length against a minted fish (1): a shark
      is big, a babyfish small.
    - `motion` is how it should move: `wiggle` is the tank's body wave;
-     `scuttle` (a crab's legs, crab.ts) is built: an alternating gait driven
+     `scuttle` (a crab's legs, src/crab.ts) is built: an alternating gait driven
      by distance walked, claws on their own clock. `pulse` (a jellyfish's
      bell) is still to build. Rigging in Blender is the
      heavier alternative, worth it only for hand-authored motion (a scuttle

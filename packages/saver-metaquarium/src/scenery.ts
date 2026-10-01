@@ -369,7 +369,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     for (let pass = 0; pass < 3; pass++) {
       for (const c of [...clusters.map(c => ({ x: c.x, z: c.z, r: c.radius + 26 * s })), ...obstacles.map(o => ({ x: o.x, z: o.z, r: o.r + 18 * s }))]) {
         const d = Math.hypot(fx - c.x, fz - c.z);
-        if (d < c.r) { const k = (c.r - d) / Math.max(1, d); fx += (fx - c.x) * k; fz += (fz - c.z) * k; }
+        if (d < c.r) {
+          // Dead centre has no direction to push: use a fixed one.
+          const nx = d > 1e-6 ? (fx - c.x) / d : 1, nz = d > 1e-6 ? (fz - c.z) / d : 0;
+          fx += nx * (c.r - d); fz += nz * (c.r - d);
+        }
       }
     }
     fountainAt = { x: fx, z: fz };

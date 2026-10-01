@@ -97,7 +97,7 @@ describe('wild geodes', () => {
     const geo = arr(f, 'aGeo');
     expect(ofPart(f, PART.crystal).every((i) => geo[i * 4 + 3] === 1)).toBe(true);
     expect(ofPart(f, PART.crust).every((i) => geo[i * 4 + 3] === 0)).toBe(true); // stone sleeps
-    // Thirty fields (~360 geodes) pin a 1-in-20 rate well inside these
+    // Thirty fields (~300 geodes) pin a 1-in-20 rate well inside these
     // bounds; sixty took ten seconds under coverage on a loaded machine.
     let aura = 0, total = 0, checked = false;
     for (let seed = 1; seed <= 30; seed += 1) {

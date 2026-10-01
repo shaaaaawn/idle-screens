@@ -68,7 +68,9 @@ describe('contact shadows', () => {
     expect(s.mesh.count).toBe(0);
     s.set(0, 1, 2, 3, new Quaternion(), 10, 8);
     s.set(5, 0, 0, 0, new Quaternion(), 1, 1); // past capacity: ignored
-    s.commit(3);
+    s.commit(1);
+    expect(s.mesh.count).toBe(1);
+    s.commit(9); // clamped to the capacity
     expect(s.mesh.count).toBe(2);
     const at = new Vector3(), m = s.mesh.instanceMatrix.array;
     at.set(m[12]!, m[13]!, m[14]!);
