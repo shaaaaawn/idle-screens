@@ -1,3 +1,4 @@
+import { NodeIO } from '@gltf-transform/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
@@ -39,6 +40,36 @@ describe('bundled breeds (breeds/README.md)', () => {
       expect(tris).toBeLessThanOrEqual(6000);
     });
   }
+
+  it('crab: the Blender rig survives the intake — one skin, six clips, every vertex rigid on its own part', async () => {
+    // breeds/rig/crab.py → rig/crab.glb → intake. Greedy meshing rewrites every
+    // body face; a joint lost or crossed on the way rigs a claw to a leg.
+    const doc = await new NodeIO().read(here('../breeds/crab.glb').pathname);
+    const root = doc.getRoot();
+    expect(root.listSkins()).toHaveLength(1);
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect(joints).toHaveLength(23);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['cheer', 'forage', 'idle', 'pinch', 'walk', 'wave']);
+    expect(root.listNodes().find((n) => n.getName() === 'Crab')?.getExtras().mqStride).toBeCloseTo(6 / 0.55, 6);
+    const parts: Record<string, RegExp> = {
+      'GLOW-claws': /^(claw|jaw)\.[LR]$/, SecondaryColor: /^(thigh|shin)[1-4]\.[LR]$/,
+      PrimaryColor: /^body$/, 'EYES-White': /^(body|eye\.[LR])$/, 'EYES-Black': /^(body|eye\.[LR])$/,
+    };
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+      expect(j.getCount()).toBe(p.getAttribute('POSITION')!.getCount());
+      const used = new Set<string>();
+      for (let i = 0; i < j.getCount(); i++) {
+        const [j0] = j.getElement(i, []) as number[];
+        const [w0, w1, w2, w3] = w.getElement(i, []) as number[];
+        expect(j0).toBeLessThan(joints.length);
+        expect([w0, w1! + w2! + w3!]).toEqual([1, 0]);
+        used.add(joints[j0!]!);
+      }
+      for (const bone of used) expect(bone).toMatch(parts[name]!);
+    }
+  });
 
   it('the server-side manifest never pulls model bytes in', () => {
     // manifest.ts → ipfs.ts is what idle-server imports to validate a mix.

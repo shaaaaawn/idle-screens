@@ -12,6 +12,7 @@ swims on every host: the wall, the Mac app and the playground.
 ```
 breeds/
   source/<breed>.glb   the model as delivered, untouched (Draco, instancing, whatever it came with)
+  rig/<breed>.py       a rigged breed's Blender script: source in, rig/<breed>.glb (skeleton + clips) out
   breeds.json          the intake manifest: roles, kind, size, motion, notes
   intake.mjs           the pipeline (pnpm --filter @idle-screens/saver-metaquarium breeds [names…])
   <breed>.glb          the optimised result: what the lab reviews and the tests pin
@@ -72,15 +73,49 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    - `size` is the breed's nominal length against a minted fish (1): a shark
      is big, a babyfish small.
    - `motion` is how it should move: `wiggle` is the tank's body wave;
-     `pulse` (a jellyfish's bell) and `scuttle` (a crab's legs) are
-     per-breed procedural motions still to build. Rigging in Blender is the
-     heavier alternative, worth it only for hand-authored motion (a scuttle
-     with real leg joints).
+     `pulse` (a jellyfish's bell) is a per-breed procedural motion still to
+     build; `scuttle` is the crab's, rigged in Blender (see **Rigged
+     breeds** below).
 8. **Tests** (`src/breeds.test.ts`) run on their own. They check that the
    chunk equals the reviewed GLB, that there's no Draco, that every material
    has a role, and that the breed stays under 6,000 triangles. Then commit
-   `source/`, the optimised GLB, `src/breeds/`, `breeds.json` and
-   `REPORT.md`, plus a changeset.
+   `source/` (and `rig/` for a rigged breed), the optimised GLB,
+   `src/breeds/`, `breeds.json` and `REPORT.md`, plus a changeset.
+
+## Rigged breeds
+
+Hand-authored motion (legs with real joints, a claw that opens) is a
+skeleton and clips made in Blender. The crab is the first:
+`rig/crab.py` imports `source/crab.glb`, rigs it and bakes its clips, and
+writes `rig/crab.glb`, which `breeds.json` names as the intake's source (the
+delivered model stays as `delivered`).
+
+```
+blender -b -P breeds/rig/crab.py       # from packages/saver-metaquarium; or exec it in a live Blender
+pnpm --filter @idle-screens/saver-metaquarium breeds crab
+```
+
+The rules a rig keeps, so the intake and the tank can trust it:
+
+- **The model is never edited.** Vertices, materials and colours are the
+  delivered ones; the rig only says which part each face belongs to. The bind
+  pose is the delivered model.
+- **Rigid parts.** Every face is weighted 1.0 to exactly one bone, chosen by
+  the voxel it skins. The intake checks it, greedy-meshes each part on its own
+  (so a merged rectangle never spans two parts that move apart, and every axis
+  merges, since the body wave never bends a skinned mesh), and keeps
+  `JOINTS_0`/`WEIGHTS_0`.
+- **Pivots on voxel boundaries**, so a joint opens the smallest seam.
+- **Clips are named actions**, exported sampled; a loop's last key is its
+  first. The intake drops channels a clip never moves and resamples the rest.
+- **Facts the tank needs ride as extras** on the armature node: the crab's
+  `mqStride` is the body's travel per walk cycle, so the tank sets the gait's
+  phase from distance and the feet never slide.
+
+The tank side is a module per rigged breed (`src/crab.ts`): it picks which
+clip plays, when and where, and sets every action's time and weight each
+frame, so the tank stays a pure function of t. `breeds.test.ts` holds the
+crab's skin, clips and joint assignment.
 
 ## Budgets
 

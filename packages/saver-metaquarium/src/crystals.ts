@@ -597,6 +597,19 @@ export function sampleLight(
 
 /** How high the seabed effectively is at (x, z) once clusters stand on it
  *  (-Infinity where none does) — a dome per cluster, so floor-huggers ride over a crystal, not through it. */
+/** What something WALKING climbs at a cluster (crab.ts): a low mound over the
+ *  colony's footprint, no swimmer's margin — it clambers in among the shards'
+ *  roots rather than floating over their tips. */
+export function clusterMound(clusters: readonly Cluster[], x: number, z: number): number {
+  let h = -Infinity;
+  for (const c of clusters) {
+    const foot = c.radius * 1.05;
+    const d = Math.hypot(x - c.x, z - c.z);
+    if (d < foot) h = Math.max(h, c.y + c.height * 0.4 * (1 - (d / foot) ** 2));
+  }
+  return h;
+}
+
 export function clusterClearance(clusters: readonly Cluster[], x: number, z: number): number {
   let h = -Infinity;
   for (const c of clusters) {

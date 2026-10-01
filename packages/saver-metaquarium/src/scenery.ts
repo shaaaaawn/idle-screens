@@ -19,6 +19,7 @@ import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX
 import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
+import { stoneTop } from './ground';
 
 export interface SceneryOptions {
   rocks: number;
@@ -78,6 +79,8 @@ export interface Scenery {
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
+  /** The boulders' own walkable top (ground.ts): -Infinity off them. What a crab stands on. */
+  groundAt(x: number, z: number): number;
   /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
   /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
@@ -102,6 +105,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   group.name = 'mineral-world';
   const anchors = sceneryAnchors(clusters, rng.fork(1), terrain);
   const stones: BufferGeometry[] = [], veins: BufferGeometry[] = [];
+  // The boulders alone: ground a crab can climb. An arch's legs or a house's
+  // walls are cliffs; their top is no place to snap up to.
+  const boulders: BufferGeometry[] = [];
   const obstacles: { x: number; y: number; z: number; r: number; h: number }[] = [];
   const clocks: { value: number }[] = [];
   const vents: SceneryAnchor[] = [];
@@ -155,6 +161,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     const key = 100 + rockIndex++;
     const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins, host }, rockRng.fork(key));
     stones.push(built.stone);
+    boulders.push(built.stone);
     if (built.glow) veins.push(built.glow);
     // A big rock's breach seeps bubbles.
     if (built.seep && rx > 15 * s) seeps.push({ x: built.seep.x, y: built.seep.y, z: built.seep.z, color });
@@ -634,6 +641,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   batch(group, shellParts, 'geode-room', FrontSide);
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
+  const stoneGround = stoneTop(boulders);
   batch(group, stones, 'rock-formations', FrontSide);
   const lava = batch(group, veins, 'crystal-veins');
   if (lava) {
@@ -662,6 +670,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       }
       return h;
     },
+    groundAt: stoneGround ?? (() => -Infinity),
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);

@@ -37,6 +37,18 @@ describe('mineral world', () => {
     // Seeded.
     expect(build({ ...off, rocks: 1, veins: 0.7 }).rockClusters).toEqual(colonies);
   });
+  it('gives a crab the boulders\' own top to stand on, and nothing where there is no stone', () => {
+    const world = build({ ...off, rocks: 1, veins: 0.7 });
+    // A colony grows out of a boulder's crown: there is stone under it, about as high.
+    let onStone = 0;
+    for (const c of world.rockClusters) {
+      const h = world.groundAt(c.x, c.z);
+      if (h > -Infinity) { onStone++; expect(Math.abs(h - c.y)).toBeLessThan(8); }
+    }
+    expect(onStone).toBeGreaterThan(world.rockClusters.length / 2);
+    expect(world.groundAt(900, 900)).toBe(-Infinity);
+    expect(build({ ...off }).groundAt(0, 0)).toBe(-Infinity);
+  });
   it('leaves old scenes empty and without collision volumes', () => {
     const world = build(off);
     expect(world.group.children).toHaveLength(0);

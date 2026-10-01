@@ -31,6 +31,7 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   Points,
+  Quaternion,
   Scene,
   ShaderMaterial,
   BackSide,
@@ -63,13 +64,14 @@ import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
+import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import { rigSeahorse } from './seahorse';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
-  clusterClearance, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
+  clusterClearance, clusterMound, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
   type Cluster, type Emitter,
 } from './crystals';
 import {
@@ -124,6 +126,8 @@ const GLB_CONCURRENCY = 3;
 interface FishTemplate {
   scene: Object3D;
   clip: AnimationClip | null;
+  /** Every clip the model carries, by name (a rigged breed: the crab's six). */
+  clips: AnimationClip[];
   norm: number;
   yaw: number;
   /** True when this template was decoded with Draco (not a fallback blob). */
@@ -524,6 +528,8 @@ interface Fish {
   eyes?: EyeRig | null;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
+  /** The crab's legs and gestures (crab.ts): it walks the floor instead of swimming. */
+  crab?: CrabRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -549,6 +555,8 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
+  /** A crab's current business (crab.ts): walk, turn, forage, pinch, wave, cheer, look, idle. */
+  doing?: string;
 }
 
 /** The leader a bonded fish rides: plan, where along it, and the light pull
@@ -610,6 +618,11 @@ class TankInstance implements SaverInstance {
   private readonly causticState = new Vector4(0, 12, 0, 132);
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
+  /** What a crab stands on: the seabed, the stone's own top, a cluster's mound. */
+  private readonly crabGround = (x: number, z: number): number => Math.max(
+    this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
+  private readonly crabSpots: number[] = [];
+  private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, doing: 'walk' };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
@@ -1887,6 +1900,7 @@ class TankInstance implements SaverInstance {
           return {
             scene,
             clip: gltf.animations[0] ?? null,
+            clips: gltf.animations,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
             draco,
@@ -1914,9 +1928,12 @@ class TankInstance implements SaverInstance {
     let bodyNode: Object3D | null = null;
     let clipDuration = 0;
     let fishGlow: FishGlow | null = null;
+    let crab: CrabRig | null = null;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
+      // Rigged at identity, before the tank scales and turns the body.
+      if (this.wantBreeds[index] === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
@@ -1931,7 +1948,12 @@ class TankInstance implements SaverInstance {
       body.rotation.y = tpl.yaw;
       group.add(body);
       bodyNode = body;
-      if (tpl.clip) {
+      if (crab) {
+        // Front along the group's +z, feet on the group's origin: crab.ts aims and stands the group.
+        body.rotation.y = 0;
+        body.position.copy(crab.anchor).multiplyScalar(-tpl.norm);
+        mixer = crab.mixer;
+      } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
         clipDuration = tpl.clip.duration;
@@ -1970,7 +1992,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
-      baseYaw: tpl ? tpl.yaw : 0,
+      baseYaw: tpl && !crab ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -1979,6 +2001,7 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
+      crab,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
     if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
@@ -2242,6 +2265,14 @@ class TankInstance implements SaverInstance {
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const tintPulse = this.num('crystalPulse');
+    // Every crab's own spot first, so each can give the others room (crab.ts).
+    const crabSpots = this.crabSpots;
+    crabSpots.length = 0;
+    for (const f of this.fish) {
+      if (!f?.crab || f.index >= visible) continue;
+      const s = crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index), FISH_LENGTH * this.fishSizeAt(f.index), speed);
+      crabSpots.push(f.index, s.x, s.z);
+    }
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -2555,6 +2586,16 @@ class TankInstance implements SaverInstance {
         px = act.x; y = act.y; pz = act.z;
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
       }
+      // A crab walks the floor on its own legs (crab.ts) and takes over its
+      // place and facing; a script's actor or a seated one just idles.
+      const crab = f.crab && !act && !style.formation
+        ? crabFrame(f.crab, {
+            t: tSec, index: f.index, plan: f.plan, start: crabStart(f.plan, f.index), len: L, speed,
+            scale: f.crab.norm * f.baseScale * size, ground: this.crabGround,
+            camX: this.camera.position.x, camZ: this.camera.position.z, others: crabSpots,
+          }, this.crabOut)
+        : null;
+      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (f.crab) crabIdle(f.crab, tSec, f.index);
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         this.followAt.set(px, y, pz); this.followSeen = true;
@@ -2585,6 +2626,7 @@ class TankInstance implements SaverInstance {
         f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
         f.group.rotateZ(pose.roll);
       }
+      if (crab) f.group.quaternion.copy(crab.quaternion);
 
       // Eye life: blinks, saccades, a look at whoever it is talking to, a
       // glance at the lens. Rigged on the first frame that asks for it, so
@@ -2621,7 +2663,7 @@ class TankInstance implements SaverInstance {
       // move the meshes inside the fish frame the wave was measured in.
       if (swimWave > 0 && f.body && f.wave === undefined) {
         f.body.rotation.y = f.baseYaw;
-        if (f.mixer) f.mixer.setTime(0);
+        if (f.mixer && !f.crab) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
         // A seahorse does not wave: it flutters its fin, coils its tail and nods.
         f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
@@ -2679,6 +2721,7 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
+        ...(crab ? { doing: crab.doing } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

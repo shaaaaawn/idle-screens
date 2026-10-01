@@ -11,8 +11,9 @@
       "notes": "Already role-named. Spiky silhouette — greedy meshing helps least here."
     },
     "crab": {
-      "source": "source/crab.glb", "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
-      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Legs want a scuttle, not a body wave — motion follow-up."
+      "source": "rig/crab.glb", "delivered": "source/crab.glb", "rig": "rig/crab.py",
+      "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
+      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Rigged in Blender by rig/crab.py from the delivered source/crab.glb (never edited): 23 rigid voxel parts — body, eye stalks, claw arms and jaws, two-segment legs — and the clips walk, idle, pinch, forage, wave, cheer. src/crab.ts drives them."
     },
     "dori": {
       "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",
