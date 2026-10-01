@@ -84,8 +84,11 @@ export function rigCrab(body: Object3D, clips: readonly AnimationClip[], norm: n
 const RAMP = 0.45;
 const TURN_IN = 0.7;
 const TURN_OUT = 1.0;
-/** Walking speed in body lengths per second, at swimSpeed 1. */
-const PACE = 0.55;
+/** Walking speed in world units per second: about half a crab's length.
+ *  A crab keeps its own pace — not `swimSpeed`, not the steerable sizes. Its
+ *  place is everything it has walked since t=0, and scaling that by a value
+ *  that can glide would fling it along its route mid-glide. */
+export const CRAB_PACE = 0.55 * 16.2;
 
 const STOPS: readonly [CrabDoing, number][] = [
   ['forage', 0.3], ['idle', 0.16], ['pinch', 0.16], ['wave', 0.15], ['cheer', 0.11], ['look', 0.12],
@@ -171,14 +174,13 @@ export interface CrabInput {
   plan: SwimPlan;
   /** Where along the plan this crab's route starts (crabStart). */
   start: number;
-  /** Body length in world units. */
+  /** Body length in world units (its footprint; the pace is the crab's own). */
   len: number;
-  /** swimSpeed: scales the walking, not the gestures. */
-  speed: number;
   /** World units per model unit. */
   scale: number;
   /** Walkable height (terrain, stone, mound): never -Infinity. */
   ground: (x: number, z: number) => number;
+  /** The camera a crab turns to face for a wave or a cheer; NaN: none to face (it stays put). */
   camX: number;
   camZ: number;
   /** Every crab's own spot this frame (crabSpot), as (index, x, z) triples:
@@ -189,8 +191,11 @@ export interface CrabInput {
 export interface CrabOutput {
   x: number; y: number; z: number;
   quaternion: Quaternion;
-  /** Unit facing (the crab's front), for the follow camera and the eyes. */
+  /** Unit facing (the crab's front). */
   fx: number; fz: number;
+  /** Unit travel along its route, and where the route had it two lengths ago: the follow camera's chord. */
+  tx: number; tz: number;
+  trailX: number; trailZ: number;
   doing: CrabDoing;
 }
 
@@ -204,10 +209,12 @@ export function crabStart(plan: SwimPlan, index: number): number {
   return fishHash(index, 719) * plan.totalLength;
 }
 
-/** Where a crab's route puts it at `t`, before it minds the others. */
-export function crabSpot(index: number, t: number, plan: SwimPlan, start: number, len: number, speed: number): { x: number; z: number; fx: number; fz: number } {
-  const pose = swimPoseAtDistance(plan, start + crabMoment(index, t).walked * PACE * len * speed);
-  return { x: pose.x, z: pose.z, fx: pose.fx, fz: pose.fz };
+/** Where a crab's route puts it at `t`, before it minds the others; `back`
+ *  units further back along the route for a trail. */
+export function crabSpot(index: number, t: number, plan: SwimPlan, start: number, back = 0): { x: number; z: number; fx: number; fz: number } {
+  const pose = swimPoseAtDistance(plan, start + crabMoment(index, t).walked * CRAB_PACE - back);
+  const l = Math.hypot(pose.fx, pose.fz) || 1;
+  return { x: pose.x, z: pose.z, fx: pose.fx / l, fz: pose.fz / l };
 }
 
 /** Two crabs closer than this many body lengths (centre to centre) ease apart. */
@@ -217,8 +224,7 @@ export function crabFrame(rig: CrabRig, inp: CrabInput, out: CrabOutput): CrabOu
   const { index, t, len } = inp;
   const c = crabCycle(index);
   const m = crabMoment(index, t);
-  const pace = PACE * len * inp.speed;
-  const pose = crabSpot(index, t, inp.plan, inp.start, len, inp.speed);
+  const pose = crabSpot(index, t, inp.plan, inp.start);
   let x = pose.x, z = pose.z;
   // Elbow room: each pair splits the overlap, so both step aside by half.
   // Pure in t — the others' spots are their own closed forms.
@@ -246,7 +252,7 @@ export function crabFrame(rig: CrabRig, inp: CrabInput, out: CrabOutput): CrabOu
   let gesture: CrabClip | null = null;
   if (m.intoStop >= 0) {
     const did = crabStopAt(index, m.k);
-    const faceCam = did === 'wave' || did === 'cheer' || did === 'look';
+    const faceCam = (did === 'wave' || did === 'cheer' || did === 'look') && Number.isFinite(inp.camX);
     const faceYaw = faceCam ? Math.atan2(inp.camX - x, inp.camZ - z) : walkYaw;
     const nextYaw = travel + (crabLead(index, m.k + 1) * Math.PI) / 2;
     const dIn = wrap(faceYaw - walkYaw);
@@ -280,14 +286,19 @@ export function crabFrame(rig: CrabRig, inp: CrabInput, out: CrabOutput): CrabOu
   euler.set(-pitch, yaw, roll);
   out.quaternion.setFromEuler(euler);
   out.x = x; out.y = y; out.z = z; out.fx = fx; out.fz = fz;
+  out.tx = pose.fx; out.tz = pose.fz;
+  const trail = crabSpot(index, t, inp.plan, inp.start, len * 2);
+  out.trailX = trail.x + (x - pose.x); out.trailZ = trail.z + (z - pose.z);
   out.doing = doing;
 
   // Clips. Gait phase from distance (no sliding), signed by which way the
   // crab's +X points along its travel (lead -1: +X is the travel); a turn
-  // steps the legs round a circle a third of a body across.
+  // steps the legs round a circle a third of a body across. Only THIS bout's
+  // distance counts: the phase is free to restart where the walk weight is 0,
+  // and a size glide cannot spin the legs through everything walked so far.
   const D = rig.durations;
   const strideW = rig.stride * inp.scale;
-  const stepped = m.walked * pace * -lead + turned * len * 0.3;
+  const stepped = boutDistance(m.u, c.walk) * CRAB_PACE * -lead + turned * len * 0.3;
   const walkW = Math.max(m.speed, turning);
   let actT = 0, actW = 0;
   if (gesture) {

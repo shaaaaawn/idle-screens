@@ -622,7 +622,7 @@ class TankInstance implements SaverInstance {
   private readonly crabGround = (x: number, z: number): number => Math.max(
     this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
   private readonly crabSpots: number[] = [];
-  private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, doing: 'walk' };
+  private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
@@ -2270,8 +2270,20 @@ class TankInstance implements SaverInstance {
     crabSpots.length = 0;
     for (const f of this.fish) {
       if (!f?.crab || f.index >= visible) continue;
-      const s = crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index), FISH_LENGTH * this.fishSizeAt(f.index), speed);
+      const s = crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index));
       crabSpots.push(f.index, s.x, s.z);
+    }
+    // The camera a crab turns to face — known for THIS t before any fish moves:
+    // the shot's, or, following a crab, where the chase camera will stand
+    // (behind it along its route). Following a fish, or riding in a crab's
+    // eye, there is none to turn to.
+    let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
+    if (followSlot >= 0) {
+      const ff = this.fish[followSlot];
+      if (ff?.crab && !followPov) {
+        const s = crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index));
+        crabCamX = s.x - s.fx * followBack; crabCamZ = s.z - s.fz * followBack;
+      } else { crabCamX = NaN; crabCamZ = NaN; }
     }
     for (const f of this.fish) {
       if (!f) continue;
@@ -2590,9 +2602,9 @@ class TankInstance implements SaverInstance {
       // place and facing; a script's actor or a seated one just idles.
       const crab = f.crab && !act && !style.formation
         ? crabFrame(f.crab, {
-            t: tSec, index: f.index, plan: f.plan, start: crabStart(f.plan, f.index), len: L, speed,
+            t: tSec, index: f.index, plan: f.plan, start: crabStart(f.plan, f.index), len: L,
             scale: f.crab.norm * f.baseScale * size, ground: this.crabGround,
-            camX: this.camera.position.x, camZ: this.camera.position.z, others: crabSpots,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
           }, this.crabOut)
         : null;
       if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (f.crab) crabIdle(f.crab, tSec, f.index);
@@ -2600,6 +2612,8 @@ class TankInstance implements SaverInstance {
       if (f.index === followSlot) {
         this.followAt.set(px, y, pz); this.followSeen = true;
         this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
+        // A crab's route is its own (crab.ts): chase along it, not the swim plan's.
+        if (crab) { this.followHead.set(crab.tx, 0, crab.tz); this.followTrail.set(crab.trailX, y, crab.trailZ); this.followHasTrail = true; }
         if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
         this.followHead.normalize();
         if (act && this.vignette) {

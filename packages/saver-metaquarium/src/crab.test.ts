@@ -4,7 +4,7 @@ import {
 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  boutDistance, boutSpeed, CRAB_CLIPS, crabCycle, crabFrame, crabIdle, crabLead, crabMoment, crabSpot, crabStart, crabStopAt,
+  boutDistance, boutSpeed, CRAB_CLIPS, CRAB_PACE, crabCycle, crabFrame, crabIdle, crabLead, crabMoment, crabSpot, crabStart, crabStopAt,
   rigCrab, type CrabDoing, type CrabInput, type CrabOutput, type CrabRig,
 } from './crab';
 import { compileSwimPlan } from './plan';
@@ -29,10 +29,10 @@ const clips = (names: readonly string[] = CRAB_CLIPS): AnimationClip[] =>
 const rigged = (): CrabRig => rigCrab(puppet(), clips(), 0.375)!;
 
 const input = (t: number, index = 0, over: Partial<CrabInput> = {}): CrabInput => ({
-  t, index, plan: PLAN, start: crabStart(PLAN, index), len: 16.2, speed: 1, scale: 0.375 * 0.9,
+  t, index, plan: PLAN, start: crabStart(PLAN, index), len: 16.2, scale: 0.375 * 0.9,
   ground: () => 3, camX: 0, camZ: 200, ...over,
 });
-const blank = (): CrabOutput => ({ x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, doing: 'walk' });
+const blank = (): CrabOutput => ({ x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' });
 
 /** A time `u` seconds into bout `k`'s cycle for crab `index`. */
 function at(index: number, k: number, u: number): number {
@@ -102,7 +102,7 @@ describe('crab: the frame', () => {
     const rig = rigged();
     const t = at(0, 2, crabCycle(0).walk / 2);
     const out = crabFrame(rig, input(t), blank());
-    const s = crabSpot(0, t, PLAN, crabStart(PLAN, 0), 16.2, 1);
+    const s = crabSpot(0, t, PLAN, crabStart(PLAN, 0));
     expect(out.doing).toBe('walk');
     expect(out.x).toBeCloseTo(s.x, 9);
     expect(out.z).toBeCloseTo(s.z, 9);
@@ -122,10 +122,10 @@ describe('crab: the frame', () => {
     const t1 = at(0, 3, crabCycle(0).walk / 2), t2 = t1 + 0.05;
     crabFrame(rig, { ...inp, t: t1 }, blank());
     const a = rig.actions.walk.time;
-    const p1 = crabSpot(0, t1, PLAN, inp.start, inp.len, 1);
+    const p1 = crabSpot(0, t1, PLAN, inp.start);
     crabFrame(rig, { ...inp, t: t2 }, blank());
     const b = rig.actions.walk.time;
-    const p2 = crabSpot(0, t2, PLAN, inp.start, inp.len, 1);
+    const p2 = crabSpot(0, t2, PLAN, inp.start);
     const walked = Math.hypot(p2.x - p1.x, p2.z - p1.z);
     const cycles = Math.abs(((b - a + 1.5) % 1) - 0.5) / DUR.walk!;
     expect(cycles).toBeCloseTo(walked / (STRIDE * inp.scale), 2);
@@ -201,6 +201,51 @@ describe('crab: the frame', () => {
     expect(wall.y).toBeGreaterThanOrEqual(5 * wall.x + 5 * wall.z - 1e-9);
   });
 
+  it('keeps its own pace: a glide of size (or of swimSpeed, which it ignores) never flings it along its route', () => {
+    const rig = rigged();
+    for (const t of [5, 120, 900]) {
+      const small = crabFrame(rig, input(t, 4), blank());
+      const big = crabFrame(rig, input(t, 4, { len: 40, scale: 0.9 }), blank());
+      expect([big.x, big.z]).toEqual([small.x, small.z]);
+    }
+    // And the legs: mid-bout, the gait phase counts only this bout's distance,
+    // so it stays within one bout's worth of cycles however long the crab has walked.
+    const c = crabCycle(4);
+    const inp = input(0, 4);
+    for (const k of [1, 50, 400]) {
+      crabFrame(rig, { ...inp, t: at(4, k, c.walk / 2) }, blank());
+      const cycles = (boutDistance(c.walk / 2, c.walk) * CRAB_PACE * -crabLead(4, k)) / (STRIDE * inp.scale);
+      const want = (((cycles * DUR.walk!) % DUR.walk!) + DUR.walk!) % DUR.walk!;
+      expect(rig.actions.walk.time).toBeCloseTo(want, 9);
+    }
+  });
+
+  it('with no camera to face, a wave or a cheer is made where it stands', () => {
+    let found: { index: number; k: number } | null = null;
+    for (let i = 0; i < 40 && !found; i++) for (let k = 1; k < 30 && !found; k++) {
+      if (crabStopAt(i, k) === 'wave' && crabLead(i, k) === crabLead(i, k + 1)) found = { index: i, k };
+    }
+    const { index, k } = found!;
+    const c = crabCycle(index);
+    const rig = rigged();
+    const walking = crabFrame(rig, input(at(index, k, c.walk - 0.01), index, { camX: NaN, camZ: NaN }), blank());
+    const fw = [walking.fx, walking.fz];
+    const waving = crabFrame(rig, input(at(index, k, c.walk + 1.5), index, { camX: NaN, camZ: NaN }), blank());
+    expect(waving.doing).toBe('wave');
+    expect(waving.fx * fw[0]! + waving.fz * fw[1]!).toBeCloseTo(1, 4);
+  });
+
+  it('leaves a trail behind it along its route, for the chase camera', () => {
+    const rig = rigged();
+    const out = crabFrame(rig, input(at(2, 3, 2), 2), blank());
+    // Two lengths back along a curving route: behind it, and a chord long
+    // enough for the chase camera to take its heading from (> 0.4 lengths).
+    const back = (out.x - out.trailX) * out.tx + (out.z - out.trailZ) * out.tz;
+    expect(back).toBeGreaterThan(16.2 * 0.4);
+    expect(Math.hypot(out.x - out.trailX, out.z - out.trailZ)).toBeLessThanOrEqual(2 * 16.2 + 1e-6);
+    expect(Math.hypot(out.tx, out.tz)).toBeCloseTo(1, 9);
+  });
+
   it('an actor a script is placing just idles where it is put', () => {
     const rig = rigged();
     crabFrame(rig, input(at(0, 2, 1.7)), blank()); // mid-walk first
@@ -214,7 +259,7 @@ describe('crab: the frame', () => {
   it('gives a neighbour room instead of walking through it', () => {
     const rig = rigged();
     const t = at(0, 2, 1.7);
-    const s = crabSpot(0, t, PLAN, crabStart(PLAN, 0), 16.2, 1);
+    const s = crabSpot(0, t, PLAN, crabStart(PLAN, 0));
     const alone = crabFrame(rig, input(t, 0, { others: [0, s.x, s.z] }), blank()); // itself: ignored
     expect(alone.x).toBeCloseTo(s.x, 9);
     const crowded = crabFrame(rig, input(t, 0, { others: [0, s.x, s.z, 7, s.x + 2, s.z] }), blank());
