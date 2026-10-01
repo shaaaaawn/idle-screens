@@ -34,8 +34,23 @@ def out_path(breed):
     return os.path.join(HERE, f'{breed}.glb')
 
 
-def base_name(name):
-    """A material's name without Blender's duplicate suffix (`.001`)."""
+def gltf_material_names(path):
+    """The material names the GLB itself carries."""
+    import json
+    import struct
+    with open(path, 'rb') as f:
+        f.read(12)
+        length, _ = struct.unpack('<II', f.read(8))
+        return {m.get('name', '') for m in json.loads(f.read(length)).get('materials', [])}
+
+
+def base_name(name, authored=()):
+    """A material's name as the model authored it. A shared .blend renames a
+    second `PrimaryColor` to `PrimaryColor.001`; but `Material.002` may be the
+    authored name itself (the hackerfish's are), so only strip what the model
+    did not write."""
+    if name in authored:
+        return name
     return re.sub(r'\.\d{3}$', '', name)
 
 
@@ -58,10 +73,17 @@ def begin(breed):
     """The breed's own scene, emptied (call inside `in_scene` of it)."""
     scene = bpy.data.scenes.get(breed) or bpy.data.scenes.new(breed)
     for o in list(scene.objects):
+        if len(o.users_scene) > 1:  # shared with another scene (a camera, a floor): only let go of it here
+            for coll in [scene.collection, *scene.collection.children_recursive]:
+                if o.name in coll.objects:
+                    coll.objects.unlink(o)
+            continue
         data = o.data
         bpy.data.objects.remove(o, do_unlink=True)
-        if data is not None and data.users == 0:
-            (bpy.data.meshes if isinstance(data, bpy.types.Mesh) else bpy.data.armatures).remove(data)
+        if isinstance(data, bpy.types.Mesh) and data.users == 0:
+            bpy.data.meshes.remove(data)
+        elif isinstance(data, bpy.types.Armature) and data.users == 0:
+            bpy.data.armatures.remove(data)
     for a in list(bpy.data.actions):
         if a.name.startswith(f'{breed}:'):
             bpy.data.actions.remove(a)
@@ -87,6 +109,13 @@ def load_source(breed):
         o.matrix_world = Matrix.Identity(4)
     for o in [o for o in scene.objects if o not in before and o.type == 'EMPTY']:
         bpy.data.objects.remove(o, do_unlink=True)
+    authored = gltf_material_names(source_path(breed))
+    for o in meshes:
+        o['rigMaterial'] = base_name(o.data.materials[0].name, authored)
+    names = [o['rigMaterial'] for o in meshes]
+    # A clash in a shared file can also INCREMENT a name (Material.006 →
+    # Material.007): every part must resolve to its own authored material.
+    assert len(set(names)) == len(names) and set(names) <= authored, (names, authored)
     return meshes
 
 
@@ -121,7 +150,7 @@ def segment(meshes, bone_of, pitch, phase):
     counts = {}
     for o in meshes:
         me = o.data
-        mat = base_name(me.materials[0].name)
+        mat = o.get('rigMaterial') or base_name(me.materials[0].name)
         bm = bmesh.new()
         bm.from_mesh(me)
         owner = {}

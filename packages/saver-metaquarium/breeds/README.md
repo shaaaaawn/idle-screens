@@ -43,6 +43,7 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    | `EYES-White` / `EYES-Black` | unlit sclera and pupil; `eyeLife` rigs them from their voxel grid |
    | `GLOW-<colour>` | unlit in its own colour, plus the halo shells and bloom card |
    | `KEEP-<part>` | the authored colour, kept (a screen, teeth) |
+   | `SCREEN-<part>` | a display the tank draws (`src/screen.ts`): faces, code rain, a boot spinner, in a phosphor per fish; the hackerfish's glass and face pixels |
    | `METAL-<part>` | polished metal: a reflective plate when lit, chrome when flat (`fishMetal: 'off'` makes it the authored colour, matte) |
    | anything else | **a random coat**: almost never what you want |
 
@@ -94,6 +95,7 @@ skeleton and clips made in Blender:
 |---|---|---|---|
 | crab | `rig/crab.py`: 23 parts, legs placed by two-bone IK | `src/crab.ts` walks it on the seabed | walk idle pinch forage wave cheer |
 | glowfish | `rig/glowfish.py`: jaw, flip-top head, tail, blinking eyes, three-link lure | `src/angler.ts` (the tank swims it) | swim lure chomp blink |
+| hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
 
 A breed's script imports `source/<breed>.glb`, rigs it, bakes its clips and
 writes `rig/<breed>.glb`, which `breeds.json` names as the intake's source

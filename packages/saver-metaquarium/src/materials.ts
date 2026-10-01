@@ -15,6 +15,7 @@ import {
   type SkinnedMesh,
 } from 'three';
 import { MIAMI_VICE_COLORS, BLOOM_COLORS } from './manifest';
+import { isScreen, PHOSPHORS, screenMaterial } from './screen';
 
 export { MIAMI_VICE_COLORS, BLOOM_COLORS };
 
@@ -140,6 +141,7 @@ function colorLuminance(m: Material): number {
  *   seeded picks, so an NPC reads as one animal in two colors rather than a
  *   patchwork of independent picks.
  * - KEEP-<part> → the authored colour, kept (the breed intake names these).
+ * - SCREEN-<part> → a display (screen.ts): a hackerfish's face, in a phosphor of its own.
  * - METAL-<part> → polished metal (a glowfish's teeth): a reflective plate
  *   that takes the studio environment when lit, chrome matcap when flat;
  *   `reflective` off (fishMetal: 'off') keeps it the authored colour, matte.
@@ -151,6 +153,9 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
   const coatB = rng.pick(BODY_COATS.filter((c) => c !== coatA));
   // Drawn only for the neon look, so a natural fish's picks are what they always were.
   const neonColor = neon ? new Color(rng.pick(NEON_COLORS)) : null;
+  // A screen's phosphor (screen.ts), drawn once, on the first SCREEN- part:
+  // a fish without a screen draws nothing extra.
+  let phosphor: Color | null = null;
   // Neon keeps SMALL glow lit (a lure, a fin's accent) and darkens a glow part
   // that is a big piece of the animal (a crab's claws): in blacklight the
   // light is the eyes, not the armour.
@@ -163,6 +168,10 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
     const mesh = node as Mesh;
     if (!mesh.isMesh || !mesh.material) return;
     const replaced = materialsOf(mesh).map((m) => {
+      if (isScreen(m)) {
+        phosphor ??= new Color(rng.pick(PHOSPHORS));
+        return screenMaterial(m.name, phosphor);
+      }
       if (isEyes(m) && neonColor) {
         // Neon: the dark of the eye glows (and so does a crab's mouth, which
         // shares its material); the light of it goes dark with the coat. Light,
@@ -516,7 +525,9 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
     }
     if (!mesh.isMesh || !mesh.material || mesh.userData.mqHalo || Array.isArray(mesh.material)) return;
     const m = mesh.material as MeshBasicMaterial;
-    if (!isGlow(m)) return;
+    // A screen is light too: its bloom and the light it throws (no halo shells —
+    // they would trace the glass, not what it shows).
+    if (!isGlow(m) && !isScreen(m)) return;
     mesh.geometry.computeBoundingSphere();
     const sphere = mesh.geometry.boundingSphere;
     if (!sphere) return;

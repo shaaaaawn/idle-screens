@@ -14,7 +14,7 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   const len = dv.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
-const ROLE = /eye|glow|^KEEP-|^METAL-|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|primary|secondary/i;
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -97,6 +97,22 @@ describe('bundled breeds (breeds/README.md)', () => {
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone, name).toMatch(parts[name]!);
+    }
+  });
+
+  it('hackerfish: the rig survives the intake — five bones, three clips, the screen on its own bone', async () => {
+    const doc = await new NodeIO().read(here('../breeds/hackerfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'fin.L', 'fin.R', 'screen', 'tail']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['glitch', 'swim', 'type']);
+    const parts: Record<string, RegExp> = {
+      PrimaryColor: /^(body|tail)$/, SecondaryColor: /^fin\.[LR]$/, 'SCREEN-Glass': /^screen$/, 'SCREEN-Pixels': /^screen$/,
+    };
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) expect(joints[(j.getElement(i, []) as number[])[0]!], name).toMatch(parts[name]!);
     }
   });
 

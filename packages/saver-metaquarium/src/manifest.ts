@@ -28,6 +28,10 @@ export const METAQUARIUM_PARAMS = {
    *  swam. Under about one body length (18) it is the fish's own eye, and the
    *  fish itself is hidden. */
   followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
+  /** Where round the followed fish the chase camera stands, degrees: 0 behind
+   *  it (the default), 90 at its side, 180 in front looking back at its face
+   *  — a hackerfish's screen, a crab's smile. */
+  followAngle: { type: 'number', default: 0, min: -180, max: 180, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },

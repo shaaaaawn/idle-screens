@@ -14,7 +14,8 @@
  *      PrimaryColor / SecondaryColor (the seeded two-tone coat), EYES-White /
  *      EYES-Black (unlit, rigged by eyeLife), GLOW-<colour> (unlit + halo),
  *      KEEP-<anything> (the authored colour, kept), METAL-<anything> (polished
- *      metal: chrome or a lit reflective plate). Anything else is painted a
+ *      metal: chrome or a lit reflective plate), SCREEN-<anything> (a display the
+ *      tank draws: src/screen.ts). Anything else is painted a
  *      random coat at runtime — the audit calls that out;
  *   3. voxel models: greedy-meshes every material's voxel faces into rectangles,
  *      never along the swim axis (the body wave bends per vertex, so a face
@@ -56,7 +57,7 @@ const io = new NodeIO().setLogger(quiet).registerExtensions(ALL_EXTENSIONS)
 
 const isEye = (name) => /eye/i.test(name);
 const roleOf = (name) => isEye(name) ? (/black|pupil/i.test(name) ? 'eye·pupil' : /white|sclera/i.test(name) ? 'eye·sclera' : 'eye (by luminance)')
-  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
+  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
 
 function stats(doc) {
   let tris = 0; const mats = new Map(); const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -256,7 +257,10 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
       if (owner === breed) anim.setName(clip); else anim.dispose();
     }
     // Names that only say where in the .blend it was built: never the breed's.
-    for (const m of [...doc.getRoot().listMaterials(), ...doc.getRoot().listMeshes(), ...doc.getRoot().listNodes()]) m.setName(m.getName().replace(/\.\d{3}$/, ''));
+    // A suffix the delivered model wrote itself (`Material.002`) stays.
+    const authored = new Set((await io.read(pathJoin(HERE, spec.delivered ?? spec.source))).getRoot().listMaterials().map((m) => m.getName()));
+    for (const m of doc.getRoot().listMaterials()) if (!authored.has(m.getName())) m.setName(m.getName().replace(/\.\d{3}$/, ''));
+    for (const m of [...doc.getRoot().listMeshes(), ...doc.getRoot().listNodes()]) m.setName(m.getName().replace(/\.\d{3}$/, ''));
     for (const scene of doc.getRoot().listScenes()) scene.setName('Scene');
   } else await doc.transform(uninstance(), flatten());
   // Uninstancing leaves many nodes sharing one mesh; baking a node's transform
