@@ -295,3 +295,21 @@ describe('the garden answers the cast', () => {
     expect(shader.uniforms.uMqFloraFishN!.value).toBe(0);
   });
 });
+
+describe('wild geodes in the scenery', () => {
+  it('builds one geode mesh, answers the cast, and the flora grows round it', () => {
+    const world = build({ ...full, geodes: 1 });
+    const geodes = world.group.children.find((o) => o.name === 'wild-geodes') as Mesh;
+    expect(geodes).toBeTruthy();
+    expect(world.counts.geodes).toBeGreaterThan(5);
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
+    (geodes.material as Material).onBeforeCompile(shader as never, {} as WebGLRenderer);
+    expect(shader.vertexShader).toContain('mqStartleAt(gW)');
+    expect(shader.vertexShader.match(/#include <project_vertex>/g)).toHaveLength(1);
+    world.setFish([{ x: 1, y: 2, z: 3, r: 28 }]);
+    expect(shader.uniforms.uMqFloraFishN!.value).toBe(1);
+    expect(build({ ...full, geodes: 0 }).group.children.some((o) => o.name === 'wild-geodes')).toBe(false);
+    // Indoors there is no floor to scatter them on.
+    expect(build({ ...off, geodes: 1, interior: true }).group.children.some((o) => o.name === 'wild-geodes')).toBe(false);
+  });
+});

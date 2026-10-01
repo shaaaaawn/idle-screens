@@ -8,8 +8,9 @@ import {
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
+import { buildGeodeField, GEODE_LOOK, GEODE_PARS, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
@@ -41,6 +42,14 @@ export interface SceneryOptions {
   floraPalette?: string[];
   /** `floraLayout`: round the crystals, or one of each species in rows. */
   floraLayout?: 'garden' | 'gallery';
+  /** 0..1 — wild geodes lying about the floor (geodes.ts). */
+  geodes?: number;
+  /** `geodeMix`, parsed: relative weights by kind. */
+  geodeMix?: Partial<Record<GeodeKind, number>>;
+  /** `geodeMineral`, resolved: the minerals they are made of (empty = all). */
+  geodeMinerals?: MineralName[];
+  /** `geodeLayout`: scattered, or one of each kind in rows. */
+  geodeLayout?: 'field' | 'gallery';
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -332,6 +341,48 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     cards.mesh.userData.mqLights = room.lights.length;
     group.add(cards.mesh);
   }
+  // The cast, as the garden sees it (setFish): where each fish is and how near is too near.
+  const floraFishN = { value: 0 };
+  const floraFish = { value: Array.from({ length: MAX_FLORA_FISH }, () => new Vector4()) };
+  // Wild geodes, before the flora so the plants grow round them, clear of
+  // the crystals, the homes and the roads.
+  let geodeMesh: Mesh | null = null;
+  const geodeClock = { value: 0 };
+  if ((opts.geodes ?? 0) > 0 && !opts.interior) {
+    const gf = buildGeodeField(rng.fork(31), {
+      amount: opts.geodes ?? 0, cap: opts.cap, scale: s, mix: opts.geodeMix, minerals: opts.geodeMinerals, layout: opts.geodeLayout, terrain,
+      blocked: (x, z, r) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        || clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        || pathClearance(keepClear, x, z) < r * 0.6,
+    });
+    if (gf.geometry) {
+      gf.geometry.userData.mqOwned = true;
+      const material = new MeshBasicMaterial({ vertexColors: true, side: DoubleSide });
+      material.userData.mqOwned = true;
+      clocks.push(geodeClock);
+      material.onBeforeCompile = shader => {
+        shader.uniforms.uGeoTime = geodeClock;
+        shader.uniforms.uMqFloraFishN = floraFishN;
+        shader.uniforms.uMqFloraFish = floraFish;
+        shader.vertexShader = GEODE_PARS + MQ_FISH_GLSL + shader.vertexShader
+          .replace('#include <begin_vertex>', GEODE_VERTEX)
+          .replace('#include <project_vertex>', GEODE_LOOK);
+      };
+      material.customProgramCacheKey = () => 'wild-geodes-v1';
+      geodeMesh = new Mesh(gf.geometry, material);
+      geodeMesh.name = 'wild-geodes';
+      geodeMesh.frustumCulled = false;
+      group.add(geodeMesh);
+      obstacles.push(...gf.obstacles);
+      // The biggest glows join the light field (the floor pools round them).
+      for (const l of gf.lights.slice(0, 4)) {
+        const c = new Color(l.color);
+        homeLights.push({ x: l.x, y: l.y, z: l.z, r: c.r, g: c.g, b: c.b, reach: l.reach, phase: rng.next() * 6.28 });
+      }
+      counts.geodes = gf.geodes;
+      counts.geodeAura = gf.aura;
+    }
+  }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
     density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette, layout: opts.floraLayout,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
@@ -342,9 +393,6 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
   // The light sweep is written in scale-1 units; this is the world's scale.
   const floraScale = { value: s };
-  // The cast, as the garden sees it (setFish): where each fish is and how near is too near.
-  const floraFishN = { value: 0 };
-  const floraFish = { value: Array.from({ length: MAX_FLORA_FISH }, () => new Vector4()) };
   if (plants) {
     const clock = { value: 0 }; clocks.push(clock);
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {

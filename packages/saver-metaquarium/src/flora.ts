@@ -531,7 +531,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
       // onto the stalk. A clump of one to three, the tallest in the middle.
       const cap = light.clone().lerp(paint(['#e0d6ff', '#ffd6a8', '#b8f0ff', '#ffb3d9', '#d6ffb8']), 0.72);
       const spots = cap.clone().offsetHSL(gene.range(-0.2, 0.2), 0.2, -0.18);
-      const stalkC = cap.clone().lerp(WHITE, 0.3).multiplyScalar(0.55), gill = light.clone().lerp(WHITE, 0.45);
+      const stalkC = cap.clone().lerp(WHITE, 0.3).multiplyScalar(0.55), gill = light.clone().lerp(cap, 0.5).multiplyScalar(0.85);
       const count = 1 + Math.floor(rng.next() * 3);
       const order = Array.from({ length: count }, (_, m) => m).reverse(); // the tallest (m = 0) last: its gills shed the spores
       for (const m of order) {
@@ -549,7 +549,9 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         }
         const capY = root + (tall + 0.5) * V;
         body.solid([mx, capY, mz], V, cells, 0);
-        lamp.cube(mx, capY - V * 0.62, mz, V * (R * 2 - 0.4), V * 0.25, V * (R * 2 - 0.4), gill, 1, true);
+        // The gills: a glowing ring tucked under the cap, not a panel the width
+        // of it (seen from below, a full-width slab read as a floating disc).
+        lamp.cube(mx, capY - V * 0.58, mz, V * R * 1.2, V * 0.2, V * R * 1.2, gill, 1, true);
       }
     },
   },
@@ -1008,13 +1010,10 @@ export const SPORE_VERTEX = /* glsl */ `
 /** Fish a garden answers to at once (the cast; the shoal is too small to startle anything). */
 export const MAX_FLORA_FISH = 24;
 
-/** What every flora program declares ahead of the sway. */
-export const FLORA_PARS = /* glsl */ `
-  uniform float uSwayTime; uniform float uFloraScale;
-  attribute vec3 aSway; attribute float aGlow; attribute vec2 aMat; attribute vec4 aPlant;
+/** The cast as the scenery sees it — declared by every program that answers a passing fish (flora, geodes). */
+export const MQ_FISH_GLSL = /* glsl */ `
   uniform int uMqFloraFishN;
   uniform vec4 uMqFloraFish[${MAX_FLORA_FISH}];
-  float mqStartle = 0.0;
   // How startled this point is by the nearest fish: 1 within half a reach, 0 past it.
   float mqStartleAt(vec3 p) {
     float s = 0.0;
@@ -1026,6 +1025,13 @@ export const FLORA_PARS = /* glsl */ `
     return s;
   }
 `;
+
+/** What every flora program declares ahead of the sway. */
+export const FLORA_PARS = /* glsl */ `
+  uniform float uSwayTime; uniform float uFloraScale;
+  attribute vec3 aSway; attribute float aGlow; attribute vec2 aMat; attribute vec4 aPlant;
+  float mqStartle = 0.0;
+` + MQ_FISH_GLSL;
 
 /** Lamps are lit metal: their vertex colour is both the metal's tint and what
  *  it emits, so a bud is anodised in its crystal's colour AND glows in it. */

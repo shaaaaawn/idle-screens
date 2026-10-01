@@ -17,6 +17,7 @@
 
 import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
+import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
@@ -92,6 +93,10 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
+  geodes: 'Wild geodes about the floor (0 = none), after real ones and No Man\'s Sky: split nodule pairs with agate-banded cut faces, thunder eggs with star cores, amethyst cathedrals, druse crystal clusters, floating orbs that turn as they bob, ikaite tufa columns, and one mega cavern geode lined with beams of selenite. Their druse glints as the view swings; one in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
+  geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. nodule thunderegg cathedral druse orb column cavern (the cavern is one at most; orbs three).',
+  geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = all, by how common; `world` = two from the seed, one scheme for the whole world; or a list.',
+  geodeLayout: '`field` (default) scatters them; `gallery` stands one of each kind in two rows, minerals dealt in turn, to see them all.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
   floraPalette: 'One colour scheme for the garden, the way a No Man\'s Sky planet is magenta grass and orange trees: `world` grows a hero hue, a neighbour and an accent from the seed; or give up to six `#rrggbb`. Each colony is pulled most of the way to one of them. Empty = every species its own colours.',
   floraMix: 'Which plants: `species[:weight]`, comma-separated. grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (a giant clam is a specimen, two at most; the elder, a blossom tree hung with lanterns, one). Plants grow in colonies that share a colour; about one colony in thirty is a rare nacreous morph. `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s own garden. Needs floraDensity > 0.',
@@ -126,6 +131,8 @@ propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@drus
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+geodeMix  kind[:weight], …   nodule thunderegg cathedral druse orb column cavern     cathedral:2, nodule, orb
+geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
@@ -230,6 +237,8 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('propMix')) push('propMix', parsePropMix(str('propMix')).problems);
   if (str('floraMix')) push('floraMix', parseFloraMix(str('floraMix')).problems);
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
+  if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
+  if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
   if (str('spotCues')) {

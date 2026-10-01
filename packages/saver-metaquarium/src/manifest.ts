@@ -289,6 +289,17 @@ export const METAQUARIUM_PARAMS = {
    *  one of each species (every one, or those `floraMix` names) in its own
    *  plot, low ones in a front row and tall ones behind — to see them all. */
   floraLayout: { type: 'enum', default: 'garden', options: ['garden', 'gallery'], ease: 'step' },
+  /** Wild geodes lying about the floor (0 = none): split nodules, thunder
+   *  eggs, amethyst cathedrals, druse clusters, floating orbs, ikaite columns
+   *  and, at most one, a mega cavern geode lined with beams of selenite. */
+  geodes: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Which kinds: `kind[:weight]`, comma-separated (`cathedral:2, nodule, orb`). */
+  geodeMix: { type: 'string', default: '', ease: 'step' },
+  /** What they are made of: empty = every mineral by how common it is;
+   *  `world` = two chosen from the seed; or a list (`amethyst, citrine`). */
+  geodeMineral: { type: 'string', default: '', ease: 'step' },
+  /** `field` (default) scatters them round the tank; `gallery` stands one of each kind in rows. */
+  geodeLayout: { type: 'enum', default: 'field', options: ['field', 'gallery'], ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
