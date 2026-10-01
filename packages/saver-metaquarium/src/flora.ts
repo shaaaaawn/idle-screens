@@ -573,7 +573,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
       // onto the stalk. A clump of one to three, the tallest in the middle.
       const cap = light.clone().lerp(paint(['#e0d6ff', '#ffd6a8', '#b8f0ff', '#ffb3d9', '#d6ffb8']), 0.72);
       const spots = cap.clone().offsetHSL(gene.range(-0.2, 0.2), 0.2, -0.18);
-      const stalkC = cap.clone().lerp(WHITE, 0.3).multiplyScalar(0.55), gill = light.clone().lerp(WHITE, 0.45);
+      const stalkC = cap.clone().lerp(WHITE, 0.3).multiplyScalar(0.55), gill = light.clone().lerp(cap, 0.5).multiplyScalar(0.85);
       const count = 1 + Math.floor(rng.next() * 3);
       const order = Array.from({ length: count }, (_, m) => m).reverse(); // the tallest (m = 0) last: its gills shed the spores
       for (const m of order) {
@@ -591,7 +591,9 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         }
         const capY = root + (tall + 0.5) * V;
         body.solid([mx, capY, mz], V, cells, 0);
-        lamp.cube(mx, capY - V * 0.62, mz, V * (R * 2 - 0.4), V * 0.25, V * (R * 2 - 0.4), gill, 1, true);
+        // The gills: a glowing ring tucked under the cap, not a panel the width
+        // of it (seen from below, a full-width slab read as a floating disc).
+        lamp.cube(mx, capY - V * 0.58, mz, V * R * 1.2, V * 0.2, V * R * 1.2, gill, 1, true);
       }
     },
   },
@@ -680,14 +682,17 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         const R = o === 0 ? rng.range(1.4, 2.1) : rng.range(0.8, 1.6);
         const ox = x + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s, oz = z + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s;
         const cells = new Map<string, Color>(), n = Math.ceil(R);
+        let low = 0;
         for (let i = -n; i <= n; i += 1) for (let j = -n; j <= n; j += 1) for (let k = -n; k <= n; k += 1) {
           if (i * i + j * j + k * k > R * R + 0.3) continue;
           // Lit from above: a highlight cell at the crown, darker below.
           const c = j === n && i === 0 && k === 0 ? hue.clone().lerp(WHITE, 0.55) : hue.clone().multiplyScalar(0.55 + 0.45 * ((j + n) / (2 * n)));
           cells.set(cellKey(i, j, k), c);
+          if (j < low) low = j;
         }
         const size = V * 0.7;
-        body.solid([ox, root + n * size * 0.85, oz], size, cells, 0);
+        // The lowest occupied cell sits on the floor, however the radius rounds.
+        body.solid([ox, root + (0.5 - low) * size - size * 0.15, oz], size, cells, 0);
       }
     },
   },
@@ -857,7 +862,6 @@ export function buildFlora(
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
   const palette = opts.palette?.length ? opts.palette : null;
-  const total = weights.reduce((a, [, w]) => a + w, 0);
   let plants = 0, rare = 0, founded = 0;
 
   /** Grow one plant of `species` rooted at (x, z). */
@@ -961,9 +965,12 @@ export function buildFlora(
       x = col.x + Math.cos(a) * r; z = col.z + Math.sin(a) * r;
     } else {
       // Species by share, so a garden keeps its proportions at any density.
-      let roll = rng.next() * total;
-      species = weights[0]![0];
-      for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
+      // A species at its cap leaves the draw, or its rolls would eat the planting attempts.
+      const open = weights.filter(([sp]) => { const m = SPECIES[sp].max; return m === undefined || bySpecies[sp] < m; });
+      if (!open.length) break;
+      let roll = rng.next() * open.reduce((a, [, w]) => a + w, 0);
+      species = open[0]![0];
+      for (const [sp, w] of open) { if (roll < w) { species = sp; break; } roll -= w; }
       const def = SPECIES[species];
       const angle = rng.range(0, Math.PI * 2);
       const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;
@@ -1059,13 +1066,10 @@ export const SPORE_VERTEX = /* glsl */ `
 /** Fish a garden answers to at once (the cast; the shoal is too small to startle anything). */
 export const MAX_FLORA_FISH = 24;
 
-/** What every flora program declares ahead of the sway. */
-export const FLORA_PARS = /* glsl */ `
-  uniform float uSwayTime; uniform float uFloraScale;
-  attribute vec3 aSway; attribute float aGlow; attribute vec2 aMat; attribute vec4 aPlant;
+/** The cast as the scenery sees it — declared by every program that answers a passing fish (flora, geodes). */
+export const MQ_FISH_GLSL = /* glsl */ `
   uniform int uMqFloraFishN;
   uniform vec4 uMqFloraFish[${MAX_FLORA_FISH}];
-  float mqStartle = 0.0;
   // How startled this point is by the nearest fish: 1 within half a reach, 0 past it.
   float mqStartleAt(vec3 p) {
     float s = 0.0;
@@ -1077,6 +1081,13 @@ export const FLORA_PARS = /* glsl */ `
     return s;
   }
 `;
+
+/** What every flora program declares ahead of the sway. */
+export const FLORA_PARS = /* glsl */ `
+  uniform float uSwayTime; uniform float uFloraScale;
+  attribute vec3 aSway; attribute float aGlow; attribute vec2 aMat; attribute vec4 aPlant;
+  float mqStartle = 0.0;
+` + MQ_FISH_GLSL;
 
 /** Lamps are lit metal: their vertex colour is both the metal's tint and what
  *  it emits, so a bud is anodised in its crystal's colour AND glows in it. */

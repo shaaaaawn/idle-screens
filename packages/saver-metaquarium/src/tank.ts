@@ -2,6 +2,7 @@ import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWei
 import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix } from './flora';
 import { parseFloraPalette } from './flora-mix';
+import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -67,6 +68,7 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { rigSeahorse } from './seahorse';
+import { rigCrab } from './crab';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -111,6 +113,7 @@ import {
   type TankQuality,
 } from './quality';
 import { LogicalClock, rateOffset } from './runtime';
+import { ContactShadows, WalkGround } from './walker';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const CAMERA_FAR = 1400;
@@ -311,7 +314,9 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
  *  clamped against the SAME expression the mesh is built from. A `dunes` or
  *  `ridges` floor reaches +46, well above the bottom of the fish's depth band,
  *  so without this a bottom-hugger swims through the hill it is hugging. */
-function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
+const smooth01 = (t: number): number => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+export function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
   const R = 620;
   // Two seeded octaves — enough for a silhouette, cheap enough to build in a
   // frame. Phases come from the rng so two tanks are never the same hill.
@@ -334,15 +339,39 @@ function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => n
       // The bowl stays, but a shorter ripple gives the near floor a surface —
       // d² alone is near-constant inside the tank radius.
       h = d * d * 150 - 60 + Math.sin(x * 0.024 + a) * 7 + Math.cos(z * 0.02 + c) * 5;
+    } else if (kind === 'shelf') {
+      // The town on a raised shelf: a plateau round the village (it sits a
+      // little behind the middle), its edge wandering, falling in two steps —
+      // a terraced lip — to a lower, gently rolling floor.
+      const dx = x, dz = z + 30, th = Math.atan2(dz, dx);
+      const edge = 165 + Math.sin(th * 3 + a) * 22 + Math.sin(th * 5 + b) * 10;
+      const r = Math.hypot(dx, dz);
+      const upper = 1 - smooth01((r - edge) / 12), lower = 1 - smooth01((r - edge - 40) / 14);
+      const roll = Math.sin(x * 0.03 + a) * 4 + Math.cos(z * 0.026 + c) * 3;
+      h = upper * 20 + lower * 18 - 22 + roll * (1 - lower) + Math.sin(x * 0.05 + b) * 1.2 * upper;
+    } else if (kind === 'trench') {
+      // A channel meandering across the front of the town, steep-walled and
+      // deep enough for a fish to hide in, the floor either side gently rolling.
+      const zc = 95 + Math.sin(x * 0.011 + a) * 32 + Math.sin(x * 0.027 + b) * 10;
+      const w = 34 + Math.sin(x * 0.017 + c) * 8;
+      const q = (z - zc) / w;
+      const cut = Math.exp(-q * q * q * q);
+      h = -48 * cut + Math.sin(x * 0.029 + a) * 5 * (1 - cut) + Math.cos(z * 0.024 + c) * 4 * (1 - cut);
+    } else if (kind === 'terraces') {
+      // Tiers stepping up behind the town: each a flat tread and a short
+      // steep riser, wandering a little so they read as rock, not stairs.
+      const back = Math.max(0, -z - 45 + Math.sin(x * 0.015 + a) * 20);
+      const tread = 38, k = back / tread, step = Math.floor(k), f = k - step;
+      h = (step + smooth01((f - 0.78) / 0.22)) * 20 + Math.sin(x * 0.04 + b) * 1.5 + Math.cos(z * 0.03 + c) * 2;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
     return h * Math.max(0, 1 - d * d);
   };
 }
 
-function buildTerrain(height: (x: number, z: number) => number, color: string): Mesh {
+function buildTerrain(height: (x: number, z: number) => number, color: string, detail = 72, carved = false): Mesh {
   const R = 620;
-  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  const geo = new PlaneGeometry(R * 2, R * 2, detail, detail);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position!;
   for (let i = 0; i < pos.count; i++) {
@@ -360,7 +389,10 @@ function buildTerrain(height: (x: number, z: number) => number, color: string): 
   const lx = -0.45, ly = 0.78, lz = -0.43;
   for (let i = 0; i < pos.count; i++) {
     const lambert = Math.max(0, normal.getX(i) * lx + normal.getY(i) * ly + normal.getZ(i) * lz);
-    const v = 0.45 + 0.55 * lambert;
+    // A carved floor (shelf, trench, terraces) darkens with slope as well, so
+    // a lip, a riser or a trench wall reads as rock face, whichever way the sun is.
+    const slope = carved ? 0.45 + 0.55 * Math.pow(Math.max(0, normal.getY(i)), 6) : 1;
+    const v = (0.45 + 0.55 * lambert) * slope;
     shadeArr[i * 3] = v;
     shadeArr[i * 3 + 1] = v;
     shadeArr[i * 3 + 2] = v;
@@ -525,6 +557,14 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** A walker (the crab): its feet, as the lowest point of the model below the
+   *  group's origin in group units — so it can stand ON the floor, not swim
+   *  over it. Undefined for anything that swims. */
+  foot?: number;
+  /** A walker's footprint, from its rig: middle and size in group units. */
+  print?: { x: number; z: number; w: number; l: number };
+  /** Where a walker's feet were last frame — a step up from here it climbs, more it walks through. */
+  walkY?: number;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
@@ -552,6 +592,8 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
+  /** A walker: the ground under it, which its feet stand on. Absent for a swimmer. */
+  ground?: number;
 }
 
 /** The leader a bonded fish rides: plan, where along it, and the light pull
@@ -621,6 +663,13 @@ class TankInstance implements SaverInstance {
   private crystals: CrystalField | null = null;
   /** The colonies that burst out of the rocks: the same field, fed by the scenery. */
   private rockCrystals: CrystalField | null = null;
+  /** What a walker stands on, rebuilt whenever the floor is (`floorHeightAt` is reassigned with it). */
+  private walkGround: WalkGround | null = null;
+  private walkFor: unknown = undefined;
+  /** Under each walker, a soft shadow on the ground (made when the first walker lands). */
+  private walkShadows: ContactShadows | null = null;
+  private walkShadowN = 0;
+  private readonly walkAt = new Vector3();
   /** The shard shapes this scene's crystals wear — rock colonies wear them too. */
   private shardVariants: ReturnType<typeof shardGeometry>[] | null = null;
   private clusters: Cluster[] = [];
@@ -1039,7 +1088,9 @@ class TankInstance implements SaverInstance {
     if (kind !== 'flat') {
       const floorHex = String(this.paletteOr('floorColor', preset.palette?.floor) ?? '#0a1d33');
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
-      const terrain = buildTerrain(height, floorHex);
+      // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
+      const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
+      const terrain = buildTerrain(height, floorHex, carved ? 240 : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
       this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
@@ -1185,11 +1236,13 @@ class TankInstance implements SaverInstance {
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
     const floraMix = this.str('floraMix').trim(), environment = this.str('environment'), floraPalette = this.str('floraPalette').trim(), floraLayout = this.str('floraLayout') === 'gallery' ? 'gallery' as const : 'garden' as const;
+    const fountain = this.str('fountain') as 'none' | 'vent' | 'geode', streetLamps = this.num('streetLamps');
+    const geodes = this.num('geodes'), geodeMix = this.str('geodeMix').trim(), geodeMineral = this.str('geodeMineral').trim(), geodeLayout = this.str('geodeLayout') === 'gallery' ? 'gallery' as const : 'field' as const;
     const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1203,14 +1256,21 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
-        { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout, bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
+        { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
+          fountain, lamps: streetLamps,
+          geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
+          bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);
       // Plants take the crystal and spot light on the tiers that can afford
       // one more light loop per vertex; the low tier keeps the baked colour.
-      if (this.quality.glowLights >= 3) for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
+      if (this.quality.glowLights >= 3) {
+        for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
+        // The geodes stand in the same light: a crystal tints the stone and agate beside it.
+        for (const m of this.scenery.geodeMaterials) installFloraLight(m, this.poolUniforms, false);
+      }
       // What broke out of the rocks is the same crystal as `propMix`: same
       // shard shapes, material, pulse, fog and halo — one more instanced
       // field, no new program. It lends no light to the floor (a throwaway
@@ -2274,6 +2334,7 @@ class TankInstance implements SaverInstance {
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const tintPulse = this.num('crystalPulse');
+    this.walkShadowN = 0;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -2645,21 +2706,63 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * size);
-      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
-
       // The swim wave (MQ: Amano study). Rigged on the first frame that asks
       // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
       // While it runs it REPLACES the rigid yaw and a whole-node clip: both
       // move the meshes inside the fish frame the wave was measured in.
-      if (swimWave > 0 && f.body && f.wave === undefined) {
+      // A crab always walks (it has no other motion), so it is rigged whatever swimWave says.
+      const isCrab = this.wantBreeds[f.index] === 'crab';
+      if ((swimWave > 0 || isCrab) && f.body && f.wave === undefined) {
         f.body.rotation.y = f.baseYaw;
         if (f.mixer) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
         // A seahorse does not wave: it flutters its fin, coils its tail and nods.
+        // A crab walks sideways on eight legs, its claws working.
+        const crab = breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2) : null;
         f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+          : breed === 'crab' ? crab
           : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+        // Rigged before the ground placement below, so a crab lands on its first frame.
+        if (crab) { f.foot = crab.foot; f.print = { x: crab.middle.x, z: crab.middle.z, w: crab.span.x, l: crab.span.z }; }
       }
-      const waving = swimWave > 0 && !!f.wave;
+      // A walker stands on what is under it — the seabed, a rock, a dome —
+      // feet down, instead of swimming a band over it. A script still places it.
+      if (f.foot !== undefined && !act) {
+        // Not `floorHeightAt`: that is a swimmer's clearance, a dome with a
+        // margin over every plant and rock, and a crab riding it hovers.
+        if (this.walkFor !== this.floorHeightAt) {
+          this.walkFor = this.floorHeightAt;
+          const roots = [this.scenery?.group, this.crystals?.group, this.rockCrystals?.group].filter((g): g is Group => !!g);
+          this.walkGround = new WalkGround(roots, this.terrainAt ?? (() => 0), { soft: new Set(this.scenery?.floraMaterials ?? []) });
+        }
+        // Level, no bank: it faces where it walks. Its feet are measured under
+        // the middle of its footprint — the model is not centred on its group.
+        const { x: wx, z: wz } = f.group.position;
+        const hl = Math.hypot(pose.fx, pose.fz) || 1, hx = pose.fx / hl, hz = pose.fz / hl;
+        f.group.lookAt(wx + hx, f.group.position.y, wz + hz);
+        const pr = f.print!, sc = f.group.scale.x;
+        const at = this.walkAt.set(pr.x, 0, pr.z).applyQuaternion(f.group.quaternion).multiplyScalar(sc);
+        const mx = wx + at.x, mz = wz + at.z, step = FISH_LENGTH * 0.4 * size;
+        const ground = this.walkGround!.at(mx, mz, f.walkY ?? this.terrainAt?.(mx, mz) ?? 0, step); // the flat floor disc is at 0
+        f.walkY = ground;
+        f.group.position.y = ground - f.foot * sc;
+        // Pitched to the ground under it: nose up a rock's flank, down the far side.
+        const half = Math.max(1, pr.l * sc * 0.5);
+        const rise = this.walkGround!.at(mx + hx * half, mz + hz * half, ground, step) - this.walkGround!.at(mx - hx * half, mz - hz * half, ground, step);
+        if (Math.abs(rise) > 1e-3) f.group.lookAt(wx + hx, f.group.position.y + rise / (2 * half), wz + hz);
+        if (f.group.visible) {
+          if (!this.walkShadows) { this.walkShadows = new ContactShadows(MAX_FISH); this.scene.add(this.walkShadows.mesh); }
+          // Past the footprint: the feet stand in the dark of it, and it
+          // fades out just beyond them.
+          this.walkShadows.set(this.walkShadowN++, mx, ground + 0.15, mz, f.group.quaternion, pr.w * sc * 1.3, pr.l * sc * 1.3);
+        }
+        if (f.index === followSlot) this.followAt.y = f.group.position.y;
+        // The follow-spot's beam and shadow track the crab where it is drawn.
+        for (let si = 0; si < this.spotRig.length; si++) if (this.spotRig[si]!.slot === f.index) this.spotAt[si]!.y = f.group.position.y;
+      }
+      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+
+      const waving = (swimWave > 0 || isCrab) && !!f.wave;
       if (f.wave) {
         f.wave.ensure();
         let turn = 0;
@@ -2705,14 +2808,17 @@ class TankInstance implements SaverInstance {
         seat: style.formation ? seat : null,
         waving,
         x: Math.round(px * 10) / 10,
-        y: Math.round(y * 10) / 10,
+        // Where it is drawn: a walker's feet put it below its swim band.
+        y: Math.round(f.group.position.y * 10) / 10,
         z: Math.round(pz * 10) / 10,
         // The facing the frame shows: the script's, for an actor.
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
+        ...(f.foot !== undefined && !act && f.walkY !== undefined ? { ground: Math.round(f.walkY * 10) / 10 } : {}),
       });
     }
+    this.walkShadows?.commit(this.walkShadowN);
     // The garden answers the cast: crowns fold, worms duck, pods swell as a fish passes —
     // after the cast is placed, so it answers this frame's fish, not last frame's.
     if (this.scenery) {

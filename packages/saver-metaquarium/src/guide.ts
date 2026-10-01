@@ -10,13 +10,14 @@
  *   RECIPES      named scenes. The playground mounts every one of them as-is
  *                (its "recipes" shelf), so what an agent can publish is what a
  *                person can look at. Channel-safe: minted ids, no local paths.
- *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, spotRig, spotCues, vignette).
+ *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, floraPalette, geodeMix, geodeMineral, spotRig, spotCues, vignette).
  *   validateMetaquariumParams   every DSL parser at once, for publish advisories.
  *   recipeTrack  a recipe as the control track `publishScene` takes.
  */
 
 import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
+import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
@@ -59,7 +60,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
-  swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab, jellies and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
+  swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab, jellies and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod — and the crab walks sideways on eight legs, its claws working (whatever swimWave says).',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',
@@ -73,7 +74,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
-  floorKind: 'Flat floor or terrain.',
+  floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Light shafts from the surface.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
@@ -92,6 +93,12 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
+  geodes: 'Wild geodes about the floor (0 = none): split geodes (one in three a thunder egg), amethyst cathedrals, crystal clusters, one mega cavern geode. They follow the world\'s rules — slate crust lit by the same key as the rocks, crystals that glow and pulse like the crystals (crystalGlow, crystalPulse), the mineral of the crystal nearest them, the crystals\' light on their stone — and flora grows round them as round a crystal. Agate banding is drawn per pixel; one in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
+  geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
+  geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
+  fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
+  streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
   floraPalette: 'One colour scheme for the garden, the way a No Man\'s Sky planet is magenta grass and orange trees: `world` grows a hero hue, a neighbour and an accent from the seed; or give up to six `#rrggbb`. Each colony is pulled most of the way to one of them. Empty = every species its own colours.',
   floraMix: 'Which plants: `species[:weight]`, comma-separated. grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (a giant clam is a specimen, two at most; the elder, a blossom tree hung with lanterns, one). Plants grow in colonies that share a colour; about one colony in thirty is a rare nacreous morph. `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s own garden. Needs floraDensity > 0.',
@@ -126,6 +133,8 @@ propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@drus
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
+geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
@@ -135,7 +144,7 @@ vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
           actor follow actor                                gestures: talk nod shake hop spin wiggle rest peek bow
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
-          home1 home1in … (geodeHomes), gate plaza courtyard (landmark).
+          home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).
           Marks indoors (interior: geode): ${Object.keys(INTERIOR_MARKS).join(' ')}
 `.trim();
 
@@ -230,6 +239,8 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('propMix')) push('propMix', parsePropMix(str('propMix')).problems);
   if (str('floraMix')) push('floraMix', parseFloraMix(str('floraMix')).problems);
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
+  if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
+  if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
   if (str('spotCues')) {
@@ -246,6 +257,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
     // Paths meet at a hub: the mark `paths` documents itself as adding.
     if (Number(params.paths ?? 0) > 0) world.hub = at;
+    if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
   }
   return out;

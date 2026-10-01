@@ -304,3 +304,52 @@ describe('the garden answers the cast', () => {
     expect((lampShader.uniforms.uMqFloraFish!.value as Array<{ toArray(): number[] }>)[3]!.toArray()).toEqual([3, 0, 0, 10]);
   });
 });
+
+describe('wild geodes in the scenery', () => {
+  it('builds one geode mesh, answers the cast, and the flora grows round it', () => {
+    const world = build({ ...full, geodes: 1 });
+    const geodes = world.group.children.find((o) => o.name === 'wild-geodes') as Mesh;
+    expect(geodes).toBeTruthy();
+    expect(world.counts.geodes).toBeGreaterThan(5);
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
+    (geodes.material as Material).onBeforeCompile(shader as never, {} as WebGLRenderer);
+    expect(shader.vertexShader).toContain('mqStartleAt(vGeoW)');
+    expect(shader.fragmentShader).toContain('float nb = 8.0');
+    expect(shader.vertexShader.match(/#include <project_vertex>/g)).toHaveLength(1);
+    world.setFish([{ x: 1, y: 2, z: 3, r: 28 }]);
+    expect(shader.uniforms.uMqFloraFishN!.value).toBe(1);
+    expect(build({ ...full, geodes: 0 }).group.children.some((o) => o.name === 'wild-geodes')).toBe(false);
+    // Indoors there is no floor to scatter them on.
+    expect(build({ ...off, geodes: 1, interior: true }).group.children.some((o) => o.name === 'wild-geodes')).toBe(false);
+  });
+});
+
+describe('the town square', () => {
+  it('a fountain where the paths meet, a plaza, a bubble column, lamps along the paths, halos', () => {
+    const world = build({ ...off, homes: 3, paths: 1, flora: 0.4, fountain: 'geode', lamps: 1 });
+    expect(world.counts.fountain).toBe(1);
+    expect(world.counts.lamps).toBeGreaterThan(3);
+    expect(world.marks.fountain).toBeTruthy();
+    expect(world.group.children.some((o) => o.name === 'fountain-bubbles')).toBe(true);
+    expect(world.group.children.some((o) => o.name === 'town-halos')).toBe(true);
+    // The plaza is painted on the floor: a pebble disc at the fountain.
+    const f = world.marks.fountain!;
+    expect(world.paths.some((p) => p.material === 'pebble' && Math.hypot(p.x0 - f.x, p.z0 - f.z) < 1 && p.width > 30)).toBe(true);
+    // Lamps and the fountain light the square.
+    expect(world.emitters.length).toBeGreaterThan(3);
+    const vent = build({ ...off, homes: 3, paths: 1, fountain: 'vent' });
+    expect(vent.counts.fountain).toBe(1);
+    expect(build({ ...off, homes: 3, paths: 1 }).counts.fountain ?? 0).toBe(0);
+    // No paths, no lamps.
+    expect(build({ ...off, homes: 3, paths: 0, lamps: 1 }).counts.lamps ?? 0).toBe(0);
+  });
+
+  it('with no paths the fountain stands in front of the homes; with no homes, near the middle', () => {
+    const homes = build({ ...off, homes: 3, paths: 0, fountain: 'vent' });
+    expect(homes.counts.fountain).toBe(1);
+    expect(homes.marks.fountain!.z).toBeGreaterThan(-60);
+    const bare = build({ ...off, fountain: 'geode' });
+    expect(bare.counts.fountain).toBe(1);
+    expect(Math.hypot(bare.marks.fountain!.x, bare.marks.fountain!.z)).toBeLessThan(80);
+  });
+});

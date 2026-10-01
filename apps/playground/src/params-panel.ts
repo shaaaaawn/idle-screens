@@ -132,7 +132,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
+    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'waterClarity', 'waterTint', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
   ],
@@ -146,6 +146,10 @@ const METAQUARIUM: PanelKnowledge = {
     fishUrl: fishPicker,
   },
   presets: {
+    floraMix: ['kelp:3, anemone, clam', 'whip, seapen, curl'],
+    floraPalette: ['world', '#ff6ec7, #7dd7ff'],
+    geodeMix: ['geode:3, cathedral, cluster', 'cavern'],
+    geodeMineral: ['world', 'amethyst, citrine'],
     vignette: ['tea', 'bedtime', 'seek', 'a =table, b =door | b >table @a | a @b talk, b @a nod | b @a talk, a @b wiggle | a b circle rug'],
     propMix: [
       'crystal#hero:1@lotus/hotpink',
