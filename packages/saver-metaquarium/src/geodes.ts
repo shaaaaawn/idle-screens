@@ -88,6 +88,10 @@ export interface GeodeFieldOptions {
    *  mineral is nearest in colour to the crystal nearest it — the way flora
    *  and homes take their crystal's colour — so it belongs to its world. */
   anchors?: ReadonlyArray<{ x: number; z: number; color: string }>;
+  /** The town's fountain at (x, z): a hot vent chimney or a geode basin. */
+  fountain?: { kind: 'vent' | 'geode'; x: number; z: number };
+  /** Streetlamps: a slate post with a crystal on top, at each of these. */
+  lamps?: ReadonlyArray<{ x: number; z: number }>;
   terrain(x: number, z: number): number;
 }
 
@@ -101,6 +105,10 @@ export interface GeodeField {
   thundereggs: number;
   obstacles: { x: number; y: number; z: number; r: number; h: number }[];
   lights: { x: number; y: number; z: number; color: string; reach: number }[];
+  /** The fountain's mouth (where its bubbles leave and its light is), if there is one. */
+  fountain: { x: number; y: number; z: number; color: string } | null;
+  /** Each lamp's crystal (light and halo). */
+  lamps: { x: number; y: number; z: number; color: string }[];
   triangles: number;
 }
 
@@ -519,6 +527,39 @@ export function galleryRows(minerals: readonly MineralName[] = MINERALS): Galler
   ].filter((row) => row.length) as GallerySpecimen[][];
 }
 
+/** A faceted slate post or chimney: stacked rings tapering from `r0` to `r1`, `h` tall. */
+function column(w: GeoWriter, rng: CrystalRng, h: number, r0: number, r1: number, sides: number, segs: number, color: Color): Vector3[] {
+  w.kind = PART.crust; w.a.copy(color); w.b.copy(color); w.glow = 0;
+  let prev: Vector3[] | null = null;
+  const spin = rng.range(0, 6.28);
+  for (let j = 0; j <= segs; j += 1) {
+    const t = j / segs, r = (r0 + (r1 - r0) * t) * (j === 0 || j === segs ? 1 : rng.range(0.9, 1.1));
+    const ring = Array.from({ length: sides }, (_, i) => {
+      const a = spin + (i / sides) * Math.PI * 2;
+      return new Vector3(Math.cos(a) * r, t * h, Math.sin(a) * r);
+    });
+    if (prev) for (let i = 0; i < sides; i += 1) {
+      const k = (i + 1) % sides;
+      w.tri(prev[i]!, 0, prev[k]!, 0, ring[k]!, 0);
+      w.tri(prev[i]!, 0, ring[k]!, 0, ring[i]!, 0);
+    }
+    prev = ring;
+  }
+  return prev!;
+}
+
+/** A crown of crystals at `at`, pointing up and out: a lamp's, or a vent's crust. */
+function crown(w: GeoWriter, rng: CrystalRng, at: Vector3, count: number, size: number, spread: number, m: Mineral): void {
+  const spec: CrystalSpec = { size: [1, 1], count: 1, bladed: m.bladed, aura: false, root: new Color(m.root), tip: new Color(m.tip) };
+  for (let i = 0; i < count; i += 1) {
+    const a = (i / count) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    const lean = i === 0 ? 0 : spread;
+    const axis = new Vector3(Math.cos(a) * lean, 1, Math.sin(a) * lean).normalize();
+    const base = at.clone().add(new Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(i === 0 ? 0 : size * 0.18));
+    crystal(w, rng, base, axis, size * (i === 0 ? 1 : rng.range(0.55, 0.8)), spec);
+  }
+}
+
 export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): GeodeField {
   const w = new GeoWriter();
   const byKind = Object.fromEntries(GEODE_KINDS.map((k) => [k, 0])) as Record<GeodeKind, number>;
@@ -583,8 +624,64 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
       put(kind, x, z, yaw, mineral, rng.next() < 0.05);
     }
   }
+  // ---- the town: a fountain in the square, lamps along the paths ---------
+  const mineralAt = (x: number, z: number): MineralName => {
+    if (minerals) return minerals[0]!;
+    if (!opts.anchors?.length) return 'quartz';
+    const near = opts.anchors.reduce((b, c) => (Math.hypot(x - c.x, z - c.z) < Math.hypot(x - b.x, z - b.z) ? c : b));
+    return mineralNear(near.color);
+  };
+  let fountain: GeodeField['fountain'] = null;
+  if (opts.fountain) {
+    const { x, z, kind } = opts.fountain;
+    const floor = opts.terrain(x, z), frng = rng.fork(77);
+    const m = MINERAL[mineralAt(x, z)];
+    const stone = STONE.clone();
+    if (kind === 'vent') {
+      // A hydrothermal chimney: a broad slate mound, a knobbled stack on it,
+      // crusted with crystal where the hot water cools, glowing at the mouth.
+      w.place = new Matrix4().makeTranslation(x, floor - 1.5 * s, z);
+      column(w, frng, 7 * s, 20 * s, 12 * s, 11, 2, stone.clone().multiplyScalar(0.9));
+      w.place = new Matrix4().makeTranslation(x, floor + 5 * s, z);
+      column(w, frng, 30 * s, 9 * s, 4.2 * s, 9, 8, stone);
+      const mouthY = 30 * s;
+      // The mouth glows hot whatever the neighbourhood: a vent's water is
+      // hot, and the crystal that crusts round its lip is citrine-gold.
+      crown(w, frng, new Vector3(0, mouthY - 1.5 * s, 0), 8, 6 * s, 1, MINERAL.citrine);
+      // Down the stack, the local crystal crusts it where the water cools.
+      for (let k = 0; k < 6; k += 1) {
+        const a = frng.range(0, 6.28), y = frng.range(3, 24) * s, r = (9 - y / s * 0.16) * s;
+        crown(w, frng, new Vector3(Math.cos(a) * r, y, Math.sin(a) * r), 3, 3.6 * s, 0.8, m);
+      }
+      fountain = { x, y: floor + 5 * s + mouthY, z, color: '#ffb36b' };
+      obstacles.push({ x, y: floor, z, r: 20 * s, h: 38 * s });
+    } else {
+      // A geode basin: one great half, cut face up, on a short plinth, its
+      // hollow full of crystal and its agate rim the basin's edge.
+      w.place = new Matrix4().makeTranslation(x, floor - 1 * s, z);
+      column(w, frng, 7 * s, 12 * s, 10 * s, 12, 2, stone);
+      const R = 17 * s, from = w.mark;
+      w.place = new Matrix4().makeTranslation(x, floor, z);
+      half(w, frng.fork(1), { out: outline(frng, 44, 1, 1, 0.08), R, depth: 0.6, m, hollow: 0.68, hollowDepth: 0.8, crystals: 220, crystalScale: 1.1, aura: false, band: frng.next() });
+      w.settle(from, floor + 6 * s, 0);
+      fountain = { x, y: floor + 6 * s + R * 0.6 + 2 * s, z, color: m.tip };
+      obstacles.push({ x, y: floor, z, r: R * 1.05, h: R * 0.9 });
+    }
+  }
+  const lamps: GeodeField['lamps'] = [];
+  for (const [i, at] of (opts.lamps ?? []).entries()) {
+    // A slate post, a cap, and a small crystal crown that glows.
+    const floor = opts.terrain(at.x, at.z), lrng = rng.fork(500 + i);
+    const m = MINERAL[mineralAt(at.x, at.z)];
+    w.place = new Matrix4().makeTranslation(at.x, floor - 0.5 * s, at.z);
+    column(w, lrng, 14 * s, 2 * s, 1.4 * s, 6, 3, STONE.clone().multiplyScalar(0.95));
+    w.place = new Matrix4().makeTranslation(at.x, floor + 13.5 * s, at.z);
+    column(w, lrng, 1.4 * s, 3 * s, 2.8 * s, 6, 1, STONE.clone().multiplyScalar(1.15));
+    crown(w, lrng, new Vector3(0, 1.3 * s, 0), 5, 6 * s, 0.5, m);
+    lamps.push({ x: at.x, y: floor + 18.5 * s, z: at.z, color: m.tip });
+  }
   const geometry = w.geometry();
-  return { geometry, geodes, byKind, aura, thundereggs, obstacles, lights, triangles: geometry ? geometry.getAttribute('position').count / 3 : 0 };
+  return { geometry, geodes, byKind, aura, thundereggs, obstacles, lights, fountain, lamps, triangles: geometry ? geometry.getAttribute('position').count / 3 : 0 };
 }
 
 /** Vertex side: hand the fragment what each pixel is, and how awake (a fish near). */

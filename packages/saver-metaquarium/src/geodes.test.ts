@@ -162,4 +162,16 @@ describe('wild geodes', () => {
     expect(GEODE_FRAGMENT_PARS).toMatch(/uniform float uGeoGlow; uniform float uGeoPulse;/);
     for (const src of [GEODE_VERTEX, GEODE_SHADE]) expect(src).not.toMatch(/random\(/);
   });
+
+  it('a fountain and lamps take the mineral the scene gives them, or quartz with none', () => {
+    const plain = buildGeodeField(createRng(3), { ...opts, amount: 0, fountain: { kind: 'geode', x: 0, z: 0 }, lamps: [{ x: 40, z: 0 }] });
+    expect(plain.fountain).toBeTruthy();
+    expect(plain.lamps).toHaveLength(1);
+    expect(plain.lamps[0]!.color).toBe('#ffffff'); // quartz
+    const listed = buildGeodeField(createRng(3), { ...opts, amount: 0, minerals: ['citrine'], lamps: [{ x: 40, z: 0 }] });
+    expect(listed.lamps[0]!.color).toBe('#c86808'); // citrine's tip
+    const vent = buildGeodeField(createRng(3), { ...opts, amount: 0, fountain: { kind: 'vent', x: 0, z: 0 }, anchors: [{ x: 50, z: 0, color: '#a855ff' }] });
+    expect(vent.fountain!.color).toBe('#ffb36b'); // a vent's mouth is hot whatever the neighbourhood
+    expect(vent.obstacles).toHaveLength(1);
+  });
 });

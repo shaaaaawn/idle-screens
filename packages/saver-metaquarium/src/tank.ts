@@ -68,6 +68,7 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { rigSeahorse } from './seahorse';
+import { rigCrab } from './crab';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -312,7 +313,9 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
  *  clamped against the SAME expression the mesh is built from. A `dunes` or
  *  `ridges` floor reaches +46, well above the bottom of the fish's depth band,
  *  so without this a bottom-hugger swims through the hill it is hugging. */
-function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
+const smooth01 = (t: number): number => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+export function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
   const R = 620;
   // Two seeded octaves — enough for a silhouette, cheap enough to build in a
   // frame. Phases come from the rng so two tanks are never the same hill.
@@ -335,15 +338,39 @@ function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => n
       // The bowl stays, but a shorter ripple gives the near floor a surface —
       // d² alone is near-constant inside the tank radius.
       h = d * d * 150 - 60 + Math.sin(x * 0.024 + a) * 7 + Math.cos(z * 0.02 + c) * 5;
+    } else if (kind === 'shelf') {
+      // The town on a raised shelf: a plateau round the village (it sits a
+      // little behind the middle), its edge wandering, falling in two steps —
+      // a terraced lip — to a lower, gently rolling floor.
+      const dx = x, dz = z + 30, th = Math.atan2(dz, dx);
+      const edge = 165 + Math.sin(th * 3 + a) * 22 + Math.sin(th * 5 + b) * 10;
+      const r = Math.hypot(dx, dz);
+      const upper = 1 - smooth01((r - edge) / 12), lower = 1 - smooth01((r - edge - 40) / 14);
+      const roll = Math.sin(x * 0.03 + a) * 4 + Math.cos(z * 0.026 + c) * 3;
+      h = upper * 20 + lower * 18 - 22 + roll * (1 - lower) + Math.sin(x * 0.05 + b) * 1.2 * upper;
+    } else if (kind === 'trench') {
+      // A channel meandering across the front of the town, steep-walled and
+      // deep enough for a fish to hide in, the floor either side gently rolling.
+      const zc = 95 + Math.sin(x * 0.011 + a) * 32 + Math.sin(x * 0.027 + b) * 10;
+      const w = 34 + Math.sin(x * 0.017 + c) * 8;
+      const q = (z - zc) / w;
+      const cut = Math.exp(-q * q * q * q);
+      h = -48 * cut + Math.sin(x * 0.029 + a) * 5 * (1 - cut) + Math.cos(z * 0.024 + c) * 4 * (1 - cut);
+    } else if (kind === 'terraces') {
+      // Tiers stepping up behind the town: each a flat tread and a short
+      // steep riser, wandering a little so they read as rock, not stairs.
+      const back = Math.max(0, -z - 45 + Math.sin(x * 0.015 + a) * 20);
+      const tread = 38, k = back / tread, step = Math.floor(k), f = k - step;
+      h = (step + smooth01((f - 0.78) / 0.22)) * 20 + Math.sin(x * 0.04 + b) * 1.5 + Math.cos(z * 0.03 + c) * 2;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
     return h * Math.max(0, 1 - d * d);
   };
 }
 
-function buildTerrain(height: (x: number, z: number) => number, color: string): Mesh {
+function buildTerrain(height: (x: number, z: number) => number, color: string, detail = 72, carved = false): Mesh {
   const R = 620;
-  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  const geo = new PlaneGeometry(R * 2, R * 2, detail, detail);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position!;
   for (let i = 0; i < pos.count; i++) {
@@ -361,7 +388,10 @@ function buildTerrain(height: (x: number, z: number) => number, color: string): 
   const lx = -0.45, ly = 0.78, lz = -0.43;
   for (let i = 0; i < pos.count; i++) {
     const lambert = Math.max(0, normal.getX(i) * lx + normal.getY(i) * ly + normal.getZ(i) * lz);
-    const v = 0.45 + 0.55 * lambert;
+    // A carved floor (shelf, trench, terraces) darkens with slope as well, so
+    // a lip, a riser or a trench wall reads as rock face, whichever way the sun is.
+    const slope = carved ? 0.45 + 0.55 * Math.pow(Math.max(0, normal.getY(i)), 6) : 1;
+    const v = (0.45 + 0.55 * lambert) * slope;
     shadeArr[i * 3] = v;
     shadeArr[i * 3 + 1] = v;
     shadeArr[i * 3 + 2] = v;
@@ -1039,7 +1069,9 @@ class TankInstance implements SaverInstance {
     if (kind !== 'flat') {
       const floorHex = String(this.paletteOr('floorColor', preset.palette?.floor) ?? '#0a1d33');
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
-      const terrain = buildTerrain(height, floorHex);
+      // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
+      const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
+      const terrain = buildTerrain(height, floorHex, carved ? 160 : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
       this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
@@ -1175,12 +1207,13 @@ class TankInstance implements SaverInstance {
     const interior = this.str('interior') === 'geode';
     const flora = this.num('floraDensity');
     const floraMix = this.str('floraMix').trim(), environment = this.str('environment'), floraPalette = this.str('floraPalette').trim(), floraLayout = this.str('floraLayout') === 'gallery' ? 'gallery' as const : 'garden' as const;
+    const fountain = this.str('fountain') as 'none' | 'vent' | 'geode', streetLamps = this.num('streetLamps');
     const geodes = this.num('geodes'), geodeMix = this.str('geodeMix').trim(), geodeMineral = this.str('geodeMineral').trim(), geodeLayout = this.str('geodeLayout') === 'gallery' ? 'gallery' as const : 'field' as const;
     const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${floraMix}|${floraPalette}|${floraLayout}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${flora > 0 ? environment : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${floraMix}|${floraPalette}|${floraLayout}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${flora > 0 ? environment : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1194,9 +1227,10 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: parseFloraPalette(floraPalette, this.ctxSaver.rng.fork(0xf1a).next()).palette, floraLayout,
+          fountain, lamps: streetLamps,
           geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
@@ -2660,15 +2694,19 @@ class TankInstance implements SaverInstance {
       // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
       // While it runs it REPLACES the rigid yaw and a whole-node clip: both
       // move the meshes inside the fish frame the wave was measured in.
-      if (swimWave > 0 && f.body && f.wave === undefined) {
+      // A crab always walks (it has no other motion), so it is rigged whatever swimWave says.
+      const isCrab = this.wantBreeds[f.index] === 'crab';
+      if ((swimWave > 0 || isCrab) && f.body && f.wave === undefined) {
         f.body.rotation.y = f.baseYaw;
         if (f.mixer) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
         // A seahorse does not wave: it flutters its fin, coils its tail and nods.
+        // A crab walks sideways on eight legs, its claws working.
         f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+          : breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2)
           : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
       }
-      const waving = swimWave > 0 && !!f.wave;
+      const waving = (swimWave > 0 || isCrab) && !!f.wave;
       if (f.wave) {
         f.wave.ensure();
         let turn = 0;
