@@ -1584,7 +1584,9 @@ class TankInstance implements SaverInstance {
     if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
     // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
     // Turned round to face it, the camera looks at the fish itself, not past it.
-    const ahead = pov ? 60 : this.num('followAngle') === 0 ? len * 0.5 : 0;
+    // The look-ahead fades out with the angle (full at 0, none from 90 on), so
+    // a followAngle that is being eased never snaps the aim.
+    const ahead = pov ? 60 : len * 0.5 * Math.max(0, Math.cos((this.num('followAngle') * Math.PI) / 180));
     this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
     this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
   }
