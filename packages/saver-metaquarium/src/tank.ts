@@ -2707,6 +2707,25 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * size);
+      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
+      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
+      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
+      // move the meshes inside the fish frame the wave was measured in.
+      // A crab always walks (it has no other motion), so it is rigged whatever swimWave says.
+      const isCrab = this.wantBreeds[f.index] === 'crab';
+      if ((swimWave > 0 || isCrab) && f.body && f.wave === undefined) {
+        f.body.rotation.y = f.baseYaw;
+        if (f.mixer) f.mixer.setTime(0);
+        const breed = this.wantBreeds[f.index] ?? null;
+        // A seahorse does not wave: it flutters its fin, coils its tail and nods.
+        // A crab walks sideways on eight legs, its claws working.
+        const crab = breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2) : null;
+        f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+          : breed === 'crab' ? crab
+          : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+        // Rigged before the ground placement below, so a crab lands on its first frame.
+        if (crab) { f.foot = crab.foot; f.print = { x: crab.middle.x, z: crab.middle.z, w: crab.span.x, l: crab.span.z }; }
+      }
       // A walker stands on what is under it — the seabed, a rock, a dome —
       // feet down, instead of swimming a band over it. A script still places it.
       if (f.foot !== undefined && !act) {
@@ -2744,25 +2763,6 @@ class TankInstance implements SaverInstance {
       }
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
-      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
-      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
-      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
-      // move the meshes inside the fish frame the wave was measured in.
-      // A crab always walks (it has no other motion), so it is rigged whatever swimWave says.
-      const isCrab = this.wantBreeds[f.index] === 'crab';
-      if ((swimWave > 0 || isCrab) && f.body && f.wave === undefined) {
-        f.body.rotation.y = f.baseYaw;
-        if (f.mixer) f.mixer.setTime(0);
-        const breed = this.wantBreeds[f.index] ?? null;
-        // A seahorse does not wave: it flutters its fin, coils its tail and nods.
-        // A crab walks sideways on eight legs, its claws working.
-        const crab = breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2) : null;
-        f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
-          : breed === 'crab' ? crab
-          : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
-        // A crab walks: from the next frame it stands on the ground (above).
-        if (crab) { f.foot = crab.foot; f.print = { x: crab.middle.x, z: crab.middle.z, w: crab.span.x, l: crab.span.z }; }
-      }
       const waving = (swimWave > 0 || isCrab) && !!f.wave;
       if (f.wave) {
         f.wave.ensure();
