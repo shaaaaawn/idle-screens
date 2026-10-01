@@ -95,13 +95,23 @@ const VERTEX = /* glsl */ `
   #include <project_vertex>
 `;
 
+/** A crab's rig: a wave rig that also knows where its feet are. */
+export interface CrabRig extends WaveRig {
+  /** The lowest point of the model at rest, in the group's own (unscaled) units: it stands with this on the ground. */
+  foot: number;
+  /** The middle of its footprint, in the same units: the model is not centred on the group. */
+  middle: { x: number; z: number };
+  /** The footprint's size, same units: `x` across the crab (claws to back), `z` along its walk. */
+  span: { x: number; z: number };
+}
+
 /**
  * Rig one crab. Same contract as `rigSwimWave` / `rigSeahorse`: `group` is
  * the fish's group (+z the way it travels), `body` the model under it at
  * its rest yaw. `set` reads the wave state's
  * phase (distance walked) and `t` (seconds).
  */
-export function rigCrab(group: Object3D, body: Object3D, phase: number): WaveRig | null {
+export function rigCrab(group: Object3D, body: Object3D, phase: number): CrabRig | null {
   group.updateMatrixWorld(true);
   const groupInv = new Matrix4().copy(group.matrixWorld).invert();
   const meshes: Mesh[] = [];
@@ -153,6 +163,10 @@ export function rigCrab(group: Object3D, body: Object3D, phase: number): WaveRig
   for (const p of parts) attach(p);
   return {
     meshes: parts.length,
+    // The gait only ever LIFTS a leg, so the rest pose's floor is the crab's.
+    foot: box.min.y,
+    middle: { x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2 },
+    span: { x: box.max.x - box.min.x, z: box.max.z - box.min.z },
     set(w: WaveState) {
       // Steps from distance walked; a crab always walks with the same will.
       crab.value.set(w.phase * CRAB.stepsPerStride, w.t ?? 0, 1, phase);

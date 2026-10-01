@@ -113,6 +113,7 @@ import {
   type TankQuality,
 } from './quality';
 import { LogicalClock, rateOffset } from './runtime';
+import { ContactShadows, WalkGround } from './walker';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const CAMERA_FAR = 1400;
@@ -556,6 +557,14 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** A walker (the crab): its feet, as the lowest point of the model below the
+   *  group's origin in group units — so it can stand ON the floor, not swim
+   *  over it. Undefined for anything that swims. */
+  foot?: number;
+  /** A walker's footprint, from its rig: middle and size in group units. */
+  print?: { x: number; z: number; w: number; l: number };
+  /** Where a walker's feet were last frame — a step up from here it climbs, more it walks through. */
+  walkY?: number;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
@@ -583,6 +592,8 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
+  /** A walker: the ground under it, which its feet stand on. Absent for a swimmer. */
+  ground?: number;
 }
 
 /** The leader a bonded fish rides: plan, where along it, and the light pull
@@ -652,6 +663,13 @@ class TankInstance implements SaverInstance {
   private crystals: CrystalField | null = null;
   /** The colonies that burst out of the rocks: the same field, fed by the scenery. */
   private rockCrystals: CrystalField | null = null;
+  /** What a walker stands on, rebuilt whenever the floor is (`floorHeightAt` is reassigned with it). */
+  private walkGround: WalkGround | null = null;
+  private walkFor: unknown = undefined;
+  /** Under each walker, a soft shadow on the ground (made when the first walker lands). */
+  private walkShadows: ContactShadows | null = null;
+  private walkShadowN = 0;
+  private readonly walkAt = new Vector3();
   /** The shard shapes this scene's crystals wear — rock colonies wear them too. */
   private shardVariants: ReturnType<typeof shardGeometry>[] | null = null;
   private clusters: Cluster[] = [];
@@ -2317,6 +2335,7 @@ class TankInstance implements SaverInstance {
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const tintPulse = this.num('crystalPulse');
+    this.walkShadowN = 0;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -2688,6 +2707,39 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * size);
+      // A walker stands on what is under it — the seabed, a rock, a dome —
+      // feet down, instead of swimming a band over it. A script still places it.
+      if (f.foot !== undefined && !act) {
+        // Not `floorHeightAt`: that is a swimmer's clearance, a dome with a
+        // margin over every plant and rock, and a crab riding it hovers.
+        if (this.walkFor !== this.floorHeightAt) {
+          this.walkFor = this.floorHeightAt;
+          const roots = [this.scenery?.group, this.crystals?.group, this.rockCrystals?.group].filter((g): g is Group => !!g);
+          this.walkGround = new WalkGround(roots, this.terrainAt ?? (() => 0), { soft: new Set(this.scenery?.floraMaterials ?? []) });
+        }
+        // Level, no bank: it faces where it walks. Its feet are measured under
+        // the middle of its footprint — the model is not centred on its group.
+        const { x: wx, z: wz } = f.group.position;
+        const hl = Math.hypot(pose.fx, pose.fz) || 1, hx = pose.fx / hl, hz = pose.fz / hl;
+        f.group.lookAt(wx + hx, f.group.position.y, wz + hz);
+        const pr = f.print!, sc = f.group.scale.x;
+        const at = this.walkAt.set(pr.x, 0, pr.z).applyQuaternion(f.group.quaternion).multiplyScalar(sc);
+        const mx = wx + at.x, mz = wz + at.z, step = FISH_LENGTH * 0.4 * size;
+        const ground = this.walkGround!.at(mx, mz, f.walkY ?? this.terrainAt?.(mx, mz) ?? 0, step); // the flat floor disc is at 0
+        f.walkY = ground;
+        f.group.position.y = ground - f.foot * sc;
+        // Pitched to the ground under it: nose up a rock's flank, down the far side.
+        const half = Math.max(1, pr.l * sc * 0.5);
+        const rise = this.walkGround!.at(mx + hx * half, mz + hz * half, ground, step) - this.walkGround!.at(mx - hx * half, mz - hz * half, ground, step);
+        if (Math.abs(rise) > 1e-3) f.group.lookAt(wx + hx, f.group.position.y + rise / (2 * half), wz + hz);
+        if (f.group.visible) {
+          if (!this.walkShadows) { this.walkShadows = new ContactShadows(MAX_FISH); this.scene.add(this.walkShadows.mesh); }
+          // Past the footprint: the feet stand in the dark of it, and it
+          // fades out just beyond them.
+          this.walkShadows.set(this.walkShadowN++, mx, ground + 0.15, mz, f.group.quaternion, pr.w * sc * 1.3, pr.l * sc * 1.3);
+        }
+        if (f.index === followSlot) this.followAt.y = f.group.position.y;
+      }
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // The swim wave (MQ: Amano study). Rigged on the first frame that asks
@@ -2702,9 +2754,12 @@ class TankInstance implements SaverInstance {
         const breed = this.wantBreeds[f.index] ?? null;
         // A seahorse does not wave: it flutters its fin, coils its tail and nods.
         // A crab walks sideways on eight legs, its claws working.
+        const crab = breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2) : null;
         f.wave = breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
-          : breed === 'crab' ? rigCrab(f.group, f.body, fishHash(f.index, 71) * Math.PI * 2)
+          : breed === 'crab' ? crab
           : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+        // A crab walks: from the next frame it stands on the ground (above).
+        if (crab) { f.foot = crab.foot; f.print = { x: crab.middle.x, z: crab.middle.z, w: crab.span.x, l: crab.span.z }; }
       }
       const waving = (swimWave > 0 || isCrab) && !!f.wave;
       if (f.wave) {
@@ -2752,14 +2807,17 @@ class TankInstance implements SaverInstance {
         seat: style.formation ? seat : null,
         waving,
         x: Math.round(px * 10) / 10,
-        y: Math.round(y * 10) / 10,
+        // Where it is drawn: a walker's feet put it below its swim band.
+        y: Math.round(f.group.position.y * 10) / 10,
         z: Math.round(pz * 10) / 10,
         // The facing the frame shows: the script's, for an actor.
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
+        ...(f.foot !== undefined && !act && f.walkY !== undefined ? { ground: Math.round(f.walkY * 10) / 10 } : {}),
       });
     }
+    this.walkShadows?.commit(this.walkShadowN);
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);

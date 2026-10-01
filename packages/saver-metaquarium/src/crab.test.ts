@@ -68,6 +68,14 @@ describe('crab rig', () => {
     expect(crab.x).toBeCloseTo(1 * CRAB.stepsPerStride);
     expect(crab.z).toBe(1); // a crab always walks with the same will
     rig.ensure();
+    // Where it stands: the bottom of its box, the middle and size of its footprint, in the group's units.
+    group.scale.setScalar(2); group.position.set(5, 9, 0);
+    const scaled = rigCrab(group, body, 0)!;
+    expect(rig.foot).toBeCloseTo(-6);
+    expect(scaled.foot).toBeCloseTo(-6); // the group's own scale and place do not change it
+    expect(rig.middle.x).toBeCloseTo((-20 + 12) / 2);
+    expect(rig.middle.z).toBeCloseTo(0);
+    expect(rig.span).toEqual({ x: 32, z: 30 });
     expect(rigCrab(new Group(), new Group(), 0)).toBeNull();
   });
 
