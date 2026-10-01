@@ -276,6 +276,19 @@ export const METAQUARIUM_PARAMS = {
    *  fish swim the room. Pairs with the default `void` environment. */
   interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Which plants grow: `species[:weight]`, comma-separated (`kelp:3, anemone, clam`).
+   *  Seventeen species: grass tube bulb fan kelp anemone staghorn brain whip barrel
+   *  shelf seapen clam bubble elder curl pod. Empty (default) plants the room's own garden: coral on a
+   *  reef, kelp and whips in the kelp forest, glow caps in the abyss. */
+  floraMix: { type: 'string', default: '', ease: 'step' },
+  /** One colour scheme for the whole garden: `world` grows one from the seed
+   *  (a hero hue, its neighbour and an accent), or up to six `#rrggbb`. Empty
+   *  (default) lets every species keep its own colours. */
+  floraPalette: { type: 'string', default: '', ease: 'step' },
+  /** `garden` (default) grows the flora round the crystals; `gallery` plants
+   *  one of each species (every one, or those `floraMix` names) in its own
+   *  plot, low ones in a front row and tall ones behind — to see them all. */
+  floraLayout: { type: 'enum', default: 'garden', options: ['garden', 'gallery'], ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

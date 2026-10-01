@@ -258,8 +258,8 @@ describe('mineral world', () => {
       if (!Object.prototype.hasOwnProperty.call(material, 'customProgramCacheKey')) continue;
       keys.set(object.name, material.customProgramCacheKey());
     }
-    expect(keys.get('voxel-light-flora')).toBe('mineral-flora-v3');
-    expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v2');
+    expect(keys.get('voxel-light-flora')).toBe('mineral-flora-v5');
+    expect(keys.get('flora-lamps')).toBe('mineral-flora-lamps-v4');
     expect(keys.get('crystal-veins')).toBe('mineral-fissures-v3');
     expect(keys.size).toBeGreaterThanOrEqual(6); // + spores, vents, snow, lanterns, horizon
     // One key per distinct PATCH. The glass lanterns are three draws of one
@@ -277,4 +277,30 @@ describe('mineral world', () => {
     expect(world.group.children.some(o => o.name.startsWith('castle-'))).toBe(false);
   });
 
+});
+
+describe('the garden answers the cast', () => {
+  it('setFish writes where each fish is into the flora programs, capped', () => {
+    const world = build(full);
+    const plants = world.group.children.find((o) => o.name === 'voxel-light-flora') as Mesh;
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
+    (plants.material as Material).onBeforeCompile(shader as never, {} as WebGLRenderer);
+    expect(shader.vertexShader).toContain('mqStartleAt(position)');
+    world.setFish([{ x: 1, y: 2, z: 3, r: 28 }, { x: -4, y: 5, z: 6, r: 20 }]);
+    expect(shader.uniforms.uMqFloraFishN!.value).toBe(2);
+    expect((shader.uniforms.uMqFloraFish!.value as Array<{ toArray(): number[] }>)[1]!.toArray()).toEqual([-4, 5, 6, 20]);
+    world.setFish(Array.from({ length: 40 }, (_, i) => ({ x: i, y: 0, z: 0, r: 10 })));
+    expect(shader.uniforms.uMqFloraFishN!.value).toBe(24);
+    world.setFish([]);
+    expect(shader.uniforms.uMqFloraFishN!.value).toBe(0);
+    // The lamps are their own program: they flare at the same cast.
+    const lamps = world.group.children.find((o) => o.name === 'flora-lamps') as Mesh | undefined;
+    expect(lamps, 'the full garden grows lamps').toBeDefined();
+    if (!lamps) return;
+    const lampShader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
+    (lamps.material as Material).onBeforeCompile(lampShader as never, {} as WebGLRenderer);
+    world.setFish(Array.from({ length: 40 }, (_, i) => ({ x: i, y: 0, z: 0, r: 10 })));
+    expect(lampShader.uniforms.uMqFloraFishN!.value).toBe(24);
+    expect((lampShader.uniforms.uMqFloraFish!.value as Array<{ toArray(): number[] }>)[3]!.toArray()).toEqual([3, 0, 0, 10]);
+  });
 });

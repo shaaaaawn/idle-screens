@@ -3,12 +3,12 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
-  DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
+  DoubleSide, type Material, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
@@ -33,6 +33,14 @@ export interface SceneryOptions {
   variants?: number;
   homes: number;
   flora: number;
+  /** `floraMix`, parsed: relative weights by species. Empty = the room's garden. */
+  floraMix?: Partial<Record<FloraSpecies, number>>;
+  /** The room (`environment`), which picks the garden when `floraMix` is empty. */
+  environment?: string;
+  /** `floraPalette`, resolved: the colours every colony is pulled toward. */
+  floraPalette?: string[];
+  /** `floraLayout`: round the crystals, or one of each species in rows. */
+  floraLayout?: 'garden' | 'gallery';
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -67,6 +75,10 @@ export interface Scenery {
   moving: Emitter[];
   /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
   canopyTips: CanopyTip[];
+  /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
+  floraMaterials: Material[];
+  /** Where the fish are this frame (x, y, z, reach): the garden answers them (flora.ts). */
+  setFish(fish: ReadonlyArray<{ x: number; y: number; z: number; r: number }>): void;
   /** Crystal colonies that burst out of the rocks — REAL clusters, for the
    *  host to build with the same field as `propMix` (no light of their own:
    *  they do not join the floor pools). */
@@ -321,7 +333,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     group.add(cards.mesh);
   }
   const field = buildFlora(anchors, terrain, rng.fork(4), {
-    density: opts.flora, cap: opts.cap, scale: s,
+    density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette, layout: opts.floraLayout,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
@@ -330,16 +342,21 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const plants = batch(group, field.parts, 'voxel-light-flora', FrontSide);
   // The light sweep is written in scale-1 units; this is the world's scale.
   const floraScale = { value: s };
+  // The cast, as the garden sees it (setFish): where each fish is and how near is too near.
+  const floraFishN = { value: 0 };
+  const floraFish = { value: Array.from({ length: MAX_FLORA_FISH }, () => new Vector4()) };
   if (plants) {
     const clock = { value: 0 }; clocks.push(clock);
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
       shader.uniforms.uFloraScale = floraScale;
-      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uMqFloraFishN = floraFishN;
+      shader.uniforms.uMqFloraFish = floraFish;
+      shader.vertexShader = FLORA_PARS + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
     };
-    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v3';
+    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v5';
     plants.frustumCulled = false;
   }
   // The lights on the flora are polished metal: they take the studio
@@ -357,12 +374,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
       shader.uniforms.uFloraScale = floraScale;
-      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uMqFloraFishN = floraFishN;
+      shader.uniforms.uMqFloraFish = floraFish;
+      shader.vertexShader = FLORA_PARS + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', FLORA_LAMP_EMISSIVE);
     };
-    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v2';
+    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v4';
     const lampMesh = new Mesh(geometry, metal);
     lampMesh.name = 'flora-lamps';
     lampMesh.frustumCulled = false;
@@ -438,13 +457,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   if (field.lights.length) {
     const sporeRng = rng.fork(9);
     const per = 3, n = field.lights.length * per;
-    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sway = new Float32Array(n * 3), spore = new Float32Array(n * 3);
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sway = new Float32Array(n * 3), spore = new Float32Array(n * 3), flex = new Float32Array(n);
     const c = new Color();
     field.lights.forEach((l, i) => {
       c.set(l.color).lerp(new Color('#ffffff'), 0.3);
       for (let k = 0; k < per; k++) {
         const j = (i * per + k) * 3;
-        pos.set([l.x, l.y, l.z], j); col.set([c.r, c.g, c.b], j); sway.set([l.root, l.phase, l.gust], j);
+        pos.set([l.x, l.y, l.z], j); col.set([c.r, c.g, c.b], j); sway.set([l.root, l.phase, l.gust], j); flex[i * per + k] = l.flex;
         spore.set([sporeRng.next(), sporeRng.range(0.05, 0.11), sporeRng.next()], j);
       }
     });
@@ -453,20 +472,21 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     geometry.setAttribute('color', new BufferAttribute(col, 3));
     geometry.setAttribute('aSway', new BufferAttribute(sway, 3));
     geometry.setAttribute('aSpore', new BufferAttribute(spore, 3));
+    geometry.setAttribute('aFlex', new BufferAttribute(flex, 1));
     geometry.userData.mqOwned = true;
     const material = new PointsMaterial({ vertexColors: true, size: 1.5 * s, transparent: true, depthWrite: false, blending: AdditiveBlending });
     material.userData.mqOwned = true;
     const clock = { value: 0 }; clocks.push(clock);
     material.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute vec3 aSpore; varying float vSpore;\n' + FLORA_SWAY
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute vec3 aSpore; attribute float aFlex; varying float vSpore;\n' + FLORA_SWAY
         + shader.vertexShader.replace('#include <begin_vertex>', SPORE_VERTEX);
       shader.fragmentShader = 'varying float vSpore;\n' + shader.fragmentShader.replace('#include <color_fragment>', `
         #include <color_fragment>
         float sr = length(gl_PointCoord - 0.5) * 2.0;
         diffuseColor.a *= (1.0 - smoothstep(0.15, 1.0, sr)) * vSpore;`);
     };
-    material.customProgramCacheKey = () => 'flora-spores-v1';
+    material.customProgramCacheKey = () => 'flora-spores-v2';
     const points = new Points(geometry, material);
     points.name = 'flora-spores';
     points.frustumCulled = false;
@@ -474,6 +494,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     counts.spores = n;
   }
   counts.flora = field.plants;
+  counts.floraRare = field.rare;
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
   const particleRng = rng.fork(6);
@@ -650,7 +671,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   return {
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [], rockClusters,
-    canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
+    floraMaterials: plants ? [plants.material as Material] : [],
+    setFish(fish) {
+      const n = Math.min(fish.length, MAX_FLORA_FISH);
+      for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);
+      floraFishN.value = n;
+    },
+    canopyTips: field.tips.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) * Math.max(1, l.flex) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
