@@ -817,7 +817,6 @@ export function buildFlora(
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
   const palette = opts.palette?.length ? opts.palette : null;
-  const total = weights.reduce((a, [, w]) => a + w, 0);
   let plants = 0, rare = 0, founded = 0;
 
   /** Grow one plant of `species` rooted at (x, z). */
@@ -912,9 +911,12 @@ export function buildFlora(
       x = col.x + Math.cos(a) * r; z = col.z + Math.sin(a) * r;
     } else {
       // Species by share, so a garden keeps its proportions at any density.
-      let roll = rng.next() * total;
-      species = weights[0]![0];
-      for (const [sp, w] of weights) { if (roll < w) { species = sp; break; } roll -= w; }
+      // A species at its cap leaves the draw, or its rolls would eat the planting attempts.
+      const open = weights.filter(([sp]) => { const m = SPECIES[sp].max; return m === undefined || bySpecies[sp] < m; });
+      if (!open.length) break;
+      let roll = rng.next() * open.reduce((a, [, w]) => a + w, 0);
+      species = open[0]![0];
+      for (const [sp, w] of open) { if (roll < w) { species = sp; break; } roll -= w; }
       const def = SPECIES[species];
       const angle = rng.range(0, Math.PI * 2);
       const radius = (def.near + (def.far - def.near) * rng.next() ** 1.4) * s;

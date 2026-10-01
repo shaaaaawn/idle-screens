@@ -1089,7 +1089,7 @@ class TankInstance implements SaverInstance {
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
       const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
-      const terrain = buildTerrain(height, floorHex, carved ? 160 : 72, carved);
+      const terrain = buildTerrain(height, floorHex, carved ? 240 : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
       this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
@@ -2739,6 +2739,8 @@ class TankInstance implements SaverInstance {
           this.walkShadows.set(this.walkShadowN++, mx, ground + 0.15, mz, f.group.quaternion, pr.w * sc * 1.3, pr.l * sc * 1.3);
         }
         if (f.index === followSlot) this.followAt.y = f.group.position.y;
+        // The follow-spot's beam and shadow track the crab where it is drawn.
+        for (let si = 0; si < this.spotRig.length; si++) if (this.spotRig[si]!.slot === f.index) this.spotAt[si]!.y = f.group.position.y;
       }
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
