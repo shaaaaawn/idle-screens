@@ -102,6 +102,34 @@ const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
   [0, 1, 0, 1], [0, -1, 0, 0.42], [1, 0, 0, 0.8], [-1, 0, 0, 0.62], [0, 0, 1, 0.72], [0, 0, -1, 0.55],
 ];
 
+/** Lights (spore emitters) one plant may have, however many lamps it grows. */
+const LAMPS_PER_PLANT = 4;
+
+/**
+ * Which lamps a plant grew: its lamp cells `from`..`to` (centres in `cells`,
+ * x y z) grouped into touching runs — closer than `touch` (squared) is the
+ * same lamp. Answers each lamp's last cell, the last-drawn lamps first, at
+ * most `cap`.
+ */
+export function lampHeads(cells: readonly number[], from: number, to: number, touch: number, cap: number): number[] {
+  const n = to - from, up = Array.from({ length: n }, (_, i) => i);
+  const top = (i: number): number => { while (up[i] !== i) i = up[i] = up[up[i]!]!; return i; };
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      const a = (from + i) * 3, b = (from + j) * 3;
+      if ((cells[a]! - cells[b]!) ** 2 + (cells[a + 1]! - cells[b + 1]!) ** 2 + (cells[a + 2]! - cells[b + 2]!) ** 2 < touch) up[top(j)] = top(i);
+    }
+  }
+  const heads: number[] = [], seen = new Set<number>();
+  for (let i = n - 1; i >= 0 && heads.length < cap; i -= 1) {
+    const r = top(i);
+    if (seen.has(r)) continue;
+    seen.add(r);
+    heads.push(from + i);
+  }
+  return heads;
+}
+
 class VoxelWriter {
   readonly pos: number[] = [];
   readonly nor: number[] = [];
@@ -125,12 +153,18 @@ class VoxelWriter {
   /** The highest point drawn since `top` was last reset (a plant's crown). */
   top = 0;
   last: [number, number, number] = [0, 0, 0];
+  /** Every cell drawn, centre by centre (x, y, z) — where a plant's lamps are. */
+  readonly cells: number[] = [];
+  /** Each cell's sway (root, phase, gust, flex), as its vertices have it: a spore leaves with the tip it came off. */
+  readonly cellSway: number[] = [];
 
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, lit: number, flat = false): void {
     for (let f = 0; f < 6; f += 1) this.face(f, cx, cy, cz, sx / 2, sy / 2, sz / 2, c, lit, flat);
     if (this.flex > this.maxFlex) this.maxFlex = this.flex;
     this.count += 1;
     this.last = [cx, cy, cz];
+    this.cells.push(cx, cy, cz);
+    this.cellSway.push(this.root, this.phase, this.gust, this.flex);
     if (cy + sy / 2 > this.top) this.top = cy + sy / 2;
   }
 
@@ -150,6 +184,8 @@ class VoxelWriter {
       }
       this.count += 1;
       this.last = [cx, cy, cz];
+      this.cells.push(cx, cy, cz);
+      this.cellSway.push(this.root, this.phase, this.gust, this.flex);
       if (cy + h > this.top) this.top = cy + h;
     }
     if (cells.size && this.flex > this.maxFlex) this.maxFlex = this.flex;
@@ -184,7 +220,7 @@ class VoxelWriter {
 
   /** Scale everything drawn since vertex \`from\` about (x, root, z): the
    *  small form of a dimorphic species, cut at a smaller voxel. */
-  shrink(from: number, x: number, root: number, z: number, k: number): void {
+  shrink(from: number, x: number, root: number, z: number, k: number, cellFrom = this.count): void {
     for (let v = from; v < this.pos.length / 3; v += 1) {
       this.pos[v * 3] = x + (this.pos[v * 3]! - x) * k;
       this.pos[v * 3 + 1] = root + (this.pos[v * 3 + 1]! - root) * k;
@@ -193,6 +229,12 @@ class VoxelWriter {
       this.plant[v * 4 + 3] = root + (this.plant[v * 4 + 3]! - root) * k;
     }
     this.top = root + (this.top - root) * k;
+    for (let c = cellFrom * 3; c < this.cells.length; c += 3) {
+      this.cells[c] = x + (this.cells[c]! - x) * k;
+      this.cells[c + 1] = root + (this.cells[c + 1]! - root) * k;
+      this.cells[c + 2] = z + (this.cells[c + 2]! - z) * k;
+      this.cellSway[(c / 3) * 4] = root + (this.cellSway[(c / 3) * 4]! - root) * k;
+    }
     this.last = [x + (this.last[0] - x) * k, root + (this.last[1] - root) * k, z + (this.last[2] - z) * k];
   }
 
@@ -420,7 +462,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
     },
   },
   staghorn: {
-    // Stony coral: it grows, it does not sway.
+    // Stony coral: it grows, and barely sways.
     near: 16, far: 34, share: 0.07, flex: 0.12, colony: [1, 3], spread: 7,
     grow({ x, z, root, V, rng, light, body, lamp, ramp, paint }) {
       // Antler coral: branches fork in every direction (a fan forks in one
@@ -852,7 +894,8 @@ export function buildFlora(
       return worldHue ? c.lerp(worldHue, 0.72) : c;
     };
     const stem = light.clone().lerp(paint(def.leaf ?? [LEAF_GREEN]), 0.62);
-    body.pearl = isRare ? 0.5 : 0;
+    // A rare morph is nacreous all through, its lamps too.
+    body.pearl = lamp.pearl = isRare ? 0.5 : 0;
     const lampsBefore = lamp.count, bodyFrom = body.pos.length / 3, lampFrom = lamp.pos.length / 3;
     def.grow({
       x, z, root, V, s, rng, gene, light, stem, lx: dx / dl, lz: dz / dl, phase, body, lamp,
@@ -864,10 +907,18 @@ export function buildFlora(
     if (sibling && def.max === undefined && rng.next() < 0.3) {
       const k = rng.range(0.45, 0.68);
       body.shrink(bodyFrom, x, root, z, k);
-      lamp.shrink(lampFrom, x, root, z, k);
+      lamp.shrink(lampFrom, x, root, z, k, lampsBefore);
     }
     const flex = Math.max(body.maxFlex, lamp.maxFlex);
-    if (lamp.count > lampsBefore) lights.push({ x: lamp.last[0], y: lamp.last[1], z: lamp.last[2], root: lamp.root, phase, gust, color: near.color, flex: lamp.flex });
+    // One light per LAMP — a branch tip, a tentacle, a blossom — not per
+    // plant: lamp cells that touch are one lamp (a clam's whole mantle), and
+    // lamps apart are lamps apart. Each lights from its last cell drawn (its
+    // crown); the last-drawn lamps first, and no more than four a plant.
+    for (const c of lampHeads(lamp.cells, lampsBefore, lamp.count, (1.8 * V) ** 2, LAMPS_PER_PLANT)) {
+      // Swaying as that cell's vertices do: its own root, phase, gust and flex.
+      const w = c * 4;
+      lights.push({ x: lamp.cells[c * 3]!, y: lamp.cells[c * 3 + 1]!, z: lamp.cells[c * 3 + 2]!, root: lamp.cellSway[w]!, phase: lamp.cellSway[w + 1]!, gust: lamp.cellSway[w + 2]!, color: near.color, flex: lamp.cellSway[w + 3]! });
+    }
     tips.push({ x, z, y: Math.max(body.top, lamp.top), root, flex });
     bySpecies[species] += 1;
     plants += 1;

@@ -41,8 +41,14 @@ export function parseFloraMix(src: string): { mix: Partial<Record<FloraSpecies, 
       problems.push(`"${part}": expected species[:weight] with species one of ${FLORA_SPECIES.join(', ')}`);
       continue;
     }
-    const w = m[2] === undefined ? 1 : Number(m[2]);
-    mix[name] = (mix[name] ?? 0) + w;
+    const w = m[2] === undefined ? 1 : Number(m[2]), sum = (mix[name] ?? 0) + w;
+    // "kelp:1e400" parses as Infinity, and one infinite weight would make the
+    // whole garden that species.
+    if (!Number.isFinite(sum)) {
+      problems.push(`"${part}": weight too large`);
+      continue;
+    }
+    mix[name] = sum;
   }
   return { mix, problems };
 }

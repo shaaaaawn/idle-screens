@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
 import { pearlSites } from './bubbles';
-import { buildFlora, FLORA_BY_ENVIRONMENT, GALLERY_ROWS, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, MAX_FLORA_FISH, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
+import { buildFlora, lampHeads, FLORA_BY_ENVIRONMENT, GALLERY_ROWS, FLORA_COLOR, FLORA_SPECIES, FLORA_SWAY, FLORA_VERTEX, MAX_FLORA_FISH, parseFloraMix, SPORE_VERTEX, type FloraOptions } from './flora';
 import { parseFloraPalette, worldPalette } from './flora-mix';
 
 const anchors = [{ x: 0, y: 0, z: 0, color: '#2dffb0' }, { x: 80, y: 0, z: -40, color: '#4fe9ff' }];
@@ -121,18 +121,21 @@ describe('flora', () => {
   });
 
   it('about one colony in thirty is a rare morph, and it gleams', () => {
-    let rare = 0, plants = 0;
+    let rare = 0, plants = 0, lampsGleam = false;
     for (let seed = 1; seed <= 30; seed += 1) {
       const f = buildFlora(anchors, flat, createRng(seed), { ...opts, cap: 12 });
       rare += f.rare; plants += f.plants;
       if (f.rare) {
         const sheen = arr(f.parts[0]!, 'aMat').filter((_, i) => i % 2 === 1);
         expect(sheen.some((v) => v === 1)).toBe(true);
+        // Its lamps are nacreous too, not just its body.
+        if (f.lamps[0] && arr(f.lamps[0], 'aMat').some((v, i) => i % 2 === 1 && v === 1)) lampsGleam = true;
       }
     }
+    expect(lampsGleam).toBe(true);
     expect(rare / plants).toBeGreaterThan(0.01);
     expect(rare / plants).toBeLessThan(0.12);
-  });
+  }, 30_000); // thirty whole gardens: a rate needs a sample, and coverage slows every voxel
 
   it('the elder is one great tree, out past the garden', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { elder: 1 } });
@@ -140,7 +143,9 @@ describe('flora', () => {
     const t = f.tips[0]!;
     expect(t.y - t.root).toBeGreaterThan(35);
     expect(Math.min(...anchors.map((a) => Math.hypot(t.x - a.x, t.z - a.z)))).toBeGreaterThanOrEqual(29);
-    expect(f.lights).toHaveLength(1);
+    // Its blossoms are lamps apart: each sheds its own spores, four at most.
+    expect(f.lights.length).toBeGreaterThan(1);
+    expect(f.lights.length).toBeLessThanOrEqual(4);
   });
 
   it('pearls rise only off leaves', () => {
@@ -188,7 +193,9 @@ describe('flora', () => {
 
   it('grows the fiddlehead and the pod in both its forms', () => {
     const curl = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { curl: 1 } });
-    expect(curl.lights.length).toBe(curl.plants); // a bead at every coil's heart
+    // A bead at every coil's heart: one light a coil, every plant lit.
+    expect(curl.lights.length).toBeGreaterThanOrEqual(curl.plants);
+    expect(curl.lights.length).toBeLessThanOrEqual(curl.plants * 4);
     let orb = 0, whirl = 0;
     for (let seed = 1; seed <= 6; seed += 1) {
       const p = buildFlora(anchors, flat, createRng(seed), { ...opts, mix: { pod: 1 } });
@@ -262,10 +269,10 @@ describe('flora', () => {
     expect(arr(f.lamps[0]!, 'aGlow').every((v) => v === 1)).toBe(true);
   });
 
-  it('reports a light for every plant that carries one, and a crown for every plant', () => {
+  it('reports a light for every lamp a plant carries, four at most, and a crown for every plant', () => {
     const f = buildFlora(anchors, flat, createRng(3), opts);
     const unlit = f.bySpecies.grass + f.bySpecies.brain;
-    expect(f.lights.length).toBeLessThanOrEqual(f.plants - unlit);
+    expect(f.lights.length).toBeLessThanOrEqual((f.plants - unlit) * 4);
     expect(f.lights.length).toBeGreaterThan((f.plants - unlit) * 0.8); // a staghorn may light no tip
     expect(f.lights.every(l => l.y > l.root && Number.isFinite(l.x + l.z))).toBe(true);
     // The shoal keeps above every plant, lit or not.
@@ -273,6 +280,35 @@ describe('flora', () => {
     expect(f.tips.every(t => t.y > t.root)).toBe(true);
     const whips = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { whip: 1 } });
     expect(Math.max(...whips.tips.map(t => t.y - t.root))).toBeGreaterThan(20);
+  });
+
+  it('a spore sways with the lamp it leaves: that lamp\'s own root, flex and phase', () => {
+    const f = buildFlora(anchors, flat, createRng(3), { ...opts, mix: { anemone: 1, elder: 1 } });
+    const g = f.lamps[0]!, pos = arr(g, 'position'), sway = arr(g, 'aSway'), mat = arr(g, 'aMat');
+    expect(f.lights.length).toBeGreaterThan(0);
+    const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-3;
+    for (const l of f.lights) {
+      // Some corner of the cell it was taken from (siblings' tips can sit
+      // closer than a cell's own corners, so not simply the nearest vertex)
+      // sways exactly as the light does. Within 3: an elder's blossom cell
+      // reaches 1.6 to its corners.
+      let match = false;
+      for (let v = 0; v < pos.length / 3 && !match; v += 1) {
+        const q = (pos[v * 3]! - l.x) ** 2 + (pos[v * 3 + 1]! - l.y) ** 2 + (pos[v * 3 + 2]! - l.z) ** 2;
+        match = q < 9 && near(l.root, sway[v * 3]!) && near(l.phase, sway[v * 3 + 1]!) && near(l.gust, sway[v * 3 + 2]!) && near(l.flex, mat[v * 2]!);
+      }
+      expect(match, `light at ${l.x.toFixed(1)},${l.y.toFixed(1)},${l.z.toFixed(1)}`).toBe(true);
+    }
+  });
+
+  it('tells a plant\'s lamps apart by whether their cells touch', () => {
+    // Cells 0-2 a run along x (one lamp), 3 alone, 4-5 a pair: drawn in that order.
+    const cells = [0, 0, 0, 1, 0, 0, 2, 0, 0, 10, 5, 0, 20, 0, 0, 20, 1, 0];
+    expect(lampHeads(cells, 0, 6, 1.5 ** 2, 4)).toEqual([5, 3, 2]); // each lamp's last cell, the last lamp first
+    expect(lampHeads(cells, 0, 6, 1.5 ** 2, 2)).toEqual([5, 3]); //    capped
+    expect(lampHeads(cells, 3, 6, 1.5 ** 2, 4)).toEqual([5, 3]); //    only this plant's cells
+    expect(lampHeads(cells, 0, 6, 30 ** 2, 4)).toEqual([5]); //        all touching: one lamp
+    expect(lampHeads(cells, 2, 2, 1, 4)).toEqual([]);
   });
 
   it('motion is gentle, pure in the tank clock, and zero at the root', () => {
@@ -289,7 +325,18 @@ describe('flora-mix', () => {
   it('stays three-free: the package entry reaches it through guide.ts, on the TV\'s 2D path too', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('./flora-mix.ts', import.meta.url), 'utf8');
-    expect(src).not.toMatch(/from ['"]three/);
-    expect(src).not.toMatch(/from ['"]\.\/(?!crystals')/); // imports nothing that could pull three in
+    // Every import, side-effect ones included, either quote style.
+    const importsOf = (code: string): string[] => [...code.matchAll(/^\s*(?:import\s+(?:[^;'"]*?\s+from\s+)?|export\s+[^;'"]*?\s+from\s+)['"]([^'"]+)['"]/gm)].map((m) => m[1]!);
+    // The same reader finds three where it is imported (it is not vacuous)…
+    expect(importsOf(readFileSync(new URL('./flora.ts', import.meta.url), 'utf8'))).toContain('three');
+    expect(importsOf(`import 'three';\nimport { a } from "./crystals";`)).toEqual(['three', './crystals']);
+    // …and flora-mix imports nothing that could pull three in.
+    for (const from of importsOf(src)) expect(['./crystals'], from).toContain(from.replace(/\.ts$/, ''));
+  });
+
+  it('refuses a weight too large to be a number', async () => {
+    const { parseFloraMix } = await import('./flora-mix');
+    expect(parseFloraMix('kelp:' + '9'.repeat(400)).problems[0]).toMatch(/too large/); // parses as Infinity
+    expect(parseFloraMix('kelp:' + '9'.repeat(400)).mix.kelp).toBeUndefined();
   });
 });
