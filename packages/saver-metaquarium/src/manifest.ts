@@ -226,7 +226,7 @@ export const METAQUARIUM_PARAMS = {
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
   /** The bundled creatures' look. `neon` is the blacklight poster: coats near
    *  black, the dark of the eyes (and a crab's mouth) a seeded neon that glows
-   *  and blooms, glow parts as they are. The glowing eyes are light, not an eye
+   *  and blooms, small glow kept, big glow (a crab's claws) dark. The glowing eyes are light, not an eye
    *  display, so `eyeLife` leaves them be. Minted fish keep their atlases.
    *  Best in a dark room with `finish`. Read when a fish spawns. */
   fishLook: { type: 'enum', default: 'natural', options: ['natural', 'neon'], ease: 'step' },

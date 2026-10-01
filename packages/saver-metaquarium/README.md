@@ -107,7 +107,7 @@ never changes because a dependency was bumped.
 | fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
 | fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
 | fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
-| fishLook | enum | natural | `neon`: the bundled creatures in blacklight — near-black coats, the dark of the eyes (a crab's mouth too) a seeded glowing neon, glow parts as they are; minted fish untouched. Read when a fish spawns |
+| fishLook | enum | natural | `neon`: the bundled creatures in blacklight — near-black coats, the dark of the eyes (a crab's mouth too) a seeded glowing neon, small glow (a lure) kept and big glow (a crab's claws) dark; minted fish untouched. Read when a fish spawns |
 | eyeLife | number | 0 | Eyes blink, look and emote — each token's own pixel-grid eye redrawn in a fragment function, black and white only. 0 is the stock eye program, byte for byte; a scene opts in with 1 |
 
 ### Scenery
