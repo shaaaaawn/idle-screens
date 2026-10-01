@@ -132,7 +132,7 @@ describe('flora', () => {
     }
     expect(rare / plants).toBeGreaterThan(0.01);
     expect(rare / plants).toBeLessThan(0.12);
-  });
+  }, 30_000); // 30 full fields: ~4 s alone, over the 5 s default on a loaded runner
 
   it('the elder is one great tree, out past the garden', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12, mix: { elder: 1 } });
