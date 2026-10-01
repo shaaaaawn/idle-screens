@@ -130,7 +130,7 @@ seed (nothing fetched); the world layers that stand on it are under
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | environment | enum | `void` | The ROOM: `void` (exactly the pre-environment scene), `abyss`, `reef`, `kelp`, `ice`, `vent`, `lagoon`, `universe`. Adds terrain and light shafts, plus a water ceiling for the rooms that have one (reef, kelp, ice, lagoon); never overrides your palette params |
-| floorKind | enum | `auto` | Override the environment's terrain: `auto`, `flat`, `dunes`, `ridges`, `basin` |
+| floorKind | enum | `auto` | Override the environment's terrain: `auto`, `flat`, `dunes`, `ridges`, `basin`, `shelf` (town on a plateau), `trench` (a channel across the front), `terraces` (tiers behind the town) |
 | waterY | number | −1 | Water-ceiling height, −1–220. −1 follows the environment (step, not smooth — the sentinel can't be interpolated through) |
 | rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason) |
 
@@ -188,9 +188,12 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `floraDensity` | 0–1 | Voxel plants — seventeen species (grass, tube worms, lantern bulbs, fans, kelp, anemone, staghorn, brain coral, sea whip, barrel sponge, glow caps, sea pen, bubble algae, fiddlehead curls, orb pods, and two specimens: the giant clam and the elder blossom tree). They grow in colonies that share a colour, ramp from base to tip, and one colony in thirty is a rare nacreous morph; they lean toward the nearest crystal and, on mid/high tiers, are lit by it and by follow-spots. Stony coral stands still, kelp and whips sway, tentacles writhe; a gust travels across the field, tips breathe. With `floraMix` empty the room picks the garden (coral on a reef, kelp and whips in the kelp forest, glow caps at the vent). Plants answer passing fish: anemone crowns fold, worms duck, sea pens pull down, pods swell, lamps flare. |
 | `floraPalette` | string | One colour scheme for the garden: `world` (seeded) or up to six `#rrggbb`. Empty = each species' own colours. |
 | `geodes` | 0–1 | Wild geodes, few and made properly: split geodes (one in three a thunder egg), amethyst cathedrals, crystal clusters and one mega cavern geode. Agate banding drawn per pixel, crystals in real quartz habit and colour-zoned root to tip, twinkling druse, self-lit so they read in a flat tank; one in twenty is an iridescent aura morph, and their crystals wake when a fish comes close. |
-| `geodeMix` | string | Which kinds: `kind[:weight]` — `geode cathedral cluster cavern`. |
+| `geodeMix` | string | Which kinds: `kind[:weight]`, comma-separated — `geode, cathedral, cluster, cavern`. |
 | `geodeMineral` | string | `amethyst agate celestine citrine carnelian rose emerald quartz smoky`; empty = the colour of each geode's nearest crystal, `world` = two from the seed. |
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
+| `fountain` | `none` \| `vent` \| `geode` | The town square's fountain: a hot-vent chimney or a geode basin, with a bubble column, a pebble plaza and its own light; adds a `fountain` vignette mark. |
+| `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs `paths`). |
+| `floraLayout` | `garden` \| `gallery` | Grow round the crystals, or one plot per species to see them all. |
 | `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
 | `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |

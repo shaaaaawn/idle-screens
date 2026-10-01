@@ -458,6 +458,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       counts.geodes = gf.geodes;
       counts.geodeAura = gf.aura;
       fountainMouth = gf.fountain;
+      // The mark is the mouth itself, not a guess at its height.
+      if (gf.fountain) marks.fountain = { x: gf.fountain.x, y: gf.fountain.y, z: gf.fountain.z };
       lampLights = gf.lamps;
       // The fountain and the lamps nearest it light the square (the pool slots are few).
       const byNear = [...(gf.fountain ? [{ ...gf.fountain, reach: 60 * s }] : []), ...gf.lamps

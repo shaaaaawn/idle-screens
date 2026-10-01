@@ -10,7 +10,7 @@
  *   RECIPES      named scenes. The playground mounts every one of them as-is
  *                (its "recipes" shelf), so what an agent can publish is what a
  *                person can look at. Channel-safe: minted ids, no local paths.
- *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, spotRig, spotCues, vignette).
+ *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, floraPalette, geodeMix, geodeMineral, spotRig, spotCues, vignette).
  *   validateMetaquariumParams   every DSL parser at once, for publish advisories.
  *   recipeTrack  a recipe as the control track `publishScene` takes.
  */
@@ -74,7 +74,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
-  floorKind: 'Flat floor or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
+  floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Light shafts from the surface.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',

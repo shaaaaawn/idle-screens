@@ -193,6 +193,7 @@ class VoxelWriter {
       this.plant[v * 4 + 3] = root + (this.plant[v * 4 + 3]! - root) * k;
     }
     this.top = root + (this.top - root) * k;
+    this.root = root + (this.root - root) * k; // the light's sway root follows its vertices
     this.last = [x + (this.last[0] - x) * k, root + (this.last[1] - root) * k, z + (this.last[2] - z) * k];
   }
 
@@ -640,14 +641,17 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         const R = o === 0 ? rng.range(1.4, 2.1) : rng.range(0.8, 1.6);
         const ox = x + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s, oz = z + (o === 0 ? 0 : rng.range(-3.5, 3.5)) * s;
         const cells = new Map<string, Color>(), n = Math.ceil(R);
+        let low = 0;
         for (let i = -n; i <= n; i += 1) for (let j = -n; j <= n; j += 1) for (let k = -n; k <= n; k += 1) {
           if (i * i + j * j + k * k > R * R + 0.3) continue;
           // Lit from above: a highlight cell at the crown, darker below.
           const c = j === n && i === 0 && k === 0 ? hue.clone().lerp(WHITE, 0.55) : hue.clone().multiplyScalar(0.55 + 0.45 * ((j + n) / (2 * n)));
           cells.set(cellKey(i, j, k), c);
+          if (j < low) low = j;
         }
         const size = V * 0.7;
-        body.solid([ox, root + n * size * 0.85, oz], size, cells, 0);
+        // The lowest occupied cell sits on the floor, however the radius rounds.
+        body.solid([ox, root + (0.5 - low) * size - size * 0.15, oz], size, cells, 0);
       }
     },
   },

@@ -18,7 +18,7 @@ describe('flora light', () => {
     expect(hasPatch(m, FLORA_LIGHT_TAG)).toBe(true);
     const sh = compile(m);
     // The same objects: a re-layout rewrites them in place, no recompile.
-    for (const k of ['uMqPoolN', 'uMqPoolPos', 'uMqPoolCol', 'uMqSpot', 'uMqSpotColor']) expect(sh.uniforms[k]).toBe(pools[k]);
+    for (const k of ['uMqPoolN', 'uMqPoolPos', 'uMqPoolCol', 'uMqPoolPhase', 'uMqPoolGain', 'uMqPoolTime', 'uMqPoolPulse', 'uMqSpot', 'uMqSpotColor']) expect(sh.uniforms[k]).toBe(pools[k]);
     expect(sh.vertexShader).toContain('uniform vec4 uMqPoolPos[');
     expect(sh.vertexShader.match(/#include <project_vertex>/g)).toHaveLength(1);
     expect(m.customProgramCacheKey()).toContain(FLORA_LIGHT_TAG);

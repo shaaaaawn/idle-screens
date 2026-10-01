@@ -299,7 +299,8 @@ export const METAQUARIUM_PARAMS = {
   /** Which kinds: `kind[:weight]`, comma-separated (`geode:3, cathedral, cluster`). */
   geodeMix: { type: 'string', default: '', ease: 'step' },
   /** What they are made of: empty = the mineral nearest in colour to each
-   *  geode's nearest crystal; `world` = two chosen from the seed; or a list
+   *  geode's nearest crystal (every mineral in `gallery` layout, and a seeded
+   *  pick where there is no crystal to match); `world` = two chosen from the seed; or a list
    *  (`amethyst, citrine`). */
   geodeMineral: { type: 'string', default: '', ease: 'step' },
   /** `field` (default) scatters them round the tank; `gallery` stands one of each kind in rows. */
@@ -309,7 +310,7 @@ export const METAQUARIUM_PARAMS = {
    *  geode basin on a plinth. A bubble column, a pebble plaza, light that
    *  draws the fish (lightSeek), and a vignette mark `fountain`. */
   fountain: { type: 'enum', default: 'none', options: ['none', 'vent', 'geode'], ease: 'step' },
-  /** Crystal streetlamps along the paths (0 = none): a slate post with a
+  /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },

@@ -42,7 +42,10 @@ export function parseFloraMix(src: string): { mix: Partial<Record<FloraSpecies, 
       continue;
     }
     const w = m[2] === undefined ? 1 : Number(m[2]);
-    mix[name] = (mix[name] ?? 0) + w;
+    const sum = (mix[name] ?? 0) + w;
+    // A weight that overflows to Infinity would collapse the garden onto one species.
+    if (!Number.isFinite(sum)) { problems.push(`"${part}": weight is too large`); continue; }
+    mix[name] = sum;
   }
   return { mix, problems };
 }

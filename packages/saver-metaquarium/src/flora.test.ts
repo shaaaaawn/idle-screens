@@ -242,6 +242,7 @@ describe('flora', () => {
   it('parses floraMix', () => {
     expect(parseFloraMix('kelp:3, anemone, clam:0.5, kelp')).toEqual({ mix: { kelp: 4, anemone: 1, clam: 0.5 }, problems: [] });
     expect(parseFloraMix('').mix).toEqual({});
+    expect(parseFloraMix(`kelp:1${'0'.repeat(400)}`).problems).toHaveLength(1); // overflows to Infinity
     const bad = parseFloraMix('kelp, rose:2, whip:x');
     expect(bad.mix).toEqual({ kelp: 1 });
     expect(bad.problems).toHaveLength(2);

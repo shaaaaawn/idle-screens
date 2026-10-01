@@ -434,7 +434,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
     w.place = placeAt(R * 1.08, R * 0.15, Math.PI / 2 - rng.range(0.3, 0.55), rng.range(-0.25, 0.1));
     half(w, rng.fork(2), { ...opts, out: out.map(([a, b]) => [-a, b] as [number, number]) });
     w.settle(from, floor, R * 0.14);
-    return { r: R * 1.6, h: R * 2.1, star, light: star ? undefined : { y: R * 0.5, reach: R * 2.2 } };
+    return { r: R * 2.2, h: R * 2.1, star, light: star ? undefined : { y: R * 0.5, reach: R * 2.2 } };
   }
   if (kind === 'cathedral') {
     const R = rng.range(10, 12.5) * s;
