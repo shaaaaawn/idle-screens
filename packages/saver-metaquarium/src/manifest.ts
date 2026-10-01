@@ -307,8 +307,8 @@ export const METAQUARIUM_PARAMS = {
   geodeLayout: { type: 'enum', default: 'field', options: ['field', 'gallery'], ease: 'step' },
   /** The town square's fountain, where the paths meet (or in front of the
    *  homes): `vent` a hot-vent chimney crusted with crystal, `geode` a great
-   *  geode basin on a plinth. A bubble column, a pebble plaza, light that
-   *  draws the fish (lightSeek), and a vignette mark `fountain`. */
+   *  geode basin on a plinth. A bubble column, a pebble plaza, a light
+   *  of its own, and a vignette mark `fountain`. */
   fountain: { type: 'enum', default: 'none', options: ['none', 'vent', 'geode'], ease: 'step' },
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */

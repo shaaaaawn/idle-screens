@@ -443,7 +443,7 @@ function grow(w: GeoWriter, rng: CrystalRng, kind: GeodeKind, mineral: MineralNa
     w.place = placeAt(0, 0, Math.PI / 2);
     half(w, rng.fork(3), { out, R, depth: rng.range(0.8, 0.95), m, hollow: 0.8, hollowDepth: 0.9, crystals: 420, crystalScale: 0.75, aura, band });
     w.settle(from, floor, R * 0.2);
-    return { r: R * 1.2, h: R * 4.7, light: { y: R * 2.2, reach: R * 3 } };
+    return { r: R * 1.2, h: R * 6.4, light: { y: R * 2.2, reach: R * 3 } };
   }
   if (kind === 'cluster') {
     // A matrix stone, its crown sugary with druse, and points radiating from
