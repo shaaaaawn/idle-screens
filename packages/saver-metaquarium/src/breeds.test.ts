@@ -116,6 +116,26 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
   });
 
+  it('shark: the rig survives the intake — head, jaw, eyes, fins and a three-link tail; the teeth on the jaw', async () => {
+    const doc = await new NodeIO().read(here('../breeds/shark.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'caudal', 'eye.L', 'eye.R', 'fin.L', 'fin.R', 'head', 'jaw', 'tail1', 'tail2']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['bite', 'swim']);
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      if (p.getMaterial()!.getName() !== 'METAL-Teeth') continue;
+      const j = p.getAttribute('JOINTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
+    }
+  });
+
+  it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', () => {
+    let tris = 0;
+    const json = gltfJson(readFileSync(here('../breeds/shark.glb')));
+    for (const mesh of json.meshes) for (const p of mesh.primitives) tris += json.accessors[p.indices ?? p.attributes.POSITION]!.count / 3;
+    expect(tris).toBeLessThan(2500); // was 5,726 before the cull
+  });
+
   it('no body face lies under an eye decal: the two would z-fight (the crab\'s mouth flickered)', async () => {
     for (const [name, spec] of Object.entries(manifest.breeds)) {
       if (spec.kind !== 'voxel') continue;

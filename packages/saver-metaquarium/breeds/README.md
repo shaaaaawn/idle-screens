@@ -52,7 +52,9 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    did).
 4. **Choose `kind`.**
    - `voxel`: every face is on an axis-aligned voxel grid (check the lab: a
-     cubic silhouette). The intake greedy-meshes it, merging coplanar faces
+     cubic silhouette). The intake first culls every face that a whole cube
+     sits right in front of (some sources keep every face of every cube: 90%
+     of the shark's 28.8k triangles were buried), then greedy-meshes it, merging coplanar faces
      of one material into rectangles.
      - It never merges along the swim axis (the longer horizontal extent),
        because the body wave bends per vertex and a face merged along the
@@ -96,6 +98,7 @@ skeleton and clips made in Blender:
 | crab | `rig/crab.py`: 23 parts, legs placed by two-bone IK | `src/crab.ts` walks it on the seabed | walk idle pinch forage wave cheer |
 | glowfish | `rig/glowfish.py`: jaw, flip-top head, tail, blinking eyes, three-link lure | `src/angler.ts` (the tank swims it) | swim lure chomp blink |
 | hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
+| shark | `rig/shark.py` (cut by position — its fins sit off the lattice): head, jaw ringed with metal teeth, rolling eyes, pectorals, three-link tail | `src/shark.ts` (the tank swims it; it patrols) | swim bite |
 
 A breed's script imports `source/<breed>.glb`, rigs it, bakes its clips and
 writes `rig/<breed>.glb`, which `breeds.json` names as the intake's source

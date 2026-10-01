@@ -110,9 +110,9 @@ def load_source(breed):
     for o in [o for o in scene.objects if o not in before and o.type == 'EMPTY']:
         bpy.data.objects.remove(o, do_unlink=True)
     authored = gltf_material_names(source_path(breed))
-    for o in meshes:
-        o['rigMaterial'] = base_name(o.data.materials[0].name, authored)
-    names = [o['rigMaterial'] for o in meshes]
+    for o in meshes:  # a mesh may carry several materials (the shark's one mesh carries five)
+        o['rigMaterials'] = [base_name(m.name, authored) for m in o.data.materials]
+    names = [n for o in meshes for n in o['rigMaterials']]
     # A clash in a shared file can also INCREMENT a name (Material.006 →
     # Material.007): every part must resolve to its own authored material.
     assert len(set(names)) == len(names) and set(names) <= authored, (names, authored)
@@ -144,20 +144,31 @@ def lattice(meshes):
     return pitch, tuple(max(p, key=p.get) for p in phases)
 
 
-def segment(meshes, bone_of, pitch, phase):
+def segment(meshes, bone_of, pitch, phase, by_point=False):
     """A vertex group per part: every face weighted 1.0 to the bone its voxel
-    belongs to (`bone_of(ix, iy, iz, material)`). Returns faces per bone."""
+    belongs to (`bone_of(ix, iy, iz, material)`). Returns faces per bone.
+
+    `by_point`: a model whose parts are not all on one lattice (the shark's
+    fins sit off it) is cut by position instead — `bone_of(x, y, z, material)`
+    gets the centre of the voxel behind the face."""
     counts = {}
     for o in meshes:
         me = o.data
-        mat = o.get('rigMaterial') or base_name(me.materials[0].name)
+        mats = list(o.get('rigMaterials') or [base_name(m.name) for m in me.materials])
         bm = bmesh.new()
         bm.from_mesh(me)
         owner = {}
         for f in bm.faces:
-            c = f.calc_center_median() - f.normal * (pitch / 2)
-            ijk = [math.floor((c[a] - phase[a]) / pitch) for a in range(3)]
-            b = bone_of(*ijk, mat)
+            if by_point:
+                # The face's square, not the triangle's centroid, then half a voxel in.
+                lo = [min(v.co[a] for v in f.verts) for a in range(3)]
+                hi = [max(v.co[a] for v in f.verts) for a in range(3)]
+                c = Vector([(lo[a] + hi[a]) / 2 for a in range(3)]) - f.normal * (pitch / 2)
+                b = bone_of(c.x, c.y, c.z, mats[f.material_index])
+            else:
+                c = f.calc_center_median() - f.normal * (pitch / 2)
+                ijk = [math.floor((c[a] - phase[a]) / pitch) for a in range(3)]
+                b = bone_of(*ijk, mats[f.material_index])
             counts[b] = counts.get(b, 0) + 1
             for v in f.verts:
                 prev = owner.setdefault(v.index, b)

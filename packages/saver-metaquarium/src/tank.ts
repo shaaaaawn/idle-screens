@@ -67,6 +67,7 @@ import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } fro
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
+import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { rigSeahorse } from './seahorse';
 
@@ -534,9 +535,10 @@ interface Fish {
   /** A breed rigged in Blender, driven by its own module: it, not the generic
    *  clip path, sets the mixer. The crab walks the floor instead of swimming
    *  (crab.ts); the glowfish fishes with its lure (angler.ts); the hackerfish
-   *  hacks, crashes and reboots, its face a screen (hacker.ts, screen.ts). `lights` are
+   *  hacks, crashes and reboots, its face a screen (hacker.ts, screen.ts); the
+   *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
-  rig?: { crab?: CrabRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; lights: Record<string, number> } | null;
+  rig?: { crab?: CrabRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; lights: Record<string, number> } | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -562,7 +564,7 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
-  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts). */
+  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts). */
   doing?: string;
 }
 
@@ -1563,9 +1565,15 @@ class TankInstance implements SaverInstance {
         const tx = at.x - this.followTrail.x, tz = at.z - this.followTrail.z, tl = Math.hypot(tx, tz);
         if (tl > len * 0.4) { dx = tx / tl; dz = tz / tl; }
       }
-      // `followAngle` swings the camera round the fish: 180 stands in front of it.
+      // `followAngle` swings the camera round the fish: 180 stands in front of
+      // it. Measured from where the fish is heading NOW, not the chord: a long
+      // fish's chord (a shark's is 80 units) can lie far off its heading, and a
+      // side or face camera must be square to the animal.
       const turn = (this.num('followAngle') * Math.PI) / 180;
-      if (turn !== 0) { const c = Math.cos(turn), s = Math.sin(turn); [dx, dz] = [dx * c - dz * s, dx * s + dz * c]; }
+      if (turn !== 0) {
+        const c = Math.cos(turn), s = Math.sin(turn);
+        [dx, dz] = [head.x * c - head.z * s, head.x * s + head.z * c];
+      }
       cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
     }
     // Inside the room, above the ground and whatever stands on it.
@@ -1958,6 +1966,7 @@ class TankInstance implements SaverInstance {
     let crab: CrabRig | null = null;
     let angler: AnglerRig | null = null;
     let hacker: HackerRig | null = null;
+    let shark: SharkRig | null = null;
     let screen: ScreenRig | null = null;
 
     if (tpl) {
@@ -1966,6 +1975,7 @@ class TankInstance implements SaverInstance {
       if (this.wantBreeds[index] === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
       if (this.wantBreeds[index] === 'glowfish') angler = rigAngler(body, tpl.clips);
       if (this.wantBreeds[index] === 'hackerfish') hacker = rigHacker(body, tpl.clips);
+      if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
@@ -1987,8 +1997,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(crab.anchor).multiplyScalar(-tpl.norm);
         mixer = crab.mixer;
-      } else if (angler || hacker) {
-        mixer = (angler ?? hacker)!.mixer;
+      } else if (angler || hacker || shark) {
+        mixer = (angler ?? hacker ?? shark)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2037,8 +2047,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || angler || hacker
-        ? { ...(crab ? { crab } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), lights: {} }
+      rig: crab || angler || hacker || shark
+        ? { ...(crab ? { crab } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2657,6 +2667,7 @@ class TankInstance implements SaverInstance {
         if (f.rig!.screen) setScreen(f.rig!.screen, tSec, hacker.screen);
         f.rig!.lights['SCREEN-Glass'] = f.rig!.lights['SCREEN-Pixels'] = hacker.screen.level;
       }
+      const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         this.followAt.set(px, y, pz); this.followSeen = true;
@@ -2785,7 +2796,7 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(crab ? { doing: crab.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : {}),
+        ...(crab ? { doing: crab.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

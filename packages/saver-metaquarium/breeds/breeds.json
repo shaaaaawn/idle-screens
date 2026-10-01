@@ -38,9 +38,10 @@
       "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
     },
     "shark": {
-      "source": "source/shark.glb", "kind": "voxel", "size": 2.2, "motion": "wiggle",
-      "roles": { "mouth": "KEEP-Mouth" },
-      "notes": "The heaviest source (28.8k tris). Big on purpose: the size follow-up gives it its length back."
+      "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
+      "kind": "voxel", "size": 2.2, "motion": "shark",
+      "roles": { "mouth": "METAL-Teeth" },
+      "notes": "The heaviest source (28.8k tris): every voxel a whole cube, 26k of its faces buried — the intake culls them. Rigged in Blender by rig/shark.py from the delivered source/shark.glb (never edited), cut by position (its fins sit off the lattice): head, a dropping jaw ringed with metal teeth, eyes that roll back, pectorals, and a three-link tail for a true wave; clips swim, bite. src/shark.ts drives them. Big on purpose: the size follow-up gives it its length back."
     }
   }
 }

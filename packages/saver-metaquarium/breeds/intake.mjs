@@ -122,6 +122,57 @@ function pitchOf(doc) {
 }
 
 /**
+ * Drops every face that a voxel sits right in front of: a face the model's own
+ * cubes bury. Some sources are whole cubes, every face kept — 26,048 of the
+ * shark's 28,818 faces could never be seen. Keyed by position (a part off the
+ * lattice simply never matches), and a cell counts as solid only when all six
+ * of its faces are there, so it only ever removes a face that a whole cube
+ * sits on. A rig culls only against a voxel of the
+ * SAME part: a face between two parts is a seam that shows when they move.
+ * Runs on unindexed primitives; every attribute is filtered alike.
+ */
+function cullHidden(doc, voxel) {
+  const step = voxel / 20;
+  const key = (q) => `${Math.round(q[0] / step)},${Math.round(q[1] / step)},${Math.round(q[2] / step)}`;
+  const at = (f, side) => { const q = [0, 0, 0]; q[f.axis] = f.plane + side * f.sign * voxel / 2; q[f.ua] = (f.u0 + f.u1) / 2; q[f.va] = (f.v0 + f.v1) / 2; return q; };
+  const prims = [];
+  // A cell is solid only when all six of its faces are there: a whole cube.
+  // A flat plate (a face with no cube behind it) must not bury what it faces.
+  const sides = new Map();
+  for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+    const joints = jointsOf(p);
+    // Only a face exactly one voxel square: a bigger one (a source built
+    // partly from boxes, as the shark's is) is not one cell, and the one cell
+    // in front of its middle says nothing about the rest of it.
+    const unit = (f) => Math.abs(f.u1 - f.u0 - voxel) < voxel * 0.01 && Math.abs(f.v1 - f.v0 - voxel) < voxel * 0.01;
+    const faces = trianglesOf(p).map((tri, t) => {
+      const f = faceOf(tri); if (!f || !unit(f)) return null;
+      const j = joints ? joints[t] : 0;
+      const inside = `${key(at(f, -1))}|${j}`;
+      (sides.get(inside) ?? sides.set(inside, new Set()).get(inside)).add(`${f.axis}${f.sign}`);
+      return { front: key(at(f, 1)), j };
+    });
+    prims.push({ p, faces });
+  }
+  const solid = new Set([...sides].filter(([, s]) => s.size === 6).map(([k]) => k));
+  let dropped = 0;
+  for (const { p, faces } of prims) {
+    const keep = faces.map((f) => !f || !solid.has(`${f.front}|${f.j}`));
+    if (keep.every(Boolean)) continue;
+    for (const sem of p.listSemantics()) {
+      const acc = p.getAttribute(sem), arr = acc.getArray(), n = acc.getElementSize();
+      const out = new arr.constructor(keep.filter(Boolean).length * 3 * n);
+      let o = 0;
+      keep.forEach((k, t) => { if (k) { out.set(arr.subarray(t * 3 * n, (t + 1) * 3 * n), o); o += 3 * n; } });
+      // A fresh accessor: one shared with another primitive must not be cut for this one.
+      p.setAttribute(sem, doc.createAccessor().setType(acc.getType()).setNormalized(acc.getNormalized()).setArray(out));
+    }
+    dropped += keep.filter((k) => !k).length;
+  }
+  return dropped;
+}
+
+/**
  * Greedy meshing, in place. `voxel` is the grid pitch; `swim` the axis the body
  * wave bends along (never merged along). Eye primitives are left exactly as
  * authored; body cells under an eye cell are dropped.
@@ -286,6 +337,8 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
   const swim = size[0] > size[2] ? 0 : 2; // the tank's own rule (tank.ts template: longX)
   if (spec.kind === 'voxel') {
     await doc.transform(unweld());
+    const buried = cullHidden(doc, pitchOf(doc));
+    if (buried) console.log(`${breed.padEnd(11)} culled ${buried} buried faces`);
     // The swim-axis rule protects the body wave, which never bends a skinned
     // mesh (swimwave.ts): a rig's parts are rigid, so they merge every way.
     greedy(doc, pitchOf(doc), rigged ? -1 : swim);
