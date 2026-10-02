@@ -7,7 +7,7 @@ import type { ControlTrack } from '@idle-screens/core';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { compileSwimPlan } from './plan';
 import {
-  AEROBICS, classSpot, DANCE_MOVES, danceAt, danceBeats, rigStarfish, STARFISH_BLOOM, STARFISH_CLIPS, STARFISH_DANCE_BLOOM, STARFISH_PACE, STARFISH_RISE,
+  AEROBICS, classSpot, coupleSpot, DANCE_MOVES, danceAt, danceBeats, DUET, duetAt, PARTNER_CLIPS, rigStarfish, STARFISH_BLOOM, STARFISH_CLIPS, STARFISH_DANCE_BLOOM, STARFISH_PACE, STARFISH_RISE,
   STARFISH_STAND_BLOOM, starfishCycle, starfishFrame, starfishGait, starfishIdle, starfishMoment, starfishSpot,
   starfishStart, starfishStopAt, type StarfishClip, type StarfishDoing, type StarfishInput, type StarfishOutput, type StarfishRig,
 } from './starfish';
@@ -16,10 +16,11 @@ const PLAN = compileSwimPlan(createRng(3).fork(1), { radius: 120, yMin: 15, yMax
 const DUR: Record<string, number> = {
   crawl: 2, idle: 4, wave: 3, stand: 4.6, curl: 3, rise: 1.2, standing: 4, walk: 1,
   ...Object.fromEntries(DANCE_MOVES.map((m) => [m, 2])),
+  mambo: 2, sway: 2, lead_twirl: 2, twirl: 2, dip_lead: 4, dip_follow: 4, lift_lead: 8, lift_fly: 8,
 };
 const STRIDE = 24, WALK_STRIDE = 22, FEET = 17;
 const FLAT: readonly StarfishClip[] = ['crawl', 'idle', 'wave', 'stand', 'curl'];
-const UPRIGHT: readonly StarfishClip[] = ['standing', 'walk', ...DANCE_MOVES];
+const UPRIGHT: readonly StarfishClip[] = ['standing', 'walk', ...DANCE_MOVES, 'mambo', 'sway', 'lead_twirl', 'twirl', 'dip_lead', 'dip_follow', 'lift_lead', 'lift_fly'];
 
 /** A stand-in for the Blender rig: a `body` bone at the disc's centre, a slab to lie on, every clip. */
 function puppet(opts: { stride?: number; feet?: number } = {}): Group {
@@ -332,5 +333,54 @@ describe('starfish: the beat', () => {
       prev = b;
     }
     expect(beats(40) - beats(30)).toBeCloseTo(30, 4);   // 3 a second after it
+  });
+});
+
+describe('starfish: the partner dance', () => {
+  it('the routine builds to the lift, every move in whole bars, the roles each on their own clip', () => {
+    expect(duetAt(0, 'lead')).toEqual({ move: 'mambo', beat: 0, clip: 'mambo' });
+    const lift = DUET.slice(0, DUET.findIndex(([m]) => m === 'lift')).reduce((s, [, n]) => s + n, 0);
+    expect(duetAt(lift + 5, 'lead')).toEqual({ move: 'lift', beat: 5, clip: 'lift_lead' });
+    expect(duetAt(lift + 5, 'follow').clip).toBe('lift_fly');
+    expect(duetAt(lift + 5, 'solo').clip).toBe('mambo'); // nobody to lift
+    for (const [move, n] of DUET) {
+      for (const role of ['lead', 'follow'] as const) expect(n % PARTNER_CLIPS[duetAt(DUET.slice(0, DUET.findIndex(([m]) => m === move)).reduce((s, [, k]) => s + k, 0), role).clip]).toBe(0);
+    }
+  });
+
+  it('couples side by side, lead on the left, close enough to hold hands; an odd one out dances alone', () => {
+    const two = [coupleSpot(0, 2), coupleSpot(1, 2)];
+    expect(two.map((c) => [c.role, c.partner])).toEqual([['lead', 1], ['follow', 0]]);
+    expect(two[1]!.side - two[0]!.side).toBeCloseTo(0.64, 9);
+    const five = [0, 1, 2, 3, 4].map((s) => coupleSpot(s, 5));
+    expect(five.map((c) => c.role)).toEqual(['lead', 'follow', 'lead', 'follow', 'solo']);
+    expect(five[4]!.partner).toBe(4);
+    expect(five[2]!.side - five[0]!.side).toBeCloseTo(1.8, 9);
+  });
+
+  it('partners face each other, cheated out to the room; for the lift both turn out and she steps in front of him', () => {
+    const rig = rigged();
+    const yaw = 0; // the room is +z
+    const lead = { mode: 'duet' as const, beats: 2, x: -5, z: 0, yaw, role: 'lead' as const, partnerX: 5, partnerZ: 0 };
+    const follow = { ...lead, x: 5, role: 'follow' as const, partnerX: -5 };
+    const l = starfishFrame(rig, input(10, 0, { dance: lead }), blank());
+    expect(l.doing).toBe('mambo');
+    expect(l.fx).toBeGreaterThan(0.5);   // toward her (+x)…
+    expect(l.fz).toBeGreaterThan(0.3);   // …and out to the room
+    const f = starfishFrame(rig, input(10, 1, { dance: follow }), blank());
+    expect(f.fx).toBeLessThan(-0.5);
+    expect(weight(rig, 'mambo')).toBe(1);
+    // Mid-lift: both square to the room, her feet just in front of his.
+    const at = DUET.slice(0, DUET.findIndex(([m]) => m === 'lift')).reduce((s, [, n]) => s + n, 0) + 8;
+    const L = starfishFrame(rig, input(10, 0, { dance: { ...lead, beats: at } }), blank());
+    expect([L.fx, L.fz]).toEqual([0, 1]);
+    expect(weight(rig, 'lift_lead')).toBe(1);
+    const F = starfishFrame(rig, input(10, 1, { dance: { ...follow, beats: at } }), blank());
+    expect(F.fx).toBeCloseTo(0, 9);
+    expect(F.fz).toBeCloseTo(1, 9);
+    expect(F.focusX).toBeCloseTo(-5, 9);
+    expect(F.focusZ).toBeCloseTo(0.3 * 16.2, 9);
+    expect(weight(rig, 'lift_fly')).toBe(1);
+    expect(rig.actions.lift_fly.time).toBeCloseTo((8 / 16) * DUR.lift_fly!, 9);
   });
 });

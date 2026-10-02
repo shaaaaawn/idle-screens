@@ -437,6 +437,31 @@ test('MQ13: starfish aerobics — the class dances one move in unison', async ({
 });
 
 /**
+ * The partner dance: a couple mounts, both on the same move of the routine,
+ * no errors.
+ */
+test('MQ14: starfish duet — a couple dances the same move together', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.starfishDance=duet&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  expect(['mambo', 'sway', 'twirl', 'dip', 'lift']).toContain(doings[0]);
+  expect(doings[1]).toBe(doings[0]);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Crystals (propMix): generated scenery builds and reports itself, and a tank
  * that asked for none builds none — the "byte-identical when off" contract,
  * checked at the one place a viewer could see it break.

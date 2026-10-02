@@ -37,6 +37,11 @@ arm its head):
               its aerobics: one bar each (four beats, authored at 120 BPM,
               the tank sets the tempo), each a loop starting and ending on
               the same upright pose, so a routine cuts between them on the bar.
+    mambo sway lead_twirl twirl dip_lead dip_follow lift_lead lift_fly
+              partners (the Dirty Dancing number), lead and follow facing
+              each other in a dance frame: the basic, a slow sway, a twirl
+              under his hand, the dip, and the lift — he raises her overhead,
+              arms spread. Each starts and ends on the same frame pose.
 
 The flat one-shots start and end on the rest pose.
 """
@@ -421,10 +426,145 @@ def spin(t, T=2.0):
 DANCES = [('march', march), ('jacks', jacks), ('reach', reach), ('kick', kick),
           ('twist', twist), ('circles', circles), ('disco', disco), ('spin', spin)]
 
+
+# ---------------------------------------------------------------------------
+# Partners (the Dirty Dancing number). Two starfish face each other in a dance
+# frame: HOLD is the upright pose with the arms out to the partner — one hand
+# held, one on the shoulder — and every partner clip starts and ends on it, so
+# the tank cuts between them on the bar (breeds.test.ts checks). Roles: the
+# lead and the follow; where their parts differ there is a clip for each.
+# ---------------------------------------------------------------------------
+
+LIFT_HEIGHT = 34.0    # model units the follow rises in the lift: her feet at his raised hands
+
+
+def hold(p, phi=math.pi / 2, hop=0.0, frame=1.0):
+    """Upright, in the dance frame: its right hand out to its partner's, its
+    left on the partner's shoulder (both toward its front: toward the partner)."""
+    upright(p, phi, hop)
+    lift(p, 3, 0.75 * frame, 0.2 * frame, 0.0)
+    raise_(p, 3, 1, -0.15 * frame)
+    lift(p, 1, 0.55 * frame, 0.35 * frame, 0.0)
+    raise_(p, 1, 1, 0.2 * frame)
+
+
+def mambo(t, T=2.0):
+    """The basic: forward on one, back on the other, the hips rolling every beat."""
+    p = Pose()
+    b = beats(t)
+    step = math.sin(math.pi * b / 2)
+    hold(p, hop=0.35 * math.sin(math.pi * (b % 1)) ** 2)
+    lift(p, 0, 0.3 * max(0.0, step), 0.0, 0.1 * max(0.0, step))
+    lift(p, 4, 0.3 * max(0.0, -step), 0.0, 0.1 * max(0.0, -step))
+    body_turn(p, 'y', 0.14 * math.sin(math.pi * b))
+    sway(p, HEAD, 3, 0.1 * math.sin(math.pi * b))
+    return p
+
+
+def sway_close(t, T=2.0):
+    """Cheek to cheek: a slow sway together, side to side over the bar."""
+    p = Pose()
+    b = beats(t)
+    s = math.sin(math.pi * b / 2)
+    hold(p, hop=0.2 * abs(s))
+    body_turn(p, 'y', 0.2 * s)
+    for n in LEGS:
+        raise_(p, n, 1, 0.12 * max(0.0, side(n) * s))
+    sway(p, HEAD, 2, 0.18 * s)
+    return p
+
+
+def lead_twirl(t, T=2.0):
+    """He raises their joined hands, and she turns under them."""
+    p = Pose()
+    b = beats(t)
+    up = math.sin(math.pi * b / 4)
+    hold(p, hop=0.3 * math.sin(math.pi * (b % 1)) ** 2)
+    raise_(p, 3, 1, 1.25 * up)
+    lift(p, 3, -0.5 * up, -0.15 * up, 0.0)
+    body_turn(p, 'y', 0.1 * math.sin(math.pi * b))
+    return p
+
+
+def twirl(t, T=2.0):
+    """She turns once under his hand, her hand up to his."""
+    p = Pose()
+    b = beats(t)
+    a = 2 * math.pi * track(b, [(0, 0), (0.5, 0), (3.2, 1), (4, 1)])
+    up = math.sin(math.pi * b / 4)
+    hold(p, hop=0.5 * up, frame=1 - up)
+    body_turn(p, 'z', a % (2 * math.pi))
+    raise_(p, 3, 1, 1.2 * up)
+    raise_(p, 1, 1, -0.3 * up)
+    return p
+
+
+def dip_lead(t, T=4.0):
+    """He leans in over her, lunging, his hand at her back."""
+    p = Pose()
+    b = beats(t)
+    e = env(b, 1, 3, 5, 7)
+    hold(p, phi=math.pi / 2 - 0.3 * e)
+    lift(p, 3, 0.35 * e, 0.0, 0.0)
+    lift(p, 0, 0.45 * e, -0.15 * e, 0.1 * e)        # the lunge
+    return p
+
+
+def dip_follow(t, T=4.0):
+    """She drops back over his arm, her free arm flung up and back, a leg up."""
+    p = Pose()
+    b = beats(t)
+    e = env(b, 1, 3, 5, 7)
+    hold(p, phi=math.pi / 2 + 0.5 * e, hop=-0.6 * e, frame=1 - 0.5 * e)
+    raise_(p, 1, 1, 1.0 * e)
+    raise_(p, 1, 2, 0.4 * e)
+    lift(p, 4, 0.9 * e, 0.2 * e, 0.2 * e)            # the leg up
+    sway(p, HEAD, 3, 0.25 * e)
+    return p
+
+
+def lift_lead(t, T=8.0):
+    """The lift: he takes her weight and raises her overhead, holds, sets her down."""
+    p = Pose()
+    b = beats(t)
+    up = env(b, 2, 4, 12, 14)
+    hold(p, frame=1 - up, hop=-0.8 * up)
+    wobble = 0.04 * math.sin(math.pi * b) * up
+    for n in ARMS:
+        raise_(p, n, 1, 1.15 * up + wobble)
+        raise_(p, n, 2, 0.2 * up)
+    for n in LEGS:
+        raise_(p, n, 1, 0.16 * up)                   # a wide, braced stance
+    body_turn(p, 'x', 0.06 * up)
+    return p
+
+
+def lift_fly(t, T=8.0):
+    """…and she flies: high over him, arms spread wide, legs together, a star in the sky."""
+    p = Pose()
+    b = beats(t)
+    up = env(b, 2, 4, 12, 14)
+    glide = 0.8 * math.sin(math.pi * (b - 4) / 4) * env(b, 4, 5, 11, 12)
+    hold(p, frame=1 - up, hop=LIFT_HEIGHT * up + glide)
+    for n in ARMS:
+        raise_(p, n, 1, 0.45 * up)
+        lift(p, n, -0.25 * up, 0.0, 0.0)
+    for n in LEGS:
+        raise_(p, n, 1, -0.18 * up)                  # legs together, pointed
+        lift(p, n, -0.12 * up, 0.0, 0.25 * up)
+    body_turn(p, 'x', -0.18 * up)                    # leaning out over the room
+    sway(p, HEAD, 1, 0.0)
+    return p
+
+
+PARTNERS = [('mambo', mambo, 4), ('sway', sway_close, 4), ('lead_twirl', lead_twirl, 4), ('twirl', twirl, 4),
+            ('dip_lead', dip_lead, 8), ('dip_follow', dip_follow, 8), ('lift_lead', lift_lead, 16), ('lift_fly', lift_fly, 16)]
+
 CLIPS = [('crawl', crawl, 2.0), ('idle', idle, 4.0), ('wave', wave, 3.0), ('stand', stand, 4.6), ('curl', curl, 3.0),
          ('rise', rise, 1.2), ('standing', standing, 4.0), ('walk', walk, 1.0),
-         *[(name, fn, 4 * BEAT) for name, fn in DANCES]]
-LOOPS = ('crawl', 'idle', 'standing', 'walk', *[name for name, _ in DANCES])
+         *[(name, fn, 4 * BEAT) for name, fn in DANCES],
+         *[(name, fn, n * BEAT) for name, fn, n in PARTNERS]]
+LOOPS = ('crawl', 'idle', 'standing', 'walk', *[name for name, _ in DANCES], *[name for name, _, _ in PARTNERS])
 
 
 def main():

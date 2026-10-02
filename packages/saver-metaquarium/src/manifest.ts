@@ -239,8 +239,12 @@ export const METAQUARIUM_PARAMS = {
    *  the camera behind an instructor, and dances the routine in unison: march,
    *  jacks, reaches, kicks, twists, arm circles, the disco point, a spin.
    *  `freestyle`: the same floor, each dancer its own move every eight counts.
+   *  `duet`: the partner dance (the Dirty Dancing number) — couples side by
+   *  side, each pair face to face in a dance frame: the basic, a sway, a
+   *  twirl, the dip, and the lift, her arms spread overhead. Pair with
+   *  `spotRig` on slots 0 and 1 for the couple's spotlights.
    *  `off` (default): they live their own lives. */
-  starfishDance: { type: 'enum', default: 'off', options: ['off', 'aerobics', 'freestyle'], ease: 'step' },
+  starfishDance: { type: 'enum', default: 'off', options: ['off', 'aerobics', 'freestyle', 'duet'], ease: 'step' },
   /** The dance's tempo, beats per minute. Every move is a bar of four beats.
    *  Integrated when steered, so a glide speeds the class up on the beat. */
   danceTempo: { type: 'number', default: 128, min: 60, max: 180, ease: 'smooth' },

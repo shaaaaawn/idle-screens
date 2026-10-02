@@ -136,7 +136,8 @@ describe('bundled breeds (breeds/README.md)', () => {
     const arms = [0, 1, 2, 3, 4].flatMap((n) => [1, 2, 3].map((l) => `arm${n}.${l}`));
     expect([...joints].sort()).toEqual(['body', 'eye.L', 'eye.R', ...arms].sort());
     expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual([
-      'circles', 'crawl', 'curl', 'disco', 'idle', 'jacks', 'kick', 'march', 'reach', 'rise', 'spin', 'stand', 'standing', 'twist', 'walk', 'wave',
+      'circles', 'crawl', 'curl', 'dip_follow', 'dip_lead', 'disco', 'idle', 'jacks', 'kick', 'lead_twirl', 'lift_fly', 'lift_lead', 'mambo', 'march',
+      'reach', 'rise', 'spin', 'stand', 'standing', 'sway', 'twirl', 'twist', 'walk', 'wave',
     ]);
     const extras = root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras();
     expect(extras.mqWalkStride).toBeGreaterThan(0);
@@ -153,7 +154,7 @@ describe('bundled breeds (breeds/README.md)', () => {
     expect(tips.sort()).toEqual(['arm0.3', 'arm1.3', 'arm2.3', 'arm3.3', 'arm4.3']);
   });
 
-  it('starfish: every dance move starts and ends on the standing pose the rise ends on, so the routine cuts on the bar', async () => {
+  it('starfish: every dance move starts and ends on one pose (the aerobics on the rise\'s end, partners on their frame), so a routine cuts on the bar', async () => {
     const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
     const anims = new Map(doc.getRoot().listAnimations().map((a) => [a.getName(), a]));
     /** A clip's value per channel at its first or last key; a channel it never moves is the node's rest. */
@@ -176,13 +177,17 @@ describe('bundled breeds (breeds/README.md)', () => {
       const flipped = key.endsWith('rotation') ? Math.max(...a.map((v, i) => Math.abs(v + b[i]!))) : Infinity;
       expect(Math.min(d, flipped), key).toBeLessThan(2e-3);
     };
-    const neutral = ends('rise', 'last');
-    for (const move of ['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']) {
-      for (const which of ['first', 'last'] as const) {
-        const e = ends(move, which);
-        for (const key of new Set([...e.keys(), ...neutral.keys()])) same(e.get(key) ?? rest(key), neutral.get(key) ?? rest(key), `${move} ${which} ${key}`);
+    const joins = (pose: Map<string, number[]>, moves: string[]): void => {
+      for (const move of moves) {
+        for (const which of ['first', 'last'] as const) {
+          const e = ends(move, which);
+          for (const key of new Set([...e.keys(), ...pose.keys()])) same(e.get(key) ?? rest(key), pose.get(key) ?? rest(key), `${move} ${which} ${key}`);
+        }
       }
-    }
+    };
+    joins(ends('rise', 'last'), ['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']);
+    // The partner clips share their own pose: upright in the dance frame.
+    joins(ends('mambo', 'first'), ['mambo', 'sway', 'lead_twirl', 'twirl', 'dip_lead', 'dip_follow', 'lift_lead', 'lift_fly']);
   });
 
   it('starfish: the committed source is what its generator draws (breeds/rig/starfish-model.mjs)', async () => {

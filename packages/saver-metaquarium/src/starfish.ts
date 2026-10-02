@@ -46,11 +46,22 @@ import { fishHash } from './swim';
 
 export const DANCE_MOVES = ['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin'] as const;
 export type DanceMove = (typeof DANCE_MOVES)[number];
-export const STARFISH_CLIPS = ['crawl', 'idle', 'wave', 'stand', 'curl', 'rise', 'standing', 'walk', ...DANCE_MOVES] as const;
+/** The partner clips (the Dirty Dancing number), with how many beats each runs. */
+export const PARTNER_CLIPS = {
+  mambo: 4, sway: 4, lead_twirl: 4, twirl: 4, dip_lead: 8, dip_follow: 8, lift_lead: 16, lift_fly: 16,
+} as const;
+export type PartnerClip = keyof typeof PARTNER_CLIPS;
+/** A partner move, danced by both: each role plays its own clip of it. */
+export type DuetMove = 'mambo' | 'sway' | 'twirl' | 'dip' | 'lift';
+export type DuetRole = 'lead' | 'follow' | 'solo';
+export const STARFISH_CLIPS = [
+  'crawl', 'idle', 'wave', 'stand', 'curl', 'rise', 'standing', 'walk', ...DANCE_MOVES,
+  ...(Object.keys(PARTNER_CLIPS) as PartnerClip[]),
+] as const;
 export type StarfishClip = (typeof STARFISH_CLIPS)[number];
 /** What a starfish is doing. `look` is idle, turned to face the camera; a dancer reports its move. */
-export type StarfishDoing = 'crawl' | 'walk' | 'turn' | 'idle' | 'look' | 'wave' | 'stand' | 'curl' | 'rise' | 'sit' | DanceMove;
-export type StarfishDanceMode = 'aerobics' | 'freestyle';
+export type StarfishDoing = 'crawl' | 'walk' | 'turn' | 'idle' | 'look' | 'wave' | 'stand' | 'curl' | 'rise' | 'sit' | DanceMove | DuetMove;
+export type StarfishDanceMode = 'aerobics' | 'freestyle' | 'duet';
 
 export interface StarfishRig {
   mixer: AnimationMixer;
@@ -215,6 +226,41 @@ export function danceAt(mode: StarfishDanceMode, index: number, beats: number): 
   return { move: 'march', beat: 0 };
 }
 
+/** The partners' routine, in beats: the basic, a slow sway, a twirl, the dip,
+ *  and the lift — the number builds to it — then cheek to cheek, and again. */
+export const DUET: readonly (readonly [DuetMove, number])[] = [
+  ['mambo', 16], ['sway', 8], ['twirl', 4], ['mambo', 8], ['dip', 8], ['mambo', 8], ['twirl', 4], ['lift', 16], ['sway', 8],
+];
+const DUET_BEATS = DUET.reduce((s, [, n]) => s + n, 0);
+const ROLE_CLIP: Record<DuetMove, Record<DuetRole, PartnerClip>> = {
+  mambo: { lead: 'mambo', follow: 'mambo', solo: 'mambo' },
+  sway: { lead: 'sway', follow: 'sway', solo: 'sway' },
+  twirl: { lead: 'lead_twirl', follow: 'twirl', solo: 'twirl' },
+  dip: { lead: 'dip_lead', follow: 'dip_follow', solo: 'mambo' },
+  lift: { lead: 'lift_lead', follow: 'lift_fly', solo: 'mambo' },
+};
+
+/** The partners' move at beat `beats`, how many beats into it, and the clip a role plays. */
+export function duetAt(beats: number, role: DuetRole): { move: DuetMove; beat: number; clip: PartnerClip } {
+  let b = posMod(beats, DUET_BEATS);
+  for (const [move, n] of DUET) {
+    if (b < n) return { move, beat: b, clip: ROLE_CLIP[move][role] };
+    b -= n;
+  }
+  return { move: 'mambo', beat: 0, clip: 'mambo' };
+}
+
+/** A dancer's place on the floor for the partner dance, in spacings: couples
+ *  side by side across the view (the first two dancers the first couple), the
+ *  lead on the left, close enough to hold hands; an odd one out dances alone. */
+export function coupleSpot(slot: number, count: number): { side: number; depth: number; role: DuetRole; partner: number } {
+  const couples = Math.ceil(count / 2), c = Math.floor(slot / 2);
+  const role: DuetRole = count % 2 === 1 && slot === count - 1 ? 'solo' : slot % 2 === 0 ? 'lead' : 'follow';
+  const centre = (c - (couples - 1) / 2) * 1.8;
+  const off = role === 'lead' ? -0.32 : role === 'follow' ? 0.32 : 0;
+  return { side: centre + off, depth: 0, role, partner: role === 'solo' ? slot : slot ^ 1 };
+}
+
 /** A dancer's place in the class, in spacings: `depth` toward the camera,
  *  `side` across. With three or more, the first is the instructor, out in
  *  front; the rest fill rows of four from the front back, so a capped cast
@@ -238,6 +284,9 @@ export interface StarfishDance {
   beats: number;
   /** Where this dancer's feet go (classSpot, placed by the tank), and which way the class faces. */
   x: number; z: number; yaw: number;
+  /** The partner dance: this dancer's part, and where its partner's feet go. */
+  role?: DuetRole;
+  partnerX?: number; partnerZ?: number;
 }
 
 export interface StarfishInput extends CrabInput {
@@ -394,21 +443,55 @@ function lifeFrame(rig: StarfishRig, inp: StarfishInput, out: StarfishOutput): S
 }
 
 function danceFrame(rig: StarfishRig, inp: StarfishInput, dance: StarfishDance, out: StarfishOutput): StarfishOutput {
+  if (dance.mode === 'duet') return duetFrame(rig, inp, dance, out);
   const { move, beat } = danceAt(dance.mode, inp.index, dance.beats);
-  const fx = Math.sin(dance.yaw), fz = Math.cos(dance.yaw);
-  const reach = rig.feet * inp.scale;
-  out.x = dance.x - fx * reach; out.z = dance.z - fz * reach;
-  out.y = inp.ground(dance.x, dance.z);
-  euler.set(0, dance.yaw, 0);
-  out.quaternion.setFromEuler(euler);
-  out.fx = fx; out.fz = fz; out.tx = fx; out.tz = fz;
-  out.focusX = dance.x; out.focusZ = dance.z;
-  out.trailX = dance.x - fx * inp.len * 2; out.trailZ = dance.z - fz * inp.len * 2;
+  place(rig, inp, dance.x, dance.z, dance.yaw, out);
   out.doing = move;
-  out.bloom = STARFISH_DANCE_BLOOM;
   // One bar per clip: four beats at whatever tempo the tank keeps.
   apply(rig, { [move]: [(posMod(beat, 4) / 4) * rig.durations[move], 1] });
   return out;
+}
+
+/** The partner dance. Partners face each other in the frame; for the lift
+ *  they turn out to the room, she steps in front of him, and up she goes. */
+function duetFrame(rig: StarfishRig, inp: StarfishInput, dance: StarfishDance, out: StarfishOutput): StarfishOutput {
+  const role = dance.role ?? 'solo';
+  const { move, beat, clip } = duetAt(dance.beats, role);
+  const px = dance.partnerX ?? dance.x, pz = dance.partnerZ ?? dance.z;
+  const toPartner = role === 'solo' ? dance.yaw : Math.atan2(px - dance.x, pz - dance.z);
+  // Face to face, but cheated out to the room as dancers on a stage are — in
+  // profile a starfish is all edge — and out to it entirely for the lift (in
+  // over its first two beats, back over its last two).
+  const out_ = move === 'lift' ? smooth(beat / 2) * smooth((16 - beat) / 2) : 0;
+  const yaw = toPartner + wrap(dance.yaw - toPartner) * (CHEAT + (1 - CHEAT) * out_);
+  let x = dance.x, z = dance.z;
+  if (role === 'follow' && move === 'lift') {
+    // She steps in front of him (toward the room), to be lifted.
+    const ahead = 0.3 * inp.len;
+    x += (px + Math.sin(dance.yaw) * ahead - x) * out_;
+    z += (pz + Math.cos(dance.yaw) * ahead - z) * out_;
+  }
+  place(rig, inp, x, z, yaw, out);
+  out.doing = move;
+  apply(rig, { [clip]: [(posMod(beat, PARTNER_CLIPS[clip]) / PARTNER_CLIPS[clip]) * rig.durations[clip], 1] });
+  return out;
+}
+
+/** How far partners turn from each other toward the room, 0..1 (0.45 ≈ 40°). */
+const CHEAT = 0.45;
+
+/** A dancer standing with its feet at (x, z), facing `yaw`. */
+function place(rig: StarfishRig, inp: StarfishInput, x: number, z: number, yaw: number, out: StarfishOutput): void {
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  const reach = rig.feet * inp.scale;
+  out.x = x - fx * reach; out.z = z - fz * reach;
+  out.y = inp.ground(x, z);
+  euler.set(0, yaw, 0);
+  out.quaternion.setFromEuler(euler);
+  out.fx = fx; out.fz = fz; out.tx = fx; out.tz = fz;
+  out.focusX = x; out.focusZ = z;
+  out.trailX = x - fx * inp.len * 2; out.trailZ = z - fz * inp.len * 2;
+  out.bloom = STARFISH_DANCE_BLOOM;
 }
 
 function apply(rig: StarfishRig, w: Weights): void {

@@ -66,8 +66,8 @@ import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
-  classSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
-  type StarfishDanceMode, type StarfishOutput, type StarfishRig,
+  classSpot, coupleSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
+  type DuetRole, type StarfishDanceMode, type StarfishOutput, type StarfishRig,
 } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
@@ -796,6 +796,14 @@ class TankInstance implements SaverInstance {
   /** This frame's dance class: each dancer's feet, by fish index (starfish.ts classSpot). */
   private readonly danceSpots = new Map<number, [number, number]>();
   private danceYaw = 0;
+  /** The partner dance: each dancer's part, and its partner's fish index. */
+  private readonly danceRoles = new Map<number, { role: DuetRole; partner: number }>();
+  /** A partner dancer's part and its partner's feet (empty outside the partner dance). */
+  private partnerOf(index: number): { role?: DuetRole; partnerX?: number; partnerZ?: number } {
+    const r = this.danceRoles.get(index);
+    const at = r ? this.danceSpots.get(r.partner) : undefined;
+    return r && at ? { role: r.role, partnerX: at[0], partnerZ: at[1] } : {};
+  }
   /** Beats danced by `tSec` (starfish.ts danceBeats). */
   private danceBeats(tSec: number): number {
     return danceBeats(tSec, this.num('danceTempo'), this.space, this.track, this.danceTempoTracked);
@@ -2343,7 +2351,7 @@ class TankInstance implements SaverInstance {
     // A dance scene: every starfish (not seated in a formation) joins the
     // class at the tank's centre, in rows facing the camera (starfish.ts).
     const danceMode = this.str('starfishDance');
-    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle';
+    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle' || danceMode === 'duet';
     const danceSpots = this.danceSpots;
     danceSpots.clear();
     if (dancing) {
@@ -2358,13 +2366,24 @@ class TankInstance implements SaverInstance {
       // The front of the class (the instructor) at the tank's centre, the rows
       // behind it: the camera looks at the centre from above, so a dancer
       // nearer than that falls out of the bottom of the frame.
-      const spots = dancers.map((_, slot) => classSpot(slot, dancers.length));
+      // The partner dance: couples side by side across the view, each pair
+      // facing each other, a dancer's part and its partner (starfish.ts coupleSpot).
+      const duet = danceMode === 'duet';
+      const spots = dancers.map((_, slot) => (duet ? coupleSpot(slot, dancers.length) : classSpot(slot, dancers.length)));
       const mid = spots.length ? Math.max(...spots.map((s) => s.depth)) : 0;
+      const roles = this.danceRoles;
+      roles.clear();
       dancers.forEach((f, slot) => {
         const { side } = spots[slot]!, depth = spots[slot]!.depth - mid;
         const gap = FISH_LENGTH * this.fishSizeAt(f.index) * 1.7;
         danceSpots.set(f.index, [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap]);
       });
+      if (duet) {
+        dancers.forEach((f, slot) => {
+          const c = coupleSpot(slot, dancers.length);
+          roles.set(f.index, { role: c.role, partner: dancers[c.partner]!.index });
+        });
+      }
       this.danceYaw = yaw;
     }
     for (const f of this.fish) {
@@ -2722,6 +2741,7 @@ class TankInstance implements SaverInstance {
             ...(this.danceSpots.has(f.index) ? { dance: {
               mode: this.str('starfishDance') as StarfishDanceMode, beats: this.danceBeats(tSec),
               x: this.danceSpots.get(f.index)![0], z: this.danceSpots.get(f.index)![1], yaw: this.danceYaw,
+              ...this.partnerOf(f.index),
             } } : {}),
           }, this.starOut)
         : null;
