@@ -11,8 +11,8 @@
  * - Phase advances with distance swum (`beat`), so a fast fish beats fast
  *   and a gliding one slows — closed-form, like everything else.
  * - Which fish: not a model with a skeleton (the betafish already bends),
- *   and not a sea turtle, seahorse, crab or jellyfish (flippers, an upright
- *   body, legs, a bell — a sideways body wave is wrong on all of them). The
+ *   and not a sea turtle, seahorse or crab (flippers, an upright
+ *   body, legs — a sideways body wave is wrong on all of them). The
  *   seahorse has its own rig instead (seahorse.ts): fin, tail, nod.
  */
 
