@@ -937,11 +937,12 @@ export function buildFlora(
       const gap = (r === 0 ? 23 : 29) * s, rowZ = (rows.length === 1 ? 0 : r === 0 ? 24 : -26) * s;
       row.forEach((sp, i) => {
         const x = (i - (row.length - 1) / 2) * gap;
-        // A plot that lands on a crystal steps out of its way — forward for
-        // the front row, back for the back — so nothing stands inside one.
+        // A plot that lands on a crystal, path or rock steps out of its way —
+        // forward for the front row, back for the back — so nothing stands
+        // inside one and no species goes missing from the gallery.
         let z = rowZ;
         const away = r === 0 && rows.length > 1 ? 1 : -1;
-        while (anchors.some((c) => Math.hypot(x - c.x, z - c.z) < 14 * s) && Math.abs(z - rowZ) < 60 * s) z += away * 8 * s;
+        while ((anchors.some((c) => Math.hypot(x - c.x, z - c.z) < 14 * s) || opts.blocked(x, z)) && Math.abs(z - rowZ) < 60 * s) z += away * 8 * s;
         if (opts.blocked(x, z)) return;
         growOne(sp, x, z, Math.floor(rng.next() * 0x7fffffff), false, false);
         founded += 1;

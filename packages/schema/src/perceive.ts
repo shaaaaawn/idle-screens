@@ -647,6 +647,16 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         centerY = p.y + box.cx * sr + box.cy * cr;
         halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
         halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
+      } else if (s.kind === 'rect') {
+        // fillRect after ctx.rotate(rot) about the entity: take the rotated box's AABB.
+        const rot = rotationAt(e, tPass);
+        if (rot) {
+          const cr = Math.abs(Math.cos(rot));
+          const sr = Math.abs(Math.sin(rot));
+          const hx = halfX * cr + halfY * sr;
+          halfY = halfX * sr + halfY * cr;
+          halfX = hx;
+        }
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;

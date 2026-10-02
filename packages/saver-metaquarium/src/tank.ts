@@ -1097,7 +1097,7 @@ class TankInstance implements SaverInstance {
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
       const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
-      const terrain = buildTerrain(height, floorHex, carved ? 240 : 72, carved);
+      const terrain = buildTerrain(height, floorHex, carved ? this.quality.carvedFloorDetail : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
       this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
