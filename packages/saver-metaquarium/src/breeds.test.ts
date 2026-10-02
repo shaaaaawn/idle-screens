@@ -93,7 +93,8 @@ describe('bundled breeds (breeds/README.md)', () => {
       const used = new Set<string>();
       for (let i = 0; i < j.getCount(); i++) {
         const [j0] = j.getElement(i, []) as number[];
-        expect((w.getElement(i, []) as number[])[0]).toBe(1);
+        const [w0, ...rest] = w.getElement(i, []) as number[];
+        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone, name).toMatch(parts[name]!);
@@ -147,7 +148,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       type Rect = [number, number, number, number];
       const eye = new Map<string, Rect[]>(), body: [string, Rect][] = [];
       for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
-        const isEye = /eye/i.test(p.getMaterial()?.getName() ?? '');
+        const isEye = /eye|GLOW-Orbs/i.test(p.getMaterial()?.getName() ?? '');
         const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
         const n = idx ? idx.getCount() : pos.getCount();
         for (let t = 0; t < n; t += 3) {

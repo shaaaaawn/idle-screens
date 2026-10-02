@@ -2,7 +2,7 @@
 '@idle-screens/saver-metaquarium': minor
 ---
 
-The shark hunts now, and every bundled breed got much lighter.
+The shark hunts now, and the bundled voxel breeds got much lighter.
 
 - **A rigged shark.** `breeds/rig/shark.py` rigs the delivered model in Blender without changing a visible voxel, cut by position (its fins sit off the lattice): the head, a lower jaw ringed with metal teeth, eyes that roll back, the pectorals, and a three-link tail so the swim is a true wave down the body. Clips swim and bite, driven by `src/shark.ts`: the tail beats slow and heavy with the distance swum (it patrols by default), and on some cycles it strikes — snout up, jaw wide, eyes rolled back, the lunge, the snap, a thrash.
 - **One body, not three pieces.** The spine is soft: body vertices blend between neighbouring spine bones over a few voxels, so the bite and the thrash bend the shark instead of splitting it at the joints. The jaw rests nearly closed, and the thrash is spread down the whole body.

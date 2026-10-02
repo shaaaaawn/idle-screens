@@ -184,11 +184,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     // opening the fish swim through, under a colony far over their heads.
     if (clear) obstacles.push({ x: site.x, y: site.y, z: site.z, r: radius, h: height });
   };
-  const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string, host = false): void => {
+  const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string, host = false, walkable = true): void => {
     const key = 100 + rockIndex++;
     const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins, host }, rockRng.fork(key));
     stones.push(built.stone);
-    boulders.push(built.stone);
+    if (walkable) boulders.push(built.stone);
     if (built.glow) veins.push(built.glow);
     // A big rock's breach seeps bubbles.
     if (built.seep && rx > 15 * s) seeps.push({ x: built.seep.x, y: built.seep.y, z: built.seep.z, color });
@@ -235,11 +235,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
     }
     counts.arches = 1;
-    for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, archTint);
+    for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, archTint, false, false);
     // Low back ridge frames the settlement without sealing off its centre.
     for (let i = 0; i < (opts.castle ? 0 : 4); i++) {
       const rx = (i - 1.5) * 30 * s, rz = -115 * s;
-      rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, anchors[i % Math.max(1, anchors.length)]?.color ?? '#567fae');
+      rock(rx, terrain(rx, rz), rz, 25 * s, (12 + rockRng.next() * 12) * s, 19 * s, anchors[i % Math.max(1, anchors.length)]?.color ?? '#567fae', false, false);
     }
   }
   // Homes: a loose crescent opening toward the default camera, habits cycled

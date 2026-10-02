@@ -34,7 +34,10 @@ describe('the shark (shark.ts)', () => {
       const m = sharkFrame(a, t, 3, 80); sharkFrame(a, t + 3, 3, 9);
       expect(sharkFrame(a, t, 3, 80)).toEqual(m);
       expect(sharkFrame(b, t, 3, 80)).toEqual(m);
-      for (const n of SHARK_CLIPS) expect(b.actions[n].time).toBe(a.actions[n].time);
+      for (const n of SHARK_CLIPS) {
+        expect(b.actions[n].time).toBe(a.actions[n].time);
+        expect(a.actions[n].getEffectiveWeight()).toBe(m.weights[n]);
+      }
     }
   });
 

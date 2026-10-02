@@ -45,10 +45,10 @@ export function rigHacker(body: Object3D, clips: readonly AnimationClip[]): Hack
   return { mixer, actions, durations };
 }
 
-const TYPE = 2.4;    // the type clip
-const GLITCH = 1.0;  // the glitch clip
-const DEAD = 0.7;    // x_x, after the tear
-const BOOT = 1.8;    // the spinner
+export const TYPE = 2.4;    // the type clip
+export const GLITCH = 1.0;  // the glitch clip
+export const DEAD = 0.7;    // x_x, after the tear
+export const BOOT = 1.8;    // the spinner
 const SLOT = 3.5;    // seconds an expression holds
 const WIPE = 0.3;    // the scan-down refresh
 const BLINK = 0.18;
@@ -140,9 +140,9 @@ export function hackerMoment(index: number, t: number): HackerMoment {
   } else if (u >= -0.6 && u < TYPE + 0.6) {
     doing = u >= 0 && u < TYPE ? 'hack' : 'swim';
     if (u >= 0.25 && u < TYPE - 0.2) screen = { from: 'focus', to: 'focus', wipe: 0, mode: 'rain', level: 1 };
-    else if (u < 0) screen = { from: faces(index, t, c).to, to: 'focus', wipe: Math.min(1, (u + 0.6) / WIPE), mode: 'face', level: 1 };
+    else if (u < 0) screen = { from: faces(index, t - (u + 0.6), c).to, to: 'focus', wipe: Math.min(1, (u + 0.6) / WIPE), mode: 'face', level: 1 };
     else if (u < TYPE) screen = { from: 'focus', to: 'focus', wipe: 0, mode: 'face', level: 1 };
-    else screen = { from: 'focus', to: faces(index, t, c).to, wipe: Math.min(1, (u - TYPE) / WIPE), mode: 'face', level: 1 };
+    else screen = { from: 'focus', to: faces(index, t - (u - TYPE) + 0.6, c).to, wipe: Math.min(1, (u - TYPE) / WIPE), mode: 'face', level: 1 };
   } else {
     screen = faces(index, t, c);
   }

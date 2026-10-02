@@ -195,6 +195,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         part.userData.mqOwned = true;
         part.userData.mqNoCaustic = true;
         if (!white) part.userData.mqGlowColor = neonColor.getHex();
+        decal(part, white ? 1 : 2); // the same bias as a natural eye: a pupil outranks its white
         return part;
       }
       if (isEyes(m)) {
