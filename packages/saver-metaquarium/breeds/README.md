@@ -103,7 +103,7 @@ skeleton and clips made in Blender:
 | glowfish | `rig/glowfish.py`: jaw, flip-top head, tail, blinking eyes, three-link lure | `src/angler.ts` (the tank swims it) | swim lure chomp blink |
 | hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
 | shark | `rig/shark.py` (cut by position — its fins sit off the lattice): head, jaw ringed with metal teeth, rolling eyes, pectorals, three-link tail | `src/shark.ts` (the tank swims it; it patrols) | swim bite |
-| starfish | `rig/starfish.py`: the disc and its face, blinking eyes, five arms in three links (hinged underneath, so a curl closes its seams) | `src/starfish.ts` crawls it on the seabed, the crab's way | crawl idle wave stand curl |
+| starfish | `rig/starfish.py`: the disc and its face, blinking eyes, five arms in three links (hinged underneath, so a curl closes its seams). Standing, a little person: front arms legs, side arms arms, the back arm its head | `src/starfish.ts` crawls it on the seabed the crab's way, walks some bouts upright, and dances (`starfishDance`) | crawl idle wave stand curl · rise standing walk · march jacks reach kick twist circles disco spin |
 
 **A breed drawn in-house.** The starfish is the first we drew ourselves, in
 our designer's style: whole 2-unit cubes, flat colours, the coat roles, a
@@ -168,6 +168,14 @@ The rules a rig keeps, so the intake and the tank can trust it:
   per bone. Each is then a small light on its own part (lit in the neon look,
   its bloom on the tip it rides), all one colour (`applyNpcMaterials` draws a
   shared glow material once).
+- **A posture is a clip, not a blend.** Lying down and standing up are the
+  starfish's `rise` played forward or back; a cross-fade of a flat pose into
+  a standing one would hang it halfway. Whatever weight the moving clip
+  leaves goes to the rest clip of the posture it is in: three.js gives an
+  unclaimed remainder to the bind pose.
+- **Dance moves cut on the bar.** Each is one bar, a loop starting and ending
+  on the same standing pose the rise ends on; `breeds.test.ts` checks every
+  join, so a routine can switch moves with no blend.
 - **A floor creature's glow** pools round it like a lamp: its driver sets
   the rig's `bloom` (the starfish's is low lying down, higher standing), which
   scales its bloom cards, light and floor pool, never the parts themselves.

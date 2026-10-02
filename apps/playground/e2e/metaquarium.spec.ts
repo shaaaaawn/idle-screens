@@ -406,7 +406,32 @@ test('MQ12: the starfish mounts, rigged, and crawls the floor', async ({ page })
     return (report?.fish ?? []).map((f) => f.doing);
   });
   expect(doings).toHaveLength(2);
-  for (const d of doings) expect(['crawl', 'turn', 'idle', 'look', 'wave', 'stand', 'curl']).toContain(d);
+  for (const d of doings) expect(['crawl', 'walk', 'rise', 'sit', 'turn', 'idle', 'look', 'wave', 'stand', 'curl']).toContain(d);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The starfish dance: an aerobics class mounts, every dancer upright on the
+ * same move of the routine (starfish.ts danceAt), no errors.
+ */
+test('MQ13: starfish aerobics — the class dances one move in unison', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:4&mq.starfishDance=aerobics&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(4);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(4);
+  expect(['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']).toContain(doings[0]);
+  expect(new Set(doings).size).toBe(1);
 
   expect(pageErrors).toEqual([]);
 });

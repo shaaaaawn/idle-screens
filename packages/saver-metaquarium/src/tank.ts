@@ -65,7 +65,10 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
-import { rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart, type StarfishOutput, type StarfishRig } from './starfish';
+import {
+  classSpot, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
+  type StarfishDanceMode, type StarfishOutput, type StarfishRig,
+} from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
@@ -639,7 +642,7 @@ class TankInstance implements SaverInstance {
     this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
   private readonly crabSpots: number[] = [];
   private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
-  private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'crawl', bloom: 0 };
+  private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, focusX: 0, focusZ: 0, doing: 'crawl', bloom: 0 };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
@@ -789,6 +792,19 @@ class TankInstance implements SaverInstance {
   /** The canopy along the school's route (max over the next six lengths), sampled round the loop. */
   private shoalLift: Float64Array | null = null;
   private shoalSpeedTracked = false;
+  private danceTempoTracked = false;
+  /** This frame's dance class: each dancer's feet, by fish index (starfish.ts classSpot). */
+  private readonly danceSpots = new Map<number, [number, number]>();
+  private danceYaw = 0;
+  /** Beats danced by `tSec`: `danceTempo` (BPM) integrated when steered, so a tempo change glides on the beat. */
+  private danceBeats(tSec: number): number {
+    const def = this.space.danceTempo;
+    return this.danceTempoTracked && this.track
+      ? integrateParam(this.space, this.track, 'danceTempo', tSec * 1000, {
+          ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
+        }) / 1000 / 60
+      : (tSec * this.num('danceTempo')) / 60;
+  }
   /** Travel time for the school at a moment, cached for the two instants a frame asks about. */
   private shoalWarpMemo: [number, number, number, number] = [NaN, 0, NaN, 0];
   private readonly shoalFloor = (x: number, z: number): number =>
@@ -2329,9 +2345,33 @@ class TankInstance implements SaverInstance {
     // give the others room (crab.ts).
     const crabSpots = this.crabSpots;
     crabSpots.length = 0;
+    // A dance scene: every starfish (not seated in a formation) joins the
+    // class at the tank's centre, in rows facing the camera (starfish.ts).
+    const danceMode = this.str('starfishDance');
+    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle';
+    const danceSpots = this.danceSpots;
+    danceSpots.clear();
+    if (dancing) {
+      const dancers = this.fish.filter((f): f is NonNullable<typeof f> => !!f?.rig?.starfish && f.index < visible && !styleAt(f.index).formation);
+      const camX = this.camera.position.x, camZ = this.camera.position.z;
+      const yaw = Math.hypot(camX, camZ) > 1e-6 ? Math.atan2(camX, camZ) : 0;
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      // The front of the class (the instructor) at the tank's centre, the rows
+      // behind it: the camera looks at the centre from above, so a dancer
+      // nearer than that falls out of the bottom of the frame.
+      const spots = dancers.map((_, slot) => classSpot(slot, dancers.length));
+      const mid = spots.length ? Math.max(...spots.map((s) => s.depth)) : 0;
+      dancers.forEach((f, slot) => {
+        const { side } = spots[slot]!, depth = spots[slot]!.depth - mid;
+        const gap = FISH_LENGTH * this.fishSizeAt(f.index) * 1.7;
+        danceSpots.set(f.index, [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap]);
+      });
+      this.danceYaw = yaw;
+    }
     for (const f of this.fish) {
       if (!f?.rig || f.index >= visible) continue;
-      const s = f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
+      const d = danceSpots.get(f.index);
+      const s = d ? { x: d[0], z: d[1] } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
         : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index)) : null;
       if (s) crabSpots.push(f.index, s.x, s.z);
     }
@@ -2680,6 +2720,10 @@ class TankInstance implements SaverInstance {
             t: tSec, index: f.index, plan: f.plan, start: starfishStart(f.plan, f.index), len: L,
             scale: starRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+            ...(this.danceSpots.has(f.index) ? { dance: {
+              mode: this.str('starfishDance') as StarfishDanceMode, beats: this.danceBeats(tSec),
+              x: this.danceSpots.get(f.index)![0], z: this.danceSpots.get(f.index)![1], yaw: this.danceYaw,
+            } } : {}),
           }, this.starOut)
         : null;
       if (star) { px = star.x; y = star.y; pz = star.z; f.rig!.bloom = star.bloom; } else if (starRig) {
@@ -2700,7 +2744,8 @@ class TankInstance implements SaverInstance {
       const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
-        this.followAt.set(px, y, pz); this.followSeen = true;
+        // A standing starfish is where its feet are, ahead of its resting place.
+        this.followAt.set(star ? star.focusX : px, y, star ? star.focusZ : pz); this.followSeen = true;
         this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
         // A crab's route is its own (crab.ts): chase along it, not the swim plan's.
         if (floor) { this.followHead.set(floor.tx, 0, floor.tz); this.followTrail.set(floor.trailX, y, floor.trailZ); this.followHasTrail = true; }
@@ -3220,6 +3265,7 @@ class TankInstance implements SaverInstance {
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
     this.trackedPaths = new Set(track.deltas.map((d) => d.path));
     this.shoalSpeedTracked = track.deltas.some((d) => d.path === 'shoalSpeed');
+    this.danceTempoTracked = track.deltas.some((d) => d.path === 'danceTempo');
     this.shoalWarpMemo = [NaN, 0, NaN, 0];
     this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
     this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');

@@ -135,7 +135,12 @@ describe('bundled breeds (breeds/README.md)', () => {
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     const arms = [0, 1, 2, 3, 4].flatMap((n) => [1, 2, 3].map((l) => `arm${n}.${l}`));
     expect([...joints].sort()).toEqual(['body', 'eye.L', 'eye.R', ...arms].sort());
-    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['crawl', 'curl', 'idle', 'stand', 'wave']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual([
+      'circles', 'crawl', 'curl', 'disco', 'idle', 'jacks', 'kick', 'march', 'reach', 'rise', 'spin', 'stand', 'standing', 'twist', 'walk', 'wave',
+    ]);
+    const extras = root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras();
+    expect(extras.mqWalkStride).toBeGreaterThan(0);
+    expect(extras.mqFeet).toBeCloseTo(2 * 10.5 * Math.cos((36 * Math.PI) / 180), 3); // its front tips, where it stands
     const tips: string[] = [];
     for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
       const name = p.getMaterial()!.getName();
@@ -146,6 +151,38 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
     // splitByBone (breeds.json): one small light per tip, so neon keeps it lit and its bloom rides the tip.
     expect(tips.sort()).toEqual(['arm0.3', 'arm1.3', 'arm2.3', 'arm3.3', 'arm4.3']);
+  });
+
+  it('starfish: every dance move starts and ends on the standing pose the rise ends on, so the routine cuts on the bar', async () => {
+    const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
+    const anims = new Map(doc.getRoot().listAnimations().map((a) => [a.getName(), a]));
+    /** A clip's value per channel at its first or last key; a channel it never moves is the node's rest. */
+    const ends = (name: string, which: 'first' | 'last'): Map<string, number[]> => {
+      const out = new Map<string, number[]>();
+      for (const ch of anims.get(name)!.listChannels()) {
+        const values = ch.getSampler()!.getOutput()!, n = values.getCount();
+        out.set(`${ch.getTargetNode()!.getName()}.${ch.getTargetPath()}`, values.getElement(which === 'first' ? 0 : n - 1, []) as number[]);
+      }
+      return out;
+    };
+    const rest = (key: string): number[] => {
+      const node = key.slice(0, key.lastIndexOf('.')), path = key.slice(key.lastIndexOf('.') + 1);
+      const nd = doc.getRoot().listNodes().find((x) => x.getName() === node)!;
+      return path === 'rotation' ? nd.getRotation() : path === 'translation' ? nd.getTranslation() : nd.getScale();
+    };
+    const same = (a: number[], b: number[], key: string): void => {
+      // q and -q are one rotation (the spin ends a full turn round).
+      const d = Math.max(...a.map((v, i) => Math.abs(v - b[i]!)));
+      const flipped = key.endsWith('rotation') ? Math.max(...a.map((v, i) => Math.abs(v + b[i]!))) : Infinity;
+      expect(Math.min(d, flipped), key).toBeLessThan(2e-3);
+    };
+    const neutral = ends('rise', 'last');
+    for (const move of ['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']) {
+      for (const which of ['first', 'last'] as const) {
+        const e = ends(move, which);
+        for (const key of new Set([...e.keys(), ...neutral.keys()])) same(e.get(key) ?? rest(key), neutral.get(key) ?? rest(key), `${move} ${which} ${key}`);
+      }
+    }
   });
 
   it('starfish: the committed source is what its generator draws (breeds/rig/starfish-model.mjs)', async () => {

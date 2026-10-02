@@ -26,7 +26,19 @@ Clips (30 fps; the tank sets their times, never update(dt)):
             with arms waving and a little bounce, then back down flat.
     curl    3 s. Every arm curls up round the disc, a slow hug, and lets go.
 
-The one-shots start and end on the rest pose.
+Standing up, it is a little person (front arms legs, side arms arms, back
+arm its head):
+
+    rise      1.2 s. Up onto its front tips; backwards, it lies down.
+    standing  4 s loop. Upright at rest, breathing, a blink.
+    walk      1 s loop. Two steps, arms swinging; `mqWalkStride` per cycle.
+              Standing, its feet are `mqFeet` ahead of where its disc lay.
+    march jacks reach kick twist circles disco spin
+              its aerobics: one bar each (four beats, authored at 120 BPM,
+              the tank sets the tempo), each a loop starting and ending on
+              the same upright pose, so a routine cuts between them on the bar.
+
+The flat one-shots start and end on the rest pose.
 """
 import math
 import os
@@ -195,7 +207,224 @@ def curl(t, T=3.0):
     return p
 
 
-CLIPS = [('crawl', crawl, 2.0), ('idle', idle, 4.0), ('wave', wave, 3.0), ('stand', stand, 4.6), ('curl', curl, 3.0)]
+# ---------------------------------------------------------------------------
+# Upright: the starfish as a little person. Its two front arms are legs, the
+# side arms are arms, the back arm is its head; its face looks the way it
+# faces. Every upright clip is the neutral pose UPRIGHT plus offsets, and
+# starts and ends exactly on it, so the tank can cut between them on a bar
+# line (breeds.test.ts checks the joins).
+#
+# Authored, like everything here, in the rest frame's axes: lifting a limb
+# (turning it about its lift axis) brings it toward the viewer once standing;
+# swaying it (about the rest up) moves it in the picture plane. The hinges
+# are on the arms' undersides — the back, standing — so a limb bent toward
+# the viewer closes its seams; bent away, it would open them to the camera.
+# Knees, then, bend little: hips and feet do the work.
+# ---------------------------------------------------------------------------
+
+WALK_STRIDE = 22.0    # model units walked per upright walk cycle (two steps)
+LEGS, ARMS, HEAD = (0, 4), (1, 3), 2
+BEAT = 0.5            # dance clips are authored at 120 BPM: four beats in 2 s
+
+
+def side(n):
+    """+1 for the starfish's left limbs (arms 0, 1), -1 for its right (3, 4)."""
+    return 1 if n in (0, 1) else -1
+
+
+def raise_(p, n, link, a):
+    """In the picture plane, standing: an arm up (a leg out) by `a`, either side."""
+    sway(p, n, link, side(n) * a)
+
+
+def upright(p, phi=math.pi / 2, hop=0.0):
+    """Up on its front tips: the body tipped `phi` about them (they stay put)."""
+    p.turn('body', 'x', phi)
+    p.move('body', (0, -TIP_FRONT * (1 - math.cos(phi)), TIP_FRONT * math.sin(phi) + hop))
+    for n in LEGS:
+        lift(p, n, 0.0, 0.0, -0.15 * math.sin(phi))
+
+
+def body_turn(p, axis, a):
+    """Turn the standing body about a world axis through the disc: 'z' twists
+    it about the vertical, 'y' rolls it side to side in the picture plane."""
+    p.turn('body', axis, a)
+
+
+def rise(t, T=1.2):
+    """From lying flat to standing, over its front tips; played backwards, it lies down."""
+    p = Pose()
+    upright(p, (math.pi / 2) * track(t, [(0, 0), (T, 1)]))
+    return p
+
+
+def standing(t, T=4.0):
+    """Upright at rest: breathing, arms loose, the head tilting, a blink."""
+    p = Pose()
+    w = 2 * math.pi * t / T
+    upright(p, hop=0.35 * (1 - math.cos(w)) / 2)
+    for n in ARMS:
+        raise_(p, n, 1, -0.12 + 0.06 * math.sin(w))
+        raise_(p, n, 3, 0.1 * math.sin(w - 0.8))
+    sway(p, HEAD, 3, 0.08 * math.sin(w))
+    blink(p, blinking(t, 2.4))
+    return p
+
+
+def walk(t, T=1.0):
+    """Two steps on its front arms, the arms swinging against them."""
+    p = Pose()
+    w = 2 * math.pi * t / T
+    upright(p, phi=math.pi / 2 - 0.06, hop=0.5 * (1 - math.cos(2 * w)) / 2)  # leans into it, bobbing each step
+    for n, ph in ((0, 0.0), (4, math.pi)):
+        sw = math.sin(w + ph)
+        lift(p, n, 0.38 * sw, -0.12 * max(0.0, sw), 0.12 * max(0.0, -sw))
+    for n, ph in ((1, math.pi), (3, 0.0)):
+        lift(p, n, 0.3 * math.sin(w + ph), 0.12 * math.sin(w + ph - 0.5), 0.0)
+        raise_(p, n, 1, -0.25)
+    body_turn(p, 'y', 0.07 * math.sin(w))
+    sway(p, HEAD, 2, 0.05 * math.sin(w))
+    return p
+
+
+def beats(t):
+    return t / BEAT
+
+
+def march(t, T=2.0):
+    """Knees up on every beat, the other arm pumping."""
+    p = Pose()
+    b = beats(t)
+    k = math.sin(math.pi * (b % 1)) ** 2          # each beat a knee up and down
+    left = int(b) % 2 == 0
+    upright(p, hop=0.6 * k)
+    for n in LEGS:
+        up = k if (n == 0) == left else 0.0
+        lift(p, n, 0.7 * up, -0.25 * up, 0.2 * up)
+    for n in ARMS:
+        up = k if (n == 3) == left else 0.0          # the opposite arm
+        lift(p, n, 0.55 * up, 0.35 * up, 0.0)
+        raise_(p, n, 1, -0.2 * k)
+    sway(p, HEAD, 3, 0.1 * math.sin(math.pi * b))
+    return p
+
+
+def jacks(t, T=2.0):
+    """Jumping jacks: out on the beat (arms up, legs wide, a hop), in on the next."""
+    p = Pose()
+    b = beats(t)
+    out = (1 - math.cos(math.pi * b)) / 2           # 0 in, 1 out, every other beat
+    upright(p, hop=2.2 * math.sin(math.pi * (b % 1)) ** 2)
+    for n in ARMS:
+        raise_(p, n, 1, 1.05 * out)
+        raise_(p, n, 2, 0.25 * out)
+    for n in LEGS:
+        raise_(p, n, 1, 0.32 * out)
+    return p
+
+
+def reach(t, T=2.0):
+    """Side reaches: lean, and the far arm goes over the head; then the other way."""
+    p = Pose()
+    b = beats(t)
+    r = math.sin(math.pi * b / 2)                    # + to its left over beats 0-2, - to its right over 2-4
+    upright(p, hop=0.3 * abs(r))
+    body_turn(p, 'y', 0.22 * r)
+    for n in ARMS:
+        over = max(0.0, -side(n) * r)               # the arm away from the lean goes up and over
+        raise_(p, n, 1, 0.9 * over - 0.25 * max(0.0, side(n) * r))
+        raise_(p, n, 2, 0.45 * over)
+        raise_(p, n, 3, 0.35 * over)
+    for n in LEGS:
+        raise_(p, n, 1, 0.2 * max(0.0, side(n) * r))  # a step out toward the lean
+    sway(p, HEAD, 3, 0.15 * r)
+    return p
+
+
+def kick(t, T=2.0):
+    """Front kicks, left then right, arms up for balance."""
+    p = Pose()
+    b = beats(t)
+    k = math.sin(math.pi * (b % 2) / 2) ** 2         # a kick over two beats
+    left = b < 2
+    upright(p, hop=0.8 * k)
+    for n in LEGS:
+        up = k if (n == 0) == left else 0.0
+        lift(p, n, 1.0 * up, 0.15 * up, 0.25 * up)
+    for n in ARMS:
+        raise_(p, n, 1, 0.5 * k)
+        lift(p, n, 0.25 * k, 0.0, 0.0)
+    body_turn(p, 'x', 0.08 * k)  # leans back from the kick
+    return p
+
+
+def twist(t, T=2.0):
+    """Twists: the body turns about the vertical, arms swinging out."""
+    p = Pose()
+    b = beats(t)
+    tw = math.sin(math.pi * b / 2)                   # left on beat 1, right on beat 3
+    upright(p, hop=0.4 * abs(tw))
+    body_turn(p, 'z', 0.5 * tw)
+    for n in ARMS:
+        raise_(p, n, 1, 0.25 * abs(tw))
+        lift(p, n, -0.0 + 0.3 * side(n) * tw, 0.0, 0.0)
+    sway(p, HEAD, 3, -0.12 * tw)
+    return p
+
+
+def circles(t, T=2.0):
+    """Arm circles, two a bar, with a bounce on every beat."""
+    p = Pose()
+    b = beats(t)
+    psi = math.pi * b                               # a circle every two beats
+    upright(p, hop=0.5 * math.sin(math.pi * (b % 1)) ** 2)
+    for n in ARMS:
+        raise_(p, n, 1, 0.75 * math.sin(psi))
+        lift(p, n, 0.75 * (1 - math.cos(psi)) / 2 * 1.4, 0.0, 0.0)
+        raise_(p, n, 3, 0.25 * math.sin(psi))
+    return p
+
+
+def disco(t, T=2.0):
+    """The point: its right arm up to the sky, then down across, hips swinging."""
+    p = Pose()
+    b = beats(t)
+    upp = math.sin(math.pi * min(b, 2) / 2) ** 2 if b < 2 else 0.0
+    down = math.sin(math.pi * (b - 2) / 2) ** 2 if b >= 2 else 0.0
+    upright(p, hop=0.4 * math.sin(math.pi * (b % 1)) ** 2)
+    raise_(p, 3, 1, 1.15 * upp - 0.7 * down)         # its right arm (viewer's left)
+    raise_(p, 3, 2, 0.15 * upp)
+    lift(p, 3, 0.35 * down, 0.0, 0.0)
+    raise_(p, 1, 1, -0.55 * (upp + down))            # the other hand on its hip
+    lift(p, 1, 0.0, 0.6 * (upp + down), 0.4 * (upp + down))
+    body_turn(p, 'y', 0.12 * math.sin(math.pi * b))  # hips side to side on the beat
+    raise_(p, 4, 1, 0.12 * (upp + down))
+    sway(p, HEAD, 3, -0.15 * (upp - down))
+    return p
+
+
+def spin(t, T=2.0):
+    """A full turn about the vertical over three beats, arms up; a bounce to land."""
+    p = Pose()
+    b = beats(t)
+    a = 2 * math.pi * track(b, [(0, 0), (3, 1), (4, 1)])
+    land = math.sin(math.pi * max(0.0, b - 3)) ** 2
+    upright(p, hop=1.2 * math.sin(math.pi * min(b, 3) / 3) + 0.6 * land)
+    body_turn(p, 'z', a % (2 * math.pi))
+    up = math.sin(math.pi * min(b, 3) / 3)
+    for n in ARMS:
+        raise_(p, n, 1, 0.9 * up)
+        raise_(p, n, 3, 0.3 * up)
+    return p
+
+
+DANCES = [('march', march), ('jacks', jacks), ('reach', reach), ('kick', kick),
+          ('twist', twist), ('circles', circles), ('disco', disco), ('spin', spin)]
+
+CLIPS = [('crawl', crawl, 2.0), ('idle', idle, 4.0), ('wave', wave, 3.0), ('stand', stand, 4.6), ('curl', curl, 3.0),
+         ('rise', rise, 1.2), ('standing', standing, 4.0), ('walk', walk, 1.0),
+         *[(name, fn, 4 * BEAT) for name, fn in DANCES]]
+LOOPS = ('crawl', 'idle', 'standing', 'walk', *[name for name, _ in DANCES])
 
 
 def main():
@@ -214,8 +443,8 @@ def main():
             keyed[pb.name] = ['scale'] if pb.name.startswith('eye.') else ['rotation_quaternion']
             if pb.name == 'body':
                 keyed[pb.name].append('location')
-        clips = bake(rig, 'starfish', CLIPS, apply_pose, ('crawl', 'idle'), keyed)
-        out = export(rig, out_path('starfish'), {'mqStride': STRIDE})
+        clips = bake(rig, 'starfish', CLIPS, apply_pose, LOOPS, keyed)
+        out = export(rig, out_path('starfish'), {'mqStride': STRIDE, 'mqWalkStride': WALK_STRIDE, 'mqFeet': TIP_FRONT})
         return {'faces_per_bone': counts, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 
