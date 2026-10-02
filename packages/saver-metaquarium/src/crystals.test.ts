@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { describe, expect, it } from 'vitest';
 import {
-  clusterClearance, emittersOf, ENV_PROP_MIX, growCluster, layoutCrystals, MAX_CLUSTERS,
+  clusterClearance, clusterMound, emittersOf, ENV_PROP_MIX, growCluster, layoutCrystals, MAX_CLUSTERS,
   parsePropMix, pulseAt, sampleLight, shardGeometry, SHARD_RADIUS,
 } from './crystals';
 import { ENVIRONMENT_NAMES } from './environments';
@@ -239,5 +239,12 @@ describe('light field', () => {
     expect(clusterClearance(clusters, c.x, c.z)).toBeCloseTo(c.y + c.height * 0.9, 5);
     expect(clusterClearance(clusters, c.x + c.radius * 0.6, c.z)).toBeGreaterThan(c.y + c.height * 0.5);
     expect(clusterClearance(clusters, c.x + c.radius * 2 + 10, c.z)).toBe(-Infinity);
+  });
+
+  it('a walker climbs a low mound in among the roots, not the swimmer\'s padded dome', () => {
+    const c = clusters[0]!;
+    expect(clusterMound(clusters, c.x, c.z)).toBeCloseTo(c.y + c.height * 0.4, 5);
+    expect(clusterMound(clusters, c.x, c.z)).toBeLessThan(clusterClearance(clusters, c.x, c.z));
+    expect(clusterMound(clusters, c.x + c.radius * 1.1, c.z)).toBe(-Infinity);
   });
 });

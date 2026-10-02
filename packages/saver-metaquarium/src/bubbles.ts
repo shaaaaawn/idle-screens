@@ -415,12 +415,16 @@ export function buildBubbles(
 export function pearlSites(parts: readonly BufferGeometry[], scale: number, max = 400): PearlSite[] {
   const out: PearlSite[] = [], seen = new Set<string>();
   for (const g of parts) {
-    const p = g.getAttribute('position'), sw = g.getAttribute('aSway');
+    const p = g.getAttribute('position'), sw = g.getAttribute('aSway'), mat = g.getAttribute('aMat');
     if (!p || !sw) continue;
     const step = Math.max(1, Math.floor(p.count / 600));
     for (let i = 0; i < p.count; i += step) {
       const y = p.getY(i), root = sw.getX(i);
       if (y - root < 2.5 * scale) continue;
+      // Pearls rise off LEAVES: a stony coral, a clam or a tentacle (anything
+      // that sways more or less than a leaf) photosynthesises nothing — and the
+      // pearl's own sway, which knows no stiffness, would drift off it.
+      if (mat && Math.abs(mat.getX(i) - 1) > 1e-3) continue;
       const key = `${p.getX(i).toFixed(2)},${y.toFixed(2)},${p.getZ(i).toFixed(2)}`;
       if (seen.has(key)) continue;
       seen.add(key);

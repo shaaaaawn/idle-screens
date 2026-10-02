@@ -28,6 +28,10 @@ export const METAQUARIUM_PARAMS = {
    *  swam. Under about one body length (18) it is the fish's own eye, and the
    *  fish itself is hidden. */
   followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
+  /** Where round the followed fish the chase camera stands, degrees: 0 behind
+   *  it (the default), 90 at its side, 180 in front looking back at its face
+   *  — a hackerfish's screen, a crab's smile. */
+  followAngle: { type: 'number', default: 0, min: -180, max: 180, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },
@@ -97,8 +101,10 @@ export const METAQUARIUM_PARAMS = {
    *  tier-budgeted. Palette params (fog, floor colour, motes) stay yours —
    *  an environment never overrides them. */
   environment: { type: 'enum', default: 'void', options: [...ENVIRONMENT_NAMES], ease: 'step' },
-  /** Override the environment's terrain. `auto` follows the environment. */
-  floorKind: { type: 'enum', default: 'auto', options: ['auto', 'flat', 'dunes', 'ridges', 'basin'], ease: 'step' },
+  /** Override the environment's terrain. `auto` follows the environment. `shelf` raises the town on a plateau with a terraced
+   *  lip; `trench` cuts a meandering channel across the front; `terraces`
+   *  steps the floor up in tiers behind the town. */
+  floorKind: { type: 'enum', default: 'auto', options: ['auto', 'flat', 'dunes', 'ridges', 'basin', 'shelf', 'trench', 'terraces'], ease: 'step' },
   /** Water-ceiling height. -1 = follow the environment; fish swim to y=72.
    *  STEP, not smooth: -1 is a sentinel, so a ramp from -1 to a real height
    *  passes through negatives that read as "auto" — the ceiling would jump
@@ -224,6 +230,12 @@ export const METAQUARIUM_PARAMS = {
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
    *  for the original unlit atlas look. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+  /** The bundled creatures' look. `neon` is the blacklight poster: coats near
+   *  black, the dark of the eyes (and a crab's mouth) a seeded neon that glows
+   *  and blooms, small glow kept, big glow (a crab's claws) dark. The glowing eyes are light, not an eye
+   *  display, so `eyeLife` leaves them be. Minted fish keep their atlases.
+   *  Best in a dark room with `finish`. Read when a fish spawns. */
+  fishLook: { type: 'enum', default: 'natural', options: ['natural', 'neon'], ease: 'step' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.
@@ -276,6 +288,40 @@ export const METAQUARIUM_PARAMS = {
    *  fish swim the room. Pairs with the default `void` environment. */
   interior: { type: 'enum', default: 'none', options: ['none', 'geode'], ease: 'step' },
   floraDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Which plants grow: `species[:weight]`, comma-separated (`kelp:3, anemone, clam`).
+   *  Seventeen species: grass tube bulb fan kelp anemone staghorn brain whip barrel
+   *  shelf seapen clam bubble elder curl pod. Empty (default) plants the room's own garden: coral on a
+   *  reef, kelp and whips in the kelp forest, glow caps in the abyss. */
+  floraMix: { type: 'string', default: '', ease: 'step' },
+  /** One colour scheme for the whole garden: `world` grows one from the seed
+   *  (a hero hue, its neighbour and an accent), or up to six `#rrggbb`. Empty
+   *  (default) lets every species keep its own colours. */
+  floraPalette: { type: 'string', default: '', ease: 'step' },
+  /** `garden` (default) grows the flora round the crystals; `gallery` plants
+   *  one of each species (every one, or those `floraMix` names) in its own
+   *  plot, low ones in a front row and tall ones behind — to see them all. */
+  floraLayout: { type: 'enum', default: 'garden', options: ['garden', 'gallery'], ease: 'step' },
+  /** Wild geodes lying about the floor (0 = none): split geodes (and thunder
+   *  eggs), amethyst cathedrals, crystal clusters and, at most one, a mega
+   *  cavern geode. Agate and druse drawn per pixel; see geodes.ts. */
+  geodes: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Which kinds: `kind[:weight]`, comma-separated (`geode:3, cathedral, cluster`). */
+  geodeMix: { type: 'string', default: '', ease: 'step' },
+  /** What they are made of: empty = the mineral nearest in colour to each
+   *  geode's nearest crystal (every mineral in `gallery` layout, and a seeded
+   *  pick where there is no crystal to match); `world` = two chosen from the seed; or a list
+   *  (`amethyst, citrine`). */
+  geodeMineral: { type: 'string', default: '', ease: 'step' },
+  /** `field` (default) scatters them round the tank; `gallery` stands one of each kind in rows. */
+  geodeLayout: { type: 'enum', default: 'field', options: ['field', 'gallery'], ease: 'step' },
+  /** The town square's fountain, where the paths meet (or in front of the
+   *  homes): `vent` a hot-vent chimney crusted with crystal, `geode` a great
+   *  geode basin on a plinth. A bubble column, a pebble plaza, a light
+   *  of its own, and a vignette mark `fountain`. */
+  fountain: { type: 'enum', default: 'none', options: ['none', 'vent', 'geode'], ease: 'step' },
+  /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
+   *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
+  streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
