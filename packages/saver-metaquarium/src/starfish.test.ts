@@ -3,9 +3,11 @@ import {
   AnimationClip, Bone, BoxGeometry, Group, Mesh, MeshBasicMaterial, Quaternion, Vector3, VectorKeyframeTrack,
 } from 'three';
 import { describe, expect, it } from 'vitest';
+import type { ControlTrack } from '@idle-screens/core';
+import { METAQUARIUM_PARAMS } from './manifest';
 import { compileSwimPlan } from './plan';
 import {
-  AEROBICS, classSpot, DANCE_MOVES, danceAt, rigStarfish, STARFISH_BLOOM, STARFISH_CLIPS, STARFISH_DANCE_BLOOM, STARFISH_PACE, STARFISH_RISE,
+  AEROBICS, classSpot, DANCE_MOVES, danceAt, danceBeats, rigStarfish, STARFISH_BLOOM, STARFISH_CLIPS, STARFISH_DANCE_BLOOM, STARFISH_PACE, STARFISH_RISE,
   STARFISH_STAND_BLOOM, starfishCycle, starfishFrame, starfishGait, starfishIdle, starfishMoment, starfishSpot,
   starfishStart, starfishStopAt, type StarfishClip, type StarfishDoing, type StarfishInput, type StarfishOutput, type StarfishRig,
 } from './starfish';
@@ -303,5 +305,32 @@ describe('starfish: the dance', () => {
     expect(STARFISH_CLIPS.reduce((s, n) => s + weight(rig, n), 0)).toBe(1);
     expect(rig.actions.jacks.time).toBeCloseTo((2.5 / 4) * DUR.jacks!, 9);
     expect(out.bloom).toBe(STARFISH_DANCE_BLOOM); // held: the beat (2 Hz at 120) is past the flash limit
+  });
+});
+
+describe('starfish: the beat', () => {
+  const space = METAQUARIUM_PARAMS;
+  it('a steady tempo: beats are bpm × t, whether or not the tempo is on the track', () => {
+    expect(danceBeats(30, 128, space, null, false)).toBeCloseTo(64, 9);
+    const steady: ControlTrack = { program: 'metaquarium', seed: 1, deltas: [{ t: 0, path: 'danceTempo', value: 128, ease: 'step', dur: 0 }] };
+    for (const t of [0, 7.5, 30, 600]) expect(danceBeats(t, 128, space, steady, true)).toBeCloseTo((t * 128) / 60, 6);
+  });
+
+  it('a glide speeds the beat up without a jump in it, and lands on the new tempo', () => {
+    // 120 BPM, then from 20 s a 4 s glide to 180.
+    const track: ControlTrack = { program: 'metaquarium', seed: 1, deltas: [
+      { t: 0, path: 'danceTempo', value: 120, ease: 'step', dur: 0 },
+      { t: 20000, path: 'danceTempo', value: 180, ease: 'smooth', dur: 4000 },
+    ] };
+    const beats = (t: number): number => danceBeats(t, 120, space, track, true);
+    expect(beats(10)).toBeCloseTo(20, 6);               // 2 a second before it
+    let prev = beats(19);
+    for (let t = 19 + 1 / 120; t < 26; t += 1 / 120) {  // through the glide at 120 fps
+      const b = beats(t);
+      expect(b - prev).toBeGreaterThan(0);
+      expect(b - prev).toBeLessThan((180 / 60) / 120 + 1e-6); // never faster than the new tempo: no jump
+      prev = b;
+    }
+    expect(beats(40) - beats(30)).toBeCloseTo(30, 4);   // 3 a second after it
   });
 });

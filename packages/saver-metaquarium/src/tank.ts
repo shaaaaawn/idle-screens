@@ -66,7 +66,7 @@ import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
-  classSpot, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
+  classSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
   type StarfishDanceMode, type StarfishOutput, type StarfishRig,
 } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
@@ -796,14 +796,9 @@ class TankInstance implements SaverInstance {
   /** This frame's dance class: each dancer's feet, by fish index (starfish.ts classSpot). */
   private readonly danceSpots = new Map<number, [number, number]>();
   private danceYaw = 0;
-  /** Beats danced by `tSec`: `danceTempo` (BPM) integrated when steered, so a tempo change glides on the beat. */
+  /** Beats danced by `tSec` (starfish.ts danceBeats). */
   private danceBeats(tSec: number): number {
-    const def = this.space.danceTempo;
-    return this.danceTempoTracked && this.track
-      ? integrateParam(this.space, this.track, 'danceTempo', tSec * 1000, {
-          ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
-        }) / 1000 / 60
-      : (tSec * this.num('danceTempo')) / 60;
+    return danceBeats(tSec, this.num('danceTempo'), this.space, this.track, this.danceTempoTracked);
   }
   /** Travel time for the school at a moment, cached for the two instants a frame asks about. */
   private shoalWarpMemo: [number, number, number, number] = [NaN, 0, NaN, 0];
@@ -2353,8 +2348,12 @@ class TankInstance implements SaverInstance {
     danceSpots.clear();
     if (dancing) {
       const dancers = this.fish.filter((f): f is NonNullable<typeof f> => !!f?.rig?.starfish && f.index < visible && !styleAt(f.index).formation);
+      // Facing the camera — but never the FOLLOW camera, which is placed from
+      // the followed dancer's own facing: the class would chase it round. Then
+      // it faces the orbit's azimuth, which nothing here moves.
       const camX = this.camera.position.x, camZ = this.camera.position.z;
-      const yaw = Math.hypot(camX, camZ) > 1e-6 ? Math.atan2(camX, camZ) : 0;
+      const yaw = followSlot >= 0 ? (this.num('cameraAzimuth') * Math.PI) / 180
+        : Math.hypot(camX, camZ) > 1e-6 ? Math.atan2(camX, camZ) : 0;
       const fx = Math.sin(yaw), fz = Math.cos(yaw);
       // The front of the class (the instructor) at the tank's centre, the rows
       // behind it: the camera looks at the centre from above, so a dancer
@@ -2868,7 +2867,7 @@ class TankInstance implements SaverInstance {
         y: Math.round(y * 10) / 10,
         z: Math.round(pz * 10) / 10,
         // The facing the frame shows: the script's, for an actor.
-        heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
+        heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : pose.fx, floor ? floor.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),

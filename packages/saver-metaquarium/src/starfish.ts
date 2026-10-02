@@ -39,6 +39,7 @@ import {
   AnimationMixer, Box3, Euler, Quaternion, Vector3,
   type AnimationAction, type AnimationClip, type Bone, type Object3D,
 } from 'three';
+import { integrateParam, type ControlTrack, type ParamSpace } from '@idle-screens/core';
 import { boutDistance, boutSpeed, type CrabInput } from './crab';
 import { swimPoseAtDistance, type SwimPlan } from './plan';
 import { fishHash } from './swim';
@@ -186,6 +187,17 @@ const AEROBICS_BEATS = AEROBICS.reduce((s, [, n]) => s + n, 0);
 const FREESTYLE: readonly (readonly [DanceMove, number])[] = [
   ['march', 0.12], ['jacks', 0.14], ['reach', 0.12], ['kick', 0.12], ['twist', 0.16], ['circles', 0.12], ['disco', 0.17], ['spin', 0.05],
 ];
+
+/** Beats danced by `t` seconds: `danceTempo` (BPM) integrated over the track
+ *  when it is steered, so a glide speeds the beat up without a jump in it;
+ *  `bpm × t` when it is not. */
+export function danceBeats(t: number, bpm: number, space: ParamSpace, track: ControlTrack | null, tracked: boolean): number {
+  if (!tracked || !track) return (t * bpm) / 60;
+  const def = space.danceTempo;
+  return integrateParam(space, track, 'danceTempo', t * 1000, {
+    ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
+  }) / 1000 / 60;
+}
 
 /** The move a dancer is on at beat `beats`, and how many beats into it. */
 export function danceAt(mode: StarfishDanceMode, index: number, beats: number): { move: DanceMove; beat: number } {
