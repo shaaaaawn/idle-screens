@@ -90,6 +90,14 @@ struct GalleryView: View {
         // leads, then what you follow, what is being watched, what is newest —
         // one rail doing the work the banner, "Following" and "Watching now"
         // rows each did a third of.
+        // Yours first: the channels you hold a key for, before anything you
+        // are merely watching.
+        if !yours.isEmpty {
+            SectionGrid(shelf: HomeSection(id: "yours", title: "Your channels",
+                                           subtitle: yours.count == 1 ? "1 channel" : "\(yours.count) channels",
+                                           ownedTags: [], channels: yours),
+                        columns: gridColumns, cardWidth: gridCardWidth)
+        }
         if !onNow.isEmpty {
             OnNowRail(channels: onNow)
         }
@@ -109,6 +117,19 @@ struct GalleryView: View {
     /// the version with the billboard channel taken out.
     private var allSections: [HomeSection] {
         HomeSections.build(channels: app.channels, categories: app.categories)
+    }
+
+    /// Every channel this device holds a key for, newest activity first. A
+    /// private or unlisted channel is not in the public list, so it gets a
+    /// stand-in card (its name, and the server's thumb) rather than vanishing.
+    private var yours: [PublicChannel] {
+        let byId = Dictionary(app.channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let owned = app.credentials.map { credential in
+            byId[credential.channelId]
+                ?? PublicChannel(channelId: credential.channelId, label: credential.label,
+                                 tags: nil, viewers: nil)
+        }
+        return owned.sorted { ($0.lastEventAt ?? 0) > ($1.lastEventAt ?? 0) }
     }
 
     private var onNow: [PublicChannel] {
