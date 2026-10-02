@@ -1,5 +1,58 @@
 # @idle-screens/saver-metaquarium
 
+## 0.13.0
+
+### Minor Changes
+
+- 9ad212f: The crab lives on the seabed now. It used to swim the floor band like a fish, rigid, nose first; it now walks on its own legs.
+  
+  - **A real rig.** `breeds/rig/crab.py` rigs the delivered model in Blender without changing a voxel of it: 23 rigid parts (body, eye stalks, claw arms and jaws, two-segment legs) and six clips — walk, idle, pinch, forage, wave, cheer. The intake carries the skeleton and clips through greedy meshing, part by part (1,482 triangles once buried faces are culled, down from 5,960).
+  - **It walks like a crab.** Sideways, in an alternating tetrapod gait placed by two-bone IK, with the gait's phase set from distance so the feet never slide. It walks in bouts and stops: to pick at the floor and feed, snap its claws, wave a claw like a fiddler crab, cheer with both claws up, or just look around. For a wave or a cheer it turns to face the camera. Between bouts it sometimes turns all the way round, stepping as it goes.
+  - **On the ground, over the rocks.** It stands on the terrain, on the boulders' real top surface (`ground.ts` rasterises their stone, so it neither hovers on a fish's padded dome nor sinks in), and on a low mound over a crystal colony, tilting with the slope. Crabs give each other room. A soft contact shadow sits under each crab, on the ground it stands on, so it reads as standing rather than hovering. A crab keeps its own pace: the global `swimSpeed` no longer hurries or slows it.
+  
+  Everything is a closed form in t, like the rest of the tank. Scenes without a crab are unchanged.
+  
+  The crab's mouth (and the dori's eyes) no longer flicker. The breed intake drops a body face that lies under an eye decal, but it keyed faces by an unsnapped plane, and the delivered models put the body a hair (0.0002) off the decal's plane, so the two stayed and z-fought. Planes snap to the lattice now; a breed test holds every voxel breed to no body face under a decal.
+- 9ad212f: Flora: twelve new species (anemone, staghorn, brain coral, sea whip, barrel sponge, glow caps, sea pen, bubble algae, fiddlehead curl, orb pod, a giant clam and the elder blossom tree, the last two specimens capped per garden), and a `floraMix` param (`kelp:3, whip, seapen`). With `floraMix` empty the environment picks the garden: coral on a reef, kelp and whips in the kelp forest, tube worms and glow caps at the vent.
+  
+  Plants grow in colonies that share a colour, ramp from a deeper base to a brighter tip, and about one colony in thirty is a rare nacreous morph. Stony corals barely sway and clams not at all; anemone tentacles writhe from the crown. On mid and high tiers plants take the crystal pools and follow-spots (multiplied into their own colour, hue kept), and sheen gleams on tentacles, bubble algae and rare morphs. Pearls rise only off leaves; the shoal keeps above every plant, lit or not. Existing scenes with `floraDensity` > 0 grow a different, more varied garden.
+  
+  After No Man's Sky's flora: plants answer passing fish (anemone crowns fold, tube worms duck, sea pens pull down, pods swell, lamps flare), siblings may grow as their species' small form, and `floraPalette` (`world` or up to six `#rrggbb`) gives a garden one colour scheme. `floraLayout: gallery` plants one of each species (or each one `floraMix` names) in its own plot across the front of the tank, so every kind can be seen at once.
+- 9ad212f: The glowfish fishes now, and the crab can go neon.
+  
+  - **A rigged anglerfish.** `breeds/rig/glowfish.py` rigs the delivered model in Blender without changing a voxel: the great lower jaw, a head that flips open on its back edge, a tail, two eyes that blink, and a three-link lure with the glowing bulb on its tip. Four clips — swim, lure, chomp, blink — driven by `src/angler.ts`: the tail beats with the distance swum; once a cycle it hovers nose-down, mouth agape, and fishes, dangling and twitching the bait; on some bouts it strikes, head flung open, lunging, jaws snapping shut; it blinks on its own clock.
+  - **Its light lives.** The lure breathes slowly, beckons while it fishes and goes dark at the strike, then comes back — its bloom, halo and the light it throws all follow the lure as it swings (a glow part riding one bone is placed from that bone). Flash-safe by construction: never faster than 1.5 Hz.
+  - **More colour.** The lure and the eyes no longer have fixed colours: each fish draws its own from the glow palette.
+  - **Metal teeth.** A new `METAL-` role: a polished plate that takes the studio environment when lit, chrome when flat (`fishMetal: 'off'` keeps the authored colour). The glowfish's teeth wear it.
+  - **`fishLook: 'neon'`.** The bundled creatures in blacklight: coats near black, the dark of the eyes — and a crab's mouth — glowing a seeded neon that blooms; small glow (a lure, a fin's accent) stays lit, while a glow part that is a big piece of the animal (a crab's claws) goes dark. Best in a dark room with `finish`. `natural` (the default) is unchanged.
+  - **One Blender file for every rig.** `breeds/rig/common.py` is what rigs share; `build.py` puts every rig in one .blend, a scene per breed, and `export.py` ships a hand edit from it.
+  - A crab's claw glow sat a little off the claws (its body stands off the fish's origin, and the glow placement ignored that); it is where the claws are now.
+- 9ad212f: The hackerfish is half fish, half computer now: its face is a screen.
+  
+  - **A rigged hackerfish.** `breeds/rig/hackerfish.py` rigs the delivered model in Blender without changing a voxel: the monitor-head box, its screen (on a bone of its own, so it can rattle in its bezel), two paddle fins and a tail. Clips swim, type and glitch, driven by `src/hacker.ts`.
+  - **A face that is a display.** A new `SCREEN-` role (`src/screen.ts`): the glass and the face pixels become one 10×10 phosphor display on the screen's front, the designer's own face its neutral expression, doubled. It changes expression every few seconds with a scan-down refresh — happy, wink, cool, love, surprised, sleepy — and the neutral face blinks. Once a cycle it hacks: a focused face, then code rain while its fins type. Some hacks end in a crash: the screen tears, shows x_x, boots with a spinner, and comes back happy. Each fish has its own phosphor (green, amber, cyan, the designer's pink, cold white), and the screen throws its light. Never more than three changes a second.
+  - **`followAngle`.** Swings the chase camera round the followed fish (0 behind, 180 in front looking back at its face) — a hackerfish's screen, a crab's smile.
+- 9ad212f: The shark hunts now, and the bundled voxel breeds got much lighter.
+  
+  - **A rigged shark.** `breeds/rig/shark.py` rigs the delivered model in Blender without changing a visible voxel, cut by position (its fins sit off the lattice): the head, a lower jaw ringed with metal teeth, eyes that roll back, the pectorals, and a three-link tail so the swim is a true wave down the body. Clips swim and bite, driven by `src/shark.ts`: the tail beats slow and heavy with the distance swum (it patrols by default), and on some cycles it strikes — snout up, jaw wide, eyes rolled back, the lunge, the snap, a thrash.
+  - **One body, not three pieces.** The spine is soft: body vertices blend between neighbouring spine bones over a few voxels, so the bite and the thrash bend the shark instead of splitting it at the joints. The jaw rests nearly closed, and the thrash is spread down the whole body.
+  - **Metal teeth that don't flicker** (the `METAL-` role, as the glowfish's). Lit metal is satin now (metalness 0.75, roughness 0.38, a little light of its own): a mirror-flat voxel face reflected one direction of the room and flipped white ↔ black as the jaw moved. Where two materials share a face of a cell, the intake keeps the smaller one, and eye, metal and kept parts get a polygon offset, so teeth and eyes never z-fight the body.
+  - **Buried faces culled.** The intake drops every face that a whole cube sits right in front of. Some sources kept every face of every cube: the shark goes from 5,726 triangles to 3,476 (215 KB to 213 KB, soft spine included), the crab from 4,540 to 1,482, the dori from 1,692 to 452, the blowfish from 2,280 to 1,274, the hackerfish from 612 to 204. Every breed's visible surface is unchanged (compared cell by cell and in the breed lab).
+  - **`followAngle`** now swings the camera round the fish's own heading, so a side or face camera stays square to a long fish too.
+- 9ad212f: The town square and the floor. `fountain` (`vent` | `geode`) stands where the paths meet: a hot-vent chimney with a citrine-hot mouth, or a great geode basin on a plinth, with a bubble column, a pebble plaza, light that draws the fish and a vignette mark `fountain`. `streetLamps` sets slate posts with crystal crowns round the plaza and along the paths, each with a halo and light on the floor. Three carved `floorKind`s: `shelf` (the town on a plateau with a terraced lip), `trench` (a channel across the front) and `terraces` (tiers climbing behind), slope-shaded so their faces read. `inspect()` reports each fish's drawn height.
+- 9ad212f: Wild geodes (`geodes`, `geodeMix`, `geodeMineral`, `geodeLayout`), four assets made properly: split geodes (one in three a thunder egg with a star core), amethyst cathedrals, crystal clusters and one mega cavern geode. Agate banding is drawn per pixel from a noise-warped band field; crystals are real quartz habit (hexagonal prism and point), scattered without a grid, colour-zoned root to tip, with facet highlights, a fresnel rim and druse that twinkles. Nine minerals and a rare iridescent aura morph; self-lit, so they read in a flat tank; crystals wake when a fish comes close. Geode homes get a multi-band agate rind; glow-cap gills are a ring under the cap.
+- 9ad212f: Seahorses move like seahorses. The body wave is wrong for an upright animal, so seahorses were excluded from it and hovered completely rigid; their only clip moves the whole model.
+  
+  With `swimWave` on, a seahorse now gets its own rig (`seahorse.ts`):
+  
+  - **The dorsal fin** ripples: a fast wave runs up it, sideways with the rays flexing fore and aft, so it reads from any camera. It beats faster when the animal works.
+  - **The prehensile tail** coils forward under the body and lets go on a slow, per-fish clock. It coils harder under effort (a maneuver, a turn), bending progressively toward the tip about the tail's root.
+  - **The head** nods about the neck, and the whole animal rocks gently upright.
+  
+  It is a vertex patch in the fish's frame, the same shape as the swim wave, so eyes and glow shells move with the body. The anatomy is quoted as fractions of the shared seahorse geometry, which all forty tokens use, and a JS mirror of the GLSL tests it. At `swimWave` 0 nothing changes.
+  
+  The playground breed lab can now review motion: `/breeds.html?url=…&rig=seahorse&times=…` renders the rigged model at chosen moments, side-on, or with `&view=34` from behind; `&effort=1.9` shows a working animal.
+
 ## 0.12.0
 
 ### Minor Changes
