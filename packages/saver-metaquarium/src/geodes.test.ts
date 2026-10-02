@@ -33,6 +33,11 @@ describe('wild geodes', () => {
     expect(buildGeodeField(createRng(3), { ...opts, amount: 0 }).geometry).toBeNull();
   });
 
+  it('a mix that names kinds but weights none of them places nothing, not the default spread', () => {
+    expect(buildGeodeField(createRng(3), { ...opts, mix: { cavern: 0 } }).geodes).toBe(0);
+    expect(buildGeodeField(createRng(3), { ...opts }).geodes).toBeGreaterThan(0);
+  });
+
   it('keeps them apart and clear of what stands there', () => {
     const blocked = (x: number, z: number, r: number): boolean => Math.hypot(x, z) < 60 + r;
     const f = buildGeodeField(createRng(5), { ...opts, cap: 12, blocked });

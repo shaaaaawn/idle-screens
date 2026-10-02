@@ -106,7 +106,7 @@ describe('the hackerfish (hacker.ts)', () => {
         prev = k;
       }
       for (let j = 0; j < changes.length; j++) {
-        expect(changes.filter((t) => t >= changes[j]! && t < changes[j]! + 1).length).toBeLessThanOrEqual(3 * 2);
+        expect(changes.filter((t) => t >= changes[j]! && t < changes[j]! + 1).length).toBeLessThanOrEqual(3 * 2); // 3 flashes a second, each a pair of key changes (a wipe starts and ends)
       }
     }
   });

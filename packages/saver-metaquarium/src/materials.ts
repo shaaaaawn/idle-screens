@@ -499,7 +499,7 @@ export interface FishGlow {
   }>;
 }
 
-/** The bone a skinned part rides, if at least 80% of its vertices ride one —
+/** The bone a skinned part rides, if at least 80% of its vertices ride one rigidly (weight 1, nothing on any other slot) —
  *  and the part's centre in that bone's frame. */
 function partBone(mesh: Mesh, centre: Vector3): { bone: Object3D; offset: Vector3 } | null {
   const sk = mesh as unknown as SkinnedMesh;
@@ -507,7 +507,7 @@ function partBone(mesh: Mesh, centre: Vector3): { bone: Object3D; offset: Vector
   const idx = mesh.geometry.getAttribute('skinIndex'), wt = mesh.geometry.getAttribute('skinWeight');
   if (!idx || !wt) return null;
   const count = new Map<number, number>();
-  for (let i = 0; i < idx.count; i++) if (wt.getX(i) > 0.5) count.set(idx.getX(i), (count.get(idx.getX(i)) ?? 0) + 1);
+  for (let i = 0; i < idx.count; i++) if (wt.getX(i) > 0.999 && wt.getY(i) < 1e-3 && wt.getZ(i) < 1e-3 && wt.getW(i) < 1e-3) count.set(idx.getX(i), (count.get(idx.getX(i)) ?? 0) + 1);
   let best = -1, most = 0;
   for (const [j, c] of count) if (c > most) { best = j; most = c; }
   const bone = sk.skeleton.bones[best];

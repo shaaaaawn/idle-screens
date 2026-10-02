@@ -64,7 +64,8 @@ describe('bundled breeds (breeds/README.md)', () => {
         const [j0] = j.getElement(i, []) as number[];
         const [w0, w1, w2, w3] = w.getElement(i, []) as number[];
         expect(j0).toBeLessThan(joints.length);
-        expect([w0, w1! + w2! + w3!]).toEqual([1, 0]);
+        expect(w0).toBeCloseTo(1, 3);
+        for (const tail of [w1!, w2!, w3!]) expect(Math.abs(tail)).toBeLessThan(1e-3);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone).toMatch(parts[name]!);
@@ -94,7 +95,8 @@ describe('bundled breeds (breeds/README.md)', () => {
       for (let i = 0; i < j.getCount(); i++) {
         const [j0] = j.getElement(i, []) as number[];
         const [w0, ...rest] = w.getElement(i, []) as number[];
-        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+        expect(w0).toBeCloseTo(1, 3);
+        for (const tail of rest) expect(Math.abs(tail)).toBeLessThan(1e-3);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone, name).toMatch(parts[name]!);
@@ -104,6 +106,7 @@ describe('bundled breeds (breeds/README.md)', () => {
   it('hackerfish: the rig survives the intake — five bones, three clips, the screen on its own bone', async () => {
     const doc = await new NodeIO().read(here('../breeds/hackerfish.glb').pathname);
     const root = doc.getRoot();
+    expect(root.listSkins()).toHaveLength(1);
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     expect([...joints].sort()).toEqual(['body', 'fin.L', 'fin.R', 'screen', 'tail']);
     expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['glitch', 'swim', 'type']);
@@ -120,14 +123,23 @@ describe('bundled breeds (breeds/README.md)', () => {
   it('shark: the rig survives the intake — head, jaw, eyes, fins and a three-link tail; the teeth on the jaw', async () => {
     const doc = await new NodeIO().read(here('../breeds/shark.glb').pathname);
     const root = doc.getRoot();
+    expect(root.listSkins()).toHaveLength(1);
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     expect([...joints].sort()).toEqual(['body', 'caudal', 'eye.L', 'eye.R', 'fin.L', 'fin.R', 'head', 'jaw', 'tail1', 'tail2']);
     expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['bite', 'swim']);
+    let teeth = 0;
     for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
       if (p.getMaterial()!.getName() !== 'METAL-Teeth') continue;
-      const j = p.getAttribute('JOINTS_0')!;
-      for (let i = 0; i < j.getCount(); i++) expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
+      teeth += 1;
+      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) {
+        expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
+        const [w0, ...rest] = w.getElement(i, []) as number[];
+        expect(w0).toBeCloseTo(1, 3);
+        for (const tail of rest) expect(Math.abs(tail)).toBeLessThan(1e-3);
+      }
     }
+    expect(teeth).toBeGreaterThan(0);
   });
 
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', () => {
