@@ -244,9 +244,33 @@ struct AquariumField: Sendable {
         self.bubbles = bubbles
     }
 
+    // MARK: gathering — the tank's own loading signal
+
+    /// "The tank is filling", said by the fish themselves: they leave their
+    /// lanes and swim a slow ring mid-water — a spinner that belongs in the
+    /// scene — then scatter back to their lanes when released. Opt-in: nil
+    /// everywhere except the phone's stand-in for a 3D tank that is loading,
+    /// so the Apple TV's aquarium is unchanged.
+    struct Gather: Sendable, Equatable {
+        var startedAt: Date
+        var releasedAt: Date?
+
+        static let gatherSeconds = 1.6
+        static let releaseSeconds = 1.3
+
+        /// 0 = swimming their lanes, 1 = fully in the ring.
+        func amount(at now: Date) -> Double {
+            let inAmount = min(1, max(0, now.timeIntervalSince(startedAt) / Self.gatherSeconds))
+            guard let releasedAt else { return inAmount }
+            let held = min(1, max(0, releasedAt.timeIntervalSince(startedAt) / Self.gatherSeconds))
+            return held * max(0, 1 - now.timeIntervalSince(releasedAt) / Self.releaseSeconds)
+        }
+    }
+
     // MARK: draw
 
-    func draw(in ctx: inout GraphicsContext, size: CGSize, t: Double, tier: CapabilityTier) {
+    func draw(in ctx: inout GraphicsContext, size: CGSize, t: Double, tier: CapabilityTier,
+              gather: Double = 0) {
         let w = size.width, h = size.height
 
         // Water: a deep vertical gradient, lighter band up top where the
@@ -316,18 +340,37 @@ struct AquariumField: Sendable {
 
         // Fish: the cast, far to near. Icons face right; leftward swimmers
         // mirror. Position is pure f(t): wrap of phase + t/period.
-        for f in fish {
+        for (index, f) in fish.enumerated() {
             guard let img = UIImage(named: Self.cast[f.icon]) else { continue }
             let travel = (f.phase + t / f.period).truncatingRemainder(dividingBy: 1)
             // 14% off-screen margin each side so entries/exits are complete.
             let span = Double(w) * 1.28
             let rawX = travel * span - Double(w) * 0.14
-            let x = f.dir > 0 ? rawX : Double(w) - rawX
+            var x = f.dir > 0 ? rawX : Double(w) - rawX
             let bob = sin(t * 0.001 * f.bobHz * 2 * .pi + f.bobPhase) * f.bobAmp
-            let y = (f.lane + bob) * Double(h)
+            var y = (f.lane + bob) * Double(h)
             // Near fish ~15% of height, far ~5%.
-            let side = (0.05 + f.depth * 0.10) * Double(h)
-            let dim = 0.55 + f.depth * 0.45
+            var side = (0.05 + f.depth * 0.10) * Double(h)
+            var dim = 0.55 + f.depth * 0.45
+            var dir = f.dir
+            if gather > 0 {
+                // Each fish joins a beat after the last, so the ring forms
+                // fish by fish instead of snapping shut.
+                let n = Double(fish.count)
+                let own = min(1, max(0, gather * 1.45 - Double(index) / n * 0.45))
+                let e = own * own * (3 - 2 * own)
+                let unit = Double(min(w, h))
+                let theta = t * 0.00085 + Double(index) * 2 * .pi / n
+                let ringX = Double(w) * 0.5 + cos(theta) * unit * 0.27
+                let ringY = Double(h) * 0.44 + sin(theta) * unit * 0.13
+                x += (ringX - x) * e
+                y += (ringY - y) * e
+                // Front of the ring is near: bigger and brighter.
+                let near = (sin(theta) + 1) / 2
+                side += ((0.06 + near * 0.05) * unit * 1.6 - side) * e
+                dim += ((0.6 + near * 0.4) - dim) * e
+                if e > 0.5 { dir = -sin(theta) >= 0 ? 1 : -1 }
+            }
             let resolved = ctx.resolve(Image(uiImage: img))
             var fctx = ctx
             fctx.opacity = dim
@@ -338,17 +381,17 @@ struct AquariumField: Sendable {
                 // face travel and add a slow paddle rock — translating the
                 // head-up art sideways read as a turtle floating wrong.
                 let rock = sin(t * 0.0012 + f.bobPhase) * 0.10
-                fctx.rotate(by: .radians((f.dir > 0 ? .pi / 2 : -.pi / 2) + rock))
+                fctx.rotate(by: .radians((dir > 0 ? .pi / 2 : -.pi / 2) + rock))
             case .seahorse:
                 // Upright drifters: never mirrored sideways momentum — just a
                 // gentle current sway around vertical.
-                if f.dir < 0 { fctx.scaleBy(x: -1, y: 1) }
+                if dir < 0 { fctx.scaleBy(x: -1, y: 1) }
                 fctx.rotate(by: .radians(sin(t * 0.0009 + f.bobPhase) * 0.14))
             case .angel:
-                if f.dir < 0 { fctx.scaleBy(x: -1, y: 1) }
+                if dir < 0 { fctx.scaleBy(x: -1, y: 1) }
                 fctx.rotate(by: .radians(sin(t * 0.0011 + f.bobPhase) * 0.05))
             case .beta:
-                if f.dir < 0 { fctx.scaleBy(x: -1, y: 1) }
+                if dir < 0 { fctx.scaleBy(x: -1, y: 1) }
             }
             fctx.draw(resolved, in: CGRect(x: -side / 2, y: -side / 2, width: side, height: side))
         }
