@@ -13,25 +13,39 @@
  *   /breeds.html?set=source      the untouched sources (breeds/source/*.glb)
  *   /breeds.html?set=both        source above optimised, per breed
  *   &only=shark,crab             a subset
+ *   ?url=/a.glb,/b.glb           any models the dev server can serve
+ *   &rig=seahorse&times=0,0.3,…  motion review: the model RIGGED (seahorse.ts),
+ *                                side-on at each moment (seconds) — one row
+ *                                per model, one column per moment;
+ *                                &view=34 from behind, &view=top from above, &effort=1.9 working
  */
 import {
-  AmbientLight, Box3, Color, DirectionalLight, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
+  AmbientLight, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
   type Object3D, PerspectiveCamera, Scene, Vector3, WebGLRenderer,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { rigSeahorse } from '../../../packages/saver-metaquarium/src/seahorse';
 
 const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 
+/** Labels and material names come from the URL and the GLB: never markup. */
+const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
 const rows: { label: string; url: string }[] = [];
 const names = [...new Set([...Object.keys(OUT), ...Object.keys(SRC)].map(nameOf))].sort()
   .filter((n) => !only || only.includes(n));
-for (const n of names) {
+for (const u of q.get('url')?.split(',').filter(Boolean) ?? []) rows.push({ label: u.split('/').pop()!, url: u });
+const rigName = q.get('rig');
+const DEFAULT_TIMES = [0, 0.25, 0.5, 0.75, 1, 1.25];
+const parsedTimes = (q.get('times') ?? '').split(',').filter(Boolean).map(Number);
+const times = parsedTimes.length && parsedTimes.every(Number.isFinite) ? parsedTimes : DEFAULT_TIMES;
+const effort = Number.isFinite(Number(q.get('effort') ?? 1)) ? Number(q.get('effort') ?? 1) : 1;
+for (const n of q.get('url') ? [] : names) {
   const s = Object.entries(SRC).find(([k]) => nameOf(k) === n)?.[1];
   const o = Object.entries(OUT).find(([k]) => nameOf(k) === n)?.[1];
   if ((set === 'source' || set === 'both') && s) rows.push({ label: `${n} · source`, url: s });
@@ -41,7 +55,7 @@ for (const n of names) {
 const FALSE = ['#ff5a5a', '#5ad1ff', '#ffd23a', '#7dff6a', '#c77dff', '#ff9a3a', '#3affc8', '#ff6ad5', '#9aa4ff', '#f0f0f0'];
 const role = (m: string): string => /eye/i.test(m) ? (/black|pupil/i.test(m) ? 'eye·pupil' : /white|sclera/i.test(m) ? 'eye·sclera' : 'eye·?') : /glow/i.test(m) ? 'glow' : /^KEEP-/.test(m) ? 'kept' : /primary/i.test(m) ? 'coat A' : /secondary/i.test(m) ? 'coat B' : 'RANDOM coat';
 
-const CELL = 260, COLS = 6;
+const CELL = 260, COLS = rigName ? times.length : 6;
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
@@ -82,6 +96,33 @@ const views: Array<[string, (d: number) => Vector3]> = [
       tris += t;
       for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mats.set(mat.name || '(unnamed)', (mats.get(mat.name || '(unnamed)') ?? 0) + t);
     });
+    if (rigName === 'seahorse') {
+      // The tank's frame: nose +z (the tank yaws the model so), up +y.
+      const group = new Group(); const body = root;
+      body.rotation.y = swimX ? Math.PI / 2 : 0;
+      group.add(body);
+      body.traverse((o) => { const m = o as Mesh; if (m.isMesh) for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mat.userData.mqOwned = true; });
+      const rig = rigSeahorse(group, body, 0.4);
+      const scene = stage(group);
+      const cam = new PerspectiveCamera(30, 1, span * 0.05, span * 20);
+      times.forEach((t, c) => {
+        rig?.set({ phase: 0, amp: 0.08 * effort, bend: 0, t });
+        // side (default), or ¾ from behind-left where the fin's sideways ripple shows.
+        if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7);
+        else if (q.get('view') === 'top') cam.position.set(0, span * 2.2, span * 0.01);
+        else cam.position.set(span * 2.4, 0, 0);
+        cam.lookAt(0, 0, 0);
+        const x = c * CELL, y = (rows.length - 1 - row) * CELL;
+        renderer.setViewport(x, y, CELL, CELL); renderer.setScissor(x, y, CELL, CELL);
+        renderer.render(scene, cam);
+        const lab = document.createElement('div'); lab.className = 'label';
+        lab.style.left = `${x + 4}px`; lab.style.top = `${row * CELL + 4}px`;
+        lab.textContent = c === 0 ? `${r.label}  t=${t}s` : `t=${t}s`;
+        sheet.append(lab);
+      });
+      row += 1;
+      continue;
+    }
     const authored = stage(root);
     // False colour: clone with one flat lit colour per material name.
     const matNames = [...mats.keys()];
@@ -104,10 +145,10 @@ const views: Array<[string, (d: number) => Vector3]> = [
     }
     const lab = document.createElement('div'); lab.className = 'label';
     lab.style.left = '4px'; lab.style.top = `${row * CELL + 4}px`;
-    lab.innerHTML = `<b>${r.label}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
+    lab.innerHTML = `<b>${esc(r.label)}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
     const leg = document.createElement('div'); leg.className = 'label';
     leg.style.left = `${3 * CELL + 4}px`; leg.style.top = `${row * CELL + 4}px`;
-    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${n} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
+    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${esc(n)} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
     sheet.append(lab, leg);
     row += 1;
   }

@@ -11,8 +11,9 @@
       "notes": "Already role-named. Spiky silhouette — greedy meshing helps least here."
     },
     "crab": {
-      "source": "source/crab.glb", "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
-      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Legs want a scuttle, not a body wave — motion follow-up."
+      "source": "rig/crab.glb", "delivered": "source/crab.glb", "rig": "rig/crab.py",
+      "kind": "voxel", "size": 0.9, "motion": "scuttle", "roles": {},
+      "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Rigged in Blender by rig/crab.py from the delivered source/crab.glb (never edited): 23 rigid voxel parts — body, eye stalks, claw arms and jaws, two-segment legs — and the clips walk, idle, pinch, forage, wave, cheer. src/crab.ts drives them."
     },
     "dori": {
       "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",
@@ -20,14 +21,16 @@
       "notes": "Unnamed materials (Material.00x) all painted a random coat before. GPU-instanced parts, baked."
     },
     "glowfish": {
-      "source": "source/glowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle",
-      "roles": { "Eyes": "GLOW-Red", "Mouth": "KEEP-Teeth" },
-      "notes": "An anglerfish: the emissive red eyes would have been repainted as black pupils; they glow red instead. The lure is GLOW-White."
+      "source": "rig/glowfish.glb", "delivered": "source/glowfish.glb", "rig": "rig/glowfish.py",
+      "kind": "voxel", "size": 0.8, "motion": "angler",
+      "roles": { "Eyes": "GLOW-Orbs", "GLOW-White": "GLOW-Lure", "Mouth": "METAL-Teeth" },
+      "notes": "An anglerfish, rigged in Blender by rig/glowfish.py from the delivered source/glowfish.glb (never edited): the lower jaw, a head that flips open, a tail, two eyes that blink, and a three-link lure; clips swim, lure, chomp, blink. src/angler.ts drives them. The eyes glow rather than read as pupils, and neither glow role names a colour (nor contains 'eye', which the tank would read as an eye display): each fish draws its own. The teeth are metal."
     },
     "hackerfish": {
-      "source": "source/hackerfish.glb", "kind": "voxel", "size": 0.85, "motion": "wiggle",
-      "roles": { "Material.007": "PrimaryColor", "Material.008": "SecondaryColor", "Material.002": "KEEP-Screen", "Material.006": "GLOW-Pink" },
-      "notes": "A little computer: the black screen keeps its colour, the face pixels glow. No EYE material — eyeLife leaves it alone."
+      "source": "rig/hackerfish.glb", "delivered": "source/hackerfish.glb", "rig": "rig/hackerfish.py",
+      "kind": "voxel", "size": 0.85, "motion": "hacker",
+      "roles": { "Material.007": "PrimaryColor", "Material.008": "SecondaryColor", "Material.002": "SCREEN-Glass", "Material.006": "SCREEN-Pixels" },
+      "notes": "Half fish, half computer, rigged in Blender by rig/hackerfish.py from the delivered source/hackerfish.glb (never edited): the box, its screen, two paddle fins and a tail; clips swim, type, glitch. src/hacker.ts drives them. The glass and the face pixels are one display (SCREEN-): src/screen.ts draws faces, code rain and a boot spinner on it, the designer's face its neutral expression. No EYE material — eyeLife leaves it alone."
     },
     "jellyfish": {
       "source": "source/jellyfish.glb", "kind": "smooth", "triBudget": 2500, "error": 0.01, "size": 0.8, "motion": "pulse",
@@ -35,9 +38,10 @@
       "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
     },
     "shark": {
-      "source": "source/shark.glb", "kind": "voxel", "size": 2.2, "motion": "wiggle",
-      "roles": { "mouth": "KEEP-Mouth" },
-      "notes": "The heaviest source (28.8k tris). Big on purpose: the size follow-up gives it its length back."
+      "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
+      "kind": "voxel", "size": 2.2, "motion": "shark",
+      "roles": { "mouth": "METAL-Teeth" },
+      "notes": "The heaviest source (28.8k tris): every voxel a whole cube, 26k of its faces buried — the intake culls them. Rigged in Blender by rig/shark.py from the delivered source/shark.glb (never edited), cut by position (its fins sit off the lattice): head, a dropping jaw ringed with metal teeth, eyes that roll back, pectorals, and a three-link tail for a true wave; clips swim, bite. src/shark.ts drives them. Big on purpose: the size follow-up gives it its length back."
     }
   }
 }

@@ -13,6 +13,7 @@ describe('metaquarium quality tiers', () => {
       envBudget: 3,
       props: { clusters: 12, shards: 32, halo: true },
       glowLights: 4,
+      carvedFloorDetail: 240,
     });
   });
 

@@ -358,6 +358,30 @@ export interface LuminanceGridOptions extends PerceiveOptions {
   rows?: number;
 }
 
+
+/** Fraction of the axis-aligned cell [x0,x1]×[y0,y1] covered by a box of half-extents (hx, hy) rotated by `rot` about (cx, cy): the box polygon clipped to the cell. */
+function rotatedBoxCoverage(cx: number, cy: number, hx: number, hy: number, rot: number, x0: number, y0: number, x1: number, y1: number): number {
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  let poly: Array<[number, number]> = ([[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]] as const).map(([x, y]) => [cx + x * cr - y * sr, cy + x * sr + y * cr] as [number, number]);
+  const clip = (inside: (p: [number, number]) => boolean, cut: (a: [number, number], b: [number, number]) => [number, number]): void => {
+    const out: Array<[number, number]> = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+      if (inside(a)) { out.push(a); if (!inside(b)) out.push(cut(a, b)); } else if (inside(b)) out.push(cut(a, b));
+    }
+    poly = out;
+  };
+  const atX = (x: number) => (a: [number, number], b: [number, number]): [number, number] => [x, a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1])];
+  const atY = (y: number) => (a: [number, number], b: [number, number]): [number, number] => [a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]), y];
+  clip((p) => p[0] >= x0, atX(x0)); if (!poly.length) return 0;
+  clip((p) => p[0] <= x1, atX(x1)); if (!poly.length) return 0;
+  clip((p) => p[1] >= y0, atY(y0)); if (!poly.length) return 0;
+  clip((p) => p[1] <= y1, atY(y1)); if (!poly.length) return 0;
+  let area = 0;
+  for (let i = 0; i < poly.length; i++) { const a = poly[i]!, b = poly[(i + 1) % poly.length]!; area += a[0] * b[1] - b[0] * a[1]; }
+  return Math.abs(area) / 2 / ((x1 - x0) * (y1 - y0));
+}
+
 /**
  * Sample the spec into a coarse luminance image — analytically, no renderer.
  * Persistence is modeled, not simulated: because positions are pure functions
@@ -621,6 +645,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       let centerY = p.y;
       let halfX = sz / 2;
       let halfY = s.kind === 'rect' ? ((e.size2 ?? sz) * (e.size > 0 ? sz / e.size : 1)) / 2 : sz / 2;
+      // A rotated rect or bar: its own half-extents and angle, for exact per-cell coverage (halfX/halfY become its AABB).
+      let boxRot = 0, boxHx = 0, boxHy = 0;
       if (s.kind === 'text') {
         const box = textBox(s, e, p);
         centerX = box.cx;
@@ -645,8 +671,20 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         const sr = Math.sin(rot);
         centerX = p.x + box.cx * cr - box.cy * sr;
         centerY = p.y + box.cx * sr + box.cy * cr;
+        boxRot = rot; boxHx = box.halfX; boxHy = box.halfY;
         halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
         halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
+      } else if (s.kind === 'rect') {
+        // fillRect after ctx.rotate(rot) about the entity: take the rotated box's AABB.
+        const rot = rotationAt(e, tPass);
+        if (rot) {
+          boxRot = rot; boxHx = halfX; boxHy = halfY;
+          const cr = Math.abs(Math.cos(rot));
+          const sr = Math.abs(Math.sin(rot));
+          const hx = halfX * cr + halfY * sr;
+          halfY = halfX * sr + halfY * cr;
+          halfX = hx;
+        }
       }
       const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
@@ -673,7 +711,14 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
         * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1) : 1);
+      // rect and bar are fillRect: the canvas paints each cell in proportion
+      // to the area the box covers. Without this a 2 px scan line darkened
+      // its whole 22 px grid row at full alpha, and 270 of them read as a
+      // black veil (mean 0.035 where the canvas paints 0.41).
+      const byArea = s.kind === 'rect' || s.kind === 'bar';
       for (let r = r0; r <= r1; r++) {
+        const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
+        if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
           const dy = (r + 0.5) * cellH - centerY;
@@ -697,6 +742,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
               wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             }
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
+          } else if (byArea) {
+            if (boxRot) {
+              // The rotated box's true overlap with this cell, not its bounding box's.
+              const cov = rotatedBoxCoverage(centerX, centerY, boxHx, boxHy, boxRot, c * cellW, r * cellH, (c + 1) * cellW, (r + 1) * cellH);
+              if (cov > 0) compose(r * cols + c, lum, a * shapeWeight * cov, layer.blend);
+            } else {
+              const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
+              if (fx > 0) compose(r * cols + c, lum, a * shapeWeight * fx * fy, layer.blend);
+            }
           } else {
             compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
