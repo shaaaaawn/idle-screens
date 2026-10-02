@@ -43,7 +43,7 @@ export const CONTRACT = '0x680cCc4fE7aa62172D20899Ab87C5304545431CB';
 export type Breed =
   | 'betafish' | 'angelfish' | 'seahorse' | 'seaturtle'   // minted
   | 'blowfish' | 'hackerfish' | 'glowfish' | 'babyfish'   // designed, unminted
-  | 'shark' | 'crab' | 'jellyfish' | 'dori';
+  | 'shark' | 'crab' | 'dori';
 
 export interface BreedInfo {
   breed: Breed;
@@ -80,7 +80,6 @@ export const BREEDS: readonly BreedInfo[] = [
   { breed: 'babyfish',   minted: false, count: 0, model: 'baby-fish2' },
   { breed: 'shark',      minted: false, count: 0, model: 'shark3' },
   { breed: 'crab',       minted: false, count: 0, model: 'crab3' },
-  { breed: 'jellyfish',  minted: false, count: 0, model: 'jellyfish' },
   { breed: 'dori',       minted: false, count: 0, model: 'dori3' },
 ];
 

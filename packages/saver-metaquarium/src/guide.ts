@@ -38,7 +38,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab jellyfish dori glowfish babyfish hackerfish blowfish). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -62,7 +62,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
-  swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab, jellies and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
+  swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',
@@ -129,7 +129,7 @@ export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab jellyfish dori glowfish babyfish hackerfish blowfish. *size scales that token over its
+          crab dori glowfish babyfish hackerfish blowfish. *size scales that token over its
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
