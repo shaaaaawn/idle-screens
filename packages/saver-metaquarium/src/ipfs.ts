@@ -63,7 +63,6 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}babyfish`, localGlb: '' },
   { id: 605, name: 'Shark', breed: 'shark', ipfs3d: `${BUNDLED_BREED_SCHEME}shark`, localGlb: '' },
   { id: 606, name: 'Crab', breed: 'crab', ipfs3d: `${BUNDLED_BREED_SCHEME}crab`, localGlb: '' },
-  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}jellyfish`, localGlb: '' },
   { id: 608, name: 'Dori', breed: 'dori', ipfs3d: `${BUNDLED_BREED_SCHEME}dori`, localGlb: '' },
 ];
 
