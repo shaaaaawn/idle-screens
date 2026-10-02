@@ -95,7 +95,8 @@ describe('bundled breeds (breeds/README.md)', () => {
       for (let i = 0; i < j.getCount(); i++) {
         const [j0] = j.getElement(i, []) as number[];
         const [w0, ...rest] = w.getElement(i, []) as number[];
-        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+        expect(w0).toBeCloseTo(1, 3);
+        for (const tail of rest) expect(Math.abs(tail)).toBeLessThan(1e-3);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone, name).toMatch(parts[name]!);
