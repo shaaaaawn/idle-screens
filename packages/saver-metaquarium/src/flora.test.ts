@@ -64,6 +64,11 @@ describe('flora', () => {
     expect(f.tips.every((t) => t.flex === 0)).toBe(true); // and it is stone
   });
 
+  it('a mix that names species but weights none of them grows nothing', () => {
+    expect(buildFlora(anchors, flat, createRng(3), { ...opts, mix: { clam: 0 } }).plants).toBe(0);
+    expect(buildFlora(anchors, flat, createRng(3), { ...opts, layout: 'gallery', mix: { clam: 0 } }).plants).toBe(0);
+  });
+
   it('each room grows its own garden when floraMix is empty', () => {
     const grow = (environment: string) => buildFlora(anchors, flat, createRng(3), { ...opts, environment }).bySpecies;
     const reef = grow('reef'), kelp = grow('kelp'), vent = grow('vent');

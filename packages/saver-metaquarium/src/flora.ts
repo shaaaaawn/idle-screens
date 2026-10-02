@@ -859,6 +859,8 @@ export function buildFlora(
   const tips: FloraField['tips'] = [];
   const empty = (): FloraField => ({ parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips, rare: 0, colonies: 0 });
   if (!want || (!anchors.length && !gallery)) return empty();
+  // A mix that names species but weights none of them (`clam:0`) asks for nothing, not for the default garden.
+  if (opts.mix && Object.keys(opts.mix).length > 0 && !Object.values(opts.mix).some((w) => (w ?? 0) > 0)) return empty();
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
   const palette = opts.palette?.length ? opts.palette : null;

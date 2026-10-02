@@ -1249,7 +1249,7 @@ class TankInstance implements SaverInstance {
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodes > 0 ? `${geodeMix}|${geodeMineral}|${geodeLayout}` : ''}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1347,7 +1347,8 @@ class TankInstance implements SaverInstance {
         (c.base.b + (1 - c.base.b) * hot) * lvl,
       );
     }
-    if (lights) for (const h of g.halos) h.mat.opacity = h.opacity * (lights[h.of] ?? 1);
+    // Always for a rig, so `fishGlow: 0` puts its halos back to the authored opacity.
+    if (f.rig) for (const h of g.halos) h.mat.opacity = h.opacity * (lights?.[h.of] ?? 1);
     if (amount <= 0) return n;
     // Body-local → world, by hand: the scene graph's matrices are a frame
     // stale here, and updating 24 skinned hierarchies to read a few points
