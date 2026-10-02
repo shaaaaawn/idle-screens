@@ -19,7 +19,7 @@
 import { Box3, Matrix4, Vector2, Vector3, type Material, type Mesh, type Object3D, type SkinnedMesh } from 'three';
 import { cloneWithHooks, hasPatch, stackPatch } from './hooks';
 
-const NO_WAVE = new Set(['seaturtle', 'seahorse', 'crab']);
+const NO_WAVE = new Set(['seaturtle', 'seahorse', 'crab', 'jellyfish']);
 
 /** Whether a model should swim with a body wave. */
 export function waveProfile(breed: string | null | undefined, model: Object3D): boolean {

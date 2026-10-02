@@ -19,7 +19,8 @@ export function jointsOf(p) {
   for (let t = 0; t < n / 3; t++) {
     const ids = [0, 1, 2].map((k) => (idx ? idx.getScalar(t * 3 + k) : t * 3 + k));
     const js = ids.map((i) => j.getElement(i, [])[0]);
-    const rigid = js[1] === js[0] && js[2] === js[0] && ids.every((i) => Math.abs(w.getElement(i, [])[0] - 1) < 1e-3);
+    // Rigid = slot 0 carries the whole weight; any secondary influence is a blend.
+    const rigid = js[1] === js[0] && js[2] === js[0] && ids.every((i) => { const e = w.getElement(i, []); return Math.abs(e[0] - 1) < 1e-3 && e[1] < 1e-3 && e[2] < 1e-3 && e[3] < 1e-3; });
     out.push(rigid ? js[0] : -1);
   }
   return out;
@@ -67,6 +68,8 @@ export function cullHidden(doc, voxel) {
   // A flat plate (a face with no cube behind it) must not bury what it faces.
   const sides = new Map();
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+    // Eye geometry is never touched (see intake.mjs): neither culled nor a culler.
+    if (/eye/i.test(p.getMaterial()?.getName() ?? '')) continue;
     const joints = jointsOf(p), dominant = dominantOf(p);
     // Only a face exactly one voxel square: a bigger one (a source built
     // partly from boxes, as the shark's is) is not one cell, and the one cell

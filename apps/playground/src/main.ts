@@ -178,7 +178,7 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-glow-dark',
     label: 'Metaquarium (glow in the dark)',
     params: {
-      fishMix: 'glowfish:2,hackerfish:1,blowfish:1,crab:1,dori:1',
+      fishMix: 'glowfish:2,hackerfish:1,blowfish:1,jellyfish:1,crab:1,dori:1',
       dracoPath: asset('/draco/'), swimStyle: 'bottom', swimVariance: 0.6, bodyWiggle: 0.35,
       fishGlow: 1, propMix: 'crystal:3@coral', moteDensity: 0.5,
       fogColor: '#020108', floorColor: '#070a12', cameraDistance: 130, cameraElevation: 10,
@@ -569,7 +569,8 @@ const METAQUARIUM_VARIANTS: SaverPlugin[] = [
     id: 'metaquarium-npc',
     label: 'Metaquarium (NPC breeds)',
     params: {
-      fishMix: 'blowfish:1,hackerfish:1,glowfish:1,babyfish:1,shark:1,crab:1,dori:1',
+      fishMix: 'blowfish:1,hackerfish:1,glowfish:1,babyfish:1,shark:1,crab:1,jellyfish:1,dori:1',
+      // Every NPC model but the jellyfish is Draco-compressed.
       dracoPath: asset('/draco/'),
       swimVariance: 0.6, bodyWiggle: 0.35,
       environment: 'lagoon', cameraDistance: 150, cameraElevation: 12,

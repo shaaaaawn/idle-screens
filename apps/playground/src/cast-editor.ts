@@ -29,7 +29,7 @@ export function formatCast(rows: readonly CastRow[]): string {
 const WHO = [
   ['100', '#100 Betafish (local)'], ['257', '#257 Angelfish (local)'], ['300', '#300 Angelfish'], ['457', '#457 Seahorse'],
   ['497', '#497 Sea Turtle'], ['betafish', 'any betafish'], ['angelfish', 'any angelfish'], ['seahorse', 'any seahorse'],
-  ['seaturtle', 'any sea turtle'], ['glowfish', 'glowfish (NPC)'], ['crab', 'crab (NPC)'],
+  ['seaturtle', 'any sea turtle'], ['glowfish', 'glowfish (NPC)'], ['jellyfish', 'jellyfish (NPC)'], ['crab', 'crab (NPC)'],
 ] as const;
 
 export function buildCastEditor(

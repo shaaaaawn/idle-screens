@@ -36,8 +36,7 @@ describe('farm manifest', () => {
   });
   it('carries the unminted breeds without ranges', () => {
     const un = BREEDS.filter((b) => !b.minted);
-    expect(un.length).toBeGreaterThanOrEqual(7);
-    expect(un.map((b) => b.breed)).not.toContain('jellyfish'); // the draft model is out
+    expect(un.length).toBeGreaterThanOrEqual(8);
     expect(un.every((b) => !b.range && b.count === 0 && !!b.model)).toBe(true);
     expect(un.map((b) => b.breed)).toContain('hackerfish');
   });

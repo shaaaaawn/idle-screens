@@ -7,5 +7,6 @@ export const BUNDLED_BREEDS: Readonly<Record<string, () => Promise<{ default: st
   dori: () => import('./dori'),
   glowfish: () => import('./glowfish'),
   hackerfish: () => import('./hackerfish'),
+  jellyfish: () => import('./jellyfish'),
   shark: () => import('./shark'),
 };

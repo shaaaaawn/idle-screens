@@ -24,7 +24,7 @@ function fish(): { group: Group; body: Group; shared: MeshBasicMaterial } {
 
 describe('waveProfile', () => {
   it('skips breeds whose motion is not a body wave', () => {
-    for (const b of ['seaturtle', 'seahorse', 'crab']) expect(waveProfile(b, fish().body)).toBe(false);
+    for (const b of ['seaturtle', 'seahorse', 'crab', 'jellyfish']) expect(waveProfile(b, fish().body)).toBe(false);
     expect(waveProfile('angelfish', fish().body)).toBe(true);
   });
   it('skips a model with a skeleton: it already bends', () => {

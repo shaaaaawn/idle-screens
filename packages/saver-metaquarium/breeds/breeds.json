@@ -32,6 +32,11 @@
       "roles": { "Material.007": "PrimaryColor", "Material.008": "SecondaryColor", "Material.002": "SCREEN-Glass", "Material.006": "SCREEN-Pixels" },
       "notes": "Half fish, half computer, rigged in Blender by rig/hackerfish.py from the delivered source/hackerfish.glb (never edited): the box, its screen, two paddle fins and a tail; clips swim, type, glitch. src/hacker.ts drives them. The glass and the face pixels are one display (SCREEN-): src/screen.ts draws faces, code rain and a boot spinner on it, the designer's face its neutral expression. No EYE material — eyeLife leaves it alone."
     },
+    "jellyfish": {
+      "source": "source/jellyfish.glb", "kind": "smooth", "triBudget": 2500, "error": 0.01, "size": 0.8, "motion": "pulse",
+      "roles": { "": "KEEP-Jellyfish" }, "metal": 0, "roughness": 0.8,
+      "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
+    },
     "shark": {
       "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
       "kind": "voxel", "size": 2.2, "motion": "shark",

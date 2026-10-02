@@ -113,17 +113,29 @@ describe('environment identity (QA pass 1, D1)', () => {
     expect(environmentOf('void').palette).toBeUndefined();
   });
 
-  it('carved floors: a shelf raises the town, a trench cuts across the front, terraces climb behind', async () => {
+  const carved = async (kind: 'shelf' | 'trench' | 'terraces') => {
     const { terrainHeightFn } = await import('./tank');
     const { createRng } = await import('@idle-screens/core');
-    const shelf = terrainHeightFn('shelf', createRng(1)), trench = terrainHeightFn('trench', createRng(1)), terraces = terrainHeightFn('terraces', createRng(1));
+    return terrainHeightFn(kind, createRng(1));
+  };
+
+  it('carved floors: a shelf raises the town', async () => {
+    const shelf = await carved('shelf');
     expect(shelf(0, -30) - shelf(0, 260)).toBeGreaterThan(25); // the town stands above the floor beyond the lip
     expect(Math.abs(shelf(10, -20) - shelf(-30, -50))).toBeLessThan(4); // and its top is level
+  });
+
+  it('carved floors: a trench cuts across the front', async () => {
+    const trench = await carved('trench');
     let deepest = 0, at = 0;
     for (let z = -150; z <= 250; z += 5) { const h = trench(0, z); if (h < deepest) { deepest = h; at = z; } }
     expect(deepest).toBeLessThan(-35);
     expect(at).toBeGreaterThan(40); // in front of the town
     expect(Math.abs(trench(0, -60))).toBeLessThan(10); // the town is not in it
+  });
+
+  it('carved floors: terraces climb behind', async () => {
+    const terraces = await carved('terraces');
     expect(terraces(0, -200)).toBeGreaterThan(terraces(0, -100) + 20); // tiers climb behind
     expect(Math.abs(terraces(0, 40))).toBeLessThan(6); // the front is open floor
   });

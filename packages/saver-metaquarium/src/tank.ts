@@ -689,6 +689,7 @@ class TankInstance implements SaverInstance {
   private propsKey = '';
   private warnedProps = '';
   private warnedFlora = '';
+  private warnedGeode = '';
   private warnedPalette = '';
   /** Scratch for the garden's view of the cast (setFish), reused every frame. */
   private readonly floraFish = Array.from({ length: 24 }, () => ({ x: 0, y: 0, z: 0, r: 0 }));
@@ -1097,7 +1098,7 @@ class TankInstance implements SaverInstance {
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
       // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
       const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
-      const terrain = buildTerrain(height, floorHex, carved ? 240 : 72, carved);
+      const terrain = buildTerrain(height, floorHex, carved ? this.quality.carvedFloorDetail : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
       this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
@@ -1236,6 +1237,15 @@ class TankInstance implements SaverInstance {
     return parsed.mix;
   }
 
+  private geodeMixParsed(mix: string): ReturnType<typeof parseGeodeMix>['mix'] {
+    const parsed = parseGeodeMix(mix);
+    if (parsed.problems.length > 0 && mix !== this.warnedGeode) {
+      this.warnedGeode = mix;
+      console.warn(`[metaquarium] geodeMix "${mix}": ${parsed.problems.join('; ')}`);
+    }
+    return parsed.mix;
+  }
+
   private buildScenery(): void {
     const rocks = this.num('rockDensity');
     const homes = this.num('geodeHomes');
@@ -1249,7 +1259,7 @@ class TankInstance implements SaverInstance {
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodes > 0 ? `${geodeMix}|${geodeMineral}|${geodeLayout}` : ''}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1267,7 +1277,7 @@ class TankInstance implements SaverInstance {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
           fountain, lamps: streetLamps,
-          geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
+          geodes, geodeMix: this.geodeMixParsed(geodeMix), geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);
@@ -1347,7 +1357,8 @@ class TankInstance implements SaverInstance {
         (c.base.b + (1 - c.base.b) * hot) * lvl,
       );
     }
-    if (lights) for (const h of g.halos) h.mat.opacity = h.opacity * (lights[h.of] ?? 1);
+    // Always for a rig, so `fishGlow: 0` puts its halos back to the authored opacity.
+    if (f.rig) for (const h of g.halos) h.mat.opacity = h.opacity * (lights?.[h.of] ?? 1);
     if (amount <= 0) return n;
     // Body-local → world, by hand: the scene graph's matrices are a frame
     // stale here, and updating 24 skinned hierarchies to read a few points
