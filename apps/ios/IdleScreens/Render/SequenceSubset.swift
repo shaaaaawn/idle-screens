@@ -6,6 +6,17 @@ import Foundation
 /// SpecSubset the existing renderers already draw; this type only answers
 /// "which segment, at what local time" — playback stays in TVAppState.
 struct SequenceSubset: Decodable, Equatable, Sendable {
+    /// The one segment to stand for the whole piece in a still: the one it
+    /// spends longest in. The first is the wrong pick for timed pieces — an
+    /// ident opens dark ("eclipse · sun") and rests on its card; a
+    /// durationless tail holds forever, so it wins outright.
+    var posterSegment: Segment? {
+        segments.enumerated().max { a, b in
+            let da = a.element.duration ?? .infinity, db = b.element.duration ?? .infinity
+            return da == db ? a.offset < b.offset : da < db
+        }?.element
+    }
+
     var format: String?
     var id: String?
     var label: String?

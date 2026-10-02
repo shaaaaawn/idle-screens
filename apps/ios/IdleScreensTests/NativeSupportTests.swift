@@ -62,3 +62,30 @@ final class NativeSupportTests: XCTestCase {
         XCTAssertTrue(try scene(#"{"id":1,"seed":1,"spec":{"id":"metaquarium"}}"#).needsWebEngine)
     }
 }
+
+/// A sequence's still: the segment it spends longest in, not its opening
+/// (an ident opens dark and rests on its card).
+final class SequencePosterTests: XCTestCase {
+    private func seq(_ segments: String) throws -> SequenceSubset {
+        try JSONDecoder().decode(SequenceSubset.self, from: Data(#"{"format":"idle-sequence","segments":[\#(segments)]}"#.utf8))
+    }
+    private func seg(_ label: String, _ duration: String?) -> String {
+        let d = duration.map { #","duration":\#($0)"# } ?? ""
+        return #"{"scene":{"schemaVersion":1,"id":"\#(label)","label":"\#(label)","layers":[]}\#(d)}"#
+    }
+
+    func testLongestSegmentWins() throws {
+        let s = try seq([seg("intro", "1500"), seg("body", "9000"), seg("outro", "2000")].joined(separator: ","))
+        XCTAssertEqual(s.posterSegment?.scene.label, "body")
+    }
+
+    func testADurationlessTailHoldsForeverSoItWins() throws {
+        let s = try seq([seg("eclipse · sun", "6000"), seg("rest: eclipse", nil)].joined(separator: ","))
+        XCTAssertEqual(s.posterSegment?.scene.label, "rest: eclipse")
+    }
+
+    func testTiesGoToTheLaterSegment() throws {
+        let s = try seq([seg("a", "3000"), seg("b", "3000")].joined(separator: ","))
+        XCTAssertEqual(s.posterSegment?.scene.label, "b")
+    }
+}
