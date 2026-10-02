@@ -65,7 +65,7 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
-import { rigStarfish, starfishFrame, starfishIdle, starfishSpot, starfishStart, type StarfishOutput, type StarfishRig } from './starfish';
+import { rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart, type StarfishOutput, type StarfishRig } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
@@ -2682,7 +2682,11 @@ class TankInstance implements SaverInstance {
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
           }, this.starOut)
         : null;
-      if (star) { px = star.x; y = star.y; pz = star.z; f.rig!.bloom = star.bloom; } else if (starRig) starfishIdle(starRig, tSec, f.index);
+      if (star) { px = star.x; y = star.y; pz = star.z; f.rig!.bloom = star.bloom; } else if (starRig) {
+        // Placed by a script or a formation: idle, and still lying down — its glow kept low (starfish.ts).
+        starfishIdle(starRig, tSec, f.index);
+        f.rig!.bloom = STARFISH_BLOOM;
+      }
       const floor = crab ?? star;
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
