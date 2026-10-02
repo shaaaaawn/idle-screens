@@ -83,7 +83,7 @@ never changes because a dependency was bumped.
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
 | fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
-| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`; a crab walks the seabed and climbs rocks on its own legs, `src/crab.ts`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
 
 ### Motion
@@ -107,6 +107,7 @@ never changes because a dependency was bumped.
 | fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
 | fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
 | fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
+| fishLook | enum | natural | `neon`: the bundled creatures in blacklight — near-black coats, the dark of the eyes (a crab's mouth too) a seeded glowing neon, small glow (a lure) kept and big glow (a crab's claws) dark; any model's untextured coats and eyes follow (textured minted bodies are left as drawn). Read when a fish spawns |
 | eyeLife | number | 0 | Eyes blink, look and emote — each token's own pixel-grid eye redrawn in a fragment function, black and white only. 0 is the stock eye program, byte for byte; a scene opts in with 1 |
 
 ### Scenery

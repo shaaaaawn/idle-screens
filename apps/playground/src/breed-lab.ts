@@ -18,7 +18,6 @@
  *                                side-on at each moment (seconds) — one row
  *                                per model, one column per moment;
  *                                &view=34 from behind, &view=top from above, &effort=1.9 working
- *   &rig=crab&only=crab&set=out   the crab's walk (crab.ts): legs stepping, claws working
  */
 import {
   AmbientLight, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
@@ -27,7 +26,6 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { rigSeahorse } from '../../../packages/saver-metaquarium/src/seahorse';
-import { rigCrab } from '../../../packages/saver-metaquarium/src/crab';
 
 const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -93,21 +91,17 @@ const views: Array<[string, (d: number) => Vector3]> = [
       tris += t;
       for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mats.set(mat.name || '(unnamed)', (mats.get(mat.name || '(unnamed)') ?? 0) + t);
     });
-    if (rigName === 'seahorse' || rigName === 'crab') {
+    if (rigName === 'seahorse') {
       // The tank's frame: nose +z (the tank yaws the model so), up +y.
       const group = new Group(); const body = root;
       body.rotation.y = swimX ? Math.PI / 2 : 0;
       group.add(body);
-      // Centre it: not every model is authored about its own origin (the crab is not).
-      group.updateMatrixWorld(true);
-      body.position.sub(new Box3().setFromObject(group).getCenter(new Vector3()));
       body.traverse((o) => { const m = o as Mesh; if (m.isMesh) for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mat.userData.mqOwned = true; });
-      const rig = rigName === 'crab' ? rigCrab(group, body, 0.4) : rigSeahorse(group, body, 0.4);
+      const rig = rigSeahorse(group, body, 0.4);
       const scene = stage(group);
       const cam = new PerspectiveCamera(30, 1, span * 0.05, span * 20);
       times.forEach((t, c) => {
-        // A crab's steps come from distance walked: walk it at a steady pace through the times.
-        rig?.set({ phase: rigName === 'crab' ? t * 2.2 : 0, amp: 0.08 * Number(q.get('effort') ?? 1), bend: 0, t });
+        rig?.set({ phase: 0, amp: 0.08 * Number(q.get('effort') ?? 1), bend: 0, t });
         // side (default), or ¾ from behind-left where the fin's sideways ripple shows.
         if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7);
         else if (q.get('view') === 'top') cam.position.set(0, span * 2.2, span * 0.01);

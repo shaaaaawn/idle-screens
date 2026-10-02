@@ -28,6 +28,10 @@ export const METAQUARIUM_PARAMS = {
    *  swam. Under about one body length (18) it is the fish's own eye, and the
    *  fish itself is hidden. */
   followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
+  /** Where round the followed fish the chase camera stands, degrees: 0 behind
+   *  it (the default), 90 at its side, 180 in front looking back at its face
+   *  — a hackerfish's screen, a crab's smile. */
+  followAngle: { type: 'number', default: 0, min: -180, max: 180, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },
@@ -226,6 +230,12 @@ export const METAQUARIUM_PARAMS = {
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
    *  for the original unlit atlas look. */
   fishMetal: { type: 'enum', default: 'on', options: ['on', 'off'], ease: 'step' },
+  /** The bundled creatures' look. `neon` is the blacklight poster: coats near
+   *  black, the dark of the eyes (and a crab's mouth) a seeded neon that glows
+   *  and blooms, small glow kept, big glow (a crab's claws) dark. The glowing eyes are light, not an eye
+   *  display, so `eyeLife` leaves them be. Minted fish keep their atlases.
+   *  Best in a dark room with `finish`. Read when a fish spawns. */
+  fishLook: { type: 'enum', default: 'natural', options: ['natural', 'neon'], ease: 'step' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.

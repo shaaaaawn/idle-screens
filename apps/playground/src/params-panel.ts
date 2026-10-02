@@ -122,11 +122,11 @@ function fishPicker(value: ParamValue, onChange: (v: ParamValue) => void): Param
 const METAQUARIUM: PanelKnowledge = {
   owns: (saver) => saver.manifest.id === 'metaquarium' || saver.manifest.id.startsWith('metaquarium-'),
   sections: [
-    ['camera', ['shot', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance']],
+    ['camera', ['shot', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle']],
     ['light', ['caustics', 'causticScale', 'surfaceMirror']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     // The renderer's look: on by default, listed so it can be turned off.
-    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'eyeLife', 'swimWave', 'fishAmbient']],
+    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek']],
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
