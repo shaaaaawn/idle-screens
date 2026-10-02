@@ -3,13 +3,14 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, Color, Group,
   Matrix4, Points, PointsMaterial, Vector4,
-  DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
+  DoubleSide, type Material, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
+import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_PARS, GEODE_SHADE, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
@@ -34,6 +35,26 @@ export interface SceneryOptions {
   variants?: number;
   homes: number;
   flora: number;
+  /** `floraMix`, parsed: relative weights by species. Empty = the room's garden. */
+  floraMix?: Partial<Record<FloraSpecies, number>>;
+  /** The room (`environment`), which picks the garden when `floraMix` is empty. */
+  environment?: string;
+  /** `floraPalette`, resolved: the colours every colony is pulled toward. */
+  floraPalette?: string[];
+  /** `floraLayout`: round the crystals, or one of each species in rows. */
+  floraLayout?: 'garden' | 'gallery';
+  /** 0..1 — wild geodes lying about the floor (geodes.ts). */
+  geodes?: number;
+  /** `geodeMix`, parsed: relative weights by kind. */
+  geodeMix?: Partial<Record<GeodeKind, number>>;
+  /** `geodeMineral`, resolved: the minerals they are made of (empty = all). */
+  geodeMinerals?: MineralName[];
+  /** `geodeLayout`: scattered, or one of each kind in rows. */
+  geodeLayout?: 'field' | 'gallery';
+  /** The town square's fountain at the hub: a hot vent chimney, or a geode basin. */
+  fountain?: 'none' | 'vent' | 'geode';
+  /** 0..1 — crystal streetlamps along the paths (needs paths). */
+  lamps?: number;
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -68,6 +89,12 @@ export interface Scenery {
   moving: Emitter[];
   /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
   canopyTips: CanopyTip[];
+  /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
+  floraMaterials: Material[];
+  /** The wild geodes' material, which takes the light field too. */
+  geodeMaterials: Material[];
+  /** Where the fish are this frame (x, y, z, reach): the garden answers them (flora.ts). */
+  setFish(fish: ReadonlyArray<{ x: number; y: number; z: number; r: number }>): void;
   /** Crystal colonies that burst out of the rocks — REAL clusters, for the
    *  host to build with the same field as `propMix` (no light of their own:
    *  they do not join the floor pools). */
@@ -327,8 +354,138 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     cards.mesh.userData.mqLights = room.lights.length;
     group.add(cards.mesh);
   }
-  const field = buildFlora(anchors, terrain, rng.fork(4), {
-    density: opts.flora, cap: opts.cap, scale: s,
+  // The cast, as the garden sees it (setFish): where each fish is and how near is too near.
+  const floraFishN = { value: 0 };
+  const floraFish = { value: Array.from({ length: MAX_FLORA_FISH }, () => new Vector4()) };
+  // Wild geodes, before the flora so the plants grow round them, clear of
+  // the crystals, the homes and the roads.
+  let geodeMesh: Mesh | null = null;
+  const geodeClock = { value: 0 };
+  // The crystals' own glow and pulse, which the geodes' crystals share.
+  const geodeGlow = { value: 1 }, geodePulse = { value: 0.35 };
+  // Where geodes glow: flora grows round them and feeds on them, as on a crystal.
+  const geodeAnchors: SceneryAnchor[] = [];
+  // The town square: a fountain where the paths meet, lamps along them.
+  const wantFountain = !opts.interior && opts.fountain && opts.fountain !== 'none' ? opts.fountain : null;
+  let fountainAt: { x: number; z: number } | null = null;
+  if (wantFountain) {
+    const centre = marks.hub ?? marks.plaza
+      ?? (doorsteps.length ? { x: doorsteps.reduce((a, d) => a + d.x, 0) / doorsteps.length, z: doorsteps.reduce((a, d) => a + d.z, 0) / doorsteps.length + 30 * s } : { x: 0, z: 20 * s });
+    let fx = centre.x, fz = centre.z;
+    // Never in a crystal or a home: step clear the way a home does.
+    for (let pass = 0; pass < 3; pass++) {
+      for (const c of [...clusters.map(c => ({ x: c.x, z: c.z, r: c.radius + 26 * s })), ...obstacles.map(o => ({ x: o.x, z: o.z, r: o.r + 18 * s }))]) {
+        const d = Math.hypot(fx - c.x, fz - c.z);
+        if (d < c.r) {
+          // Dead centre has no direction to push: use a fixed one.
+          const nx = d > 1e-6 ? (fx - c.x) / d : 1, nz = d > 1e-6 ? (fz - c.z) / d : 0;
+          fx += nx * (c.r - d); fz += nz * (c.r - d);
+        }
+      }
+    }
+    fountainAt = { x: fx, z: fz };
+    marks.fountain = { x: fx, y: terrain(fx, fz) + 24 * s, z: fz };
+  }
+  const lampSites: Array<{ x: number; z: number }> = [];
+  if (!opts.interior && (opts.lamps ?? 0) > 0 && network?.segments.length) {
+    // Along every path, a lamp every so often on alternate sides, clear of
+    // doors, homes, crystals and the fountain.
+    const want = Math.round((opts.lamps ?? 0) * 24), every = 32 * s;
+    const free = (x: number, z: number, near: number): boolean =>
+      !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 2 * s)
+      && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + 5 * s)
+      && !doorsteps.some(dd => Math.hypot(x - dd.x, z - dd.z) < 10 * s)
+      && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < near);
+    // The square first: a ring of lamps round the fountain's plaza.
+    if (fountainAt) {
+      const ring = Math.max(4, Math.round(6 * (opts.lamps ?? 0)));
+      for (let k = 0; k < ring && lampSites.length < want; k += 1) {
+        const a = (k / ring) * Math.PI * 2 + Math.PI / ring;
+        const x = fountainAt.x + Math.cos(a) * 27 * s, z = fountainAt.z + Math.sin(a) * 27 * s;
+        if (free(x, z, 14 * s)) lampSites.push({ x, z });
+      }
+    }
+    let side = 1, carry = every * 0.5, prev: PathSegment | null = null;
+    // A path is drawn as a chain of short segments: walk the chain, carrying
+    // the spacing across their joins, so lamps keep their rhythm along it.
+    for (const seg of network.segments) {
+      const len = Math.hypot(seg.x1 - seg.x0, seg.z1 - seg.z0);
+      if (!prev || Math.hypot(seg.x0 - prev.x1, seg.z0 - prev.z1) > 2 * s) carry = every * 0.5;
+      prev = seg;
+      if (len < 1e-3) continue;
+      const ux = (seg.x1 - seg.x0) / len, uz = (seg.z1 - seg.z0) / len;
+      let d = carry;
+      for (; d < len && lampSites.length < want; d += every) {
+        const off = seg.width / 2 + 4 * s;
+        const x = seg.x0 + ux * d - uz * off * side, z = seg.z0 + uz * d + ux * off * side;
+        side = -side;
+        const clear = free(x, z, every * 0.6) && !(fountainAt && Math.hypot(x - fountainAt.x, z - fountainAt.z) < 34 * s);
+        if (clear) lampSites.push({ x, z });
+      }
+      carry = d - len;
+    }
+  }
+  const plaza: PathSegment[] = fountainAt ? [{ x0: fountainAt.x, z0: fountainAt.z, x1: fountainAt.x, z1: fountainAt.z + 0.01, width: 46 * s, material: 'pebble' }] : [];
+  // Plants keep off the plaza; fish and plants go round the lamp posts.
+  keepClear.push(...plaza);
+  for (const l of lampSites) obstacles.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, r: 2.5 * s, h: 17 * s });
+  let fountainMouth: { x: number; y: number; z: number; color: string } | null = null;
+  let lampLights: { x: number; y: number; z: number; color: string }[] = [];
+  if (((opts.geodes ?? 0) > 0 || fountainAt || lampSites.length) && !opts.interior) {
+    const gf = buildGeodeField(rng.fork(31), {
+      fountain: fountainAt && wantFountain ? { kind: wantFountain, ...fountainAt } : undefined, lamps: lampSites,
+      amount: opts.geodes ?? 0, cap: opts.cap, scale: s, mix: opts.geodeMix, minerals: opts.geodeMinerals, layout: opts.geodeLayout, terrain,
+      anchors: clusters.map(c => ({ x: c.x, z: c.z, color: c.color })),
+      blocked: (x, z, r) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        || clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        || pathClearance(keepClear, x, z) < r * 0.6,
+    });
+    if (gf.geometry) {
+      gf.geometry.userData.mqOwned = true;
+      const material = new MeshBasicMaterial({ vertexColors: true, side: DoubleSide });
+      material.userData.mqOwned = true;
+      clocks.push(geodeClock);
+      material.onBeforeCompile = shader => {
+        shader.uniforms.uGeoTime = geodeClock;
+        shader.uniforms.uGeoGlow = geodeGlow;
+        shader.uniforms.uGeoPulse = geodePulse;
+        shader.uniforms.uMqFloraFishN = floraFishN;
+        shader.uniforms.uMqFloraFish = floraFish;
+        shader.vertexShader = GEODE_PARS + MQ_FISH_GLSL + shader.vertexShader.replace('#include <project_vertex>', GEODE_VERTEX);
+        shader.fragmentShader = GEODE_FRAGMENT_PARS + shader.fragmentShader.replace('#include <color_fragment>', GEODE_SHADE);
+      };
+      material.customProgramCacheKey = () => 'wild-geodes-v3';
+      geodeMesh = new Mesh(gf.geometry, material);
+      geodeMesh.name = 'wild-geodes';
+      geodeMesh.frustumCulled = false;
+      group.add(geodeMesh);
+      obstacles.push(...gf.obstacles);
+      // The biggest glows join the light field (the floor pools round them).
+      for (const l of gf.lights.slice(0, 4)) {
+        const c = new Color(l.color);
+        homeLights.push({ x: l.x, y: l.y, z: l.z, r: c.r, g: c.g, b: c.b, reach: l.reach, phase: rng.next() * 6.28 });
+      }
+      for (const l of gf.lights) geodeAnchors.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, color: l.color });
+      counts.geodes = gf.geodes;
+      counts.geodeAura = gf.aura;
+      fountainMouth = gf.fountain;
+      // The mark is the mouth itself, not a guess at its height.
+      if (gf.fountain) marks.fountain = { x: gf.fountain.x, y: gf.fountain.y, z: gf.fountain.z };
+      lampLights = gf.lamps;
+      // The fountain and the lamps nearest it light the square (the pool slots are few).
+      const byNear = [...(gf.fountain ? [{ ...gf.fountain, reach: 60 * s }] : []), ...gf.lamps
+        .map(l => ({ ...l, reach: 34 * s }))
+        .sort((a, b) => (fountainAt ? Math.hypot(a.x - fountainAt.x, a.z - fountainAt.z) - Math.hypot(b.x - fountainAt.x, b.z - fountainAt.z) : 0))];
+      for (const l of byNear.slice(0, 6)) {
+        const c = new Color(l.color);
+        homeLights.push({ x: l.x, y: l.y, z: l.z, r: c.r, g: c.g, b: c.b, reach: l.reach, phase: rng.next() * 6.28 });
+      }
+      counts.fountain = gf.fountain ? 1 : 0;
+      counts.lamps = gf.lamps.length;
+    }
+  }
+  const field = buildFlora(geodeAnchors.length ? [...anchors, ...geodeAnchors] : anchors, terrain, rng.fork(4), {
+    density: opts.flora, cap: opts.cap, scale: s, mix: opts.floraMix, environment: opts.environment, palette: opts.floraPalette, layout: opts.floraLayout,
     // Nothing grows on a walk, a road or a plaza: that is what makes them read as kept.
     blocked: (x, z) => obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + 3 * s) || pathClearance(keepClear, x, z) < 3 * s,
   });
@@ -342,11 +499,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     (plants.material as MeshBasicMaterial).onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
       shader.uniforms.uFloraScale = floraScale;
-      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uMqFloraFishN = floraFishN;
+      shader.uniforms.uMqFloraFish = floraFish;
+      shader.vertexShader = FLORA_PARS + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
     };
-    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v3';
+    (plants.material as MeshBasicMaterial).customProgramCacheKey = () => 'mineral-flora-v5';
     plants.frustumCulled = false;
   }
   // The lights on the flora are polished metal: they take the studio
@@ -364,12 +523,14 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     metal.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
       shader.uniforms.uFloraScale = floraScale;
-      shader.vertexShader = 'uniform float uSwayTime; uniform float uFloraScale; attribute vec3 aSway; attribute float aGlow;\n' + FLORA_SWAY + shader.vertexShader;
+      shader.uniforms.uMqFloraFishN = floraFishN;
+      shader.uniforms.uMqFloraFish = floraFish;
+      shader.vertexShader = FLORA_PARS + FLORA_SWAY + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', FLORA_VERTEX)
         .replace('#include <color_vertex>', FLORA_COLOR);
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', FLORA_LAMP_EMISSIVE);
     };
-    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v2';
+    metal.customProgramCacheKey = () => 'mineral-flora-lamps-v4';
     const lampMesh = new Mesh(geometry, metal);
     lampMesh.name = 'flora-lamps';
     lampMesh.frustumCulled = false;
@@ -445,13 +606,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   if (field.lights.length) {
     const sporeRng = rng.fork(9);
     const per = 3, n = field.lights.length * per;
-    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sway = new Float32Array(n * 3), spore = new Float32Array(n * 3);
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sway = new Float32Array(n * 3), spore = new Float32Array(n * 3), flex = new Float32Array(n);
     const c = new Color();
     field.lights.forEach((l, i) => {
       c.set(l.color).lerp(new Color('#ffffff'), 0.3);
       for (let k = 0; k < per; k++) {
         const j = (i * per + k) * 3;
-        pos.set([l.x, l.y, l.z], j); col.set([c.r, c.g, c.b], j); sway.set([l.root, l.phase, l.gust], j);
+        pos.set([l.x, l.y, l.z], j); col.set([c.r, c.g, c.b], j); sway.set([l.root, l.phase, l.gust], j); flex[i * per + k] = l.flex;
         spore.set([sporeRng.next(), sporeRng.range(0.05, 0.11), sporeRng.next()], j);
       }
     });
@@ -460,20 +621,21 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     geometry.setAttribute('color', new BufferAttribute(col, 3));
     geometry.setAttribute('aSway', new BufferAttribute(sway, 3));
     geometry.setAttribute('aSpore', new BufferAttribute(spore, 3));
+    geometry.setAttribute('aFlex', new BufferAttribute(flex, 1));
     geometry.userData.mqOwned = true;
     const material = new PointsMaterial({ vertexColors: true, size: 1.5 * s, transparent: true, depthWrite: false, blending: AdditiveBlending });
     material.userData.mqOwned = true;
     const clock = { value: 0 }; clocks.push(clock);
     material.onBeforeCompile = shader => {
       shader.uniforms.uSwayTime = clock;
-      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute vec3 aSpore; varying float vSpore;\n' + FLORA_SWAY
+      shader.vertexShader = 'uniform float uSwayTime; attribute vec3 aSway; attribute vec3 aSpore; attribute float aFlex; varying float vSpore;\n' + FLORA_SWAY
         + shader.vertexShader.replace('#include <begin_vertex>', SPORE_VERTEX);
       shader.fragmentShader = 'varying float vSpore;\n' + shader.fragmentShader.replace('#include <color_fragment>', `
         #include <color_fragment>
         float sr = length(gl_PointCoord - 0.5) * 2.0;
         diffuseColor.a *= (1.0 - smoothstep(0.15, 1.0, sr)) * vSpore;`);
     };
-    material.customProgramCacheKey = () => 'flora-spores-v1';
+    material.customProgramCacheKey = () => 'flora-spores-v2';
     const points = new Points(geometry, material);
     points.name = 'flora-spores';
     points.frustumCulled = false;
@@ -481,6 +643,18 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     counts.spores = n;
   }
   counts.flora = field.plants;
+  // Halos: the lamps and the fountain wear the soft glow card a crystal does.
+  let townCards: GlowCards | null = null;
+  const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s }))];
+  if (halos.length) {
+    townCards = buildGlowCards(halos.length);
+    const c = new Color();
+    halos.forEach((h, i) => { c.set(h.color); townCards!.set(i, h.x, h.y, h.z, h.size, c.r, c.g, c.b, i * 1.7); });
+    townCards.mesh.userData.mqLights = halos.length;
+    townCards.mesh.name = 'town-halos';
+    group.add(townCards.mesh);
+  }
+  counts.floraRare = field.rare;
   // Both particle layers are one draw each; positions are pure in t, including
   // wraps. Bubble fade at either end hides the reset back to its vent.
   const particleRng = rng.fork(6);
@@ -494,11 +668,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const lightColors = Array.from({ length: 12 }, (_, i) => {
     const e = emitters[i]; return e ? new Vector3(e.r, e.g, e.b) : new Vector3();
   });
-  const particles = (bubble: boolean, n: number): void => {
+  const particles = (bubble: boolean, n: number, from: readonly SceneryAnchor[] = sources, name?: string): void => {
     if (!n) return;
     const positions = new Float32Array(n * 3), colors = new Float32Array(n * 3), phases = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      const source = sources[i % sources.length]!;
+      const source = from[i % from.length]!;
       // A vent is a mouth, not a point: bubbles leave from anywhere across it.
       const ja = particleRng.next() * Math.PI * 2, jr = Math.sqrt(particleRng.next()) * 2.6 * s;
       positions.set(bubble
@@ -509,8 +683,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       // Bubbles leave in PUFFS: every bubble of a vent belongs to one of three
       // bursts, so a chimney coughs a little cloud, rests, coughs again —
       // where a uniform phase gave a dripping tap. Snow stays uniform.
-      const src = i % sources.length;
-      const burst = bubble ? ((i / sources.length | 0) % 3) / 3 + src * 0.137 + particleRng.range(0, 0.07) : particleRng.next();
+      const src = i % from.length;
+      const burst = bubble ? ((i / from.length | 0) % 3) / 3 + src * 0.137 + particleRng.range(0, 0.07) : particleRng.next();
       // Sizes are heavy-tailed: a fizz of small ones, the odd fat one. Small
       // bubbles are slow, big ones fast — which also spreads a puff out as it
       // climbs instead of letting it rise as a fixed constellation.
@@ -616,7 +790,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     };
     material.customProgramCacheKey = () => bubble ? 'mineral-bubbles-v5' : 'mineral-snow-v4';
     const points = new Points(geometry, material);
-    points.name = bubble ? 'bubble-vents' : 'illuminated-marine-snow';
+    points.name = name ?? (bubble ? 'bubble-vents' : 'illuminated-marine-snow');
     points.frustumCulled = false;
     group.add(points);
   };
@@ -624,6 +798,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   counts.bubbles = live ? 0 : Math.round(opts.bubbles * opts.cap * 12);
   counts.snow = Math.round(opts.snow * opts.cap * 25);
   particles(true, counts.bubbles);
+  // The fountain always bubbles, a steady column of its own whatever bubbleVents says.
+  if (fountainMouth) {
+    particles(true, Math.round(70 + 40 * Math.min(1, opts.cap / 8)), [{ x: fountainMouth.x, y: fountainMouth.y, z: fountainMouth.z, color: '#e8f6ff' }], 'fountain-bubbles');
+    counts.fountainBubbles = 1;
+  }
   let bubbleLayer: BubbleLayer | null = null;
   if ((live && opts.bubbles > 0) || (opts.pearling ?? 0) > 0 || (opts.mist ?? 0) > 0) {
     bubbleLayer = buildBubbles(sources, pearls, rng.fork(21), {
@@ -657,8 +836,15 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving, marks, paths: network?.segments ?? [], rockClusters,
-    canopyTips: field.lights.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) })),
+    group, counts, vents, emitters: homeLights, moving, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
+    floraMaterials: plants ? [plants.material as Material] : [],
+    geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
+    setFish(fish) {
+      const n = Math.min(fish.length, MAX_FLORA_FISH);
+      for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);
+      floraFishN.value = n;
+    },
+    canopyTips: field.tips.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) * Math.max(1, l.flex) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),
@@ -675,7 +861,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);
       if (fog) horizonFog.value.copy(fog.color);
+      geodeGlow.value = glow; geodePulse.value = pulse;
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
+      if (townCards && fog) townCards.commit(Number(townCards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
       // to draw (fog is the card pass's business): a caller that only asks
       // for time still gets the lanterns where they are.
