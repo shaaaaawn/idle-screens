@@ -193,9 +193,9 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `geodeMineral` | string | `amethyst agate celestine citrine carnelian rose emerald quartz smoky`; empty = the mineral closest in colour to each geode's nearest crystal, `world` = two from the seed. |
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
 | `fountain` | `none` \| `vent` \| `geode` | The town square's fountain: a hot-vent chimney or a geode basin, with a bubble column, a pebble plaza and its own light; adds a `fountain` vignette mark. |
-| `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs `paths`). |
+| `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs the `paths` param above 0; with it at 0 there is nothing to line). |
 | `floraLayout` | `garden` \| `gallery` | Grow round the crystals, or one plot per species to see them all. |
-| `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
+| `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`; species are `grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
 | `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |
 

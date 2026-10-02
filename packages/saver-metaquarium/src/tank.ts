@@ -689,6 +689,7 @@ class TankInstance implements SaverInstance {
   private propsKey = '';
   private warnedProps = '';
   private warnedFlora = '';
+  private warnedGeode = '';
   private warnedPalette = '';
   /** Scratch for the garden's view of the cast (setFish), reused every frame. */
   private readonly floraFish = Array.from({ length: 24 }, () => ({ x: 0, y: 0, z: 0, r: 0 }));
@@ -1236,6 +1237,15 @@ class TankInstance implements SaverInstance {
     return parsed.mix;
   }
 
+  private geodeMixParsed(mix: string): ReturnType<typeof parseGeodeMix>['mix'] {
+    const parsed = parseGeodeMix(mix);
+    if (parsed.problems.length > 0 && mix !== this.warnedGeode) {
+      this.warnedGeode = mix;
+      console.warn(`[metaquarium] geodeMix "${mix}": ${parsed.problems.join('; ')}`);
+    }
+    return parsed.mix;
+  }
+
   private buildScenery(): void {
     const rocks = this.num('rockDensity');
     const homes = this.num('geodeHomes');
@@ -1267,7 +1277,7 @@ class TankInstance implements SaverInstance {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
           fountain, lamps: streetLamps,
-          geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
+          geodes, geodeMix: this.geodeMixParsed(geodeMix), geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
       this.scene.add(this.scenery.group);

@@ -578,7 +578,7 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
     if (grown.star) thundereggs += 1;
   };
   const minerals = opts.minerals?.length ? opts.minerals : undefined;
-  if (opts.layout === 'gallery' && opts.amount > 0) {
+  if (opts.layout === 'gallery' && opts.amount > 0 && !(opts.mix && Object.keys(opts.mix).length > 0 && !Object.values(opts.mix).some((v) => (v ?? 0) > 0))) {
     // Columns a mineral each, rows a kind each, spaced so nothing touches;
     // the mega geode stands behind the lot.
     const rows = galleryRows(minerals ?? MINERALS);
