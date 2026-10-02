@@ -109,20 +109,26 @@ struct RecordedScene: Decodable, Equatable, Sendable {
     /// The steering performance recorded against this scene, when the scene
     /// carries one. Not yet consumed by the renderer (see the type's doc).
     let track: RecordedControlTrack?
+    /// What the native renderer would drop from this scene (see NativeSupport).
+    let nativeGaps: [NativeSupport.Gap]
 
     /// Classic savers whose native port is only a stand-in: the aquarium is a
     /// 2D sketch of a three.js tank, built for the Apple TV (no WebKit there).
     static let webOnlySavers: Set<String> = ["metaquarium"]
 
-    /// Which past scenes the phone draws with the web engine: only the ones it
-    /// can merely impersonate. Schema scenes and ported classics re-render
-    /// natively and match the site (checked 2026-09-23 against a 3.9 table
-    /// scene — pixel-identical in layout, and just as still). A WebView per
-    /// history page would cost a live-page reload on every visit for nothing.
+    /// Which past scenes the phone draws with the web engine: the ones native
+    /// would get wrong. A plain schema scene re-renders natively and matches
+    /// the site (checked 2026-09-23 on a 3.9 table scene), so it stays native —
+    /// a WebView per history page costs a live-page reload on the way back.
+    /// But a sequence, a timeline, groups or layer transforms are dropped by
+    /// the native renderer, and a timed piece became a dark still (logo's
+    /// "deep-seek", 2026-10-01): those go to the reference renderer.
     var needsWebEngine: Bool {
-        if let classicSaverId { return Self.webOnlySavers.contains(classicSaverId) }
-        // Nothing native can draw at all: better the real thing than a caption.
-        return spec == nil
+        if let classicSaverId {
+            return Self.webOnlySavers.contains(classicSaverId)
+                || ClassicSaverKind.supported(id: classicSaverId) == nil
+        }
+        return spec == nil || !nativeGaps.isEmpty
     }
 
     /// A 3D aquarium: mounts empty and fills over 10–20 s, so it gets the
@@ -160,6 +166,7 @@ struct RecordedScene: Decodable, Equatable, Sendable {
             classicSaverId = nil
         }
         label = topLabel ?? scene?.label ?? classicSaverId
+        nativeGaps = NativeSupport.gaps(in: try? c.decodeIfPresent(JSONValue.self, forKey: .spec))
     }
 }
 

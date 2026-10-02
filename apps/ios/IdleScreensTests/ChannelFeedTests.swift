@@ -151,7 +151,7 @@ final class WebEngineHistoryTests: XCTestCase {
         let schema = try decode("""
         {"id":3,"seed":1,"spec":{"schemaVersion":1,"id":"x","label":"x","layers":[{"count":1,"sprite":{"kind":"circle"}}]}}
         """)
-        XCTAssertFalse(schema.needsWebEngine)
+        XCTAssertFalse(schema.needsWebEngine, "a plain schema scene the native renderer draws faithfully")
         XCTAssertFalse(schema.isTank)
     }
 
