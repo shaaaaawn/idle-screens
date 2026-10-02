@@ -252,7 +252,7 @@ export function crabFrame(rig: CrabRig, inp: CrabInput, out: CrabOutput): CrabOu
   let gesture: CrabClip | null = null;
   if (m.intoStop >= 0) {
     const did = crabStopAt(index, m.k);
-    const faceCam = (did === 'wave' || did === 'cheer' || did === 'look') && Number.isFinite(inp.camX);
+    const faceCam = (did === 'wave' || did === 'cheer' || did === 'look') && Number.isFinite(inp.camX) && Number.isFinite(inp.camZ);
     const faceYaw = faceCam ? Math.atan2(inp.camX - x, inp.camZ - z) : walkYaw;
     const nextYaw = travel + (crabLead(index, m.k + 1) * Math.PI) / 2;
     const dIn = wrap(faceYaw - walkYaw);

@@ -31,6 +31,8 @@ const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb',
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 
+/** Labels and material names come from the URL and the GLB: never markup. */
+const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
@@ -140,10 +142,10 @@ const views: Array<[string, (d: number) => Vector3]> = [
     }
     const lab = document.createElement('div'); lab.className = 'label';
     lab.style.left = '4px'; lab.style.top = `${row * CELL + 4}px`;
-    lab.innerHTML = `<b>${r.label}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
+    lab.innerHTML = `<b>${esc(r.label)}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
     const leg = document.createElement('div'); leg.className = 'label';
     leg.style.left = `${3 * CELL + 4}px`; leg.style.top = `${row * CELL + 4}px`;
-    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${n} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
+    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${esc(n)} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
     sheet.append(lab, leg);
     row += 1;
   }

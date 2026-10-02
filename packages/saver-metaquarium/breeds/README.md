@@ -83,8 +83,9 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
      is big, a babyfish small.
    - `motion` is how it should move: `wiggle` is the tank's body wave;
      `pulse` (a jellyfish's bell) is a per-breed procedural motion still to
-     build; `scuttle` is the crab's, rigged in Blender (see **Rigged
-     breeds** below).
+     build; `scuttle` is the crab's, and `angler` (glowfish), `hacker`
+     (hackerfish) and `shark` are the other rig-driven motions, all rigged in
+     Blender (see **Rigged breeds** below).
 8. **Tests** (`src/breeds.test.ts`) run on their own. They check that the
    chunk equals the reviewed GLB, that there's no Draco, that every material
    has a role, and that the breed stays under 6,000 triangles. Then commit
