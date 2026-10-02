@@ -166,9 +166,9 @@ describe('resolveIpfsUrls', () => {
 });
 
 describe('NPC breeds (unminted set, bundled)', () => {
-  it('covers all eight designed breeds with synthetic ids above the supply, each bundled', () => {
+  it('covers the eight designed breeds and the starfish with synthetic ids above the supply, each bundled', () => {
     expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(
-      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark'],
+      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark', 'starfish'],
     );
     for (const f of NPC_CATALOG) {
       expect(f.id).toBeGreaterThan(512); // never collides with a minted token

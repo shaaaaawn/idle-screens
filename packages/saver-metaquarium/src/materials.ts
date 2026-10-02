@@ -169,6 +169,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
   // A screen's phosphor (screen.ts), drawn once, on the first SCREEN- part:
   // a fish without a screen draws nothing extra.
   let phosphor: Color | null = null;
+  const glows = new Map<Material, MeshBasicMaterial>();
   // Neon keeps SMALL glow lit (a lure, a fin's accent) and darkens a glow part
   // that is a big piece of the animal (a crab's claws): in blacklight the
   // light is the eyes, not the armour.
@@ -223,7 +224,12 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       // A textured glow part keeps its template material; it is still light, not a lit surface.
       if (isGlow(m)) m.userData.mqNoCaustic = true;
       if (isGlow(m) && !(m as Partial<MeshBasicMaterial>).map) {
+        // One light, however many meshes share it (the starfish's five tips):
+        // one colour, drawn once.
+        const shared = glows.get(m);
+        if (shared) return shared;
         const glow = new MeshBasicMaterial({ color: glowColorOf(m, rng) });
+        glows.set(m, glow);
         glow.name = m.name;
         glow.userData.mqNoCaustic = true;
         // The halo pass reads this back so shell and core NEVER disagree —

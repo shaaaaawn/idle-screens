@@ -37,6 +37,11 @@
       "roles": { "": "KEEP-Jellyfish" }, "metal": 0, "roughness": 0.8,
       "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
     },
+    "starfish": {
+      "source": "rig/starfish.glb", "delivered": "source/starfish.glb", "rig": "rig/starfish.py",
+      "kind": "voxel", "size": 1.0, "motion": "starfish", "roles": {}, "splitByBone": ["GLOW-Tips"],
+      "notes": "The first breed drawn in-house, in our designer's style: rig/starfish-model.mjs writes source/starfish.glb voxel by voxel (whole cubes, one mesh per material, already role-named). The tips are GLOW-Tips (no 'eye' in a glow name), split one primitive per arm (splitByBone) so each is a small light riding its own tip. Rigged in Blender by rig/starfish.py, which never edits the model: the disc and its face, two blinking eyes, five arms in three rigid links each; clips crawl, idle, wave, stand, curl. src/starfish.ts drives them."
+    },
     "shark": {
       "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
       "kind": "voxel", "size": 2.2, "motion": "shark",

@@ -386,6 +386,32 @@ test('MQ11: shoal mounts over a dense canopy and reports a sane inspect().shoal'
 });
 
 /**
+ * The starfish (a bundled breed drawn in-house, rigged in Blender): it mounts
+ * from its own lazy chunk, and its driver (starfish.ts) has it on the floor
+ * doing a starfish's business. The NPC cast above is capped at the low
+ * tier's eight fish, so it gets its own scene.
+ */
+test('MQ12: the starfish mounts, rigged, and crawls the floor', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.environment=reef');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  for (const d of doings) expect(['crawl', 'turn', 'idle', 'look', 'wave', 'stand', 'curl']).toContain(d);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Crystals (propMix): generated scenery builds and reports itself, and a tank
  * that asked for none builds none — the "byte-identical when off" contract,
  * checked at the one place a viewer could see it break.

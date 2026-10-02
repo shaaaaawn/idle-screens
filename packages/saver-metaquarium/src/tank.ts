@@ -65,6 +65,7 @@ import { buildStudio, type Studio } from './studio';
 import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
+import { rigStarfish, starfishFrame, starfishIdle, starfishSpot, starfishStart, type StarfishOutput, type StarfishRig } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
@@ -538,7 +539,13 @@ interface Fish {
    *  hacks, crashes and reboots, its face a screen (hacker.ts, screen.ts); the
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
-  rig?: { crab?: CrabRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; lights: Record<string, number> } | null;
+  rig?: {
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig;
+    lights: Record<string, number>;
+    /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
+     *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
+    bloom?: number;
+  } | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
 }
@@ -564,7 +571,7 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
-  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts). */
+  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts); a starfish's crawl, turn, idle, look, wave, stand or curl (starfish.ts). */
   doing?: string;
 }
 
@@ -632,6 +639,7 @@ class TankInstance implements SaverInstance {
     this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
   private readonly crabSpots: number[] = [];
   private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
+  private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'crawl', bloom: 0 };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
   // Scenery. Everything below stays null/empty until a scene asks for props.
@@ -1261,6 +1269,7 @@ class TankInstance implements SaverInstance {
     // A rigged breed's light lives with it (angler.ts: the lure breathes,
     // beckons, goes dark at the strike): its level per part, by material.
     const lights = f.rig?.lights;
+    const bloom = f.rig?.bloom ?? 1;
     for (const c of g.cores) {
       const lvl = beat * (lights?.[c.mat.name] ?? 1);
       c.mat.color.setRGB(
@@ -1295,17 +1304,17 @@ class TankInstance implements SaverInstance {
       // whole fin outline) is not a lamp. Sized and lit like an accent it
       // washed a quarter of the frame in its colour, in every scene, from a
       // single fish: it keeps a close, faint rim and casts nothing.
-      const size = part.coat
+      const size = (part.coat
         ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
-        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2;
-      const k = g.gain * (part.coat ? 0.5 : 1) * (lights?.[part.name] ?? 1);
+        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2) * Math.sqrt(bloom);
+      const k = g.gain * (part.coat ? 0.5 : 1) * (lights?.[part.name] ?? 1) * bloom;
       this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
       n += 1;
       if (this.studio?.lights.length && !part.coat) {
         this.lightBids.push({
           d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
           x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
-          size, power: amount * g.gain * beat * (lights?.[part.name] ?? 1),
+          size, power: amount * g.gain * beat * (lights?.[part.name] ?? 1) * bloom,
         });
       }
     }
@@ -1315,7 +1324,7 @@ class TankInstance implements SaverInstance {
     // on a neighbour scales with `fishGlow` like the bloom does.
     if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
     const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
-    const emit = 0.7 * g.gain * amount;
+    const emit = 0.7 * g.gain * amount * bloom;
     this.fishEmitters.push({
       x: p.x, y: p.y, z: p.z, r: g.r * emit, g: g.g * emit, b: g.b * emit,
       reach, phase, owner: f.index,
@@ -1964,6 +1973,7 @@ class TankInstance implements SaverInstance {
     let clipDuration = 0;
     let fishGlow: FishGlow | null = null;
     let crab: CrabRig | null = null;
+    let starfish: StarfishRig | null = null;
     let angler: AnglerRig | null = null;
     let hacker: HackerRig | null = null;
     let shark: SharkRig | null = null;
@@ -1973,6 +1983,7 @@ class TankInstance implements SaverInstance {
       const body = cloneSkinned(tpl.scene);
       // Rigged at identity, before the tank scales and turns the body.
       if (this.wantBreeds[index] === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
+      if (this.wantBreeds[index] === 'starfish') starfish = rigStarfish(body, tpl.clips, tpl.norm);
       if (this.wantBreeds[index] === 'glowfish') angler = rigAngler(body, tpl.clips);
       if (this.wantBreeds[index] === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
@@ -1992,11 +2003,12 @@ class TankInstance implements SaverInstance {
       body.rotation.y = tpl.yaw;
       group.add(body);
       bodyNode = body;
-      if (crab) {
-        // Front along the group's +z, feet on the group's origin: crab.ts aims and stands the group.
+      const walker = crab ?? starfish;
+      if (walker) {
+        // Front along the group's +z, feet on the group's origin: crab.ts (starfish.ts) aims and stands the group.
         body.rotation.y = 0;
-        body.position.copy(crab.anchor).multiplyScalar(-tpl.norm);
-        mixer = crab.mixer;
+        body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
+        mixer = walker.mixer;
       } else if (angler || hacker || shark) {
         mixer = (angler ?? hacker ?? shark)!.mixer;
       } else if (tpl.clip) {
@@ -2038,7 +2050,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
-      baseYaw: tpl && !crab ? tpl.yaw : 0,
+      baseYaw: tpl && !crab && !starfish ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -2047,8 +2059,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || angler || hacker || shark
-        ? { ...(crab ? { crab } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), lights: {} }
+      rig: crab || starfish || angler || hacker || shark
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2313,13 +2325,15 @@ class TankInstance implements SaverInstance {
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const tintPulse = this.num('crystalPulse');
-    // Every crab's own spot first, so each can give the others room (crab.ts).
+    // Every floor creature's own spot first (crabs and starfish), so each can
+    // give the others room (crab.ts).
     const crabSpots = this.crabSpots;
     crabSpots.length = 0;
     for (const f of this.fish) {
-      if (!f?.rig?.crab || f.index >= visible) continue;
-      const s = crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index));
-      crabSpots.push(f.index, s.x, s.z);
+      if (!f?.rig || f.index >= visible) continue;
+      const s = f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
+        : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index)) : null;
+      if (s) crabSpots.push(f.index, s.x, s.z);
     }
     // The camera a crab turns to face — known for THIS t before any fish moves:
     // the shot's, or, following a crab, where the chase camera will stand
@@ -2328,8 +2342,9 @@ class TankInstance implements SaverInstance {
     let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
     if (followSlot >= 0) {
       const ff = this.fish[followSlot];
-      if (ff?.rig?.crab && !followPov) {
-        const s = crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index));
+      if ((ff?.rig?.crab || ff?.rig?.starfish) && !followPov) {
+        const s = ff.rig.crab ? crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index))
+          : starfishSpot(ff.index, tSec, ff.plan, starfishStart(ff.plan, ff.index));
         const turn = (this.num('followAngle') * Math.PI) / 180, c = Math.cos(turn), sn = Math.sin(turn);
         crabCamX = s.x - (s.fx * c - s.fz * sn) * followBack; crabCamZ = s.z - (s.fx * sn + s.fz * c) * followBack;
       } else { crabCamX = NaN; crabCamZ = NaN; }
@@ -2658,6 +2673,17 @@ class TankInstance implements SaverInstance {
           }, this.crabOut)
         : null;
       if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (crabRig) crabIdle(crabRig, tSec, f.index);
+      // A starfish crawls the floor the same way (starfish.ts).
+      const starRig = f.rig?.starfish;
+      const star = starRig && !act && !style.formation
+        ? starfishFrame(starRig, {
+            t: tSec, index: f.index, plan: f.plan, start: starfishStart(f.plan, f.index), len: L,
+            scale: starRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+          }, this.starOut)
+        : null;
+      if (star) { px = star.x; y = star.y; pz = star.z; f.rig!.bloom = star.bloom; } else if (starRig) starfishIdle(starRig, tSec, f.index);
+      const floor = crab ?? star;
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
@@ -2673,7 +2699,7 @@ class TankInstance implements SaverInstance {
         this.followAt.set(px, y, pz); this.followSeen = true;
         this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
         // A crab's route is its own (crab.ts): chase along it, not the swim plan's.
-        if (crab) { this.followHead.set(crab.tx, 0, crab.tz); this.followTrail.set(crab.trailX, y, crab.trailZ); this.followHasTrail = true; }
+        if (floor) { this.followHead.set(floor.tx, 0, floor.tz); this.followTrail.set(floor.trailX, y, floor.trailZ); this.followHasTrail = true; }
         if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
         this.followHead.normalize();
         if (act && this.vignette) {
@@ -2700,7 +2726,7 @@ class TankInstance implements SaverInstance {
         f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
         f.group.rotateZ(pose.roll);
       }
-      if (crab) f.group.quaternion.copy(crab.quaternion);
+      if (floor) f.group.quaternion.copy(floor.quaternion);
 
       // Eye life: blinks, saccades, a look at whoever it is talking to, a
       // glance at the lens. Rigged on the first frame that asks for it, so
@@ -2796,7 +2822,7 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(act ? act.fx : pose.fx, act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(crab ? { doing: crab.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),
+        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

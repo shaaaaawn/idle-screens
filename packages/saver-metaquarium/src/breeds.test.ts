@@ -129,6 +129,38 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
   });
 
+  it('starfish: the rig survives the intake — disc, eyes, five arms in three links; each glowing tip its own light on its own arm', async () => {
+    const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    const arms = [0, 1, 2, 3, 4].flatMap((n) => [1, 2, 3].map((l) => `arm${n}.${l}`));
+    expect([...joints].sort()).toEqual(['body', 'eye.L', 'eye.R', ...arms].sort());
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['crawl', 'curl', 'idle', 'stand', 'wave']);
+    const tips: string[] = [];
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      if (name === 'GLOW-Tips') { expect(bones.size).toBe(1); tips.push(...bones); }
+      if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R']);
+    }
+    // splitByBone (breeds.json): one small light per tip, so neon keeps it lit and its bloom rides the tip.
+    expect(tips.sort()).toEqual(['arm0.3', 'arm1.3', 'arm2.3', 'arm3.3', 'arm4.3']);
+  });
+
+  it('starfish: the committed source is what its generator draws (breeds/rig/starfish-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/starfish-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12); // every face of every cube
+    const doc = await new NodeIO().read(here('../breeds/source/starfish.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    // No glow named for an eye: isEyes() would take it for an eye display.
+    for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
+  });
+
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', () => {
     let tris = 0;
     const json = gltfJson(readFileSync(here('../breeds/shark.glb')));

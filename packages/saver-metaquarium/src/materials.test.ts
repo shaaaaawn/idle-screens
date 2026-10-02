@@ -572,6 +572,28 @@ describe('the neon look (fishLook: neon)', () => {
   });
 });
 
+describe('one glow material on several meshes (a starfish\'s five tips)', () => {
+  it('shares one light: one colour drawn once, the same material on every mesh, lit in neon too', () => {
+    for (const neon of [false, true]) {
+      const shared = new MeshStandardMaterial(); shared.name = 'GLOW-Tips';
+      const root = new Group();
+      const body = new Mesh(new SphereGeometry(20, 4, 4), new MeshStandardMaterial()); body.material.name = 'PrimaryColor';
+      root.add(body);
+      const tips = [0, 1, 2, 3, 4].map((n) => {
+        const tip = new Mesh(new SphereGeometry(1.5, 4, 4), shared);
+        tip.position.set(18 * Math.sin(n * 1.26), 0, 18 * Math.cos(n * 1.26));
+        root.add(tip);
+        return tip;
+      });
+      applyNpcMaterials(root, createRng(4), true, true, neon);
+      const first = tips[0]!.material as unknown as MeshBasicMaterial;
+      expect(first).toBeInstanceOf(MeshBasicMaterial);
+      expect(first.name).toBe('GLOW-Tips');
+      for (const tip of tips) expect(tip.material).toBe(first);
+    }
+  });
+});
+
 describe('a glow part riding a bone (a glowfish\'s lure)', () => {
   it('records the bone and its centre in the bone\'s frame, so its light follows the swing', () => {
     const geo = new SphereGeometry(1, 4, 4).translate(5, 2, 0);

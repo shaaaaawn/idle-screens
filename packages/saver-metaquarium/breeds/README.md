@@ -13,6 +13,7 @@ swims on every host: the wall, the Mac app and the playground.
 breeds/
   source/<breed>.glb   the model as delivered, untouched (Draco, instancing, whatever it came with)
   rig/<breed>.py       a rigged breed's Blender script: source in, rig/<breed>.glb (skeleton + clips) out
+  rig/<breed>-model.mjs  a breed drawn in-house (the starfish): writes its source/<breed>.glb voxel by voxel
   rig/common.py        what every rig script shares: load, lattice, segment, armature, pose, bake, export
   rig/build.py         every rig into one .blend (a scene per breed); rig/export.py ships a hand edit from it
   breeds.json          the intake manifest: roles, kind, size, motion, notes
@@ -102,6 +103,16 @@ skeleton and clips made in Blender:
 | glowfish | `rig/glowfish.py`: jaw, flip-top head, tail, blinking eyes, three-link lure | `src/angler.ts` (the tank swims it) | swim lure chomp blink |
 | hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
 | shark | `rig/shark.py` (cut by position — its fins sit off the lattice): head, jaw ringed with metal teeth, rolling eyes, pectorals, three-link tail | `src/shark.ts` (the tank swims it; it patrols) | swim bite |
+| starfish | `rig/starfish.py`: the disc and its face, blinking eyes, five arms in three links (hinged underneath, so a curl closes its seams) | `src/starfish.ts` crawls it on the seabed, the crab's way | crawl idle wave stand curl |
+
+**A breed drawn in-house.** The starfish is the first we drew ourselves, in
+our designer's style: whole 2-unit cubes, flat colours, the coat roles, a
+`GLOW-` accent, white eyes with black pupils and a black smile.
+`rig/starfish-model.mjs` writes `source/starfish.glb` the way their models
+arrive (one mesh per material, every face of every cube, each face its own
+vertices), so the rig and the intake treat it exactly like theirs and the
+rig still never edits it; `breeds.test.ts` holds the committed source to the
+generator. Change the voxel map there, rerun it, then the rig and the intake.
 
 A breed's script imports `source/<breed>.glb`, rigs it, bakes its clips and
 writes `rig/<breed>.glb`, which `breeds.json` names as the intake's source
@@ -152,8 +163,16 @@ The rules a rig keeps, so the intake and the tank can trust it:
   dark at the strike). Flash-safe: no faster than 1.5 Hz, tested.
 - **Never put `eye` in a glow role's name**: `isEyes()` would make it a
   black-and-white eye display. The glowfish's glowing eyes are `GLOW-Orbs`.
+- **One glow material on several moving parts** (the starfish's five tips):
+  name it in `breeds.json` `splitByBone` and the intake writes one primitive
+  per bone. Each is then a small light on its own part (lit in the neon look,
+  its bloom on the tip it rides), all one colour (`applyNpcMaterials` draws a
+  shared glow material once).
+- **A floor creature's glow** pools round it like a lamp: its driver sets
+  the rig's `bloom` (the starfish's is low lying down, higher standing), which
+  scales its bloom cards, light and floor pool, never the parts themselves.
 
-The tank side is a module per rigged breed (`src/crab.ts`, `src/angler.ts`):
+The tank side is a module per rigged breed (`src/crab.ts`, `src/angler.ts`, `src/starfish.ts`):
 it picks which clip plays and when, and sets every action's time and weight
 each frame, so the tank stays a pure function of t. `breeds.test.ts` holds
 each rig's skin, clips and joint assignment.
