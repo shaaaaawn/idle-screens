@@ -34,6 +34,13 @@ export function inkPuffAt(c: InkCloud, p: number, t: number, out: InkPuff): InkP
   return out;
 }
 
+/** The key's own characters, so two keys of one length and one bucket still differ. */
+function keyHash(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (Math.imul(h, 31) + key.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+
 export class InkLayer {
   readonly mesh: InstancedMesh;
   private readonly clouds = new Map<string, InkCloud>();
@@ -58,7 +65,7 @@ export class InkLayer {
   /** A cloud, once per `key`, from (x, y, z) at `t`; `size` its puffs' radius. */
   emit(key: string, t: number, x: number, y: number, z: number, size: number): void {
     if (this.clouds.has(key) || this.clouds.size >= CAP / PUFFS) return;
-    this.clouds.set(key, { t, x, y, z, size, seed: fishHash(key.length, Math.round(t * 100) % 9973) });
+    this.clouds.set(key, { t, x, y, z, size, seed: fishHash(keyHash(key), Math.round(t * 100) % 9973) });
   }
 
   get size(): number { return this.clouds.size; }

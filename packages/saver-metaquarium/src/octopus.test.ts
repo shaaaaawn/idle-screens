@@ -307,4 +307,13 @@ describe('ink (ink.ts)', () => {
     expect(layer.update(9)).toBe(0);
     expect(layer.size).toBe(0);
   });
+
+  it('two keys of one length emitted at once do not make cloned clouds', () => {
+    const at = (key: string) => {
+      const layer = new InkLayer(new Scene());
+      layer.emit(key, 10, 0, 20, 0, 4); layer.update(11);
+      return Array.from(layer.mesh.instanceMatrix.array.slice(0, 48));
+    };
+    expect(at('3:7')).not.toEqual(at('5:2'));
+  });
 });
