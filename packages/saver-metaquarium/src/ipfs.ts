@@ -66,6 +66,8 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 608, name: 'Dori', breed: 'dori', ipfs3d: `${BUNDLED_BREED_SCHEME}dori`, localGlb: '' },
   // Drawn in-house in the designer's style, not from the original aquarium (breeds/rig/starfish-model.mjs).
   { id: 609, name: 'Starfish', breed: 'starfish', ipfs3d: `${BUNDLED_BREED_SCHEME}starfish`, localGlb: '' },
+  // The second drawn in-house (breeds/rig/octopus-model.mjs).
+  { id: 610, name: 'Octopus', breed: 'octopus', ipfs3d: `${BUNDLED_BREED_SCHEME}octopus`, localGlb: '' },
 ];
 
 /** The default catalog's lookup: minted samples first, then the bundled breeds. */

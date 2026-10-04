@@ -120,12 +120,13 @@ export function voxels() {
     if (open && hash(i, j, k) < 0.09) cells.set(key, [i, j, k, 'SecondaryColor']);
   }
   // Rings that glow: three a side on the mantle, one on each arm.
-  // Rings that glow: on the bulb's flanks, and one on each arm.
-  for (const [i, j, k] of [[5, 2, 6], [4, 4, 8], [2, 4, 10], [-5, 2, 6], [-4, 4, 8], [-2, 4, 10]]) {
+  // Rings that glow: on the bulb's flanks, and one on each arm — each clear
+  // of a joint (rig/octopus.py blends there), so each is one bone's light.
+  for (const [i, j, k] of [[4, 2, 5], [4, 4, 8], [2, 4, 10], [-4, 2, 5], [-4, 4, 8], [-2, 4, 10]]) {
     if (has(i, j, k)) cells.set(`${i},${j},${k}`, [i, j, k, 'GLOW-Rings']);
   }
   ARM_ANGLES.forEach((_, n) => {
-    const p = armPoint(n, 6.5), i = Math.round(p.x), j = Math.round(p.y);
+    const p = armPoint(n, 5.75), i = Math.round(p.x), j = Math.round(p.y);
     if (has(i, j, 0)) cells.set(`${i},${j},0`, [i, j, 0, 'GLOW-Rings']);
   });
   // The eyes, low on the front of the bulb and proud of it: white, a

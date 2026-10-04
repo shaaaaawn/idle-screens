@@ -1,0 +1,166 @@
+import { readFileSync } from 'node:fs';
+import { BoxGeometry, Color, Group, Mesh, MeshLambertMaterial, Quaternion, Scene, Vector3, type AnimationClip, type Object3D } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { describe, expect, it } from 'vitest';
+import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
+import {
+  newOctopusOutput, OCTOPUS_CLIPS, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusLook, octopusMoment, octopusSkin,
+  octopusSpot, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusRig,
+} from './octopus';
+import { createRng } from '@idle-screens/core';
+import { compileSwimPlan } from './plan';
+
+/** The real octopus, as the tank loads it. */
+async function load(): Promise<{ scene: Object3D; clips: AnimationClip[] }> {
+  const buf = readFileSync(new URL('../breeds/octopus.glb', import.meta.url));
+  const gltf = await new GLTFLoader().parseAsync(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), '');
+  return { scene: gltf.scene, clips: gltf.animations };
+}
+async function rigged(): Promise<{ g: Group; rig: OctopusRig; body: Object3D }> {
+  const { scene, clips } = await load();
+  const rig = rigOctopus(scene, clips, 0.4, 3)!;
+  const g = new Group(); g.add(scene);
+  return { g, rig, body: scene };
+}
+const plan = compileSwimPlan(createRng(3).fork(1), { radius: 120, yMin: 15, yMax: 72 });
+const flat = (): number => 0;
+
+describe('the octopus (octopus.ts)', () => {
+  it('rigs the real model: every clip, both eyes with their pupils and brows, the siphon', async () => {
+    const { rig } = await rigged();
+    expect(Object.keys(rig.actions).sort()).toEqual([...OCTOPUS_CLIPS].sort());
+    expect(rig.eyes.map((e) => [e.side, e.eye.name, e.pupil.name, e.brow?.name])).toEqual([[1, 'eyeL', 'pupilL', 'browL'], [-1, 'eyeR', 'pupilR', 'browR']]);
+    expect(rig.siphon?.name).toBe('siphon');
+  });
+
+  it('keeps its pupils level with the world: rolled 30°, they turn back 30°; on its side, as far as an eye can (80°); pitched, level still', async () => {
+    const { g, rig } = await rigged();
+    const state = newOctopusOutput();
+    const level = (): number => {
+      // The pupil's own right (its bar) in the world: level means no rise.
+      const e = rig.eyes[0]!, q = e.pupil.getWorldQuaternion(new Quaternion());
+      const right = new Vector3(1, 0, 0).applyQuaternion(q.multiply(e.pupilAxes.clone().invert()));
+      return Math.abs(right.y) / Math.hypot(right.x, right.y, right.z);
+    };
+    const at = (roll: number, pitch: number) => {
+      g.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), roll).multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch));
+      g.updateMatrixWorld(true);
+      const l = octopusLook(rig, 0.1, 3, { viewer: null, state });
+      g.updateMatrixWorld(true);
+      return l;
+    };
+    const r30 = at(Math.PI / 6, 0);
+    expect(r30.bodyRoll).toBeCloseTo(30, -0.5);
+    expect(r30.pupilRoll).toBeCloseTo(-30, -0.5);
+    expect(level()).toBeLessThan(0.03);
+    const side = at(Math.PI / 2, 0);
+    expect(side.pupilRoll).toBe(-80);
+    const pitched = at(0, Math.PI / 3);
+    // Pitched, only the eye's own small swivel tilts its face: the pupil turns a little, and the bar is level.
+    expect(Math.abs(pitched.pupilRoll)).toBeLessThan(15);
+    expect(level()).toBeLessThan(0.03);
+  });
+
+  it('moves three ways, stops eight, and every cycle has room for its longest stop', () => {
+    const gaits = new Set<string>(), stops = new Set<string>();
+    for (let i = 0; i < 20; i++) for (let k = 0; k < 40; k++) { gaits.add(octopusGait(i, k)); stops.add(octopusStopAt(i, k)); }
+    expect([...gaits].sort()).toEqual(['crawl', 'inkjet', 'jet', 'tiptoe']);
+    expect([...stops].sort()).toEqual(['beckon', 'idle', 'look', 'peek', 'pounce', 'reach', 'sleep', 'wave']);
+    for (let i = 0; i < 30; i++) expect(octopusCycle(i).stop).toBeGreaterThan(1 + 8 + 1 + 1.2);
+  });
+
+  it('goes along its route without a jump — crawled or jetted, every bout covers its share — and only a jet leaves the floor', () => {
+    for (const i of [0, 1, 2, 5]) {
+      let prev = octopusSpot(i, 0, plan, 0);
+      for (let t = 0.05; t < 120; t += 0.05) {
+        const s = octopusSpot(i, t, plan, 0);
+        expect(Math.hypot(s.x - prev.x, s.z - prev.z)).toBeLessThan(2.5);
+        prev = s;
+        const m = octopusMoment(i, t);
+        if (m.gait !== 'jet' && m.gait !== 'inkjet') expect(m.lift).toBe(0);
+      }
+    }
+  });
+
+  it('jets and tiptoes backwards (mantle first; on its rear arms), crawls mostly ahead', () => {
+    for (let i = 0; i < 10; i++) for (let k = 0; k < 20; k++) {
+      const g = octopusGait(i, k), h = octopusHeading(i, k);
+      if (g !== 'crawl') expect(h).toBe(Math.PI);
+      else expect(Math.abs(h)).toBeLessThan(1.2);
+    }
+  });
+
+  it('its clips always make one whole, and it turns to face you to wave', async () => {
+    const { rig } = await rigged();
+    const out = newOctopusOutput();
+    let faced = false;
+    for (let t = 0; t < 200; t += 0.21) {
+      octopusFrame(rig, { t, index: 4, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300 }, out);
+      expect(OCTOPUS_CLIPS.reduce((s, n) => s + rig.actions[n].getEffectiveWeight(), 0)).toBeCloseTo(1, 6);
+      if (out.doing === 'wave' || out.doing === 'beckon' || out.doing === 'look') {
+        const toCam = Math.atan2(0 - out.x, 300 - out.z), face = Math.atan2(out.fx, out.fz);
+        expect(Math.abs(Math.atan2(Math.sin(toCam - face), Math.cos(toCam - face)))).toBeLessThan(0.05);
+        faced = true;
+      }
+    }
+    expect(faced).toBe(true);
+  });
+
+  it('a jet lifts it and sets it back down; an inked jet lets go one cloud', async () => {
+    const { rig } = await rigged();
+    let i = 0, k = 1;
+    outer: for (i = 0; i < 40; i++) for (k = 1; k < 30; k++) if (octopusGait(i, k) === 'inkjet') break outer;
+    const c = octopusCycle(i), start = k * (c.move + c.stop) - c.offset;
+    const out = newOctopusOutput();
+    const keys = new Set<string>();
+    let high = 0;
+    for (let u = 0; u < c.move + 0.5; u += 0.05) {
+      octopusFrame(rig, { t: start + u, index: i, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300 }, out);
+      high = Math.max(high, out.y - out.groundY);
+      if (out.ink) keys.add(out.ink.key);
+    }
+    expect(high).toBeGreaterThan(21);
+    expect(out.y).toBeCloseTo(out.groundY, 6);
+    expect(keys.size).toBe(1);
+  });
+});
+
+describe('the octopus\'s skin', () => {
+  it('goes pale, flushes, fades toward the floor and back to itself; the passing clouds are a shader on the coat', () => {
+    const body = new Group();
+    const mat = new MeshLambertMaterial({ color: new Color('#c03020') }); mat.name = 'PrimaryColor';
+    body.add(new Mesh(new BoxGeometry(1, 1, 1), mat));
+    const skin = octopusSkin(body);
+    expect(skin.parts).toHaveLength(1);
+    const mood = newOctopusOutput().mood;
+    setOctopusSkin(skin, { ...mood, pale: 1 }, null);
+    expect(mat.color.r + mat.color.g + mat.color.b).toBeGreaterThan(new Color('#c03020').r + new Color('#c03020').g + new Color('#c03020').b + 0.5);
+    setOctopusSkin(skin, { ...mood, camo: 1 }, new Color('#0000ff'));
+    expect(mat.color.b).toBeGreaterThan(0.4);
+    setOctopusSkin(skin, mood, null);
+    expect(mat.color.getHex()).toBe(new Color('#c03020').getHex());
+    setOctopusSkin(skin, { ...mood, cloud: 0.8, cloudPhase: 2 }, null);
+    expect(skin.cloud.value).toBe(0.8);
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    mat.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.fragmentShader).toContain('uMqCloud');
+    expect(shader.uniforms.uMqCloud).toBe(skin.cloud);
+  });
+});
+
+describe('ink (ink.ts)', () => {
+  it('blooms out from the siphon, sinks, thins away; a seek back forgets it', () => {
+    const c = { t: 10, x: 0, y: 20, z: 0, size: 4, seed: 0.3 };
+    const p = { visible: false, x: 0, y: 0, z: 0, s: 0 };
+    const early = inkPuffAt(c, 0, 10.1, { ...p }).s, mid = inkPuffAt(c, 0, 11.5, { ...p }).s, late = inkPuffAt(c, 0, 10 + INK_LIFE - 0.05, { ...p }).s;
+    expect(mid).toBeGreaterThan(early);
+    expect(late).toBeLessThan(mid * 0.4);
+    expect(inkPuffAt(c, 0, 10 + INK_LIFE + 0.01, { ...p }).visible).toBe(false);
+    const layer = new InkLayer(new Scene());
+    layer.emit('1:2', 10, 0, 20, 0, 4); layer.emit('1:2', 10.5, 9, 9, 9, 4);
+    expect(layer.size).toBe(1);
+    expect(layer.update(11)).toBeGreaterThan(3);
+    expect(layer.update(9)).toBe(0);
+    expect(layer.size).toBe(0);
+  });
+});
