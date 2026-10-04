@@ -79,7 +79,7 @@ import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import {
-  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
+  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusPlaced, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
   type OctopusRig, type OctopusSkin,
 } from './octopus';
 import { InkLayer } from './ink';
@@ -3002,14 +3002,16 @@ class TankInstance implements SaverInstance {
       }
       // An octopus's eyes — each pupil turned level with the world — its skin, its ink (octopus.ts, ink.ts).
       let oLook: ReturnType<typeof octopusLook> | null = null;
-      if (octo && f.rig!.octopus) {
+      // Placed by a script or a formation it has no stops, but it still keeps its pupils level and changes colour.
+      const oState = octo ?? (f.rig!.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
+      if (oState && f.rig!.octopus) {
         f.group.updateMatrixWorld(true);
-        oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: octo });
-        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, octo.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, octo.coat);
+        oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: oState });
+        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, oState.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, oState.coat);
         const siphon = f.rig!.octopus.siphon;
-        if (octo.ink && siphon && this.ink) {
+        if (oState.ink && siphon && this.ink) {
           siphon.getWorldPosition(this.burpAt);
-          this.ink.emit(octo.ink.key, octo.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
+          this.ink.emit(oState.ink.key, oState.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
         }
       }
       // A dori's eyes, now the fish is placed: who it is looking at (tang.ts).

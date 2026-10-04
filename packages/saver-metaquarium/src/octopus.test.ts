@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
 import {
   newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusIdle,
-  octopusLook, octopusMoment, octopusSkin, octopusSpot, octopusStart, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusOutput, type OctopusRig, type OctopusStop,
+  octopusLook, octopusMoment, octopusPlaced, octopusSkin, octopusSpot, octopusStart, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusOutput, type OctopusRig, type OctopusStop,
 } from './octopus';
 import { createRng } from '@idle-screens/core';
 import { compileSwimPlan } from './plan';
@@ -171,6 +171,18 @@ describe('the octopus, more closely', () => {
     octopusIdle(rig, 3, 2);
     expect(rig.actions.idle.getEffectiveWeight()).toBe(1);
     expect(OCTOPUS_CLIPS.filter((n) => n !== 'idle').every((n) => rig.actions[n].getEffectiveWeight() === 0)).toBe(true);
+  });
+
+  it('placed by someone else, it still keeps its pupils level and changes colour', async () => {
+    const { g, rig } = await rigged();
+    g.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 6);
+    g.updateMatrixWorld(true);
+    const dirty = { ...newOctopusOutput(), doing: 'jet' as const, stop: 'wave' as const, lift: 1, ink: { key: 'k', t: 0 } };
+    const state = octopusPlaced(3, 400, dirty);
+    expect(state).toMatchObject({ doing: 'idle', stop: null, lift: 0, ink: null });
+    expect(state.coat).toEqual(octopusCoat(3, 400));
+    const look = octopusLook(rig, 0.1, 3, { viewer: null, state });
+    expect(look.pupilRoll).toBeCloseTo(-30, -0.5);
   });
 
   /** Its eyes, at a stop, a second into it, the viewer in front. */

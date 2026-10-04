@@ -372,6 +372,15 @@ export function newOctopusOutput(): OctopusOutput {
   };
 }
 
+/** A placed octopus (a vignette's, or a formation's): at rest, still looking about and changing colour. */
+export function octopusPlaced(index: number, t: number, out: OctopusOutput): OctopusOutput {
+  out.doing = 'idle'; out.stop = null; out.intoActivity = 0; out.lift = 0; out.ink = null;
+  const m = out.mood;
+  m.pale = 0; m.flush = 0; m.camo = 0; m.cloud = 0; m.cloudPhase = 0; m.dream = 0; m.dreamHue = 0; m.rings = 0.3;
+  out.coat = octopusCoat(index, t);
+  return out;
+}
+
 const ROOM = 1.2;
 const euler = new Euler(0, 0, 0, 'YXZ');
 /** Stops it turns to face the viewer for. */
