@@ -183,6 +183,66 @@ describe('the blowfish\'s eyes', () => {
   });
 });
 
+describe('what each act does with its eyes', () => {
+  const viewer = new Vector3(10, 4, 80);
+  const eyesFor = (act: PufferAct, into: number, over: Partial<PufferState> = {}) => {
+    const { g, rig } = rigged();
+    g.updateMatrixWorld(true);
+    const l = pufferLook(rig, 50, 3, { viewer, state: calm({ act, weight: 1, into, doing: act, ...over }) });
+    return { l, rig };
+  };
+
+  it('shy: looks away and down, then peeks back at you through half-shut lids', () => {
+    expect(eyesFor('shy', 0.5).l.at).toBe('away');
+    const peek = eyesFor('shy', 1.45).l;
+    expect(peek.at).toBe('viewer');
+    expect(peek.lids[0]).toBeCloseTo(0.35, 6);
+  });
+
+  it('gulping: wide eyes, tiny pupils; zipped off, the eyes roll every which way', () => {
+    expect(eyesFor('puffup', 1.0, { puff: 1 }).l.pupil).toBeCloseTo(0.7, 6);
+    const zip = find('puffup', (i, k) => pufferRelease(i, k) === 'zip');
+    const { g, rig } = rigged();
+    g.updateMatrixWorld(true);
+    const l = pufferLook(rig, 50, zip.i, { viewer, state: calm({ act: 'puffup', weight: 1, into: 5.0, cycle: zip.k, doing: 'puffup' }) });
+    expect(l.at).toBe('dizzy');
+  });
+
+  it('yawning, its eyes droop; crunching, it looks down at its food', () => {
+    expect(eyesFor('yawn', 1.2).l.lids[0]).toBeCloseTo(0.75, 6);
+    expect(eyesFor('chomp', 0.5).l.at).toBe('down');
+  });
+
+  it('waving, shimmying, bouncing: eyes on you, pupils wide — an eyebrow flash with the wave, bedroom eyes with the shimmy', () => {
+    const wave = eyesFor('wave', 0.62);
+    expect(wave.l.at).toBe('viewer');
+    expect(wave.l.pupil).toBeCloseTo(1.25, 6);
+    const e = wave.rig.eyes[0]!;
+    expect(e.eye.position.distanceTo(e.eyeRest.p)).toBeGreaterThan(0.5);
+    expect(eyesFor('shimmy', 1.0).l.lids[1]).toBeCloseTo(0.4, 6);
+    expect(eyesFor('bounce', 1.0).l.at).toBe('viewer');
+  });
+
+  it('bats its lashes: quick flutters, both eyes', () => {
+    const { g, rig } = rigged();
+    g.updateMatrixWorld(true);
+    let batted = false;
+    for (let t = 0; t < 400 && !batted; t += 0.04) {
+      const l = pufferLook(rig, t, 3, { viewer, state: calm() });
+      if (l.flirt === 'bat' && Math.min(...l.lids) > 0.7) batted = true;
+    }
+    expect(batted).toBe(true);
+  });
+
+  it('a pout is two gulps\' worth: the gulp clip plays as it puffs a little', () => {
+    const { i, k } = find('pout');
+    const { rig } = rigged();
+    pufferFrame(rig, startOf(i, k) + 0.35, i, 0, { pace: 0 });
+    expect(w(rig, 'gulp')).toBeGreaterThan(0.5);
+    expect(pufferPuff(i, startOf(i, k) + 1.2)).toBeGreaterThan(0.35);
+  });
+});
+
 describe('the act schedule', () => {
   it('is pure', () => {
     for (const t of [3, 50, 777]) expect(pufferAct(5, t)).toEqual(pufferAct(5, t));

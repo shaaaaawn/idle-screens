@@ -1,4 +1,4 @@
-import { Scene } from 'three';
+import { MeshBasicMaterial, Scene } from 'three';
 import { describe, expect, it } from 'vitest';
 import { BURP_DRAG, BURP_LIFE, BURP_TRAIL, BurpLayer, burpAt, type BurpPose } from './burps';
 
@@ -53,6 +53,31 @@ describe('hiccup bubbles (burps.ts)', () => {
     layer.emit('1:1.000', 1.2, 0, 30, 0, 0.8, 0.1);
     layer.update(2, Infinity);
     layer.update(1.2 + BURP_TRAIL + BURP_LIFE + 0.1, Infinity);
+    expect(layer.size).toBe(0);
+  });
+
+  it('lists its bubbles for inspect, and draws them as bubbles — a bright rim, a clear middle, a catchlight', () => {
+    const layer = new BurpLayer(new Scene());
+    layer.emit('2:5.000', 5.2, 1.04, 30, -2, 0.8, 0.1);
+    expect(layer.list()).toEqual([
+      { key: '2:5.000', t: 5.2, x: 1, y: 30, z: -2 },
+      { key: '2:5.000+', t: 5.3, x: 1.3, y: 30.2, z: -2 },
+    ]);
+    const shader = {
+      uniforms: {}, vertexShader: '#include <common>\n#include <project_vertex>', fragmentShader: '#include <common>\n#include <alphamap_fragment>',
+    };
+    (layer.mesh.material as MeshBasicMaterial).onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('vBurpN = normalize(normalMatrix * n)');
+    expect(shader.fragmentShader).toContain('float rim = pow(');
+    expect(shader.fragmentShader).toContain('diffuseColor.a *= max(');
+  });
+
+  it('a bubble whose big one is long gone is forgotten too', () => {
+    const layer = new BurpLayer(new Scene());
+    layer.emit('4:1.000', 1.2, 0, 30, 0, 0.8, 0.1);
+    layer.update(1.2 + BURP_LIFE + 0.05, Infinity);   // the big one popped and is forgotten
+    expect(layer.size).toBe(1);
+    layer.update(1.2 + BURP_TRAIL + BURP_LIFE + 0.05, Infinity);
     expect(layer.size).toBe(0);
   });
 });
