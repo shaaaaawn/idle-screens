@@ -2184,7 +2184,7 @@ class TankInstance implements SaverInstance {
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       fishGlow = collectFishGlow(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       // An octopus's skin changes with its mood: its coat as dressed, and the passing clouds (octopus.ts).
-      if (octopus) octoSkin = octopusSkin(body);
+      if (octopus) octoSkin = octopusSkin(body, index);
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
@@ -3005,7 +3005,7 @@ class TankInstance implements SaverInstance {
       if (octo && f.rig!.octopus) {
         f.group.updateMatrixWorld(true);
         oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: octo });
-        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, octo.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null);
+        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, octo.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, octo.coat);
         const siphon = f.rig!.octopus.siphon;
         if (octo.ink && siphon && this.ink) {
           siphon.getWorldPosition(this.burpAt);

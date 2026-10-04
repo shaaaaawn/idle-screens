@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
 import {
-  newOctopusOutput, OCTOPUS_CLIPS, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusLook, octopusMoment, octopusSkin,
+  newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusLook, octopusMoment, octopusSkin,
   octopusSpot, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusRig,
 } from './octopus';
 import { createRng } from '@idle-screens/core';
@@ -145,6 +145,57 @@ describe('the octopus\'s skin', () => {
     mat.onBeforeCompile(shader as never, undefined as never);
     expect(shader.fragmentShader).toContain('uMqCloud');
     expect(shader.uniforms.uMqCloud).toBe(skin.cloud);
+  });
+});
+
+describe('the octopus changes colour', () => {
+  it('has a repertoire of its own, and changes among it every so often — a dozen changes in five minutes', () => {
+    for (const i of [0, 3, 8]) {
+      const rep = octopusRepertoire(i);
+      expect(new Set(rep).size).toBe(rep.length);
+      for (const c of rep) expect(c).toBeLessThan(OCTOPUS_COATS.length);
+      const worn = new Set<number>();
+      let changes = 0, last = octopusCoat(i, 0).to;
+      for (let t = 0; t < 300; t += 0.25) {
+        const c = octopusCoat(i, t);
+        worn.add(c.to);
+        if (c.to !== last) { changes++; last = c.to; }
+      }
+      expect(worn.size).toBeGreaterThanOrEqual(3);
+      expect(changes).toBeGreaterThan(8);
+    }
+  });
+
+  it('a change sweeps in over about a second, and every frame agrees on it', () => {
+    let seen = 0;
+    for (let t = 1; t < 300 && seen < 5; t += 0.05) {
+      const a = octopusCoat(2, t), b = octopusCoat(2, t + 0.05);
+      if (a.wave < 1 && b.wave < 1) {
+        expect([b.from, b.to]).toEqual([a.from, a.to]);
+        expect(b.wave - a.wave).toBeCloseTo(0.05 / OCTOPUS_SHIFT, 6);
+        seen++;
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it('the skin wears the coat it is changing to, the old one beyond the wave, and the shader draws the sweep', () => {
+    const body = new Group();
+    const mat = new MeshLambertMaterial({ color: new Color('#c03020') }); mat.name = 'PrimaryColor';
+    body.add(new Mesh(new BoxGeometry(1, 1, 1), mat));
+    const skin = octopusSkin(body, 5);
+    const mood = newOctopusOutput().mood;
+    setOctopusSkin(skin, mood, null, { from: 0, to: 2, wave: 0.4 });
+    expect(mat.color.getHex()).toBe(skin.coats[1]![0].getHex());
+    expect(skin.parts[0]!.old.value.getHex()).toBe(new Color('#c03020').getHex());
+    expect(skin.wave.value).toBe(0.4);
+    setOctopusSkin(skin, mood, null, { from: 0, to: 2, wave: 1 });
+    expect(skin.parts[0]!.old.value.getHex()).toBe(mat.color.getHex());
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    mat.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('vMqWaveD');
+    expect(shader.fragmentShader).toContain('mix(uMqOld, diffuseColor.rgb');
+    expect(shader.uniforms.uMqOld).toBe(skin.parts[0]!.old);
   });
 });
 

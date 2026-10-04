@@ -250,6 +250,77 @@ export function octopusSpot(index: number, t: number, plan: SwimPlan, start: num
 }
 
 // ---------------------------------------------------------------------------
+// Its colours
+// ---------------------------------------------------------------------------
+
+/**
+ * What an octopus can turn: rich colours, far apart round the wheel. Each
+ * octopus draws a few of these as its own repertoire (with the coat the tank
+ * dressed it in), and changes between them — an octopus can change its whole
+ * colour in a fraction of a second (chromatophores, ~0.3 s: Reiter 2018); here
+ * as a wave that sweeps down it from the top of its head to its arm tips.
+ */
+export const OCTOPUS_COATS = [
+  '#ff4f6d', '#b44dff', '#21c7b8', '#ffb23f', '#ff4fc8', '#3f6dff', '#6edc3c', '#ff7a3d', '#7a3dff', '#e0384e', '#18a8ff', '#ffd23f',
+] as const;
+/** How many colours it has besides its own coat. */
+const REPERTOIRE = 4;
+/** Seconds a change takes to sweep from its head to its arm tips. */
+export const OCTOPUS_SHIFT = 1.2;
+
+/** This octopus's own colours: indices into OCTOPUS_COATS, distinct. */
+export function octopusRepertoire(index: number): number[] {
+  const out: number[] = [];
+  for (let n = 0; out.length < REPERTOIRE && n < 64; n++) {
+    const c = Math.floor(fishHash(index * 131 + n, 1741) * OCTOPUS_COATS.length);
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+/** The colour changes in cycle k: (seconds into the cycle) — at most stops, sometimes mid-crawl. */
+function shiftsIn(index: number, k: number): number[] {
+  const c = octopusCycle(index), out: number[] = [];
+  if (octopusGait(index, k) === 'crawl' && fishHash(index * 433 + k, 1743) < 0.4) out.push(c.move * 0.5);
+  if (fishHash(index * 439 + k, 1745) < 0.75) out.push(c.move + TURN_IN * 0.4);
+  return out;
+}
+
+/** The coat a change puts on: 0 its own, 1.. its repertoire. Its own hash
+ *  alone, so any frame agrees on it (now and then the same coat again: a
+ *  change you do not see). */
+function coatOf(index: number, k: number, slot: number): number {
+  return Math.floor(fishHash(index * 911 + k * 3 + slot, 1747) * (REPERTOIRE + 1));
+}
+
+export interface OctopusCoat {
+  /** The coat it is changing from, and to: 0 its own (as dressed), 1.. its repertoire. */
+  from: number;
+  to: number;
+  /** How far the change has swept (0 just begun, 1 done). */
+  wave: number;
+}
+
+/** Its colour at `t`: the last change and the one before it. A closed form: the changes are hashed per cycle. */
+export function octopusCoat(index: number, t: number): OctopusCoat {
+  const c = octopusCycle(index), P = c.move + c.stop;
+  const tau = t + c.offset, k = Math.floor(tau / P), u = tau - k * P;
+  // The last two changes (looking back a few cycles; with none, its own coat).
+  let coat = 0, prevCoat = 0, at = -Infinity;
+  for (let kk = k - 6; kk <= k; kk++) {
+    const list = shiftsIn(index, kk);
+    for (let slot = 0; slot < list.length; slot++) {
+      if (kk === k && list[slot]! > u) break;
+      prevCoat = coat;
+      coat = coatOf(index, kk, slot);
+      at = kk * P + list[slot]!;
+    }
+  }
+  const wave = Math.min(1, Math.max(0, (tau - at) / OCTOPUS_SHIFT));
+  return { from: prevCoat, to: coat, wave };
+}
+
+// ---------------------------------------------------------------------------
 // The frame
 // ---------------------------------------------------------------------------
 
@@ -288,6 +359,8 @@ export interface OctopusOutput {
   mood: OctopusMood;
   /** Ink to let go: its key and when (the tank's InkLayer). */
   ink: { key: string; t: number } | null;
+  /** Its colour, changing (setOctopusSkin). */
+  coat: OctopusCoat;
 }
 
 export function newOctopusOutput(): OctopusOutput {
@@ -295,6 +368,7 @@ export function newOctopusOutput(): OctopusOutput {
     x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 0, tz: 1, trailX: 0, trailZ: 0, groundY: 0, lift: 0,
     doing: 'idle', stop: null, intoActivity: 0,
     mood: { pale: 0, flush: 0, camo: 0, cloud: 0, cloudPhase: 0, dream: 0, dreamHue: 0, rings: 0.3 }, ink: null,
+    coat: { from: 0, to: 0, wave: 1 },
   };
 }
 
@@ -414,6 +488,7 @@ export function octopusFrame(rig: OctopusRig, inp: OctopusInput, out: OctopusOut
   md.dreamHue = Math.sin(t * 2.3 + index) * 0.5;
   md.rings = Math.max(0.3, inking, 0.8 * jetting * (1 - smooth((m.u - jetStart(m.gait) - 0.6) / 0.5)), 0.6 * act('pounce'));
   out.ink = moving && m.gait === 'inkjet' && m.u >= 0.55 && m.u < 2.5 ? { key: `${index}:${m.k}`, t: t - (m.u - 0.55) } : null;
+  out.coat = octopusCoat(index, t);
   return out;
 }
 
@@ -608,22 +683,33 @@ function setPupil(e: OctopusEye, yaw: number, pitch: number, pupil: number, roll
 // ---------------------------------------------------------------------------
 
 export interface OctopusSkin {
-  parts: { mat: MeshBasicMaterial; base: Color }[];
+  parts: { mat: MeshBasicMaterial; base: Color; secondary: boolean; old: { value: Color } }[];
+  /** Its repertoire as colours, primary and secondary: [coat][0 primary | 1 secondary]. Coat 0 is its own, per part. */
+  coats: [Color, Color][];
   cloud: { value: number };
   phase: { value: number };
+  wave: { value: number };
 }
 
-const CLOUD_TAG = 'mq-octopus-clouds';
+const CLOUD_TAG = 'mq-octopus-skin';
+
+/** A coat's second tone (the freckles, the pale tips): lighter, a touch less saturated. */
+function secondTone(c: Color): Color {
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  return new Color().setHSL(hsl.h, hsl.s * 0.85, Math.min(0.85, hsl.l + 0.22));
+}
 
 /**
- * The coat's materials, their colours as dressed, and the passing clouds:
- * dark bands in a shader, running from the back of the mantle forward and out
- * along the arms (Mather 2004: O. cyanea, after a pounce). Call once the coat
- * is on (applyNpcMaterials).
+ * The coat's materials, their colours as dressed, its repertoire, and the
+ * shader that draws a change sweeping down it and the passing clouds: dark
+ * bands running from the back of the mantle forward and out along the arms
+ * (Mather 2004: O. cyanea, after a pounce). Call once the coat is on
+ * (applyNpcMaterials).
  */
-export function octopusSkin(body: Object3D): OctopusSkin {
+export function octopusSkin(body: Object3D, index = 0): OctopusSkin {
   const parts: OctopusSkin['parts'] = [];
-  const cloud = { value: 0 }, phase = { value: 0 };
+  const cloud = { value: 0 }, phase = { value: 0 }, wave = { value: 1 };
   const seen = new Set<Material>();
   body.traverse((o) => {
     const mat = (o as { material?: Material | Material[] }).material;
@@ -632,19 +718,27 @@ export function octopusSkin(body: Object3D): OctopusSkin {
       seen.add(m);
       const mm = m as MeshBasicMaterial;
       if (!mm.color) continue;
-      parts.push({ mat: mm, base: mm.color.clone() });
+      const old = { value: mm.color.clone() };
+      parts.push({ mat: mm, base: mm.color.clone(), secondary: /^Secondary/.test(m.name), old });
       stackPatch(m, CLOUD_TAG, (shader) => {
         shader.uniforms.uMqCloud = cloud;
         shader.uniforms.uMqCloudPhase = phase;
+        shader.uniforms.uMqWave = wave;
+        shader.uniforms.uMqOld = old;
         shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', '#include <common>\nvarying float vMqCloudD;')
+          .replace('#include <common>', '#include <common>\nvarying float vMqCloudD;\nvarying float vMqWaveD;')
           .replace('#include <begin_vertex>', `#include <begin_vertex>
-          // Distance back from the front of the crown along the body, then out the arms (bind space, glTF axes: +z ahead).
-          vMqCloudD = -position.z + length(position.xz) * 0.6 + position.y * 0.4;`);
+          // Bind space, glTF axes (+z ahead, +y up). The clouds run back to front and out the arms;
+          // a colour change sweeps from the top of the head (0) down and out to the arm tips (1).
+          vMqCloudD = -position.z + length(position.xz) * 0.6 + position.y * 0.4;
+          vMqWaveD = clamp((24.0 - position.y + length(position.xz)) / 50.0, 0.0, 1.0);`);
         shader.fragmentShader = shader.fragmentShader
-          .replace('#include <common>', '#include <common>\nvarying float vMqCloudD;\nuniform float uMqCloud;\nuniform float uMqCloudPhase;')
+          .replace('#include <common>', '#include <common>\nvarying float vMqCloudD;\nvarying float vMqWaveD;\nuniform float uMqCloud;\nuniform float uMqCloudPhase;\nuniform float uMqWave;\nuniform vec3 uMqOld;')
           .replace('#include <color_fragment>', `#include <color_fragment>
           {
+            // The change: its new colour where the wave has passed, the old one beyond it.
+            float front = uMqWave * 1.3 - 0.15;
+            diffuseColor.rgb = mix(uMqOld, diffuseColor.rgb, 1.0 - smoothstep(front - 0.12, front + 0.12, vMqWaveD));
             // Bands about a body length apart, sweeping forward and outward.
             float band = 0.5 + 0.5 * sin(vMqCloudD * 0.32 + uMqCloudPhase);
             diffuseColor.rgb *= 1.0 - uMqCloud * 0.7 * smoothstep(0.55, 0.85, band);
@@ -652,27 +746,42 @@ export function octopusSkin(body: Object3D): OctopusSkin {
       });
     }
   });
-  return { parts, cloud, phase };
+  const coats = octopusRepertoire(index).map((i): [Color, Color] => {
+    const c = new Color(OCTOPUS_COATS[i]);
+    return [c, secondTone(c)];
+  });
+  return { parts, coats, cloud, phase, wave };
 }
 
 const _hsl = { h: 0, s: 0, l: 0 };
 const PALE = new Color('#f2e6df');
 
-/** Dress the skin for this frame's mood; `floor` is the floor's own colour (for camouflage). */
-export function setOctopusSkin(skin: OctopusSkin, mood: OctopusMood, floor: Color | null): void {
+/** A part's colour in coat `n`: 0 its own (as dressed), else the repertoire's. */
+function coatColor(skin: OctopusSkin, p: OctopusSkin['parts'][number], n: number, out: Color): Color {
+  return n === 0 || !skin.coats[n - 1] ? out.copy(p.base) : out.copy(skin.coats[n - 1]![p.secondary ? 1 : 0]);
+}
+
+function dress(c: Color, mood: OctopusMood, floor: Color | null): void {
+  if (mood.flush > 0) {
+    c.getHSL(_hsl);
+    c.setHSL(_hsl.h, Math.min(1, _hsl.s * (1 + 0.4 * mood.flush)), _hsl.l * (1 - 0.3 * mood.flush));
+  }
+  if (mood.dream > 0) {
+    c.getHSL(_hsl);
+    c.setHSL((_hsl.h + mood.dreamHue * mood.dream + 1) % 1, _hsl.s, _hsl.l);
+  }
+  if (floor && mood.camo > 0) c.lerp(floor, 0.55 * mood.camo);
+  if (mood.pale > 0) c.lerp(PALE, 0.7 * mood.pale);
+}
+
+/** Dress the skin for this frame: its colour (changing), its mood; `floor` the floor's colour, for camouflage. */
+export function setOctopusSkin(skin: OctopusSkin, mood: OctopusMood, floor: Color | null, coat: OctopusCoat = { from: 0, to: 0, wave: 1 }): void {
   skin.cloud.value = mood.cloud;
   skin.phase.value = mood.cloudPhase;
+  skin.wave.value = coat.wave;
   for (const p of skin.parts) {
-    const c = p.mat.color.copy(p.base);
-    if (mood.flush > 0) {
-      c.getHSL(_hsl);
-      c.setHSL(_hsl.h, Math.min(1, _hsl.s * (1 + 0.4 * mood.flush)), _hsl.l * (1 - 0.3 * mood.flush));
-    }
-    if (mood.dream > 0) {
-      c.getHSL(_hsl);
-      c.setHSL((_hsl.h + mood.dreamHue * mood.dream + 1) % 1, _hsl.s, _hsl.l);
-    }
-    if (floor && mood.camo > 0) c.lerp(floor, 0.55 * mood.camo);
-    if (mood.pale > 0) c.lerp(PALE, 0.7 * mood.pale);
+    dress(coatColor(skin, p, coat.to, p.mat.color), mood, floor);
+    if (coat.wave >= 1) p.old.value.copy(p.mat.color);
+    else dress(coatColor(skin, p, coat.from, p.old.value), mood, floor);
   }
 }
