@@ -282,7 +282,9 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
 
 /** The tank's fish cap on the best devices; smaller ones swim fewer. */
 const CAST_CAP = 24;
-const ORBIT_PARAMS = ['cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate'] as const;
+/** The orbit params a follow camera overrides outright. cameraAzimuth and autoRotate stay live while following
+ *  (they face a dancing class and steer crossing paths), so they are not listed. */
+const ORBIT_PARAMS = ['cameraElevation', 'cameraDistance'] as const;
 
 /**
  * Params that do nothing because another param overrides them or is off — the
@@ -321,7 +323,8 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   if (follow >= cast) out.push({ path: 'cameraFollow', also: castParams, message: noFish(follow) });
   const rig = parseSpotRig(str('spotRig')).spots;
   const spot = Math.round(num('followSpot', -1));
-  if (!rig.length && spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
+  if (rig.length && set('followSpot')) out.push({ path: 'followSpot', also: ['spotRig'], message: 'ignored: a spotRig replaces the single followSpot' });
+  else if (spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
   for (const s of rig) if (s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
   if (str('vignette')) {
     const { actors } = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
@@ -330,14 +333,17 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
 
   // Off switches: a param that only shapes something that is not there.
   const dance = str('starfishDance', 'off') || 'off';
-  if (dance !== 'off' && mix.length && !mix.some((e) => e.breed === 'starfish')) {
-    out.push({ path: 'starfishDance', also: ['fishMix'], message: 'there is no starfish in fishMix to dance — add e.g. starfish:7' });
+  // Slots fill in entry order and the cast is capped, so a starfish past slot CAST_CAP never swims.
+  const starfishSwims = mix.some((e, i) => e.breed === 'starfish' && mix.slice(0, i).reduce((n, p) => n + p.count, 0) < CAST_CAP);
+  if (dance !== 'off' && mix.length && !starfishSwims) {
+    out.push({ path: 'starfishDance', also: ['fishMix'], message: 'no starfish in the cast to dance — add e.g. starfish:7 (slots past the cap never swim)' });
   }
   if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
   if (follow < 0) {
     for (const k of ['followDistance', 'followAngle']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
-  } else {
-    for (const k of ORBIT_PARAMS) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: `ignored while cameraFollow rides with slot ${follow} — the orbit params return when it is -1` });
+  } else if (follow < cast) {
+    for (const k of ORBIT_PARAMS) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: `ignored while cameraFollow rides with slot ${follow} — they return when it is -1` });
   }
   const spotOn = rig.length > 0 || spot >= 0;
   if (!spotOn) {
@@ -345,8 +351,8 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   } else if (rig.length && set('spotColor')) {
     out.push({ path: 'spotColor', also: ['spotRig'], message: 'colours the single followSpot; a spotRig gives each of its spots its own colour (slot/#rrggbb)' });
   }
-  if (num('shoal', 0) <= 0) {
-    for (const k of ['shoalKind', 'shoalSpeed']) if (set(k)) out.push({ path: k, also: ['shoal'], message: 'does nothing while shoal is 0 (no school)' });
+  if (Math.round(num('shoal', 0) * CAST_CAP * 2.5) < 3) {  // the tank builds no school under 3 fish
+    for (const k of ['shoalKind', 'shoalSpeed']) if (set(k)) out.push({ path: k, also: ['shoal'], message: 'does nothing while shoal is too low to make a school (under 3 fish; 0 is off)' });
   }
   if (num('floraDensity', 0) <= 0) {
     for (const k of ['floraMix', 'floraPalette', 'floraLayout']) if (set(k)) out.push({ path: k, also: ['floraDensity'], message: 'does nothing while floraDensity is 0 (no plants)' });

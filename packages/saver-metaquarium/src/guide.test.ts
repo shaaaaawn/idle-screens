@@ -81,12 +81,17 @@ describe('agent guide', () => {
     expect(paths({ fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 110 })).toEqual([]);
     expect(paths({ danceTempo: 110 })).toEqual(['danceTempo']);
     expect(paths({ followDistance: 60, followAngle: 90 })).toEqual(['followDistance', 'followAngle']);
-    expect(paths({ fishMix: 'dori:2', cameraFollow: 0, cameraDistance: 140, autoRotate: 1, followDistance: 60 })).toEqual(['cameraDistance', 'autoRotate']);
+    expect(paths({ fishMix: 'dori:2', cameraFollow: 0, cameraDistance: 140, autoRotate: 1, followDistance: 60 })).toEqual(['cameraDistance']);
+    // A follow slot past the cast never activates: only the slot problem, no "orbit ignored".
+    expect(paths({ fishMix: 'dori:2', cameraFollow: 5, cameraDistance: 140 })).toEqual(['cameraFollow']);
     expect(paths({ spotStrength: 0.9, spotColor: '#ffffff' })).toEqual(['spotStrength', 'spotColor']);
     expect(paths({ fishMix: 'dori:2', spotRig: '0, 1', spotColor: '#ffffff', spotStrength: 0.9 })).toEqual(['spotColor']);
     expect(paths({ followSpot: 0, spotColor: '#ffffff' })).toEqual([]);
     expect(paths({ shoalKind: 'ember', shoalSpeed: 1 })).toEqual(['shoalKind', 'shoalSpeed']);
     expect(paths({ shoal: 0.6, shoalKind: 'ember' })).toEqual([]);
+    expect(paths({ shoal: 0.01, shoalKind: 'ember' })).toEqual(['shoalKind']);
+    expect(paths({ fishMix: 'dori:24,starfish:1', starfishDance: 'aerobics' })).toEqual(['fishMix', 'starfishDance']);
+    expect(paths({ fishMix: 'dori:2', spotRig: '0, 1', followSpot: 1 })).toEqual(['followSpot']);
     expect(paths({ floraMix: 'kelp:3', floraPalette: 'world' })).toEqual(['floraMix', 'floraPalette']);
     expect(paths({ floraDensity: 0.5, floraMix: 'kelp:3' })).toEqual([]);
   });
