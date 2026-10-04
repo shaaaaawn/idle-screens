@@ -25,9 +25,9 @@
  *           the middle — an octopus's slit pupil (rig/octopus.py keeps it
  *           level with the world, as a real octopus does)
  *   brows   a ridge of SecondaryColor over each eye (k 6): it raises them
- *   siphon  the jet's nozzle, a stub on its left side (i 5..6, k 3)
+ *   siphon  the jet's nozzle, a stub on its left side (i 4..6, k 3)
  *   arms    eight, leaving at 22.5° + 45°·n from the front and sweeping
- *           round as they reach (alternate arms opposite ways: CURL), from
+ *           round as they reach, all the same way (a pinwheel: CURL), from
  *           r 2 to ARM_R, tapering from 1.4 voxels either side of the
  *           centreline to 0.5; two
  *           layers to r 4.5, then one; the tip curls UP (its last stretch a
@@ -48,8 +48,9 @@ export const ARM_ANGLES = [0, 1, 2, 3, 4, 5, 6, 7].map((n) => ((22.5 + 45 * n) *
 /** The mantle's radius at each layer k, and how far back its centre leans (voxels): a big round bulb behind and above the eyes. */
 const MANTLE = { 2: 3.2, 3: 3.8, 4: 4.2, 5: 4.5, 6: 4.6, 7: 4.6, 8: 4.4, 9: 4.0, 10: 3.3, 11: 2.3 };
 const lean = (k) => 0.3 * Math.max(0, k - 3);
-/** How far each arm sweeps round as it reaches out (radians at its tip): alternate arms curl opposite ways. */
-const CURL = 0.8;
+/** How far each arm sweeps round as it reaches out (radians at its tip). Every arm curls the same way — a
+ *  pinwheel: arms curling opposite ways meet their neighbours, however gently they curl. */
+const CURL = 0.7;
 
 const MATERIALS = {
   PrimaryColor: { color: [0.8, 0.22, 0.12], roughness: 0.5 },
@@ -62,7 +63,7 @@ const MATERIALS = {
 /** Arm n's centreline at `along` voxels out: it sweeps round as it reaches, the octopus's curl. */
 export function armPoint(n, along) {
   const u = Math.max(0, (along - ARM_ROOT) / (ARM_R - ARM_ROOT));
-  const th = ARM_ANGLES[n] + (n % 2 ? -1 : 1) * CURL * u * u;
+  const th = ARM_ANGLES[n] + CURL * u * u;
   return { x: Math.sin(th) * along, y: -Math.cos(th) * along, th };
 }
 
@@ -100,9 +101,10 @@ export function voxels() {
       const arm = armOf(i, j);
       if (!crown && !arm) continue;
       if (crown || arm.along < ARM_THICK) { put(i, j, 0, 'PrimaryColor'); put(i, j, 1, 'PrimaryColor'); continue; }
-      // The tip curls up: its very end a layer higher, its pale underside showing.
+      // The tip curls up: its very end a layer higher, its pale underside
+      // showing, standing on the arm (not a cube floating at its corner).
+      put(i, j, 0, 'PrimaryColor');
       if (arm.along > ARM_R - 0.9) put(i, j, 1, 'SecondaryColor');
-      else put(i, j, 0, 'PrimaryColor');
     }
   }
   // The mantle: a dome leaning back.
@@ -122,7 +124,7 @@ export function voxels() {
   // Rings that glow: three a side on the mantle, one on each arm.
   // Rings that glow: on the bulb's flanks, and one on each arm — each clear
   // of a joint (rig/octopus.py blends there), so each is one bone's light.
-  for (const [i, j, k] of [[4, 2, 5], [4, 4, 8], [2, 4, 10], [-4, 2, 5], [-4, 4, 8], [-2, 4, 10]]) {
+  for (const [i, j, k] of [[4, 2, 5], [4, 3, 8], [2, 4, 10], [-4, 2, 5], [-4, 3, 8], [-2, 4, 10]]) {
     if (has(i, j, k)) cells.set(`${i},${j},${k}`, [i, j, k, 'GLOW-Rings']);
   }
   ARM_ANGLES.forEach((_, n) => {
@@ -145,8 +147,8 @@ export function voxels() {
   }
   // Between the eyes, down to the crown: the head is whole.
   for (let k = 2; k <= 6; k++) for (let j = -4; j <= -2; j++) if (!has(0, j, k)) put(0, j, k, 'PrimaryColor');
-  // The siphon: a stub out of its left side, low.
-  put(5, 1, 3, 'SecondaryColor'); put(6, 1, 3, 'SecondaryColor');
+  // The siphon: a stub out of its left side, low — its root on the head.
+  put(4, 1, 3, 'SecondaryColor'); put(5, 1, 3, 'SecondaryColor'); put(6, 1, 3, 'SecondaryColor');
   return [...cells.values()];
 }
 

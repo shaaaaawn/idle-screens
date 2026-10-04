@@ -166,6 +166,20 @@ describe('the octopus, more closely', () => {
     expect(Math.hypot(crowded.x - alone.x, crowded.z - alone.z)).toBeGreaterThan(5);
   });
 
+  it('an activity lasts as long as its clip; then it sits, looking about, until it turns to go', async () => {
+    const { rig } = await rigged();
+    let i = 0, k = 1;
+    outer: for (i = 0; i < 40; i++) for (k = 1; k < 30; k++) if (octopusStopAt(i, k) === 'wave') break outer;
+    const c = octopusCycle(i), stopAt = k * (c.move + c.stop) - c.offset + c.move;
+    const out = newOctopusOutput();
+    const at = (u: number): OctopusOutput => octopusFrame(rig, { t: stopAt + u, index: i, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300 }, out);
+    expect(at(1.0 + 1.0).doing).toBe('wave');
+    const after = at(1.0 + 2.0 + 1.5);
+    expect(after.doing).toBe('idle');
+    expect(after.stop).toBe('idle');
+    expect(rig.actions.wave.getEffectiveWeight()).toBe(0);
+  });
+
   it('placed by someone else, it just breathes', async () => {
     const { rig } = await rigged();
     octopusIdle(rig, 3, 2);

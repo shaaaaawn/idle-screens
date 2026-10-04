@@ -200,6 +200,15 @@ function greedy(doc, voxel, swim, spine = swim, mergeBends = true) {
       // A triangle is half its rectangle; its twin marks the same cells.
       for (const c of cellsOf(f)) if (!covered(name, key, c, bone)) pl.cells.add(c);
     });
+    // A quad that bends in one triangle and not its twin: both halves claimed
+    // the face, so it would be drawn twice, each copy skinned its own way.
+    // The bending half wins it (its corners carry the blend; anySkinAt has
+    // the rigid corner).
+    for (const [k, pl] of planes) {
+      if (pl.bone < 0) continue;
+      const bending = planes.get(`${k.slice(0, k.lastIndexOf('|'))}|-1`);
+      if (bending) for (const c of bending.cells) pl.cells.delete(c);
+    }
     const pos = [], jnt = [], wgt = [];
     for (const { f, bone, cells } of planes.values()) {
       const bends = bone < 0;

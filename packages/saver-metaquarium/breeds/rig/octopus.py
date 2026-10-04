@@ -69,7 +69,7 @@ from common import (  # noqa: E402
 )
 
 # The model's arms (octopus-model.mjs): keep in step with it.
-ARM_ROOT, ARM_R, CROWN_R, CURL = 2.0, 12.5, 3.0, 0.8
+ARM_ROOT, ARM_R, CROWN_R, CURL = 2.0, 12.5, 3.0, 0.7
 ARM_ANGLES = [math.radians(22.5 + 45 * n) for n in range(8)]
 # Where each arm's links meet, in voxels along it.
 CUTS = (ARM_ROOT, 4.5, 7.0, 9.75, ARM_R)
@@ -79,14 +79,14 @@ BLEND = 0.6
 def arm_point(n, along):
     """Arm n's centreline at `along` voxels out (Blender units)."""
     u = max(0.0, (along - ARM_ROOT) / (ARM_R - ARM_ROOT))
-    th = ARM_ANGLES[n] + (-1 if n % 2 else 1) * CURL * u * u
+    th = ARM_ANGLES[n] + CURL * u * u   # every arm the same way: a pinwheel (crossing arms otherwise)
     return Vector((2 * math.sin(th) * along, -2 * math.cos(th) * along, 0.0))
 
 
-def nearest_arm(x, y):
-    """(arm, voxels along it) of the centreline point nearest (x, y)."""
+def nearest_arm(x, y, arms=range(8)):
+    """(arm, voxels along it) of the centreline point nearest (x, y), among `arms`."""
     best = None
-    for n in range(8):
+    for n in arms:
         a = ARM_ROOT
         while a <= ARM_R + 1e-9:
             p = arm_point(n, a)
@@ -149,9 +149,12 @@ def soften(meshes):
             if b.startswith('arm') or b == 'body':
                 if v.co.z > 4.01:
                     continue
-                n, along = nearest_arm(v.co.x, v.co.y)
                 if b == 'body' and math.hypot(v.co.x, v.co.y) / 2 < ARM_ROOT + 0.4:
                     continue
+                # An arm's vertex measures along ITS arm: the nearest centreline
+                # can be a neighbour's, and the vertex would follow that arm.
+                own = [int(b[3])] if b.startswith('arm') else range(8)
+                n, along = nearest_arm(v.co.x, v.co.y, own)
                 for c, (lo, hi) in zip(CUTS[:4], [('body', f'arm{n}.1'), (f'arm{n}.1', f'arm{n}.2'),
                                                   (f'arm{n}.2', f'arm{n}.3'), (f'arm{n}.3', f'arm{n}.4')]):
                     if abs(along - c) < BLEND:
@@ -381,7 +384,8 @@ def sleep(t, T=3.4):
     p = Pose()
     breathe(p, t, T, 0.025)
     p.move('head', (0, 0, -1.2))
-    p.scale['mantle'] = (1.04, 1.04, 0.86)
+    # Curled low, still breathing: the curl's scale times the breath's.
+    p.scale['mantle'] = tuple(a * b for a, b in zip((1.04, 1.04, 0.86), p.scale['mantle']))
     w = 2 * math.pi * t / T
     for n in range(8):
         twitch = 0.04 * math.sin(w * 2 + n)
