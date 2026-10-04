@@ -3009,7 +3009,7 @@ class TankInstance implements SaverInstance {
         const siphon = f.rig!.octopus.siphon;
         if (octo.ink && siphon && this.ink) {
           siphon.getWorldPosition(this.burpAt);
-          this.ink.emit(octo.ink.key, octo.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.22);
+          this.ink.emit(octo.ink.key, octo.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
         }
       }
       // A dori's eyes, now the fish is placed: who it is looking at (tang.ts).

@@ -1,0 +1,12 @@
+---
+'@idle-screens/saver-metaquarium': minor
+---
+
+The octopus — a new bundled breed (id 610), drawn in-house in the designer's voxel style and rigged in Blender.
+
+- **The model** (`breeds/rig/octopus-model.mjs`): a round mantle bulb leaning back, two big eyes low on its front with horizontal bar pupils, brow ridges, a siphon, eight arms that sweep round as they reach with up-curled pale tips, freckles, and glowing rings after the blue-ringed octopus.
+- **The rig** (`breeds/rig/octopus.py`): a crown, a head and a breathing mantle, a siphon, eight four-link arms hinged underneath and blended at their joints, eyes, pupils and brows as bones of their own; clips idle (an octopus's ~18 breaths a minute), crawl, jet, drift, tiptoe, wave, beckon, reach (a bend travelling down the arm), peek, ink, pounce, sleep.
+- **It moves three ways** (`src/octopus.ts`), a floor creature like the crab and the starfish: it crawls (sometimes sidelong — an octopus's heading is its own), jets mantle-first and pale, rising off the floor and parachuting back down — sometimes squirting ink first (`src/ink.ts`) — and walks backwards on its two rear arms, the other six coiled up. At a stop it looks at you, waves, beckons, reaches, peeks (pressed flat, eyes up on stalks), pounces (the web spread over), or naps — eyes shut, pale, its colours flickering as it dreams.
+- **Its pupils stay level.** An octopus's statocysts roll its eyes so the slit pupil stays horizontal however its body turns; every frame each pupil turns back against the body's roll (up to 80°). It rounds its pupils when excited, slits them when calm, has a favourite eye, closes its lids, and raises its brows.
+- **Its skin changes:** pale in a jet and asleep, flushed when excited, fading toward the floor's colour when it sits still, and passing clouds — dark bands sweeping over it — when it hunts. Its rings glow brighter when alarmed. `inspect()` reports each octopus's doing, gaze, lids, and its pupils' and body's roll.
+- **Intake:** a breed may keep its bending faces unmerged (`mergeBends: false` — the octopus's arms bend every which way), and a quad that bends in one triangle finds its fourth corner's skin from its twin; every other breed is unchanged byte for byte.

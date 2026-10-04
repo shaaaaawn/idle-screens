@@ -10,7 +10,7 @@ import { fishHash } from './swim';
 
 /** Seconds a cloud lasts. */
 export const INK_LIFE = 5;
-const PUFFS = 7;
+const PUFFS = 12;
 const CAP = 8 * PUFFS;
 
 export interface InkCloud { t: number; x: number; y: number; z: number; size: number; seed: number }
@@ -23,13 +23,14 @@ export function inkPuffAt(c: InkCloud, p: number, t: number, out: InkPuff): InkP
   if (!out.visible) return out;
   const h = (k: number): number => fishHash(Math.round(c.seed * 1000) + p * 17 + k, 1801) * 2 - 1;
   // Out from the siphon, slowing; a slow sink.
-  const spread = c.size * 1.6 * (1 - Math.exp(-a / 0.8));
+  // Out from the siphon fast, then hanging: a cloud, not a ball.
+  const spread = c.size * 3.2 * (1 - Math.exp(-a / 0.7)) * (0.6 + 0.4 * Math.abs(h(5)));
   out.x = c.x + h(1) * spread;
-  out.y = c.y + h(2) * spread * 0.5 - 0.25 * c.size * a;
+  out.y = c.y + h(2) * spread * 0.6 - 0.2 * c.size * a;
   out.z = c.z + h(3) * spread;
-  // It blooms, holds, and thins away.
-  const bloom = Math.min(1, a / 0.5), thin = 1 - Math.max(0, (a - INK_LIFE * 0.45) / (INK_LIFE * 0.55));
-  out.s = c.size * (0.5 + 0.35 * (h(4) + 1)) * (0.4 + 0.9 * bloom) * Math.sqrt(Math.max(0, thin));
+  // Each wisp blooms as it spreads and thins away to nothing.
+  const bloom = Math.min(1, a / 0.6), thin = 1 - Math.max(0, (a - INK_LIFE * 0.35) / (INK_LIFE * 0.65));
+  out.s = c.size * (0.35 + 0.3 * (h(4) + 1)) * (0.3 + 1.1 * bloom) * Math.max(0, thin);
   return out;
 }
 
@@ -40,9 +41,10 @@ export class InkLayer {
   private readonly m = new Matrix4();
 
   constructor(scene: Scene) {
-    const geo = new SphereGeometry(1, 10, 8);
+    const geo = new SphereGeometry(1, 8, 6);
     geo.userData.mqOwned = true;
-    const mat = new MeshBasicMaterial({ color: new Color('#0d0b16'), transparent: true, opacity: 0.82, depthWrite: false });
+    // Sepia-black, see-through: overlapping wisps darken where the cloud is thick.
+    const mat = new MeshBasicMaterial({ color: new Color('#1c1626'), transparent: true, opacity: 0.42, depthWrite: false });
     mat.userData.mqOwned = true;
     this.mesh = new InstancedMesh(geo, mat, CAP);
     this.mesh.name = 'octopus-ink';
