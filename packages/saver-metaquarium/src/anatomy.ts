@@ -87,6 +87,10 @@ const noun = (breed: string, n: number): string => (BREED_NOUN[breed] ?? [breed,
  * is in force from the start when it has `t` 0 (or none) or a `liveAt` (a
  * live steer: already arrived for anyone mounting now); later ones are
  * choreography. Same path: the last one wins, as in the tank.
+ *
+ * `ParamDelta` carries no wall-clock marker, so a steer that has already
+ * happened is told apart only by the caller stamping `liveAt` on it: without
+ * that, a steer at a positive `t` reads as future choreography.
  */
 export function metaquariumParamsFromTrack(
   deltas: ReadonlyArray<{ t?: unknown; path?: unknown; value?: unknown; liveAt?: unknown }> | undefined,
@@ -198,7 +202,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   }
   if (has('vignette')) {
     const v = str('vignette');
-    stage.push(VIGNETTES[v] ? `vignette: ${v}` : `vignette: ${v.split('|').filter((b) => b.trim()).length} beats`);
+    stage.push(VIGNETTES[v] ? `vignette: ${v}` : `vignette: ${v.split(/[|\n]/).filter((b) => b.trim()).length} beats`);
   }
   if (str('starfishDance') !== 'off') stage.push(`starfish ${str('starfishDance')}${has('danceTempo') ? ` at ${num('danceTempo')} bpm` : ''}`);
 

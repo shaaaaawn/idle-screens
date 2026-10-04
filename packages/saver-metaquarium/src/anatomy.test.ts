@@ -76,6 +76,12 @@ describe('describeMetaquarium', () => {
     expect(world(0.05)).toEqual(['a school of neon']);
   });
 
+  it('counts vignette beats split by newline as well as |', () => {
+    const stage = (vignette: string) => describeMetaquarium({ vignette }).sections.find((x) => x.name === 'Stage')?.items;
+    expect(stage('0s: a\n4s: b')).toEqual(['vignette: 2 beats']);
+    expect(stage('0s: a | 4s: b')).toEqual(['vignette: 2 beats']);
+  });
+
   it('reads every recipe without a problem and with a cast', () => {
     for (const r of RECIPES) {
       const a = describeMetaquarium(r.params);
