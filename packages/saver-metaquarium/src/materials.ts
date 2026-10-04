@@ -421,7 +421,9 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         candy.userData.mqOwned = true;
         return candy;
       }
-      const coat = vivid
+      const coat = paint
+        ? new Color(paint[1])
+        : vivid
         ? vividOf(coatA, coatB, Math.min(100, Number(vivid[1])) / 100)
         : /primary/i.test(m.name)
         ? coatA

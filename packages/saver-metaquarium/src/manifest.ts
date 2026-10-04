@@ -247,7 +247,7 @@ export const METAQUARIUM_PARAMS = {
    *  `spotRig` on slots 0 and 1 for the couple's spotlights.
    *  `off` (default): they live their own lives. */
   starfishDance: { type: 'enum', default: 'off', options: ['off', 'aerobics', 'freestyle', 'duet'], ease: 'step' },
-  /** The dance's tempo, beats per minute. Every move is a bar of four beats.
+  /** The dance's tempo, beats per minute (moves run a few bars each).
    *  Integrated when steered, so a glide speeds the class up on the beat. */
   danceTempo: { type: 'number', default: 128, min: 60, max: 180, ease: 'smooth' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that

@@ -51,7 +51,8 @@ export const BUNDLED_BREED_SCHEME = 'mq-breed:';
  * them), so they swim on every host, the wall included, with nothing to
  * fetch. `fishMix` takes their breed name or id in the default catalog.
  *
- * All are clip-less and unrigged — they swim on the body wave. Their
+ * All are clip-less and unrigged — they swim on the body wave — except the
+ * rigged breeds (starfish, babyfish, dori, blowfish), which carry clips and a driver. Their
  * materials carry the role names (PrimaryColor, SecondaryColor, EYES-,
  * GLOW-, KEEP-), so every instance gets the seeded two-tone coat, glow
  * halos, and its authored colour where the intake said to keep it.

@@ -56,7 +56,11 @@ export function burpAt(b: Burp, t: number, top: number, out: BurpPose): BurpPose
 function popAge(b: Burp, top: number): number {
   const h = top - b.y, v0 = 3 + 2.5 * b.r, acc = 2.5 + 2 * b.r;
   if (h <= 0) return 0;
-  return (-v0 + Math.sqrt(v0 * v0 + 2 * acc * h)) / acc;
+  if (b.vy === 0) return (-v0 + Math.sqrt(v0 * v0 + 2 * acc * h)) / acc;
+  // The baby's vertical carry lifts it too (burpAt): find where the whole path crosses `top`.
+  const rise = (a: number): number => v0 * a + 0.5 * acc * a * a + b.vy * BURP_DRAG * (1 - Math.exp(-a / BURP_DRAG));
+  for (let a = 0.02; a <= BURP_LIFE; a += 0.02) if (rise(a) >= h) return a;
+  return BURP_LIFE;
 }
 
 /** Rim bright, middle clear, a catchlight up and to the left: a bubble. */

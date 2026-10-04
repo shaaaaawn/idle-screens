@@ -142,14 +142,17 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
   };
   for (const part of parts) {
     const uEyeM = { value: part.toGroup };
-    part.mat.onBeforeCompile = (shader) => {
+    // A patch the material already carries (the babyfish's catchlight, materials.ts `sparkle`) rides along.
+    const before = (part.mat.userData.mqEyePrev ??= part.mat.onBeforeCompile) as Material['onBeforeCompile'];
+    part.mat.onBeforeCompile = (shader, renderer) => {
       Object.assign(shader.uniforms, shared, { uEyeM });
       shader.vertexShader = 'uniform mat4 uEyeM; varying vec3 vEyeP;\n'
         + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vEyeP = (uEyeM * vec4(position, 1.0)).xyz;');
       shader.fragmentShader = EYE_PARS
         + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqEyeColor(diffuseColor.rgb);');
+      if (part.mat.userData.mqSparkle) before(shader, renderer);
     };
-    part.mat.customProgramCacheKey = () => 'mq-eye-display-v4';
+    part.mat.customProgramCacheKey = () => 'mq-eye-display-v4' + (part.mat.userData.mqSparkle ? '+spk' : '');
     part.mat.needsUpdate = true;
   }
   const clampInt = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, Math.round(v)));
