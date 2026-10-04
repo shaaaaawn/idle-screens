@@ -72,7 +72,7 @@ import {
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
-import { rigTang, tangFrame, tangLook, type TangRig } from './tang';
+import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
@@ -2499,7 +2499,12 @@ class TankInstance implements SaverInstance {
         }
       }
       const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
-      const d = anchor + effort * style.travel + mnv.along * L;
+      // A dori holds still for a headstand, plays dead without being towed,
+      // backs off when wary — then catches up (tang.ts). Before the pose, so a
+      // follower behind it stops too.
+      const held = this.wantBreeds[f.index] === 'dori' && !style.formation
+        ? tangHold(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
+      const d = anchor + effort * style.travel + mnv.along * L - held;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what

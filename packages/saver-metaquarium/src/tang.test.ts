@@ -1,6 +1,6 @@
 import { AnimationClip, Bone, Group, NumberKeyframeTrack, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { rigTang, TANG_CLIPS, tangCycle, tangFrame, tangLook, tangMoment, tangMomentAt, type TangClip, type TangRig, type TangState } from './tang';
+import { rigTang, TANG_CATCH, TANG_CLIPS, tangCycle, tangFrame, tangHold, tangLook, tangMoment, tangMomentAt, type TangClip, type TangRig, type TangState } from './tang';
 
 const DUR: Record<string, number> = { fly: 0.4, hover: 0.8, back: 0.36, burst: 0.3, pick: 1.0, flare: 2.6, headstand: 3.0, flop: 3.0 };
 /** A dori's skeleton as three loads it: the head at the origin, the eyes either side of the face, a pupil on each (model axes: +z ahead, +x its left). */
@@ -64,7 +64,7 @@ describe('the dori (tang.ts)', () => {
     const { g, rig } = rigged();
     g.updateMatrixWorld(true);
     // Find a time it is looking at the viewer, out to its left and ahead.
-    const viewer = new Vector3(60, 5, 40);
+    const viewer = new Vector3(40, 5, 60);
     let found = false;
     for (let t = 0; t < 30 && !found; t += 0.05) {
       const look = tangLook(rig, t, 2, { viewer, state: swimming });
@@ -136,5 +136,31 @@ describe('the dori (tang.ts)', () => {
         expect(a.rig.eyes[e]!.pupil.position.toArray()).toEqual(b.rig.eyes[e]!.pupil.position.toArray());
       }
     }
+  });
+
+  it('holds still for a moment instead of being towed through it, backs off when wary, then catches up to where it would have been', () => {
+    const find = (m: string): { i: number; k: number } => {
+      for (let i = 0; i < 40; i++) for (let k = 1; k < 40; k++) if (tangMomentAt(i, k) === m) return { i, k };
+      throw new Error(m);
+    };
+    for (const m of ['headstand', 'flop', 'wary']) {
+      const { i, k } = find(m);
+      const c = tangCycle(i), start = k * c.period + c.at - c.offset;
+      expect(tangHold(i, start - 0.01)).toBeCloseTo(0, 6);
+      // Through the moment the held travel grows nearly as fast as time (more than time when wary: it backs off).
+      const mid = tangHold(i, start + 2.0) - tangHold(i, start + 1.0);
+      expect(mid).toBeGreaterThan(m === 'wary' ? 1.0 : 0.8);
+      // Afterwards it is made good.
+      expect(tangHold(i, start + 3 + TANG_CATCH + 0.01)).toBeCloseTo(0, 6);
+      // Smoothly: no jump from one frame to the next.
+      for (let t = start - 0.5; t < start + 3 + TANG_CATCH + 0.5; t += 1 / 60) expect(Math.abs(tangHold(i, t + 1 / 60) - tangHold(i, t))).toBeLessThan(0.05);
+    }
+  });
+
+  it('looks at the viewer only while its eyes can reach them — never staring past them', () => {
+    const { g, rig } = rigged();
+    g.updateMatrixWorld(true);
+    // Far out to the side and a little ahead: beyond the swivel and the slide.
+    for (let t = 0; t < 30; t += 0.1) expect(tangLook(rig, t, 2, { viewer: new Vector3(200, 0, 20), state: swimming }).at).not.toBe('viewer');
   });
 });

@@ -159,6 +159,44 @@ export function tangMoment(index: number, t: number): { moment: TangMoment | nul
   return { moment, weight: smooth(u / 0.2) * smooth((len - u) / 0.3), into: u };
 }
 
+/**
+ * How much of its travel a moment holds back: a headstand or playing dead is
+ * held still (not glided through at cruise, which reads as a dead fish towed
+ * along), a display nearly so, and a wary tang backs OFF — more than all of
+ * it. Plankton it darts at, on its fins.
+ */
+const HOLD: Record<TangMoment, number> = { headstand: 0.95, flop: 0.9, flare: 0.6, wary: 1.3, pick: 0 };
+/** Seconds it takes to catch up afterwards: the held travel is made good, so the fish is where it would have been. */
+export const TANG_CATCH = 2.5;
+
+/**
+ * Seconds of cruising held back at `t` — the tank subtracts that much travel.
+ * Grows through a moment (the fade's integral, times the hold), shrinks back
+ * to nothing over TANG_CATCH after it. A closed form: the integral is summed
+ * on a fixed grid from the moment's start.
+ */
+export function tangHold(index: number, t: number): number {
+  const c = tangCycle(index);
+  const k = Math.floor((t + c.offset) / c.period);
+  let held = 0;
+  for (const kk of [k - 1, k]) {
+    const moment = tangMomentAt(index, kk);
+    const h = HOLD[moment];
+    if (!h) continue;
+    const start = kk * c.period + c.at - c.offset, len = MOMENT_LENGTH[moment];
+    if (t <= start) continue;
+    // Midpoint steps, the last one partial, so it grows smoothly frame to frame.
+    const span = Math.min(t, start + len) - start;
+    let area = 0;
+    for (let u0 = 0; u0 < span; u0 += 0.05) {
+      const dt = Math.min(0.05, span - u0), u = u0 + dt / 2;
+      area += smooth(u / 0.2) * smooth((len - u) / 0.3) * dt;
+    }
+    held += h * area * (t > start + len ? 1 - smooth((t - start - len) / TANG_CATCH) : 1);
+  }
+  return held;
+}
+
 /** Sets the clips for `t`; `beat` is the distance swum. */
 export function tangFrame(rig: TangRig, t: number, index: number, beat: number, inp: TangInput): TangState {
   const m = tangMoment(index, t);
@@ -239,10 +277,14 @@ function targetOf(rig: TangRig, index: number, j: number, eye: TangEye, viewer: 
   const m = inp.state;
   // A moment owns the gaze.
   if (m.moment === 'pick' && m.into > 0.0 && m.into < 0.75) return aimAt(eye, _w.set(0, -4, 30));
-  if ((m.moment === 'wary' || m.moment === 'flare') && viewer) return aimAt(eye, viewer, 'viewer');
-  if (m.moment === 'flop' && viewer && eye.side > 0) return aimAt(eye, viewer, 'viewer');
+  // The viewer only while its eyes can reach them: past that it would stare
+  // past them, so it looks elsewhere.
+  const you = viewer ? aimAt(eye, viewer, 'viewer') : null;
+  const reach = you && Math.abs(you.yaw) < REACH_YAW + 0.15 && Math.abs(you.pitch) < REACH_PITCH + 0.15 ? you : null;
+  if ((m.moment === 'wary' || m.moment === 'flare') && reach) return reach;
+  if (m.moment === 'flop' && reach && eye.side > 0) return reach;
   // Otherwise: half the saccades find the viewer, half look about.
-  if (viewer && fishHash(index * 977 + j, 1513) < 0.5) return aimAt(eye, viewer, 'viewer');
+  if (reach && fishHash(index * 977 + j, 1513) < 0.5) return reach;
   const h1 = fishHash(index * 31 + j, 1515), h2 = fishHash(index * 37 + j, 1517);
   // A little of its own each eye, held for the saccade: never quite yoked.
   const drift = 0.12 * (fishHash(index * 41 + j * 2 + (eye.side > 0 ? 1 : 0), 1521) * 2 - 1);
