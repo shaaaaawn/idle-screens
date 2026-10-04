@@ -21,6 +21,7 @@
  * flirting) is the guide's to tell.
  */
 
+import { parsePropMix } from './crystals';
 import { breedOf, isMintedId } from './farm';
 import { environmentOf } from './environments';
 import { validateMetaquariumParams, type ParamProblem } from './guide';
@@ -173,7 +174,11 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (num('floraDensity') > 0) world.push(`plants ${pct('floraDensity')}${has('floraMix') ? `: ${str('floraMix')}` : ''}`);
   if (num('rockDensity') > 0) world.push(`rocks ${pct('rockDensity')}`);
   if (num('geodes') > 0) world.push(`wild geodes ${pct('geodes')}`);
-  if (has('propMix')) world.push(`crystals: ${str('propMix')}`);
+  if (has('propMix')) {
+    const props = parsePropMix(str('propMix')).entries;
+    const n = props.reduce((k, e) => k + e.count, 0);
+    if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette} ${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
+  }
   if (num('skyLanterns') > 0) world.push('jellyfish lanterns overhead');
   if (num('horizon') > 0) world.push('a far horizon');
   if (num('bubbleVents') > 0) world.push('bubble vents');

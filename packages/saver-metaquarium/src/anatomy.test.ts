@@ -30,7 +30,7 @@ describe('describeMetaquarium', () => {
     expect(a.castTotal).toBe(22);
     const s = Object.fromEntries(a.sections.map((x) => [x.name, x.items]));
     expect(s.Room).toEqual(['Lagoon', 'shelf floor', 'water overhead', 'water 100%, clarity 80%', 'caustics 50%', 'surface mirror 50%', 'light shafts 40%']);
-    expect(s.World).toEqual(expect.arrayContaining(['the citadel', '3 geode homes', 'paths (pebble)', 'geode fountain', 'a school of rummynose']));
+    expect(s.World).toEqual(expect.arrayContaining(['the citadel', '3 geode homes', 'paths (pebble)', 'geode fountain', '2 crystals: cyan spire, hotpink druse', 'a school of rummynose']));
     expect(s.Camera).toEqual(['distance 220', 'elevation 18°', 'orbits 0.5°/s']);
     expect(s.Look).toEqual(['living eyes', 'finish 60%', 'fish ambient 60%', 'dither']);
     expect(a.summary).toBe('a shark, 6 crabs, 2 hackerfish, 2 glowfish, 3 tangs, 2 blowfish and 6 baby fish in the lagoon, around the citadel; slow orbit.');
