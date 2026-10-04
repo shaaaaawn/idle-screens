@@ -78,6 +78,11 @@ import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
+import {
+  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusPlaced, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
+  type OctopusRig, type OctopusSkin,
+} from './octopus';
+import { InkLayer } from './ink';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
@@ -583,7 +588,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -614,11 +619,14 @@ interface InspectFish {
   size: number;
   /** A maneuver event is displacing this fish right now. */
   maneuvering: boolean;
-  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts); a starfish's crawl, turn, idle, look, wave, stand or curl (starfish.ts); a dori's swim, hover, burst, pick, flare, headstand, flop or wary (tang.ts). */
+  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts); a starfish's crawl, turn, idle, look, wave, stand or curl (starfish.ts); a dori's swim, hover, burst, pick, flare, headstand, flop or wary (tang.ts); an octopus's crawl, jet, ink, drift, tiptoe, turn, look, wave, beckon, reach, peek, pounce or sleep (octopus.ts). */
   doing?: string;
   /** A dori's gaze (tang.ts): what its eyes are on, and how many degrees they point off the viewer (null: no viewer in front of it). */
   looking?: string;
   offViewer?: number | null;
+  /** An octopus's (octopus.ts): how far its pupils turn to stay level, and how far its body is rolled (degrees). */
+  pupilRoll?: number;
+  bodyRoll?: number;
   /** A blowfish's (puffer.ts): how puffed (0..1), how shut each eye (left, right), and the flirt its eyes are making. */
   puff?: number;
   lids?: [number, number];
@@ -799,6 +807,11 @@ class TankInstance implements SaverInstance {
   private wantBreeds: string[] = [];
   /** A babyfish's hiccup bubbles: made with the first baby, so a tank without one draws nothing new. */
   private burps: BurpLayer | null = null;
+  /** An octopus's ink clouds: made with the first octopus (ink.ts). */
+  private ink: InkLayer | null = null;
+  /** This frame's octopus, one at a time through the fish loop (octopus.ts). */
+  private readonly octoOutput = newOctopusOutput();
+  private readonly floorColor = new Color();
   private readonly burpFrom = new Vector3();
   /**
    * Where the viewer is, for a fish that looks at them (tang.ts, puffer.ts).
@@ -2131,6 +2144,8 @@ class TankInstance implements SaverInstance {
     let baby: BabyRig | null = null;
     let tang: TangRig | null = null;
     let puffer: PufferRig | null = null;
+    let octopus: OctopusRig | null = null;
+    let octoSkin: OctopusSkin | null = null;
     let screen: ScreenRig | null = null;
 
     if (tpl) {
@@ -2147,6 +2162,11 @@ class TankInstance implements SaverInstance {
       if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
       if (rigged === 'dori') tang = rigTang(body, tpl.clips);
       if (rigged === 'blowfish') puffer = rigPuffer(body, tpl.clips);
+      if (rigged === 'octopus') octopus = rigOctopus(body, tpl.clips, tpl.norm, index);
+      if (octopus && !this.ink) {
+        this.ink = new InkLayer(this.scene);
+        if (this.waterInstalled) patchWater(this.ink.mesh.material as Material, this.str('dither') === 'on');
+      }
       if ((baby || puffer) && !this.burps) {
         this.burps = new BurpLayer(this.scene);
         if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
@@ -2163,13 +2183,15 @@ class TankInstance implements SaverInstance {
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
       fishGlow = collectFishGlow(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      // An octopus's skin changes with its mood: its coat as dressed, and the passing clouds (octopus.ts).
+      if (octopus) octoSkin = octopusSkin(body, index);
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
       bodyNode = body;
-      const walker = crab ?? starfish;
+      const walker = crab ?? starfish ?? octopus;
       if (walker) {
-        // Front along the group's +z, feet on the group's origin: crab.ts (starfish.ts) aims and stands the group.
+        // Front along the group's +z, feet on the group's origin: crab.ts (starfish.ts, octopus.ts) aims and stands the group.
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
@@ -2214,7 +2236,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
-      baseYaw: tpl && !crab && !starfish ? tpl.yaw : 0,
+      baseYaw: tpl && !crab && !starfish && !octopus ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -2223,8 +2245,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || hacker || shark || baby || tang || puffer
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), lights: {} }
+      rig: crab || starfish || angler || hacker || shark || baby || tang || puffer || octopus
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2536,7 +2558,8 @@ class TankInstance implements SaverInstance {
       if (!f?.rig || f.index >= visible) continue;
       const d = danceSpots.get(f.index);
       const s = d ? { x: d[0], z: d[1] } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
-        : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index)) : null;
+        : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index))
+        : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index)) : null;
       if (s) crabSpots.push(f.index, s.x, s.z);
     }
     // The camera a crab turns to face — known for THIS t before any fish moves:
@@ -2546,9 +2569,10 @@ class TankInstance implements SaverInstance {
     let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
     if (followSlot >= 0) {
       const ff = this.fish[followSlot];
-      if ((ff?.rig?.crab || ff?.rig?.starfish) && !followPov) {
+      if ((ff?.rig?.crab || ff?.rig?.starfish || ff?.rig?.octopus) && !followPov) {
         const s = ff.rig.crab ? crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index))
-          : starfishSpot(ff.index, tSec, ff.plan, starfishStart(ff.plan, ff.index));
+          : ff.rig.starfish ? starfishSpot(ff.index, tSec, ff.plan, starfishStart(ff.plan, ff.index))
+          : octopusSpot(ff.index, tSec, ff.plan, octopusStart(ff.plan, ff.index));
         const turn = (this.num('followAngle') * Math.PI) / 180, c = Math.cos(turn), sn = Math.sin(turn);
         crabCamX = s.x - (s.fx * c - s.fz * sn) * followBack; crabCamZ = s.z - (s.fx * sn + s.fz * c) * followBack;
       } else { crabCamX = NaN; crabCamZ = NaN; }
@@ -2901,7 +2925,18 @@ class TankInstance implements SaverInstance {
         starfishIdle(starRig, tSec, f.index);
         f.rig!.bloom = STARFISH_BLOOM;
       }
-      const floor = crab ?? star;
+      // An octopus crawls it too — and jets off it, and walks on two arms (octopus.ts).
+      const octoRig = f.rig?.octopus;
+      const octo = octoRig && !act && !style.formation
+        ? octopusFrame(octoRig, {
+            t: tSec, index: f.index, plan: f.plan, start: octopusStart(f.plan, f.index), len: L,
+            scale: octoRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+          }, this.octoOutput)
+        : null;
+      if (octo) { px = octo.x; y = octo.y; pz = octo.z; f.rig!.lights['GLOW-Rings'] = octo.mood.rings; f.rig!.bloom = 0.35 + 0.65 * octo.lift; }
+      else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.lights['GLOW-Rings'] = 0.3; f.rig!.bloom = 0.35; }
+      const floor = crab ?? star ?? octo;
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
@@ -2961,7 +2996,23 @@ class TankInstance implements SaverInstance {
       // sand still read as hovering. Its feet are the group's origin (crab.ts, starfish.ts).
       if (floor && f.group.visible) {
         if (!this.walkShadows) { this.walkShadows = new ContactShadows(MAX_FISH); this.scene.add(this.walkShadows.mesh); }
-        this.walkShadows.set(this.walkShadowN++, floor.x, floor.y + 0.15, floor.z, floor.quaternion, L * 1.15, L * 0.95);
+        // On the floor even when a jet lifts the octopus, and smaller the higher it goes.
+        const gy = octo ? octo.groundY : floor.y, far = octo ? 1 - 0.6 * octo.lift : 1;
+        this.walkShadows.set(this.walkShadowN++, floor.x, gy + 0.15, floor.z, floor.quaternion, L * 1.15 * far, L * 0.95 * far);
+      }
+      // An octopus's eyes — each pupil turned level with the world — its skin, its ink (octopus.ts, ink.ts).
+      let oLook: ReturnType<typeof octopusLook> | null = null;
+      // Placed by a script or a formation it has no stops, but it still keeps its pupils level and changes colour.
+      const oState = octo ?? (f.rig?.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
+      if (oState && f.rig?.octopus) {
+        f.group.updateMatrixWorld(true);
+        oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: oState });
+        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, oState.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, oState.coat);
+        const siphon = f.rig!.octopus.siphon;
+        if (oState.ink && siphon && this.ink) {
+          siphon.getWorldPosition(this.burpAt);
+          this.ink.emit(oState.ink.key, oState.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
+        }
       }
       // A dori's eyes, now the fish is placed: who it is looking at (tang.ts).
       // Not the camera it is riding in.
@@ -3015,7 +3066,7 @@ class TankInstance implements SaverInstance {
       // glance at the lens. Rigged on the first frame that asks for it, so
       // `eyeLife: 0` compiles the stock eye program and costs nothing.
       // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
-      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer) {
+      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hz) || 1;
@@ -3107,8 +3158,10 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : pose.fx, floor ? floor.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
-          : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) } : {}),
+        ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
+ : {}),
       });
     }
     this.walkShadows?.commit(this.walkShadowN);
@@ -3128,6 +3181,7 @@ class TankInstance implements SaverInstance {
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);
     this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
     this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
+    this.ink?.update(tSec);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
     this.lastFish = report;

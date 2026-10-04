@@ -39,6 +39,11 @@
       "kind": "voxel", "size": 1.0, "motion": "starfish", "roles": {}, "splitByBone": ["GLOW-Tips"],
       "notes": "The first breed drawn in-house, in our designer's style: rig/starfish-model.mjs writes source/starfish.glb voxel by voxel (whole cubes, one mesh per material, already role-named). The tips are GLOW-Tips (no 'eye' in a glow name), split one primitive per arm (splitByBone) so each is a small light riding its own tip. Rigged in Blender by rig/starfish.py, which never edits the model: the disc and its face, two blinking eyes, five arms in three rigid links each; clips crawl, idle, wave, stand, curl. src/starfish.ts drives them."
     },
+    "octopus": {
+      "source": "rig/octopus.glb", "delivered": "source/octopus.glb", "rig": "rig/octopus.py",
+      "kind": "voxel", "size": 1.2, "motion": "octopus", "roles": {}, "mergeBends": false, "splitByBone": ["GLOW-Rings"],
+      "notes": "Our second in-house breed: rig/octopus-model.mjs writes source/octopus.glb voxel by voxel in the designer's style (already role-named). Rigged in Blender by rig/octopus.py: a crown, a head and a breathing mantle, a siphon, eight arms of four links each (hinged underneath, blended at their joints), and eyes, pupils and brows that no clip moves — src/octopus.ts keeps each bar of a pupil level with the world, closes the lids, raises the eyes and the brows. Clips idle, crawl, jet, drift, tiptoe, wave, beckon, reach, peek, ink, pounce, sleep."
+    },
     "shark": {
       "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
       "kind": "voxel", "size": 2.2, "motion": "shark",
