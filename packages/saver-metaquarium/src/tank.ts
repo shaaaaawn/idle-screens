@@ -72,7 +72,8 @@ import {
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
-import { babyFrame, rigBaby, type BabyRig } from './babyfish';
+import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
+import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { rigSeahorse } from './seahorse';
 
@@ -125,6 +126,8 @@ const CAMERA_FAR = 1400;
 /** Floor-pool slots kept free of fixed light, for the sources that move. */
 const MOVING_POOLS = 4;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
+/** The longest line of babies a moment can travel down (babyLeader). */
+const BABY_LINE = 8;
 const Y_AXIS = new Vector3(0, 1, 0);
 const GLB_CONCURRENCY = 3;
 
@@ -743,6 +746,23 @@ class TankInstance implements SaverInstance {
   private wantStyles: Array<SwimStyleSpec | null> = [];
   /** Per-slot breed from the mix, for `swimStyle: 'auto'` (MQ33). */
   private wantBreeds: string[] = [];
+  /** A babyfish's hiccup bubbles: made with the first baby, so a tank without one draws nothing new. */
+  private burps: BurpLayer | null = null;
+  private readonly burpFrom = new Vector3();
+  private readonly burpAt = new Vector3();
+  private readonly burpTmp = new Vector3();
+  /**
+   * Who a baby copies (babyfish.ts): the baby just before it in the mix — in a
+   * `@follow` line, the one ahead. A run of babies is cut into lines of
+   * BABY_LINE, so a moment travels at most that far and the lookup stays short.
+   */
+  private readonly babyLeader: BabyLeader = (i) => {
+    const b = this.wantBreeds;
+    if (i <= 0 || b[i - 1] !== 'babyfish') return null;
+    let run = 1;
+    while (i - run - 1 >= 0 && b[i - run - 1] === 'babyfish') run++;
+    return run % BABY_LINE === 0 ? null : i - 1;
+  };
   /** Per-slot `*size` from the mix (1 when the token has none). */
   private wantSizes: number[] = [];
   /** The body length (units) of the fish each spot follows, for its shadow. */
@@ -2009,6 +2029,10 @@ class TankInstance implements SaverInstance {
       if (this.wantBreeds[index] === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
       if (this.wantBreeds[index] === 'babyfish') baby = rigBaby(body, tpl.clips);
+      if (baby && !this.burps) {
+        this.burps = new BurpLayer(this.scene);
+        if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
+      }
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
@@ -2765,7 +2789,9 @@ class TankInstance implements SaverInstance {
       }
       const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
       // A babyfish swims where the tank puts it (it schools); its module sets its clips.
-      const baby = f.rig?.baby ? babyFrame(f.rig.baby, tSec, f.index, beat) : null;
+      const baby = f.rig?.baby ? babyFrame(f.rig.baby, tSec, f.index, beat, this.babyLeader) : null;
+      // A hiccuping baby's speed, for the momentum its bubble leaves with.
+      if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         // A standing starfish is where its feet are, ahead of its resting place.
@@ -2800,6 +2826,26 @@ class TankInstance implements SaverInstance {
         f.group.rotateZ(pose.roll);
       }
       if (floor) f.group.quaternion.copy(floor.quaternion);
+      // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
+      if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
+        const hx = act ? act.fx : pose.fx, hy = act ? act.fy : fy, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hy, hz) || 1;
+        // The mouth: between the eyes, a little ahead and below — the model's
+        // origin is back by its tail, so the group's position will not do.
+        const eyes = f.rig!.baby!.eyes, m = this.burpAt;
+        if (eyes) {
+          eyes[0].getWorldPosition(m); eyes[1].getWorldPosition(this.burpTmp);
+          m.add(this.burpTmp).multiplyScalar(0.5);
+        } else m.set(px + (hx / hl) * L * 0.8, y, pz + (hz / hl) * L * 0.8);
+        // The snout is 1/8 of a length past the eyes, the mouth 1/6 below them;
+        // the bubble's centre is its own radius further out.
+        const out = L * 0.22;
+        m.x += (hx / hl) * out; m.y += (hy / hl) * out - L * 0.15; m.z += (hz / hl) * out;
+        const dt = (t - this.lastFrameT) / 1000;
+        const v = dt > 0 && dt < 0.25 && this.burpFrom.lengthSq() > 0 ? 1 / dt : 0;
+        this.burps.emit(`${f.index}:${baby.start.toFixed(3)}`, baby.start + HICCUP_JOLT,
+          m.x, m.y, m.z, L * 0.09, fishHash(f.index, Math.round(baby.start * 10)),
+          (px - this.burpFrom.x) * v, (y - this.burpFrom.y) * v, (pz - this.burpFrom.z) * v);
+      }
 
       // Eye life: blinks, saccades, a look at whoever it is talking to, a
       // glance at the lens. Rigged on the first frame that asks for it, so
@@ -2899,6 +2945,7 @@ class TankInstance implements SaverInstance {
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);
+    this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
     this.lastFish = report;
@@ -2928,6 +2975,7 @@ class TankInstance implements SaverInstance {
     return {
       saver: 'metaquarium',
       t: this.lastFrameT,
+      ...(this.burps?.size ? { burps: this.burps.list() } : {}),
       camera: {
         // Following a fish: the orbit params are ignored while this is set.
         follow: this.followState,

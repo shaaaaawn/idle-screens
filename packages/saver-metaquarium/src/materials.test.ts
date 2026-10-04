@@ -516,6 +516,8 @@ describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
     expect(one[0]!.color.equals(two[0]!.color)).toBe(false);
     expect(one[1]!.color.getHex()).toBe(new Color('#ffd23f').getHex());
     expect(two[1]!.color.getHex()).toBe(one[1]!.color.getHex());
+    // Its own glow, so a yellow stays sunny under blue water light.
+    expect(one[1]!.emissive.r).toBeGreaterThan(0.3);
   });
 });
 

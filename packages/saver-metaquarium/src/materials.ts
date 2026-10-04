@@ -50,6 +50,8 @@ export function sparkle(eye: MeshBasicMaterial): void {
 
 /** A VIVID- coat glows this much of its own colour: candy-bright in dark water too. */
 export const VIVID_GLOW = 0.22;
+/** A PAINT- part glows this much of its own colour (it shades to mud under blue light otherwise). */
+export const PAINT_GLOW = 0.4;
 /**
  * A candy-bright step between two coats (the VIVID-<n> role). The two ends are
  * held at least 70° apart in hue — two near neighbours (lavender, periwinkle)
@@ -370,7 +372,10 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       // every fish (the babyfish's stripe, sunny yellow on its candy coat).
       const paint = /^PAINT-(#[0-9a-f]{6})$/i.exec(m.name);
       if (paint && !neonColor) {
-        const painted = lit ? new MeshLambertMaterial({ color: new Color(paint[1]) }) : new MeshBasicMaterial({ color: new Color(paint[1]) });
+        // It glows a little more than a VIVID coat: a yellow under blue water
+        // light shades to olive, and a stripe is meant to pop.
+        const pc = new Color(paint[1]);
+        const painted = lit ? new MeshLambertMaterial({ color: pc, emissive: pc.clone().multiplyScalar(PAINT_GLOW) }) : new MeshBasicMaterial({ color: pc });
         painted.name = m.name;
         painted.userData.mqOwned = true;
         return painted;

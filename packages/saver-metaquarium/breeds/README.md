@@ -106,7 +106,7 @@ skeleton and clips made in Blender:
 | hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
 | shark | `rig/shark.py` (cut by position — its fins sit off the lattice): head, jaw ringed with metal teeth, rolling eyes, pectorals, three-link tail | `src/shark.ts` (the tank swims it; it patrols) | swim bite |
 | starfish | `rig/starfish.py`: the disc and its face, blinking eyes, five arms in three links (hinged underneath, so a curl closes its seams). Standing, a little person: front arms legs, side arms arms, the back arm its head | `src/starfish.ts` crawls it on the seabed the crab's way, walks some bouts upright, and dances (`starfishDance`) | crawl idle wave stand curl · rise standing walk · march jacks reach kick twist circles disco spin · partners: mambo sway lead_twirl twirl dip_lead dip_follow lift_lead lift_fly |
-| babyfish | `rig/babyfish.py`: head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a dorsal fin, two eyes | `src/babyfish.ts` (the tank swims it; it schools) | swim zoom wiggle flip peek · eyes: blink wiggle_eyes peek_eyes |
+| babyfish | `rig/babyfish.py`: head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a dorsal fin, two eyes | `src/babyfish.ts` (the tank swims it; it schools; a baby copies the moments of the baby ahead of it) · `src/burps.ts` (hiccup bubbles) | swim zoom wiggle flip peek hiccup tailchase yawn · eyes: blink wiggle_eyes peek_eyes hiccup_eyes yawn_eyes |
 
 **A breed drawn in-house.** The starfish is the first we drew ourselves, in
 our designer's style: whole 2-unit cubes, flat colours, the coat roles, a
