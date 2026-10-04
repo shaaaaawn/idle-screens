@@ -428,7 +428,7 @@ export const metaquariumManifest: SaverManifest = {
   id: 'metaquarium',
   label: 'Metaquarium',
   description:
-    'A living fish tank: skinned GLB fish swim seeded Catmull-Rom paths through a dark, fogged aquarium.',
+    'A voxel fish tank you configure by params: a cast of fish and characters (tangs, blowfish, an octopus, crabs, starfish, minted fish) in rooms, gardens, villages and castles, with stage spotlights and small scripted scenes.',
   minBackend: 'webgl2',
   costTier: 'medium',
   motionIntensity: 'calm',
