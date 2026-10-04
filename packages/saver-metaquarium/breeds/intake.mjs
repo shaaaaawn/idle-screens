@@ -57,7 +57,7 @@ const io = new NodeIO().setLogger(quiet).registerExtensions(ALL_EXTENSIONS)
 
 const isEye = (name) => /eye/i.test(name);
 const roleOf = (name) => isEye(name) ? (/black|pupil/i.test(name) ? 'eye·pupil' : /white|sclera/i.test(name) ? 'eye·sclera' : 'eye (by luminance)')
-  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
+  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /^PASTEL-\d{1,3}$/.test(name) ? `pastel ${name.slice(7)}%` : /^PAINT-#[0-9a-f]{6}$/i.test(name) ? `paint ${name.slice(6)}` : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
 
 function stats(doc) {
   let tris = 0; const mats = new Map(); const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];

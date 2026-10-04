@@ -14,7 +14,7 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   const len = dv.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
-const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^PASTEL-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -127,6 +127,30 @@ describe('bundled breeds (breeds/README.md)', () => {
       const j = p.getAttribute('JOINTS_0')!;
       for (let i = 0; i < j.getCount(); i++) expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
     }
+  });
+
+  it('babyfish: the rig survives the intake — a soft-spined body, a dorsal fin, two eyes; every clip, the eye clips moving only the eyes', async () => {
+    const doc = await new NodeIO().read(here('../breeds/babyfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'dorsal', 'eye.L', 'eye.R', 'fin', 'head', 'tail1', 'tail2']);
+    const anims = new Map(root.listAnimations().map((a) => [a.getName(), a]));
+    expect([...anims.keys()].sort()).toEqual(['blink', 'flip', 'peek', 'peek_eyes', 'swim', 'wiggle', 'wiggle_eyes', 'zoom']);
+    // The eye clips layer at full weight over the body's clips, so they touch nothing else…
+    for (const n of ['blink', 'wiggle_eyes', 'peek_eyes']) {
+      for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).toMatch(/^eye\./);
+    }
+    // …and the body's clips leave the eyes to them.
+    for (const n of ['swim', 'zoom', 'wiggle', 'flip', 'peek']) {
+      for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).not.toMatch(/^eye\./);
+    }
+    // A soft spine: some vertices blend between two parts, so a joint never opens.
+    let blended = 0;
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const w = p.getAttribute('WEIGHTS_0')!;
+      for (let i = 0; i < w.getCount(); i++) if ((w.getElement(i, []) as number[])[0]! < 0.99) blended++;
+    }
+    expect(blended).toBeGreaterThan(0);
   });
 
   it('starfish: the rig survives the intake — disc, eyes, five arms in three links; each glowing tip its own light on its own arm', async () => {

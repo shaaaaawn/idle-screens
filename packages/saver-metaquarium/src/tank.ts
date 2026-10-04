@@ -72,6 +72,7 @@ import {
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
+import { babyFrame, rigBaby, type BabyRig } from './babyfish';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { rigSeahorse } from './seahorse';
 
@@ -543,7 +544,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -1996,6 +1997,7 @@ class TankInstance implements SaverInstance {
     let angler: AnglerRig | null = null;
     let hacker: HackerRig | null = null;
     let shark: SharkRig | null = null;
+    let baby: BabyRig | null = null;
     let screen: ScreenRig | null = null;
 
     if (tpl) {
@@ -2006,6 +2008,7 @@ class TankInstance implements SaverInstance {
       if (this.wantBreeds[index] === 'glowfish') angler = rigAngler(body, tpl.clips);
       if (this.wantBreeds[index] === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
+      if (this.wantBreeds[index] === 'babyfish') baby = rigBaby(body, tpl.clips);
       // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
       // (still `false` at construction) would get flat materials even though
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
@@ -2028,8 +2031,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || hacker || shark) {
-        mixer = (angler ?? hacker ?? shark)!.mixer;
+      } else if (angler || hacker || shark || baby) {
+        mixer = (angler ?? hacker ?? shark ?? baby)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2078,8 +2081,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || hacker || shark
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), lights: {} }
+      rig: crab || starfish || angler || hacker || shark || baby
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2761,6 +2764,8 @@ class TankInstance implements SaverInstance {
         f.rig!.lights['SCREEN-Glass'] = f.rig!.lights['SCREEN-Pixels'] = hacker.screen.level;
       }
       const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
+      // A babyfish swims where the tank puts it (it schools); its module sets its clips.
+      const baby = f.rig?.baby ? babyFrame(f.rig.baby, tSec, f.index, beat) : null;
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         // A standing starfish is where its feet are, ahead of its resting place.
@@ -2890,7 +2895,7 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : pose.fx, floor ? floor.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : {}),
+        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

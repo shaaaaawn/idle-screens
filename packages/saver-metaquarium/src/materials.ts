@@ -20,6 +20,12 @@ import { isScreen, PHOSPHORS, screenMaterial } from './screen';
 export { MIAMI_VICE_COLORS, BLOOM_COLORS };
 
 const BODY_COATS = MIAMI_VICE_COLORS.filter((c) => c !== '#1c1c1c');
+/** How far a PASTEL- coat is softened toward white. */
+export const PASTEL_SOFTEN = 0.28;
+/** A pastel step between two coats (the PASTEL-<n> role): mixed in linear light, then softened toward white. */
+export function pastelOf(a: string, b: string, t: number): Color {
+  return new Color(a).lerp(new Color(b), t).lerp(new Color('#ffffff'), PASTEL_SOFTEN);
+}
 
 function materialsOf(mesh: Mesh): Material[] {
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -315,7 +321,21 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         decal(kept, 1);
         return kept;
       }
-      const coat = /primary/i.test(m.name)
+      // PAINT-#rrggbb: a part in a colour of the intake's choosing, the same on
+      // every fish (the babyfish's stripe, butter yellow on its pastels).
+      const paint = /^PAINT-(#[0-9a-f]{6})$/i.exec(m.name);
+      if (paint && !neonColor) {
+        const painted = lit ? new MeshLambertMaterial({ color: new Color(paint[1]) }) : new MeshBasicMaterial({ color: new Color(paint[1]) });
+        painted.name = m.name;
+        painted.userData.mqOwned = true;
+        return painted;
+      }
+      // PASTEL-<n>: n% of the way from coat A to coat B, softened toward white
+      // (a baby's coat: the babyfish's bands run head to tail as one gradient).
+      const pastel = /^PASTEL-(\d{1,3})$/.exec(m.name);
+      const coat = pastel
+        ? pastelOf(coatA, coatB, Math.min(100, Number(pastel[1])) / 100)
+        : /primary/i.test(m.name)
         ? coatA
         : /secondary/i.test(m.name)
         ? coatB

@@ -488,6 +488,29 @@ describe('fish glow — GLOW parts as light sources', () => {
   });
 });
 
+describe('PASTEL- and PAINT- (a babyfish\'s coat and stripe)', () => {
+  it('PASTEL-<n> runs one gradient between the fish\'s two coats, softened; PAINT-#hex is the same on every fish', () => {
+    const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
+    const names = ['PASTEL-0', 'PASTEL-50', 'PASTEL-100', 'PAINT-#ffe08a'];
+    const colours = [3, 5].map((seed) => {
+      const root = new Group(); const parts = names.map(part); root.add(...parts);
+      applyNpcMaterials(root, createRng(seed), true, true);
+      return parts.map((p) => (p.material as MeshLambertMaterial).color.clone());
+    });
+    for (const c of colours) {
+      // The middle step lies between the ends, and every step is lighter than a raw coat would be.
+      for (const k of ['r', 'g', 'b'] as const) {
+        expect(c[1]![k]).toBeGreaterThanOrEqual(Math.min(c[0]![k], c[2]![k]) - 1e-9);
+        expect(c[1]![k]).toBeLessThanOrEqual(Math.max(c[0]![k], c[2]![k]) + 1e-9);
+      }
+      for (const step of c.slice(0, 3)) expect(Math.min(step.r, step.g, step.b)).toBeGreaterThan(0.2);
+      expect(c[3]!.getHex()).toBe(new Color('#ffe08a').getHex());
+    }
+    expect(colours[0]![0]!.equals(colours[1]![0]!)).toBe(false); // seeded per fish
+    expect(colours[0]![3]!.getHex()).toBe(colours[1]![3]!.getHex());
+  });
+});
+
 describe('METAL- parts (a glowfish\'s teeth)', () => {
   const fishWith = (name: string): { root: Group; part: Mesh } => {
     const part = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: 0x1a0030 }));

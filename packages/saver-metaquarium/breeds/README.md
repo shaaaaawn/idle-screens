@@ -44,6 +44,8 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    | `EYES-White` / `EYES-Black` | unlit sclera and pupil; `eyeLife` rigs them from their voxel grid |
    | `GLOW-<colour>` | unlit in its own colour, plus the halo shells and bloom card |
    | `KEEP-<part>` | the authored colour, kept (a screen, teeth) |
+   | `PASTEL-<n>` | a pastel step `n`% of the way from the fish's coat A to coat B, softened toward white: bands named `PASTEL-0` … `PASTEL-100` head to tail wear one gradient (the babyfish) |
+   | `PAINT-#rrggbb` | that colour on every fish (the babyfish's butter-yellow stripe) |
    | `SCREEN-<part>` | a display the tank draws (`src/screen.ts`): faces, code rain, a boot spinner, in a phosphor per fish; the hackerfish's glass and face pixels |
    | `METAL-<part>` | polished metal: a reflective plate when lit, chrome when flat (`fishMetal: 'off'` makes it the authored colour, matte) |
    | anything else | **a random coat**: almost never what you want |
@@ -104,6 +106,7 @@ skeleton and clips made in Blender:
 | hackerfish | `rig/hackerfish.py`: the box, its screen, paddle fins, tail | `src/hacker.ts`; its face a display, `src/screen.ts` | swim type glitch |
 | shark | `rig/shark.py` (cut by position — its fins sit off the lattice): head, jaw ringed with metal teeth, rolling eyes, pectorals, three-link tail | `src/shark.ts` (the tank swims it; it patrols) | swim bite |
 | starfish | `rig/starfish.py`: the disc and its face, blinking eyes, five arms in three links (hinged underneath, so a curl closes its seams). Standing, a little person: front arms legs, side arms arms, the back arm its head | `src/starfish.ts` crawls it on the seabed the crab's way, walks some bouts upright, and dances (`starfishDance`) | crawl idle wave stand curl · rise standing walk · march jacks reach kick twist circles disco spin · partners: mambo sway lead_twirl twirl dip_lead dip_follow lift_lead lift_fly |
+| babyfish | `rig/babyfish.py`: head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a dorsal fin, two eyes | `src/babyfish.ts` (the tank swims it; it schools) | swim zoom wiggle flip peek · eyes: blink wiggle_eyes peek_eyes |
 
 **A breed drawn in-house.** The starfish is the first we drew ourselves, in
 our designer's style: whole 2-unit cubes, flat colours, the coat roles, a
@@ -163,6 +166,12 @@ The rules a rig keeps, so the intake and the tank can trust it:
   dark at the strike). Flash-safe: no faster than 1.5 Hz, tested.
 - **Never put `eye` in a glow role's name**: `isEyes()` would make it a
   black-and-white eye display. The glowfish's glowing eyes are `GLOW-Orbs`.
+- **Eyes in their own clips** (the babyfish's blink, its happy squint, its
+  peek): a clip that moves only the eyes plays at full weight over whatever
+  the body is doing, because the intake drops the channels every other clip
+  leaves at rest. Point every bone the same way along the body: a bone
+  pointing back exports its rest rotation as q and its keys as -q, the same
+  turn, and the intake would keep that channel in every clip.
 - **One glow material on several moving parts** (the starfish's five tips):
   name it in `breeds.json` `splitByBone` and the intake writes one primitive
   per bone. Each is then a small light on its own part (lit in the neon look,
