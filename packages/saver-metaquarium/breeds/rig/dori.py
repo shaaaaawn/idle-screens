@@ -36,9 +36,9 @@ The rig never changes a visible voxel. Two things it does to the delivered
 data, neither visible at rest:
   - The dark marking arrives as 144 GPU-instanced cubes (36 of them twice in
     one place): they are joined into one mesh and the doubles dropped.
-  - A white face is laid under every pupil face that sits on its eye's
-    surface (2 thousandths in), because the white has holes there: a pupil
-    that slides would otherwise open a window into the eye.
+  - Each eye is rebuilt as one white box and its pupil as one black quad
+    on its face (common.clean_eyes): the delivered cubes, left as they are,
+    showed every seam as the pupil slid — a line through the eye.
 
 Clips (30 fps; the tank sets their times, never update(dt)):
 
@@ -66,14 +66,13 @@ import math
 import os
 import sys
 
-import bmesh
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, apply_pose, bake, begin, build_armature, ease, env, export, in_scene, lattice, out_path, segment,
+    Pose, apply_pose, bake, begin, build_armature, clean_eyes, ease, env, export, in_scene, lattice, out_path, segment,
     source_path, track,
 )
 
@@ -139,34 +138,9 @@ def load_dori():
     return out
 
 
-def back_the_pupils(meshes):
-    """Lay a white face under every pupil face on its eye's surface, so a
-    sliding pupil uncovers white, not a hole."""
-    white = next(o for o in meshes if o['rigMaterials'][0] == 'EYES-White')
-    black = next(o for o in meshes if o['rigMaterials'][0] == 'EYES-Black')
-    # Each eye's box, measured (the planes sit at -16.912, not -16.91).
-    boxes = {}
-    for side in (1, -1):
-        pts = [v.co for v in white.data.vertices if v.co.x * side > 0]
-        boxes[side] = (Vector([min(p[i] for p in pts) for i in range(3)]), Vector([max(p[i] for p in pts) for i in range(3)]))
-    tris = []
-    for f in black.data.polygons:
-        c, n = f.center, f.normal
-        if not (c.y < -14.5 and c.z > -1.5 and abs(c.x) > 0.5):
-            continue  # not a pupil (the mouth, the tail's bar)
-        lo, hi = boxes[1 if c.x > 0 else -1]
-        ax = max(range(3), key=lambda i: abs(n[i]))
-        plane = hi[ax] if n[ax] > 0 else lo[ax]
-        if abs(c[ax] - plane) > 0.01:
-            continue  # inside the eye, not on its surface
-        tris.append([black.data.vertices[i].co - n * 0.002 for i in f.vertices])
-    bm = bmesh.new()
-    bm.from_mesh(white.data)
-    for tri in tris:
-        bm.faces.new([bm.verts.new(v) for v in tri])
-    bm.to_mesh(white.data)
-    bm.free()
-    return len(tris)
+def is_pupil(c):
+    """A pupil face: in front, high on the face (not the mouth under it, nor the tail's bar)."""
+    return c.y < -14.5 and c.z > -1.5 and abs(c.x) > 0.5
 
 
 def spine_of(y):
@@ -398,11 +372,12 @@ def main():
     with in_scene(scene):
         begin('dori')
         meshes = load_dori()
-        backed = back_the_pupils(meshes)
+        role = {o['rigMaterials'][0]: o for o in meshes}
+        eyes = clean_eyes(role['EYES-White'], role['EYES-Black'], is_pupil)
         pitch, phase = lattice(meshes)
         counts = segment(meshes, bone_of, pitch, phase, by_point=True)
         counts['blended vertices'] = soften(meshes)
-        counts['pupil backing faces'] = backed
+        counts['eyes'] = eyes
         rig = build_armature('Dori', meshes, bone_table())
         keyed = {
             'body': ['rotation_quaternion', 'location'],

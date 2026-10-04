@@ -352,3 +352,64 @@ def export(rig, path, extras):
         export_materials='EXPORT', export_rest_position_armature=True,
     )
     return path
+
+
+# --------------------------------------------------------------------------
+# Eyes that look about: a clean white box and a flat pupil on its face
+# --------------------------------------------------------------------------
+
+def clean_eyes(white, black, is_pupil):
+    """Rebuild each eye (one per side of x = 0) for a pupil that SLIDES.
+
+    A delivered eye is voxels: a white box with the pupil's cubes set into
+    it, every cube a box of its own. Leave it so and a sliding pupil shows
+    every seam — a hairline between two pupil cubes, an inner face's edge
+    poking through the white where the pupil's draw-on-top offset lets it
+    (the dori's line through the eye, the blowfish's at the pupil's edge).
+    So each eye becomes ONE white box (six quads, the eye's full extent,
+    pupil included — the white under the pupil is what a slide uncovers)
+    and its pupil ONE quad on the box's front face (-y), its own footprint
+    there. Nothing visible changes at rest. `is_pupil(centre)` picks the
+    black faces that are pupil (not a mouth, not a tail's bar).
+    Returns, per side, the white box and the pupil's rectangle."""
+    out = {}
+    for side in (1, -1):
+        wf = [f for f in white.data.polygons if f.center.x * side > 0]
+        bf = [f for f in black.data.polygons if f.center.x * side > 0 and is_pupil(f.center)]
+        if not wf or not bf:
+            continue
+        pts = [white.data.vertices[i].co for f in wf for i in f.vertices] + [black.data.vertices[i].co for f in bf for i in f.vertices]
+        lo = Vector([min(p[i] for p in pts) for i in range(3)])
+        hi = Vector([max(p[i] for p in pts) for i in range(3)])
+        front = [f for f in bf if f.normal.y < -0.9 and abs(f.center.y - lo.y) < 0.01]
+        fp = [black.data.vertices[i].co for f in front for i in f.vertices]
+        x0, x1 = min(p.x for p in fp), max(p.x for p in fp)
+        z0, z1 = min(p.z for p in fp), max(p.z for p in fp)
+        _replace(white, {f.index for f in wf}, _box_quads(lo, hi))
+        _replace(black, {f.index for f in bf}, [([Vector((x0, lo.y, z0)), Vector((x1, lo.y, z0)), Vector((x1, lo.y, z1)), Vector((x0, lo.y, z1))], Vector((0, -1, 0)))])
+        out[side] = ((tuple(lo), tuple(hi)), (x0, x1, z0, z1))
+    return out
+
+
+def _box_quads(lo, hi):
+    """Six outward quads of the box lo..hi."""
+    c = [Vector((hi.x if i & 1 else lo.x, hi.y if i & 2 else lo.y, hi.z if i & 4 else lo.z)) for i in range(8)]
+    faces = [((0, 2, 6, 4), (-1, 0, 0)), ((1, 5, 7, 3), (1, 0, 0)), ((0, 4, 5, 1), (0, -1, 0)),
+             ((2, 3, 7, 6), (0, 1, 0)), ((0, 1, 3, 2), (0, 0, -1)), ((4, 6, 7, 5), (0, 0, 1))]
+    return [([c[i] for i in q], Vector(n)) for q, n in faces]
+
+
+def _replace(obj, drop, quads):
+    """Drop faces `drop` (and verts left loose) from `obj`; add `quads` [(corners, outward normal)]."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    bmesh.ops.delete(bm, geom=[bm.faces[i] for i in drop], context='FACES')
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    for corners, n in quads:
+        f = bm.faces.new([bm.verts.new(v) for v in corners])
+        f.normal_update()
+        if f.normal.dot(n) < 0:
+            f.normal_flip()
+    bm.to_mesh(obj.data)
+    bm.free()

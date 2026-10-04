@@ -117,10 +117,11 @@ export function rigPuffer(body: Object3D, clips: readonly AnimationClip[]): Puff
 // ---------------------------------------------------------------------------
 
 /** Swim-clip seconds per unit swum, on top of one a second: the flutter quickens with speed (3-6 Hz, Gordon 1996). */
-export const PUFFER_STROKE = 0.01;
-const ACT_LENGTH: Record<PufferAct, number> = {
-  kiss: 2.0, shimmy: 1.8, spin: 1.6, flip: 1.4, bounce: 1.5, spit: 1.2, yawn: 2.4, shy: 2.2, wave: 1.6, chomp: 0.9,
-  puffup: 6.2, pout: 2.4,
+export const PUFFER_STROKE = 0.005;
+/** Each act's length: its clip's (the rig's — breeds.test holds them equal), the shows' own. */
+export const ACT_LENGTH: Record<PufferAct, number> = {
+  kiss: 2.4, shimmy: 2.6, spin: 2.2, flip: 2.0, bounce: 2.3, spit: 1.6, yawn: 2.7, shy: 2.6, wave: 2.1, chomp: 1.2,
+  puffup: 7.2, pout: 2.8,
 };
 const ACTS: readonly [PufferAct, number][] = [
   ['puffup', 0.15], ['kiss', 0.12], ['shimmy', 0.09], ['wave', 0.09], ['shy', 0.08], ['pout', 0.08], ['spin', 0.08],
@@ -130,9 +131,9 @@ const LONGEST = Math.max(...Object.values(ACT_LENGTH));
 
 export interface PufferCycle { period: number; offset: number; at: number }
 
-/** One act a cycle — a lively one: 8 to 13 s. */
+/** One act a cycle, 13 to 20 s: lively, but a fish to watch, not one that fidgets. */
 export function pufferCycle(index: number): PufferCycle {
-  const period = 8 + 5 * fishHash(index, 1601);
+  const period = 13 + 7 * fishHash(index, 1601);
   return { period, offset: fishHash(index, 1603) * period, at: 0.4 + Math.max(0, period - LONGEST - 0.8) * fishHash(index, 1605) };
 }
 
@@ -161,15 +162,15 @@ export function pufferAct(index: number, t: number): PufferActNow {
 
 // The puff show: gulps, a hold, a release.
 const GULPS = 4;
-const GULP_EVERY = 0.4;                  // 2.5 gulps a second
-const HOLD_FROM = GULPS * GULP_EVERY + 0.2;
-const RELEASE_AT = HOLD_FROM + 2.2;
+const GULP_EVERY = 0.45;                 // ~2.2 gulps a second (a puffer's is ~2.5)
+const HOLD_FROM = GULPS * GULP_EVERY + 0.25;
+const RELEASE_AT = HOLD_FROM + 2.6;
 const BURPS = 4;
-const BURP_EVERY = 0.45;
+const BURP_EVERY = 0.55;
 
 /** How it lets go: burping it back out (the real way), or zipping off like a balloon. */
 export function pufferRelease(index: number, cycle: number): 'burp' | 'zip' {
-  return fishHash(index * 389 + cycle, 1609) < 0.35 ? 'zip' : 'burp';
+  return fishHash(index * 389 + cycle, 1609) < 0.2 ? 'zip' : 'burp';
 }
 
 /** How puffed it is (0 relaxed, 1 a full ball) — a breath always, a show now and then. */
@@ -205,10 +206,11 @@ export function pufferPuff(index: number, t: number): number {
 
 /** How much of its travel an act holds back (a kiss is given standing still; a puffed ball can barely swim). */
 const HOLD: Record<PufferAct, number> = {
-  puffup: 0.92, pout: 0.6, kiss: 0.9, wave: 0.8, shy: 0.6, yawn: 0.7, bounce: 0.7, shimmy: 0.7, spit: 0.5,
-  chomp: 0.6, spin: 0.5, flip: 0.5,
+  puffup: 0.85, pout: 0.4, kiss: 0.75, wave: 0.5, shy: 0.4, yawn: 0.5, bounce: 0.4, shimmy: 0.4, spit: 0.3,
+  chomp: 0.4, spin: 0.3, flip: 0.3,
 };
-export const PUFFER_CATCH = 4;
+/** Made good slowly: a dash to catch up is frantic. */
+export const PUFFER_CATCH = 6;
 
 /** Seconds of cruising held back at `t` (the tank subtracts that much travel), made good over PUFFER_CATCH after. */
 export function pufferHold(index: number, t: number): number {
@@ -253,8 +255,8 @@ export interface PufferState {
 function bubbleOf(index: number, a: PufferActNow): PufferState['bubble'] {
   const key = (n: string, at: number, size: number): PufferState['bubble'] =>
     a.into >= at ? { key: `${index}:${a.cycle}:${n}`, t: at - a.into, size } : null;
-  if (a.act === 'kiss' && a.into < 1.6) return key('kiss', 1.06, 0.12);
-  if (a.act === 'spit') for (const at of [0.8, 0.55, 0.3]) if (a.into >= at && a.into < at + 0.3) return key(`spit${at}`, at, 0.07);
+  if (a.act === 'kiss' && a.into < 1.95) return key('kiss', 1.27, 0.12);
+  if (a.act === 'spit') for (const at of [1.07, 0.73, 0.4]) if (a.into >= at && a.into < at + 0.4) return key(`spit${at}`, at, 0.07);
   if (a.act === 'puffup' && pufferRelease(index, a.cycle) === 'burp') {
     for (let b = BURPS - 1; b >= 0; b--) {
       const at = RELEASE_AT + b * BURP_EVERY + 0.05;
@@ -292,7 +294,7 @@ export function pufferFrame(rig: PufferRig, t: number, index: number, beat: numb
   set(rig, 'hover', posMod(phase, D.hover), (1 - w) * (1 - cruise));
   if (clip) set(rig, clip, Math.min(time, D[clip]), w);
   rig.mixer.update(0);
-  const face = a.act === 'kiss' || a.act === 'wave' || a.act === 'shimmy' ? a.weight : a.act === 'shy' ? a.weight * env(a.into, 0.9, 1.1, 1.4, 1.7) : 0;
+  const face = a.act === 'kiss' || a.act === 'wave' || a.act === 'shimmy' ? a.weight : a.act === 'shy' ? a.weight * env(a.into, 1.06, 1.3, 1.65, 2.0) : 0;
   const doing: PufferDoing = a.act && a.weight > 0.02 ? a.act : cruise > 0.5 ? 'swim' : 'hover';
   const bubble = bubbleOf(index, a);
   // A bubble's time comes back relative to now: make it the moment it left.
@@ -314,7 +316,7 @@ function set(rig: PufferRig, name: PufferClip, time: number, weight: number): vo
 const FACE = { x0: -5, x1: 1, y0: -4, y1: 2, pw: 2, ph: 4 };
 /** How far it can look: as far as the slide reaches, and a little swivel of the eye. */
 const REACH_YAW = 1.2, REACH_PITCH = 0.7;
-const SLOT = 0.3;
+const SLOT = 0.45;
 
 export interface PufferLookInput {
   /** The viewer in world space, or null (riding in its eye). */
@@ -349,7 +351,7 @@ function viewerAim(e: PufferEye, viewer: Vector3): Aim | null {
 }
 
 function saccade(index: number, j: number): boolean {
-  return fishHash(index * 4241 + j, 1621) < 0.35;
+  return fishHash(index * 4241 + j, 1621) < 0.25;
 }
 function lastSaccade(index: number, j: number): number {
   for (let k = 0; k < 24; k++) if (saccade(index, j - k)) return j - k;
@@ -358,7 +360,7 @@ function lastSaccade(index: number, j: number): number {
 
 /** Whether eye-slot `j` is one where the eyes go their own ways (a puffer's eyes can). */
 function googly(index: number, j: number): boolean {
-  return fishHash(index * 613 + j, 1623) < 0.18;
+  return fishHash(index * 613 + j, 1623) < 0.07;
 }
 
 function wanderAim(index: number, j: number, side: number): Aim {
@@ -368,14 +370,14 @@ function wanderAim(index: number, j: number, side: number): Aim {
 }
 
 /** A flirt window: every few seconds with the viewer in reach, one of five looks. */
-const FLIRT_SLOT = 1.6;
+const FLIRT_SLOT = 2.6;
 const FLIRT_LEN: Record<PufferFlirt, number> = { wink: 0.9, bat: 1.1, bedroom: 2.6, sideeye: 2.2, brows: 0.8 };
 const FLIRTS: readonly [PufferFlirt, number][] = [['wink', 0.3], ['bat', 0.2], ['bedroom', 0.2], ['sideeye', 0.15], ['brows', 0.15]];
 
 function flirtAt(index: number, t: number): { flirt: PufferFlirt; u: number } | null {
   const j = Math.floor(t / FLIRT_SLOT);
   for (const jj of [j, j - 1]) {
-    if (fishHash(index * 911 + jj, 1631) > 0.28) continue;
+    if (fishHash(index * 911 + jj, 1631) > 0.25) continue;
     let r = fishHash(index * 919 + jj, 1633);
     const flirt = FLIRTS.find(([, w]) => (r -= w) < 0)?.[0] ?? 'wink';
     const u = t - jj * FLIRT_SLOT;
@@ -397,7 +399,7 @@ export function pufferLook(rig: PufferRig, t: number, index: number, inp: Puffer
   let flirt: PufferFlirt | null = null;
   let off = 0, offN = 0, anyViewer = false;
   // An everyday slow blink, every few seconds (both eyes).
-  const every = 3.5 + 3 * fishHash(index, 1635);
+  const every = 5 + 4 * fishHash(index, 1635);
   const b = posMod(t + fishHash(index, 1637) * every, every);
   const daily = blink(b, 0, 0.3);
   const aims: Aim[] = [];
@@ -424,14 +426,14 @@ export function pufferLook(rig: PufferRig, t: number, index: number, inp: Puffer
     case 'kiss': {
       // Eyes on you, shut for the pucker, open at the mwah — and a wink after.
       rig.eyes.forEach((_, i) => set(i, atYou(i)));
-      const shut = env(u, 0.35, 0.5, 0.95, 1.05) * w;
-      lids[0] = Math.max(shut, blink(u, 1.35, 0.35)); lids[1] = shut;
+      const shut = env(u, 0.42, 0.6, 1.14, 1.26) * w;
+      lids[0] = Math.max(shut, blink(u, 1.62, 0.42)); lids[1] = shut;
       pupil = 1.3;
       break;
     }
     case 'shy': {
       // Look away and down, then peek back through half-shut lids.
-      const peek = env(u, 0.9, 1.1, 1.4, 1.7);
+      const peek = env(u, 1.06, 1.3, 1.65, 2.0);
       rig.eyes.forEach((_, i) => set(i, peek > 0.5 ? atYou(i) : { yaw: -0.8, pitch: -0.5, at: 'away' }));
       lids[0] = lids[1] = 0.35 * w;
       pupil = 1.2;
@@ -441,16 +443,16 @@ export function pufferLook(rig: PufferRig, t: number, index: number, inp: Puffer
       // Wide eyes, tiny pupils as it gulps; as it zips, they roll every which way.
       pupil = 1 - 0.3 * clamp(s.puff * 1.4, 0, 1);
       if (s.act === 'puffup' && u >= RELEASE_AT && pufferRelease(index, s.cycle) === 'zip') {
-        rig.eyes.forEach((e, i) => set(i, { yaw: Math.sin(t * 13 + e.side * 1.7) * 1.1, pitch: Math.cos(t * 11 + e.side) * 0.6, at: 'dizzy' }));
+        rig.eyes.forEach((e, i) => set(i, { yaw: Math.sin(t * 7 + e.side * 1.7) * 1.1, pitch: Math.cos(t * 6 + e.side) * 0.6, at: 'dizzy' }));
       }
       break;
     }
-    case 'yawn': lids[0] = lids[1] = 0.75 * env(u, 0.4, 0.8, 1.5, 1.9); break;
+    case 'yawn': lids[0] = lids[1] = 0.75 * env(u, 0.45, 0.9, 1.69, 2.14); break;
     case 'chomp': rig.eyes.forEach((_, i) => set(i, { yaw: 0, pitch: -0.55, at: 'down' })); break;
     case 'wave': case 'shimmy': case 'bounce':
       rig.eyes.forEach((_, i) => set(i, atYou(i)));
       pupil = 1.25;
-      if (s.act === 'wave') lift = env(u, 0.3, 0.42, 0.52, 0.7);
+      if (s.act === 'wave') lift = env(u, 0.39, 0.55, 0.68, 0.92);
       if (s.act === 'shimmy') lids[0] = lids[1] = 0.4 * w;
       break;
     default: break;

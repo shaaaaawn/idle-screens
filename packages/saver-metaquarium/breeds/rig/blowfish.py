@@ -28,9 +28,9 @@ and lets it all go. So the rig is built round that:
                 the eyes and their pupils, bones of their own that no clip
                 moves: src/puffer.ts aims them, slides the pupils, dilates
                 them, and closes them — a wink, batted lashes, a slow
-                bedroom blink. A white face is laid under each pupil (in the
-                eye's surface, a hair inside) so a sliding pupil uncovers
-                white, not a hole.
+                bedroom blink. Each eye is rebuilt as one white box and its
+                pupil as one black quad on its face (common.clean_eyes), so a
+                sliding pupil uncovers white, and shows no seam.
 
 Blender axes: it faces -Y, its left is +X, Z is up; voxel centres on odd
 coordinates. The core box is x -10..10, y -10..6, z -8..8; the face's layer
@@ -38,22 +38,22 @@ coordinates. The core box is x -10..10, y -10..6, z -8..8; the face's layer
 
 Clips (30 fps; the tank sets their times, never update(dt)):
 
-    swim      0.4 s loop. Pectorals a-flutter (5 Hz), a bob, a waddle, the
+    swim      1.25 s loop. Pectorals a-flutter (3.2 Hz), a bob, a waddle, the
               tail of spines sculling.
-    hover     0.8 s loop. Holding station like a little helicopter.
+    hover     1.6 s loop. Holding station like a little helicopter.
     puff      1.0 s — the dial (above). Not played: looked up.
     gulp      0.35 s. One gulp of water: the mouth opens, the body swallows.
-    zip       1.4 s. Let go like a balloon: spinning, wobbling, zigzagging.
-    spin      1.6 s. A pirouette, fins out.
-    flip      1.4 s. A back flip, tucked.
-    kiss      2.0 s. It leans in, puckers up — mwah! — and bobs back.
-    shimmy    1.8 s. A little side-to-side dance.
-    bounce    1.5 s. Three bounces, squash and stretch.
-    spit      1.2 s. Blows a jet of water: the mouth pumps, the body recoils.
-    yawn      2.4 s. A big round yawn, a stretch.
-    shy       2.2 s. Turns away coyly, tucks its fins... and peeks back.
-    wave      1.6 s. Waves a fin: hey there.
-    chomp     0.9 s. Crunch, crunch: a beak made for snails.
+    zip       1.8 s. Let go like a balloon: spinning, wobbling, zigzagging.
+    spin      2.2 s. A pirouette, fins out.
+    flip      2.0 s. A back flip, tucked.
+    kiss      2.4 s. It leans in, puckers up — mwah! — and bobs back.
+    shimmy    2.6 s. A little side-to-side dance.
+    bounce    2.3 s. Three bounces, squash and stretch.
+    spit      1.6 s. Blows a jet of water: the mouth pumps, the body recoils.
+    yawn      2.7 s. A big round yawn, a stretch.
+    shy       2.6 s. Turns away coyly, tucks its fins... and peeks back.
+    wave      2.1 s. Waves a fin: hey there.
+    chomp     1.2 s. Crunch, crunch: a beak made for snails.
 
 Every one-shot starts and ends on the rest pose.
 """
@@ -61,15 +61,14 @@ import math
 import os
 import sys
 
-import bmesh
 import bpy
 from mathutils import Vector
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, apply_pose, bake, begin, build_armature, ease, env, export, in_scene, lattice, load_source, out_path, segment,
-    track,
+    Pose, apply_pose, bake, begin, build_armature, clean_eyes, ease, env, export, in_scene, lattice, load_source, out_path,
+    segment, track,
 )
 
 # The spines, by the face they stand on, and which way is out.
@@ -103,33 +102,6 @@ def bone_of(x, y, z, mat):
     if x < -10:
         return 'spines.R'
     return 'puff'
-
-
-def back_the_pupils(meshes):
-    """Lay a white face under every pupil face that sits on its eye's surface,
-    so a sliding pupil uncovers white, not a hole (the dori's way)."""
-    white = next(o for o in meshes if o['rigMaterials'][0] == 'EYES-WHITE')
-    black = next(o for o in meshes if o['rigMaterials'][0] == 'EYES-BLACK')
-    boxes = {}
-    for side in (1, -1):
-        pts = [v.co for v in white.data.vertices if v.co.x * side > 0] + [v.co for v in black.data.vertices if v.co.x * side > 0]
-        boxes[side] = (Vector([min(p[i] for p in pts) for i in range(3)]), Vector([max(p[i] for p in pts) for i in range(3)]))
-    tris = []
-    for f in black.data.polygons:
-        c, n = f.center, f.normal
-        lo, hi = boxes[1 if c.x > 0 else -1]
-        ax = max(range(3), key=lambda i: abs(n[i]))
-        plane = hi[ax] if n[ax] > 0 else lo[ax]
-        if abs(c[ax] - plane) > 0.01:
-            continue
-        tris.append([black.data.vertices[i].co - n * 0.002 for i in f.vertices])
-    bm = bmesh.new()
-    bm.from_mesh(white.data)
-    for tri in tris:
-        bm.faces.new([bm.verts.new(v) for v in tri])
-    bm.to_mesh(white.data)
-    bm.free()
-    return len(tris), {k: (tuple(lo), tuple(hi)) for k, (lo, hi) in boxes.items()}
 
 
 def bone_table():
@@ -179,11 +151,11 @@ def squash(p, s):
     p.scale['body'] = (1 + 0.5 * s, 1 + 0.25 * s, 1 - s)
 
 
-def swim(t, T=0.4):
+def swim(t, T=1.25):
     p = Pose()
-    flutter(p, t, hz=5.0)
+    flutter(p, t, hz=3.2, amp=0.45, sweep=0.2)
     w = 2 * math.pi * t / T
-    p.move('body', (0, 0, 0.25 * math.sin(w)))
+    p.move('body', (0, 0, 0.3 * math.sin(w)))
     p.turn('body', 'x', -0.1)                   # it swims a little mouth-up (3-10 degrees)
     p.turn('body', 'z', 0.035 * math.sin(w))   # a waddle
     p.turn('body', 'y', 0.03 * math.sin(w + 1))
@@ -191,9 +163,9 @@ def swim(t, T=0.4):
     return p
 
 
-def hover(t, T=0.8):
+def hover(t, T=1.6):
     p = Pose()
-    flutter(p, t, hz=3.75, amp=0.45, sweep=0.3)
+    flutter(p, t, hz=2.5, amp=0.4, sweep=0.25)
     w = 2 * math.pi * t / T
     p.move('body', (0, 0, 0.35 * math.sin(w)))
     p.turn('body', 'y', 0.04 * math.sin(w))
@@ -355,9 +327,19 @@ def chomp(t, T=0.9):
     return p
 
 
-CLIPS = [('swim', swim, 0.4), ('hover', hover, 0.8), ('puff', puff, 1.0), ('gulp', gulp, 0.35), ('zip', zip_, 1.4),
-         ('spin', spin, 1.6), ('flip', flip, 1.4), ('kiss', kiss, 2.0), ('shimmy', shimmy, 1.8), ('bounce', bounce, 1.5),
-         ('spit', spit, 1.2), ('yawn', yawn, 2.4), ('shy', shy, 2.2), ('wave', wave, 1.6), ('chomp', chomp, 0.9)]
+def slow(fn, was, now):
+    """A clip authored over `was` seconds, played over `now`: everything in
+    it — flutters, spins, bounces — that much more leisurely."""
+    return lambda t, T=now: fn(t * was / now, was)
+
+
+# Unhurried: a puffer is a slow, deliberate swimmer, and an ambient screen
+# wants a fish you can watch, not one that fidgets.
+CLIPS = [('swim', swim, 1.25), ('hover', hover, 1.6), ('puff', puff, 1.0), ('gulp', gulp, 0.35),
+         ('zip', slow(zip_, 1.4, 1.8), 1.8), ('spin', slow(spin, 1.6, 2.2), 2.2), ('flip', slow(flip, 1.4, 2.0), 2.0),
+         ('kiss', slow(kiss, 2.0, 2.4), 2.4), ('shimmy', slow(shimmy, 1.8, 2.6), 2.6), ('bounce', slow(bounce, 1.5, 2.3), 2.3),
+         ('spit', slow(spit, 1.2, 1.6), 1.6), ('yawn', slow(yawn, 2.4, 2.7), 2.7), ('shy', slow(shy, 2.2, 2.6), 2.6),
+         ('wave', slow(wave, 1.6, 2.1), 2.1), ('chomp', slow(chomp, 0.9, 1.2), 1.2)]
 LOOPS = ('swim', 'hover')
 
 
@@ -366,10 +348,10 @@ def main():
     with in_scene(scene):
         begin('blowfish')
         meshes = load_source('blowfish')
-        backed, boxes = back_the_pupils(meshes)
+        role = {o['rigMaterials'][0]: o for o in meshes}
+        boxes = clean_eyes(role['EYES-WHITE'], role['EYES-BLACK'], lambda c: True)
         pitch, phase = lattice(meshes)
         counts = segment(meshes, bone_of, pitch, phase, by_point=True)
-        counts['pupil backing faces'] = backed
         # `body` holds no vertices but must stay a deform bone: the exporter drops the rest, and every clip moves it.
         rig = build_armature('Blowfish', meshes, bone_table(), nondeform=('root',))
         keyed = {

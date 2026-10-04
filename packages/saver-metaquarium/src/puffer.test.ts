@@ -44,7 +44,7 @@ describe('the blowfish (puffer.ts)', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 30; i++) for (let k = 0; k < 60; k++) seen.add(pufferActAt(i, k));
     expect(seen.size).toBe(12);
-    for (let i = 0; i < 40; i++) { const c = pufferCycle(i); expect(c.at + 6.2).toBeLessThanOrEqual(c.period + 1e-9); }
+    for (let i = 0; i < 40; i++) { const c = pufferCycle(i); expect(c.at + 7.2).toBeLessThanOrEqual(c.period + 1e-9); }
   });
 
   it('breathes a little always, and puffs up in gulps — about 2.5 a second — to a full ball', () => {
@@ -60,19 +60,19 @@ describe('the blowfish (puffer.ts)', () => {
     expect(pufferPuff(i, s + 0.9)).toBeLessThan(pufferPuff(i, s + 1.3));
     expect(pufferPuff(i, s + 3)).toBeGreaterThan(0.95);
     // And all the way back down by the end.
-    expect(pufferPuff(i, s + 6.15)).toBeLessThan(0.1);
+    expect(pufferPuff(i, s + 7.15)).toBeLessThan(0.1);
   });
 
   it('lets go two ways: burped out in steps (slower, the real way) or zipped off like a balloon', () => {
     const burp = find('puffup', (i, k) => pufferRelease(i, k) === 'burp'), zip = find('puffup', (i, k) => pufferRelease(i, k) === 'zip');
     const at = (x: { i: number; k: number }, u: number): number => pufferPuff(x.i, startOf(x.i, x.k) + u);
-    // 0.55 s after the release begins the balloon is out; the burper is still burping.
-    expect(at(zip, 4.0 + 0.6)).toBeLessThan(0.15);
-    expect(at(burp, 4.0 + 0.6)).toBeGreaterThan(0.4);
+    // 0.6 s after the release begins the balloon is out; the burper is still burping.
+    expect(at(zip, 4.65 + 0.6)).toBeLessThan(0.15);
+    expect(at(burp, 4.65 + 0.6)).toBeGreaterThan(0.4);
     // The burper lets out a bubble with each burp.
     const { rig } = rigged();
     const keys = new Set<string>();
-    for (let u = 4.0; u < 6.2; u += 0.05) {
+    for (let u = 4.6; u < 7.2; u += 0.05) {
       const b = pufferFrame(rig, startOf(burp.i, burp.k) + u, burp.i, 0, { pace: 0 }).bubble;
       if (b) keys.add(b.key);
     }
@@ -93,11 +93,11 @@ describe('the blowfish (puffer.ts)', () => {
   it('holds still for an act (a kiss is given standing still), then catches up', () => {
     for (const act of ['kiss', 'puffup', 'wave'] as const) {
       // One whose next act starts after it has caught up.
-      const { i, k } = find(act, (i, k) => startOf(i, k + 1) > startOf(i, k) + 6.3 + PUFFER_CATCH);
+      const { i, k } = find(act, (i, k) => startOf(i, k + 1) > startOf(i, k) + 7.3 + PUFFER_CATCH);
       const s = startOf(i, k);
       expect(pufferHold(i, s - 0.01)).toBeCloseTo(0, 6);
-      expect(pufferHold(i, s + 1.4) - pufferHold(i, s + 0.6)).toBeGreaterThan(0.5);
-      expect(pufferHold(i, s + 6.3 + PUFFER_CATCH)).toBeCloseTo(0, 6);
+      expect(pufferHold(i, s + 1.4) - pufferHold(i, s + 0.6)).toBeGreaterThan(0.3);
+      expect(pufferHold(i, s + 7.3 + PUFFER_CATCH)).toBeCloseTo(0, 6);
     }
   });
 

@@ -10,7 +10,7 @@
     "blowfish": {
       "source": "rig/blowfish.glb", "delivered": "source/blowfish.glb", "rig": "rig/blowfish.py",
       "kind": "voxel", "size": 0.8, "motion": "puffer", "roles": {},
-      "notes": "A pufferfish and a flirt, rigged in Blender by rig/blowfish.py from the delivered source/blowfish.glb (never edited; a white face laid under each pupil so it can slide). Already role-named. Everything hangs off a `puff` bone: the `puff` clip is a dial (its time is how puffed it is) that scales the fish round and stands its spines up from half tucked, so src/puffer.ts gulps it up, holds it and lets it go. Above it `body` carries the clips — swim, hover, gulp, zip, spin, flip, kiss, shimmy, bounce, spit, yawn, shy, wave, chomp — and the eyes and pupils are bones no clip moves: src/puffer.ts aims them, dilates them and closes them (true puffers can close their eyes)."
+      "notes": "A pufferfish and a flirt, rigged in Blender by rig/blowfish.py from the delivered source/blowfish.glb (never edited but for its eyes: each rebuilt as one white box and its pupil as one quad on its face, so a sliding pupil shows no seam). Already role-named. Everything hangs off a `puff` bone: the `puff` clip is a dial (its time is how puffed it is) that scales the fish round and stands its spines up from half tucked, so src/puffer.ts gulps it up, holds it and lets it go. Above it `body` carries the clips — swim, hover, gulp, zip, spin, flip, kiss, shimmy, bounce, spit, yawn, shy, wave, chomp — and the eyes and pupils are bones no clip moves: src/puffer.ts aims them, dilates them and closes them (true puffers can close their eyes)."
     },
     "crab": {
       "source": "rig/crab.glb", "delivered": "source/crab.glb", "rig": "rig/crab.py",
@@ -20,7 +20,7 @@
     "dori": {
       "source": "rig/dori.glb", "delivered": "source/dori.glb", "rig": "rig/dori.py",
       "kind": "voxel", "size": 0.9, "motion": "tang", "roles": {},
-      "notes": "A blue tang, rigged in Blender by rig/dori.py from the delivered source/dori.glb (never edited; its GPU-instanced marking is joined and its doubled cubes dropped, and its Material.00x names, which collide in a shared .blend, are matched by colour and renamed to the roles the intake used to map them to). The first breed that swims on its fins: a rigid body, two pectorals that beat like wings, a tail only for bursts, a dorsal that rises in a display; clips fly, hover, back, burst, pick, flare, headstand, flop. Its eyes are bones, not clips: src/dori.ts aims each one every frame (the box swivels, the pupil slides over a white backing laid under it), and it never blinks — fish have no eyelids."
+      "notes": "A blue tang, rigged in Blender by rig/dori.py from the delivered source/dori.glb (never edited; its GPU-instanced marking is joined and its doubled cubes dropped, and its Material.00x names, which collide in a shared .blend, are matched by colour and renamed to the roles the intake used to map them to; each eye is rebuilt as one white box and its pupil as one quad, so a sliding pupil shows no seam). The first breed that swims on its fins: a rigid body, two pectorals that beat like wings, a tail only for bursts, a dorsal that rises in a display; clips fly, hover, back, burst, pick, flare, headstand, flop. Its eyes are bones, not clips: src/dori.ts aims each one every frame (the box swivels, the pupil slides over it), and it never blinks — fish have no eyelids."
     },
     "glowfish": {
       "source": "rig/glowfish.glb", "delivered": "source/glowfish.glb", "rig": "rig/glowfish.py",

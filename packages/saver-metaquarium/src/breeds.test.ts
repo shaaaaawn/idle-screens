@@ -1,8 +1,9 @@
-import { NodeIO } from '@gltf-transform/core';
+import { NodeIO, type Document } from '@gltf-transform/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
 import { NPC_CATALOG } from './ipfs';
+import { ACT_LENGTH } from './puffer';
 
 const here = (p: string): URL => new URL(p, import.meta.url);
 const manifest = JSON.parse(readFileSync(here('../breeds/breeds.json'), 'utf8')) as { breeds: Record<string, { kind: string }> };
@@ -15,6 +16,23 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
 const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
+
+/** Triangles in each eye's white and in its pupils: a clean eye is one box (12 each) and one quad (2 each) — no seams for a sliding pupil to show. */
+function cleanEyes(root: ReturnType<Document['getRoot']>, joints: string[], white: string, black: string): { white: number; pupil: number } {
+  let w = 0, p = 0;
+  for (const mesh of root.listMeshes()) for (const prim of mesh.listPrimitives()) {
+    const name = prim.getMaterial()!.getName();
+    if (name !== white && name !== black) continue;
+    const j = prim.getAttribute('JOINTS_0')!, idx = prim.getIndices();
+    const n = idx ? idx.getCount() : j.getCount();
+    for (let t = 0; t < n; t += 3) {
+      const v = idx ? idx.getScalar(t) : t;
+      const bone = joints[(j.getElement(v, []) as number[])[0]!]!;
+      if (name === white) w++; else if (bone.startsWith('pupil')) p++;
+    }
+  }
+  return { white: w, pupil: p };
+}
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -181,6 +199,9 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
     // …and no clip at all moves an eye or a pupil: puffer.ts aims, closes and dilates them.
     for (const [name] of anims) for (const ch of touches(name)) expect(ch, name).not.toMatch(/^(eye|pupil)\./);
+    expect(cleanEyes(root, joints, 'EYES-WHITE', 'EYES-BLACK')).toEqual({ white: 24, pupil: 4 });
+    // The driver schedules each act by its clip's length.
+    for (const [act, len] of Object.entries(ACT_LENGTH)) if (anims.has(act)) expect(anims.get(act)!.listChannels()[0]!.getSampler()!.getInput()!.getMax([])[0], act).toBeCloseTo(len, 2);
   });
 
   it('dori: the rig survives the intake — a rigid body on two fins, a tail for bursts, eyes and pupils of their own that no clip moves', async () => {
@@ -194,9 +215,7 @@ describe('bundled breeds (breeds/README.md)', () => {
     for (const a of anims) for (const ch of a.listChannels()) expect(ch.getTargetNode()!.getName(), a.getName()).not.toMatch(/^(eye|pupil)\./);
     // The materials arrive as the roles the delivered model was mapped to.
     expect(root.listMaterials().map((m) => m.getName()).sort()).toEqual(['EYES-Black', 'EYES-White', 'GLOW-Yellow', 'PrimaryColor', 'SecondaryColor']);
-    // Each pupil is its own bone's alone, and the white is backed under it: some
-    // white faces sit 2 thousandths inside the eye's front face (y -16.912 in
-    // Blender is z 16.912 here).
+    // Each pupil is its own bone's alone.
     const where = (name: string): Set<string> => {
       const out = new Set<string>();
       for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
@@ -208,13 +227,7 @@ describe('bundled breeds (breeds/README.md)', () => {
     };
     expect([...where('EYES-White')].sort()).toEqual(['eye.L', 'eye.R']);
     expect([...where('EYES-Black')].sort()).toEqual(['head', 'pupil.L', 'pupil.R', 'tail']);
-    let backing = 0;
-    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
-      if (p.getMaterial()!.getName() !== 'EYES-White') continue;
-      const pos = p.getAttribute('POSITION')!;
-      for (let i = 0; i < pos.getCount(); i++) if (Math.abs((pos.getElement(i, []) as number[])[2]! - (16.912 - 0.002)) < 6e-4) backing++;
-    }
-    expect(backing).toBeGreaterThan(0);
+    expect(cleanEyes(root, joints, 'EYES-White', 'EYES-Black')).toEqual({ white: 24, pupil: 4 });
   });
 
   it('starfish: the rig survives the intake — disc, eyes, five arms in three links; each glowing tip its own light on its own arm', async () => {
