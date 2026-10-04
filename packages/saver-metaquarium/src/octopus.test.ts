@@ -174,6 +174,7 @@ describe('the octopus, more closely', () => {
     const out = newOctopusOutput();
     const at = (u: number): OctopusOutput => octopusFrame(rig, { t: stopAt + u, index: i, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300 }, out);
     expect(at(1.0 + 1.0).doing).toBe('wave');
+    expect(rig.actions.wave.getEffectiveWeight()).toBeGreaterThan(0);
     const after = at(1.0 + 2.0 + 1.5);
     expect(after.doing).toBe('idle');
     expect(after.stop).toBe('idle');
