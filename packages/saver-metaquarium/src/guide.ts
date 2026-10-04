@@ -11,7 +11,8 @@
  *                (its "recipes" shelf), so what an agent can publish is what a
  *                person can look at. Channel-safe: minted ids, no local paths.
  *   GRAMMAR      the small DSLs (fishMix, propMix, floraMix, floraPalette, geodeMix, geodeMineral, spotRig, spotCues, vignette).
- *   validateMetaquariumParams   every DSL parser at once, for publish advisories.
+ *   validateMetaquariumParams   every DSL parser at once, plus the params another
+ *                one silently overrides or needs, for publish advisories.
  *   recipeTrack  a recipe as the control track `publishScene` takes.
  */
 
@@ -222,6 +223,15 @@ export const RECIPES: readonly Recipe[] = [
       propMix: 'crystal:1@lotus/hotpink,crystal:1@druse/cyan,crystal:1@spire/yellow,crystal:1@druse/purple', fishMix: '100:1,257:1', swimStyle: 'drift', swimSpeed: 0.4,
       cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1 },
   },
+  {
+    id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a coral reef: tangs that look back at you, blowfish that puff up and flirt, an octopus that changes colour and inks, a crab on the floor. A slow orbit.',
+    params: { ...ALIVE, environment: 'reef', fishMix: 'dori:3,blowfish:2,octopus:1,crab:1', floraDensity: 0.6, marineSnow: 0.3, finish: 0.5, swimSpeed: 0.7,
+      cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
+  },
+  {
+    id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
+    params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
+  },
 ];
 
 export const recipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
@@ -232,7 +242,9 @@ export function recipeTrack(params: Readonly<Record<string, Value>>, seed = 0):
   return { program: 'metaquarium', seed, deltas: Object.entries(params).map(([path, value]) => ({ t: 0, path, value })) };
 }
 
-export interface ParamProblem { path: string; message: string }
+/** `also`: the other params the problem is about — a server reporting only
+ *  what one call changed counts the problem as touched when any of them was. */
+export interface ParamProblem { path: string; message: string; also?: string[] }
 
 /** Every DSL parser at once. Never throws; an empty list means the strings are sound. */
 export function validateMetaquariumParams(params: Readonly<Record<string, unknown>>): ParamProblem[] {
@@ -263,6 +275,87 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     if (Number(params.paths ?? 0) > 0) world.hub = at;
     if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
+  }
+  out.push(...dependencyProblems(params));
+  return out;
+}
+
+/** The tank's fish cap on the best devices; smaller ones swim fewer. */
+const CAST_CAP = 24;
+/** The orbit params a follow camera overrides outright. cameraAzimuth and autoRotate stay live while following
+ *  (they face a dancing class and steer crossing paths), so they are not listed. */
+const ORBIT_PARAMS = ['cameraElevation', 'cameraDistance'] as const;
+
+/**
+ * Params that do nothing because another param overrides them or is off — the
+ * tank accepts them without a word, so an author who set `fishCount: 14` beside
+ * a nine-fish `fishMix` saw nine fish and no reason (blind-agent probe on prod,
+ * 2026-10-04). Only params the author SET are judged; an unset one is its
+ * default and says nothing.
+ */
+function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamProblem[] {
+  const out: ParamProblem[] = [];
+  const set = (k: string): boolean => params[k] !== undefined && params[k] !== null;
+  const num = (k: string, fallback: number): number => {
+    const v = Number(params[k]);
+    return set(k) && Number.isFinite(v) ? v : fallback;
+  };
+  const str = (k: string, fallback = ''): string => (typeof params[k] === 'string' ? (params[k] as string).trim() : fallback);
+
+  // The cast: a fishMix with any valid token defines it absolutely
+  // (tank.reconcile), otherwise fishCount copies of fishUrl.
+  const mix = str('fishMix') ? parseFishMix(str('fishMix')).entries : [];
+  const mixTotal = mix.reduce((n, e) => n + e.count, 0);
+  const cast = mix.length ? Math.min(mixTotal, CAST_CAP) : Math.min(Math.max(1, Math.round(num('fishCount', 1))), CAST_CAP);
+  const castWhy = mix.length ? `fishMix casts ${cast}` : `the cast is fishCount ${cast}`;
+  const castParams = mix.length ? ['fishMix'] : ['fishCount'];
+  if (mix.length) {
+    for (const k of ['fishCount', 'fishUrl']) {
+      if (set(k)) out.push({ path: k, also: ['fishMix'], message: `ignored: a non-empty fishMix sets the cast (${mixTotal} fish) — put the counts in fishMix` });
+    }
+    if (mixTotal > CAST_CAP) out.push({ path: 'fishMix', message: `casts ${mixTotal} fish, but at most ${CAST_CAP} swim (fewer on smaller devices): slots ${CAST_CAP}+ never appear` });
+  }
+
+  // Slots: the follow camera, the spots and the vignette's actors address
+  // fish by their place in the cast.
+  const noFish = (slot: number): string => `slot ${slot} has no fish — ${castWhy} (slots 0–${cast - 1})`;
+  const follow = Math.round(num('cameraFollow', -1));
+  if (follow >= cast) out.push({ path: 'cameraFollow', also: castParams, message: noFish(follow) });
+  const rig = parseSpotRig(str('spotRig')).spots;
+  const spot = Math.round(num('followSpot', -1));
+  if (rig.length && set('followSpot')) out.push({ path: 'followSpot', also: ['spotRig'], message: 'ignored: a spotRig replaces the single followSpot' });
+  else if (spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
+  for (const s of rig) if (s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
+  if (str('vignette')) {
+    const { actors } = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
+    if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abc'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
+  }
+
+  // Off switches: a param that only shapes something that is not there.
+  const dance = str('starfishDance', 'off') || 'off';
+  // Slots fill in entry order and the cast is capped, so a starfish past slot CAST_CAP never swims.
+  const starfishSwims = mix.some((e, i) => e.breed === 'starfish' && mix.slice(0, i).reduce((n, p) => n + p.count, 0) < CAST_CAP);
+  if (dance !== 'off' && !starfishSwims) {  // no fishMix = one minted fish, never a starfish
+    out.push({ path: 'starfishDance', also: ['fishMix'], message: 'no starfish in the cast to dance — add e.g. starfish:7 (slots past the cap never swim)' });
+  }
+  if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
+  if (follow < 0) {
+    for (const k of ['followDistance', 'followAngle']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
+  } else if (follow < cast) {
+    for (const k of ORBIT_PARAMS) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: `ignored while cameraFollow rides with slot ${follow} — they return when it is -1` });
+  }
+  const spotOn = rig.length > 0 || spot >= 0;
+  if (!spotOn) {
+    for (const k of ['spotStrength', 'spotShadow', 'spotColor']) if (set(k)) out.push({ path: k, also: ['followSpot', 'spotRig'], message: 'does nothing with no spot on (followSpot is -1 and spotRig is empty)' });
+  } else if (rig.length && set('spotColor')) {
+    out.push({ path: 'spotColor', also: ['spotRig'], message: 'colours the single followSpot; a spotRig gives each of its spots its own colour (slot/#rrggbb)' });
+  }
+  if (Math.round(num('shoal', 0) * CAST_CAP * 2.5) < 3) {  // the tank builds no school under 3 fish
+    for (const k of ['shoalKind', 'shoalSpeed']) if (set(k)) out.push({ path: k, also: ['shoal'], message: 'does nothing while shoal is too low to make a school (under 3 fish; 0 is off)' });
+  }
+  if (num('floraDensity', 0) <= 0) {
+    for (const k of ['floraMix', 'floraPalette', 'floraLayout']) if (set(k)) out.push({ path: k, also: ['floraDensity'], message: 'does nothing while floraDensity is 0 (no plants)' });
   }
   return out;
 }

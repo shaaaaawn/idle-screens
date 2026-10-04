@@ -242,6 +242,7 @@ import { RECIPES, recipeTrack, PARAM_DOCS, GRAMMAR, validateMetaquariumParams } 
 const scene = RECIPES.find((r) => r.id === 'stage-duet')!;
 publishScene({ spec: { id: 'metaquarium' }, track: recipeTrack(scene.params) });
 validateMetaquariumParams({ vignette: 'a >home1', geodeHomes: 0 }); // → [{ path: 'vignette', message: 'beat 1: no mark "home1" …' }]
+validateMetaquariumParams({ fishMix: 'dori:3,blowfish:2', fishCount: 14 }); // → [{ path: 'fishCount', also: ['fishMix'], message: 'ignored: a non-empty fishMix sets the cast (5 fish) …' }]
 ```
 
-`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf.
+`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf. `validateMetaquariumParams` also names the params that would do nothing: one another param overrides (`fishCount` beside a `fishMix`), a slot past the end of the cast, or a dial on something switched off (`shoalKind` with no shoal); a problem that involves other params lists them in `also`.
