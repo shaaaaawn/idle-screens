@@ -305,17 +305,19 @@ export interface OctopusCoat {
 export function octopusCoat(index: number, t: number): OctopusCoat {
   const c = octopusCycle(index), P = c.move + c.stop;
   const tau = t + c.offset, k = Math.floor(tau / P), u = tau - k * P;
-  // The last two changes (looking back a few cycles; with none, its own coat).
-  let coat = 0, prevCoat = 0, at = -Infinity;
-  for (let kk = k - 6; kk <= k; kk++) {
+  // Back through the cycles until two are found (most cycles have one; a long run of none is rare, but still has a last change).
+  const found: { kk: number; slot: number; when: number }[] = [];
+  for (let kk = k; kk > k - 64 && found.length < 2; kk--) {
     const list = shiftsIn(index, kk);
-    for (let slot = 0; slot < list.length; slot++) {
-      if (kk === k && list[slot]! > u) break;
-      prevCoat = coat;
-      coat = coatOf(index, kk, slot);
-      at = kk * P + list[slot]!;
+    for (let slot = list.length - 1; slot >= 0 && found.length < 2; slot--) {
+      if (kk === k && list[slot]! > u) continue;
+      found.push({ kk, slot, when: kk * P + list[slot]! });
     }
   }
+  const [last, before] = found;
+  const coat = last ? coatOf(index, last.kk, last.slot) : 0;
+  const prevCoat = before ? coatOf(index, before.kk, before.slot) : 0;
+  const at = last ? last.when : -Infinity;
   const wave = Math.min(1, Math.max(0, (tau - at) / OCTOPUS_SHIFT));
   return { from: prevCoat, to: coat, wave };
 }

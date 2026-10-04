@@ -2935,7 +2935,7 @@ class TankInstance implements SaverInstance {
           }, this.octoOutput)
         : null;
       if (octo) { px = octo.x; y = octo.y; pz = octo.z; f.rig!.lights['GLOW-Rings'] = octo.mood.rings; f.rig!.bloom = 0.35 + 0.65 * octo.lift; }
-      else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.bloom = 0.35; }
+      else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.lights['GLOW-Rings'] = 0.3; f.rig!.bloom = 0.35; }
       const floor = crab ?? star ?? octo;
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
