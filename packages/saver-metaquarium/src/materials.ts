@@ -8,7 +8,9 @@ import {
   MeshMatcapMaterial,
   MeshStandardMaterial,
   SRGBColorSpace,
+  Vector2,
   Vector3,
+  type Box3,
   type Material,
   type Mesh,
   type Object3D,
@@ -21,31 +23,54 @@ export { MIAMI_VICE_COLORS, BLOOM_COLORS };
 
 const BODY_COATS = MIAMI_VICE_COLORS.filter((c) => c !== '#1c1c1c');
 /**
- * A catchlight in a pupil (EYES-Sparkle, the babyfish's): a little white
- * square high on every face of each pupil voxel, the light caught in a
- * bright eye. Drawn from the rest-pose position (`position`, before skinning),
- * so it rides the eye wherever it turns; a voxel spans two units between odd
- * planes, so (p + 1) / 2 runs 0..1 across each face.
+ * A catchlight in a pupil (EYES-Sparkle, the babyfish's): ONE soft-edged
+ * white square per eye, high on the face that looks out of the head — the
+ * light caught in a bright eye. Placed in the pupils' own box (`box`, the
+ * rest-pose bounds of the mesh, both eyes): "out" is the axis the two eyes
+ * spread along, "up" is y. Drawn from the rest-pose position (before
+ * skinning), so it rides the eye as it turns and squashes with a blink.
+ *
+ * Not on every face (two or three squares an eye read as spots), and its
+ * edges are antialiased and it fades out when the pupil is a few pixels
+ * across, so it never shimmers.
  */
-export function sparkle(eye: MeshBasicMaterial): void {
+export function sparkle(eye: MeshBasicMaterial, box: Box3): void {
   eye.userData.mqSparkle = true;
+  const size = box.getSize(new Vector3());
+  // The axis the eyes spread along (left eye to right eye) is the widest.
+  const out = size.x >= size.y && size.x >= size.z ? 0 : size.z >= size.y ? 2 : 1;
+  const up = out === 1 ? 2 : 1;
+  const along = 3 - out - up;
+  const axis = ['x', 'y', 'z'] as const;
+  const lo = new Vector2(box.min[axis[along]], box.min[axis[up]]);
+  const span = new Vector2(Math.max(1e-6, size[axis[along]]), Math.max(1e-6, size[axis[up]]));
+  const mid = (box.min[axis[out]] + box.max[axis[out]]) / 2;
   eye.onBeforeCompile = (shader) => {
+    shader.uniforms.uSpkLo = { value: lo };
+    shader.uniforms.uSpkSpan = { value: span };
+    shader.uniforms.uSpkMid = { value: mid };
+    const a = axis[along], u = axis[up], o = axis[out];
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpkP = position;\nvSpkN = normal;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;\nuniform vec2 uSpkLo;\nuniform vec2 uSpkSpan;\nuniform float uSpkMid;')
       .replace('#include <color_fragment>', `#include <color_fragment>
       {
-        vec3 an = abs(vSpkN);
-        // The face's own two axes, the second one up wherever there is an up.
-        vec2 f = an.x > 0.5 ? vSpkP.zy : an.z > 0.5 ? vSpkP.xy : vSpkP.xz;
-        vec2 uv = fract((f + 1.0) * 0.5);
-        float s = step(0.14, uv.x) * step(uv.x, 0.44) * step(0.56, uv.y) * step(uv.y, 0.86);
+        // Only the face that looks out of the head: its normal along the
+        // eyes' axis, pointing away from the middle.
+        float outward = step(0.5, abs(vSpkN.${o})) * step(0.0, vSpkN.${o} * (vSpkP.${o} - uSpkMid));
+        vec2 uv = (vec2(vSpkP.${a}, vSpkP.${u}) - uSpkLo) / uSpkSpan;
+        vec2 w = max(fwidth(uv) * 0.6, vec2(1e-4));
+        vec2 inA = smoothstep(vec2(0.42, 0.5) - w, vec2(0.42, 0.5) + w, uv);
+        vec2 inB = 1.0 - smoothstep(vec2(0.82, 0.88) - w, vec2(0.82, 0.88) + w, uv);
+        float s = inA.x * inA.y * inB.x * inB.y * outward;
+        // A pupil a few pixels across: no catchlight to flicker.
+        s *= 1.0 - smoothstep(0.12, 0.3, max(w.x, w.y));
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), s);
       }`);
   };
-  eye.customProgramCacheKey = () => 'mq-eye-sparkle';
+  eye.customProgramCacheKey = () => `mq-eye-sparkle-v2-${axis[along]}${axis[up]}${axis[out]}`;
 }
 
 /** A VIVID- coat glows this much of its own colour: candy-bright in dark water too. */
@@ -260,7 +285,10 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
         eye.userData.mqNoCaustic = true; // a display, not a surface
-        if (!white && /sparkle/i.test(m.name)) sparkle(eye);
+        if (!white && /sparkle/i.test(m.name)) {
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          sparkle(eye, mesh.geometry.boundingBox!);
+        }
         decal(eye, white ? 1 : 2);
         return eye;
       }

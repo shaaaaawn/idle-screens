@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Bone, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute } from 'three';
+import { Bone, Box3, BoxGeometry, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
@@ -522,19 +522,28 @@ describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
 });
 
 describe('EYES-Sparkle (a babyfish\'s catchlights)', () => {
-  it('a sparkle pupil is still a pupil, with a white square patched into its colour; a plain pupil is untouched', () => {
-    const mk = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: 0x000000 })); m.material.name = name; return m; };
+  it('a sparkle pupil is still a pupil, with one soft catchlight on the face that looks out of the head; a plain pupil is untouched', () => {
+    // Two pupils either side of the head, as the babyfish's: x ±3..±5, y 3..5, z 11..13.
+    const pupils = new BoxGeometry(2, 2, 2).translate(4, 4, 12);
+    pupils.boundingBox = new Box3(new Vector3(-5, 3, 11), new Vector3(5, 5, 13));
+    const mk = (name: string): Mesh => { const m = new Mesh(pupils, new MeshStandardMaterial({ color: 0x000000 })); m.material.name = name; return m; };
     const spark = mk('EYES-Sparkle'), plain = mk('EYES-Black');
     const root = new Group(); root.add(spark, plain);
     applyNpcMaterials(root, createRng(1), true, true);
     const s = spark.material as MeshBasicMaterial, p = plain.material as MeshBasicMaterial;
     expect(s.userData.mqEye).toBe('pupil');
     expect(s.userData.mqSparkle).toBe(true);
-    expect(s.customProgramCacheKey()).toBe('mq-eye-sparkle');
-    const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    // The eyes spread along x; the catchlight sits on x-facing faces, placed in (z, y).
+    expect(s.customProgramCacheKey()).toBe('mq-eye-sparkle-v2-zyx');
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
     s.onBeforeCompile(shader as never, undefined as never);
     expect(shader.vertexShader).toContain('vSpkP = position');
-    expect(shader.fragmentShader).toContain('mix(diffuseColor.rgb, vec3(1.0), s)');
+    expect(shader.fragmentShader).toContain('abs(vSpkN.x)');           // only the outward faces
+    expect(shader.fragmentShader).toContain('fwidth(uv)');             // soft edges
+    expect(shader.fragmentShader).toContain('vec2(vSpkP.z, vSpkP.y)');
+    expect((shader.uniforms.uSpkLo!.value as Vector2).toArray()).toEqual([11, 3]);
+    expect((shader.uniforms.uSpkSpan!.value as Vector2).toArray()).toEqual([2, 2]);
+    expect(shader.uniforms.uSpkMid!.value).toBe(0);
     expect(p.userData.mqSparkle).toBeUndefined();
   });
 });
