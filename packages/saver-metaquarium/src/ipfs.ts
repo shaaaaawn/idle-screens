@@ -51,7 +51,8 @@ export const BUNDLED_BREED_SCHEME = 'mq-breed:';
  * them), so they swim on every host, the wall included, with nothing to
  * fetch. `fishMix` takes their breed name or id in the default catalog.
  *
- * All are clip-less and unrigged — they swim on the body wave. Their
+ * The original NPCs are clip-less and unrigged — they swim on the body wave;
+ * the breeds drawn in-house (starfish, octopus) are rigged with clips. Their
  * materials carry the role names (PrimaryColor, SecondaryColor, EYES-,
  * GLOW-, KEEP-), so every instance gets the seeded two-tone coat, glow
  * halos, and its authored colour where the intake said to keep it.
@@ -63,8 +64,11 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}babyfish`, localGlb: '' },
   { id: 605, name: 'Shark', breed: 'shark', ipfs3d: `${BUNDLED_BREED_SCHEME}shark`, localGlb: '' },
   { id: 606, name: 'Crab', breed: 'crab', ipfs3d: `${BUNDLED_BREED_SCHEME}crab`, localGlb: '' },
-  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}jellyfish`, localGlb: '' },
   { id: 608, name: 'Dori', breed: 'dori', ipfs3d: `${BUNDLED_BREED_SCHEME}dori`, localGlb: '' },
+  // Drawn in-house in the designer's style, not from the original aquarium (breeds/rig/starfish-model.mjs).
+  { id: 609, name: 'Starfish', breed: 'starfish', ipfs3d: `${BUNDLED_BREED_SCHEME}starfish`, localGlb: '' },
+  // The second drawn in-house (breeds/rig/octopus-model.mjs).
+  { id: 610, name: 'Octopus', breed: 'octopus', ipfs3d: `${BUNDLED_BREED_SCHEME}octopus`, localGlb: '' },
 ];
 
 /** The default catalog's lookup: minted samples first, then the bundled breeds. */

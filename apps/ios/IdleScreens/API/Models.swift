@@ -149,7 +149,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         // the grid shows real art instead of falling back to thumbs.
         if let seq = try? c.decodeIfPresent(SequenceSubset.self, forKey: .resolvedSpec),
            SequenceSubset.isSequenceDocument(format: seq.format),
-           let first = seq.segments.first {
+           let first = seq.posterSegment {
             spec = first.scene
         } else {
             spec = (try? c.decodeIfPresent(SpecSubset.self, forKey: .resolvedSpec))

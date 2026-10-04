@@ -135,7 +135,18 @@ struct AgentsView: View {
                     Button {
                         if let link = agent.link(for: prompt) { openURL(link) }
                     } label: {
-                        Text("Open in \(agent.name)")
+                        Label {
+                            Text("Open in \(agent.name)")
+                        } icon: {
+                            // The product's own mark, as a template: it takes
+                            // the button's text colour in either style.
+                            Image(agent.markAsset)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 17, height: 17)
+                                .accessibilityHidden(true)
+                        }
+                        .labelStyle(.titleAndIcon)
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)

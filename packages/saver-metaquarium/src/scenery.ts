@@ -15,7 +15,7 @@ import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
-import { buildPaths, MAX_PATH_SEGMENTS, pathClearance, type PathMaterial, type PathSegment } from './paths';
+import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
@@ -800,9 +800,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   particles(true, counts.bubbles);
   // The fountain always bubbles, a steady column of its own whatever bubbleVents says.
   if (fountainMouth) {
-    const fountainN = Math.round(70 + 40 * Math.min(1, opts.cap / 8));
-    particles(true, fountainN, [{ x: fountainMouth.x, y: fountainMouth.y, z: fountainMouth.z, color: '#e8f6ff' }], 'fountain-bubbles');
-    counts.fountainBubbles = fountainN;
+    particles(true, Math.round(70 + 40 * Math.min(1, opts.cap / 8)), [{ x: fountainMouth.x, y: fountainMouth.y, z: fountainMouth.z, color: '#e8f6ff' }], 'fountain-bubbles');
+    counts.fountainBubbles = 1;
   }
   let bubbleLayer: BubbleLayer | null = null;
   if ((live && opts.bubbles > 0) || (opts.pearling ?? 0) > 0 || (opts.mist ?? 0) > 0) {
@@ -837,7 +836,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving, marks, paths: [...(network?.segments ?? []).slice(0, MAX_PATH_SEGMENTS - plaza.length), ...plaza], rockClusters,
+    group, counts, vents, emitters: homeLights, moving, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     setFish(fish) {

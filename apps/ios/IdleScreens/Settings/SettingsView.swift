@@ -12,6 +12,11 @@ struct SettingsView: View {
     @State private var keysFor: ChannelCredential?
     @State private var removing: ChannelCredential?
     @State private var confirmingRemoval = false
+    /// Collapsed by default: a list of secrets is not the first thing this
+    /// page should show, and it grows with every channel.
+    @State private var keysExpanded = false
+    @State private var confirmingBackup = false
+    @State private var backupFile: URL?
 
     var body: some View {
         NavigationStack {
@@ -80,10 +85,50 @@ struct SettingsView: View {
     // MARK: Keys
 
     private var keysSection: some View {
-        section("keys", footer: "A key is what lets you steer a channel. Owner keys can mint and revoke editor and viewer keys to share.") {
-            ForEach(app.credentials) { credential in
-                keyRow(credential)
+        section("keys", footer: "A key is what lets you steer a channel. They sync to your other Apple devices through iCloud Keychain; back them all up for anywhere else.") {
+            Button {
+                withAnimation(.spring(duration: 0.3, bounce: 0.1)) { keysExpanded.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "key.fill")
+                        .foregroundStyle(Color.appPrimary)
+                        .frame(width: 26)
+                    Text(app.credentials.isEmpty ? "No keys yet"
+                         : app.credentials.count == 1 ? "1 key" : "\(app.credentials.count) keys")
+                        .foregroundStyle(Color.textPrimary)
+                    // Worth seeing even folded: a key that is not on this device.
+                    if missingKeys > 0 {
+                        Label("\(missingKeys) missing", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.appDanger)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.textTertiary)
+                        .rotationEffect(.degrees(keysExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(keysExpanded ? "Hides your keys" : "Shows your keys")
+
+            if keysExpanded {
                 Divider().overlay(Color.appBorder.opacity(0.5))
+                ForEach(app.credentials) { credential in
+                    keyRow(credential)
+                    Divider().overlay(Color.appBorder.opacity(0.5))
+                }
+            }
+
+            if !backupEntries.isEmpty {
+                Button { confirmingBackup = true } label: {
+                    Label("Back up all keys…", systemImage: "square.and.arrow.down.on.square")
+                        .foregroundStyle(Color.appPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             Button {
                 showingAddKey = true
@@ -94,6 +139,43 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+        .alert("Back up \(backupEntries.count == 1 ? "your key" : "all \(backupEntries.count) keys")?",
+               isPresented: $confirmingBackup) {
+            Button("Make the backup") { backupFile = writeBackup() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This makes one private file with every key on this phone. Anyone who has the file controls every channel in it — save it somewhere only you can open.")
+        }
+        .sheet(item: Binding(get: { backupFile.map(BackupFile.init) }, set: { if $0 == nil { backupFile = nil } })) { file in
+            BackupReadySheet(file: file.url, count: backupEntries.count)
+                .presentationDetents([.medium])
+        }
+    }
+
+    private var missingKeys: Int {
+        app.credentials.filter { app.token(for: $0.channelId) == nil }.count
+    }
+
+    private var backupEntries: [KeyBackup.Entry] {
+        app.credentials.compactMap { credential in
+            app.token(for: credential.channelId).map {
+                KeyBackup.Entry(channelId: credential.channelId, label: credential.label,
+                                role: app.role(for: credential.channelId)?.rawValue, token: $0)
+            }
+        }
+    }
+
+    /// Written to the app's temporary directory, handed to the share sheet,
+    /// and deleted when the sheet closes — the secrets don't linger on disk.
+    private func writeBackup() -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(KeyBackup.fileName())
+        do {
+            try KeyBackup.document(backupEntries).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
+            return url
+        } catch {
+            return nil
         }
     }
 
@@ -224,5 +306,43 @@ private extension View {
                 RoundedRectangle(cornerRadius: 14)
                     .strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1)
             }
+    }
+}
+
+private struct BackupFile: Identifiable {
+    let url: URL
+    var id: String { url.path }
+}
+
+/// The file is made; now choose where it goes. Deleted from the app's
+/// temporary directory once this closes.
+private struct BackupReadySheet: View {
+    let file: URL
+    let count: Int
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Backup ready", systemImage: "checkmark.seal.fill")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text("\(count == 1 ? "1 key" : "\(count) keys"), in one text file. Save it to Files, a password manager or a drive only you can open. Each key restores with one tap from its link.")
+                .font(.subheadline)
+                .foregroundStyle(Color.textSecondary)
+            ShareLink(item: file) {
+                Label("Save the backup…", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(Color.appBackground)
+                    .background(Color.textPrimary, in: Capsule())
+            }
+            Button("Done") { dismiss() }
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(Color.textSecondary)
+        }
+        .padding(24)
+        .background(Color.appBackground.ignoresSafeArea())
+        .onDisappear { try? FileManager.default.removeItem(at: file) }
     }
 }

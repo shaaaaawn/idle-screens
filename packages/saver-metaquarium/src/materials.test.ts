@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Bone, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute } from 'three';
+import { Bone, Box3, BoxGeometry, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
@@ -488,6 +488,66 @@ describe('fish glow — GLOW parts as light sources', () => {
   });
 });
 
+describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
+  const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
+  const dress = (seed: number, names: string[]): MeshLambertMaterial[] => {
+    const root = new Group(); const parts = names.map(part); root.add(...parts);
+    applyNpcMaterials(root, createRng(seed), true, true);
+    return parts.map((p) => p.material as MeshLambertMaterial);
+  };
+  it('VIVID-<n> runs one candy-bright gradient between the fish\'s two coats, glowing a little of its own colour', () => {
+    for (const seed of [1, 2, 3, 5, 8, 13]) {
+      const [a, mid, b] = dress(seed, ['VIVID-0', 'VIVID-50', 'VIVID-100']);
+      const ha = { h: 0, s: 0, l: 0 }, hb = { h: 0, s: 0, l: 0 };
+      a!.color.getHSL(ha); b!.color.getHSL(hb);
+      let dh = Math.abs(hb.h - ha.h); dh = Math.min(dh, 1 - dh);
+      expect(dh * 360, `seed ${seed}: the ends far enough apart to read as a gradient`).toBeGreaterThan(55);
+      for (const m of [a!, mid!, b!]) {
+        const hsl = { h: 0, s: 0, l: 0 }; m.color.getHSL(hsl);
+        expect(hsl.s).toBeGreaterThan(0.6);              // saturated, never washed out
+        expect(hsl.l).toBeGreaterThanOrEqual(0.45 - 1e-6); // never mud…
+        expect(hsl.l).toBeLessThanOrEqual(0.62 + 1e-6);    // …never chalk
+        expect(m.emissive.getHex()).not.toBe(0);           // its own light, so dark water does not dim it
+      }
+    }
+  });
+  it('VIVID is seeded per fish; PAINT-#hex is the same on every fish', () => {
+    const one = dress(3, ['VIVID-0', 'PAINT-#ffd23f']), two = dress(5, ['VIVID-0', 'PAINT-#ffd23f']);
+    expect(one[0]!.color.equals(two[0]!.color)).toBe(false);
+    expect(one[1]!.color.getHex()).toBe(new Color('#ffd23f').getHex());
+    expect(two[1]!.color.getHex()).toBe(one[1]!.color.getHex());
+    // Its own glow, so a yellow stays sunny under blue water light.
+    expect(one[1]!.emissive.r).toBeGreaterThan(0.3);
+  });
+});
+
+describe('EYES-Sparkle (a babyfish\'s catchlights)', () => {
+  it('a sparkle pupil is still a pupil, with one soft catchlight on the face that looks out of the head; a plain pupil is untouched', () => {
+    // Two pupils either side of the head, as the babyfish's: x ±3..±5, y 3..5, z 11..13.
+    const pupils = new BoxGeometry(2, 2, 2).translate(4, 4, 12);
+    pupils.boundingBox = new Box3(new Vector3(-5, 3, 11), new Vector3(5, 5, 13));
+    const mk = (name: string): Mesh => { const m = new Mesh(pupils, new MeshStandardMaterial({ color: 0x000000 })); m.material.name = name; return m; };
+    const spark = mk('EYES-Sparkle'), plain = mk('EYES-Black');
+    const root = new Group(); root.add(spark, plain);
+    applyNpcMaterials(root, createRng(1), true, true);
+    const s = spark.material as MeshBasicMaterial, p = plain.material as MeshBasicMaterial;
+    expect(s.userData.mqEye).toBe('pupil');
+    expect(s.userData.mqSparkle).toBe(true);
+    // The eyes spread along x; the catchlight sits on x-facing faces, placed in (z, y).
+    expect(s.customProgramCacheKey()).toBe('mq-eye-sparkle-v2-zyx');
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    s.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('vSpkP = position');
+    expect(shader.fragmentShader).toContain('abs(vSpkN.x)');           // only the outward faces
+    expect(shader.fragmentShader).toContain('fwidth(uv)');             // soft edges
+    expect(shader.fragmentShader).toContain('vec2(vSpkP.z, vSpkP.y)');
+    expect((shader.uniforms.uSpkLo!.value as Vector2).toArray()).toEqual([11, 3]);
+    expect((shader.uniforms.uSpkSpan!.value as Vector2).toArray()).toEqual([2, 2]);
+    expect(shader.uniforms.uSpkMid!.value).toBe(0);
+    expect(p.userData.mqSparkle).toBeUndefined();
+  });
+});
+
 describe('METAL- parts (a glowfish\'s teeth)', () => {
   const fishWith = (name: string): { root: Group; part: Mesh } => {
     const part = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: 0x1a0030 }));
@@ -569,6 +629,28 @@ describe('the neon look (fishLook: neon)', () => {
     applyNpcMaterials(f.root, createRng(9), true, true, true);
     expect((lure.material as unknown as MeshBasicMaterial).name).toBe('GLOW-Lure');
     expect(lure.material).toBeInstanceOf(MeshBasicMaterial);
+  });
+});
+
+describe('one glow material on several meshes (a starfish\'s five tips)', () => {
+  it('shares one light: one colour drawn once, the same material on every mesh, lit in neon too', () => {
+    for (const neon of [false, true]) {
+      const shared = new MeshStandardMaterial(); shared.name = 'GLOW-Tips';
+      const root = new Group();
+      const body = new Mesh(new SphereGeometry(20, 4, 4), new MeshStandardMaterial()); body.material.name = 'PrimaryColor';
+      root.add(body);
+      const tips = [0, 1, 2, 3, 4].map((n) => {
+        const tip = new Mesh(new SphereGeometry(1.5, 4, 4), shared);
+        tip.position.set(18 * Math.sin(n * 1.26), 0, 18 * Math.cos(n * 1.26));
+        root.add(tip);
+        return tip;
+      });
+      applyNpcMaterials(root, createRng(4), true, true, neon);
+      const first = tips[0]!.material as unknown as MeshBasicMaterial;
+      expect(first).toBeInstanceOf(MeshBasicMaterial);
+      expect(first.name).toBe('GLOW-Tips');
+      for (const tip of tips) expect(tip.material).toBe(first);
+    }
   });
 });
 

@@ -1,71 +1,8 @@
 import SwiftUI
 
-/// "The tank is filling." Shown over the 2D stand-in while a 3D aquarium boots:
-/// three fish swim a ring nose-to-tail — a spinner that belongs in the scene —
-/// with bubbles rising through the middle, and a count of the fish still on
-/// their way when the page reports one.
-///
-/// The stand-in tank on its own looks finished, which is the problem: a scene
-/// that then swaps to something else reads as a glitch. A fish visibly doing a
-/// loading thing makes the wait part of the picture.
-struct TankLoadingView: View {
-    /// Models the page is still downloading; nil until it has said anything.
-    var pending: Int?
-    var scheme: ColorScheme = .dark
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private let ring: CGFloat = 30
-    private let fish = 3
-
-    var body: some View {
-        let ink: Color = scheme == .light ? .black : .white
-        VStack(spacing: 14) {
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                ZStack {
-                    // Bubbles rise through the ring, one after another.
-                    ForEach(0..<3, id: \.self) { i in
-                        let phase = (t * 0.55 + Double(i) / 3).truncatingRemainder(dividingBy: 1)
-                        Circle()
-                            .strokeBorder(ink.opacity(0.55), lineWidth: 1)
-                            .frame(width: 5 + CGFloat(i), height: 5 + CGFloat(i))
-                            .offset(x: CGFloat(sin(t * 1.3 + Double(i) * 2)) * 4,
-                                    y: 16 - CGFloat(phase) * 34)
-                            .opacity(sin(phase * .pi))
-                    }
-                    ForEach(0..<fish, id: \.self) { i in
-                        // Clockwise, with a breath of wobble so it swims
-                        // rather than rotates.
-                        let angle = t * 1.7 + Double(i) * (2 * .pi / Double(fish))
-                        let wobble = sin(t * 6 + Double(i)) * 0.12
-                        Image(systemName: "fish.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(ink.opacity(0.92 - Double(i) * 0.18))
-                            .rotationEffect(.radians(angle + .pi / 2 + wobble))
-                            .offset(x: CGFloat(cos(angle)) * ring, y: CGFloat(sin(angle)) * ring)
-                    }
-                }
-                .frame(width: ring * 2 + 28, height: ring * 2 + 28)
-            }
-            Text(label)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(ink.opacity(0.85))
-                .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.3), value: pending)
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 18)
-        .glassPanel(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-    }
-
-    private var label: String {
-        guard let pending, pending > 0 else { return "filling the tank…" }
-        return pending == 1 ? "one more fish on its way…" : "\(pending) fish on their way…"
-    }
-}
+// The fish-ring card that used to sit over a loading tank lived here until
+// 2026-10-01; the loading signal is now the scene itself (AquariumField.Gather).
+// It is in git history (8d4e44c) if it is wanted back.
 
 /// When a 3D tank counts as loaded.
 ///

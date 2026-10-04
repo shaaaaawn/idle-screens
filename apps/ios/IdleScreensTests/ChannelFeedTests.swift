@@ -124,14 +124,20 @@ final class RecordedSceneTests: XCTestCase {
         XCTAssertEqual(scene.label, "warp")
     }
 
-    func testSequencePostersItsFirstSegment() throws {
+    /// A sequence's still is the segment it spends longest in (ties go to the
+    /// later one), not its opening — an ident opens dark and rests on its card.
+    /// It is drawn natively only as a placeholder: the sequence itself goes to
+    /// the web engine (NativeSupport).
+    func testSequencePostersItsLongestSegment() throws {
         let scene = try decode("""
         {"id":9,"seed":1,"spec":{"format":"idle-sequence","id":"triptych","segments":[
           {"key":"dawn","duration":4,"scene":{"id":"dawn","label":"Dawn","layers":[{"count":3,"sprite":{"kind":"circle"}}]}},
-          {"key":"noon","duration":4,"scene":{"id":"noon","layers":[{"count":3,"sprite":{"kind":"circle"}}]}}]}}
+          {"key":"noon","duration":9,"scene":{"id":"noon","layers":[{"count":3,"sprite":{"kind":"circle"}}]}},
+          {"key":"dusk","duration":4,"scene":{"id":"dusk","layers":[{"count":3,"sprite":{"kind":"circle"}}]}}]}}
         """)
-        XCTAssertEqual(scene.spec?.id, "dawn")
+        XCTAssertEqual(scene.spec?.id, "noon")
         XCTAssertNil(scene.classicSaverId)
+        XCTAssertTrue(scene.needsWebEngine)
     }
 }
 
@@ -151,7 +157,7 @@ final class WebEngineHistoryTests: XCTestCase {
         let schema = try decode("""
         {"id":3,"seed":1,"spec":{"schemaVersion":1,"id":"x","label":"x","layers":[{"count":1,"sprite":{"kind":"circle"}}]}}
         """)
-        XCTAssertFalse(schema.needsWebEngine)
+        XCTAssertFalse(schema.needsWebEngine, "a plain schema scene the native renderer draws faithfully")
         XCTAssertFalse(schema.isTank)
     }
 

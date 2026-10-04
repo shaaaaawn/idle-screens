@@ -729,7 +729,7 @@ export function adviseSequence(
       warnings.push({
         path: `segments[${i}]`,
         code: 'boundary-luminance-jump',
-        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut${tr === undefined || tr.type === 'cut' ? `; declare transition: { type: 'fade', dur } on segments[${i}] to ramp it` : ''}`,
+        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut; declare transition: { type: 'fade', dur } on segments[${i}] to ramp it`,
       });
     }
 
