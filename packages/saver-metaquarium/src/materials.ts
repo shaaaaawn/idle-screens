@@ -701,7 +701,7 @@ export function collectFishGlow(root: Object3D, rng: Rng): FishGlow | null {
   });
   if (!parts.length || w === 0) return null;
   parts.sort((p, q) => q.radius - p.radius);
-  parts.length = Math.min(parts.length, 4);
+  parts.length = Math.min(parts.length, 5);
   const c = parts[0]!;
   const hi = Math.max(c.r, c.g, c.b);
   const sat = hi > 0 ? (hi - Math.min(c.r, c.g, c.b)) / hi : 0;

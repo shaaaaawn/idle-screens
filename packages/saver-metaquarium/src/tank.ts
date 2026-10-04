@@ -1421,7 +1421,7 @@ class TankInstance implements SaverInstance {
     // would cost more than the glow.
     const scale = body.scale.x * f.group.scale.x;
     if (!this.glowCards) {
-      this.glowCards = buildGlowCards(MAX_FISH * 4);
+      this.glowCards = buildGlowCards(MAX_FISH * 5);
       this.scene.add(this.glowCards.mesh);
     }
     const cam = this.camera.position;
@@ -2010,6 +2010,13 @@ class TankInstance implements SaverInstance {
       if (wantUrl !== undefined && !this.fish[i]) missing.push(i);
     }
     this.fish.length = Math.min(this.fish.length, want.length);
+    // The bubble layer belongs to babyfish and blowfish: a cast with neither lets it go
+    // (the next one that spawns builds it again).
+    if (this.burps && !this.fish.some((f) => f?.rig?.baby || f?.rig?.puffer)) {
+      this.scene.remove(this.burps.mesh);
+      disposeOwned(this.burps.mesh);
+      this.burps = null;
+    }
     if (missing.length) void this.spawnMissing(missing);
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
   }
@@ -2519,11 +2526,15 @@ class TankInstance implements SaverInstance {
       const mid = spots.length ? Math.max(...spots.map((s) => s.depth)) : 0;
       const roles = this.danceRoles;
       roles.clear();
-      dancers.forEach((f, slot) => {
+      const places = dancers.map((f, slot) => {
         const { side } = spots[slot]!, depth = spots[slot]!.depth - mid;
         const gap = FISH_LENGTH * this.fishSizeAt(f.index) * 1.7;
-        danceSpots.set(f.index, [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap]);
+        return [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap] as const;
       });
+      // A big cast (24 on the high tier) is squeezed to fit the stage, not walked off it.
+      const reach = Math.max(0, ...places.map(([x, z]) => Math.hypot(x, z)));
+      const fit = reach > BOUNDS.radius * 0.8 ? (BOUNDS.radius * 0.8) / reach : 1;
+      dancers.forEach((f, slot) => danceSpots.set(f.index, [places[slot]![0] * fit, places[slot]![1] * fit]));
       if (duet) {
         dancers.forEach((f, slot) => {
           const c = coupleSpot(slot, dancers.length);
@@ -2615,7 +2626,8 @@ class TankInstance implements SaverInstance {
       // A dori holds still for a headstand, plays dead without being towed,
       // backs off when wary — then catches up (tang.ts). Before the pose, so a
       // follower behind it stops too.
-      const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold : null;
+      // By the rig, not the mix: a single-breed fishUrl has no wantBreeds entry.
+      const holdOf = f.rig?.tang ? tangHold : f.rig?.puffer ? pufferHold : null;
       const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
       const d = anchor + effort * style.travel + mnv.along * L - held;
 

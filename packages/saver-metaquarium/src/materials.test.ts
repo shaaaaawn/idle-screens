@@ -448,18 +448,18 @@ describe('fish glow — GLOW parts as light sources', () => {
     expect(rgb(p)).toEqual(rgb(teal.clone().multiplyScalar(p.g / teal.g))); // still teal, not bleached
   });
 
-  it('lists its parts largest first, keeps four, and takes the lead colour from the biggest', () => {
+  it('lists its parts largest first, keeps five, and takes the lead colour from the biggest', () => {
     const root = new Group();
     root.add(new Mesh(new SphereGeometry(6, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));
-    // Five accents in five sizes, added smallest first so the order is earned.
-    const sizes = [0.4, 0.6, 0.8, 1, 1.2], names = ['GLOW-Yellow', 'GLOW-Pink', 'GLOW-Teal', 'GLOW-Purple', 'GLOW-Orange'];
+    // Six accents in six sizes, added smallest first so the order is earned.
+    const sizes = [0.2, 0.4, 0.6, 0.8, 1, 1.2], names = ['GLOW-Red', 'GLOW-Yellow', 'GLOW-Pink', 'GLOW-Teal', 'GLOW-Purple', 'GLOW-Orange'];
     sizes.forEach((r, i) => root.add(fin(r, i * 3, names[i])));
     applyNpcMaterials(root, createRng(2));
     const g = collectFishGlow(root, createRng(2))!;
-    expect(g.parts.map((p) => Number(p.radius.toFixed(4)))).toEqual([1.2, 1, 0.8, 0.6]);
+    expect(g.parts.map((p) => Number(p.radius.toFixed(4)))).toEqual([1.2, 1, 0.8, 0.6, 0.4]);
     const orange = new Color('#ff7a00');
     expect(rgb(g)).toEqual(rgb(orange.clone().multiplyScalar(g.r / orange.r)));
-    expect(g.cores).toHaveLength(5); // …but every glowing material is still repaintable
+    expect(g.cores).toHaveLength(6); // …but every glowing material is still repaintable
   });
 
   it('a small WHITE glow part is a lamp — the glowfish\'s angler lure — and blooms; a big white coat still does not', () => {
