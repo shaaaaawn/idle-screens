@@ -79,6 +79,7 @@ describe('agent guide', () => {
     const paths = (p: Record<string, unknown>): string[] => validateMetaquariumParams(p).map((x) => x.path);
     expect(paths({ fishMix: 'dori:3', starfishDance: 'aerobics' })).toEqual(['starfishDance']);
     expect(paths({ fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 110 })).toEqual([]);
+    expect(paths({ starfishDance: 'aerobics' })).toEqual(['starfishDance']); // no mix: one minted fish
     expect(paths({ danceTempo: 110 })).toEqual(['danceTempo']);
     expect(paths({ followDistance: 60, followAngle: 90 })).toEqual(['followDistance', 'followAngle']);
     expect(paths({ fishMix: 'dori:2', cameraFollow: 0, cameraDistance: 140, autoRotate: 1, followDistance: 60 })).toEqual(['cameraDistance']);

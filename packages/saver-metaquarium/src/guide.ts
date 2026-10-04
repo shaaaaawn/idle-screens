@@ -335,7 +335,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   const dance = str('starfishDance', 'off') || 'off';
   // Slots fill in entry order and the cast is capped, so a starfish past slot CAST_CAP never swims.
   const starfishSwims = mix.some((e, i) => e.breed === 'starfish' && mix.slice(0, i).reduce((n, p) => n + p.count, 0) < CAST_CAP);
-  if (dance !== 'off' && mix.length && !starfishSwims) {
+  if (dance !== 'off' && !starfishSwims) {  // no fishMix = one minted fish, never a starfish
     out.push({ path: 'starfishDance', also: ['fishMix'], message: 'no starfish in the cast to dance — add e.g. starfish:7 (slots past the cap never swim)' });
   }
   if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
