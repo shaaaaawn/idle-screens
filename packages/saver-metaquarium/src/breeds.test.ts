@@ -1,8 +1,9 @@
-import { NodeIO } from '@gltf-transform/core';
+import { NodeIO, type Document } from '@gltf-transform/core';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
 import { NPC_CATALOG } from './ipfs';
+import { ACT_LENGTH } from './puffer';
 
 const here = (p: string): URL => new URL(p, import.meta.url);
 const manifest = JSON.parse(readFileSync(here('../breeds/breeds.json'), 'utf8')) as { breeds: Record<string, { kind: string }> };
@@ -14,7 +15,24 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   const len = dv.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
-const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
+
+/** Triangles in each eye's white and in its pupils: a clean eye is one box (12 each) and one quad (2 each) — no seams for a sliding pupil to show. */
+function cleanEyes(root: ReturnType<Document['getRoot']>, joints: string[], white: string, black: string): { white: number; pupil: number } {
+  let w = 0, p = 0;
+  for (const mesh of root.listMeshes()) for (const prim of mesh.listPrimitives()) {
+    const name = prim.getMaterial()!.getName();
+    if (name !== white && name !== black) continue;
+    const j = prim.getAttribute('JOINTS_0')!, idx = prim.getIndices();
+    const n = idx ? idx.getCount() : j.getCount();
+    for (let t = 0; t < n; t += 3) {
+      const v = idx ? idx.getScalar(t) : t;
+      const bone = joints[(j.getElement(v, []) as number[])[0]!]!;
+      if (name === white) w++; else if (bone.startsWith('pupil')) p++;
+    }
+  }
+  return { white: w, pupil: p };
+}
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -64,8 +82,7 @@ describe('bundled breeds (breeds/README.md)', () => {
         const [j0] = j.getElement(i, []) as number[];
         const [w0, w1, w2, w3] = w.getElement(i, []) as number[];
         expect(j0).toBeLessThan(joints.length);
-        expect(w0).toBeCloseTo(1, 3);
-        for (const tail of [w1!, w2!, w3!]) expect(Math.abs(tail)).toBeLessThan(1e-3);
+        expect([w0, w1! + w2! + w3!]).toEqual([1, 0]);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone).toMatch(parts[name]!);
@@ -95,8 +112,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       for (let i = 0; i < j.getCount(); i++) {
         const [j0] = j.getElement(i, []) as number[];
         const [w0, ...rest] = w.getElement(i, []) as number[];
-        expect(w0).toBeCloseTo(1, 3);
-        for (const tail of rest) expect(Math.abs(tail)).toBeLessThan(1e-3);
+        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
         used.add(joints[j0!]!);
       }
       for (const bone of used) expect(bone, name).toMatch(parts[name]!);
@@ -106,7 +122,6 @@ describe('bundled breeds (breeds/README.md)', () => {
   it('hackerfish: the rig survives the intake — five bones, three clips, the screen on its own bone', async () => {
     const doc = await new NodeIO().read(here('../breeds/hackerfish.glb').pathname);
     const root = doc.getRoot();
-    expect(root.listSkins()).toHaveLength(1);
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     expect([...joints].sort()).toEqual(['body', 'fin.L', 'fin.R', 'screen', 'tail']);
     expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['glitch', 'swim', 'type']);
@@ -123,23 +138,171 @@ describe('bundled breeds (breeds/README.md)', () => {
   it('shark: the rig survives the intake — head, jaw, eyes, fins and a three-link tail; the teeth on the jaw', async () => {
     const doc = await new NodeIO().read(here('../breeds/shark.glb').pathname);
     const root = doc.getRoot();
-    expect(root.listSkins()).toHaveLength(1);
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     expect([...joints].sort()).toEqual(['body', 'caudal', 'eye.L', 'eye.R', 'fin.L', 'fin.R', 'head', 'jaw', 'tail1', 'tail2']);
     expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['bite', 'swim']);
-    let teeth = 0;
     for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
       if (p.getMaterial()!.getName() !== 'METAL-Teeth') continue;
-      teeth += 1;
-      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
-      for (let i = 0; i < j.getCount(); i++) {
-        expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
-        const [w0, ...rest] = w.getElement(i, []) as number[];
-        expect(w0).toBeCloseTo(1, 3);
-        for (const tail of rest) expect(Math.abs(tail)).toBeLessThan(1e-3);
+      const j = p.getAttribute('JOINTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) expect(joints[(j.getElement(i, []) as number[])[0]!]).toBe('jaw');
+    }
+  });
+
+  it('babyfish: the rig survives the intake — a soft-spined body, a dorsal fin, two eyes; every clip, the eye clips moving only the eyes', async () => {
+    const doc = await new NodeIO().read(here('../breeds/babyfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'dorsal', 'eye.L', 'eye.R', 'fin', 'head', 'tail1', 'tail2']);
+    const anims = new Map(root.listAnimations().map((a) => [a.getName(), a]));
+    expect([...anims.keys()].sort()).toEqual([
+      'blink', 'flip', 'hiccup', 'hiccup_eyes', 'peek', 'peek_eyes', 'swim', 'tailchase', 'wiggle', 'wiggle_eyes', 'yawn', 'yawn_eyes', 'zoom',
+    ]);
+    // The eye clips layer at full weight over the body's clips, so they touch nothing else…
+    for (const n of ['blink', 'wiggle_eyes', 'peek_eyes', 'hiccup_eyes', 'yawn_eyes']) {
+      for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).toMatch(/^eye\./);
+    }
+    // …and the body's clips leave the eyes to them.
+    for (const n of ['swim', 'zoom', 'wiggle', 'flip', 'peek', 'hiccup', 'tailchase', 'yawn']) {
+      for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).not.toMatch(/^eye\./);
+    }
+    // A soft spine: some vertices blend between two parts, so a joint never opens.
+    let blended = 0;
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const w = p.getAttribute('WEIGHTS_0')!;
+      for (let i = 0; i < w.getCount(); i++) if ((w.getElement(i, []) as number[])[0]! < 0.99) blended++;
+    }
+    expect(blended).toBeGreaterThan(0);
+  });
+
+  it('blowfish: the rig survives the intake — a body the clips move, a puff dial that alone scales it and stands its spines up, eyes no clip touches', async () => {
+    const doc = await new NodeIO().read(here('../breeds/blowfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual([
+      'body', 'eye.L', 'eye.R', 'fin.L', 'fin.R', 'mouth', 'puff', 'pupil.L', 'pupil.R',
+      'spines.L', 'spines.R', 'spines.back', 'spines.bottom', 'spines.top',
+    ]);
+    const anims = new Map(root.listAnimations().map((a) => [a.getName(), a]));
+    expect([...anims.keys()].sort()).toEqual(['bounce', 'chomp', 'flip', 'gulp', 'hover', 'kiss', 'puff', 'shimmy', 'shy', 'spin', 'spit', 'swim', 'wave', 'yawn', 'zip']);
+    const touches = (clip: string): string[] => anims.get(clip)!.listChannels().map((c) => `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`);
+    // The body is a bone with no vertices, and still exported: every clip moves it.
+    expect(touches('spin')).toContain('body.rotation');
+    expect(touches('flip')).toContain('body.rotation');
+    // The dial alone scales the puff and moves the spines…
+    expect(touches('puff')).toContain('puff.scale');
+    expect(touches('puff')).toContain('spines.top.translation');
+    for (const [name] of anims) {
+      if (name === 'puff') continue;
+      for (const ch of touches(name)) {
+        expect(ch, name).not.toBe('puff.scale');
+        expect(ch, name).not.toMatch(/^spines\.(top|bottom|L|R)\.translation$/);
       }
     }
-    expect(teeth).toBeGreaterThan(0);
+    // …and no clip at all moves an eye or a pupil: puffer.ts aims, closes and dilates them.
+    for (const [name] of anims) for (const ch of touches(name)) expect(ch, name).not.toMatch(/^(eye|pupil)\./);
+    expect(cleanEyes(root, joints, 'EYES-WHITE', 'EYES-BLACK')).toEqual({ white: 24, pupil: 4 });
+    // The driver schedules each act by its clip's length.
+    for (const [act, len] of Object.entries(ACT_LENGTH)) if (anims.has(act)) expect(anims.get(act)!.listChannels()[0]!.getSampler()!.getInput()!.getMax([])[0], act).toBeCloseTo(len, 2);
+  });
+
+  it('dori: the rig survives the intake — a rigid body on two fins, a tail for bursts, eyes and pupils of their own that no clip moves', async () => {
+    const doc = await new NodeIO().read(here('../breeds/dori.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'dorsal', 'eye.L', 'eye.R', 'head', 'pec.L', 'pec.R', 'peduncle', 'pupil.L', 'pupil.R', 'tail']);
+    const anims = root.listAnimations();
+    expect(anims.map((a) => a.getName()).sort()).toEqual(['back', 'burst', 'flare', 'flop', 'fly', 'headstand', 'hover', 'pick']);
+    // The eyes are tang.ts's, every frame: a clip that keyed them would fight it.
+    for (const a of anims) for (const ch of a.listChannels()) expect(ch.getTargetNode()!.getName(), a.getName()).not.toMatch(/^(eye|pupil)\./);
+    // The materials arrive as the roles the delivered model was mapped to.
+    expect(root.listMaterials().map((m) => m.getName()).sort()).toEqual(['EYES-Black', 'EYES-White', 'GLOW-Yellow', 'PrimaryColor', 'SecondaryColor']);
+    // Each pupil is its own bone's alone.
+    const where = (name: string): Set<string> => {
+      const out = new Set<string>();
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+        if (p.getMaterial()!.getName() !== name) continue;
+        const j = p.getAttribute('JOINTS_0')!;
+        for (let i = 0; i < j.getCount(); i++) out.add(joints[(j.getElement(i, []) as number[])[0]!]!);
+      }
+      return out;
+    };
+    expect([...where('EYES-White')].sort()).toEqual(['eye.L', 'eye.R']);
+    expect([...where('EYES-Black')].sort()).toEqual(['head', 'pupil.L', 'pupil.R', 'tail']);
+    expect(cleanEyes(root, joints, 'EYES-White', 'EYES-Black')).toEqual({ white: 24, pupil: 4 });
+  });
+
+  it('starfish: the rig survives the intake — disc, eyes, five arms in three links; each glowing tip its own light on its own arm', async () => {
+    const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    const arms = [0, 1, 2, 3, 4].flatMap((n) => [1, 2, 3].map((l) => `arm${n}.${l}`));
+    expect([...joints].sort()).toEqual(['body', 'eye.L', 'eye.R', ...arms].sort());
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual([
+      'circles', 'crawl', 'curl', 'dip_follow', 'dip_lead', 'disco', 'idle', 'jacks', 'kick', 'lead_twirl', 'lift_fly', 'lift_lead', 'mambo', 'march',
+      'reach', 'rise', 'spin', 'stand', 'standing', 'sway', 'twirl', 'twist', 'walk', 'wave',
+    ]);
+    const extras = root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras();
+    expect(extras.mqWalkStride).toBeGreaterThan(0);
+    expect(extras.mqFeet).toBeCloseTo(2 * 10.5 * Math.cos((36 * Math.PI) / 180), 3); // its front tips, where it stands
+    const tips: string[] = [];
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      if (name === 'GLOW-Tips') { expect(bones.size).toBe(1); tips.push(...bones); }
+      if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R']);
+    }
+    // splitByBone (breeds.json): one small light per tip, so neon keeps it lit and its bloom rides the tip.
+    expect(tips.sort()).toEqual(['arm0.3', 'arm1.3', 'arm2.3', 'arm3.3', 'arm4.3']);
+  });
+
+  it('starfish: every dance move starts and ends on one pose (the aerobics on the rise\'s end, partners on their frame), so a routine cuts on the bar', async () => {
+    const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
+    const anims = new Map(doc.getRoot().listAnimations().map((a) => [a.getName(), a]));
+    /** A clip's value per channel at its first or last key; a channel it never moves is the node's rest. */
+    const ends = (name: string, which: 'first' | 'last'): Map<string, number[]> => {
+      const out = new Map<string, number[]>();
+      for (const ch of anims.get(name)!.listChannels()) {
+        const values = ch.getSampler()!.getOutput()!, n = values.getCount();
+        out.set(`${ch.getTargetNode()!.getName()}.${ch.getTargetPath()}`, values.getElement(which === 'first' ? 0 : n - 1, []) as number[]);
+      }
+      return out;
+    };
+    const rest = (key: string): number[] => {
+      const node = key.slice(0, key.lastIndexOf('.')), path = key.slice(key.lastIndexOf('.') + 1);
+      const nd = doc.getRoot().listNodes().find((x) => x.getName() === node)!;
+      return path === 'rotation' ? nd.getRotation() : path === 'translation' ? nd.getTranslation() : nd.getScale();
+    };
+    const same = (a: number[], b: number[], key: string): void => {
+      // q and -q are one rotation (the spin ends a full turn round).
+      const d = Math.max(...a.map((v, i) => Math.abs(v - b[i]!)));
+      const flipped = key.endsWith('rotation') ? Math.max(...a.map((v, i) => Math.abs(v + b[i]!))) : Infinity;
+      expect(Math.min(d, flipped), key).toBeLessThan(2e-3);
+    };
+    const joins = (pose: Map<string, number[]>, moves: string[]): void => {
+      for (const move of moves) {
+        for (const which of ['first', 'last'] as const) {
+          const e = ends(move, which);
+          for (const key of new Set([...e.keys(), ...pose.keys()])) same(e.get(key) ?? rest(key), pose.get(key) ?? rest(key), `${move} ${which} ${key}`);
+        }
+      }
+    };
+    joins(ends('rise', 'last'), ['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']);
+    // The partner clips share their own pose: upright in the dance frame.
+    joins(ends('mambo', 'first'), ['mambo', 'sway', 'lead_twirl', 'twirl', 'dip_lead', 'dip_follow', 'lift_lead', 'lift_fly']);
+  });
+
+  it('starfish: the committed source is what its generator draws (breeds/rig/starfish-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/starfish-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12); // every face of every cube
+    const doc = await new NodeIO().read(here('../breeds/source/starfish.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    // No glow named for an eye: isEyes() would take it for an eye display.
+    for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
   });
 
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', () => {

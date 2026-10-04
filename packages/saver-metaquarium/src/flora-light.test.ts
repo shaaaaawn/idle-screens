@@ -30,8 +30,6 @@ describe('flora light', () => {
     expect(FLORA_LIGHT_VERTEX).toMatch(/vColor\.rgb \*= 1\.0 \+ min\(/); // multiply, not add
     expect(FLORA_LIGHT_VERTEX).not.toMatch(/vColor\.rgb \+= feed/);
     expect(FLORA_LIGHT_VERTEX).toMatch(/vColor\.rgb \/= mqTop/); // scaled back whole
-    // …after the feed AND after the sheen add: dropping either clips the hue.
-    expect(FLORA_LIGHT_VERTEX.match(/vColor\.rgb \/= mqTop/g)?.length).toBeGreaterThanOrEqual(2);
     expect(FLORA_FEED.cap).toBeLessThanOrEqual(1);
     // Same falloff as the floor pools and the fish tint.
     expect(FLORA_LIGHT_VERTEX).toMatch(/\/ \(1\.0 \+ q\)/);

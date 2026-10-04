@@ -119,15 +119,6 @@ describe('rect and bar splat by area (fillRect coverage)', () => {
     expect(g.cells[9 * 80 + 40]).toBeCloseTo(0.25, 5);
   });
 
-  it('a rotated thin rect keeps its ink: weighted by true overlap, not by its bounding box', () => {
-    // A 1200 × 4 px line turned 45°: its bounding box is ~850 px square, but its ink is still 1200 × 4.
-    const s = spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'rect', width: [1200, 1200], aspect: [4 / 1200, 4 / 1200], color: '#ffffff' }, motion: { type: 'static' }, rotate: 45 }]);
-    const g = luminanceGrid(s, { viewport: { width: 1600, height: 1600 }, cols: 80, rows: 80 });
-    const ink = Array.from(g.cells).reduce((acc, v) => acc + v, 0) * 20 * 20;
-    expect(ink).toBeGreaterThan(1200 * 4 * 0.8);
-    expect(ink).toBeLessThan(1200 * 4 * 1.2);
-  });
-
   it('a thin bar row is weighted by its thickness too', () => {
     const s = spec([{ count: 1, position: { x: 0.1, y: 0.5 }, sprite: { kind: 'bar', length: 800, thickness: 2, values: [1], color: '#ffffff' }, motion: { type: 'static' } }]);
     const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });

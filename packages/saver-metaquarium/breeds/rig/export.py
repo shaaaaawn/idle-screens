@@ -16,9 +16,7 @@ import sys
 import bpy
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
-# `__file__` is undefined when run from Blender's Text Editor: use the open text block's path.
-_here = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.path.dirname(bpy.path.abspath(bpy.context.space_data.text.filepath))
-sys.path.insert(0, _here)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import export, in_scene, out_path  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []

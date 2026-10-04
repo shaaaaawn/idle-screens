@@ -133,6 +133,9 @@ enum AgentHandoff {
         /// Where that app manages MCP connectors, for the "not connected" case.
         let connectors: URL?
 
+        /// Asset-catalog name of the product's mark (Simple Icons, CC0).
+        var markAsset: String { id == "claude" ? "BrandClaude" : "BrandOpenAI" }
+
         func link(for prompt: String) -> URL? {
             var parts = URLComponents(string: base)
             parts?.queryItems = [URLQueryItem(name: "q", value: prompt)]

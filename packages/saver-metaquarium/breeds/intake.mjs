@@ -58,7 +58,7 @@ const io = new NodeIO().setLogger(quiet).registerExtensions(ALL_EXTENSIONS)
 
 const isEye = (name) => /eye/i.test(name);
 const roleOf = (name) => isEye(name) ? (/black|pupil/i.test(name) ? 'eye·pupil' : /white|sclera/i.test(name) ? 'eye·sclera' : 'eye (by luminance)')
-  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
+  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /^VIVID-\d{1,3}$/.test(name) ? `vivid ${name.slice(6)}%` : /^PAINT-#[0-9a-f]{6}$/i.test(name) ? `paint ${name.slice(6)}` : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
 
 function stats(doc) {
   let tris = 0; const mats = new Map(); const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -98,7 +98,7 @@ function bytes(w) {
   return b;
 }
 
-function greedy(doc, voxel, swim, spine = swim) {
+function greedy(doc, voxel, swim, spine = swim, mergeBends = true) {
   // Parts are not all on one lattice (baked instances sit at offsets like
   // 5.91), so each plane's grid carries its own phase along both of its axes.
   // Decoded Draco positions carry float noise (2.9985 for 3), so the phase is
@@ -173,6 +173,11 @@ function greedy(doc, voxel, swim, spine = swim) {
     const planes = new Map(); const loose = [];
     const jAttr = p.getAttribute('JOINTS_0'), wAttr = p.getAttribute('WEIGHTS_0');
     const skinAt = new Map();
+    // Every corner's skin, bending or not: a quad can bend in one triangle and
+    // not its twin (three corners alike, the fourth not), and then its fourth
+    // corner is only here. Consulted only where the bending faces are silent,
+    // so a breed that never needed it merges exactly as before.
+    const anySkinAt = new Map();
     const posKey = (q) => q.map((x) => Math.round(x / (voxel / 40))).join(',');
     // Rigged: a part per joint, each merged on its own.
     const joints = jointsOf(p);
@@ -183,6 +188,7 @@ function greedy(doc, voxel, swim, spine = swim) {
       // pass through untouched, with their own skin.
       const skin = () => [0, 1, 2].map((k) => ({ j: jAttr.getElement(t * 3 + k, []), w: wAttr.getElement(t * 3 + k, []) }));
       if (!f) { loose.push({ tri, bone, skin: joints && bone < 0 ? skin() : null }); return; }
+      if (joints) skin().forEach((c, k) => { if (!anySkinAt.has(posKey(tri[k]))) anySkinAt.set(posKey(tri[k]), c); });
       if (bone < 0) {
         // A bending face: remember each corner's skin by where it is. Merged
         // rectangles take their corners' skins from here, and never merge
@@ -197,7 +203,10 @@ function greedy(doc, voxel, swim, spine = swim) {
     const pos = [], jnt = [], wgt = [];
     for (const { f, bone, cells } of planes.values()) {
       const bends = bone < 0;
-      const canU = f.ua !== swim && (!bends || f.ua !== spine), canV = f.va !== swim && (!bends || f.va !== spine);
+      // A breed whose parts bend every which way (the octopus's arms radiate
+      // and curl: `mergeBends: false`) keeps its bending faces as drawn —
+      // a merged one would need a source vertex at every corner.
+      const canU = f.ua !== swim && (!bends || (mergeBends && f.ua !== spine)), canV = f.va !== swim && (!bends || (mergeBends && f.va !== spine));
       const used = new Set();
       const order = [...cells].map((k) => k.split('|').map(Number)).sort((A, B) => A[1] - B[1] || A[0] - B[0]);
       for (const [i, j] of order) {
@@ -214,11 +223,11 @@ function greedy(doc, voxel, swim, spine = swim) {
         // A bending rectangle's corners take the source's skins; a corner a cut
         // makes blends its rectangle's four, as the skin does across the face.
         const at = (q) => {
-          const sk = skinAt.get(posKey(q)); if (sk) return sk;
+          const sk = skinAt.get(posKey(q)) ?? anySkinAt.get(posKey(q)); if (sk) return sk;
           const tu = (q[f.ua] - R[0]) / (R[1] - R[0]), tv = (q[f.va] - R[2]) / (R[3] - R[2]);
           const mix = new Map();
           for (const [uu, vv, k] of [[R[0], R[2], (1 - tu) * (1 - tv)], [R[1], R[2], tu * (1 - tv)], [R[1], R[3], tu * tv], [R[0], R[3], (1 - tu) * tv]]) {
-            const c = skinAt.get(posKey(corner(uu, vv)));
+            const c = skinAt.get(posKey(corner(uu, vv))) ?? anySkinAt.get(posKey(corner(uu, vv)));
             if (!c) throw new Error(`${name}: a bending rectangle's corner has no source vertex at ${corner(uu, vv)}`);
             c.j.forEach((jj, i) => mix.set(jj, (mix.get(jj) ?? 0) + k * c.w[i]));
           }
@@ -289,6 +298,32 @@ function flatNormals(doc) {
   }
 }
 
+/** One primitive per bone for the materials named (breeds.json `splitByBone`):
+ *  a glow material spread over several moving parts (the starfish's five tips)
+ *  becomes one small light per part, each riding its own bone — a small glow
+ *  stays lit in the neon look, and its bloom and light follow the tip. Runs on
+ *  unindexed, rigid primitives (after greedy and flatNormals). */
+function splitByBone(doc, names) {
+  for (const mesh of doc.getRoot().listMeshes()) for (const p of [...mesh.listPrimitives()]) {
+    if (!names.includes(p.getMaterial()?.getName()) || p.getIndices()) continue;
+    const joints = jointsOf(p); if (!joints) continue;
+    if (joints.includes(-1)) throw new Error(`${p.getMaterial().getName()}: splitByBone needs rigid parts`);
+    const parts = [...new Set(joints)].sort((a, b) => a - b); if (parts.length < 2) continue;
+    for (const j of parts) {
+      const q = doc.createPrimitive().setMaterial(p.getMaterial()).setMode(p.getMode());
+      for (const sem of p.listSemantics()) {
+        const a = p.getAttribute(sem), size = a.getElementSize(), src = a.getArray();
+        const out = new src.constructor(joints.filter((x) => x === j).length * 3 * size);
+        let o = 0;
+        joints.forEach((x, t) => { if (x === j) { out.set(src.subarray(t * 3 * size, (t + 1) * 3 * size), o); o += 3 * size; } });
+        q.setAttribute(sem, doc.createAccessor().setType(a.getType()).setArray(out).setNormalized(a.getNormalized()));
+      }
+      mesh.addPrimitive(q);
+    }
+    p.dispose();
+  }
+}
+
 const rows = [];
 mkdirSync(SRC_OUT, { recursive: true });
 for (const [breed, spec] of Object.entries(manifest.breeds)) {
@@ -348,11 +383,12 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     if (buried) console.log(`${breed.padEnd(11)} culled ${buried} buried faces`);
     // The swim-axis rule protects the body wave, which never bends a skinned
     // mesh (swimwave.ts): a rig's parts are rigid, so they merge every way.
-    greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim);
+    greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim, spec.mergeBends !== false);
   } else {
     await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, spec.triBudget / before.tris), error: spec.error ?? 0.002, lockBorder: false }), unweld());
   }
   flatNormals(doc);
+  if (rigged && spec.splitByBone) splitByBone(doc, spec.splitByBone);
   if (rigged) {
     dropRestChannels(doc);
     // Blender's own extras (material-variant bookkeeping) go; the rig's mq* facts stay.

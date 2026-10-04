@@ -1,0 +1,10 @@
+---
+'@idle-screens/saver-metaquarium': minor
+---
+
+The dori — a blue tang — is rigged, and it is the first fish in the tank that swims on its fins and the first whose eyes are the show.
+
+- **It flies on its fins.** A tang is a labriform swimmer: its body stays rigid while its pectorals beat like wings — out and back, then in and forward, twisting as they go — and it only kicks its tail to burst. The stroke runs on time as well as distance, so the fins keep beating while it holds station, and the tail comes in exactly when the tank makes it dart.
+- **Its eyes look at things.** Fish have no eyelids and a fixed pupil, so the dori never blinks: its life is in where it looks. Every frame each eye's box swivels and its pupil slides across the eye's face (`src/tang.ts`). It scans the tank in saccades — quick jumps, then still — and turns to the viewer and holds their eye while it can reach them, the second eye a beat behind the first. Before it snaps at plankton both eyes converge on the speck. It never looks through the back of its head, nor at the camera it is riding in. `inspect()` reports what each dori is looking at, and how far off the viewer its eyes point.
+- **Moments of its own,** one every 10–18 s: snapping up plankton, a display (dorsal raised, fins spread, curled into a C, the tail flicked twice to flash the scalpel), a headstand at a cleaning station, backing off warily on its fins, and — rarely, briefly — playing dead on its side before righting itself with a kick. It holds still for them (the tank holds back its travel, then lets it catch up to where it would have been), so a headstand is a pose, not a glide, and a follower behind it stops too.
+- **The rig.** `breeds/rig/dori.py` rigs the delivered model without changing a visible voxel: its GPU-instanced marking is joined (36 doubled cubes dropped), its clashing material names are matched by colour, and each eye is rebuilt as one white box with its pupil one quad on its face — a sliding pupil uncovers white and shows no seam. The eye display (`eyeLife`) leaves the dori alone.

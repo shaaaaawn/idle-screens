@@ -2,13 +2,15 @@
   "$comment": "Breed intake manifest — see README.md. roles: source material name → role name the tank reads (materials.ts). size: nominal body length relative to a minted fish (1 = FISH_LENGTH). motion: how the breed should move (wiggle = the tank's body wave).",
   "breeds": {
     "babyfish": {
-      "source": "source/babyfish.glb", "kind": "voxel", "size": 0.45, "motion": "wiggle",
-      "roles": { "primaryColor2": "SecondaryColor2", "primaryColor4": "SecondaryColor4", "mouth": "KEEP-Mouth" },
-      "notes": "Rainbow bands authored as primaryColor…primaryColor4; the tank would paint every 'primary' one coat and lose the banding, so alternate bands become coat B."
+      "source": "rig/babyfish.glb", "delivered": "source/babyfish.glb", "rig": "rig/babyfish.py",
+      "kind": "voxel", "size": 0.45, "motion": "baby",
+      "roles": { "primaryColor": "VIVID-0", "primaryColor2": "VIVID-25", "primaryColor3": "VIVID-50", "primaryColor4": "VIVID-75", "secondaryColor": "VIVID-100", "mouth": "PAINT-#ffd23f", "eyes2": "EYES-Sparkle" },
+      "notes": "The babies of the metaquarium. Rainbow bands authored as primaryColor…primaryColor4 and secondaryColor, head to tail: each fish wears them as one candy-bright gradient between its two coats (VIVID-<n>); its stripe and mouth are sunny yellow on every fish (PAINT-#ffd23f), and a catchlight sparkles in each pupil (EYES-Sparkle). Rigged in Blender by rig/babyfish.py from the delivered source/babyfish.glb (never edited): head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a fluttering dorsal fin, two blinking eyes; clips swim, zoom, wiggle, flip, peek and blink (wiggle_eyes, peek_eyes layer like a blink). src/babyfish.ts drives them."
     },
     "blowfish": {
-      "source": "source/blowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle", "roles": {},
-      "notes": "Already role-named. Spiky silhouette — greedy meshing helps least here."
+      "source": "rig/blowfish.glb", "delivered": "source/blowfish.glb", "rig": "rig/blowfish.py",
+      "kind": "voxel", "size": 0.8, "motion": "puffer", "roles": {},
+      "notes": "A pufferfish and a flirt, rigged in Blender by rig/blowfish.py from the delivered source/blowfish.glb (never edited but for its eyes: each rebuilt as one white box and its pupil as one quad on its face, so a sliding pupil shows no seam). Already role-named. Everything hangs off a `puff` bone: the `puff` clip is a dial (its time is how puffed it is) that scales the fish round and stands its spines up from half tucked, so src/puffer.ts gulps it up, holds it and lets it go. Above it `body` carries the clips — swim, hover, gulp, zip, spin, flip, kiss, shimmy, bounce, spit, yawn, shy, wave, chomp — and the eyes and pupils are bones no clip moves: src/puffer.ts aims them, dilates them and closes them (true puffers can close their eyes)."
     },
     "crab": {
       "source": "rig/crab.glb", "delivered": "source/crab.glb", "rig": "rig/crab.py",
@@ -16,9 +18,9 @@
       "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Rigged in Blender by rig/crab.py from the delivered source/crab.glb (never edited): 23 rigid voxel parts — body, eye stalks, claw arms and jaws, two-segment legs — and the clips walk, idle, pinch, forage, wave, cheer. src/crab.ts drives them."
     },
     "dori": {
-      "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",
-      "roles": { "Material.008": "PrimaryColor", "Material.003": "SecondaryColor", "Material.007": "EYES-White", "Black": "EYES-Black", "Material.002": "GLOW-Yellow" },
-      "notes": "Unnamed materials (Material.00x) all painted a random coat before. GPU-instanced parts, baked."
+      "source": "rig/dori.glb", "delivered": "source/dori.glb", "rig": "rig/dori.py",
+      "kind": "voxel", "size": 0.9, "motion": "tang", "roles": {},
+      "notes": "A blue tang, rigged in Blender by rig/dori.py from the delivered source/dori.glb (never edited; its GPU-instanced marking is joined and its doubled cubes dropped, and its Material.00x names, which collide in a shared .blend, are matched by colour and renamed to the roles the intake used to map them to; each eye is rebuilt as one white box and its pupil as one quad, so a sliding pupil shows no seam). The first breed that swims on its fins: a rigid body, two pectorals that beat like wings, a tail only for bursts, a dorsal that rises in a display; clips fly, hover, back, burst, pick, flare, headstand, flop. Its eyes are bones, not clips: src/dori.ts aims each one every frame (the box swivels, the pupil slides over it), and it never blinks — fish have no eyelids."
     },
     "glowfish": {
       "source": "rig/glowfish.glb", "delivered": "source/glowfish.glb", "rig": "rig/glowfish.py",
@@ -32,10 +34,15 @@
       "roles": { "Material.007": "PrimaryColor", "Material.008": "SecondaryColor", "Material.002": "SCREEN-Glass", "Material.006": "SCREEN-Pixels" },
       "notes": "Half fish, half computer, rigged in Blender by rig/hackerfish.py from the delivered source/hackerfish.glb (never edited): the box, its screen, two paddle fins and a tail; clips swim, type, glitch. src/hacker.ts drives them. The glass and the face pixels are one display (SCREEN-): src/screen.ts draws faces, code rain and a boot spinner on it, the designer's face its neutral expression. No EYE material — eyeLife leaves it alone."
     },
-    "jellyfish": {
-      "source": "source/jellyfish.glb", "kind": "smooth", "triBudget": 2500, "error": 0.01, "size": 0.8, "motion": "pulse",
-      "roles": { "": "KEEP-Jellyfish" }, "metal": 0, "roughness": 0.8,
-      "notes": "Textured, not a voxel grid (a third of its faces are off-axis), so decimated rather than greedy-meshed. Shipped fully metallic (black in the tank's dark rooms) and without normals. Wants a bell pulse, not a body wave — motion follow-up."
+    "starfish": {
+      "source": "rig/starfish.glb", "delivered": "source/starfish.glb", "rig": "rig/starfish.py",
+      "kind": "voxel", "size": 1.0, "motion": "starfish", "roles": {}, "splitByBone": ["GLOW-Tips"],
+      "notes": "The first breed drawn in-house, in our designer's style: rig/starfish-model.mjs writes source/starfish.glb voxel by voxel (whole cubes, one mesh per material, already role-named). The tips are GLOW-Tips (no 'eye' in a glow name), split one primitive per arm (splitByBone) so each is a small light riding its own tip. Rigged in Blender by rig/starfish.py, which never edits the model: the disc and its face, two blinking eyes, five arms in three rigid links each; clips crawl, idle, wave, stand, curl. src/starfish.ts drives them."
+    },
+    "octopus": {
+      "source": "rig/octopus.glb", "delivered": "source/octopus.glb", "rig": "rig/octopus.py",
+      "kind": "voxel", "size": 1.2, "motion": "octopus", "roles": {}, "mergeBends": false, "splitByBone": ["GLOW-Rings"],
+      "notes": "Our second in-house breed: rig/octopus-model.mjs writes source/octopus.glb voxel by voxel in the designer's style (already role-named). Rigged in Blender by rig/octopus.py: a crown, a head and a breathing mantle, a siphon, eight arms of four links each (hinged underneath, blended at their joints), and eyes, pupils and brows that no clip moves — src/octopus.ts keeps each bar of a pupil level with the world, closes the lids, raises the eyes and the brows. Clips idle, crawl, jet, drift, tiptoe, wave, beckon, reach, peek, ink, pounce, sleep."
     },
     "shark": {
       "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",

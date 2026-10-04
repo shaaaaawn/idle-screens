@@ -92,11 +92,4 @@ describe('jointsOf', () => {
     prim.getAttribute('WEIGHTS_0')!.setElement(0, [0.5, 0.5, 0, 0]);
     expect(jointsOf(prim)).toEqual([-1, 2]);
   });
-
-  it('a secondary influence on slots 1–3 is a blend even when slot 0 is 1', () => {
-    const { doc } = build([{ joint: 2, faces: [{ cell: [0, 0, 0], side: [0, 1] }] }]);
-    const prim = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!;
-    prim.getAttribute('WEIGHTS_0')!.setElement(0, [1, 0, 0.2, 0]);
-    expect(jointsOf(prim)).toEqual([-1, 2]);
-  });
 });

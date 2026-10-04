@@ -83,7 +83,7 @@ never changes because a dependency was bumped.
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
 | fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
-| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab jellyfish dori glowfish babyfish hackerfish blowfish`, ids 601–608: species, so a count is copies; bundled in the package, see `breeds/README.md`; a crab walks the seabed and climbs rocks on its own legs, `src/crab.ts`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
+| fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab dori glowfish babyfish hackerfish blowfish starfish octopus`, ids 601–606 and 608–610: species, so a count is copies; bundled in the package, see `breeds/README.md`; a crab walks the seabed and climbs rocks on its own legs, `src/crab.ts`; a starfish crawls it and stands up to wave, `src/starfish.ts`; an octopus crawls it, jets off and parachutes down, and watches you with level pupils, `src/octopus.ts`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
 | dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
 
 ### Motion
@@ -103,11 +103,13 @@ never changes because a dependency was bumped.
 | maneuverIntensity | number | 0.7 | How hard — scales the surge, the kick and the tail flurry together, 0–1 |
 | lightSeek | number | 0 | Free fish drawn toward the room's light shafts, each to its own pool, 0–1 (needs rays) |
 | formationBreathe | number | 0 | The school relaxes outward and back on a ~15 s cycle, 0–1; only ever expands |
-| *look* | | | *The next four are the renderer's defaults, not something a scene sets: every tank is lit, glowing and reflective with no params. They exist to opt out.* |
+| *look* | | | *The next three are the renderer's defaults, not something a scene sets: every tank is lit, glowing and reflective with no params. They exist to opt out.* |
 | fishGlow | number | 0.6 | The fish's own `GLOW-*` parts as light sources: bloom card, white-hot breathing core, colour on the floor under low swimmers. 0 is the flat colour + thin halo |
 | fishLighting | enum | lit | `lit`: fish take light — key + fill so voxel faces shade, a generated studio environment for metal to reflect, point lights riding the glow parts nearest the camera (4 / 3 / 0 by tier). `flat` is the original unlit look |
 | fishMetal | enum | on | Metallic plates wear a generated chrome matcap (reflection with no env map, no lights); `off` is the flat unlit atlas |
 | fishLook | enum | natural | `neon`: the bundled creatures in blacklight — near-black coats, the dark of the eyes (a crab's mouth too) a seeded glowing neon, small glow (a lure) kept and big glow (a crab's claws) dark; any model's untextured coats and eyes follow (textured minted bodies are left as drawn). Read when a fish spawns |
+| starfishDance | enum | off | `aerobics`: every starfish in the cast stands up in a class at the tank's centre, rows facing the camera behind an instructor, and dances a routine in unison (march, jacks, reach, kick, twist, circles, disco, spin, a bar each); `freestyle`: each its own move every eight counts; `duet`: the partner dance (Dirty Dancing) — couples face to face, cheated out to the room, dancing the basic, a sway, a twirl, the dip and the lift (pair with `spotRig` on slots 0 and 1). `src/starfish.ts` |
+| danceTempo | number | 128 | The dance's beats per minute, 60–180; integrated when steered, so a glide stays on the beat |
 | eyeLife | number | 0 | Eyes blink, look and emote — each token's own pixel-grid eye redrawn in a fragment function, black and white only. 0 is the stock eye program, byte for byte; a scene opts in with 1 |
 
 ### Scenery
@@ -193,9 +195,9 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `geodeMineral` | string | `amethyst agate celestine citrine carnelian rose emerald quartz smoky`; empty = the mineral closest in colour to each geode's nearest crystal, `world` = two from the seed. |
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
 | `fountain` | `none` \| `vent` \| `geode` | The town square's fountain: a hot-vent chimney or a geode basin, with a bubble column, a pebble plaza and its own light; adds a `fountain` vignette mark. |
-| `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs the `paths` param above 0; with it at 0 there is nothing to line). |
+| `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs `paths`). |
 | `floraLayout` | `garden` \| `gallery` | Grow round the crystals, or one plot per species to see them all. |
-| `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`; species are `grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
+| `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
 | `marineSnow` | 0–1 | Slowly sinking particles sampling the crystals' coloured light field. Separate from the original single-colour `moteDensity`. |
 

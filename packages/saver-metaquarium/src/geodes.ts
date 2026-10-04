@@ -578,7 +578,7 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
     if (grown.star) thundereggs += 1;
   };
   const minerals = opts.minerals?.length ? opts.minerals : undefined;
-  if (opts.layout === 'gallery' && opts.amount > 0 && !(opts.mix && Object.keys(opts.mix).length > 0 && !Object.values(opts.mix).some((v) => (v ?? 0) > 0))) {
+  if (opts.layout === 'gallery' && opts.amount > 0) {
     // Columns a mineral each, rows a kind each, spaced so nothing touches;
     // the mega geode stands behind the lot.
     const rows = galleryRows(minerals ?? MINERALS);
@@ -600,10 +600,7 @@ export function buildGeodeField(rng: CrystalRng, opts: GeodeFieldOptions): Geode
     // A mix that names kinds but weights none of them (`cavern:0`) asks for nothing, not for the default.
     const nothing = !!opts.mix && Object.keys(opts.mix).length > 0 && !named;
     const want = nothing ? 0 : Math.round(opts.amount * opts.cap * 0.8);
-    const raw = GEODE_KINDS.map((k) => [k, named ? Math.max(0, opts.mix?.[k] ?? 0) : KIND[k].share] as const).filter(([, v]) => v > 0);
-    // Relative to the heaviest, so two huge finite weights cannot sum to Infinity.
-    const heaviest = Math.max(...raw.map(([, v]) => v), 1e-300);
-    const weights = raw.map(([k, v]) => [k, v / heaviest] as const);
+    const weights = GEODE_KINDS.map((k) => [k, named ? Math.max(0, opts.mix?.[k] ?? 0) : KIND[k].share] as const).filter(([, v]) => v > 0);
     const total = weights.reduce((a, [, v]) => a + v, 0);
     const placed: Array<{ x: number; z: number; r: number }> = [];
     const landmark = opts.amount >= 0.5 && weights.some(([k]) => k === 'cavern');

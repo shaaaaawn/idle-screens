@@ -31,8 +31,6 @@ const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb',
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 
-/** Labels and material names come from the URL and the GLB: never markup. */
-const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
@@ -41,10 +39,7 @@ const names = [...new Set([...Object.keys(OUT), ...Object.keys(SRC)].map(nameOf)
   .filter((n) => !only || only.includes(n));
 for (const u of q.get('url')?.split(',').filter(Boolean) ?? []) rows.push({ label: u.split('/').pop()!, url: u });
 const rigName = q.get('rig');
-const DEFAULT_TIMES = [0, 0.25, 0.5, 0.75, 1, 1.25];
-const parsedTimes = (q.get('times') ?? '').split(',').filter(Boolean).map(Number);
-const times = parsedTimes.length && parsedTimes.every(Number.isFinite) ? parsedTimes : DEFAULT_TIMES;
-const effort = Number.isFinite(Number(q.get('effort') ?? 1)) ? Number(q.get('effort') ?? 1) : 1;
+const times = (q.get('times') ?? '0,0.25,0.5,0.75,1,1.25').split(',').map(Number);
 for (const n of q.get('url') ? [] : names) {
   const s = Object.entries(SRC).find(([k]) => nameOf(k) === n)?.[1];
   const o = Object.entries(OUT).find(([k]) => nameOf(k) === n)?.[1];
@@ -106,7 +101,7 @@ const views: Array<[string, (d: number) => Vector3]> = [
       const scene = stage(group);
       const cam = new PerspectiveCamera(30, 1, span * 0.05, span * 20);
       times.forEach((t, c) => {
-        rig?.set({ phase: 0, amp: 0.08 * effort, bend: 0, t });
+        rig?.set({ phase: 0, amp: 0.08 * Number(q.get('effort') ?? 1), bend: 0, t });
         // side (default), or ¾ from behind-left where the fin's sideways ripple shows.
         if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7);
         else if (q.get('view') === 'top') cam.position.set(0, span * 2.2, span * 0.01);
@@ -145,10 +140,10 @@ const views: Array<[string, (d: number) => Vector3]> = [
     }
     const lab = document.createElement('div'); lab.className = 'label';
     lab.style.left = '4px'; lab.style.top = `${row * CELL + 4}px`;
-    lab.innerHTML = `<b>${esc(r.label)}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
+    lab.innerHTML = `<b>${r.label}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
     const leg = document.createElement('div'); leg.className = 'label';
     leg.style.left = `${3 * CELL + 4}px`; leg.style.top = `${row * CELL + 4}px`;
-    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${esc(n)} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
+    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${n} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
     sheet.append(lab, leg);
     row += 1;
   }
