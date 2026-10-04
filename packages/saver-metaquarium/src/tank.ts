@@ -73,6 +73,7 @@ import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
+import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
@@ -548,7 +549,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -584,6 +585,10 @@ interface InspectFish {
   /** A dori's gaze (tang.ts): what its eyes are on, and how many degrees they point off the viewer (null: no viewer in front of it). */
   looking?: string;
   offViewer?: number | null;
+  /** A blowfish's (puffer.ts): how puffed (0..1), how shut each eye (left, right), and the flirt its eyes are making. */
+  puff?: number;
+  lids?: [number, number];
+  flirt?: string | null;
 }
 
 /** The leader a bonded fish rides: plan, where along it, and the light pull
@@ -1976,8 +1981,13 @@ class TankInstance implements SaverInstance {
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
-          const longX = size.x > size.z;
-          const nose = eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
+          // A rig (breeds/rig/*.py) faces +z by construction: never guess. The
+          // guess reads a fish's long side as its length, and a blowfish —
+          // wider than long, fins and spines out — swam sideways.
+          let rigged = false;
+          scene.traverse((o) => { if (o.userData?.mqRig) rigged = true; });
+          const longX = !rigged && size.x > size.z;
+          const nose = rigged ? 1 : eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
           const yaw = longX
             ? nose > 0
               ? -Math.PI / 2
@@ -2023,6 +2033,7 @@ class TankInstance implements SaverInstance {
     let shark: SharkRig | null = null;
     let baby: BabyRig | null = null;
     let tang: TangRig | null = null;
+    let puffer: PufferRig | null = null;
     let screen: ScreenRig | null = null;
 
     if (tpl) {
@@ -2035,7 +2046,8 @@ class TankInstance implements SaverInstance {
       if (this.wantBreeds[index] === 'shark') shark = rigShark(body, tpl.clips);
       if (this.wantBreeds[index] === 'babyfish') baby = rigBaby(body, tpl.clips);
       if (this.wantBreeds[index] === 'dori') tang = rigTang(body, tpl.clips);
-      if (baby && !this.burps) {
+      if (this.wantBreeds[index] === 'blowfish') puffer = rigPuffer(body, tpl.clips);
+      if ((baby || puffer) && !this.burps) {
         this.burps = new BurpLayer(this.scene);
         if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
       }
@@ -2061,8 +2073,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || hacker || shark || baby || tang) {
-        mixer = (angler ?? hacker ?? shark ?? baby ?? tang)!.mixer;
+      } else if (angler || hacker || shark || baby || tang || puffer) {
+        mixer = (angler ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2111,8 +2123,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || hacker || shark || baby || tang
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), lights: {} }
+      rig: crab || starfish || angler || hacker || shark || baby || tang || puffer
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2502,8 +2514,8 @@ class TankInstance implements SaverInstance {
       // A dori holds still for a headstand, plays dead without being towed,
       // backs off when wary — then catches up (tang.ts). Before the pose, so a
       // follower behind it stops too.
-      const held = this.wantBreeds[f.index] === 'dori' && !style.formation
-        ? tangHold(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
+      const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold : null;
+      const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
       const d = anchor + effort * style.travel + mnv.along * L - held;
 
       // What drives the animation. For a free fish that is its own effort; for
@@ -2806,6 +2818,8 @@ class TankInstance implements SaverInstance {
       const tang = f.rig?.tang ? tangFrame(f.rig.tang, tSec, f.index, beat, {
         pace: speed * styleSpeed * style.travel, flurry: mnv.flurry + flurryBoost,
       }) : null;
+      // A blowfish (puffer.ts): its puff, its act, the clips for both.
+      const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, { pace: speed * styleSpeed * style.travel }) : null;
       // A hiccuping baby's speed, for the momentum its bubble leaves with.
       if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
       f.group.position.set(px, y, pz);
@@ -2849,6 +2863,26 @@ class TankInstance implements SaverInstance {
         f.group.updateMatrixWorld(true);
         look = tangLook(f.rig!.tang, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.camera.position, state: tang });
       }
+      // A blowfish turns to whoever it is kissing or waving at (a kiss given
+      // sideways is no kiss at all), then its eyes, then its bubbles.
+      let pLook: ReturnType<typeof pufferLook> | null = null;
+      if (puffer && f.rig!.puffer) {
+        const viewer = followPov && f.index === followSlot ? null : this.camera.position;
+        if (viewer && puffer.face > 0.01) {
+          const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz;
+          let turn = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          f.group.rotateOnWorldAxis(Y_AXIS, Math.max(-0.9, Math.min(0.9, turn)) * puffer.face);
+        }
+        f.group.updateMatrixWorld(true);
+        pLook = pufferLook(f.rig!.puffer, tSec, f.index, { viewer, state: puffer });
+        const mouth = f.rig!.puffer.mouth;
+        if (puffer.bubble && mouth && this.burps) {
+          mouth.getWorldPosition(this.burpAt);
+          this.burps.emit(puffer.bubble.key, puffer.bubble.t, this.burpAt.x, this.burpAt.y, this.burpAt.z,
+            L * puffer.bubble.size, fishHash(f.index, puffer.bubble.key.length + Math.round(puffer.bubble.t)));
+        }
+      }
       // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
       if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
         const hx = act ? act.fx : pose.fx, hy = act ? act.fy : fy, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hy, hz) || 1;
@@ -2874,7 +2908,7 @@ class TankInstance implements SaverInstance {
       // glance at the lens. Rigged on the first frame that asks for it, so
       // `eyeLife: 0` compiles the stock eye program and costs nothing.
       // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
-      if (eyeLife > 0 && f.body && !f.rig?.tang) {
+      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hz) || 1;
@@ -2965,7 +2999,8 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : pose.fx, floor ? floor.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
-        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) } : {}),
+        ...(floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) } : {}),
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);

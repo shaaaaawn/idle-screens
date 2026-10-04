@@ -155,6 +155,34 @@ describe('bundled breeds (breeds/README.md)', () => {
     expect(blended).toBeGreaterThan(0);
   });
 
+  it('blowfish: the rig survives the intake — a body the clips move, a puff dial that alone scales it and stands its spines up, eyes no clip touches', async () => {
+    const doc = await new NodeIO().read(here('../breeds/blowfish.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual([
+      'body', 'eye.L', 'eye.R', 'fin.L', 'fin.R', 'mouth', 'puff', 'pupil.L', 'pupil.R',
+      'spines.L', 'spines.R', 'spines.back', 'spines.bottom', 'spines.top',
+    ]);
+    const anims = new Map(root.listAnimations().map((a) => [a.getName(), a]));
+    expect([...anims.keys()].sort()).toEqual(['bounce', 'chomp', 'flip', 'gulp', 'hover', 'kiss', 'puff', 'shimmy', 'shy', 'spin', 'spit', 'swim', 'wave', 'yawn', 'zip']);
+    const touches = (clip: string): string[] => anims.get(clip)!.listChannels().map((c) => `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`);
+    // The body is a bone with no vertices, and still exported: every clip moves it.
+    expect(touches('spin')).toContain('body.rotation');
+    expect(touches('flip')).toContain('body.rotation');
+    // The dial alone scales the puff and moves the spines…
+    expect(touches('puff')).toContain('puff.scale');
+    expect(touches('puff')).toContain('spines.top.translation');
+    for (const [name] of anims) {
+      if (name === 'puff') continue;
+      for (const ch of touches(name)) {
+        expect(ch, name).not.toBe('puff.scale');
+        expect(ch, name).not.toMatch(/^spines\.(top|bottom|L|R)\.translation$/);
+      }
+    }
+    // …and no clip at all moves an eye or a pupil: puffer.ts aims, closes and dilates them.
+    for (const [name] of anims) for (const ch of touches(name)) expect(ch, name).not.toMatch(/^(eye|pupil)\./);
+  });
+
   it('dori: the rig survives the intake — a rigid body on two fins, a tail for bursts, eyes and pupils of their own that no clip moves', async () => {
     const doc = await new NodeIO().read(here('../breeds/dori.glb').pathname);
     const root = doc.getRoot();

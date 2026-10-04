@@ -8,8 +8,9 @@
       "notes": "The babies of the metaquarium. Rainbow bands authored as primaryColor…primaryColor4 and secondaryColor, head to tail: each fish wears them as one candy-bright gradient between its two coats (VIVID-<n>); its stripe and mouth are sunny yellow on every fish (PAINT-#ffd23f), and a catchlight sparkles in each pupil (EYES-Sparkle). Rigged in Blender by rig/babyfish.py from the delivered source/babyfish.glb (never edited): head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a fluttering dorsal fin, two blinking eyes; clips swim, zoom, wiggle, flip, peek and blink (wiggle_eyes, peek_eyes layer like a blink). src/babyfish.ts drives them."
     },
     "blowfish": {
-      "source": "source/blowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle", "roles": {},
-      "notes": "Already role-named. Spiky silhouette — greedy meshing helps least here."
+      "source": "rig/blowfish.glb", "delivered": "source/blowfish.glb", "rig": "rig/blowfish.py",
+      "kind": "voxel", "size": 0.8, "motion": "puffer", "roles": {},
+      "notes": "A pufferfish and a flirt, rigged in Blender by rig/blowfish.py from the delivered source/blowfish.glb (never edited; a white face laid under each pupil so it can slide). Already role-named. Everything hangs off a `puff` bone: the `puff` clip is a dial (its time is how puffed it is) that scales the fish round and stands its spines up from half tucked, so src/puffer.ts gulps it up, holds it and lets it go. Above it `body` carries the clips — swim, hover, gulp, zip, spin, flip, kiss, shimmy, bounce, spit, yawn, shy, wave, chomp — and the eyes and pupils are bones no clip moves: src/puffer.ts aims them, dilates them and closes them (true puffers can close their eyes)."
     },
     "crab": {
       "source": "rig/crab.glb", "delivered": "source/crab.glb", "rig": "rig/crab.py",
