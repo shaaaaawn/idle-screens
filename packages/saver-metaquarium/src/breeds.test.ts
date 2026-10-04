@@ -14,7 +14,7 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   const len = dv.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
-const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^PASTEL-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
 
 describe('bundled breeds (breeds/README.md)', () => {
   const names = Object.keys(manifest.breeds);
@@ -135,13 +135,15 @@ describe('bundled breeds (breeds/README.md)', () => {
     const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
     expect([...joints].sort()).toEqual(['body', 'dorsal', 'eye.L', 'eye.R', 'fin', 'head', 'tail1', 'tail2']);
     const anims = new Map(root.listAnimations().map((a) => [a.getName(), a]));
-    expect([...anims.keys()].sort()).toEqual(['blink', 'flip', 'peek', 'peek_eyes', 'swim', 'wiggle', 'wiggle_eyes', 'zoom']);
+    expect([...anims.keys()].sort()).toEqual([
+      'blink', 'flip', 'hiccup', 'hiccup_eyes', 'peek', 'peek_eyes', 'swim', 'tailchase', 'wiggle', 'wiggle_eyes', 'yawn', 'yawn_eyes', 'zoom',
+    ]);
     // The eye clips layer at full weight over the body's clips, so they touch nothing else…
-    for (const n of ['blink', 'wiggle_eyes', 'peek_eyes']) {
+    for (const n of ['blink', 'wiggle_eyes', 'peek_eyes', 'hiccup_eyes', 'yawn_eyes']) {
       for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).toMatch(/^eye\./);
     }
     // …and the body's clips leave the eyes to them.
-    for (const n of ['swim', 'zoom', 'wiggle', 'flip', 'peek']) {
+    for (const n of ['swim', 'zoom', 'wiggle', 'flip', 'peek', 'hiccup', 'tailchase', 'yawn']) {
       for (const ch of anims.get(n)!.listChannels()) expect(ch.getTargetNode()!.getName(), n).not.toMatch(/^eye\./);
     }
     // A soft spine: some vertices blend between two parts, so a joint never opens.

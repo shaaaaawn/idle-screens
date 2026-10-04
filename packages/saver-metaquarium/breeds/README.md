@@ -44,8 +44,8 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
    | `EYES-White` / `EYES-Black` | unlit sclera and pupil; `eyeLife` rigs them from their voxel grid |
    | `GLOW-<colour>` | unlit in its own colour, plus the halo shells and bloom card |
    | `KEEP-<part>` | the authored colour, kept (a screen, teeth) |
-   | `PASTEL-<n>` | a pastel step `n`% of the way from the fish's coat A to coat B, softened toward white: bands named `PASTEL-0` … `PASTEL-100` head to tail wear one gradient (the babyfish) |
-   | `PAINT-#rrggbb` | that colour on every fish (the babyfish's butter-yellow stripe) |
+   | `VIVID-<n>` | a candy-bright step `n`% of the way from the fish's coat A to coat B (the ends held apart in hue, saturated, glowing a little of its own colour): bands named `VIVID-0` … `VIVID-100` head to tail wear one gradient (the babyfish) |
+   | `PAINT-#rrggbb` | that colour on every fish (the babyfish's sunny-yellow stripe) |
    | `SCREEN-<part>` | a display the tank draws (`src/screen.ts`): faces, code rain, a boot spinner, in a phosphor per fish; the hackerfish's glass and face pixels |
    | `METAL-<part>` | polished metal: a reflective plate when lit, chrome when flat (`fishMetal: 'off'` makes it the authored colour, matte) |
    | anything else | **a random coat**: almost never what you want |

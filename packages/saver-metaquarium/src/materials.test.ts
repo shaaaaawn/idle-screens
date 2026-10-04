@@ -488,26 +488,52 @@ describe('fish glow — GLOW parts as light sources', () => {
   });
 });
 
-describe('PASTEL- and PAINT- (a babyfish\'s coat and stripe)', () => {
-  it('PASTEL-<n> runs one gradient between the fish\'s two coats, softened; PAINT-#hex is the same on every fish', () => {
-    const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
-    const names = ['PASTEL-0', 'PASTEL-50', 'PASTEL-100', 'PAINT-#ffe08a'];
-    const colours = [3, 5].map((seed) => {
-      const root = new Group(); const parts = names.map(part); root.add(...parts);
-      applyNpcMaterials(root, createRng(seed), true, true);
-      return parts.map((p) => (p.material as MeshLambertMaterial).color.clone());
-    });
-    for (const c of colours) {
-      // The middle step lies between the ends, and every step is lighter than a raw coat would be.
-      for (const k of ['r', 'g', 'b'] as const) {
-        expect(c[1]![k]).toBeGreaterThanOrEqual(Math.min(c[0]![k], c[2]![k]) - 1e-9);
-        expect(c[1]![k]).toBeLessThanOrEqual(Math.max(c[0]![k], c[2]![k]) + 1e-9);
+describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
+  const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
+  const dress = (seed: number, names: string[]): MeshLambertMaterial[] => {
+    const root = new Group(); const parts = names.map(part); root.add(...parts);
+    applyNpcMaterials(root, createRng(seed), true, true);
+    return parts.map((p) => p.material as MeshLambertMaterial);
+  };
+  it('VIVID-<n> runs one candy-bright gradient between the fish\'s two coats, glowing a little of its own colour', () => {
+    for (const seed of [1, 2, 3, 5, 8, 13]) {
+      const [a, mid, b] = dress(seed, ['VIVID-0', 'VIVID-50', 'VIVID-100']);
+      const ha = { h: 0, s: 0, l: 0 }, hb = { h: 0, s: 0, l: 0 };
+      a!.color.getHSL(ha); b!.color.getHSL(hb);
+      let dh = Math.abs(hb.h - ha.h); dh = Math.min(dh, 1 - dh);
+      expect(dh * 360, `seed ${seed}: the ends far enough apart to read as a gradient`).toBeGreaterThan(55);
+      for (const m of [a!, mid!, b!]) {
+        const hsl = { h: 0, s: 0, l: 0 }; m.color.getHSL(hsl);
+        expect(hsl.s).toBeGreaterThan(0.6);              // saturated, never washed out
+        expect(hsl.l).toBeGreaterThanOrEqual(0.45 - 1e-6); // never mud…
+        expect(hsl.l).toBeLessThanOrEqual(0.62 + 1e-6);    // …never chalk
+        expect(m.emissive.getHex()).not.toBe(0);           // its own light, so dark water does not dim it
       }
-      for (const step of c.slice(0, 3)) expect(Math.min(step.r, step.g, step.b)).toBeGreaterThan(0.2);
-      expect(c[3]!.getHex()).toBe(new Color('#ffe08a').getHex());
     }
-    expect(colours[0]![0]!.equals(colours[1]![0]!)).toBe(false); // seeded per fish
-    expect(colours[0]![3]!.getHex()).toBe(colours[1]![3]!.getHex());
+  });
+  it('VIVID is seeded per fish; PAINT-#hex is the same on every fish', () => {
+    const one = dress(3, ['VIVID-0', 'PAINT-#ffd23f']), two = dress(5, ['VIVID-0', 'PAINT-#ffd23f']);
+    expect(one[0]!.color.equals(two[0]!.color)).toBe(false);
+    expect(one[1]!.color.getHex()).toBe(new Color('#ffd23f').getHex());
+    expect(two[1]!.color.getHex()).toBe(one[1]!.color.getHex());
+  });
+});
+
+describe('EYES-Sparkle (a babyfish\'s catchlights)', () => {
+  it('a sparkle pupil is still a pupil, with a white square patched into its colour; a plain pupil is untouched', () => {
+    const mk = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: 0x000000 })); m.material.name = name; return m; };
+    const spark = mk('EYES-Sparkle'), plain = mk('EYES-Black');
+    const root = new Group(); root.add(spark, plain);
+    applyNpcMaterials(root, createRng(1), true, true);
+    const s = spark.material as MeshBasicMaterial, p = plain.material as MeshBasicMaterial;
+    expect(s.userData.mqEye).toBe('pupil');
+    expect(s.userData.mqSparkle).toBe(true);
+    expect(s.customProgramCacheKey()).toBe('mq-eye-sparkle');
+    const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    s.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('vSpkP = position');
+    expect(shader.fragmentShader).toContain('mix(diffuseColor.rgb, vec3(1.0), s)');
+    expect(p.userData.mqSparkle).toBeUndefined();
   });
 });
 

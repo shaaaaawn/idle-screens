@@ -2,12 +2,13 @@
  * The babyfish, alive: the babies of the metaquarium. A quick, fluttery
  * stroke with a bob and a squash-and-stretch, and now and then a moment of
  * its own — a zoom, a happy wiggle with its eyes squeezed shut, a barrel
- * roll, a curious peek — and a blink in between.
+ * roll, a curious peek, a hiccup, a chase after its own tail, a sleepy yawn —
+ * and a blink in between.
  *
  * The rig and clips come from Blender (breeds/rig/babyfish.py): head, body,
  * two tail links and a forked fin as a soft spine, a dorsal fin, two eyes;
- * clips swim, zoom, wiggle, flip, peek, and the eye clips blink, wiggle_eyes
- * and peek_eyes. The tank places it as any fish (it schools); this module
+ * clips swim, zoom, wiggle, flip, peek, hiccup, tailchase, yawn, and the eye
+ * clips blink, wiggle_eyes, peek_eyes, hiccup_eyes and yawn_eyes. The tank places it as any fish (it schools); this module
  * sets the clips — each action's time and weight, every frame, then
  * `mixer.update(0)` — as a closed form in t.
  *
@@ -18,9 +19,12 @@
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { fishHash } from './swim';
 
-export const BABY_CLIPS = ['swim', 'zoom', 'wiggle', 'wiggle_eyes', 'flip', 'peek', 'peek_eyes', 'blink'] as const;
+export const BABY_CLIPS = [
+  'swim', 'zoom', 'wiggle', 'wiggle_eyes', 'flip', 'peek', 'peek_eyes', 'blink',
+  'hiccup', 'hiccup_eyes', 'tailchase', 'yawn', 'yawn_eyes',
+] as const;
 export type BabyClip = (typeof BABY_CLIPS)[number];
-export type BabyMoment = 'zoom' | 'wiggle' | 'flip' | 'peek';
+export type BabyMoment = 'zoom' | 'wiggle' | 'flip' | 'peek' | 'hiccup' | 'tailchase' | 'yawn';
 export type BabyDoing = 'swim' | BabyMoment;
 
 export interface BabyRig {
@@ -49,16 +53,20 @@ export function rigBaby(body: Object3D, clips: readonly AnimationClip[]): BabyRi
 /** Swim-clip seconds per unit swum: a baby's stroke is short and quick (a grown fish's is 0.045). */
 export const BABY_STROKE = 0.07;
 /** The moments' lengths (the rig's clips), for the schedule, which knows no rig. */
-const MOMENT_LENGTH: Record<BabyMoment, number> = { zoom: 1.2, wiggle: 1.6, flip: 1.4, peek: 2.4 };
-const MOMENTS: readonly [BabyMoment, number][] = [['zoom', 0.3], ['wiggle', 0.3], ['peek', 0.25], ['flip', 0.15]];
-const EYES_OF: Partial<Record<BabyMoment, BabyClip>> = { wiggle: 'wiggle_eyes', peek: 'peek_eyes' };
+const MOMENT_LENGTH: Record<BabyMoment, number> = { zoom: 1.2, wiggle: 1.6, flip: 1.4, peek: 2.4, hiccup: 0.9, tailchase: 2.0, yawn: 3.0 };
+const MOMENTS: readonly [BabyMoment, number][] = [
+  ['zoom', 0.18], ['wiggle', 0.18], ['peek', 0.16], ['flip', 0.1], ['hiccup', 0.14], ['tailchase', 0.12], ['yawn', 0.12],
+];
+const EYES_OF: Partial<Record<BabyMoment, BabyClip>> = { wiggle: 'wiggle_eyes', peek: 'peek_eyes', hiccup: 'hiccup_eyes', yawn: 'yawn_eyes' };
+/** The longest moment: every cycle leaves room for it. */
+const LONGEST = Math.max(...Object.values(MOMENT_LENGTH));
 
 export interface BabyCycle { period: number; offset: number; at: number }
 
 /** This baby's rhythm: one moment a cycle, at a time of its own. */
 export function babyCycle(index: number): BabyCycle {
   const period = 6 + 6 * fishHash(index, 1401);
-  return { period, offset: fishHash(index, 1403) * period, at: 0.5 + (period - 3.5) * fishHash(index, 1405) };
+  return { period, offset: fishHash(index, 1403) * period, at: 0.5 + (period - LONGEST - 1) * fishHash(index, 1405) };
 }
 
 /** The moment in cycle `k`. */

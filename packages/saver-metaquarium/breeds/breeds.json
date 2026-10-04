@@ -4,8 +4,8 @@
     "babyfish": {
       "source": "rig/babyfish.glb", "delivered": "source/babyfish.glb", "rig": "rig/babyfish.py",
       "kind": "voxel", "size": 0.45, "motion": "baby",
-      "roles": { "primaryColor": "PASTEL-0", "primaryColor2": "PASTEL-25", "primaryColor3": "PASTEL-50", "primaryColor4": "PASTEL-75", "secondaryColor": "PASTEL-100", "mouth": "PAINT-#ffe08a" },
-      "notes": "The babies of the metaquarium. Rainbow bands authored as primaryColor…primaryColor4 and secondaryColor, head to tail: each fish wears them as one pastel gradient between its two coats (PASTEL-<n>); its stripe and mouth are butter yellow on every fish (PAINT-#ffe08a). Rigged in Blender by rig/babyfish.py from the delivered source/babyfish.glb (never edited): head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a fluttering dorsal fin, two blinking eyes; clips swim, zoom, wiggle, flip, peek and blink (wiggle_eyes, peek_eyes layer like a blink). src/babyfish.ts drives them."
+      "roles": { "primaryColor": "VIVID-0", "primaryColor2": "VIVID-25", "primaryColor3": "VIVID-50", "primaryColor4": "VIVID-75", "secondaryColor": "VIVID-100", "mouth": "PAINT-#ffd23f", "eyes2": "EYES-Sparkle" },
+      "notes": "The babies of the metaquarium. Rainbow bands authored as primaryColor…primaryColor4 and secondaryColor, head to tail: each fish wears them as one candy-bright gradient between its two coats (VIVID-<n>); its stripe and mouth are sunny yellow on every fish (PAINT-#ffd23f), and a catchlight sparkles in each pupil (EYES-Sparkle). Rigged in Blender by rig/babyfish.py from the delivered source/babyfish.glb (never edited): head, body, two tail links and a forked fin as a soft spine (it bends as one piece), a fluttering dorsal fin, two blinking eyes; clips swim, zoom, wiggle, flip, peek and blink (wiggle_eyes, peek_eyes layer like a blink). src/babyfish.ts drives them."
     },
     "blowfish": {
       "source": "source/blowfish.glb", "kind": "voxel", "size": 0.8, "motion": "wiggle", "roles": {},

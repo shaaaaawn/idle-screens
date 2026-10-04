@@ -31,6 +31,10 @@ Clips (30 fps; the tank sets their times, never update(dt)):
     flip    1.4 s. A barrel roll, a hop up and over.
     peek    2.4 s. It stops, tilts its head one way and the other, and
             blinks twice: who's there?
+    hiccup  0.9 s. Hic! A jolt up, eyes popped wide (hiccup_eyes).
+    tailchase 2 s. Round and round after its own tail, a puppy at play.
+    yawn    3 s. Sleepy: it slows and droops, eyes half shut (yawn_eyes), a
+            big stretching yawn — then a shake, and it is wide awake.
     blink   0.3 s. The eyes only (every other clip leaves them at rest, so
             the intake keeps no eye channels there): it layers over any clip.
 
@@ -135,12 +139,13 @@ def squash(p, s):
     p.scale['body'] = (1 - 0.5 * s, 1 + s, 1 - 0.5 * s)
 
 
-def eyes(p, shut=0.0, happy=0.0):
-    """shut: a blink (squeezed flat); happy: squeezed into arcs, a touch wider."""
+def eyes(p, shut=0.0, happy=0.0, wide=0.0):
+    """shut: a blink (squeezed flat); happy: squeezed into arcs, a touch wider;
+    wide: popped open, surprised."""
     k = max(shut, happy)
     for side in 'LR':
         # Bone frame: y runs up the eye bone (world up).
-        p.scale[f'eye.{side}'] = (1 + 0.12 * happy, 1 - 0.85 * k, 1 + 0.12 * happy)
+        p.scale[f'eye.{side}'] = (1 + 0.12 * happy + 0.18 * wide, (1 - 0.85 * k) * (1 + 0.3 * wide), 1 + 0.12 * happy + 0.18 * wide)
 
 
 def swim(t, T=0.5):
@@ -223,8 +228,65 @@ def blink(t, T=0.3):
     return p
 
 
+def hiccup(t, T=0.9):
+    """Hic! A jolt up, a stiff little flick, and on it goes."""
+    p = Pose()
+    jolt = track(t, [(0, 0), (0.15, 0), (0.2, 1), (0.32, 0.35), (0.5, 0), (T, 0)])
+    p.move('body', (0, 0, 2.8 * jolt))
+    p.turn('head', 'x', -0.18 * jolt)                    # nose bobbed up
+    squash(p, 0.14 * jolt - 0.08 * env(t, 0.32, 0.4, 0.45, 0.6))
+    tail(p, 0.25 * jolt, 0.4 * jolt, 0.6 * jolt)
+    p.turn('dorsal', 'y', -0.3 * jolt)
+    return p
+
+
+def hiccup_eyes(t, T=0.9):
+    p = Pose()
+    eyes(p, wide=env(t, 0.15, 0.2, 0.5, 0.8))
+    return p
+
+
+def tailchase(t, T=2.0):
+    """Round and round after its own tail, a puppy at play."""
+    p = Pose()
+    spin = track(t, [(0, 0), (0.15, 0), (1.75, 1), (T, 1)])
+    p.turn('body', 'z', 2 * math.pi * spin % (2 * math.pi))
+    curl = env(t, 0.05, 0.3, 1.6, 1.9)
+    tail(p, 0.45 * curl, 0.55 * curl, 0.7 * curl + 0.25 * math.sin(2 * math.pi * 6 * t) * curl)
+    p.turn('head', 'z', 0.18 * curl)                    # nose round after the tail
+    p.move('body', (0, 0, 0.6 * math.sin(2 * math.pi * 2 * t) * curl))
+    return p
+
+
+def yawn(t, T=3.0):
+    """Sleepy: it slows, droops, a big yawn (nose up, body stretched) — then a
+    shake, and it is wide awake."""
+    p = Pose()
+    sleepy = env(t, 0.1, 0.6, 2.0, 2.3)
+    stretch = env(t, 0.7, 1.1, 1.5, 1.9)
+    w = 2 * math.pi * 0.8 * t
+    tail(p, 0.06 * math.sin(w) * sleepy, 0.1 * math.sin(w - 0.7) * sleepy, 0.18 * math.sin(w - 1.4) * sleepy)
+    p.turn('head', 'x', -0.22 * stretch)
+    p.turn('body', 'y', 0.12 * sleepy - 0.12 * stretch)
+    p.move('body', (0, 0, -0.8 * sleepy))
+    squash(p, 0.1 * stretch)
+    shake = env(t, 2.2, 2.3, 2.7, 2.9)
+    p.turn('body', 'y', 0.28 * math.sin(2 * math.pi * 6 * t) * shake)
+    tail(p, 0.0, 0.0, 0.5 * math.sin(2 * math.pi * 6 * t + 1) * shake)
+    return p
+
+
+def yawn_eyes(t, T=3.0):
+    p = Pose()
+    droop = env(t, 0.2, 0.6, 2.0, 2.2)
+    eyes(p, shut=0.5 * droop + 0.45 * env(t, 0.9, 1.1, 1.5, 1.7), wide=env(t, 2.25, 2.35, 2.6, 2.9))
+    return p
+
+
 CLIPS = [('swim', swim, 0.5), ('zoom', zoom, 1.2), ('wiggle', wiggle, 1.6), ('wiggle_eyes', wiggle_eyes, 1.6),
-         ('flip', flip, 1.4), ('peek', peek, 2.4), ('peek_eyes', peek_eyes, 2.4), ('blink', blink, 0.3)]
+         ('flip', flip, 1.4), ('peek', peek, 2.4), ('peek_eyes', peek_eyes, 2.4), ('blink', blink, 0.3),
+         ('hiccup', hiccup, 0.9), ('hiccup_eyes', hiccup_eyes, 0.9), ('tailchase', tailchase, 2.0),
+         ('yawn', yawn, 3.0), ('yawn_eyes', yawn_eyes, 3.0)]
 
 
 def main():

@@ -20,11 +20,55 @@ import { isScreen, PHOSPHORS, screenMaterial } from './screen';
 export { MIAMI_VICE_COLORS, BLOOM_COLORS };
 
 const BODY_COATS = MIAMI_VICE_COLORS.filter((c) => c !== '#1c1c1c');
-/** How far a PASTEL- coat is softened toward white. */
-export const PASTEL_SOFTEN = 0.28;
-/** A pastel step between two coats (the PASTEL-<n> role): mixed in linear light, then softened toward white. */
-export function pastelOf(a: string, b: string, t: number): Color {
-  return new Color(a).lerp(new Color(b), t).lerp(new Color('#ffffff'), PASTEL_SOFTEN);
+/**
+ * A catchlight in a pupil (EYES-Sparkle, the babyfish's): a little white
+ * square high on every face of each pupil voxel, the light caught in a
+ * bright eye. Drawn from the rest-pose position (`position`, before skinning),
+ * so it rides the eye wherever it turns; a voxel spans two units between odd
+ * planes, so (p + 1) / 2 runs 0..1 across each face.
+ */
+export function sparkle(eye: MeshBasicMaterial): void {
+  eye.userData.mqSparkle = true;
+  eye.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpkP = position;\nvSpkN = normal;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        vec3 an = abs(vSpkN);
+        // The face's own two axes, the second one up wherever there is an up.
+        vec2 f = an.x > 0.5 ? vSpkP.zy : an.z > 0.5 ? vSpkP.xy : vSpkP.xz;
+        vec2 uv = fract((f + 1.0) * 0.5);
+        float s = step(0.14, uv.x) * step(uv.x, 0.44) * step(0.56, uv.y) * step(uv.y, 0.86);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), s);
+      }`);
+  };
+  eye.customProgramCacheKey = () => 'mq-eye-sparkle';
+}
+
+/** A VIVID- coat glows this much of its own colour: candy-bright in dark water too. */
+export const VIVID_GLOW = 0.22;
+/**
+ * A candy-bright step between two coats (the VIVID-<n> role). The two ends are
+ * held at least 70° apart in hue — two near neighbours (lavender, periwinkle)
+ * make a gradient nobody sees — the steps run round the colour wheel between
+ * them, and every step is saturated and kept out of the very light and the
+ * very dark, where colour reads as white or mud.
+ */
+export function vividOf(a: string, b: string, t: number): Color {
+  const ha = { h: 0, s: 0, l: 0 }, hb = { h: 0, s: 0, l: 0 };
+  new Color(a).getHSL(ha); new Color(b).getHSL(hb);
+  let dh = hb.h - ha.h;
+  dh -= Math.round(dh);                       // the short way round the wheel
+  if (Math.abs(dh) < 70 / 360) dh = (dh >= 0 ? 1 : -1) * 0.3;
+  // Round the colour wheel, not through grey: a straight mix of two far hues
+  // goes muddy in the middle.
+  const h = (ha.h + dh * t + 1) % 1;
+  const sat = Math.min(1, Math.max(ha.s, hb.s) * 1.15 + 0.15);
+  const l = Math.min(0.62, Math.max(0.45, ha.l + (hb.l - ha.l) * t));
+  return new Color().setHSL(h, sat, l);
 }
 
 function materialsOf(mesh: Mesh): Material[] {
@@ -214,6 +258,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
         eye.userData.mqNoCaustic = true; // a display, not a surface
+        if (!white && /sparkle/i.test(m.name)) sparkle(eye);
         decal(eye, white ? 1 : 2);
         return eye;
       }
@@ -322,7 +367,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         return kept;
       }
       // PAINT-#rrggbb: a part in a colour of the intake's choosing, the same on
-      // every fish (the babyfish's stripe, butter yellow on its pastels).
+      // every fish (the babyfish's stripe, sunny yellow on its candy coat).
       const paint = /^PAINT-(#[0-9a-f]{6})$/i.exec(m.name);
       if (paint && !neonColor) {
         const painted = lit ? new MeshLambertMaterial({ color: new Color(paint[1]) }) : new MeshBasicMaterial({ color: new Color(paint[1]) });
@@ -330,11 +375,20 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         painted.userData.mqOwned = true;
         return painted;
       }
-      // PASTEL-<n>: n% of the way from coat A to coat B, softened toward white
-      // (a baby's coat: the babyfish's bands run head to tail as one gradient).
-      const pastel = /^PASTEL-(\d{1,3})$/.exec(m.name);
-      const coat = pastel
-        ? pastelOf(coatA, coatB, Math.min(100, Number(pastel[1])) / 100)
+      // VIVID-<n>: n% of the way from coat A to coat B, candy-bright (a baby's
+      // coat: the babyfish's bands run head to tail as one gradient).
+      const vivid = /^VIVID-(\d{1,3})$/.exec(m.name);
+      if (vivid && !neonColor) {
+        const c = vividOf(coatA, coatB, Math.min(100, Number(vivid[1])) / 100);
+        const candy = lit
+          ? new MeshLambertMaterial({ color: c, emissive: c.clone().multiplyScalar(VIVID_GLOW) })
+          : new MeshBasicMaterial({ color: c });
+        candy.name = m.name;
+        candy.userData.mqOwned = true;
+        return candy;
+      }
+      const coat = vivid
+        ? vividOf(coatA, coatB, Math.min(100, Number(vivid[1])) / 100)
         : /primary/i.test(m.name)
         ? coatA
         : /secondary/i.test(m.name)
