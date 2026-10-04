@@ -17,9 +17,9 @@
       "notes": "Already role-named. The black mouth is EYES-Black coplanar with the body: the decal rule keeps it. Rigged in Blender by rig/crab.py from the delivered source/crab.glb (never edited): 23 rigid voxel parts — body, eye stalks, claw arms and jaws, two-segment legs — and the clips walk, idle, pinch, forage, wave, cheer. src/crab.ts drives them."
     },
     "dori": {
-      "source": "source/dori.glb", "kind": "voxel", "size": 0.9, "motion": "wiggle",
-      "roles": { "Material.008": "PrimaryColor", "Material.003": "SecondaryColor", "Material.007": "EYES-White", "Black": "EYES-Black", "Material.002": "GLOW-Yellow" },
-      "notes": "Unnamed materials (Material.00x) all painted a random coat before. GPU-instanced parts, baked."
+      "source": "rig/dori.glb", "delivered": "source/dori.glb", "rig": "rig/dori.py",
+      "kind": "voxel", "size": 0.9, "motion": "tang", "roles": {},
+      "notes": "A blue tang, rigged in Blender by rig/dori.py from the delivered source/dori.glb (never edited; its GPU-instanced marking is joined and its doubled cubes dropped, and its Material.00x names, which collide in a shared .blend, are matched by colour and renamed to the roles the intake used to map them to). The first breed that swims on its fins: a rigid body, two pectorals that beat like wings, a tail only for bursts, a dorsal that rises in a display; clips fly, hover, back, burst, pick, flare, headstand, flop. Its eyes are bones, not clips: src/dori.ts aims each one every frame (the box swivels, the pupil slides over a white backing laid under it), and it never blinks — fish have no eyelids."
     },
     "glowfish": {
       "source": "rig/glowfish.glb", "delivered": "source/glowfish.glb", "rig": "rig/glowfish.py",

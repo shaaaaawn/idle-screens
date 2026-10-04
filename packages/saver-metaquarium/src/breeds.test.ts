@@ -155,6 +155,40 @@ describe('bundled breeds (breeds/README.md)', () => {
     expect(blended).toBeGreaterThan(0);
   });
 
+  it('dori: the rig survives the intake — a rigid body on two fins, a tail for bursts, eyes and pupils of their own that no clip moves', async () => {
+    const doc = await new NodeIO().read(here('../breeds/dori.glb').pathname);
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['body', 'dorsal', 'eye.L', 'eye.R', 'head', 'pec.L', 'pec.R', 'peduncle', 'pupil.L', 'pupil.R', 'tail']);
+    const anims = root.listAnimations();
+    expect(anims.map((a) => a.getName()).sort()).toEqual(['back', 'burst', 'flare', 'flop', 'fly', 'headstand', 'hover', 'pick']);
+    // The eyes are tang.ts's, every frame: a clip that keyed them would fight it.
+    for (const a of anims) for (const ch of a.listChannels()) expect(ch.getTargetNode()!.getName(), a.getName()).not.toMatch(/^(eye|pupil)\./);
+    // The materials arrive as the roles the delivered model was mapped to.
+    expect(root.listMaterials().map((m) => m.getName()).sort()).toEqual(['EYES-Black', 'EYES-White', 'GLOW-Yellow', 'PrimaryColor', 'SecondaryColor']);
+    // Each pupil is its own bone's alone, and the white is backed under it: some
+    // white faces sit 2 thousandths inside the eye's front face (y -16.912 in
+    // Blender is z 16.912 here).
+    const where = (name: string): Set<string> => {
+      const out = new Set<string>();
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+        if (p.getMaterial()!.getName() !== name) continue;
+        const j = p.getAttribute('JOINTS_0')!;
+        for (let i = 0; i < j.getCount(); i++) out.add(joints[(j.getElement(i, []) as number[])[0]!]!);
+      }
+      return out;
+    };
+    expect([...where('EYES-White')].sort()).toEqual(['eye.L', 'eye.R']);
+    expect([...where('EYES-Black')].sort()).toEqual(['head', 'pupil.L', 'pupil.R', 'tail']);
+    let backing = 0;
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      if (p.getMaterial()!.getName() !== 'EYES-White') continue;
+      const pos = p.getAttribute('POSITION')!;
+      for (let i = 0; i < pos.getCount(); i++) if (Math.abs((pos.getElement(i, []) as number[])[2]! - (16.912 - 0.002)) < 6e-4) backing++;
+    }
+    expect(backing).toBeGreaterThan(0);
+  });
+
   it('starfish: the rig survives the intake — disc, eyes, five arms in three links; each glowing tip its own light on its own arm', async () => {
     const doc = await new NodeIO().read(here('../breeds/starfish.glb').pathname);
     const root = doc.getRoot();

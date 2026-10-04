@@ -23,7 +23,7 @@ sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, HERE)
 from common import in_scene  # noqa: E402
 
-BREEDS = ['crab', 'glowfish', 'hackerfish', 'shark', 'starfish', 'babyfish']
+BREEDS = ['crab', 'glowfish', 'hackerfish', 'shark', 'starfish', 'babyfish', 'dori']
 
 
 def stage(scene, rig, first_clip):
