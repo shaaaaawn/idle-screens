@@ -758,6 +758,15 @@ class TankInstance implements SaverInstance {
   /** A babyfish's hiccup bubbles: made with the first baby, so a tank without one draws nothing new. */
   private burps: BurpLayer | null = null;
   private readonly burpFrom = new Vector3();
+  /**
+   * Where the viewer is, for a fish that looks at them (tang.ts, puffer.ts).
+   * The follow camera is placed AFTER the fish (it needs their positions), so
+   * during the fish loop `camera.position` is still the shot's: a fish would
+   * look at an orbit camera nobody is watching through. So: last frame's
+   * camera, one frame behind, when following.
+   */
+  private readonly viewerAt = new Vector3();
+  private viewerSeen = false;
   private readonly burpAt = new Vector3();
   private readonly burpTmp = new Vector3();
   /**
@@ -1564,6 +1573,11 @@ class TankInstance implements SaverInstance {
     this.spotSheet = cues.trim() ? parseSpotCues(cues, this.spotRig.length) : null;
     const problems = [...parsed.problems, ...(this.spotSheet?.problems ?? [])];
     if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
+  }
+
+  /** Where a fish should look to meet the viewer's eye (see `viewerAt`). */
+  private viewer(followSlot: number): Vector3 {
+    return followSlot >= 0 && this.viewerSeen ? this.viewerAt : this.camera.position;
   }
 
   /** The shot's camera, before the fish loop (follow, if on, overrides it after). */
@@ -2861,13 +2875,13 @@ class TankInstance implements SaverInstance {
       let look: ReturnType<typeof tangLook> | null = null;
       if (tang && f.rig!.tang) {
         f.group.updateMatrixWorld(true);
-        look = tangLook(f.rig!.tang, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.camera.position, state: tang });
+        look = tangLook(f.rig!.tang, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: tang });
       }
       // A blowfish turns to whoever it is kissing or waving at (a kiss given
       // sideways is no kiss at all), then its eyes, then its bubbles.
       let pLook: ReturnType<typeof pufferLook> | null = null;
       if (puffer && f.rig!.puffer) {
-        const viewer = followPov && f.index === followSlot ? null : this.camera.position;
+        const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
         if (viewer && puffer.face > 0.01) {
           const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz;
           let turn = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
@@ -3004,6 +3018,7 @@ class TankInstance implements SaverInstance {
       });
     }
     this.placeFollowCamera(followSlot, followBack, followPov, followLen);
+    this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
     this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
     this.commitGlow(glowN, fishGlow, glowPulse, tSec);
     this.aimSpot(tSec);
