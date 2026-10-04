@@ -140,10 +140,15 @@ const views: Array<[string, (d: number) => Vector3]> = [
     }
     const lab = document.createElement('div'); lab.className = 'label';
     lab.style.left = '4px'; lab.style.top = `${row * CELL + 4}px`;
-    lab.innerHTML = `<b>${r.label}</b>  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`;
+    const name = document.createElement('b'); name.textContent = r.label;
+    lab.append(name, `  ${Math.round(tris)} tris  swim ${swimX ? 'x' : 'z'}  size ${size.toArray().map((v) => v.toFixed(1)).join('×')}`);
     const leg = document.createElement('div'); leg.className = 'label';
     leg.style.left = `${3 * CELL + 4}px`; leg.style.top = `${row * CELL + 4}px`;
-    leg.innerHTML = matNames.map((n, i) => `<span class="sw" style="background:${FALSE[i % FALSE.length]}"></span>${n} → ${role(n)} (${Math.round(mats.get(n)!)})`).join('\n');
+    // Material names come from the GLB, so build text nodes rather than markup.
+    matNames.forEach((n, i) => {
+      const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = FALSE[i % FALSE.length]!;
+      leg.append(sw, `${n} → ${role(n)} (${Math.round(mats.get(n)!)})${i < matNames.length - 1 ? '\n' : ''}`);
+    });
     sheet.append(lab, leg);
     row += 1;
   }

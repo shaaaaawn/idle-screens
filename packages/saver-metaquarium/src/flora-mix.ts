@@ -35,7 +35,7 @@ export function parseFloraMix(src: string): { mix: Partial<Record<FloraSpecies, 
   for (const raw of src.split(',')) {
     const part = raw.trim();
     if (!part) continue;
-    const m = /^([a-z]+)\s*(?::\s*([0-9]*\.?[0-9]+))?$/i.exec(part);
+    const m = /^([a-z]+)\s*(?::\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/i.exec(part);
     const name = m?.[1]?.toLowerCase() as FloraSpecies | undefined;
     if (!m || !name || !(FLORA_SPECIES as readonly string[]).includes(name)) {
       problems.push(`"${part}": expected species[:weight] with species one of ${FLORA_SPECIES.join(', ')}`);
