@@ -426,7 +426,9 @@ export function octopusFrame(rig: OctopusRig, inp: OctopusInput, out: OctopusOut
     intoActivity = m.intoStop - TURN_IN;
     // The activity lasts as long as it does (a nap fills the stop); after it,
     // it just sits — breathing, looking about — until it turns to go.
-    if (stop !== 'sleep' && intoActivity > STOP_LEN[stop] + 0.4) stop = 'idle';
+    // Its idle begins there, so its mood (the camouflage) ramps in from nothing
+    // rather than jumping to the plateau the fade-out just left.
+    if (stop !== 'sleep' && intoActivity > STOP_LEN[stop] + 0.4) { intoActivity -= STOP_LEN[stop] + 0.4; stop = 'idle'; }
     doing = (a < 1 && Math.abs(dIn) > 0.05) || (b > 0 && Math.abs(dOut) > 0.05) ? 'turn' : stop;
   }
   const fx = Math.sin(yaw), fz = Math.cos(yaw);

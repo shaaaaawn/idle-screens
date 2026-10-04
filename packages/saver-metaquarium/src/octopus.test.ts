@@ -178,6 +178,10 @@ describe('the octopus, more closely', () => {
     const after = at(1.0 + 2.0 + 1.5);
     expect(after.doing).toBe('idle');
     expect(after.stop).toBe('idle');
+    // The idle's camouflage fades in from the moment it begins, not from the plateau.
+    const camoLate = after.mood.camo;
+    expect(at(1.0 + 2.0 + 0.5).mood.camo).toBeLessThan(0.55 * 0.5);
+    expect(camoLate).toBeGreaterThan(0.55 * 0.5);
     expect(rig.actions.wave.getEffectiveWeight()).toBe(0);
   });
 
