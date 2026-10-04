@@ -8,7 +8,9 @@ import {
   MeshMatcapMaterial,
   MeshStandardMaterial,
   SRGBColorSpace,
+  Vector2,
   Vector3,
+  type Box3,
   type Material,
   type Mesh,
   type Object3D,
@@ -20,6 +22,81 @@ import { isScreen, PHOSPHORS, screenMaterial } from './screen';
 export { MIAMI_VICE_COLORS, BLOOM_COLORS };
 
 const BODY_COATS = MIAMI_VICE_COLORS.filter((c) => c !== '#1c1c1c');
+/**
+ * A catchlight in a pupil (EYES-Sparkle, the babyfish's): ONE soft-edged
+ * white square per eye, high on the face that looks out of the head — the
+ * light caught in a bright eye. Placed in the pupils' own box (`box`, the
+ * rest-pose bounds of the mesh, both eyes): "out" is the axis the two eyes
+ * spread along, "up" is y. Drawn from the rest-pose position (before
+ * skinning), so it rides the eye as it turns and squashes with a blink.
+ *
+ * Not on every face (two or three squares an eye read as spots), and its
+ * edges are antialiased and it fades out when the pupil is a few pixels
+ * across, so it never shimmers.
+ */
+export function sparkle(eye: MeshBasicMaterial, box: Box3): void {
+  eye.userData.mqSparkle = true;
+  const size = box.getSize(new Vector3());
+  // The axis the eyes spread along (left eye to right eye) is the widest.
+  const out = size.x >= size.y && size.x >= size.z ? 0 : size.z >= size.y ? 2 : 1;
+  const up = out === 1 ? 2 : 1;
+  const along = 3 - out - up;
+  const axis = ['x', 'y', 'z'] as const;
+  const lo = new Vector2(box.min[axis[along]], box.min[axis[up]]);
+  const span = new Vector2(Math.max(1e-6, size[axis[along]]), Math.max(1e-6, size[axis[up]]));
+  const mid = (box.min[axis[out]] + box.max[axis[out]]) / 2;
+  eye.onBeforeCompile = (shader) => {
+    shader.uniforms.uSpkLo = { value: lo };
+    shader.uniforms.uSpkSpan = { value: span };
+    shader.uniforms.uSpkMid = { value: mid };
+    const a = axis[along], u = axis[up], o = axis[out];
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpkP = position;\nvSpkN = normal;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpkP;\nvarying vec3 vSpkN;\nuniform vec2 uSpkLo;\nuniform vec2 uSpkSpan;\nuniform float uSpkMid;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        // Only the face that looks out of the head: its normal along the
+        // eyes' axis, pointing away from the middle.
+        float outward = step(0.5, abs(vSpkN.${o})) * step(0.0, vSpkN.${o} * (vSpkP.${o} - uSpkMid));
+        vec2 uv = (vec2(vSpkP.${a}, vSpkP.${u}) - uSpkLo) / uSpkSpan;
+        vec2 w = max(fwidth(uv) * 0.6, vec2(1e-4));
+        vec2 inA = smoothstep(vec2(0.42, 0.5) - w, vec2(0.42, 0.5) + w, uv);
+        vec2 inB = 1.0 - smoothstep(vec2(0.82, 0.88) - w, vec2(0.82, 0.88) + w, uv);
+        float s = inA.x * inA.y * inB.x * inB.y * outward;
+        // A pupil a few pixels across: no catchlight to flicker.
+        s *= 1.0 - smoothstep(0.12, 0.3, max(w.x, w.y));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), s);
+      }`);
+  };
+  eye.customProgramCacheKey = () => `mq-eye-sparkle-v2-${axis[along]}${axis[up]}${axis[out]}`;
+}
+
+/** A VIVID- coat glows this much of its own colour: candy-bright in dark water too. */
+export const VIVID_GLOW = 0.22;
+/** A PAINT- part glows this much of its own colour (it shades to mud under blue light otherwise). */
+export const PAINT_GLOW = 0.4;
+/**
+ * A candy-bright step between two coats (the VIVID-<n> role). The two ends are
+ * held at least 70° apart in hue — two near neighbours (lavender, periwinkle)
+ * make a gradient nobody sees — the steps run round the colour wheel between
+ * them, and every step is saturated and kept out of the very light and the
+ * very dark, where colour reads as white or mud.
+ */
+export function vividOf(a: string, b: string, t: number): Color {
+  const ha = { h: 0, s: 0, l: 0 }, hb = { h: 0, s: 0, l: 0 };
+  new Color(a).getHSL(ha); new Color(b).getHSL(hb);
+  let dh = hb.h - ha.h;
+  dh -= Math.round(dh);                       // the short way round the wheel
+  if (Math.abs(dh) < 70 / 360) dh = (dh >= 0 ? 1 : -1) * 0.3;
+  // Round the colour wheel, not through grey: a straight mix of two far hues
+  // goes muddy in the middle.
+  const h = (ha.h + dh * t + 1) % 1;
+  const sat = Math.min(1, Math.max(ha.s, hb.s) * 1.15 + 0.15);
+  const l = Math.min(0.62, Math.max(0.45, ha.l + (hb.l - ha.l) * t));
+  return new Color().setHSL(h, sat, l);
+}
 
 function materialsOf(mesh: Mesh): Material[] {
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -169,6 +246,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
   // A screen's phosphor (screen.ts), drawn once, on the first SCREEN- part:
   // a fish without a screen draws nothing extra.
   let phosphor: Color | null = null;
+  const glows = new Map<Material, MeshBasicMaterial>();
   // Neon keeps SMALL glow lit (a lure, a fin's accent) and darkens a glow part
   // that is a big piece of the animal (a crab's claws): in blacklight the
   // light is the eyes, not the armour.
@@ -208,6 +286,10 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         // What `rigEyes` looks for: the white blinks and widens, the black looks and dilates.
         eye.userData.mqEye = white ? 'sclera' : 'pupil';
         eye.userData.mqNoCaustic = true; // a display, not a surface
+        if (!white && /sparkle/i.test(m.name)) {
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          sparkle(eye, mesh.geometry.boundingBox!);
+        }
         decal(eye, white ? 1 : 2);
         return eye;
       }
@@ -224,7 +306,12 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       // A textured glow part keeps its template material; it is still light, not a lit surface.
       if (isGlow(m)) m.userData.mqNoCaustic = true;
       if (isGlow(m) && !(m as Partial<MeshBasicMaterial>).map) {
+        // One light, however many meshes share it (the starfish's five tips):
+        // one colour, drawn once.
+        const shared = glows.get(m);
+        if (shared) return shared;
         const glow = new MeshBasicMaterial({ color: glowColorOf(m, rng) });
+        glows.set(m, glow);
         glow.name = m.name;
         glow.userData.mqNoCaustic = true;
         // The halo pass reads this back so shell and core NEVER disagree —
@@ -310,7 +397,33 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         decal(kept, 1);
         return kept;
       }
-      const coat = /primary/i.test(m.name)
+      // PAINT-#rrggbb: a part in a colour of the intake's choosing, the same on
+      // every fish (the babyfish's stripe, sunny yellow on its candy coat).
+      const paint = /^PAINT-(#[0-9a-f]{6})$/i.exec(m.name);
+      if (paint && !neonColor) {
+        // It glows a little more than a VIVID coat: a yellow under blue water
+        // light shades to olive, and a stripe is meant to pop.
+        const pc = new Color(paint[1]);
+        const painted = lit ? new MeshLambertMaterial({ color: pc, emissive: pc.clone().multiplyScalar(PAINT_GLOW) }) : new MeshBasicMaterial({ color: pc });
+        painted.name = m.name;
+        painted.userData.mqOwned = true;
+        return painted;
+      }
+      // VIVID-<n>: n% of the way from coat A to coat B, candy-bright (a baby's
+      // coat: the babyfish's bands run head to tail as one gradient).
+      const vivid = /^VIVID-(\d{1,3})$/.exec(m.name);
+      if (vivid && !neonColor) {
+        const c = vividOf(coatA, coatB, Math.min(100, Number(vivid[1])) / 100);
+        const candy = lit
+          ? new MeshLambertMaterial({ color: c, emissive: c.clone().multiplyScalar(VIVID_GLOW) })
+          : new MeshBasicMaterial({ color: c });
+        candy.name = m.name;
+        candy.userData.mqOwned = true;
+        return candy;
+      }
+      const coat = vivid
+        ? vividOf(coatA, coatB, Math.min(100, Number(vivid[1])) / 100)
+        : /primary/i.test(m.name)
         ? coatA
         : /secondary/i.test(m.name)
         ? coatB

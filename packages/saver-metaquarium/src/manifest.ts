@@ -236,6 +236,20 @@ export const METAQUARIUM_PARAMS = {
    *  display, so `eyeLife` leaves them be. Minted fish keep their atlases.
    *  Best in a dark room with `finish`. Read when a fish spawns. */
   fishLook: { type: 'enum', default: 'natural', options: ['natural', 'neon'], ease: 'step' },
+  /** The starfish dance (starfish.ts). `aerobics`: every starfish in the cast
+   *  (bar a formation's) stands up in a class at the tank's centre, rows facing
+   *  the camera behind an instructor, and dances the routine in unison: march,
+   *  jacks, reaches, kicks, twists, arm circles, the disco point, a spin.
+   *  `freestyle`: the same floor, each dancer its own move every eight counts.
+   *  `duet`: the partner dance (the Dirty Dancing number) — couples side by
+   *  side, each pair face to face in a dance frame: the basic, a sway, a
+   *  twirl, the dip, and the lift, her arms spread overhead. Pair with
+   *  `spotRig` on slots 0 and 1 for the couple's spotlights.
+   *  `off` (default): they live their own lives. */
+  starfishDance: { type: 'enum', default: 'off', options: ['off', 'aerobics', 'freestyle', 'duet'], ease: 'step' },
+  /** The dance's tempo, beats per minute. Every move is a bar of four beats.
+   *  Integrated when steered, so a glide speeds the class up on the beat. */
+  danceTempo: { type: 'number', default: 128, min: 60, max: 180, ease: 'smooth' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.

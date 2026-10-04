@@ -215,7 +215,7 @@ describe('relationships, auto styles, breathing, sway', () => {
   });
   it('auto covers every minted breed and every NPC breed, and loops for strangers', () => {
     for (const b of ['betafish', 'angelfish', 'seahorse', 'seaturtle',
-      'blowfish', 'hackerfish', 'glowfish', 'babyfish', 'shark', 'crab', 'dori']) {
+      'blowfish', 'hackerfish', 'glowfish', 'babyfish', 'shark', 'crab', 'dori', 'starfish']) {
       expect(AUTO_STYLE_BY_BREED[b]).toBeDefined();
       expect(swimStyleOf(AUTO_STYLE_BY_BREED[b]!).name).toBe(AUTO_STYLE_BY_BREED[b]);
     }

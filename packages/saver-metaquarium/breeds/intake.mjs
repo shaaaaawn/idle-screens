@@ -58,7 +58,7 @@ const io = new NodeIO().setLogger(quiet).registerExtensions(ALL_EXTENSIONS)
 
 const isEye = (name) => /eye/i.test(name);
 const roleOf = (name) => isEye(name) ? (/black|pupil/i.test(name) ? 'eye·pupil' : /white|sclera/i.test(name) ? 'eye·sclera' : 'eye (by luminance)')
-  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
+  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /^VIVID-\d{1,3}$/.test(name) ? `vivid ${name.slice(6)}%` : /^PAINT-#[0-9a-f]{6}$/i.test(name) ? `paint ${name.slice(6)}` : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
 
 function stats(doc) {
   let tris = 0; const mats = new Map(); const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -289,6 +289,32 @@ function flatNormals(doc) {
   }
 }
 
+/** One primitive per bone for the materials named (breeds.json `splitByBone`):
+ *  a glow material spread over several moving parts (the starfish's five tips)
+ *  becomes one small light per part, each riding its own bone — a small glow
+ *  stays lit in the neon look, and its bloom and light follow the tip. Runs on
+ *  unindexed, rigid primitives (after greedy and flatNormals). */
+function splitByBone(doc, names) {
+  for (const mesh of doc.getRoot().listMeshes()) for (const p of [...mesh.listPrimitives()]) {
+    if (!names.includes(p.getMaterial()?.getName()) || p.getIndices()) continue;
+    const joints = jointsOf(p); if (!joints) continue;
+    if (joints.includes(-1)) throw new Error(`${p.getMaterial().getName()}: splitByBone needs rigid parts`);
+    const parts = [...new Set(joints)].sort((a, b) => a - b); if (parts.length < 2) continue;
+    for (const j of parts) {
+      const q = doc.createPrimitive().setMaterial(p.getMaterial()).setMode(p.getMode());
+      for (const sem of p.listSemantics()) {
+        const a = p.getAttribute(sem), size = a.getElementSize(), src = a.getArray();
+        const out = new src.constructor(joints.filter((x) => x === j).length * 3 * size);
+        let o = 0;
+        joints.forEach((x, t) => { if (x === j) { out.set(src.subarray(t * 3 * size, (t + 1) * 3 * size), o); o += 3 * size; } });
+        q.setAttribute(sem, doc.createAccessor().setType(a.getType()).setArray(out).setNormalized(a.getNormalized()));
+      }
+      mesh.addPrimitive(q);
+    }
+    p.dispose();
+  }
+}
+
 const rows = [];
 mkdirSync(SRC_OUT, { recursive: true });
 for (const [breed, spec] of Object.entries(manifest.breeds)) {
@@ -353,6 +379,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, spec.triBudget / before.tris), error: spec.error ?? 0.002, lockBorder: false }), unweld());
   }
   flatNormals(doc);
+  if (rigged && spec.splitByBone) splitByBone(doc, spec.splitByBone);
   if (rigged) {
     dropRestChannels(doc);
     // Blender's own extras (material-variant bookkeeping) go; the rig's mq* facts stay.

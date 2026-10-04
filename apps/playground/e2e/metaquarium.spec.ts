@@ -385,6 +385,82 @@ test('MQ11: shoal mounts over a dense canopy and reports a sane inspect().shoal'
 });
 
 /**
+ * The starfish (a bundled breed drawn in-house, rigged in Blender): it mounts
+ * from its own lazy chunk, and its driver (starfish.ts) has it on the floor
+ * doing a starfish's business. The NPC cast above is capped at the low
+ * tier's eight fish, so it gets its own scene.
+ */
+test('MQ12: the starfish mounts, rigged, and crawls the floor', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.environment=reef');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  for (const d of doings) expect(['crawl', 'walk', 'rise', 'sit', 'turn', 'idle', 'look', 'wave', 'stand', 'curl']).toContain(d);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The starfish dance: an aerobics class mounts, every dancer upright on the
+ * same move of the routine (starfish.ts danceAt), no errors.
+ */
+test('MQ13: starfish aerobics — the class dances one move in unison', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:4&mq.starfishDance=aerobics&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(4);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(4);
+  expect(['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']).toContain(doings[0]);
+  expect(new Set(doings).size).toBe(1);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The partner dance: a couple mounts, both on the same move of the routine,
+ * no errors.
+ */
+test('MQ14: starfish duet — a couple dances the same move together', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.starfishDance=duet&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  expect(['mambo', 'sway', 'twirl', 'dip', 'lift']).toContain(doings[0]);
+  expect(doings[1]).toBe(doings[0]);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Crystals (propMix): generated scenery builds and reports itself, and a tank
  * that asked for none builds none — the "byte-identical when off" contract,
  * checked at the one place a viewer could see it break.
