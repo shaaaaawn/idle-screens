@@ -245,6 +245,8 @@ describe('what each act does with its eyes', () => {
 
 describe('the act schedule', () => {
   it('is pure', () => {
-    for (const t of [3, 50, 777]) expect(pufferAct(5, t)).toEqual(pufferAct(5, t));
+    const expected = [3, 50, 777].map((t) => pufferAct(5, t));
+    pufferAct(6, 123);
+    expect([3, 50, 777].map((t) => pufferAct(5, t))).toEqual(expected);
   });
 });

@@ -195,7 +195,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       if (name === 'puff') continue;
       for (const ch of touches(name)) {
         expect(ch, name).not.toBe('puff.scale');
-        expect(ch, name).not.toMatch(/^spines\.(top|bottom|L|R)\.translation$/);
+        expect(ch, name).not.toMatch(/^spines\.(top|bottom|L|R|back)\.translation$/);
       }
     }
     // …and no clip at all moves an eye or a pupil: puffer.ts aims, closes and dilates them.

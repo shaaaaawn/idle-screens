@@ -72,6 +72,7 @@ describe('the dori (tang.ts)', () => {
       found = true;
       expect(ahead(rig, 1).x).toBeGreaterThan(0.3);           // the left eye's box turned to its left
       expect(look.offViewer).toBeLessThan(25);
+      expect(rig.eyes[0]!.pupil.position.x).toBeLessThan(rig.eyes[0]!.pupilRest.x);
     }
     expect(found).toBe(true);
   });

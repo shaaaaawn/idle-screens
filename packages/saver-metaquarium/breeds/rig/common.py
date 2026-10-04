@@ -383,6 +383,8 @@ def clean_eyes(white, black, is_pupil):
         lo = Vector([min(p[i] for p in pts) for i in range(3)])
         hi = Vector([max(p[i] for p in pts) for i in range(3)])
         front = [f for f in bf if f.normal.y < -0.9 and abs(f.center.y - lo.y) < 0.01]
+        if not front:
+            continue
         fp = [black.data.vertices[i].co for f in front for i in f.vertices]
         x0, x1 = min(p.x for p in fp), max(p.x for p in fp)
         z0, z1 = min(p.z for p in fp), max(p.z for p in fp)
