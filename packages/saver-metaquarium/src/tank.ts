@@ -3003,8 +3003,8 @@ class TankInstance implements SaverInstance {
       // An octopus's eyes — each pupil turned level with the world — its skin, its ink (octopus.ts, ink.ts).
       let oLook: ReturnType<typeof octopusLook> | null = null;
       // Placed by a script or a formation it has no stops, but it still keeps its pupils level and changes colour.
-      const oState = octo ?? (f.rig!.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
-      if (oState && f.rig!.octopus) {
+      const oState = octo ?? (f.rig?.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
+      if (oState && f.rig?.octopus) {
         f.group.updateMatrixWorld(true);
         oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: oState });
         if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, oState.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, oState.coat);
