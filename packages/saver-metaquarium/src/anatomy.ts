@@ -181,7 +181,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (has('propMix')) {
     const props = parsePropMix(str('propMix')).entries;
     const n = props.reduce((k, e) => k + e.count, 0);
-    if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette} ${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
+    if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette === 'env' ? '' : `${e.palette} `}${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
   }
   if (num('skyLanterns') > 0) world.push('jellyfish lanterns overhead');
   if (num('horizon') > 0) world.push('a far horizon');

@@ -82,6 +82,11 @@ describe('describeMetaquarium', () => {
     expect(stage('0s: a | 4s: b')).toEqual(['vignette: 2 beats']);
   });
 
+  it('names an unpainted crystal by habit alone, not the "env" palette token', () => {
+    const world = describeMetaquarium({ propMix: 'crystal:1@spire' }).sections.find((x) => x.name === 'World')?.items ?? [];
+    expect(world).toContain('1 crystal: spire');
+  });
+
   it('reads every recipe without a problem and with a cast', () => {
     for (const r of RECIPES) {
       const a = describeMetaquarium(r.params);
