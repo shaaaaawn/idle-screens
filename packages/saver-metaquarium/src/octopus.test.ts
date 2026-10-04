@@ -4,8 +4,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
 import {
-  newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusLook, octopusMoment, octopusSkin,
-  octopusSpot, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusRig,
+  newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusIdle,
+  octopusLook, octopusMoment, octopusSkin, octopusSpot, octopusStart, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusOutput, type OctopusRig, type OctopusStop,
 } from './octopus';
 import { createRng } from '@idle-screens/core';
 import { compileSwimPlan } from './plan';
@@ -145,6 +145,87 @@ describe('the octopus\'s skin', () => {
     mat.onBeforeCompile(shader as never, undefined as never);
     expect(shader.fragmentShader).toContain('uMqCloud');
     expect(shader.uniforms.uMqCloud).toBe(skin.cloud);
+  });
+});
+
+describe('the octopus, more closely', () => {
+  it('rigs only a whole model: every clip, and its crown', async () => {
+    const { scene, clips } = await load();
+    expect(rigOctopus(scene, clips.slice(0, 3), 1)).toBeNull();
+    expect(rigOctopus(new Group(), clips, 1)).toBeNull();
+  });
+
+  it('starts somewhere along its route, and two octopuses on one spot make room for each other', async () => {
+    const s0 = octopusStart(plan, 4);
+    expect(s0).toBeGreaterThanOrEqual(0);
+    expect(s0).toBeLessThan(plan.totalLength);
+    const { rig } = await rigged();
+    const alone = octopusFrame(rig, { t: 5, index: 4, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300 }, newOctopusOutput());
+    const spot = octopusSpot(4, 5, plan, 0);
+    const crowded = octopusFrame(rig, { t: 5, index: 4, plan, start: 0, len: 21, scale: 1, ground: flat, camX: 0, camZ: 300, others: [9, spot.x + 1, spot.z] }, newOctopusOutput());
+    expect(Math.hypot(crowded.x - alone.x, crowded.z - alone.z)).toBeGreaterThan(5);
+  });
+
+  it('placed by someone else, it just breathes', async () => {
+    const { rig } = await rigged();
+    octopusIdle(rig, 3, 2);
+    expect(rig.actions.idle.getEffectiveWeight()).toBe(1);
+    expect(OCTOPUS_CLIPS.filter((n) => n !== 'idle').every((n) => rig.actions[n].getEffectiveWeight() === 0)).toBe(true);
+  });
+
+  /** Its eyes, at a stop, a second into it, the viewer in front. */
+  async function eyesAt(stop: OctopusStop | null, doing: OctopusOutput['doing'] = 'idle', into = 1.0) {
+    const { g, rig } = await rigged();
+    g.updateMatrixWorld(true);
+    const state = { ...newOctopusOutput(), stop, doing, intoActivity: into };
+    return { look: octopusLook(rig, 2.0, 3, { viewer: new Vector3(4, 8, 120), state }), rig };
+  }
+
+  it('its eyes at a stop: on you for a look (one brow up, pupils rounder), rounder still to wave and beckon', async () => {
+    const look = (await eyesAt('look')).look;
+    expect(look.at).toBe('viewer');
+    expect(look.pupil).toBeCloseTo(1.6, 6);
+    expect((await eyesAt('wave')).look.pupil).toBeCloseTo(1.8, 6);
+    expect((await eyesAt('beckon')).look.at).toBe('viewer');
+  });
+
+  it('reaching or pouncing, its pupils go round; pouncing, it looks down at what it is landing on', async () => {
+    expect((await eyesAt('reach')).look.pupil).toBeCloseTo(2.2, 6);
+    const pounce = (await eyesAt('pounce')).look;
+    expect(pounce.pupil).toBeCloseTo(2.4, 6);
+    expect(pounce.at).toBe('down');
+  });
+
+  it('peeking, its eyes go up on their stalks and its brows with them', async () => {
+    const { rig } = await eyesAt('peek', 'peek', 1.5);
+    const e = rig.eyes[0]!;
+    expect(e.eye.position.distanceTo(e.eyeRest.p)).toBeGreaterThan(2);
+    expect(e.brow!.position.distanceTo(e.browRest!)).toBeGreaterThan(2);
+  });
+
+  it('asleep, its eyes are shut; jetting, its pupils narrow', async () => {
+    const sleep = (await eyesAt('sleep', 'sleep', 3)).look;
+    expect(sleep.lids).toEqual([1, 1]);
+    expect(sleep.at).toBe('closed');
+    expect((await eyesAt(null, 'jet')).look.pupil).toBeCloseTo(0.6, 6);
+  });
+
+  it('flushes deeper when excited, and its colours wander as it dreams', () => {
+    const body = new Group();
+    const mat = new MeshLambertMaterial({ color: new Color('#3060c0') }); mat.name = 'PrimaryColor';
+    const other = new MeshLambertMaterial({ color: new Color('#ffffff') }); other.name = 'GLOW-Rings';
+    body.add(new Mesh(new BoxGeometry(1, 1, 1), mat), new Mesh(new BoxGeometry(1, 1, 1), mat), new Mesh(new BoxGeometry(1, 1, 1), other));
+    const skin = octopusSkin(body, 1);
+    expect(skin.parts).toHaveLength(1);   // each coat material once, and only the coat
+    const mood = newOctopusOutput().mood;
+    const hsl = { h: 0, s: 0, l: 0 }, base = { h: 0, s: 0, l: 0 };
+    new Color('#3060c0').getHSL(base);
+    setOctopusSkin(skin, { ...mood, flush: 1 }, null);
+    mat.color.getHSL(hsl);
+    expect(hsl.l).toBeLessThan(base.l);
+    setOctopusSkin(skin, { ...mood, dream: 1, dreamHue: 0.3 }, null);
+    mat.color.getHSL(hsl);
+    expect(Math.abs(hsl.h - base.h)).toBeGreaterThan(0.1);
   });
 });
 
