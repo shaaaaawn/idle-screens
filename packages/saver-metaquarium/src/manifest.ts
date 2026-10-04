@@ -260,6 +260,11 @@ export const METAQUARIUM_PARAMS = {
   /** A body wave from nose to tail, beating with distance swum and curling
    *  into turns. 0 keeps the legacy rigid wiggle and the stock programs. */
   swimWave: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Elbow room, 0..1: fish see each other coming and make way — the smaller
+   *  gives more, over or under before round. Pure in t, like every motion here.
+   *  On by default, the one exception to "defaults keep the old look":
+   *  fish swimming through fish was a bug, not a look. 0 is the old tank. */
+  fishAvoid: { type: 'number', default: 1, min: 0, max: 1, ease: 'smooth' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },

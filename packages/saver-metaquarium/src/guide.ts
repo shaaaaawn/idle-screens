@@ -66,6 +66,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
   swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
+  fishAvoid: 'Fish make way for each other instead of swimming through one another: a pair about to meet parts a second ahead, the smaller fish giving more, over or under before round. 1 (default) is on, 0 is the old pass-through. `inspect().crowding` counts the pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',

@@ -60,6 +60,7 @@ import {
   anchorFraction, bandRange, breedSize, FISH_LENGTH, fishHash, fishSizeMul, fishVariation, FORMATION_SHAPES,
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
+import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
 import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
@@ -696,6 +697,19 @@ class TankInstance implements SaverInstance {
   private readonly crabGround = (x: number, z: number): number => Math.max(
     this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
   private readonly crabSpots: number[] = [];
+  /** Elbow room (avoid.ts): one body per fish on screen, reused frame to frame. */
+  private readonly avoidPool: AvoidBody[] = [];
+  private readonly avoidBodies: AvoidBody[] = [];
+  private readonly avoidFinish: Array<() => void> = [];
+  private readonly avoidOff = new Float64Array(MAX_FISH * 3);
+  private readonly avoidRate = new Float64Array(MAX_FISH * 3);
+  private readonly avoidAhead = new Float64Array(MAX_FISH * 3);
+  private readonly avoidScratch = new Float64Array(MAX_FISH * 3);
+  private readonly crowdAt = new Float64Array(MAX_FISH * 4);
+  /** The fish slot of each avoid body. */
+  private readonly avoidSlot: number[] = [];
+  /** Who touched whom in the last frame, with and without the dodge — `inspect().crowding`. */
+  private lastCrowding: (Crowding & { without: number }) | null = null;
   private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
   private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, focusX: 0, focusZ: 0, doing: 'crawl', bloom: 0 };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
@@ -2577,6 +2591,17 @@ class TankInstance implements SaverInstance {
         crabCamX = s.x - (s.fx * c - s.fz * sn) * followBack; crabCamZ = s.z - (s.fx * sn + s.fz * c) * followBack;
       } else { crabCamX = NaN; crabCamZ = NaN; }
     }
+    // Elbow room (avoid.ts). The loop runs in two halves: the first puts every
+    // fish on its route, then each pair about to meet makes way, then the
+    // second half draws each fish where it ended up — so no fish dodges a
+    // neighbour that has not been placed yet, and the frame is still a pure
+    // function of t.
+    const avoid = Math.max(0, Math.min(1, this.num('fishAvoid')));
+    const bodies = this.avoidBodies;
+    bodies.length = 0;
+    const finish = this.avoidFinish;
+    finish.length = 0;
+    const off = this.avoidOff, offRate = this.avoidRate;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -2648,7 +2673,7 @@ class TankInstance implements SaverInstance {
       // is actually moving it. Beating to its own unused loop made a shoal
       // whose tails were out of step with its travel — fish moonwalking.
       let beat = effort;
-      let pose;
+      let pose: SwimPose;
       // Where the fish's heading comes from, for the swim wave's C-bend.
       let turnPlan: SwimPlan | null = null, turnD = 0;
       if (style.formation) {
@@ -2895,6 +2920,70 @@ class TankInstance implements SaverInstance {
         px = act.x; y = act.y; pz = act.z;
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
       }
+      // This fish's body for the dodge: where it is, where it is going. A
+      // floor creature walks its own spot (crab.ts) and keeps it — it is in
+      // the way, it does not get out of it; nor does an actor, whose script
+      // places it. A seated fish gives a little, so the school keeps shape.
+      const walker = (f.rig?.crab || f.rig?.starfish || f.rig?.octopus) && !act && !style.formation;
+      const give = act || walker ? 0 : style.formation ? 0.35 : 1;
+      const k = bodies.length;
+      const body = this.avoidPool[k] ?? (this.avoidPool[k] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, len: 0, give: 0 });
+      body.x = px; body.y = y; body.z = pz; body.vx = body.vy = body.vz = 0; body.len = L; body.give = give;
+      if (walker) {
+        for (let ci = 0; ci < crabSpots.length; ci += 3) {
+          if (crabSpots[ci] !== f.index) continue;
+          body.x = crabSpots[ci + 1]!; body.z = crabSpots[ci + 2]!;
+          body.y = (this.floorHeightAt?.(body.x, body.z) ?? 0) + L * 0.3;
+          break;
+        }
+      } else if (!act) {
+        // Where its route takes it over the next half second, as a chord: a
+        // route's tangent can swing right round in a tight curl, and the
+        // dodge reads its direction off this.
+        const pace = f.plan.cruise * speed * styleSpeed * style.travel;
+        if (turnPlan && pace > 1e-3) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD + pace * 0.5);
+          body.vx = (b.x - a.x) * 2; body.vy = band ? 0 : (b.y - a.y) * 2; body.vz = (b.z - a.z) * 2;
+        } else {
+          const hl = Math.hypot(pose.fx, fy, pose.fz) || 1;
+          body.vx = (pose.fx / hl) * pace; body.vy = (fy / hl) * pace; body.vz = (pose.fz / hl) * pace;
+        }
+      }
+      bodies.push(body);
+      this.avoidSlot[k] = f.index;
+      finish.push(() => {
+      // The facing it is drawn with: its route's, turned into its dodge.
+      let lfx = pose.fx, lfy = fy, lfz = pose.fz;
+      if (give > 0 && avoid > 0) {
+        px += off[k * 3]!; y += off[k * 3 + 1]!; pz += off[k * 3 + 2]!;
+        const kr = Math.hypot(px, pz);
+        if (kr > BOUNDS.radius) { px *= BOUNDS.radius / kr; pz *= BOUNDS.radius / kr; }
+        // Never out of the water: not under the floor's base, not through the
+        // surface — unless the route itself put it higher.
+        let top = BOUNDS.yMax + 60;
+        if (this.ceiling) top = Math.min(top, this.ceiling.position.y - FISH_LENGTH * 0.8);
+        y = Math.min(Math.max(y, BOUNDS.yMin), Math.max(body.y, top));
+        if (this.floorHeightAt) {
+          const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
+          if (y < clear) y = Math.max(y, Math.min(BOUNDS.yMax, clear));
+        }
+        // Nose into the dodge: the route's velocity plus how fast the dodge
+        // is moving it, the turn held to a third of a right angle either way.
+        const rx = offRate[k * 3]!, ry = offRate[k * 3 + 1]!, rz = offRate[k * 3 + 2]!;
+        if (rx * rx + ry * ry + rz * rz > 1e-4) {
+          const hl = Math.hypot(body.vx, body.vz);
+          const yaw0 = Math.atan2(body.vx, body.vz);
+          let turn = Math.atan2(body.vx + rx, body.vz + rz) - yaw0;
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          // A fish hardly moving turns less: a sideways shuffle is not a heading.
+          turn = Math.max(-0.5, Math.min(0.5, turn)) * Math.min(1, hl / 4);
+          const c = Math.cos(turn), sn = Math.sin(turn);
+          const fx0 = lfx, fz0 = lfz;
+          lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
+          const fl = Math.hypot(lfx, lfz) || 1;
+          lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? (ry / Math.max(hl, 4)) * fl : 0)));
+        }
+      }
       // A crab walks the floor on its own legs (crab.ts) and takes over its
       // place and facing; a script's actor or a seated one just idles.
       const crabRig = f.rig?.crab;
@@ -2988,7 +3077,7 @@ class TankInstance implements SaverInstance {
         f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
         f.group.rotateZ(act.roll);
       } else {
-        f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
+        f.group.lookAt(px + lfx, y + lfy, pz + lfz);
         f.group.rotateZ(pose.roll);
       }
       if (floor) f.group.quaternion.copy(floor.quaternion);
@@ -3163,7 +3252,26 @@ class TankInstance implements SaverInstance {
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });
+      });
     }
+    avoidFrame(bodies, avoid, off, offRate, this.avoidScratch, this.avoidAhead);
+    for (const fn of finish) fn();
+    finish.length = 0;
+    // Who is touching whom now, and who would have been without the dodge.
+    const at = this.crowdAt;
+    at.fill(NaN);
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i]!, slot = this.avoidSlot[i]!;
+      at[slot * 4] = b.x; at[slot * 4 + 1] = b.y; at[slot * 4 + 2] = b.z; at[slot * 4 + 3] = b.len;
+    }
+    const without = crowding(at, MAX_FISH).touching;
+    at.fill(NaN);
+    for (const f of this.fish) {
+      if (!f || f.index >= visible) continue;
+      const q = f.group.position;
+      at[f.index * 4] = q.x; at[f.index * 4 + 1] = q.y; at[f.index * 4 + 2] = q.z; at[f.index * 4 + 3] = FISH_LENGTH * this.fishSizeAt(f.index);
+    }
+    this.lastCrowding = { ...crowding(at, MAX_FISH), without };
     this.walkShadows?.commit(this.walkShadowN);
     // The garden answers the cast: crowns fold, worms duck, pods swell as a fish passes —
     // after the cast is placed, so it answers this frame's fish, not last frame's.
@@ -3212,6 +3320,9 @@ class TankInstance implements SaverInstance {
       saver: 'metaquarium',
       t: this.lastFrameT,
       ...(this.burps?.size ? { burps: this.burps.list() } : {}),
+      // Fish passing through fish: pairs closer than touching now, the worst
+      // three ([slot, slot, overlap]), and how many would be without `fishAvoid`.
+      ...(this.lastCrowding ? { crowding: { avoid: this.num('fishAvoid'), ...this.lastCrowding } } : {}),
       camera: {
         // Following a fish: the orbit params are ignored while this is set.
         follow: this.followState,
