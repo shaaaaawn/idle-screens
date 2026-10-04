@@ -166,9 +166,9 @@ describe('resolveIpfsUrls', () => {
 });
 
 describe('NPC breeds (unminted set, bundled)', () => {
-  it('covers the eight designed breeds and the starfish with synthetic ids above the supply, each bundled', () => {
+  it('covers the seven bundled breeds and the starfish with synthetic ids above the supply', () => {
     expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(
-      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark', 'starfish'],
+      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'shark', 'starfish'],
     );
     for (const f of NPC_CATALOG) {
       expect(f.id).toBeGreaterThan(512); // never collides with a minted token
@@ -176,10 +176,10 @@ describe('NPC breeds (unminted set, bundled)', () => {
     }
   });
   it('the DEFAULT catalog casts them by breed or id, as species (counts, not individuals)', () => {
-    const ok = parseFishMix('shark:2,jellyfish:1,606@bottom');
+    const ok = parseFishMix('shark:2,glowfish:1,606@bottom');
     expect(ok.problems).toEqual([]);
     expect(ok.entries.map((e) => [e.breed, e.count, e.url])).toEqual([
-      ['shark', 2, 'mq-breed:shark'], ['jellyfish', 1, 'mq-breed:jellyfish'], ['crab', 1, 'mq-breed:crab'],
+      ['shark', 2, 'mq-breed:shark'], ['glowfish', 1, 'mq-breed:glowfish'], ['crab', 1, 'mq-breed:crab'],
     ]);
     expect(ok.entries[2]!.style).toBe('bottom');
     // Minted fish in the same mix keep their uniqueness rules.
@@ -193,7 +193,12 @@ describe('NPC breeds (unminted set, bundled)', () => {
   it('the breed error names what the ACTIVE catalog offers', () => {
     const r = parseFishMix('unicorn:1', NPC_CATALOG.map((f) => ({ ...f, ipfs3d: 'x' })));
     expect(r.problems[0]).toContain('shark');
-    expect(r.problems[0]).toContain('jellyfish');
+    expect(r.problems[0]).toContain('glowfish');
+  });
+  it('the draft jellyfish is gone: 607 and its name are unknown, the other ids keep their numbers', () => {
+    expect(parseFishMix('jellyfish:1').problems).toHaveLength(1);
+    expect(parseFishMix('607:1').problems).toHaveLength(1);
+    expect(parseFishMix('dori:1').entries[0]!.id).toBe(608);
   });
 });
 

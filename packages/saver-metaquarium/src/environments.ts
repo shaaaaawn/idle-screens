@@ -20,11 +20,11 @@ export type EnvironmentName =
 
 /** Terrain silhouette. `flat` is the original disc; the rest are generated
  *  from the mount seed — never fetched, so determinism and offline both hold. */
-export type FloorKind = 'flat' | 'dunes' | 'ridges' | 'basin';
+export type FloorKind = 'flat' | 'dunes' | 'ridges' | 'basin' | 'shelf' | 'trench' | 'terraces';
 
 /** Runtime guard for the same set — the steering lane is unvalidated, so a
  *  bad value must fall back rather than build an invisible floor. */
-export const FLOOR_KINDS: readonly FloorKind[] = ['flat', 'dunes', 'ridges', 'basin'];
+export const FLOOR_KINDS: readonly FloorKind[] = ['flat', 'dunes', 'ridges', 'basin', 'shelf', 'trench', 'terraces'];
 
 /** A translucent plane ABOVE the fish. The single strongest identity cue in
  *  the original: it is what makes a scene read as *under* something. */

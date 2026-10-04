@@ -146,14 +146,15 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     }
   }
 
-  // The rind, across every edge the break left open: stone → quartz → colour.
-  const INNER = 0.84, MID = 0.92;
+  // The rind, across every edge the break left open: real agate — a pale
+  // skin, then bands of the home's colour laid down one by one, light and
+  // dark and a thread of white between, closing on the crystal throat.
+  const INNER = 0.84;
+  const deep = tint.clone().multiplyScalar(0.55), pale = tint.clone().lerp(quartz, 0.6);
+  const ladder: Array<[number, Color]> = [[1, quartz], [0.955, pale], [0.925, quartz], [0.905, tint], [0.875, deep], [0.86, pale], [INNER, tint]];
   for (const e of edgeCount.values()) {
     if (e.n !== 1) continue;
-    const bands: Array<[number, number, Color, Color]> = [
-      [1, MID, quartz, quartz],
-      [MID, INNER, tint.clone().lerp(quartz, 0.35), tint],
-    ];
+    const bands: Array<[number, number, Color, Color]> = ladder.slice(0, -1).map(([o, c], k) => [o, ladder[k + 1]![0], c, c]);
     for (const [o, i, co, ci] of bands) {
       const a0 = e.a.clone().multiplyScalar(o), b0 = e.b.clone().multiplyScalar(o);
       const a1 = e.a.clone().multiplyScalar(i), b1 = e.b.clone().multiplyScalar(i);

@@ -17,7 +17,7 @@
  *   &rig=seahorse&times=0,0.3,…  motion review: the model RIGGED (seahorse.ts),
  *                                side-on at each moment (seconds) — one row
  *                                per model, one column per moment;
- *                                &view=34 from behind, &effort=1.9 working
+ *                                &view=34 from behind, &view=top from above, &effort=1.9 working
  */
 import {
   AmbientLight, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
@@ -103,7 +103,9 @@ const views: Array<[string, (d: number) => Vector3]> = [
       times.forEach((t, c) => {
         rig?.set({ phase: 0, amp: 0.08 * Number(q.get('effort') ?? 1), bend: 0, t });
         // side (default), or ¾ from behind-left where the fin's sideways ripple shows.
-        if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7); else cam.position.set(span * 2.4, 0, 0);
+        if (q.get('view') === '34') cam.position.set(span * 1.7, span * 0.35, -span * 1.7);
+        else if (q.get('view') === 'top') cam.position.set(0, span * 2.2, span * 0.01);
+        else cam.position.set(span * 2.4, 0, 0);
         cam.lookAt(0, 0, 0);
         const x = c * CELL, y = (rows.length - 1 - row) * CELL;
         renderer.setViewport(x, y, CELL, CELL); renderer.setScissor(x, y, CELL, CELL);
