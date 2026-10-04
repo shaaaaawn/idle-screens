@@ -51,16 +51,29 @@ describe('describeMetaquarium', () => {
 
   it('with no fishMix, the cast is fishCount copies of fishUrl', () => {
     const a = describeMetaquarium({});
-    expect(a.cast).toEqual([{ slots: [0, 0], count: 1, breed: 'angelfish', label: 'angelfish #257', motion: 'swims', size: null, offstage: false }]);
+    expect(a.cast).toEqual([{ slots: [0, 0], count: 1, visible: 1, breed: 'angelfish', label: 'angelfish #257', motion: 'swims', size: null, offstage: false }]);
     expect(a.sections.map((x) => x.name)).toEqual(['Room', 'Camera']);
     expect(a.summary).toBe('an angelfish #257 in the void; still camera.');
   });
 
   it('marks fish past the cap and says what is set but idle', () => {
     const a = describeMetaquarium({ fishMix: 'dori:20,blowfish:10', fishCount: 4, shoalKind: 'ember' });
-    expect(a.cast.map((r) => r.offstage)).toEqual([false, true]);
+    expect(a.cast.map((r) => r.offstage)).toEqual([false, false]);
+    expect(a.cast.map((r) => r.visible)).toEqual([20, 4]);
     expect(a.castTotal).toBe(24);
+    expect(a.summary).toMatch(/^20 tangs and 4 blowfish /);
+    expect(describeMetaquarium({ fishMix: 'dori:24,octopus:2' }).cast.map((r) => [r.offstage, r.visible])).toEqual([[false, 24], [true, 0]]);
+    expect(describeMetaquarium({ fishMix: 'dori:23,octopus:2' }).summary).toMatch(/^23 tangs and an octopus /);
     expect(a.problems.map((p) => p.path)).toEqual(expect.arrayContaining(['fishCount', 'fishMix', 'shoalKind']));
+  });
+
+  it('reports the room preset\'s own light shafts, and only a real school', () => {
+    expect(describeMetaquarium({ environment: 'lagoon' }).sections[0]?.items).toContain('light shafts 55%');
+    expect(describeMetaquarium({ environment: 'lagoon', rayStrength: 0 }).sections[0]?.items).toContain('no light shafts');
+    expect(describeMetaquarium({ environment: 'lagoon', rayStrength: 0.2 }).sections[0]?.items).toContain('light shafts 20%');
+    const world = (shoal: number) => describeMetaquarium({ shoal }).sections.find((x) => x.name === 'World')?.items ?? [];
+    expect(world(0.04)).toEqual([]);
+    expect(world(0.05)).toEqual(['a school of neon']);
   });
 
   it('reads every recipe without a problem and with a cast', () => {

@@ -35,6 +35,8 @@ export interface AnatomyCastRow {
   /** Slots this entry fills, inclusive: [first, last]. */
   slots: [number, number];
   count: number;
+  /** How many of `count` fit under the cap and swim. */
+  visible: number;
   breed: string;
   /** What to call it: "tang", "baby fish", "angelfish #257". */
   label: string;
@@ -42,7 +44,7 @@ export interface AnatomyCastRow {
   motion: string;
   /** Its own `*size`, when it has one. */
   size: number | null;
-  /** Slots past the device cap: cast but never swimming. */
+  /** Every slot of this entry is past the device cap: cast but never swimming. An entry that straddles the cap is not offstage; `visible` counts its swimmers. */
   offstage: boolean;
 }
 
@@ -125,11 +127,12 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
       cast.push({
         slots: [at, at + e.count - 1],
         count: e.count,
+        visible: Math.max(0, Math.min(e.count, CAST_CAP - at)),
         breed: e.breed,
         label: minted ? (e.count > 1 ? `${e.breed} from #${e.id}` : `${e.breed} #${e.id}`) : noun(e.breed, e.count),
         motion: motionOf(e.breed, e.style),
         size: slots[at]?.size ?? null,
-        offstage: at + e.count > CAST_CAP,
+        offstage: at >= CAST_CAP,
       });
       at += e.count;
     }
@@ -137,7 +140,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
     const n = Math.min(Math.max(1, Math.round(num('fishCount'))), CAST_CAP);
     const id = Number(/fish_(\d+)_/.exec(str('fishUrl'))?.[1] ?? NaN);
     const breed = (Number.isFinite(id) && breedOf(id)) || 'fish';
-    cast.push({ slots: [0, n - 1], count: n, breed, label: Number.isFinite(id) ? `${breed} #${id}` : breed, motion: motionOf(breed), size: null, offstage: false });
+    cast.push({ slots: [0, n - 1], count: n, visible: n, breed, label: Number.isFinite(id) ? `${breed} #${id}` : breed, motion: motionOf(breed), size: null, offstage: false });
   }
   const castTotal = Math.min(cast.reduce((n, r) => n + r.count, 0), CAST_CAP);
   const slotName = (slot: number): string => {
@@ -154,7 +157,9 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (num('water') > 0) room.push(`water ${pct('water')}${has('waterClarity') ? `, clarity ${pct('waterClarity')}` : ''}`);
   if (num('caustics') > 0) room.push(`caustics ${pct('caustics')}`);
   if (num('surfaceMirror') > 0) room.push(`surface mirror ${pct('surfaceMirror')}`);
-  if (has('rayStrength') && num('rayStrength') >= 0) room.push(num('rayStrength') === 0 ? 'no light shafts' : `light shafts ${pct('rayStrength')}`);
+  // rayStrength -1 (the default) defers to the room preset's own shafts, as the tank does.
+  const rays = has('rayStrength') && num('rayStrength') >= 0 ? num('rayStrength') : env.rays?.strength ?? null;
+  if (rays !== null) room.push(rays === 0 ? 'no light shafts' : `light shafts ${Math.round(rays * 100)}%`);
   if (has('fogNear') || has('fogFar')) room.push(`fog ${num('fogNear')}–${num('fogFar')}`);
   if (str('interior') === 'geode') room.push('inside a geode home');
 
@@ -175,7 +180,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (num('marineSnow') > 0) world.push('marine snow');
   if (num('co2Mist') > 0) world.push('CO₂ mist');
   if (num('pearling') > 0) world.push('pearling plants');
-  if (num('shoal') > 0) world.push(`a school of ${str('shoalKind')}`);
+  if (Math.round(num('shoal') * CAST_CAP * 2.5) >= 3) world.push(`a school of ${str('shoalKind')}`);
 
   // ---- stage --------------------------------------------------------------
   const stage: string[] = [];
@@ -244,8 +249,10 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (has('floraPalette')) for (const c of str('floraPalette').split(',')) add(c.trim());
 
   // ---- summary ------------------------------------------------------------
-  const swimming = cast.filter((r) => !r.offstage);
-  const names = swimming.map((r) => (r.count === 1 ? `${/^[aeiou]/.test(r.label) ? 'an' : 'a'} ${r.label}` : `${r.count} ${r.label}`));
+  const swimming = cast.filter((r) => r.visible > 0);
+  // A cut-off entry is named for who actually swims ("an octopus", not "an octopuses").
+  const nameOf = (r: AnatomyCastRow): string => (r.visible < r.count && !r.label.includes('#') ? noun(r.breed, r.visible) : r.label);
+  const names = swimming.map((r) => (r.visible === 1 ? `${/^[aeiou]/.test(nameOf(r)) ? 'an' : 'a'} ${nameOf(r)}` : `${r.visible} ${nameOf(r)}`));
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? 'no fish';
   const where = str('interior') === 'geode' ? 'inside a geode home' : `in the ${env.label.toLowerCase()}`;
   // The headline act: a dance, then a vignette, then the lights.
