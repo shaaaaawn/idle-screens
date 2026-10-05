@@ -107,8 +107,8 @@ describe('avoidOffsets', () => {
 
   it('never dodges a fish below its floor', () => {
     const out = buf();
-    const low = body(0, 20, 0); low.floor = 18;
-    avoidOffsets([low, body(3, 12, 0, 0, 0, 0, L, 0)], 1, out, buf());
+    const low = body(0, 20, 0); low.floorAt = () => 18;
+    avoidOffsets([low, body(3, 28, 0, 0, 0, 0, L, 0)], 1, out, buf());
     expect(low.y + out[1]!).toBeGreaterThanOrEqual(18 - 1e-9);
   });
 

@@ -699,6 +699,9 @@ class TankInstance implements SaverInstance {
   private readonly crabSpots: number[] = [];
   /** Elbow room (avoid.ts): one body per fish on screen, reused frame to frame. */
   private readonly avoidPool: AvoidBody[] = [];
+  /** Lowest y a dodged fish may take at (x, z): the seabed's clearance, as in the draw half. */
+  private readonly fishFloorAt = (x: number, z: number): number =>
+    Math.min(BOUNDS.yMax, (this.floorHeightAt?.(x, z) ?? -Infinity) + FISH_LENGTH * 0.5);
   private readonly avoidBodies: AvoidBody[] = [];
   private readonly avoidFinish: Array<() => void> = [];
   private readonly avoidOff = new Float64Array(MAX_FISH * 3);
@@ -2930,7 +2933,7 @@ class TankInstance implements SaverInstance {
       const body = this.avoidPool[k] ?? (this.avoidPool[k] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, len: 0, give: 0 });
       body.x = px; body.y = y; body.z = pz; body.vx = body.vy = body.vz = 0; body.len = L; body.give = give;
       // The seabed a dodge cannot push a fish under (the clamp in the draw half).
-      body.floor = give > 0 && this.floorHeightAt ? Math.min(BOUNDS.yMax, this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5) : -Infinity;
+      body.floorAt = give > 0 && this.floorHeightAt ? this.fishFloorAt : undefined;
       if (walker) {
         for (let ci = 0; ci < crabSpots.length; ci += 3) {
           if (crabSpots[ci] !== f.index) continue;
