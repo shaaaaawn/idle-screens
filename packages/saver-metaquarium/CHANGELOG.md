@@ -1,5 +1,23 @@
 # @idle-screens/saver-metaquarium
 
+## 0.15.0
+
+### Minor Changes
+
+- db1569e: `describeMetaquarium(params)` reads a scene back as parts: cast rows (count, breed, how it moves, which slots it fills), Room · World · Stage · Camera · Motion · Look sections holding only what the author set, the palette on screen (the author's colours, else the room's own), choreographed changes, and the params that do nothing. `metaquariumParamsFromTrack(deltas)` folds a control track into the params in force at mount, treating live steers (`liveAt`) as already arrived. Both are zero-dep and exported through `./manifest`, so a viewer's scene card or a channel's state can explain a classic scene the way a SaverSpec's layers explain themselves.
+- db1569e: Fish make way for each other. A pair about to meet sees it coming up to 1.6 s ahead and parts across its line of travel, over or under before round. The smaller fish gives more, and each fish turns its nose into the dodge so it never slides sideways. Nothing is simulated: the dodge is a pure function of where every fish's route puts it at t, so the same spec, seed and t still give the same frame on every screen.
+  
+  New param `fishAvoid` (0..1, smooth). **It defaults to 1, which changes how existing channels look**: this is the one param whose default does not keep the old look, because fish swimming through fish was a bug. Set `fishAvoid: 0` for the old pass-through. Measured on a 17-fish reef, frames with a fish inside another fell from 79% to 1%; on 8 fish, from 44% to 0%.
+  
+  `inspect()` gains `crowding`, which counts the pairs touching now, lists the worst three as `[slot, slot, overlap]`, and gives `without`, the count that would be touching with it off. `perceiveChannel` returns it in `frame.state`.
+  
+  Two cases fall outside the dodge. Floor creatures and vignette actors hold their ground and the others go round them. A pair passing exactly nose to nose has no side to part to, and the dodge fades there rather than flicking.
+
+### Patch Changes
+
+- db1569e: For agents — `validateMetaquariumParams` now also reports params that would silently do nothing: `fishCount`/`fishUrl` beside a non-empty `fishMix` (which sets the cast), a mix over the 24-fish cap, a `cameraFollow`/`followSpot`/`spotRig` slot or vignette actor past the end of the cast, `starfishDance` with no starfish in the mix, and dials on something switched off (`danceTempo`, `followDistance`/`followAngle`, orbit params while following, spot params with no spot, `shoalKind`/`shoalSpeed` with no shoal, `floraMix`/`floraPalette`/`floraLayout` with no plants). Each problem names the other params it is about in a new optional `also` field. Two recipes cast the bundled characters: `reef-characters` (tangs, blowfish, an octopus and a crab on a reef) and `starfish-class` (an aerobics class on an ice floor). The manifest description now says what the tank is rather than how it was first built.
+- db1569e: Octopus review fixes. Its arms curl the same way, a pinwheel (curling opposite ways, neighbouring arms crossed); every raised arm tip stands on its arm; the siphon sits on the body; all six mantle rings are there (two fell outside the mantle). Each arm vertex blends along its own arm, not a neighbour's. It breathes while it sleeps. A stop's activity (a wave, a look) ends with its clip instead of running the whole stop. The intake no longer draws a quad twice when one triangle bends and its twin does not (the octopus had sixteen such squares; every other breed is byte-identical).
+
 ## 0.14.0
 
 ### Minor Changes
