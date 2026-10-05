@@ -2929,6 +2929,8 @@ class TankInstance implements SaverInstance {
       const k = bodies.length;
       const body = this.avoidPool[k] ?? (this.avoidPool[k] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, len: 0, give: 0 });
       body.x = px; body.y = y; body.z = pz; body.vx = body.vy = body.vz = 0; body.len = L; body.give = give;
+      // The seabed a dodge cannot push a fish under (the clamp in the draw half).
+      body.floor = give > 0 && this.floorHeightAt ? Math.min(BOUNDS.yMax, this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5) : -Infinity;
       if (walker) {
         for (let ci = 0; ci < crabSpots.length; ci += 3) {
           if (crabSpots[ci] !== f.index) continue;
@@ -2936,7 +2938,12 @@ class TankInstance implements SaverInstance {
           body.y = (this.floorHeightAt?.(body.x, body.z) ?? 0) + L * 0.3;
           break;
         }
-      } else if (!act) {
+      } else if (act) {
+        // A script's actor holds its ground in the dodge but keeps walking: its
+        // velocity is its next scripted pose, so swimmers see it coming.
+        const nx = poseOf(this.vignette!, f.index, tSec + 0.25);
+        if (nx) { body.vx = (nx.x - act.x) * 4; body.vy = (nx.y - act.y) * 4; body.vz = (nx.z - act.z) * 4; }
+      } else {
         // Where its route takes it over the next half second, as a chord: a
         // route's tangent can swing right round in a tight curl, and the
         // dodge reads its direction off this.
@@ -3051,7 +3058,7 @@ class TankInstance implements SaverInstance {
       if (f.index === followSlot) {
         // A standing starfish is where its feet are, ahead of its resting place.
         this.followAt.set(star ? star.focusX : px, y, star ? star.focusZ : pz); this.followSeen = true;
-        this.followHead.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz);
+        this.followHead.set(act ? act.fx : lfx, 0, act ? act.fz : lfz);
         // A crab's route is its own (crab.ts): chase along it, not the swim plan's.
         if (floor) { this.followHead.set(floor.tx, 0, floor.tz); this.followTrail.set(floor.trailX, y, floor.trailZ); this.followHasTrail = true; }
         if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
@@ -3069,7 +3076,7 @@ class TankInstance implements SaverInstance {
       for (let si = 0; si < this.spotRig.length; si++) {
         if (this.spotRig[si]!.slot === f.index) {
           this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true; this.spotLen[si] = L;
-          this.spotHead[si]!.set(act ? act.fx : pose.fx, 0, act ? act.fz : pose.fz).normalize();
+          this.spotHead[si]!.set(act ? act.fx : lfx, 0, act ? act.fz : lfz).normalize();
         }
       }
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
@@ -3116,7 +3123,7 @@ class TankInstance implements SaverInstance {
       if (puffer && f.rig!.puffer) {
         const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
         if (viewer && puffer.face > 0.01) {
-          const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz;
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
           let turn = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
           turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
           f.group.rotateOnWorldAxis(Y_AXIS, Math.max(-0.9, Math.min(0.9, turn)) * puffer.face);
@@ -3132,7 +3139,7 @@ class TankInstance implements SaverInstance {
       }
       // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
       if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
-        const hx = act ? act.fx : pose.fx, hy = act ? act.fy : fy, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hy, hz) || 1;
+        const hx = act ? act.fx : lfx, hy = act ? act.fy : lfy, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hy, hz) || 1;
         // The mouth: between the eyes, a little ahead and below — the model's
         // origin is back by its tail, so the group's position will not do.
         const eyes = f.rig!.baby!.eyes, m = this.burpAt;
@@ -3158,7 +3165,7 @@ class TankInstance implements SaverInstance {
       if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
-          const hx = act ? act.fx : pose.fx, hz = act ? act.fz : pose.fz, hl = Math.hypot(hx, hz) || 1;
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
           const toward = (tx: number, ty: number, tz: number): { fwd: number; up: number } => {
             const dx = tx - px, dy = ty - y, dz = tz - pz, dl = Math.hypot(dx, dy, dz) || 1;
             return { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl };
@@ -3244,7 +3251,7 @@ class TankInstance implements SaverInstance {
         y: Math.round(f.group.position.y * 10) / 10,
         z: Math.round(pz * 10) / 10,
         // The facing the frame shows: the script's, for an actor.
-        heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : pose.fx, floor ? floor.fz : act ? act.fz : pose.fz) * 180) / Math.PI + 360) % 360),
+        heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : lfx, floor ? floor.fz : act ? act.fz : lfz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }

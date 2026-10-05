@@ -46,6 +46,8 @@ export interface AvoidBody {
   len: number;
   /** 0..1: how much of a pair's dodge this one takes. 0 never moves. */
   give: number;
+  /** Lowest y this body may be dodged to (the seabed's clearance); default none. */
+  floor?: number;
 }
 
 export interface Crowding {
@@ -130,6 +132,8 @@ function pass(bodies: readonly AvoidBody[], amount: number, out: Float64Array, i
     let x = out[i * 3]! + inc[i * 3]!, y = out[i * 3 + 1]! + inc[i * 3 + 1]!, z = out[i * 3 + 2]! + inc[i * 3 + 2]!;
     const cap = bodies[i]!.len * CAP, m = Math.hypot(x, y, z);
     if (m > cap) { x *= cap / m; y *= cap / m; z *= cap / m; }
+    const lo = bodies[i]!.floor;
+    if (lo !== undefined && bodies[i]!.y + y < lo) y = lo - bodies[i]!.y;
     out[i * 3] = x; out[i * 3 + 1] = y; out[i * 3 + 2] = z;
   }
 }
@@ -183,9 +187,10 @@ export function crowding(at: ArrayLike<number>, slots: number): Crowding {
       touching++;
       const o = 1 - d / R;
       deepest = Math.max(deepest, o);
-      pairs.push([i, j, Math.round(o * 100) / 100]);
+      pairs.push([i, j, o]);
     }
   }
   pairs.sort((a, b) => b[2] - a[2]);
-  return { touching, deepest: Math.round(deepest * 100) / 100, pairs: pairs.slice(0, 3) };
+  const worst = pairs.slice(0, 3).map(([i, j, o]): [number, number, number] => [i, j, Math.round(o * 100) / 100]);
+  return { touching, deepest: Math.round(deepest * 100) / 100, pairs: worst };
 }

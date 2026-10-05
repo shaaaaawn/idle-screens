@@ -105,6 +105,13 @@ describe('avoidOffsets', () => {
     expect(Math.hypot(out[0]!, out[1]!, out[2]!)).toBeLessThanOrEqual(L * 0.4 * 0.9 + 1e-9);
   });
 
+  it('never dodges a fish below its floor', () => {
+    const out = buf();
+    const low = body(0, 20, 0); low.floor = 18;
+    avoidOffsets([low, body(3, 12, 0, 0, 0, 0, L, 0)], 1, out, buf());
+    expect(low.y + out[1]!).toBeGreaterThanOrEqual(18 - 1e-9);
+  });
+
   it('prefers over and under to round', () => {
     const out = buf();
     avoidOffsets([body(0, 40, 0), body(3, 43, 0)], 1, out, buf());
