@@ -232,6 +232,24 @@ textures, downloads, shadow maps or additional lights. Flora, shards, snow and
 bubbles scale with the existing device prop budget. `inspect().props.scenery`
 reports actual populations; prop draw-call/triangle totals include the world.
 
+## Reading a scene back
+
+A SaverSpec explains itself; a metaquarium scene is `{id: "metaquarium"}` plus a control track. `describeMetaquarium` reads that back as parts, using the tank's own parsers and room presets, for a viewer's scene card, a channel's state, or an agent with no eyes:
+
+```ts
+import { describeMetaquarium, metaquariumParamsFromTrack } from '@idle-screens/saver-metaquarium/manifest';
+
+const { params, timed } = metaquariumParamsFromTrack(scene.track.deltas); // in force at mount, plus later choreography
+const a = describeMetaquarium(params, timed);
+a.summary;  // '3 octopuses, a starfish, a crab and 4 baby fish in the reef; slow orbit.'
+a.cast;     // [{ slots: [0, 2], count: 3, breed: 'octopus', label: 'octopuses', motion: 'floor', … }, …]
+a.sections; // [{ name: 'Room', items: ['Reef', 'dunes floor', 'water overhead'] }, { name: 'Camera', … }, …]
+a.palette;  // the author's colours, else the room's own
+a.problems; // params set but doing nothing (validateMetaquariumParams)
+```
+
+It reports only what the params say, and only what the author set (plus the room and camera, which every scene has).
+
 ## For agents (MCP)
 
 Everything an agent needs to author a scene is data, importable without three.js:

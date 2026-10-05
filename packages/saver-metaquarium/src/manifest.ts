@@ -521,6 +521,7 @@ export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, typ
 export * from './environments';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';
 export { parseVignette, resolveVignette, VIGNETTES, VIGNETTE_CUES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {
   parsePropMix, CRYSTAL_HABITS, CRYSTAL_PALETTES, ENV_PROP_MIX, MAX_CLUSTERS,
