@@ -260,6 +260,11 @@ export const METAQUARIUM_PARAMS = {
   /** A body wave from nose to tail, beating with distance swum and curling
    *  into turns. 0 keeps the legacy rigid wiggle and the stock programs. */
   swimWave: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Elbow room, 0..1: fish see each other coming and make way — the smaller
+   *  gives more, over or under before round. Pure in t, like every motion here.
+   *  On by default, the one exception to "defaults keep the old look":
+   *  fish swimming through fish was a bug, not a look. 0 is the old tank. */
+  fishAvoid: { type: 'number', default: 1, min: 0, max: 1, ease: 'smooth' },
   /** Independent mineral-world layers. Zero preserves legacy scenes; counts
    * are reduced by the device's existing prop budget. All motion is analytic. */
   rockDensity: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
@@ -428,7 +433,7 @@ export const metaquariumManifest: SaverManifest = {
   id: 'metaquarium',
   label: 'Metaquarium',
   description:
-    'A living fish tank: skinned GLB fish swim seeded Catmull-Rom paths through a dark, fogged aquarium.',
+    'A voxel fish tank you configure by params: a cast of fish and characters (tangs, blowfish, an octopus, crabs, starfish, minted fish) in rooms, gardens, villages and castles, with stage spotlights and small scripted scenes.',
   minBackend: 'webgl2',
   costTier: 'medium',
   motionIntensity: 'calm',
@@ -521,6 +526,7 @@ export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, typ
 export * from './environments';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';
 export { parseVignette, resolveVignette, VIGNETTES, VIGNETTE_CUES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {
   parsePropMix, CRYSTAL_HABITS, CRYSTAL_PALETTES, ENV_PROP_MIX, MAX_CLUSTERS,

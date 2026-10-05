@@ -232,6 +232,24 @@ textures, downloads, shadow maps or additional lights. Flora, shards, snow and
 bubbles scale with the existing device prop budget. `inspect().props.scenery`
 reports actual populations; prop draw-call/triangle totals include the world.
 
+## Reading a scene back
+
+A SaverSpec explains itself; a metaquarium scene is `{id: "metaquarium"}` plus a control track. `describeMetaquarium` reads that back as parts, using the tank's own parsers and room presets, for a viewer's scene card, a channel's state, or an agent with no eyes:
+
+```ts
+import { describeMetaquarium, metaquariumParamsFromTrack } from '@idle-screens/saver-metaquarium/manifest';
+
+const { params, timed } = metaquariumParamsFromTrack(scene.track.deltas); // in force at mount, plus later choreography
+const a = describeMetaquarium(params, timed);
+a.summary;  // '3 octopuses, a starfish, a crab and 4 baby fish in the reef; slow orbit.'
+a.cast;     // [{ slots: [0, 2], count: 3, breed: 'octopus', label: 'octopuses', motion: 'floor', … }, …]
+a.sections; // [{ name: 'Room', items: ['Reef', 'dunes floor', 'water overhead'] }, { name: 'Camera', … }, …]
+a.palette;  // the author's colours, else the room's own
+a.problems; // params set but doing nothing (validateMetaquariumParams)
+```
+
+It reports only what the params say, and only what the author set (plus the room and camera, which every scene has).
+
 ## For agents (MCP)
 
 Everything an agent needs to author a scene is data, importable without three.js:
@@ -242,6 +260,7 @@ import { RECIPES, recipeTrack, PARAM_DOCS, GRAMMAR, validateMetaquariumParams } 
 const scene = RECIPES.find((r) => r.id === 'stage-duet')!;
 publishScene({ spec: { id: 'metaquarium' }, track: recipeTrack(scene.params) });
 validateMetaquariumParams({ vignette: 'a >home1', geodeHomes: 0 }); // → [{ path: 'vignette', message: 'beat 1: no mark "home1" …' }]
+validateMetaquariumParams({ fishMix: 'dori:3,blowfish:2', fishCount: 14 }); // → [{ path: 'fishCount', also: ['fishMix'], message: 'ignored: a non-empty fishMix sets the cast (5 fish) …' }]
 ```
 
-`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf.
+`PARAM_DOCS` has one line per param (a test keeps it complete), `GRAMMAR` documents the five small DSLs and the marks a vignette can name, and the playground mounts every recipe unchanged on its "recipes" shelf. `validateMetaquariumParams` also names the params that would do nothing: one another param overrides (`fishCount` beside a `fishMix`), a slot past the end of the cast, or a dial on something switched off (`shoalKind` with no shoal); a problem that involves other params lists them in `also`.

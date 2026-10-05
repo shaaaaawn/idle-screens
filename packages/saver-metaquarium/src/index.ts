@@ -16,3 +16,4 @@ export {
 } from './vignette';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';
