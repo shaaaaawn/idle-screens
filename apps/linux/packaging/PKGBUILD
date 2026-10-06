@@ -2,13 +2,14 @@
 pkgname=idle-screens-wayland
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Web-engine screensaver overlay for Hyprland/Omarchy (idle-screens)"
+pkgdesc="Web-engine screensaver overlay for wlr-layer-shell compositors (idle-screens)"
 arch=(x86_64 aarch64)
 url="https://github.com/shaaaaawn/idle-screens"
 license=(MIT)
-depends=(gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita)
+depends=(gtk4 webkitgtk-6.0 gtk4-layer-shell)
 makedepends=(rust)
-optdepends=('hypridle: idle-triggered launch')
+optdepends=('hypridle: idle-triggered launch (Hyprland/Omarchy)'
+            'swayidle: idle-triggered launch (sway/labwc/wayfire)')
 source=("$url/releases/download/linux-v$pkgver/idle-screens-wayland-$pkgver-src.tar.gz")
 sha256sums=('SKIP') # replace with the checksum printed by make-src-tarball.sh
 
@@ -51,7 +52,7 @@ package() {
 
   install -Dm644 packaging/config.toml.example \
     packaging/hypridle.conf.example packaging/hypridle-kiosk.conf.example \
-    packaging/hypridle.lua.example \
+    packaging/hypridle.lua.example packaging/swayidle/swayidle.snippet \
     -t "$pkgdir/usr/share/doc/$pkgname/"
   [ -f LICENSE ] && install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" || true
 }

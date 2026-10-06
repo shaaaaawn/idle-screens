@@ -1,0 +1,50 @@
+# idle-screens-wayland — swayidle integration (sway / labwc / wayfire / Raspberry Pi OS)
+#
+# Unlike hypridle, swayidle has NO config file: it is configured entirely by its
+# command line, wherever your session launches it. So there is nothing to patch —
+# you edit the launch site. Find yours with:
+#
+#   ps -o args= -C swayidle
+#   grep -rl swayidle ~/.config/labwc /etc/xdg/labwc ~/.config/autostart \
+#       /etc/xdg/autostart ~/.config/systemd/user 2>/dev/null
+#
+# Common launch sites:
+#   labwc      ~/.config/labwc/autostart   (copy /etc/xdg/labwc/autostart first;
+#                                           never edit /etc — an update reverts it)
+#   sway       ~/.config/sway/config       (exec swayidle ...)
+#   wayfire    ~/.config/wayfire.ini       [autostart]
+#   systemd    ~/.config/systemd/user/swayidle.service
+#
+# Or run: ./packaging/swayidle/install-swayidle.sh
+#
+# ORDERING MATTERS. There is only ONE swayidle process and it owns every timeout,
+# so extend the existing line — do not start a second instance. The saver timeout
+# must be strictly LESS than the display-blank (wlopm/DPMS) timeout, or the panel
+# powers off seconds after the overlay appears and the saver runs behind a dark
+# screen. Raspberry Pi OS's stock blank timeout is short enough to hit this.
+# Recommended: saver 150 s, blank 900 s.
+#
+# NB the kill pattern: the kernel truncates a process name to 15 chars
+# ("idle-screens-wa"), so `pkill -x idle-screens-wayland` never matches and the
+# saver is never dismissed. Match the command line; the [i] bracket stops pkill's
+# own shell from matching (and killing) itself.
+
+swayidle -w \
+  timeout 150 'idle-screens-wayland' \
+    resume 'pkill -TERM -f "[i]dle-screens-wayland"' \
+  timeout 900 'wlopm --off \*' \
+    resume 'wlopm --on \*' &
+
+# Kiosk (mouse does not dismiss, display never blanks): drop BOTH the
+# `resume 'pkill ...'` and the wlopm pair. Leaving wlopm in place would sleep the
+# panel behind a saver that nothing will dismiss.
+#
+# swayidle -w \
+#   timeout 150 'pgrep -f "[i]dle-screens-wayland" || idle-screens-wayland --kiosk' &
+#
+# Exit manually: pkill -TERM -f '[i]dle-screens-wayland'
+
+# After editing, restart swayidle — `labwc --reconfigure` does NOT re-run
+# autostart, so a reconfigure is not enough:
+#   pkill -x swayidle && setsid sh -c '<your new swayidle line>' &
+# or simply log out and back in.

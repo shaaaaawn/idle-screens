@@ -1,6 +1,11 @@
 name: Linux Release
 
-# Tag a release as linux-vX.Y.Z to build and publish the Arch binary tarball.
+# Tag a release as linux-vX.Y.Z to build and publish the binary tarballs.
+#
+# Release binaries are built on debian:trixie, NOT Arch, for both arches. A
+# binary's glibc floor is its build base: trixie (2.41) runs on trixie-or-newer
+# and on current Arch, whereas an Arch-built binary runs on nothing older. Arch
+# stays in linux-ci.yml for compile coverage.
 on:
   push:
     tags:
@@ -11,27 +16,13 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & publish
+  version:
+    name: Resolve version
     runs-on: ubuntu-latest
-    container: archlinux:latest
-    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install toolchain + deps
-        run: |
-          pacman -Syu --noconfirm --needed \
-            base-devel rustup git pkgconf nodejs npm rsync \
-            gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita
-          rustup default stable
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/linux
-
       - name: Extract + validate version
         id: ver
         run: |
@@ -47,21 +38,88 @@ jobs:
             echo "version=$manifest_version" >> "$GITHUB_OUTPUT"
           fi
 
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: version
+    runs-on: ${{ matrix.runs-on }}
+    container: debian:trixie
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+            skip_src: ''
+          - arch: aarch64
+            runs-on: ubuntu-24.04-arm
+            # The AUR source tarball is arch-independent; emitting it from both
+            # legs would collide when the artifacts are merged.
+            skip_src: '1'
+    steps:
+      # Before actions/checkout — the bare image has no git/curl/CA certs.
+      # Node deliberately NOT from apt: trixie ships 20.x and the monorepo's
+      # engines field requires >=22, so sync-web.sh (which make-release.sh always
+      # runs) would fail on pnpm install. setup-node below supplies it.
+      - name: Install toolchain + native deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config git curl ca-certificates rsync xz-utils \
+            libgtk-4-dev libwebkitgtk-6.0-dev libgtk4-layer-shell-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/linux
+          key: release-${{ matrix.arch }}
+
       - name: Build release tarball
         working-directory: apps/linux
         env:
           # Stamps the About panel: distinguishes this artifact from local dev builds.
           IDLE_BUILD_KIND: release
+          SKIP_SRC: ${{ matrix.skip_src }}
         run: ./scripts/make-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: apps/linux/dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: apps/linux/dist
+
+      - name: Show what will be published
+        run: ls -la apps/linux/dist
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('linux-v{0}', steps.ver.outputs.version) }}
-          name: idle-screens-wayland ${{ steps.ver.outputs.version }} (Linux)
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('linux-v{0}', needs.version.outputs.version) }}
+          name: idle-screens-wayland ${{ needs.version.outputs.version }} (Linux)
           draft: ${{ github.ref_type != 'tag' }}
           files: |
-            apps/linux/dist/idle-screens-wayland-${{ steps.ver.outputs.version }}-x86_64.tar.gz
-            apps/linux/dist/idle-screens-wayland-${{ steps.ver.outputs.version }}-src.tar.gz
+            apps/linux/dist/*.tar.gz
+            apps/linux/dist/SHA256SUMS-*
           fail_on_unmatched_files: true
           generate_release_notes: true

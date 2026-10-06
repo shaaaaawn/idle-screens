@@ -57,8 +57,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Must be decided before GTK/WebKit initialize.
-    if platform::should_disable_dmabuf(&settings) {
-        log::info!("disabling WebKit DMA-BUF renderer");
+    if let Some(reason) = platform::dmabuf_disable_reason(&settings) {
+        log::info!("disabling WebKit DMA-BUF renderer ({reason})");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     if settings.inhibit {
@@ -95,7 +95,7 @@ fn main() -> anyhow::Result<()> {
         if state.settings.windowed {
             log::info!("windowed dev mode: idle input watcher disabled (close via window manager or Ctrl+C)");
         } else if state.settings.kiosk {
-            log::info!("kiosk mode: idle input watcher disabled (exit via pkill/SIGTERM or hyprland binding)");
+            log::info!("kiosk mode: idle input watcher disabled (exit with Escape, SIGTERM, or pkill -TERM -f '[i]dle-screens-wayland')");
         } else {
             idle::spawn_watcher();
         }
