@@ -60,3 +60,6 @@ Original thinking docs that motivated the project. Preserved for context — his
 - **[screensaver-ideas.md](research/screensaver-ideas.md)** — brainstorming list for new saver concepts; selected entries imported into [saver-ideas.md](saver-ideas.md), the rest still a candidate source.
 - **[community-screensaver-wishlist.md](research/community-screensaver-wishlist.md)** — what people ask for in screensaver threads, framed as implementable briefs; not yet imported into [saver-ideas.md](saver-ideas.md).
 - **[aval-findings.md](research/aval-findings.md)** — AVAL audit findings and build-in-public notes.
+- **[omarchy-plugin-spec.md](research/omarchy-plugin-spec.md)** — Omarchy's plugin system read from source: why we still fork the idle plugin, the 3s screensaver-window deadline, the theme-set/post-update hook leverage, and the ranked options for stopping.
+- **[linux-distro-targets.md](research/linux-distro-targets.md)** — which distros clear the two gates (libraries, layer-shell compositor), measured per distro, plus what "smoke test" should mean at each level.
+- **[tickets-omarchy-and-distros.md](research/tickets-omarchy-and-distros.md)** — ready-to-file ticket drafts from the two docs above: outbound (first-class Omarchy support) and inbound (distro reach).
