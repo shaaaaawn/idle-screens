@@ -39,35 +39,69 @@ export const FISH_CATALOG: FishEntry[] = [
 
 export const DEFAULT_FISH = FISH_CATALOG[0]!;
 
+/** URL scheme of a breed bundled INSIDE this package (src/breeds, generated
+ *  by breeds/intake.mjs): no network, no gateway, no decoder. The tank
+ *  resolves it; everything else treats it as an opaque URL. */
+export const BUNDLED_BREED_SCHEME = 'mq-breed:';
+
 /**
- * The unminted breeds — the original aquarium's NPC set, brought in as
- * catalog entries with synthetic ids above the 512 supply. No token, no
- * IPFS pin yet (`ipfs3d` empty), so they resolve only where a host serves
- * the bundled GLBs (`localGlb`) — the playground/studio today. Pinning them
- * and filling `ipfs3d` is what makes them wall-ready; until then the DSL
- * reports them as unhosted rather than spawning a dead URL.
+ * The unminted breeds — the original aquarium's NPC set, catalog entries with
+ * synthetic ids above the 512 supply. They have no token and no IPFS pin:
+ * the package BUNDLES them (breeds/README.md — the intake that optimised
+ * them), so they swim on every host, the wall included, with nothing to
+ * fetch. `fishMix` takes their breed name or id in the default catalog.
  *
- * All are clip-less and unrigged — they swim on `bodyWiggle`. Their
- * materials use the NPC naming (PrimaryColor, SecondaryColor, EYES-, GLOW-),
- * so every instance gets the seeded two-tone coat and glow halos.
+ * The original NPCs are clip-less and unrigged — they swim on the body wave;
+ * the breeds drawn in-house (starfish, octopus) are rigged with clips. Their
+ * materials carry the role names (PrimaryColor, SecondaryColor, EYES-,
+ * GLOW-, KEEP-), so every instance gets the seeded two-tone coat, glow
+ * halos, and its authored colour where the intake said to keep it.
  */
 export const NPC_CATALOG: FishEntry[] = [
-  { id: 601, name: 'Blowfish', breed: 'blowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-blowfish.glb' },
-  { id: 602, name: 'Hackerfish', breed: 'hackerfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-hackerfish.glb' },
-  { id: 603, name: 'Glowfish', breed: 'glowfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-glowfish.glb' },
-  { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-babyfish.glb' },
-  { id: 605, name: 'Shark', breed: 'shark', ipfs3d: '', localGlb: '/assets/metaquarium/shark3.glb' },
-  { id: 606, name: 'Crab', breed: 'crab', ipfs3d: '', localGlb: '/assets/metaquarium/npc-crab.glb' },
-  { id: 607, name: 'Jellyfish', breed: 'jellyfish', ipfs3d: '', localGlb: '/assets/metaquarium/npc-jellyfish.glb' },
-  { id: 608, name: 'Dori', breed: 'dori', ipfs3d: '', localGlb: '/assets/metaquarium/npc-dori.glb' },
+  { id: 601, name: 'Blowfish', breed: 'blowfish', ipfs3d: `${BUNDLED_BREED_SCHEME}blowfish`, localGlb: '' },
+  { id: 602, name: 'Hackerfish', breed: 'hackerfish', ipfs3d: `${BUNDLED_BREED_SCHEME}hackerfish`, localGlb: '' },
+  { id: 603, name: 'Glowfish', breed: 'glowfish', ipfs3d: `${BUNDLED_BREED_SCHEME}glowfish`, localGlb: '' },
+  { id: 604, name: 'Babyfish', breed: 'babyfish', ipfs3d: `${BUNDLED_BREED_SCHEME}babyfish`, localGlb: '' },
+  { id: 605, name: 'Shark', breed: 'shark', ipfs3d: `${BUNDLED_BREED_SCHEME}shark`, localGlb: '' },
+  { id: 606, name: 'Crab', breed: 'crab', ipfs3d: `${BUNDLED_BREED_SCHEME}crab`, localGlb: '' },
+  { id: 608, name: 'Dori', breed: 'dori', ipfs3d: `${BUNDLED_BREED_SCHEME}dori`, localGlb: '' },
+  // Drawn in-house in the designer's style, not from the original aquarium (breeds/rig/starfish-model.mjs).
+  { id: 609, name: 'Starfish', breed: 'starfish', ipfs3d: `${BUNDLED_BREED_SCHEME}starfish`, localGlb: '' },
+  // The second drawn in-house (breeds/rig/octopus-model.mjs).
+  { id: 610, name: 'Octopus', breed: 'octopus', ipfs3d: `${BUNDLED_BREED_SCHEME}octopus`, localGlb: '' },
 ];
 
+/** The default catalog's lookup: minted samples first, then the bundled breeds. */
+const findInDefault = (key: string): FishEntry | undefined => /^\d+$/.test(key)
+  ? FISH_CATALOG.find((f) => f.id === Number(key)) ?? NPC_CATALOG.find((f) => f.id === Number(key))
+  : FISH_CATALOG.find((f) => f.breed.toLowerCase() === key) ?? NPC_CATALOG.find((f) => f.breed.toLowerCase() === key);
+
+import { SWIM_STYLE_NAMES, type SwimStyle } from './swim';
 import { BREEDS, breedOf, fishAsset, TOTAL_SUPPLY } from './farm';
+import type { Breed } from './farm';
 
 export interface FishMixEntry {
   id: number;
+  /** Catalog breed, so the tank can pick a species-aware style under
+   *  `swimStyle: 'auto'` without re-resolving the id. */
+  breed: string;
   url: string;
   count: number;
+  /** Per-token swim style (`id[:count]@style`, MQ30). Absent = the scene's
+   *  `swimStyle`. This is what turns a monoculture into a community:
+   *  `457:3@hover, 257:6@school, 497:1@surface`. */
+  style?: SwimStyle;
+  /** Per-token size (`*1.5`), multiplying the breed's own. Absent = 1. */
+  size?: number;
+}
+
+/** One spawn slot: the URL to load and, if the token said so, how it swims. */
+export interface FishSlot {
+  url: string;
+  breed: string;
+  style?: SwimStyle;
+  /** Per-token size (`*1.5`), multiplying the breed's own. Absent = 1. */
+  size?: number;
 }
 
 export interface FishMixResult {
@@ -93,24 +127,110 @@ export interface FishMixResult {
  * bad tokens land in `problems` and good ones still parse, so one typo
  * degrades a mix instead of blanking the tank.
  */
+/**
+ * THE UNIQUENESS RULE (default catalog only): a minted fish is an INDIVIDUAL,
+ * so no token id appears twice in one scene. Counts still mean "how many
+ * fish" — `300:12` casts twelve DISTINCT angelfish (300 and its nearest
+ * unused neighbours in the breed range), and `betafish:5` five distinct
+ * betafish spread across the range. Reassignments are recorded in `problems`
+ * so publish advisories can say what happened; a breed with no ids left
+ * clamps with a problem. Custom catalogs are exempt — a closed world is its
+ * curator's business, and NPC entries are SPECIES, not individuals.
+ */
 export function parseFishMix(
   mix: string,
   catalog: FishEntry[] = FISH_CATALOG,
 ): FishMixResult {
   const entries: FishMixEntry[] = [];
   const problems: string[] = [];
+  const unique = catalog === FISH_CATALOG;
+  const used = new Set<number>();
+
+  /** Whether `core` is already a complete, valid unstyled token. Custom
+   *  catalog aliases historically allowed `@`, so an unrecognised trailing
+   *  word is style syntax only when the prefix resolves and the whole token
+   *  does not. */
+  const resolvesAsToken = (core: string): boolean => {
+    const [idRaw, countRaw, ...extra] = core.split(':');
+    if (extra.length > 0) return false;
+    if (countRaw !== undefined) {
+      const count = Number(countRaw.trim());
+      if (!Number.isInteger(count) || count < 1) return false;
+    }
+    const key = (idRaw ?? '').trim().toLowerCase();
+    if (catalog === FISH_CATALOG && findInDefault(key)) return true;
+    if (/^\d+$/.test(key)) {
+      if (catalog.some((fish) => fish.id === Number(key))) return true;
+      return catalog === FISH_CATALOG
+        && fishAsset(Number(key), '3d') !== null
+        && breedOf(Number(key)) !== null;
+    }
+    return catalog.some((fish) => fish.breed.toLowerCase() === key);
+  };
+
+  /** Nearest unused minted id of `breed`, spreading outward from `want`. */
+  const allocate = (breed: Breed, want: number): number | null => {
+    const b = BREEDS.find((x) => x.breed === breed);
+    if (!b?.range) return null;
+    const [lo, hi] = b.range;
+    if (!used.has(want) && want >= lo && want <= hi) { used.add(want); return want; }
+    for (let d = 1; d <= hi - lo; d += 1) {
+      for (const cand of [want + d, want - d]) {
+        if (cand >= lo && cand <= hi && !used.has(cand)) { used.add(cand); return cand; }
+      }
+    }
+    return null;
+  };
   for (const rawToken of mix.split(',')) {
-    const token = rawToken.trim();
+    let token = rawToken.trim();
     if (token === '') continue;
-    const [idRaw, countRaw, ...extra] = token.split(':');
+    // `*size` comes off the very end, before `@style`: `shark:1@patrol*1.5`.
+    let size: number | undefined;
+    const star = token.lastIndexOf('*');
+    if (star >= 0) {
+      const n = Number(token.slice(star + 1).trim());
+      if (Number.isFinite(n) && n > 0) {
+        size = Math.min(4, Math.max(0.25, n));
+        if (size !== n) problems.push(`"${token}": size clamped to ${size} (0.25–4)`);
+      } else {
+        problems.push(`"${token}": size must be a number 0.25–4 — swimming at its breed's size`);
+      }
+      token = token.slice(0, star).trim();
+    }
+    // `@style` is parsed off the END first so `id:count` stays exactly as
+    // documented; an unknown style is a problem but the fish still swims,
+    // on the scene's style — degrade the tag, never drop the fish.
+    let style: SwimStyle | undefined;
+    let core = token;
+    const at = token.lastIndexOf('@');
+    if (at >= 0) {
+      const styleRaw = token.slice(at + 1).trim().toLowerCase();
+      const styledCore = token.slice(0, at).trim();
+      if (resolvesAsToken(token)) {
+        // A complete legacy alias wins even when it ends in a word that is
+        // also a style name. Authors can still style it by appending another
+        // suffix (`reef@hover@school`).
+      } else if ((SWIM_STYLE_NAMES as readonly string[]).includes(styleRaw)) {
+        core = styledCore;
+        style = styleRaw as SwimStyle;
+      } else if (resolvesAsToken(styledCore)) {
+        // Preserve a complete alias such as `reef@night`; only diagnose a
+        // misspelled suffix when removing it exposes a real id/alias.
+        core = styledCore;
+        problems.push(`"${token}": unknown style "${styleRaw}" (${SWIM_STYLE_NAMES.join(', ')}) — swimming with the scene's swimStyle`);
+      }
+    }
+    const [idRaw, countRaw, ...extra] = core.split(':');
     if (extra.length > 0) {
       problems.push(`"${token}": too many ':' — expected id[:count]`);
       continue;
     }
     const key = (idRaw ?? '').trim().toLowerCase();
-    let fish = /^\d+$/.test(key)
-      ? catalog.find((f) => f.id === Number(key))
-      : catalog.find((f) => f.breed.toLowerCase() === key);
+    let fish = catalog === FISH_CATALOG
+      ? findInDefault(key)
+      : /^\d+$/.test(key)
+        ? catalog.find((f) => f.id === Number(key))
+        : catalog.find((f) => f.breed.toLowerCase() === key);
     // Farm fallback is only for the default catalog. A custom catalog is a
     // closed world (playground offline e2e, a future pack) — leaking a minted
     // id out to IPFS would silently undo that constraint.
@@ -123,7 +243,8 @@ export function parseFishMix(
     if (!fish) {
       // Name what THIS catalog offers, not a hardcoded minted list — a studio
       // catalog carries the NPC breeds too, and the message should say so.
-      const breeds = [...new Set(catalog.map((f) => f.breed))].join(', ');
+      const offered = catalog === FISH_CATALOG ? [...BREEDS.filter((b) => b.minted).map((b) => b.breed), ...NPC_CATALOG.map((f) => f.breed)] : catalog.map((f) => f.breed);
+      const breeds = [...new Set(offered)].join(', ');
       problems.push(
         /^\d+$/.test(key)
           ? catalog === FISH_CATALOG
@@ -133,10 +254,10 @@ export function parseFishMix(
       );
       continue;
     }
-    // ipfs3d stays the ONE spawnable URL. NPC entries ship with it empty —
-    // a host that serves the bundled GLBs maps localGlb into it (the
-    // playground's asset() rebase); anywhere else the honest answer is
-    // "not hosted here", never a root-relative path that 404s on the wall.
+    // ipfs3d stays the ONE spawnable URL. Every default-catalog entry
+    // (minted or bundled NPC breed) carries one; this only still fires for
+    // a caller-supplied catalog whose entry genuinely has none — the honest
+    // answer is "not hosted here", never a root-relative path that 404s.
     const url = fish.ipfs3d;
     if (!url) {
       problems.push(`"${key}": model not hosted here (catalog carries no URL for it)`);
@@ -158,7 +279,43 @@ export function parseFishMix(
         count = n;
       }
     }
-    entries.push({ id: fish.id, url, count });
+    // Minted individuals are unique per scene; everything else (custom
+    // catalogs, NPC species) keeps plain count semantics.
+    if (!unique || fish.id > TOTAL_SUPPLY) {
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}), ...(size ? { size } : {}) });
+      continue;
+    }
+    const breed = breedOf(fish.id);
+    if (!breed) {
+      entries.push({ id: fish.id, breed: fish.breed, url, count, ...(style ? { style } : {}), ...(size ? { size } : {}) });
+      continue;
+    }
+    // Breed aliases spread across the whole range for variety; numeric ids
+    // start the spread at the id the author asked for.
+    const isAlias = !/^\d+$/.test(key);
+    const b = BREEDS.find((x) => x.breed === breed);
+    for (let i = 0; i < count; i += 1) {
+      const want = isAlias && b?.range
+        ? b.range[0] + Math.floor(((b.range[1] - b.range[0]) * i) / Math.max(1, count))
+        : fish.id;
+      const got = allocate(breed, want);
+      if (got === null) {
+        problems.push(`"${token}": only ${i} distinct ${breed} left — a minted fish appears once per scene`);
+        break;
+      }
+      // Advisory only when the id the author NAMED was already taken by an
+      // earlier token — the extras of an `id:count` school reassign silently,
+      // that being the whole meaning of the count under uniqueness.
+      if (!isAlias && i === 0 && got !== fish.id) {
+        problems.push(`fish ${fish.id} already cast — fish ${got} swims instead`);
+      }
+      const gotUrl = fishAsset(got, '3d');
+      if (!gotUrl) {
+        problems.push(`fish ${got}: no asset URL`);
+        continue;
+      }
+      entries.push({ id: got, breed: fish.breed, url: gotUrl, count: 1, ...(style ? { style } : {}), ...(size ? { size } : {}) });
+    }
   }
   return { entries, problems };
 }
@@ -167,9 +324,18 @@ export function parseFishMix(
  *  from: `"257:2,100:1"` → [url257, url257, url100]. Slot order IS the
  *  DSL order, so fish 0..N are stable for a given string. */
 export function expandFishMix(entries: FishMixEntry[], cap: number): string[] {
-  const urls: string[] = [];
+  return expandFishMixSlots(entries, cap).map((s) => s.url);
+}
+
+/** The same expansion carrying each token's `@style` per slot (MQ30). The
+ *  tank spawns from this; `expandFishMix` stays for callers that only need
+ *  the URLs. */
+export function expandFishMixSlots(entries: FishMixEntry[], cap: number): FishSlot[] {
+  const slots: FishSlot[] = [];
   for (const e of entries) {
-    for (let i = 0; i < e.count && urls.length < cap; i++) urls.push(e.url);
+    for (let i = 0; i < e.count && slots.length < cap; i++) {
+      slots.push({ url: e.url, breed: e.breed, ...(e.style ? { style: e.style } : {}), ...(e.size ? { size: e.size } : {}) });
+    }
   }
-  return urls;
+  return slots;
 }

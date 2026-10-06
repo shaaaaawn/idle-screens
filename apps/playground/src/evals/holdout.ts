@@ -20,6 +20,7 @@
 import { BENCHMARK_INTENTS } from './benchmarks';
 import { buildArtistScreens } from './style-apply';
 import type { ArtistStyleProfile, EvalScreen } from './types';
+import { isCoverageBand } from './score';
 
 /**
  * Supplied by the `eval-holdout` Vite plugin. Resolves to `null` when no
@@ -62,6 +63,12 @@ export function parseHoldoutProfiles(raw: unknown): ArtistStyleProfile[] {
     }
     if (!Array.isArray(rec.signaturePrompts) || rec.signaturePrompts.length === 0) {
       throw new Error(`holdout: profile ${String(rec.id)} has no signaturePrompts`);
+    }
+    const band = (rec.composition as { coverageBand?: unknown } | undefined)?.coverageBand;
+    if (band !== undefined && !isCoverageBand(band)) {
+      throw new Error(
+        `holdout: profile ${String(rec.id)} has a malformed composition.coverageBand (want [min, max] with 0 < min ≤ max ≤ 1), got ${JSON.stringify(band)}`,
+      );
     }
     return rec as unknown as ArtistStyleProfile;
   });

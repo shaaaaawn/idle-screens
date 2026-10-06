@@ -89,15 +89,19 @@ test.describe('gallery view', () => {
   });
 
   test('the idle screensaver does not fire on top of an open preview', async ({ page }) => {
-    // 1500ms, not 600: boot + first click has to finish before the timer can
-    // fire, or the engine sleeps before the preview is even open.
-    await page.goto('/?timeout=1500');
+    // 2500ms, not 600 or 1500: boot + first click has to finish before the
+    // timer can fire, or the engine sleeps before the preview is even open —
+    // and this PR's larger default catalog (metaquarium worlds, vignettes,
+    // interior scenes) pushed boot cost past the old 1500ms margin under a
+    // loaded CI runner (a real, reproducible flake, not a suppress bug: see
+    // PR #178 review discussion).
+    await page.goto('/?timeout=2500');
     await page.waitForFunction(() => !!window.__idleScreens);
     await page.locator('.gallery-card[data-id="dvd"]').click();
     await expect.poll(() => previewOpen(page)).toBe(true);
     expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
 
-    await page.waitForTimeout(2600); // well past the idle timeout
+    await page.waitForTimeout(4000); // well past the idle timeout
     expect(await page.evaluate(() => window.__idleScreens!.state())).toBe('awake');
     expect(await previewOpen(page)).toBe(true);
 
@@ -273,9 +277,16 @@ test.describe('config panel (dev view)', () => {
     await expect.poll(() =>
       page.evaluate(() => {
         const host = document.getElementById('viewport-host');
+        if (!host?.classList.contains('active')) return false;
+        // The scene just picked, not just any: the outgoing layer keeps its
+        // `live` class (and its canvas) until it is retired 340 ms after the
+        // new one goes live, so "some live layer has children" is true before
+        // the pick has mounted anything. The incoming layer is appended last.
+        const layers = host.querySelectorAll(':scope > .vp-layer');
+        const newest = layers[layers.length - 1];
         return (
-          !!host?.classList.contains('active') &&
-          host.querySelectorAll(':scope > :not(#viewport-label)').length > 0
+          (!!newest && newest.classList.contains('live') && newest.childElementCount > 0) ||
+          host.querySelector(':scope > iframe') !== null
         );
       }),
     ).toBe(true);

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bandRange, FISH_LENGTH, fishHash, fishVariation, FORMATION_SHAPES, formationExtent, formationSlot, SWIM_STYLES,
-  SWIM_STYLE_NAMES, swimStyleOf,
+  anchorFraction, AUTO_STYLE_BY_BREED, autoStyleFor, bandRange, BREED_SIZE, breedSize, FISH_LENGTH, fishSizeMul, fishHash, fishVariation, FORMATION_SHAPES, formationBreathe, formationExtent, formationSlot, idleSway,
+  SWIM_STYLES, SWIM_STYLE_NAMES, swimStyleOf, fitBreath,
 } from './swim';
 import { METAQUARIUM_PARAMS } from './manifest';
 
@@ -21,17 +21,17 @@ describe('swim styles', () => {
     // A literal is the only thing here that fails when someone renames a
     // style out from under the scenes already published with it.
     expect([...SWIM_STYLE_NAMES].sort()).toEqual(
-      ['bottom', 'drift', 'hover', 'loop', 'patrol', 'school', 'surface'],
+      ['bottom', 'chase', 'drift', 'follow', 'hover', 'loop', 'pair', 'patrol', 'school', 'surface'],
     );
+    // `auto` is a manifest option, not a style: it resolves per fish.
     expect([...(METAQUARIUM_PARAMS.swimStyle.options ?? [])].sort())
-      .toEqual([...SWIM_STYLE_NAMES].sort());
+      .toEqual([...SWIM_STYLE_NAMES, 'auto'].sort());
     for (const n of SWIM_STYLE_NAMES) expect(swimStyleOf(n).name).toBe(n);
   });
   it('variance 0 is a uniform population, not a synchronised one', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     // ...but phase and anchor still spread, deliberately: see fishVariation.
     const phases = [0, 1, 2, 3, 4, 5].map((i) => fishVariation(i, 0).phase);
@@ -93,6 +93,43 @@ describe('swim styles', () => {
         .map((s2) => `${Math.round(s2.side)},${Math.round(s2.up)},${Math.round(s2.back)}`).join('|');
     expect(new Set(FORMATION_SHAPES.map(sig)).size).toBe(FORMATION_SHAPES.length);
   });
+  it('the law holds at any body length: a school of sharks spaces like sharks', () => {
+    for (const shape of FORMATION_SHAPES) {
+      for (const k of [0.45, 2.2, 3]) {
+        const L = FISH_LENGTH * k;
+        for (const count of [2, 8, 24]) {
+          const slots = Array.from({ length: count }, (_, i) => formationSlot(i, count, 1, undefined, shape, L));
+          for (let i = 0; i < count; i += 1) {
+            for (let j = i + 1; j < count; j += 1) {
+              const a = slots[i]!; const b = slots[j]!;
+              expect(Math.hypot(a.side - b.side, a.up - b.up, a.back - b.back), `${shape} ×${k} ${count} ${i},${j}`)
+                .toBeGreaterThanOrEqual(L);
+            }
+          }
+        }
+      }
+    }
+  });
+  it('breeds have their own length, and fish their own size within it', () => {
+    expect(breedSize('shark')).toBeGreaterThan(2);
+    expect(breedSize('babyfish')).toBeLessThan(0.5);
+    expect(breedSize('Angelfish')).toBe(1);
+    expect(breedSize('unicorn')).toBe(1);
+    expect(breedSize(undefined)).toBe(1);
+    for (const v of Object.values(BREED_SIZE)) expect(v).toBeGreaterThan(0);
+    // Variance 0: every fish its breed's size.
+    expect(fishSizeMul(5, 0)).toBe(1);
+    // Seeded, bounded, and log-symmetric: as many a third smaller as a third bigger.
+    const at1 = Array.from({ length: 400 }, (_, i) => fishSizeMul(i, 1));
+    expect(fishSizeMul(17, 0.7)).toBe(fishSizeMul(17, 0.7));
+    expect(Math.min(...at1)).toBeGreaterThanOrEqual(2 ** -0.8 - 1e-9);
+    expect(Math.max(...at1)).toBeLessThanOrEqual(2 ** 0.8 + 1e-9);
+    const meanLog = at1.reduce((a, x) => a + Math.log2(x), 0) / at1.length;
+    expect(Math.abs(meanLog)).toBeLessThan(0.08);
+    // No five-step cycle: neighbouring slots do not repeat a size.
+    const at5 = Array.from({ length: 20 }, (_, i) => fishSizeMul(i, 0.5));
+    expect(new Set(at5.map((x) => x.toFixed(3))).size).toBe(20);
+  });
   it('no two fish in a formation are inside one body length', () => {
     // The enforceable version of "a school does not collide". A review
     // measured 36% of fish-frames with a neighbour inside a body length when
@@ -153,12 +190,77 @@ describe('swim styles', () => {
   });
 });
 
+describe('relationships, auto styles, breathing, sway', () => {
+  it('bonded styles declare their bond; every older style is unbonded', () => {
+    expect(swimStyleOf('follow').bond).toBe('follow');
+    expect(swimStyleOf('pair').bond).toBe('pair');
+    expect(swimStyleOf('chase').bond).toBe('chase');
+    for (const n of ['loop', 'school', 'drift', 'hover', 'patrol', 'bottom', 'surface']) {
+      expect(swimStyleOf(n).bond ?? 'none').toBe('none');
+      // Exactly one older style forms; a style that silently became a
+      // formation (or school stopped being one) must fail here.
+      expect(swimStyleOf(n).formation).toBe(n === 'school');
+    }
+  });
+  it('fitBreath caps a breath that would push seats out of the glass', () => {
+    const bounds = { yRange: 57, radius: 120 };
+    // A ring's vertical reach is capped at 24: ×1.22 = 29.3 > 28.5 half-column.
+    const fit = fitBreath({ up: 24, reach: 50 }, 1.22, bounds, 0);
+    expect(fit).toBeCloseTo(28.5 / 24, 5);
+    expect(24 * fit).toBeLessThanOrEqual(bounds.yRange / 2);
+    // A shoal that fits breathes the full amount.
+    expect(fitBreath({ up: 10, reach: 30 }, 1.22, bounds, 0)).toBe(1.22);
+    // Never below 1: a shoal already at the limit holds, it does not shrink.
+    expect(fitBreath({ up: 40, reach: 30 }, 1.22, bounds, 0)).toBe(1);
+  });
+  it('auto covers every minted breed and every NPC breed, and loops for strangers', () => {
+    for (const b of ['betafish', 'angelfish', 'seahorse', 'seaturtle',
+      'blowfish', 'hackerfish', 'glowfish', 'babyfish', 'shark', 'crab', 'dori', 'starfish', 'octopus']) {
+      expect(AUTO_STYLE_BY_BREED[b]).toBeDefined();
+      expect(swimStyleOf(AUTO_STYLE_BY_BREED[b]!).name).toBe(AUTO_STYLE_BY_BREED[b]);
+    }
+    expect(autoStyleFor('seahorse').name).toBe('hover');
+    expect(autoStyleFor('SeaTurtle').name).toBe('surface');
+    expect(autoStyleFor('reef@night').name).toBe('loop');
+    expect(autoStyleFor(undefined).name).toBe('loop');
+  });
+  it('breathing only ever expands, and 0 is exactly 1', () => {
+    for (let t = 0; t < 60; t += 0.37) {
+      expect(formationBreathe(t, 0)).toBe(1);
+      expect(formationBreathe(t, 1)).toBeGreaterThanOrEqual(1);
+      expect(formationBreathe(t, 1)).toBeLessThanOrEqual(1.22 + 1e-9);
+      expect(formationBreathe(t, 2)).toBe(formationBreathe(t, 1));
+    }
+  });
+  it('idle sway belongs to station-keepers only', () => {
+    for (const n of ['loop', 'school', 'patrol', 'bottom', 'surface', 'follow']) {
+      expect(idleSway(swimStyleOf(n), 3.3, 1)).toBe(0);
+    }
+    const hover = Array.from({ length: 50 }, (_, i) => idleSway(swimStyleOf('hover'), i * 0.3, 0));
+    expect(Math.max(...hover.map(Math.abs))).toBeGreaterThan(0.3);
+    expect(Math.max(...hover.map(Math.abs))).toBeLessThan(0.5);
+    expect(Math.abs(idleSway(swimStyleOf('drift'), 3.49, 0))).toBeLessThan(0.25);
+  });
+  it('the wheel is the ring tilted; the ring itself stays flat for published scenes', () => {
+    const ups = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'wheel').up);
+    expect(Math.max(...ups) - Math.min(...ups)).toBeGreaterThan(FISH_LENGTH);
+    expect(Math.max(...ups.map(Math.abs))).toBeLessThanOrEqual(28);
+    const ringUps = Array.from({ length: 8 }, (_, i) => formationSlot(i, 8, 0, undefined, 'ring').up);
+    expect(Math.max(...ringUps.map(Math.abs))).toBeLessThanOrEqual(FISH_LENGTH * 0.3);
+    for (let i = 0; i < 8; i++) {
+      const a = formationSlot(i, 8, 0.4, undefined, 'ring');
+      const b = formationSlot(i, 8, 0.4, undefined, 'wheel');
+      expect(a.side).toBe(b.side);
+      expect(a.back).toBe(b.back);
+    }
+  });
+});
+
 describe('per-fish uniqueness', () => {
   it('variance 0 is a uniform shoal — the safe default', () => {
     for (const i of [0, 1, 7, 23]) {
       const v = fishVariation(i, 0);
       expect(v.speedMul).toBe(1);
-      expect(v.scaleMul).toBe(1);
     }
     expect(METAQUARIUM_PARAMS.swimVariance.default).toBe(0);
   });
@@ -167,8 +269,6 @@ describe('per-fish uniqueness', () => {
       const v = fishVariation(i, 1);
       expect(v.speedMul).toBeGreaterThan(0.55);
       expect(v.speedMul).toBeLessThan(1.45);
-      expect(v.scaleMul).toBeGreaterThan(0.7);
-      expect(v.scaleMul).toBeLessThan(1.3);
     }
   });
   it('a fish varies by INDEX, not by spawn order or rebuild count', () => {
@@ -235,5 +335,50 @@ describe('station-keeping styles must not knot up', () => {
   });
   it('anchoring does not depend on variance — spreading is correctness', () => {
     expect(fishVariation(9, 0).anchor).toBe(fishVariation(9, 1).anchor);
+  });
+});
+
+describe('anchorFraction — the rule the tank actually applies', () => {
+  // The tests above prove the HASH spreads. They passed while the tank was
+  // still knotting patrol/bottom/surface into one clump at mount, because the
+  // bug was in the tank's USE of the hash: the offset applied only when
+  // `travel < 1`. These assert the rule itself, which is what the tank calls.
+  const CAST = 24;
+  const spread = (name: string, variance: number): number[] =>
+    Array.from({ length: CAST }, (_, i) => anchorFraction(swimStyleOf(name), i, variance));
+
+  it('loop is anchorless — its no-op promise reaches frame 0', () => {
+    expect(spread('loop', 0.6).every((a) => a === 0)).toBe(true);
+  });
+
+  it('EVERY other style spreads, full-travel ones included', () => {
+    // The regression gate. patrol/bottom/surface/school all carry travel = 1,
+    // so a `travel < 1` condition silently exempts them — and they are exactly
+    // the styles that were seen knotting on a live channel.
+    for (const name of SWIM_STYLE_NAMES) {
+      if (name === 'loop') continue;
+      const xs = spread(name, 0.6);
+      expect(new Set(xs.map((a) => a.toFixed(4))).size, name).toBe(CAST);
+      // Reaching both ends means the cast starts strung round the whole
+      // route, not bunched near the spline's azimuth-0 origin.
+      expect(Math.min(...xs), name).toBeLessThan(0.25);
+      expect(Math.max(...xs), name).toBeGreaterThan(0.75);
+      // No quarter of the route left empty — a cast can hit both extremes and
+      // still be two clumps.
+      const quarters = new Set(xs.map((a) => Math.floor(a * 4)));
+      expect(quarters.size, name).toBe(4);
+    }
+  });
+
+  it('at least one full-travel style exists to be gated', () => {
+    // Guards the gate above against becoming vacuous if the catalogue's
+    // travel values are ever retuned.
+    const full = SWIM_STYLES.filter((s) => s.travel === 1 && s.name !== 'loop');
+    expect(full.length).toBeGreaterThan(0);
+  });
+
+  it('spreads at variance 0 too — it is correctness, not flavour', () => {
+    expect(new Set(spread('patrol', 0).map((a) => a.toFixed(4))).size).toBe(CAST);
+    expect(spread('patrol', 0)).toEqual(spread('patrol', 1));
   });
 });

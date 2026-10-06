@@ -1,8 +1,12 @@
 import { createRng } from '@idle-screens/core';
-import { backgroundLuma, backgroundRgb, colourSeparation, hexLuma, hexRgb, spriteHex } from './luma';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt } from './simulate';
-import { structuralSignature } from './steer';
-import { LIMITS, type IdleSequence, type SaverSpec, type SpecWarning } from './types';
+import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
+import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
+import { barFraction, polygonArea, polygonPoints } from './shapes';
+import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { morphNothingMorphable, structuralSignature } from './steer';
+import { groupOf, mapBox, paintMap, paintOpacity } from './paint';
+import { resolveTimelineAt, timelineTracks } from './timeline';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
  * Minimum RGB-space colour distance (see `colourSeparation`) between a layer
@@ -18,29 +22,86 @@ import { LIMITS, type IdleSequence, type SaverSpec, type SpecWarning } from './t
 const LOW_CONTRAST_FLOOR = 0.05;
 
 /**
+ * A spec that declares `density: 'sparse'` is promising a mostly-empty frame.
+ * Above this alpha-weighted coverage the promise is broken (2 % of the frame
+ * is a comfortable field, not restraint — `lanterns` measures ~1.5 %).
+ */
+const SPARSE_DECLARED_MAX_COVERAGE = 0.02;
+
+/**
+ * WCAG AA floor for body text. Only layers that declare `role: 'read'` are
+ * measured against it — atmospheric text is texture, not copy, and the
+ * shipped examples paint it at 2–3:1 on purpose.
+ */
+const READ_LEGIBILITY_FLOOR = 4.5;
+
+/** A `role: 'read'` box closer than this to any edge is in the overscan / bezel zone. */
+const READ_SAFE_AREA = 0.05;
+
+/**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
  * call advise only on specs that have already passed validation.
  */
 export function adviseSpec(
   spec: SaverSpec,
   viewport = { width: 1920, height: 1080 },
+  /**
+   * Sample point. `perceiveScene` forwards its own `t`/`seed` so the advisories
+   * describe the same scene its other channels do — without them a caller
+   * perceiving at t = 30 s would get `form` for that instant beside an
+   * `overlap-seams` advisory computed for a different one.
+   *
+   * `backgroundSeed` is separate from `seed` because a sequence's
+   * `inkOverBed` (the segment's ink layers judged against the bed's
+   * background — see `perceiveSequenceFrame`) mixes two scenes with
+   * potentially different seeds: `seed` drives the ink layers' own entity
+   * stream, `backgroundSeed` samples the bed's field. Defaults to `seed` —
+   * every other caller has one scene and one seed for both.
+   */
+  opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
 ): SpecWarning[] {
+  // Which layers never show in this scene — paint opacity (the layer's own ×
+  // its group's) 0 at every key boundary of its timeline, or simply 0 without
+  // one. A timed piece keeps every prop in every act and hides the unused
+  // ones; judging those would bury the real advisories. Without `opacity` or
+  // `groups` no layer is hidden and every check below runs as it always has.
+  const hidden = hiddenLayers(spec);
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  const countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  const rng = createRng(spec.seed ?? 42);
+  // Mirror buildScene's maxTotal clamp: without it a dense scene above the
+  // reference viewport is advised on more entities than the renderer will
+  // build, and `perceiveScene` would pair a `form` channel counted one way
+  // with an `overlap-seams` advisory counted the other. (Part of F49, which
+  // tracks the same divergence for describeScene.)
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((sum, l) => sum + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
+  const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
   const bgLuma = backgroundLuma(spec);
   const bgRgb = backgroundRgb(spec);
+
+  // Do overlapping layers actually merge? Computed once from the entities we
+  // already built; the advisory below fires only on the case where the author
+  // clearly wanted one shape and the paint settings defeat it.
+  const cohesion = cohesionOf(
+    spec.layers.map((layer, i) => ({ layer, entities: allEntities[i]! })),
+    opts.t ?? COHESION_T, w, h,
+  );
 
   let totalEntities = 0;
   let textLayerCount = 0;
   let motionLayerCount = 0;
 
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const entities = allEntities[li]!;
     totalEntities += entities.length;
@@ -50,6 +111,18 @@ export function adviseSpec(
     if (isStaticText) textLayerCount++;
     if (layer.motion.type !== 'static') motionLayerCount++;
 
+    const coh = cohesion[li]!;
+    if (seamsWorthWarning(layer, coh, entities.length)) {
+      warnings.push({
+        path: `layers[${li}]`,
+        code: 'overlap-seams',
+        message:
+          `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
+          + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
+          + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
+      });
+    }
+
     if (layer.trail && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].trail`,
@@ -58,11 +131,11 @@ export function adviseSpec(
       });
     }
 
-    if (layer.sprite.kind === 'streak' && layer.motion.type === 'static') {
+    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static') {
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: 'streak sprites orient along the motion heading — static entities have none and will render at angle 0',
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing${layer.spin ? ' (spin still rotates the mark)' : ' and it renders at angle 0'}`,
       });
     }
 
@@ -116,36 +189,62 @@ export function adviseSpec(
   // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled"
   let totalCoverage = 0;
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const entities = allEntities[li]!;
+    // Paint opacity weighs coverage like alpha does (unset ⇒ exactly as before).
+    const paintA = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of entities) {
       const r = e.size / 2;
       let pixArea: number;
       if (layer.sprite.kind === 'circle') {
         pixArea = Math.PI * r * r;
+      } else if (layer.sprite.kind === 'polygon') {
+        // The outline's own area, not its bounding square (4r²) — a flat band
+        // or ridge fills a fraction of that.
+        pixArea = polygonArea(polygonPoints(layer.sprite, r));
+      } else if (layer.sprite.kind === 'bar') {
+        pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
         const maxWPx = layer.sprite.maxWidth * scale;
-        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx);
-        pixArea = maxWPx * lines.length * lh * 0.55;
+        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
+        pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
       } else {
         pixArea = e.size * e.size; // text/emoji: approximate as square of font size
       }
-      totalCoverage += (pixArea * e.alpha) / (w * h);
+      // Sparse-event layers are lit only for `life` of every `every` ms, at a
+      // mean envelope of ~½, and at a mean grown size — judge their coverage
+      // by that duty, not by whichever instant we happen to sample.
+      let duty = 1;
+      if (layer.emit) {
+        // Area scales with size², so the time-mean over a linear size ramp
+        // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
+        const [ga, gb] = layer.emit.grow ?? [1, 1];
+        const g2 = (ga * ga + ga * gb + gb * gb) / 3;
+        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
+      }
+      totalCoverage += paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {
       const positions = entities.map((e) => positionAt(e, 0, w, h));
       const maxDistPx = layer.links.maxDist * scale;
       const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false, w, h);
-      const lwPx = (layer.links.width ?? 1) * scale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const lwPx = (layer.links.width ?? defaultWidth) * scale;
       const la = layer.links.alpha ?? 1;
-      for (const edge of edges) totalCoverage += (edge.dist * lwPx * la) / (w * h);
+      for (const edge of edges) totalCoverage += paintA === 1 ? (edge.dist * lwPx * la) / (w * h) : (edge.dist * lwPx * la * paintA) / (w * h);
     }
   }
 
-  if (totalCoverage < 0.0005 && spec.layers.length > 0) {
+  // A declared `density` is read before either density advisory fires — and
+  // then checked against the measurement, so the declaration cannot be used
+  // to silence a scene that is empty by accident rather than by intent.
+  const density = spec.density ?? 'normal';
+  const wouldBeSparse = totalCoverage < 0.0005 && spec.layers.length > 0;
+  if (wouldBeSparse && density !== 'sparse') {
     warnings.push({
       path: 'layers',
       code: 'sparse-scene',
@@ -153,11 +252,25 @@ export function adviseSpec(
     });
   }
 
-  if (totalEntities > 500) {
+  if (totalEntities > 500 && density !== 'dense') {
     warnings.push({
       path: 'layers',
       code: 'dense-scene',
       message: `${totalEntities} entities — scene may feel crowded and hurt performance on low-end devices`,
+    });
+  }
+
+  if (density === 'sparse' && totalCoverage > SPARSE_DECLARED_MAX_COVERAGE) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared sparse but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(2)}% — either the declaration or the scene is wrong`,
+    });
+  } else if (density === 'dense' && wouldBeSparse) {
+    warnings.push({
+      path: 'density',
+      code: 'density-mismatch',
+      message: `declared dense but alpha-weighted coverage is ${(totalCoverage * 100).toFixed(4)}% — the scene will look empty`,
     });
   }
 
@@ -175,6 +288,7 @@ export function adviseSpec(
   // Link starvation: links layer where few edges actually form.
   // Chain mode always forms its edges — only distance-gated modes can starve.
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     if (!layer.links || layer.links.mode === 'chain') continue;
     const entities = allEntities[li]!;
@@ -193,6 +307,7 @@ export function adviseSpec(
 
   // Motion variety: all entities in a layer have nearly identical velocity
   for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     if (layer.motion.type === 'static') continue;
     const entities = allEntities[li]!;
@@ -214,7 +329,8 @@ export function adviseSpec(
   // whole viewport (bounce, warp, path) have transient spawn positions that say
   // nothing about composition — exclude them from the centroid.
   const composed = spec.layers
-    .map((l, li) => ({ l, ents: allEntities[li]! }))
+    .map((l, li) => ({ l, li, ents: allEntities[li]! }))
+    .filter(({ li }) => !hidden?.[li])
     .filter(({ l }) => !['bounce', 'warp', 'path'].includes(l.motion.type))
     // Layer-parented orbits position relative to their parent (resolved at render
     // time) — their raw positionAt is an offset around (0,0), not a screen position.
@@ -235,7 +351,333 @@ export function adviseSpec(
     }
   }
 
+  // Spatial text: the one layout bug an author without eyes makes most and
+  // cannot detect — a caption that runs off the frame, a title painted over a
+  // body. Only static text is judged (moving text has no fixed box). Boxes use
+  // the character-class width table the textBlock line-breaker uses, so the
+  // estimate is the renderer's own idea of the text, not a separate guess.
+  const textBoxes: TextBoxAt[] = [];
+  for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
+    const layer = spec.layers[li]!;
+    const s = layer.sprite;
+    if (layer.motion.type !== 'static') continue;
+    if (s.kind !== 'text' && s.kind !== 'textBlock') continue;
+    const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
+    for (const e of allEntities[li]!) {
+      const p = positionAt(e, 0, w, h);
+      const raw = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
+      const map = paintMap(spec, layer, w, h, scale);
+      const box = map ? { ...raw, ...mapBox(map, raw) } : raw;
+      // What the layer guarantees it paints, worst case: base alpha minus its
+      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
+      // duty cycle is a readability question, not an ink-colour one; sampling
+      // at `t = 0` would otherwise flag every emitting layer as invisible)
+      // times a textBlock's own `opacity` — so faint or invisible
+      // `role: 'read'` text can't hide behind an unmeasured alpha.
+      const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
+      textBoxes.push({ li, label, alpha, ...box });
+    }
+  }
+  const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
+    x: +(b.x0 / w).toFixed(4),
+    y: +(b.y0 / h).toFixed(4),
+    w: +((b.x1 - b.x0) / w).toFixed(4),
+    h: +((b.y1 - b.y0) / h).toFixed(4),
+  });
+
+  // Off-screen: any edge past the viewport by more than 1% of that dimension
+  // (the width table is approximate; a hairline overhang is not a finding).
+  const tolX = w * 0.01;
+  const tolY = h * 0.01;
+  const offFlagged = new Set<number>();
+  for (const b of textBoxes) {
+    if (offFlagged.has(b.li)) continue;
+    const edges: string[] = [];
+    if (b.x0 < -tolX) edges.push(`left edge by ~${Math.round(-b.x0)}px`);
+    if (b.x1 > w + tolX) edges.push(`right edge by ~${Math.round(b.x1 - w)}px`);
+    if (b.y0 < -tolY) edges.push(`top edge by ~${Math.round(-b.y0)}px`);
+    if (b.y1 > h + tolY) edges.push(`bottom edge by ~${Math.round(b.y1 - h)}px`);
+    if (edges.length === 0) continue;
+    offFlagged.add(b.li);
+    warnings.push({
+      path: `layers[${b.li}]`,
+      code: 'text-off-screen',
+      message: `${b.label} text runs off the ${edges.join(' and the ')} at ${w}×${h} — move position, or shrink fontSize / maxWidth`,
+    });
+  }
+
+  // Overlap: two different static text layers whose boxes share more than 10%
+  // of the smaller box. Reported once per layer pair, on the earlier layer.
+  const pairFlagged = new Set<string>();
+  for (let i = 0; i < textBoxes.length; i++) {
+    for (let j = i + 1; j < textBoxes.length; j++) {
+      const a = textBoxes[i]!;
+      const b = textBoxes[j]!;
+      if (a.li === b.li) continue;
+      const pair = `${Math.min(a.li, b.li)}:${Math.max(a.li, b.li)}`;
+      if (pairFlagged.has(pair)) continue;
+      const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+      const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (ix <= 0 || iy <= 0) continue;
+      const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+      if (smaller <= 0) continue;
+      const share = (ix * iy) / smaller;
+      if (share <= 0.1) continue;
+      pairFlagged.add(pair);
+      const [first, second] = a.li < b.li ? [a, b] : [b, a];
+      warnings.push({
+        path: `layers[${first.li}]`,
+        code: 'text-overlap',
+        message: `${first.label} and ${second.label} text boxes overlap (~${Math.round(share * 100)}% of the smaller one) — they will paint over each other; move one or shrink it`,
+        // The two boxes, so an agent can move one without re-deriving the
+        // layout. Additive: the message is unchanged.
+        boxes: [asFraction(first), asFraction(second)],
+      });
+    }
+  }
+
+  // Legibility, for text that declared it must be read (`role: 'read'`).
+  // Everything below is opt-in: a layer without the role is never measured,
+  // so the atmospheric text the examples paint at 2–3:1 stays silent.
+  const readFlagged = new Set<number>();
+  for (const b of textBoxes) {
+    if (readFlagged.has(b.li)) continue;
+    const layer = spec.layers[b.li]!;
+    const s = layer.sprite;
+    if ((s.kind !== 'text' && s.kind !== 'textBlock') || s.role !== 'read') continue;
+    // Every box of the layer (a `list` of labels is several), worst one wins.
+    const boxes = textBoxes.filter((x) => x.li === b.li);
+    readFlagged.add(b.li);
+
+    const ink = hexRgb(s.color ?? '#e6e8ef');
+    // What the layer actually paints over `base`, at its own alpha and blend —
+    // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
+    // `multiply`, is not free to hide behind a source-over assumption.
+    const textPlate = (base: Rgb, alpha: number): Rgb => {
+      if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
+      if (layer.blend === 'multiply') {
+        return {
+          r: base.r * (1 - alpha + ink.r * alpha),
+          g: base.g * (1 - alpha + ink.g * alpha),
+          b: base.b * (1 - alpha + ink.b * alpha),
+        };
+      }
+      return sourceOverPlate(base, ink, alpha);
+    };
+    let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
+    for (const box of boxes) {
+      const cy = (box.y0 + box.y1) / 2;
+      const cx = (box.x0 + box.x1) / 2;
+      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
+      const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
+      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+      if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
+        worst = { ground, plate, plateLabel: lit?.label ?? null };
+      }
+    }
+    if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
+      const under = worst.plateLabel
+        ? ` and ${worst.plate.toFixed(1)}:1 under ${worst.plateLabel} at its brightest`
+        : '';
+      warnings.push({
+        path: `layers[${b.li}].sprite`,
+        code: 'text-legibility',
+        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 against the background at the box centre${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
+      });
+    }
+
+    // Safe area: readable text that sits in the outer 5 % of the frame lands
+    // in the bezel / overscan zone on a real display.
+    const edges: string[] = [];
+    const x0 = Math.min(...boxes.map((x) => x.x0));
+    const x1 = Math.max(...boxes.map((x) => x.x1));
+    const y0 = Math.min(...boxes.map((x) => x.y0));
+    const y1 = Math.max(...boxes.map((x) => x.y1));
+    if (x0 < w * READ_SAFE_AREA) edges.push('left');
+    if (x1 > w * (1 - READ_SAFE_AREA)) edges.push('right');
+    if (y0 < h * READ_SAFE_AREA) edges.push('top');
+    if (y1 > h * (1 - READ_SAFE_AREA)) edges.push('bottom');
+    if (edges.length > 0) {
+      warnings.push({
+        path: `layers[${b.li}]`,
+        code: 'text-safe-area',
+        message: `${b.label} is declared role: 'read' but its box is within ${READ_SAFE_AREA * 100}% of the ${edges.join(' and ')} edge${edges.length === 1 ? '' : 's'} at ${w}×${h} — displays crop and bezels hide that zone; move it inward`,
+        boxes: [asFraction({ x0, y0, x1, y1 })],
+      });
+    }
+  }
+
   return warnings;
+}
+
+/**
+ * The brightest ground a `role: 'read'` box can find itself on: for every
+ * additive layer (`lighter` / `screen`) whose entities can reach the box and
+ * are big enough to sit under a glyph, the brightest per-entity plate — its
+ * own colour composited at its own peak alpha (base + pulse), never a
+ * different entity's alpha borrowed onto it. Reach is judged at rest: a
+ * static entity is its disc at `t = 0`; an orbit is its centre ± radius;
+ * every travelling motion can be anywhere. The disc's diameter is the
+ * entity's largest possible rendered extent — grow breathing, a rect/bar's
+ * second dimension (thickness/aspect height can exceed the primary size),
+ * and the peak scale warp/emit reach over their lifecycle — so a mote that
+ * balloons under a line is not dismissed as dust because it starts small.
+ */
+function brightestAdditivePlate(
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  ground: Rgb,
+  box: TextBoxAt,
+  w: number,
+  h: number,
+): { rgb: Rgb; label: string } | null {
+  let best: { rgb: Rgb; label: string; lum: number } | null = null;
+  for (let lj = 0; lj < spec.layers.length; lj++) {
+    const layer = spec.layers[lj]!;
+    const blend = layer.blend;
+    if (blend !== 'lighter' && blend !== 'screen') continue;
+    if (lj === box.li) continue;
+    const entities = allEntities[lj]!;
+    // Only a layer that is actually moved at draw time (its own or its
+    // group's transform) may reach anywhere; opacity alone moves nothing.
+    const moved = layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined;
+    for (const e of entities) {
+      const hex = spriteHex(layer, e);
+      if (hex === null) continue;
+      const growScale = (e.motion === 'warp' ? WARP_MAX_SCALE : 1) * (e.emit ? Math.max(e.emit.growFrom, e.emit.growTo) : 1);
+      const maxDim = Math.max(e.size, e.size2 ?? 0) * (1 + e.growAmp) * growScale;
+      if (maxDim < box.fs) continue;
+      // A transformed layer is moved at draw time: treat it like a moving one (it may reach anywhere).
+      if (!moved && !entityReachesBox(e, maxDim / 2, box, w, h)) continue;
+      const a = layer.opacity === undefined && layer.group === undefined ? Math.min(1, e.alpha + e.pulseAmp) : Math.min(1, e.alpha + e.pulseAmp) * paintOpacity(spec, layer);
+      if (a <= 0) continue;
+      const plate = additivePlate(ground, hexRgb(hex), a, blend);
+      const lum = relativeLuminance(plate);
+      if (!best || lum > best.lum) {
+        best = { rgb: plate, label: layer.key ? `\`${layer.key}\`` : `layers[${lj}]`, lum };
+      }
+    }
+  }
+  return best ? { rgb: best.rgb, label: best.label } : null;
+}
+
+/** Whether an entity's disc of half-extent `r` can overlap `box` (see `brightestAdditivePlate`). */
+function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: number): boolean {
+  if (e.motion === 'static') {
+    const p = positionAt(e, 0, w, h);
+    return p.x + r > box.x0 && p.x - r < box.x1 && p.y + r > box.y0 && p.y - r < box.y1;
+  }
+  if (e.motion === 'orbit' && !e.orbitParent) {
+    const span = e.orbitR + r;
+    return e.orbitCx + span > box.x0 && e.orbitCx - span < box.x1 && e.orbitCy + span > box.y0 && e.orbitCy - span < box.y1;
+  }
+  return true;
+}
+
+interface TextBoxAt {
+  li: number;
+  label: string;
+  /**
+   * Worst case, not "at rest": base alpha minus its pulse trough (never the
+   * `emit` envelope, whose on/off duty cycle is excluded on purpose) times a
+   * textBlock's own `opacity`.
+   */
+  alpha: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** Glyph height in px — what an additive layer must out-size to sit under a line. */
+  fs: number;
+}
+
+type Box = Pick<TextBoxAt, 'x0' | 'y0' | 'x1' | 'y1' | 'fs'>;
+
+/**
+ * Box of one `text` entity, mirroring the renderer: a `font` with a px size is
+ * used verbatim (scaled by the same viewport/reference ratio the renderer
+ * applies), otherwise the seeded per-entity size; `align`/`baseline` move the
+ * anchor; `maxWidth` is a hard cap because `fillText(text, x, y, maxWidth)`
+ * squeezes the glyphs to fit.
+ */
+function textBoxAt(
+  s: Extract<LayerSpec['sprite'], { kind: 'text' }>,
+  e: Entity,
+  p: { x: number; y: number },
+  spec: SaverSpec,
+  w: number,
+  h: number,
+): Box {
+  const m = s.font ? /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/.exec(s.font) : null;
+  const fontScale = spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
+  const fh = m ? Number(m[1]) * fontScale : e.size;
+  const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
+  let fw = textWidthEm(str) * fh;
+  if (s.maxWidth) fw = Math.min(fw, s.maxWidth * (spec.units === 'px' ? 1 : Math.min(w, h)));
+  const align = s.align ?? 'center';
+  const baseline = s.baseline ?? 'middle';
+  const x0 = align === 'left' ? p.x : align === 'right' ? p.x - fw : p.x - fw / 2;
+  const y0 = baseline === 'top' ? p.y : baseline === 'bottom' ? p.y - fh : p.y - fh / 2;
+  return { x0, y0, x1: x0 + fw, y1: y0 + fh, fs: fh };
+}
+
+/**
+ * Box of a `textBlock`, mirroring the renderer: `position` is the block's
+ * top-left, lines break with `breakTextBlock`, `align` moves the painted lines
+ * inside the `maxWidth` box (not the box itself).
+ */
+function textBlockBoxAt(
+  s: Extract<LayerSpec['sprite'], { kind: 'textBlock' }>,
+  p: { x: number; y: number },
+  w: number,
+  h: number,
+): Box {
+  const unit = Math.min(w, h);
+  const fsPx = s.fontSize * unit;
+  const lh = (s.lineHeight ?? 1.4) * fsPx;
+  const maxWPx = s.maxWidth * unit;
+  const lines = breakTextBlock(s.text, maxWPx / fsPx, textMetricsClassFor(s.font));
+  const maxLineW = lines.reduce((mx, l) => Math.max(mx, l.widthEm), 0) * fsPx;
+  const totalH = lines.length * lh;
+  const align = s.align ?? 'left';
+  const x0 = align === 'center' ? p.x + (maxWPx - maxLineW) / 2 : align === 'right' ? p.x + maxWPx - maxLineW : p.x;
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
+  return { x0: x0 + dx, y0: p.y + dy, x1: x0 + dx + maxLineW, y1: p.y + dy + totalH, fs: fsPx };
+}
+
+/**
+ * Per layer, whether it never shows: its own `opacity`, or its group's, is
+ * pinned to 0 — 0 in the base scene and every `timeline` key on that path
+ * (and no whole-object key above it) sets 0 too. A glide between zeros stays
+ * at zero, so this is exact at every instant, not just at key boundaries,
+ * and costs no timeline resolution. Membership is fixed per scene (not
+ * steerable or keyable), so a group's pin covers its members. Null when no
+ * layer uses `opacity` or `groups` (nothing can be hidden — the common case).
+ */
+function hiddenLayers(spec: SaverSpec): boolean[] | null {
+  if (!spec.groups && !spec.layers.some((l) => l.opacity !== undefined)) return null;
+  const tracks = spec.timeline ? timelineTracks(spec) : null;
+  const pinnedZero = (path: string, base: unknown, ancestors: string[]): boolean => {
+    if (base !== 0) return false;
+    if (!tracks) return true;
+    for (const [p, keys] of tracks) {
+      if (p === path && keys.some((k) => k.value !== 0)) return false;
+      if (ancestors.includes(p)) return false; // a whole-object key could set anything
+    }
+    return true;
+  };
+  const out = spec.layers.map((l, i) => {
+    const lp = `layers.${i}`;
+    if (pinnedZero(`${lp}.opacity`, l.opacity, ['layers', lp])) return true;
+    const g = l.group !== undefined && spec.groups && Object.prototype.hasOwnProperty.call(spec.groups, l.group) ? spec.groups[l.group] : undefined;
+    return !!g && pinnedZero(`groups.${l.group}.opacity`, g.opacity, ['groups', `groups.${l.group}`]);
+  });
+  return out.some(Boolean) ? out : null;
 }
 
 /**
@@ -251,23 +693,46 @@ export function adviseSequence(
   for (let i = 0; i < seq.segments.length; i++) {
     const segWarnings = adviseSpec(seq.segments[i]!.scene, viewport);
     for (const w of segWarnings) {
-      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message });
+      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message, boxes: w.boxes });
     }
   }
 
+  // Informational, once per sequence: a fade costs two live segments for
+  // `dur`, which the lowest tiers cannot afford, so they play it as a cut.
+  // A `fade` on the last segment only ever runs under `loop: true` (it's the
+  // wrap's transition into segment 0) — without loop there is no next
+  // segment for it to transition into, so it never executes and should not
+  // be counted.
+  const fadeBound = seq.loop ? seq.segments.length : seq.segments.length - 1;
+  const fades = seq.segments.slice(0, fadeBound).filter((s) => s.transition?.type === 'fade').length;
+  if (fades > 0) {
+    const first = seq.segments.slice(0, fadeBound).findIndex((s) => s.transition?.type === 'fade');
+    warnings.push({
+      path: `segments[${first}].transition`,
+      code: 'fade-degrades-on-low-tier',
+      message: `informational: ${fades} fade transition${fades === 1 ? '' : 's'} declared — viewers on the 'basic' or 'minimal' capability tier render fade as cut (two live segments for dur is over that budget); the show still plays`,
+    });
+  }
+
   for (let i = 0; i < seq.segments.length - 1; i++) {
-    const lumaA = backgroundLuma(seq.segments[i]!.scene);
-    const lumaB = backgroundLuma(seq.segments[i + 1]!.scene);
+    const tr = seq.segments[i]!.transition;
+    // The ground each side of the cut actually shows: the outgoing segment at
+    // its end, the incoming at its start (a timeline may end on a different
+    // colour than it began; without one these are the scenes themselves).
+    // A declared `fade` is the documented remedy — the jump is ramped over
+    // `dur`, not cut — so it is not raised there (low tiers that play the
+    // fade as a cut are covered by `fade-degrades-on-low-tier`).
+    const lumaA = backgroundLuma(resolveTimelineAt(seq.segments[i]!.scene, seq.segments[i]!.duration ?? 0));
+    const lumaB = backgroundLuma(resolveTimelineAt(seq.segments[i + 1]!.scene, 0));
     const delta = Math.abs(lumaA - lumaB);
-    if (delta > 0.5) {
+    if (delta > 0.5 && tr?.type !== 'fade') {
       warnings.push({
         path: `segments[${i}]`,
         code: 'boundary-luminance-jump',
-        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut`,
+        message: `background luminance jumps ${delta.toFixed(2)} at boundary ${i}→${i + 1} — may flash on cut; declare transition: { type: 'fade', dur } on segments[${i}] to ramp it`,
       });
     }
 
-    const tr = seq.segments[i]!.transition;
     if (tr?.type === 'morph') {
       const sigA = structuralSignature(seq.segments[i]!.scene);
       const sigB = structuralSignature(seq.segments[i + 1]!.scene);
@@ -276,6 +741,13 @@ export function adviseSequence(
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+        });
+      } else if (!seq.segments[i]!.scene.timeline && !seq.segments[i + 1]!.scene.timeline
+        && morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' || tr.text === 'dip' })) {
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-nothing-morphable',
+          message: `segments ${i}→${i + 1} differ only in values morph cannot interpolate (strings such as textBlock.text step on the first frame): the morph will look like a cut — fade text via colour or reveal.progress`,
         });
       }
     }

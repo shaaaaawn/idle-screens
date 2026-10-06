@@ -3,12 +3,14 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         TabView {
+            WatchFeedView()
+                .tabItem { Label("Watch", systemImage: "play.tv") }
             GalleryView()
-                .tabItem { Label("Watch", systemImage: "tv") }
-            MyChannelsView()
-                .tabItem { Label("Create", systemImage: "wand.and.stars") }
-            PairedTVView()
-                .tabItem { Label("Screens", systemImage: "tv.badge.wifi") }
+                .tabItem { Label("Channels", systemImage: "square.grid.2x2") }
+            AgentsView()
+                .tabItem { Label("Agents", systemImage: "sparkles") }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .preferredColorScheme(.dark)
         .tint(.appPrimary)

@@ -62,3 +62,23 @@ final class SceneVisibilityTests: XCTestCase {
         XCTAssertEqual(SceneVisibility.verdict(layers: [], background: nil), .invisible)
     }
 }
+
+/// Two different questions about a gradient background must not share one
+/// number: "is the fill itself bright?" and "what does ink stand out against?"
+final class ContrastReferenceTests: XCTestCase {
+
+    func testAmberOverTheDarkTopIsNotJudgedAgainstTheWarmBottom() throws {
+        // Regression: the contrast reference became the BRIGHTEST stop, so
+        // amber lanterns floating over the near-black top of a night gradient
+        // were scored against the brown at the bottom and the whole channel
+        // was declared "not broadcasting".
+        let spec = try JSONDecoder().decode(SpecSubset.self, from: Data(##"""
+        {"seed":3,"background":{"type":"gradient","stops":[
+            {"at":0,"color":"#04060f"},{"at":1,"color":"#8a5a2a"}]},
+         "layers":[{"count":40,"sprite":{"kind":"circle","radius":[0.006,0.009],"color":"#b06a2a"},
+           "region":{"y":[0,0.4]},"motion":{"type":"static"}}]}
+        """##.utf8))
+        let layers = spec.compile(seed: 3)
+        XCTAssertEqual(SceneVisibility.verdict(layers: layers, background: spec.background), .visible)
+    }
+}

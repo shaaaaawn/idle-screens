@@ -264,9 +264,13 @@ struct ChannelCard: View {
             .font(.tvMeta)
             .foregroundStyle(Color.textSecondary)
         } else {
-            // Hold the line's height so titles across a row stay aligned
-            // whether or not anyone is watching.
-            Text(" ").font(.tvMeta)
+            // Who made what is on, and when — the same line the phone and the
+            // website print. A space still holds the row's height when a
+            // channel has never been steered: no line beats a fake one.
+            Text(SteerLine.cardLine(for: channel) ?? " ")
+                .font(.tvMeta)
+                .foregroundStyle(Color.textSecondary.opacity(0.8))
+                .lineLimit(1)
         }
     }
 

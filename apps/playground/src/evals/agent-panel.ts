@@ -26,7 +26,8 @@ import {
   resolveAgentTargets,
   type AgentTargetContext,
 } from './agent-targets';
-import type { AgentScope } from './types';
+import type { AgentScope, AgentToolName, SchemaMode } from './types';
+import { agentSwitchesMarkup, readAgentSwitches, type AgentSwitches } from './agent-switches';
 
 export type AgentPanelContext = AgentTargetContext;
 export type { AgentScope };
@@ -48,6 +49,9 @@ export async function runAgentEvalInteractive(opts: {
   model: string;
   maxToolCalls: number;
   scope: AgentScope;
+  /** Experiment switches; absent = all four tools / full FORMAT.md. */
+  tools?: ReadonlyArray<AgentToolName>;
+  schemaMode?: SchemaMode;
   operator?: string;
   runId?: string;
 }): Promise<AgentRun | null> {
@@ -113,6 +117,8 @@ export async function runAgentEvalInteractive(opts: {
       runId: opts.runId ?? `agent-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`,
       model: opts.model,
       maxToolCalls: opts.maxToolCalls,
+      tools: opts.tools,
+      schemaMode: opts.schemaMode,
       operator: opts.operator,
       targets,
       profiles: opts.ctx.catalog.artists,
@@ -198,7 +204,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         <label class="evals-field">Max tool calls per screen
           <input name="maxCalls" type="number" min="1" max="100" value="20" />
         </label>
-      </div>
+      </div>${agentSwitchesMarkup()}
       <p class="evals-field-hint" data-role="model-hint"></p>
       <div data-role="scope-controls"></div>
       ${
@@ -275,7 +281,7 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
         },
         sel.scope,
       );
-      void runBatch(model, maxToolCalls, targets);
+      void runBatch(model, maxToolCalls, targets, readAgentSwitches(modal));
     });
   };
 
@@ -301,7 +307,12 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
     return modal;
   };
 
-  const runBatch = async (model: string, maxToolCalls: number, targets: AgentRunTarget[]): Promise<void> => {
+  const runBatch = async (
+    model: string,
+    maxToolCalls: number,
+    targets: AgentRunTarget[],
+    switches: AgentSwitches,
+  ): Promise<void> => {
     const modal = renderProgress(model, targets);
     const rowsHost = modal.querySelector<HTMLElement>('[data-role="rows"]')!;
     const log = modal.querySelector<HTMLElement>('[data-role="log"]')!;
@@ -333,6 +344,8 @@ export function openAgentPanel(ctx: AgentPanelContext): void {
       runId: `agent-${new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)}`,
       model,
       maxToolCalls,
+      tools: switches.tools,
+      schemaMode: switches.schemaMode,
       operator: getRunDefaults().operator,
       targets,
       profiles: ctx.catalog.artists,

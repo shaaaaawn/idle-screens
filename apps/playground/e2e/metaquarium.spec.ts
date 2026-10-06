@@ -6,6 +6,17 @@ declare global {
   }
 }
 
+/** The shape `shoal.ts`'s `stats()` reports at `inspect().shoal`. */
+type ShoalStats = { count: number; inView: number | null; out: number; nearest: number; polarisation: number };
+
+/** `inspect().shoal`, or null before the first frame reports one. */
+async function shoalStats(page: Page): Promise<ShoalStats | null> {
+  return page.evaluate(() => {
+    const el = document.querySelector('idle-screen') as unknown as { inspect(): Record<string, unknown> | null };
+    return (el.inspect()?.['shoal'] as ShoalStats | null) ?? null;
+  });
+}
+
 /** The saver host inside <idle-screen>'s shadow root. */
 async function surfaceDataset(page: Page): Promise<{ fish: number; env: string; backend: string; draco: boolean }> {
   return page.evaluate(() => {
@@ -88,7 +99,14 @@ test('MQ2: school variant spawns at least 6 fish', async ({ page }) => {
  * cycles crash unless dispose() force-releases via forceContextLoss().
  */
 test('MQ3: 18 mount/dispose cycles never exhaust the GL context pool', async ({ page }) => {
-  test.setTimeout(90_000);
+  // fishLighting defaults to 'lit' (studio.ts), so every one of the 18 mounts
+  // now also builds a fresh PMREMGenerator environment — real per-mount GPU
+  // work that cannot be cached across cycles (each cycle gets its own
+  // WebGLRenderer/context, which is the whole point of this test). Measured
+  // ~60-70s for the loop alone on an idle runner; under a loaded CI runner
+  // running other WebGL-heavy specs concurrently that leaves too little
+  // margin against the old 90s budget.
+  test.setTimeout(150_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   const contextErrors: string[] = [];
@@ -241,19 +259,233 @@ test('MQ8: the formation branch mounts and populates without errors', async ({ p
   expect(pageErrors).toEqual([]);
 });
 
-test('MQ9: the whole unminted NPC cast mounts — all eight breeds, no errors', async ({ page }) => {
+test('MQ9: the whole unminted NPC cast mounts — all seven breeds, no errors', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
-  // Draco + WebP in one scene: six of the eight are Draco-compressed and the
-  // jellyfish atlas is WebP - this is the test that catches a decoder or
+  // The whole bundled cast in one scene: the test that catches a decoder or
   // extension regression across the NPC pipeline.
   await page.goto('/?saver=metaquarium-npc');
   await page.waitForFunction(() => !!window.__idleScreens);
   await page.evaluate(() => window.__idleScreens!.sleep());
   await expect
     .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
-    .toBe(8);
+    .toBe(7);
 
+  expect(pageErrors).toEqual([]);
+});
+
+test('MQ10: ?lofi=1 mounts the Apple TV 2D tank — icons, no three.js, capturable', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  // Hermetic: every transparent icon is the same 8x8 PNG served from here, so
+  // the test proves the backend, not a gateway's mood. Solid opaque magenta —
+  // a colour the tank's own palette/gradients never produce — so a fish's
+  // presence in the pixels is verifiable, not just its icon being decoded.
+  const icon = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR4nGP4z/D/Pz7MMDIUAACD5r9BB2dd7wAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await page.route('**/*_transparent_icon.png', (route) =>
+    route.fulfill({ body: icon, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' } }),
+  );
+  const chunks: string[] = [];
+  page.on('request', (r) => chunks.push(r.url()));
+
+  await page.goto('/?saver=metaquarium&lofi=1');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('lofi');
+  // Exact parity count, like MQ9's WebGL check — but lofiRich() ties fish
+  // count to the runner's capability tier (8 lean, 13 on 'high'), so accept
+  // either rather than assuming this Chromium always resolves 'standard'.
+  await expect
+    .poll(async () => [8, 13].includes((await surfaceDataset(page)).fish), { timeout: 15_000 })
+    .toBe(true);
+
+  // A 2d canvas, one a thumbnail can read (blob-decoded icons never taint),
+  // and — the actual point of "icons" — at least one drawn magenta pixel.
+  const surface = await page.evaluate(() => {
+    const canvas = document
+      .querySelector('idle-screen')
+      ?.shadowRoot?.querySelector<HTMLCanvasElement>('.surface canvas');
+    if (!canvas) return { twoD: false, readable: false, fishVisible: false };
+    let readable = false;
+    try {
+      readable = canvas.toDataURL('image/jpeg').startsWith('data:image/jpeg');
+    } catch {
+      readable = false;
+    }
+    let fishVisible = false;
+    const g2d = canvas.getContext('2d');
+    if (g2d) {
+      // Fish draw at globalAlpha 0.55-1 over a dark tank, so a near fish
+      // reads as pure magenta and a far one as magenta blended into the
+      // background — check the blend, not an exact (255,0,255) match.
+      const { data } = g2d.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i]! > 150 && data[i + 1]! < 100 && data[i + 2]! > 150) {
+          fishVisible = true;
+          break;
+        }
+      }
+    }
+    return { twoD: !!g2d, readable, fishVisible };
+  });
+  expect(surface).toEqual({ twoD: true, readable: true, fishVisible: true });
+
+  // The WebGL tank's chunk (and with it three.js) never loads on this path.
+  expect(chunks.filter((u) => /saver-metaquarium\/src\/tank\.ts|\/tank-[\w-]+\.js|node_modules\/.*three/.test(u))).toEqual([]);
+
+  await page.evaluate(() => window.__idleScreens!.wake());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => !!document.querySelector('idle-screen')?.shadowRoot?.querySelector('.surface canvas'),
+      ),
+    )
+    .toBe(false);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Ambient shoal + canopy (canopy.ts, tank.ts's shoalCarrier/buildShoal): the
+ * school mounts over a dense flora bed without erroring, and inspect().shoal
+ * — including its camera-frustum inView metric — comes back well-formed
+ * rather than NaN/undefined from a broken canopy lookup or lift-table
+ * sample. Neither this path nor the `shoal` param is otherwise exercised
+ * anywhere in e2e.
+ */
+test('MQ11: shoal mounts over a dense canopy and reports a sane inspect().shoal', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.shoal=1&mq.floraDensity=1&mq.shoalSpeed=1.5');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).backend, { timeout: 15_000 })
+    .toBe('webgl2');
+  await expect.poll(() => shoalStats(page), { timeout: 15_000 }).not.toBeNull();
+
+  const shoal = await shoalStats(page);
+  expect(shoal!.count).toBeGreaterThan(0);
+  expect(shoal!.inView).not.toBeNull();
+  expect(shoal!.inView).toBeGreaterThanOrEqual(0);
+  expect(shoal!.inView).toBeLessThanOrEqual(1);
+  expect(shoal!.nearest).toBeGreaterThanOrEqual(0);
+  expect(Number.isFinite(shoal!.polarisation)).toBe(true);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The starfish (a bundled breed drawn in-house, rigged in Blender): it mounts
+ * from its own lazy chunk, and its driver (starfish.ts) has it on the floor
+ * doing a starfish's business. The NPC cast above is capped at the low
+ * tier's eight fish, so it gets its own scene.
+ */
+test('MQ12: the starfish mounts, rigged, and crawls the floor', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.environment=reef');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  for (const d of doings) expect(['crawl', 'walk', 'rise', 'sit', 'turn', 'idle', 'look', 'wave', 'stand', 'curl']).toContain(d);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The starfish dance: an aerobics class mounts, every dancer upright on the
+ * same move of the routine (starfish.ts danceAt), no errors.
+ */
+test('MQ13: starfish aerobics — the class dances one move in unison', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:4&mq.starfishDance=aerobics&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(4);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(4);
+  expect(['march', 'jacks', 'reach', 'kick', 'twist', 'circles', 'disco', 'spin']).toContain(doings[0]);
+  expect(new Set(doings).size).toBe(1);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * The partner dance: a couple mounts, both on the same move of the routine,
+ * no errors.
+ */
+test('MQ14: starfish duet — a couple dances the same move together', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=starfish:2&mq.starfishDance=duet&mq.environment=lagoon&mq.floorKind=flat');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 30_000 })
+    .toBe(2);
+  const doings = await page.evaluate(() => {
+    const report = (document.querySelector('idle-screen') as unknown as { inspect?: () => { fish?: { doing?: string }[] } }).inspect?.();
+    return (report?.fish ?? []).map((f) => f.doing);
+  });
+  expect(doings).toHaveLength(2);
+  expect(['mambo', 'sway', 'twirl', 'dip', 'lift']).toContain(doings[0]);
+  expect(doings[1]).toBe(doings[0]);
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * Crystals (propMix): generated scenery builds and reports itself, and a tank
+ * that asked for none builds none — the "byte-identical when off" contract,
+ * checked at the one place a viewer could see it break.
+ */
+test('MQ40: propMix grows crystals; a propless tank grows none', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const props = (): Promise<string | null> => page.evaluate(() => document
+    .querySelector('idle-screen')
+    ?.shadowRoot?.querySelector<HTMLElement>('.surface')?.dataset.mqProps ?? null);
+
+  await page.goto('/?saver=metaquarium-crystal-habits');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  // 5 clusters requested, but a software-GL runner resolves the 'minimal'
+  // tier (see MQ10's fish-count check for the same class of flakiness),
+  // whose props.clusters budget of 4 clamps the layout — accept either.
+  await expect
+    .poll(async () => [4, 5].includes(Number(await props())), { timeout: 20_000 })
+    .toBe(true);
+
+  await page.goto('/?saver=metaquarium-school');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+  await expect.poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+  expect(await props()).toBeNull();
   expect(pageErrors).toEqual([]);
 });

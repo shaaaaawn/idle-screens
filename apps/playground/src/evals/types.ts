@@ -108,6 +108,18 @@ export interface ArtistStyleProfile {
     regionBias?: { x?: [number, number]; y?: [number, number] };
     densityScale: number;
     layerCountHint: number;
+    /**
+     * Expected alpha-weighted coverage range for a faithful screen. When set,
+     * the scorer's perception gate — "is there a picture at all?" — LOWERS its
+     * 0.2 % floor to the band's lower bound; a style whose premise is
+     * emptiness (Fathom) is otherwise scored as broken for following its own
+     * DNA. The band can only lower that gate, never raise it: a higher minimum
+     * coverage is an intent constraint, which is what the benchmark bands
+     * (`minCoverage`) express, not a "no picture" test. The upper bound is
+     * documentation for now. Must satisfy 0 < min ≤ max ≤ 1 (the holdout
+     * loader rejects anything else).
+     */
+    coverageBand?: [number, number];
   };
   /** What schema v1 cannot express for this style — feeds next cycle. */
   schemaGaps: string[];
@@ -174,6 +186,8 @@ export type EvalHarness =
   | 'playground-ui'
   | 'headless-vitest'
   | 'agent-loop'
+  /** A model under test authored the specs itself; eval:score-run graded them. */
+  | 'agent-authored'
   | 'mcp'
   | 'manual';
 
@@ -227,6 +241,16 @@ export interface RunProvenance {
     minCoverage: number;
     minLuminanceVar: number;
     weights: { perception: number; styleFit: number; intentFit: number };
+  };
+  /**
+   * Which experiment switches the agent loop ran with. Optional: only
+   * `agent-loop` runs have it, and runs recorded before the switches existed
+   * ran with all four tools and the full FORMAT.md.
+   */
+  agentLoop?: {
+    maxToolCalls: number;
+    tools: AgentToolName[];
+    schemaMode: SchemaMode;
   };
 }
 
@@ -305,6 +329,22 @@ export type RunMode =
 
 export type AgentScope = 'screen' | 'benchmark' | 'artist' | 'suite';
 
+/**
+ * The agent loop's tool vocabulary. `submit_spec` and `finish` are the loop
+ * itself and can never be removed; `perceive` and `score` are experiment
+ * switches (mono `docs/training-a-saverspec-author.md` TR2: a run without
+ * `score` is the model's own answer, not a climb of the analytic scorer).
+ */
+export type AgentToolName = 'submit_spec' | 'perceive' | 'score' | 'finish';
+
+/**
+ * What the system prompt says about the format. `full` inlines all of
+ * FORMAT.md (the historical behaviour, ~54k prompt tokens per call);
+ * `allowlist` inlines a compact per-profile subset derived from the JSON
+ * schema (TR1) and leaves the rest to the validator's error messages.
+ */
+export type SchemaMode = 'full' | 'allowlist';
+
 /** Dialog / CLI inputs when starting a new run. */
 export interface RunRequest {
   label: string;
@@ -319,6 +359,10 @@ export interface RunRequest {
   targetBenchmarkId?: string;
   targetScreenId?: string;
   maxToolCalls?: number;
+  /** Agent-loop tool subset; absent = all four (today's behaviour). */
+  agentTools?: readonly AgentToolName[];
+  /** Agent-loop format reference; absent = `full` (today's behaviour). */
+  schemaMode?: SchemaMode;
   modelName?: string;
   modelProvider?: string;
   operator?: string;

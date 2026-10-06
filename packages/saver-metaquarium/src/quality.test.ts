@@ -11,6 +11,8 @@ describe('metaquarium quality tiers', () => {
       pixelBudget: 1_800_000,
       moteCap: 400,
       envBudget: 3,
+      props: { clusters: 12, shards: 32, halo: true },
+      glowLights: 4,
     });
   });
 
@@ -69,7 +71,9 @@ describe('probeSoftwareGL', () => {
     const UNMASKED = 0x9246;
     const gl = {
       RENDERER: 0x1f01,
-      getExtension: vi.fn().mockReturnValue({ UNMASKED_RENDERER_WEBGL: UNMASKED }),
+      getExtension: vi.fn((name: string) =>
+        name === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: UNMASKED } : null,
+      ),
       getParameter: vi.fn((p: number) =>
         p === UNMASKED
           ? 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0)))'

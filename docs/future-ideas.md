@@ -1,6 +1,6 @@
 # Future Ideas — schema, core & MCP improvements
 
-> **Status:** Updated 2026-07-23. Research backlog, not a commitment.
+> **Status:** Updated 2026-08-31. Research backlog, not a commitment.
 > Each idea lists the **problem**, a **proposal**, **where it lives in code**,
 > and **open questions**.
 >
@@ -24,10 +24,10 @@
 | F1  | `describeScene` scene dump    | **Done**     | `describeScene()` in `packages/schema/src/describe.ts` — multi-t snapshots |
 | F3  | `critiqueScene` heuristics    | **Done**     | `adviseSpec` now covers link-starvation, uniform-motion, off-center |
 | A1  | _Weights_ channel tuning      | **Actionable** | No code change — re-publish with adjusted spec            |
-| B2  | Richer links (falloff + mode) | Open         | Fidelity upgrade for graph pieces                           |
-| B3  | Weighted color palettes       | Open         | Low priority polish                                         |
+| B2  | Richer links (falloff + mode) | **Shipped (v1 ceiling, 2026-07-21)** | `links.falloff` + `mode: nearest \| chain \| random` in `types.ts` |
+| B3  | Weighted color palettes       | **Shipped (v1 ceiling, 2026-07-21)** | `sprite.colorWeights[]` on circle/ring/streak/rect          |
 | C2  | Render-stat confirmation      | Open         | Catch empty/invisible without eyes — **validated again in round 3; also unlocks live A/B diff** |
-| F2  | ASCII luminance map           | Open         | Perceivable image for text models                           |
+| F2  | ASCII luminance map           | **Shipped, superseded (2.3.0 / 2.4.0)** | Landed as a braille map (`perceive.ts`, 8× the resolution) in 2.3.0, plus `renderDensityMap` for the ASCII form in 2.4.0 |
 | G1  | Calibrate additive-glow in perceive | **Shipped (2.4.0)** — first-pass constant | Halo modeled; `GLOW_SPREAD=2.4` still needs playground calibration |
 | G2  | Geometry-aware dominance      | **Shipped (2.4.0)** | Line-salience boost for rings/streaks/links in `dominanceRanking` |
 | G3  | `spin` as `[min, max]` range  | **Shipped (2.4.0)** | Full chain; scalar streams byte-identical (determinism suite) |
@@ -35,35 +35,13 @@
 | G5  | Spec version stamping / migration | Open     | Schema 2.3.0 viewport-unit default broke previously-valid live channels |
 | G6  | `reveal` on textBlock — animated typing/deleting | Open | One numeric paint param rides the existing steer glide; iOS/tvOS native renderer must follow |
 
+B2 (richer `links`) and B3 (weighted color palettes) shipped in the v1
+ceiling batch (2026-07-21) — see the status table above for their final
+shape (`links.falloff`/`mode`, `sprite.colorWeights[]`).
+
 ---
 
 ## Open ideas (not yet implemented)
-
-### B2 — Richer `links`
-
-**Problem.** Links connect to `k` nearest neighbors within `maxDist`. Two gaps:
-(a) edges are uniform brightness regardless of distance, (b) nearest-neighbor
-produces a local mesh, not the long-range connections of a real attention graph.
-
-**Proposal.**
-- `links.falloff?: 'linear' | boolean` — alpha × `(1 - dist/maxDist)`.
-- `links.mode?: 'nearest' | 'random' | 'mixed'` — `random` = seeded random
-  partners (long-range), `mixed` = some near + some far.
-
-**Where.** `src/types.ts` (`links`), the link-drawing code in the compiled saver
-runtime, `src/simulate.ts`.
-
-**Constraints.** `maxLinksK = 8`; random edges must be seeded per-layer.
-
-### B3 — Weighted color palettes
-
-**Problem.** `circle.colors` picks uniformly. "Sparse bright" requires duplicating
-cool entries — fragile.
-
-**Proposal.** Accept `colors: string[]` (current, uniform) or
-`colors: { pick: string[]; weights?: number[] }`.
-
-**Where.** `src/types.ts` (`SpriteSpec` circle), `src/simulate.ts`.
 
 ### C2 — Render-stat confirmation
 
@@ -241,8 +219,10 @@ Design doc (mono-level, with the full gate-by-gate analysis):
 
 `adviseSpec` covers: invisible-layer, sparse-scene, dense-scene, text-heavy,
 link-starvation, uniform-motion, off-center, and trail-on-static. **Remaining:**
-- Contrast vs background luminance (partially covered by invisible-layer for
-  circles, not for text or links)
+- Link contrast vs the background plate — `low-contrast-layer` runs for every
+  non-emoji sprite kind (text and textBlock included) but never inspects
+  `links.color`, so a Mystify-style scene whose links *are* the picture can
+  paint them into the plate and pass every check
 - Extreme alpha range warning
 
 ---
@@ -257,5 +237,8 @@ G1–G4 shipped in schema 2.4.0 and are no longer on this list; what's left:
    invalidate stored specs the way 2.3.0's `units` default did
 3. **G1 follow-up: calibrate `GLOW_SPREAD` against the playground** — the halo
    is modeled, but the constant is still a first-pass guess
-4. **B2 richer links** — falloff + random mode for graph visualizations
-5. **B3, F2** — polish
+4. **Link contrast + extreme-alpha** — the two remaining `adviseSpec` gaps
+5. **Server dedupe** — idle-server carried its own `steerablePaths` /
+   `resolveSpecPath` in `screen-channel.ts` instead of importing the schema's;
+   shipped on branch `spec/server-dedupe-steerable-paths` 2026-08-31, awaiting
+   merge.

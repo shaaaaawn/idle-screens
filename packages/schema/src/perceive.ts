@@ -15,7 +15,10 @@
  */
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
+import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, hexLuma, spriteLuma } from './luma';
+import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
+import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import {
   alphaAt,
   breakTextBlock,
@@ -25,10 +28,16 @@ import {
   linkEdges,
   positionAt,
   revealState,
+  rotationAt,
   sizeAt,
+  textBlockAnchorOffset,
+  textMetricsClassFor,
   type Entity,
 } from './simulate';
-import { LIMITS, type LayerSpec, type SaverSpec } from './types';
+import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
+import { paintMap, paintOpacity, paintSize, type Pt } from './paint';
+import { resolveTimelineAt } from './timeline';
+import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -69,6 +78,23 @@ const LINE_SALIENCE = 3.5;
  */
 const GHOST_TAPS = 12;
 
+/**
+ * A polygon whose bounding diameter spans at least this many grid cells is
+ * rasterized by its real outline; below it, it splats as its circumscribed
+ * disc weighted by `polygonFill`, exactly as before. The two do NOT agree at
+ * the boundary: the disc path lights every cell whose centre is within half a
+ * cell of the rim at full weight, so it over-reports a small glyph's ink (12
+ * hexagons just under 3 cells: mean deviation 0.022 against an analytic 0.014;
+ * the outline gives 0.013). Circles carry the same dilation, and keeping it
+ * for small polygons keeps a hexagon and a disc of one size reading alike.
+ * Above the threshold the disc is materially wrong for any non-round glyph — a
+ * full-width flat band reads as a circle, a ridge silhouette as a dome.
+ */
+const POLYGON_OUTLINE_CELLS = 3;
+
+/** Sub-scanlines per grid row when rasterizing a polygon outline. */
+const POLYGON_SCANLINES = 4;
+
 // ---------------------------------------------------------------------------
 // Shared scene construction (mirrors describeScene/adviseSpec)
 // ---------------------------------------------------------------------------
@@ -77,9 +103,14 @@ interface BuiltScene {
   w: number;
   h: number;
   scale: number;
+  /** Normalized exactly like `SpecInstance.seed` (0 is falsy, so it lands on 1). */
+  seed: number;
   layers: Array<{ layer: LayerSpec; entities: Entity[] }>;
   byKey: Map<string, Entity[]>;
+  /** Entities of layers with a paint `transform` — null (every scene without one) skips the lookup. */
+  transforms: Map<Entity, (p: Pt) => Pt> | null;
 }
+
 
 export interface PerceiveOptions {
   viewport?: { width: number; height: number };
@@ -90,7 +121,10 @@ export interface PerceiveOptions {
 
 function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const { width: w, height: h } = opts.viewport ?? { width: 1920, height: 1080 };
-  const seed = opts.seed ?? spec.seed ?? 42;
+  // Normalized exactly like `SpecInstance.seed` — a valid `seed: 0` lands on 1,
+  // matching the renderer, and this same normalized value is reused for field
+  // background sampling (see `luminanceGrid`) so both agree on one seed.
+  const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
   const scale = spec.units === 'px' ? 1 : Math.min(w, h);
   const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
   let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
@@ -102,7 +136,15 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
   for (const { layer, entities } of layers) if (layer.key) byKey.set(layer.key, entities);
-  return { w, h, scale, layers, byKey };
+  let transforms: Map<Entity, (p: Pt) => Pt> | null = null;
+  for (const { layer, entities } of layers) {
+    // Layer transform (about its origin) wrapped by its group's — see paint.ts.
+    const map = paintMap(spec, layer, w, h, scale);
+    if (!map) continue;
+    transforms ??= new Map();
+    for (const e of entities) transforms.set(e, map);
+  }
+  return { w, h, scale, seed, layers, byKey, transforms };
 }
 
 /** Position with layer-parented-orbit resolution (matches the renderer). */
@@ -116,7 +158,8 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
       p.y += pp.y;
     }
   }
-  return p;
+  const map = scene.transforms?.get(e);
+  return map ? map(p) : p;
 }
 
 /**
@@ -155,16 +198,18 @@ function textBlockBox(
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unitScale;
   const maxWEm = maxWPx / fsPx;
-  const lines = breakTextBlock(s.text, maxWEm);
+  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
   const totalH = lines.length * lh;
   const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
   const align = s.align ?? 'left';
   const cx = align === 'center' ? p.x + maxWPx / 2
     : align === 'right' ? p.x + maxWPx - maxLineW / 2
     : p.x + maxLineW / 2;
+  // Anchor moves the whole block the same way the renderer does (0,0 when absent).
+  const { dx, dy } = textBlockAnchorOffset(s, maxWPx, maxLineW, totalH);
   return {
-    cx,
-    cy: p.y + totalH / 2,
+    cx: cx + dx,
+    cy: p.y + totalH / 2 + dy,
     halfX: maxLineW / 2,
     halfY: totalH / 2,
   };
@@ -184,7 +229,7 @@ function textBlockRevealFraction(
   if (!s.reveal) return 1;
   const unitScale = Math.min(w, h);
   const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
-  const lines = breakTextBlock(s.text, maxWEm);
+  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
   const rs = revealState(lines, s.reveal, t);
   if (rs.glyphAlphas) {
     // glyphFade paints partial-alpha glyphs, so the ink fraction is the mean
@@ -198,6 +243,88 @@ function textBlockRevealFraction(
 }
 
 // ---------------------------------------------------------------------------
+// Polygon outline rasterization
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of each cell in the window [c0..c1]×[r0..r1] that a polygon fills,
+ * row-major within the window. Scanline with the canvas's own `nonzero` rule:
+ * each sub-scanline collects signed edge crossings (half-open in y, so a
+ * horizontal edge or a vertex on the line is counted once), and the spans where
+ * the winding is nonzero are split exactly across the cells they cross. So
+ * coverage is exact horizontally and POLYGON_SCANLINES-sampled vertically, and
+ * a self-intersecting outline fills both lobes, as `ctx.fill()` does.
+ */
+function polygonCellCoverage(
+  pts: Array<{ x: number; y: number }>,
+  cellW: number,
+  cellH: number,
+  c0: number,
+  c1: number,
+  r0: number,
+  r1: number,
+): Float64Array {
+  const nc = c1 - c0 + 1;
+  const cov = new Float64Array(nc * (r1 - r0 + 1));
+  const xMin = c0 * cellW;
+  const xMax = (c1 + 1) * cellW;
+  const share = 1 / POLYGON_SCANLINES;
+  const hits: Array<{ x: number; dir: number }> = [];
+  const addSpan = (row: number, xa: number, xb: number): void => {
+    const a = Math.max(xMin, xa);
+    const b = Math.min(xMax, xb);
+    if (!(b > a)) return;
+    const first = Math.max(c0, Math.floor(a / cellW));
+    const last = Math.min(c1, Math.floor(b / cellW));
+    for (let c = first; c <= last; c++) {
+      const len = Math.min(b, (c + 1) * cellW) - Math.max(a, c * cellW);
+      if (len > 0) cov[row * nc + (c - c0)]! += (len / cellW) * share;
+    }
+  };
+  for (let r = r0; r <= r1; r++) {
+    for (let k = 0; k < POLYGON_SCANLINES; k++) {
+      const y = (r + (k + 0.5) / POLYGON_SCANLINES) * cellH;
+      hits.length = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]!;
+        const q = pts[(i + 1) % pts.length]!;
+        const down = p.y <= y && q.y > y;
+        if (!down && !(q.y <= y && p.y > y)) continue;
+        hits.push({ x: p.x + ((y - p.y) / (q.y - p.y)) * (q.x - p.x), dir: down ? 1 : -1 });
+      }
+      if (hits.length < 2) continue;
+      hits.sort((m, n) => m.x - n.x);
+      let wind = 0;
+      let start = 0;
+      for (const hit of hits) {
+        const before = wind;
+        wind += hit.dir;
+        if (before === 0 && wind !== 0) start = hit.x;
+        else if (before !== 0 && wind === 0) addSpan(r - r0, start, hit.x);
+      }
+    }
+  }
+  return cov;
+}
+
+/** Distance from (x, y) to the nearest edge of a closed outline. */
+function distanceToOutline(pts: Array<{ x: number; y: number }>, x: number, y: number): number {
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const ex = q.x - p.x;
+    const ey = q.y - p.y;
+    const len2 = ex * ex + ey * ey;
+    const u = len2 > 0 ? Math.max(0, Math.min(1, ((x - p.x) * ex + (y - p.y) * ey) / len2)) : 0;
+    const dx = x - (p.x + ex * u);
+    const dy = y - (p.y + ey * u);
+    best = Math.min(best, dx * dx + dy * dy);
+  }
+  return Math.sqrt(best);
+}
+
+// ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
 
@@ -206,8 +333,15 @@ export interface LuminanceGrid {
   rows: number;
   /** Row-major luminance 0..1 including the background. */
   cells: number[];
-  /** Per-row background luminance (what an empty scene would be). */
+  /** Per-row background luminance (what an empty scene would be). For a `field` background: each row's mean. */
   background: number[];
+  /**
+   * Per-cell background luminance, present only for a `field` background
+   * (a solid or gradient varies by row alone, and `background` says it all).
+   * Coverage, centroid and the profiles deviate from THIS, so the field's own
+   * contours never count as content — a bright field is ground, not ink.
+   */
+  backgroundCells?: number[];
   meanLuminance: number;
   /** Fraction of cells deviating perceptibly (> 0.03) from the background. */
   coverage: number;
@@ -230,12 +364,15 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
  * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
  * re-uses drawTrail's sampling — past positions with decaying alpha and
- * shrinking radius. Remaining approximations (documented, deliberate): soft
- * circles use a linear falloff, background drift is sampled at its rest
- * position. Good enough to perceive composition, focus, balance — and now
- * smear.
+ * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
+ * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Remaining approximations (documented, deliberate): soft circles use a linear
+ * falloff, background drift is sampled at its rest position. Good enough to
+ * perceive composition, focus, balance — and now smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
+  // A `timeline` resolves at the sample time; without one this is `spec` itself.
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
@@ -244,11 +381,28 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   const cellW = w / cols;
   const cellH = h / rows;
 
-  // Background: vertical gradient (or solid) + optional bottom band.
+  // Background: vertical gradient (or solid) + optional bottom band — or a
+  // field, sampled per cell with the renderer's own function at the same
+  // bucketed time, so the grid's ground IS what the raster paints.
   const bg = spec.background;
   const bgRow: number[] = new Array(rows).fill(0);
+  let bgCells: number[] | undefined;
   if (!bg || bg.type === 'solid') {
     bgRow.fill(hexLuma(bg?.color ?? '#05050a'));
+  } else if (bg.type === 'field') {
+    bgCells = new Array<number>(cols * rows);
+    const short = Math.max(1, Math.min(w, h));
+    const seed = scene.seed;
+    const ft = fieldSampleTime(bg, t);
+    for (let r = 0; r < rows; r++) {
+      let rowSum = 0;
+      for (let c = 0; c < cols; c++) {
+        const lum = rgb255Luma(fieldRgbAt(((c + 0.5) * cellW) / short, ((r + 0.5) * cellH) / short, ft, bg, seed));
+        bgCells[r * cols + c] = lum;
+        rowSum += lum;
+      }
+      bgRow[r] = rowSum / cols;
+    }
   } else {
     const stops = [...bg.stops].sort((a, b) => a.at - b.at);
     for (let r = 0; r < rows; r++) {
@@ -274,7 +428,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   }
 
   const cells = new Array<number>(cols * rows);
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells[r * cols + c] = bgRow[r]!;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells[r * cols + c] = bgCells ? bgCells[r * cols + c]! : bgRow[r]!;
 
   const compose = (idx: number, lum: number, a: number, blend: LayerSpec['blend']): void => {
     const cur = cells[idx]!;
@@ -328,12 +482,75 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     }
   };
 
+  // A polygon painted by its real outline — the renderer's path, rotated by
+  // `rotationAt` about the entity — instead of its circumscribed disc. Weight
+  // per cell is the fraction of it the outline fills; `soft` is the renderer's
+  // radial gradient (centred on the entity, radius = circumradius) clipped to
+  // that outline. The additive halo spreads past the OUTLINE, not a disc: its
+  // band is GLOW_SPREAD − 1 times the glyph's thickness (2·area/perimeter —
+  // the radius for a disc, the apothem for a regular n-gon), so a soft
+  // `lighter` hexagon blooms about as far as the disc model did while a
+  // full-width band or ridge doesn't re-inflate into a screen-filling dome.
+  const splatPolygonOutline = (layer: LayerSpec, s: PolygonSprite, e: Entity, p: { x: number; y: number }, sz: number, a: number, lum: number, tPass: number): void => {
+    const radius = sz / 2;
+    const rot = rotationAt(e, tPass);
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
+    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+    const glow = !!s.soft && additive;
+    let band = 0;
+    if (glow) {
+      const perimeter = pts.reduce((acc, q, i) => { const n = pts[(i + 1) % pts.length]!; return acc + Math.hypot(n.x - q.x, n.y - q.y); }, 0);
+      band = perimeter > 0 ? (GLOW_SPREAD - 1) * ((2 * polygonArea(pts)) / perimeter) : 0;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const q of pts) {
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+    }
+    const c0 = Math.max(0, Math.floor((minX - band) / cellW));
+    const c1 = Math.min(cols - 1, Math.floor((maxX + band) / cellW));
+    const r0 = Math.max(0, Math.floor((minY - band) / cellH));
+    const r1 = Math.min(rows - 1, Math.floor((maxY + band) / cellH));
+    if (c0 > c1 || r0 > r1) return;
+    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
+    const nc = c1 - c0 + 1;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const f = cov[(r - r0) * nc + (c - c0)]!;
+        const x = (c + 0.5) * cellW;
+        const y = (r + 0.5) * cellH;
+        let wgt: number;
+        if (glow) {
+          // Outside the outline's box by more than the band: no halo reaches.
+          const outX = Math.max(0, minX - x, x - maxX);
+          const outY = Math.max(0, minY - y, y - maxY);
+          if (f >= 1) wgt = 1;
+          else if (outX * outX + outY * outY >= band * band) wgt = f;
+          else {
+            const k = band > 0 ? Math.max(0, 1 - distanceToOutline(pts, x, y) / band) : 0;
+            wgt = f + (1 - f) * k * k;
+          }
+        } else if (s.soft) {
+          wgt = f * Math.max(0.1, 1 - Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6));
+        } else {
+          wgt = f;
+        }
+        if (wgt > 0) compose(r * cols + c, lum, a * Math.min(1, wgt), layer.blend);
+      }
+    }
+  };
+
   // One composite pass at time tPass with all ink scaled by alphaScale — the
   // analytic mirror of the renderer's paintFrame. Ghost passes call this with
   // decayed weights; the live frame calls it with alphaScale 1.
   const splatPass = (tPass: number, alphaScale: number): void => {
   for (const { layer, entities } of scene.layers) {
-    const lifeA = lifeAlphaAt(layer.life, tPass);
+    const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * paintOpacity(spec, layer);
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
@@ -342,12 +559,50 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
-      const sz = sizeAt(e, tPass);
+      const sz = layer.transform || layer.group !== undefined ? sizeAt(e, tPass) * paintSize(spec, layer) : sizeAt(e, tPass);
       const s = layer.sprite;
 
+      if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+        splatPolygonOutline(layer, s, e, p, sz, a, lum, tPass);
+        continue;
+      }
+      if (s.kind === 'stroke') {
+        // Stamp along the sampled path, rotated like the renderer does.
+        const pts = strokeSamples(s, sz / 2);
+        let angle = rotationAt(e, tPass);
+        if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
+        const ca = Math.cos(angle);
+        const sa = Math.sin(angle);
+        const lw = strokeWidthPx(s, scale);
+        const stampAt = (q: { x: number; y: number }, u: number): void => {
+          const x = p.x + q.x * ca - q.y * sa;
+          const y = p.y + q.x * sa + q.y * ca;
+          const c = Math.floor(x / cellW);
+          const r = Math.floor(y / cellH);
+          if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+          const taper = s.taper ? strokeTaper(u) : 1;
+          compose(r * cols + c, lum, a * Math.min(1, (lw * taper) / cellH), layer.blend);
+        };
+        // Rasterize each segment at half-cell steps so a long stroke leaves a
+        // continuous line of ink, not a dotted one.
+        const step = Math.min(cellW, cellH) / 2;
+        stampAt(pts[0]!, 0);
+        for (let i = 1; i < pts.length; i++) {
+          const q0 = pts[i - 1]!;
+          const q1 = pts[i]!;
+          const segLen = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+          const sub = Math.max(1, Math.ceil(segLen / step));
+          for (let k = 1; k <= sub; k++) {
+            const f = k / sub;
+            stampAt({ x: q0.x + (q1.x - q0.x) * f, y: q0.y + (q1.y - q0.y) * f }, (i - 1 + f) / (pts.length - 1));
+          }
+        }
+        continue;
+      }
       if (s.kind === 'streak') {
-        // Stamp along the segment from tail to head.
-        const heading = headingAt(e, tPass, w, h) ?? 0;
+        // Stamp along the segment from tail to head, like the renderer: motion
+        // heading plus the entity's own resolved rotation.
+        const heading = (headingAt(e, tPass, w, h) ?? 0) + rotationAt(e, tPass);
         const steps = Math.max(2, Math.ceil(sz / Math.min(cellW, cellH)));
         const wgt = Math.min(1, ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) / cellH);
         for (let i = 0; i <= steps; i++) {
@@ -378,9 +633,31 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         centerY = box.cy;
         halfX = box.halfX;
         halfY = box.halfY;
+      } else if (s.kind === 'bar') {
+        const len = sz * barFraction(s, e.barIndex ?? 0);
+        if (len <= 0) continue;
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        const box = barBox(s.direction ?? 'right', len, th);
+        // The renderer rotates the bar about the entity with `spin`; rotate
+        // the box's offset the same way and take the rotated box's AABB.
+        const rot = rotationAt(e, tPass);
+        const cr = Math.cos(rot);
+        const sr = Math.sin(rot);
+        centerX = p.x + box.cx * cr - box.cy * sr;
+        centerY = p.y + box.cx * sr + box.cy * cr;
+        halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
+        halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
       }
-      const circular = s.kind === 'circle' || s.kind === 'ring';
-      const soft = s.kind === 'circle' && !!s.soft;
+      const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
+      const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
+      // A small polygon (under POLYGON_OUTLINE_CELLS) fills only part of its
+      // disc; a feathered rect only part of its box. Scale the splat weight
+      // rather than trace the outline — large polygons took the outline path.
+      const shapeWeight = s.kind === 'polygon'
+        ? polygonFill(s, sz / 2)
+        : s.kind === 'rect' && s.feather
+          ? (1 - s.feather / 2) * (1 - s.feather / 2)
+          : 1;
       const additive = layer.blend === 'lighter' || layer.blend === 'screen';
       // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
       // falloff outside the solid core, so coverage tracks what the audience
@@ -395,8 +672,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
-        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) : 1);
+        * (s.kind === 'textBlock' ? textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1) : 1);
+      // rect and bar are fillRect: the canvas paints each cell in proportion
+      // to the area the box covers. Without this a 2 px scan line darkened
+      // its whole 22 px grid row at full alpha, and 270 of them read as a
+      // black veil (mean 0.035 where the canvas paints 0.41).
+      const byArea = s.kind === 'rect' || s.kind === 'bar';
       for (let r = r0; r <= r1; r++) {
+        const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
+        if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
           const dx = (c + 0.5) * cellW - centerX;
           const dy = (r + 0.5) * cellH - centerY;
@@ -419,9 +703,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
             } else {
               wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
             }
-            compose(r * cols + c, lum, a * wgt, layer.blend);
+            compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
+          } else if (byArea) {
+            const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
+            if (fx > 0) compose(r * cols + c, lum, a * shapeWeight * fx * fy, layer.blend);
           } else {
-            compose(r * cols + c, lum, a * inkWeight, layer.blend);
+            compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
         }
       }
@@ -435,7 +722,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false && motionWraps, w, h);
       const la = Math.min(1, (layer.links.alpha ?? 0.6) * lifeA);
       const lum = layer.links.color ? hexLuma(layer.links.color) : 0.7;
-      const wgt = Math.min(1, ((layer.links.width ?? 1) * scale) / cellH) * la * alphaScale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const wgt = Math.min(1, ((layer.links.width ?? defaultWidth) * scale) / cellH) * la * alphaScale;
       for (const edge of edges) {
         const pi = positions[edge.i]!;
         const pj = positions[edge.j]!;
@@ -475,6 +763,15 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   splatPass(t, 1);
 
   // Deviation stats
+  return finishGrid(cols, rows, cells, bgRow, bgCells);
+}
+
+/**
+ * The stats every grid carries, from its cells and per-row background —
+ * or, for a field, its per-cell background (`bgCells`), which deviation is
+ * measured against instead so the field's own contours read as ground.
+ */
+function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[], bgCells?: number[]): LuminanceGrid {
   let sum = 0;
   let covered = 0;
   let devSum = 0;
@@ -486,7 +783,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     for (let c = 0; c < cols; c++) {
       const v = cells[r * cols + c]!;
       sum += v;
-      const dev = Math.abs(v - bgRow[r]!);
+      const dev = Math.abs(v - (bgCells ? bgCells[r * cols + c]! : bgRow[r]!));
       if (dev > 0.03) covered++;
       devSum += dev;
       cxAcc += dev * (c + 0.5);
@@ -503,6 +800,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     rows,
     cells,
     background: bgRow,
+    ...(bgCells ? { backgroundCells: bgCells } : {}),
     meanLuminance: sum / (cols * rows),
     coverage: covered / (cols * rows),
     centroid: devSum > 1e-6 ? { x: cxAcc / devSum / cols, y: cyAcc / devSum / rows } : null,
@@ -625,6 +923,7 @@ export interface TextSpriteInfo {
  * that blind spot analytically.
  */
 export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSpriteInfo[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const out: TextSpriteInfo[] = [];
@@ -670,6 +969,38 @@ export interface DominanceEntry {
  * ribbons, so a comet layer is ranked by its comet, not just its head.
  */
 export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): DominanceEntry[] {
+  return rankDominance(rawDominance(spec, opts));
+}
+
+interface RawDominance {
+  layerIndex: number;
+  key: string | undefined;
+  weight: number;
+  entityCount: number;
+  meanLuma: number;
+  factors: DominanceEntry['factors'];
+}
+
+/** Normalize raw weights to shares and rank — shared by a scene and a composed sequence frame. */
+function rankDominance(raw: RawDominance[]): DominanceEntry[] {
+  const total = raw.reduce((s, r) => s + r.weight, 0) || 1;
+  return raw
+    .slice()
+    .sort((a, b) => b.weight - a.weight)
+    .map((r, i) => ({
+      rank: i + 1,
+      layerIndex: r.layerIndex,
+      key: r.key,
+      share: r.weight / total,
+      entityCount: r.entityCount,
+      meanLuma: r.meanLuma,
+      factors: r.factors,
+    }));
+}
+
+/** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
+function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const { w, h, scale } = scene;
@@ -703,7 +1034,9 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
   };
 
   const raw = scene.layers.map(({ layer, entities }, layerIndex) => {
-    const lifeA = lifeAlphaAt(layer.life, t);
+    const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, t) : lifeAlphaAt(layer.life, t) * paintOpacity(spec, layer);
+    const painted = layer.transform !== undefined || layer.group !== undefined;
+    const areaScale = painted ? paintSize(spec, layer) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
     for (const e of entities) {
@@ -716,17 +1049,27 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
       else if (s.kind === 'rect') {
         const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
-        entArea = sz * h2;
+        const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
+        entArea = sz * h2 * f;
+      }
+      else if (s.kind === 'polygon') entArea = polygonArea(polygonPoints(s, sz / 2));
+      else if (s.kind === 'bar') {
+        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+        entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
+      }
+      else if (s.kind === 'stroke') {
+        const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
+        entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 });
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t);
+        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
-      area += entArea * a;
+      area += painted ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
       // width ≈ 0.65×size and mean alpha ≈ (1 - fade/2) of the head's.
@@ -747,7 +1090,8 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
       const motionWraps = ['drift', 'rise', 'wander'].includes(layer.motion.type);
       const edges = linkEdges(layer.links, positions, layer.links.maxDist * scale, layer.wrap !== false && motionWraps, w, h);
       const la = (layer.links.alpha ?? 0.6) * lifeA;
-      const lw = (layer.links.width ?? 1) * scale;
+      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+      const lw = (layer.links.width ?? defaultWidth) * scale;
       for (const edge of edges) area += edge.dist * lw * la * LINE_SALIENCE;
     }
     const meanLuma = entities.length ? lumAcc / entities.length : 0;
@@ -758,24 +1102,24 @@ export function dominanceRanking(spec: SaverSpec, opts: PerceiveOptions = {}): D
     return { layerIndex, key: layer.key, weight, entityCount: entities.length, meanLuma, factors: { area: area / (w * h), contrast, blendBoost, motionBoost } };
   });
 
-  const total = raw.reduce((s, r) => s + r.weight, 0) || 1;
-  return raw
-    .slice()
-    .sort((a, b) => b.weight - a.weight)
-    .map((r, i) => ({
-      rank: i + 1,
-      layerIndex: r.layerIndex,
-      key: r.key,
-      share: r.weight / total,
-      entityCount: r.entityCount,
-      meanLuma: r.meanLuma,
-      factors: r.factors,
-    }));
+  return raw;
 }
 
 // ---------------------------------------------------------------------------
 // Motion stats
 // ---------------------------------------------------------------------------
+
+/**
+ * Does each layer read as one merged form or as separate marks? The one thing
+ * the luminance maps cannot answer — they measure ink, not edges, so a layer
+ * that merged into a silhouette and one that stayed a pile of discs look
+ * identical in every other channel. See `cohesion.ts`.
+ */
+export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): LayerCohesion[] {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
+  const scene = buildScene(spec, opts);
+  return cohesionOf(scene.layers, opts.t ?? 5000, scene.w, scene.h);
+}
 
 export interface LayerMotionStats {
   layerIndex: number;
@@ -786,27 +1130,37 @@ export interface LayerMotionStats {
   moving: boolean;
 }
 
-/** Per-layer displacement between t and t+dt — choreography as numbers. */
+/**
+ * Per-layer displacement between t and t+dt — choreography as numbers.
+ *
+ * Samples the scene at both ends of the window separately (not just each
+ * entity's own position within one scene) so a `timeline`-driven layer
+ * `transform` — a camera pan or zoom with every entity otherwise static —
+ * registers as motion instead of vanishing between two reads of the same
+ * frozen transform.
+ */
 export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: number } = {}): LayerMotionStats[] {
-  const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
   const dt = opts.dt ?? 500;
-  const { w, h } = scene;
-  return scene.layers.map(({ layer, entities }, layerIndex) => {
+  const scene0 = buildScene(resolveTimelineAt(spec, t), opts);
+  const scene1 = spec.timeline ? buildScene(resolveTimelineAt(spec, t + dt), opts) : scene0;
+  const { w, h } = scene0;
+  return scene0.layers.map(({ layer, entities }, layerIndex) => {
+    const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
     let acc = 0;
     let max = 0;
     let n = 0;
-    for (const e of entities) {
-      const p0 = posOf(scene, e, t);
-      const p1 = posOf(scene, e, t + dt);
+    entities.forEach((e, i) => {
+      const p0 = posOf(scene0, e, t);
+      const p1 = posOf(scene1, entities1[i] ?? e, t + dt);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
-      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) continue; // wrap seam
+      if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
       const speed = (Math.sqrt(dx * dx + dy * dy) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
-    }
+    });
     const meanSpeed = n ? acc / n : 0;
     return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, moving: meanSpeed > 0.5 };
   });
@@ -827,8 +1181,12 @@ function regionMeans(grid: LuminanceGrid): number[] {
   const cnt = new Array<number>(9).fill(0);
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
+      const idx = r * grid.cols + c;
       const region = Math.min(2, Math.floor((r / grid.rows) * 3)) * 3 + Math.min(2, Math.floor((c / grid.cols) * 3));
-      out[region]! += Math.abs(grid.cells[r * grid.cols + c]! - grid.background[r]!);
+      // A field's own contours are ground, not content (see `backgroundCells`
+      // on `LuminanceGrid`): deviate against the per-cell background where
+      // one exists, the same rule `finishGrid` applies to coverage/centroid.
+      out[region]! += Math.abs(grid.cells[idx]! - (grid.backgroundCells ? grid.backgroundCells[idx]! : grid.background[r]!));
       cnt[region]!++;
     }
   }
@@ -917,6 +1275,8 @@ export interface ScenePerception {
   colProfile: number[];
   dominance: DominanceEntry[];
   motion: LayerMotionStats[];
+  /** Per layer: merged silhouette, seamed overlap, or separate marks. */
+  form: LayerCohesion[];
   /** Literal strings + sizes of any text layers (glyphs don't show in the maps). */
   text: TextSpriteInfo[];
   advisories: ReturnType<typeof adviseSpec>;
@@ -929,6 +1289,7 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
     t: opts.t ?? 5000,
@@ -941,7 +1302,124 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
     motion: motionStats(spec, opts),
+    form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
-    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }),
+    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sequence frames — bed + segment
+// ---------------------------------------------------------------------------
+
+export interface SequenceFramePerception extends ScenePerception {
+  /** Which segment the global time `T` resolved to, and where in it. */
+  segment: { index: number; key: string; localT: number; held?: true };
+  /** True when a bed was composed under the segment. */
+  bed: boolean;
+}
+
+export interface PerceiveSequenceOptions extends Omit<LuminanceGridOptions, 't'> {
+  /** Holds released by the clicker so far — see `ResolveOptions.releasedBelow`. */
+  releasedBelow?: number;
+}
+
+/** Prefix bed layers so they read apart from the segment's in a merged list. */
+const bedKey = (key: string | undefined, layerIndex: number): string => `bed:${key ?? layerIndex}`;
+
+/**
+ * Perceive one frame of a sequence at global time `T`: resolve the segment,
+ * then — when the sequence has a `bed` — compose the bed at `T` (its clock
+ * never resets) under the segment's ink at `localT`, the segment's own
+ * background dropped, exactly as the renderer stacks them. The luminance maps
+ * add the two grids (clamped), so coverage, centroid and the profiles are of
+ * the composite; dominance ranks bed and segment layers together by their raw
+ * weights, bed layers keyed `bed:<key|index>`; text, motion and form list bed
+ * layers first with the same prefix. Bed and segment are assumed to share
+ * `units`/`referenceViewport`, as the renderer's shared canvas assumes. The
+ * bed and segment seeds come from `segmentRenderSeed`/`bedRenderSeed`
+ * (`./sequence`) — the same derivation `SequenceInstance` uses, chain roots
+ * and zero-seed normalization included — so the composed frame matches what
+ * the renderer actually draws at `T`, not just what the raw specs would show.
+ * Without a bed this is `perceiveScene(segment, localT)` plus the `segment`
+ * field. Intended as the payload behind a sequence-aware previewScene.
+ *
+ * Two known approximations, both accepted for a coarse, cheap, renderer-free
+ * tool rather than fixed here:
+ * - **The transition WINDOW isn't composed.** During a live `fade` or `morph`
+ *   (i.e. `localT < transition.dur`) the renderer also paints the outgoing
+ *   (or interpolating) segment, but this only ever perceives the segment
+ *   `resolveSegment` resolves to — call it at a `T` outside the transition's
+ *   `dur` for an accurate read. (Outside that window, a morph-chained
+ *   segment's entities and seed ARE correct — `segmentRenderSeed` already
+ *   resolves the chain root.) Composing the live window properly needs the
+ *   same capability-tier gate `SequenceInstance` uses to decide whether
+ *   `fade` even plays; this analytical path has no such context.
+ * - **Ink composites onto the bed by addition, not by blend mode.** This
+ *   matches a plain `source-over`, opaque-ink segment (the common case), but
+ *   a segment layer with `blend: 'multiply'`/`'screen'`/etc. or partial alpha
+ *   composites directionally differently on the real canvas than adding
+ *   luminance values ever can (`multiply` darkens; addition only brightens).
+ *   The per-cell grids don't retain per-layer blend/alpha to composite
+ *   correctly at this resolution.
+ */
+export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: PerceiveSequenceOptions = {}): SequenceFramePerception {
+  const { releasedBelow, ...gridOpts } = opts;
+  const r = resolveSegment(seq, T, { releasedBelow });
+  const seg = seq.segments[r.index]!;
+  const segment: SequenceFramePerception['segment'] = { index: r.index, key: seg.key, localT: r.localT, ...(r.held ? { held: true } : {}) };
+  const segOpts: LuminanceGridOptions = { ...gridOpts, t: r.localT, seed: gridOpts.seed ?? segmentRenderSeed(seq, r.index) };
+  if (!seq.bed) return { ...perceiveScene(seg.scene, segOpts), segment, bed: false };
+
+  const bedOpts: LuminanceGridOptions = { ...gridOpts, t: T, seed: gridOpts.seed ?? bedRenderSeed(seq) };
+  const viewport = gridOpts.viewport ?? { width: 1920, height: 1080 };
+  // The segment's ink alone: a black ground contributes nothing to the sum,
+  // and no ghosting — a transparent child ignores it, as the renderer does.
+  const ink: SaverSpec = { ...seg.scene, background: { type: 'solid', color: '#000000' } };
+  delete ink.ghosting;
+  // For contrast, ink is judged against what is actually behind it: the bed.
+  const inkOverBed: SaverSpec = { ...ink, background: seq.bed.background ?? { type: 'solid', color: '#05050a' } };
+
+  const bedGrid = luminanceGrid(seq.bed, bedOpts);
+  const inkGrid = luminanceGrid(ink, segOpts);
+  const cells = bedGrid.cells.map((v, i) => Math.min(1, v + inkGrid.cells[i]!));
+  const grid = finishGrid(bedGrid.cols, bedGrid.rows, cells, bedGrid.background, bedGrid.backgroundCells);
+
+  const bedLayers = seq.bed.layers.length;
+  const dominance = rankDominance([
+    ...rawDominance(seq.bed, bedOpts).map((d) => ({ ...d, key: bedKey(d.key, d.layerIndex) })),
+    ...rawDominance(inkOverBed, segOpts).map((d) => ({ ...d, layerIndex: d.layerIndex + bedLayers })),
+  ]);
+  const shift = <X extends { layerIndex: number }>(x: X): X => ({ ...x, layerIndex: x.layerIndex + bedLayers });
+  const prefix = <X extends { layerIndex: number; key: string | undefined }>(x: X): X => ({ ...x, key: bedKey(x.key, x.layerIndex) });
+
+  return {
+    t: r.localT,
+    braille: renderBrailleMap(grid),
+    density: renderDensityMap(grid),
+    coverage: grid.coverage,
+    meanLuminance: grid.meanLuminance,
+    centroid: grid.centroid,
+    rowProfile: grid.rowProfile,
+    colProfile: grid.colProfile,
+    dominance,
+    motion: [...motionStats(seq.bed, bedOpts).map(prefix), ...motionStats(ink, segOpts).map(shift)],
+    form: [...layerCohesion(seq.bed, bedOpts).map(prefix), ...layerCohesion(ink, segOpts).map(shift)],
+    text: [...textSprites(seq.bed, bedOpts).map(prefix), ...textSprites(ink, segOpts).map(shift)],
+    advisories: [
+      ...adviseSpec(seq.bed, viewport, { t: T, seed: bedOpts.seed }).map((w) => ({ ...w, path: `bed.${w.path}` })),
+      // inkOverBed's layers are the segment's (seed: segOpts.seed) but its
+      // background is the bed's (seq.bed.background) — a field there must be
+      // sampled with the bed's own seed, or a `role: 'read'` legibility
+      // advisory checks terrain that isn't what's actually behind the ink.
+      // `?? 42`: inkOverBed.seed is the SEGMENT's raw seed field (it's `ink`
+      // spread first), so adviseSpec's own `backgroundSeed ?? seed` fallback
+      // would substitute the segment's seed, not the bed's, if bedOpts.seed
+      // were left undefined — 42 is the same default `luminanceGrid` (and
+      // every other field seed fallback) converges on.
+      ...adviseSpec(inkOverBed, viewport, { t: r.localT, seed: segOpts.seed, backgroundSeed: bedOpts.seed ?? 42 }),
+    ],
+    segment,
+    bed: true,
   };
 }

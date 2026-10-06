@@ -206,15 +206,75 @@ test('glyphs fade in place — mid-fade ink is a subset of the finished block', 
   // prefix advance that depends only on the (fixed) prefix, ramping alpha can
   // only brighten a pixel, never move it. If positions were derived from
   // anything alpha-dependent, lit pixels would migrate and this would fail.
+  //
+  // Tolerance is ONE pixel of neighbourhood, not zero: since a729243 the
+  // finished run is re-drawn as a single batched fillText (ligatures + pair
+  // kerning, pixel parity with the un-revealed path), while a still-fading
+  // glyph draws alone at its prefix advance. The same glyph rasterises with
+  // slightly different antialiased edges alone vs inside a run, so a few
+  // edge pixels legitimately shift by a sub-pixel amount when the run
+  // saturates. A reflow moves whole glyphs — many pixels with NO lit
+  // neighbour — which is what the strict bar below still catches.
   const half = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(0.5)));
   const full = await renderSpec(page, textBlockSpec(LONG_TEXT, glyphFade(1)));
   const mHalf = decodeMask(half.mask);
   const mFull = decodeMask(full.mask);
-  let moved = 0;
-  for (let i = 0; i < half.width * half.height; i++) {
-    if (isLit(mHalf, i) && !isLit(mFull, i)) moved++;
+  const { width, height } = half;
+  const litNear = (x: number, y: number): boolean => {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+        if (isLit(mFull, yy * width + xx)) return true;
+      }
+    }
+    return false;
+  };
+  let exact = 0;
+  const migrated: Array<[number, number]> = [];
+  for (let i = 0; i < width * height; i++) {
+    if (!isLit(mHalf, i) || isLit(mFull, i)) continue;
+    exact++;
+    const x = i % width;
+    const y = Math.floor(i / width);
+    if (!litNear(x, y)) migrated.push([x, y]);
   }
-  expect(moved, 'ink lit mid-fade must still be lit when the block finishes').toBeLessThan(8);
+  const exactAfterShift = (dx: number, dy: number): number => {
+    let missing = 0;
+    for (let i = 0; i < width * height; i++) {
+      if (!isLit(mHalf, i)) continue;
+      const x = i % width;
+      const y = Math.floor(i / width);
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx < 0 || sy < 0 || sx >= width || sy >= height || !isLit(mFull, sy * width + sx)) missing++;
+    }
+    return missing;
+  };
+  // Ligature substitution is the one legitimate way ink can vanish outright:
+  // "fi"/"fl" drawn glyph-by-glyph keep the i's tittle; the batched run forms
+  // the ligature and the tittle is gone — a tight cluster of a dozen pixels,
+  // not a line. Keep fixed, calibrated ceilings: a percentage of total ink
+  // made the gate weaker as the fixture grew. The exact-pixel ceiling also
+  // catches a one-pixel whole-block shift that the neighbourhood check alone
+  // intentionally tolerates. The four synthetic shifts prove that gate bites.
+  const EXACT_RASTER_TOLERANCE = 128; // observed 55 in CI, 78 locally
+  const OUTLIER_TOLERANCE = 24; // observed 13 in both environments
+  expect(
+    exact,
+    `too much ink changed exact position between half and full glyphFade frames — ${exact} pixels`,
+  ).toBeLessThan(EXACT_RASTER_TOLERANCE);
+  expect(
+    migrated.length,
+    `ink lit mid-fade must still be lit (within 1px) when the block finishes — ${migrated.length} migrated, ${exact} re-rasterised, of ${half.ink} lit at half; migrated at ${JSON.stringify(migrated.slice(0, 20))}`,
+  ).toBeLessThan(OUTLIER_TOLERANCE);
+  const shifts: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const shifted = shifts.map(([dx, dy]) => exactAfterShift(dx, dy));
+  expect(
+    Math.min(...shifted),
+    `exact-position gate must reject a synthetic one-pixel shift; mismatches were ${shifted.join(', ')}`,
+  ).toBeGreaterThanOrEqual(EXACT_RASTER_TOLERANCE);
 });
 
 test('a wider fade window paints more of the block at the same progress', async ({ page }) => {

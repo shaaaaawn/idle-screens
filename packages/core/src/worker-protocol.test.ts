@@ -187,6 +187,56 @@ describe('runIdleWorker', () => {
     });
   });
 
+  describe('capture', () => {
+    beforeEach(() => {
+      Object.assign(lifeInst, stubInst('life'));
+      delete (lifeInst as Partial<SaverInstance>).capture;
+      dispatch(mountMsg('life'));
+      outbound.length = 0;
+    });
+
+    const settle = async (): Promise<void> => {
+      // capture replies via a promise chain — let microtasks drain.
+      await new Promise((r) => setTimeout(r, 0));
+    };
+
+    it('falls back to a bitmap of the canvas when the instance has no capture', async () => {
+      const fakeBitmap = { width: 64, height: 64 } as ImageBitmap;
+      vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue(fakeBitmap));
+      dispatch({ type: 'capture', id: 7 });
+      await settle();
+      expect(outbound).toEqual([{ type: 'captured', id: 7, bitmap: fakeBitmap }]);
+    });
+
+    it('prefers the instance capture, which can render fresh in-task', async () => {
+      const own = { width: 8, height: 8 } as ImageBitmap;
+      lifeInst.capture = vi.fn().mockResolvedValue(own);
+      // Re-mount so the handler sees the capture-capable instance.
+      dispatch(mountMsg('life'));
+      outbound.length = 0;
+      vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1, height: 1 }));
+      dispatch({ type: 'capture', id: 8 });
+      await settle();
+      expect(lifeInst.capture).toHaveBeenCalled();
+      expect(outbound).toEqual([{ type: 'captured', id: 8, bitmap: own }]);
+    });
+
+    it('answers null with nothing mounted', async () => {
+      dispatch({ type: 'dispose' });
+      outbound.length = 0;
+      dispatch({ type: 'capture', id: 9 });
+      await settle();
+      expect(outbound).toEqual([{ type: 'captured', id: 9, bitmap: null }]);
+    });
+
+    it('answers null when the read itself fails', async () => {
+      vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new Error('nope')));
+      dispatch({ type: 'capture', id: 10 });
+      await settle();
+      expect(outbound).toEqual([{ type: 'captured', id: 10, bitmap: null }]);
+    });
+  });
+
   describe('mount-spec', () => {
     it('mounts via compiler', () => {
       dispatch({

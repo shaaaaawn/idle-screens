@@ -15,7 +15,13 @@
  */
 
 export type SwimStyle =
-  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface';
+  | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface'
+  | 'follow' | 'pair' | 'chase';
+
+/** How a fish relates to another fish. `none` is every pre-relationship
+ *  style. A bonded fish rides the plan of the nearest preceding unbonded fish
+ *  in slot order (its LEADER) — closed-form, because the leader's own pose is. */
+export type Bond = 'none' | 'follow' | 'pair' | 'chase';
 
 /** Where in the water column a style lives. */
 export type DepthBand = 'free' | 'floor' | 'ceiling' | 'mid';
@@ -42,6 +48,8 @@ export interface SwimStyleSpec {
    *  80 minutes). At any timescale anyone is watching it reads as staying
    *  put, which is the effect being bought — but the loop is not fenced. */
   travel: number;
+  /** Relationship to other fish (MQ31). Absent = `none`. */
+  bond?: Bond;
 }
 
 /**
@@ -65,7 +73,69 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'patrol', label: 'Patrol', speedMul: 0.55, band: 'mid', bobAmp: 1, bobHz: 0.09, formation: false, travel: 1 },
   { name: 'bottom', label: 'Bottom-hugger', speedMul: 0.7, band: 'floor', bobAmp: 2, bobHz: 0.4, formation: false, travel: 1 },
   { name: 'surface', label: 'Surface-skimmer', speedMul: 0.9, band: 'ceiling', bobAmp: 3, bobHz: 0.55, formation: false, travel: 1 },
+  // Relationships (MQ31). A bonded fish has no route of its own: it rides
+  // its leader's plan at a lag, so a `@follow` trio behind a turtle is a
+  // file, a `@pair` couple orbits a shared point, and a `@chase` closes on
+  // its leader and falls back. All three stay pure in t because the leader
+  // is — the follower samples the SAME closed form at `d - lag`.
+  { name: 'follow', label: 'Follower', speedMul: 1, band: 'free', bobAmp: 1.2, bobHz: 0.5, formation: false, travel: 1, bond: 'follow' },
+  { name: 'pair', label: 'Pair', speedMul: 0.8, band: 'free', bobAmp: 2.5, bobHz: 0.35, formation: false, travel: 1, bond: 'pair' },
+  { name: 'chase', label: 'Chaser', speedMul: 1, band: 'free', bobAmp: 1, bobHz: 0.6, formation: false, travel: 1, bond: 'chase' },
 ];
+
+/**
+ * `swimStyle: 'auto'` — species-aware defaults from the cast (MQ33). The
+ * scene names no behaviour; each untagged token swims the way its breed
+ * does. A `@style` on the token still wins. Breeds this table does not know
+ * (a custom catalog) loop, the pre-style behaviour.
+ */
+export const AUTO_STYLE_BY_BREED: Readonly<Record<string, SwimStyle>> = {
+  angelfish: 'school',
+  betafish: 'drift',
+  seahorse: 'hover',
+  seaturtle: 'surface',
+  // The unminted NPC set.
+  blowfish: 'hover',
+  hackerfish: 'loop',
+  glowfish: 'drift',
+  babyfish: 'school',
+  shark: 'patrol',
+  crab: 'bottom',
+  starfish: 'bottom',
+  octopus: 'bottom',
+  dori: 'school',
+};
+
+export function autoStyleFor(breed: string | undefined): SwimStyleSpec {
+  const name = breed ? AUTO_STYLE_BY_BREED[breed.toLowerCase()] : undefined;
+  return swimStyleOf(name ?? 'loop');
+}
+
+/**
+ * Formation breathing (MQ34): the lattice relaxes outward and draws back in
+ * on a slow cycle. The factor never drops below 1, so the no-pair-inside-a-
+ * body-length law the seating charts are tested against still holds at every
+ * instant — a school breathes OUT from its guaranteed spacing, never into it.
+ * `amount` 0 (the default) is exactly 1: no change to any published scene.
+ */
+export function formationBreathe(tSec: number, amount: number): number {
+  const a = Math.max(0, Math.min(1, amount));
+  if (a <= 0) return 1;
+  return 1 + a * 0.22 * (0.5 + 0.5 * Math.sin(tSec * 0.42));
+}
+
+/**
+ * Idle micro-motion (MQ36): a fish that works a patch of water (`travel` < 1)
+ * turns in place while it holds station, instead of pointing rigidly down a
+ * loop it is barely moving along — "a stationary fish is a statue with a
+ * tail". Yaw in radians, zero for every touring style, so `loop` and the
+ * formations are untouched. Amplitude grows as travel shrinks: hover sways
+ * ~25°, drift ~11°.
+ */
+export function idleSway(style: SwimStyleSpec, tSec: number, phase: number): number {
+  if (style.travel >= 1 || style.formation) return 0;
+  return (1 - style.travel) * 0.5 * Math.sin(tSec * 0.45 + phase);
+}
 
 export const SWIM_STYLE_NAMES: readonly SwimStyle[] = SWIM_STYLES.map((s) => s.name);
 
@@ -86,10 +156,11 @@ export function fishHash(index: number, salt: number): number {
 }
 
 /**
- * Per-fish spread. `variance` 0 means a uniform shoal in the things an author
- * is asking about — size and pace; 1 means every fish is visibly its own
- * animal. This is the "expandable uniqueness" dial: one number an author
- * turns up, rather than per-fish values nobody wants to write.
+ * Per-fish spread in how a fish swims. `variance` 0 means a uniform shoal in
+ * pace; 1 means every fish is visibly its own animal. Size has its own dial,
+ * `sizeVariance` (see `fishSizeMul`) — a big fish is not a fast one. This is
+ * the "expandable uniqueness" dial: one number an author turns up, rather
+ * than per-fish values nobody wants to write.
  *
  * Two fields deliberately IGNORE `variance` — `phase` and `anchor`. Both are
  * desynchronisation, not flavour: a shoal that bobs and beats its tail in
@@ -98,14 +169,13 @@ export function fishHash(index: number, salt: number): number {
  * variance to 0 should give you a uniform population, not a chorus line.
  */
 export function fishVariation(index: number, variance: number): {
-  speedMul: number; scaleMul: number; phase: number; anchor: number;
+  speedMul: number; phase: number; anchor: number;
 } {
   const v = Math.max(0, Math.min(1, variance));
   return {
-    // ±40% speed and ±25% size at full variance — enough to read as a mixed
-    // population, not so much that one fish looks broken.
+    // ±40% speed at full variance — enough to read as a mixed population,
+    // not so much that one fish looks broken.
     speedMul: 1 + (fishHash(index, 1) - 0.5) * 0.8 * v,
-    scaleMul: 1 + (fishHash(index, 2) - 0.5) * 0.5 * v,
     // Independent of `variance` — see the note above; synchronised bobbing is
     // a machine, not a shoal.
     phase: fishHash(index, 3) * Math.PI * 2,
@@ -118,11 +188,62 @@ export function fishVariation(index: number, variance: number): {
   };
 }
 
+/**
+ * Where a fish starts on its own route, as a fraction of the route's length.
+ *
+ * The rule lives here rather than inline in the tank because it is the whole
+ * of a bug that shipped once already: the offset used to apply only when
+ * `travel < 1`, so every full-travel style (patrol, bottom, surface) mounted
+ * as one knot dead-centre — every compiled spline's `points[0]` sits near
+ * azimuth 0, so an unspread cast starts stacked. It took minutes of screen
+ * time to disperse, and was watched happening three times in a row on a live
+ * channel before anyone read the condition.
+ *
+ * `loop` is the one exception, and not for looks: it promises to be exactly
+ * the pre-style behaviour frame for frame, so it may not touch frame 0.
+ *
+ * Formation styles pass through here too even though the carrier's rigid
+ * transform ignores the result — cheaper to keep one rule than to encode
+ * "except when a branch downstream discards it", which is the kind of caveat
+ * that stops being true and nobody notices.
+ */
+export function anchorFraction(style: SwimStyleSpec, index: number, variance: number): number {
+  if (style.name === 'loop') return 0;
+  return fishVariation(index, variance).anchor;
+}
+
 /** Nose-to-tail length of a fish at scale 1, in tank units. Formation spacing
  *  is quoted in these so the lattice cannot silently start interpenetrating
  *  when the fish change size — a review measured 36% of fish-frames with a
  *  neighbour inside one body length when the pitch was a bare number. */
 export const FISH_LENGTH = 18;
+
+/**
+ * Nominal body length of each breed, against a minted fish (1). Every model
+ * is normalised to FISH_LENGTH on load, which made a shark the size of a
+ * babyfish; this gives each breed its length back. Unknown breeds are 1.
+ * (Bundled breeds record theirs in breeds/breeds.json too — keep the two in
+ * step when a breed comes in.)
+ */
+export const BREED_SIZE: Readonly<Record<string, number>> = {
+  betafish: 1, angelfish: 1, seahorse: 0.8, seaturtle: 1.35,
+  shark: 2.2, crab: 0.9, dori: 0.9, glowfish: 0.8, babyfish: 0.45, hackerfish: 0.85, blowfish: 0.8,
+  starfish: 1, octopus: 1.2,
+};
+export function breedSize(breed: string | null | undefined): number {
+  return (breed && BREED_SIZE[breed.toLowerCase()]) || 1;
+}
+
+/**
+ * One fish's own size, around its breed's: a seeded spread, log-symmetric so
+ * as many fish come out a third smaller as a third bigger. `variance` 0 is
+ * every fish at its breed size; 0.5 spans ≈ ×0.76–×1.32; 1 spans ≈ ×0.57–×1.74.
+ * Independent of speed variance — a big fish is not a fast one.
+ */
+export function fishSizeMul(index: number, variance: number): number {
+  const v = Math.max(0, Math.min(1, variance));
+  return 2 ** ((fishHash(index, 8) - 0.5) * 1.6 * v);
+}
 
 /** Half-width the formation lattice is allowed to occupy, in tank units. The
  *  tank still clamps the final position — this keeps the shape sane, the
@@ -149,14 +270,19 @@ const FORMATION_HALF_WIDTH = 62;
  * - `ring`    — a carousel around the carrier, the ring swimming as one
  * - `wedge`   — the migratory V, ranks widening behind the point
  * - `ball`    — a bait-ball: Fibonacci-shell seats on a sphere
+ * - `wheel`   — the ring tilted so it reads from a side camera (MQ34)
  */
-export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball';
-export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball'];
+export type FormationShape = 'phalanx' | 'line' | 'ring' | 'wedge' | 'ball' | 'wheel';
+export const FORMATION_SHAPES: readonly FormationShape[] = ['phalanx', 'line', 'ring', 'wedge', 'ball', 'wheel'];
 
 export function formationSlot(
   index: number, count: number, variance: number, halfWidth = FORMATION_HALF_WIDTH,
-  shape: FormationShape = 'phalanx',
+  shape: FormationShape = 'phalanx', length = FISH_LENGTH,
 ): { side: number; up: number; back: number } {
+  // Every spacing below is quoted in body lengths — of THIS school's biggest
+  // member, so a school of sharks spaces like sharks. Its room grows with it.
+  const L = length;
+  halfWidth *= Math.max(1, L / FISH_LENGTH);
   const j = 0.35 + 0.65 * Math.max(0, Math.min(1, variance));
   if (shape === 'line') {
     // Nose to tail with a seeded weave bounded well under half a body
@@ -171,20 +297,36 @@ export function formationSlot(
     const within = index % FILE;
     const fileLen = Math.min(FILE, count - col * FILE);
     return {
-      side: (col - (files - 1) / 2) * FISH_LENGTH * 1.6
-        + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.4 * j,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.5 * j,
-      back: (within - (fileLen - 1) / 2) * FISH_LENGTH * 1.7,
+      side: (col - (files - 1) / 2) * L * 1.6
+        + (fishHash(index, 4) - 0.5) * L * 0.4 * j,
+      up: (fishHash(index, 5) - 0.5) * L * 0.5 * j,
+      back: (within - (fileLen - 1) / 2) * L * 1.7,
     };
   }
   if (shape === 'ring') {
     // Evenly seated carousel; radius grows with the cast so seats keep a
     // body length of arc between them.
-    const r = Math.max(FISH_LENGTH * 1.6, (count * FISH_LENGTH * 1.35) / (Math.PI * 2));
+    const r = Math.max(L * 1.6, (count * L * 1.35) / (Math.PI * 2));
     const a = (index / Math.max(1, count)) * Math.PI * 2;
     return {
       side: Math.cos(a) * r,
-      up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * 0.6 * j,
+      up: (fishHash(index, 5) - 0.5) * L * 0.6 * j,
+      back: Math.sin(a) * r,
+    };
+  }
+  if (shape === 'wheel') {
+    // The ring, TILTED: seats rise and fall around the carousel so it reads
+    // as a wheel from a side camera. A flat ring was verified invisible from
+    // every side view — a line of fish, not a circle (MQ34). A separate
+    // shape rather than a change to `ring`, so scenes already published on
+    // `ring` render exactly as before. Horizontal spacing is the ring's, so
+    // the arc-length law holds; the vertical reach is capped so the
+    // carrier's y-clamp keeps the top seat under the lid.
+    const r = Math.max(L * 1.6, (count * L * 1.35) / (Math.PI * 2));
+    const a = (index / Math.max(1, count)) * Math.PI * 2;
+    return {
+      side: Math.cos(a) * r,
+      up: Math.sin(a) * Math.min(r * 0.55, 24) + (fishHash(index, 5) - 0.5) * L * 0.3 * j,
       back: Math.sin(a) * r,
     };
   }
@@ -204,23 +346,34 @@ export function formationSlot(
     // CENTRED on the mean rank so it never grows the vertical extent: the
     // point rides high, the wings low, the average unmoved. Same offset at
     // the same rank in every layer, so inter-layer spacing is untouched.
-    const droop = (rank - 2) * FISH_LENGTH * (layers === 1 ? 0.24 : 0.12);
+    const droop = (rank - 2) * L * (layers === 1 ? 0.24 : 0.12);
     // Multi-layer pitch drops to 1.2 body lengths (same-rank vertical gap
     // 21.6 minus worst-case jitter closure still clears one body length) so
     // three stacked Vs plus droop fit the water column.
     const pitch = layers === 1 ? 1.5 : 1.2;
     const jit = layers === 1 ? 0.2 : 0.15;
     return {
-      side: wing * rank * FISH_LENGTH * 1.25 + (fishHash(index, 4) - 0.5) * FISH_LENGTH * 0.3 * j,
-      up: (layer - (layers - 1) / 2) * FISH_LENGTH * pitch
-        + (fishHash(index, 5) - 0.5) * FISH_LENGTH * jit * j - droop,
-      back: (rank - 2) * FISH_LENGTH * 1.35,
+      side: wing * rank * L * 1.25 + (fishHash(index, 4) - 0.5) * L * 0.3 * j,
+      up: (layer - (layers - 1) / 2) * L * pitch
+        + (fishHash(index, 5) - 0.5) * L * jit * j - droop,
+      back: (rank - 2) * L * 1.35,
     };
   }
   if (shape === 'ball') {
     // Fibonacci-sphere seats: the classic even shell. Radius grows with the
     // cast so nearest seats stay a body length apart.
-    const r = FISH_LENGTH * (1.1 + 0.34 * Math.sqrt(count));
+    const r = L * (1.1 + 0.34 * Math.sqrt(count));
+    // Big fish cannot stack in a 57-unit water column: when the height cap
+    // would squash the shell tighter than it squashes a minted-fish ball, the
+    // ball of big fish is what physics leaves it — a flat sunflower disc,
+    // seats a body length apart. (A minted-size ball never takes this path.)
+    const r0 = FISH_LENGTH * (1.1 + 0.34 * Math.sqrt(count));
+    if (L > FISH_LENGTH && Math.min(r * 0.62, 28) / (r * 0.62) < Math.min(r0 * 0.62, 28) / (r0 * 0.62) - 1e-9) {
+      const g = (1 + Math.sqrt(5)) / 2;
+      const a = (2 * Math.PI * index) / (g * g);
+      const rr = L * 1.2 * Math.sqrt(index + 0.5);
+      return { side: rr * Math.cos(a), up: (fishHash(index, 5) - 0.5) * Math.min(L * 0.3, 20) * j, back: rr * Math.sin(a) };
+    }
     const g = (1 + Math.sqrt(5)) / 2;
     const u = count <= 1 ? 0 : index / (count - 1);
     const incl = Math.acos(1 - 2 * u);
@@ -245,20 +398,20 @@ export function formationSlot(
   // pitch rather than a fixed number of units. Both matter: a bare 26/22 was
   // narrower than a fish is long once jitter ate into it, so the shoal
   // interpenetrated at every variance including 0.
-  const pitch = Math.min(FISH_LENGTH * 1.9, (halfWidth * 2) / span);
+  const pitch = Math.min(L * 1.9, (halfWidth * 2) / span);
   // Jitter is bounded so the CLOSEST possible pair still clears a body
   // length: adjacent columns are `pitch` apart and jitter can close at most
-  // `jit`, so pitch - jit must stay above FISH_LENGTH. That is the whole
+  // `jit`, so pitch - jit must stay above L. That is the whole
   // reason the spacing is quoted in body lengths at all.
   const jit = pitch * 0.35;
   const rows = Math.ceil(Math.max(1, count) / cols);
   return {
     side: (col - (cols - 1) / 2) * pitch + (fishHash(index, 4) - 0.5) * jit * j,
-    up: (fishHash(index, 5) - 0.5) * FISH_LENGTH * j,
+    up: (fishHash(index, 5) - 0.5) * L * j,
     // Centred fore-aft like every other shape — a 24-fish lattice trailing
     // its whole depth behind the carrier pushed the extent past what the
     // centre-clamp could absorb.
-    back: (row - (rows - 1) / 2) * FISH_LENGTH * 1.6 + fishHash(index, 6) * FISH_LENGTH * 0.4 * j,
+    back: (row - (rows - 1) / 2) * L * 1.6 + fishHash(index, 6) * L * 0.4 * j,
   };
 }
 
@@ -269,11 +422,11 @@ export function formationSlot(
  * legal lattice back into a pile.
  */
 export function formationExtent(
-  count: number, variance: number, shape: FormationShape = 'phalanx',
+  count: number, variance: number, shape: FormationShape = 'phalanx', length = FISH_LENGTH,
 ): { side: number; up: number; back: number; reach: number } {
   let side = 0, up = 0, back = 0, reach = 0;
   for (let i = 0; i < count; i += 1) {
-    const s = formationSlot(i, count, variance, undefined, shape);
+    const s = formationSlot(i, count, variance, undefined, shape, length);
     side = Math.max(side, Math.abs(s.side));
     up = Math.max(up, Math.abs(s.up));
     back = Math.max(back, Math.abs(s.back));
@@ -283,6 +436,28 @@ export function formationExtent(
     reach = Math.max(reach, Math.hypot(s.side, s.back));
   }
   return { side, up, back, reach };
+}
+
+/**
+ * The largest breath a formation can take and still fit the glass. Breathing
+ * scales seats and extent together, and the carrier keeps the shoal inside
+ * by moving its CENTRE — which only works while the extent fits: a ring's
+ * vertical reach is capped at 24 units, and at a full breath (×1.22) that is
+ * 29.3 against a 57-unit water column, so the carrier's y-clamp inverted and
+ * the top and bottom seats left the tank (review, MQ34). Cap the breath so
+ * the breathed extent (plus a margin for per-seat jitter) never exceeds what
+ * the carrier can keep inside.
+ */
+export function fitBreath(
+  extent: { up: number; reach: number },
+  lattice: number,
+  bounds: { yRange: number; radius: number },
+  margin = FISH_LENGTH * 0.5,
+): number {
+  let fit = lattice;
+  if (extent.up > 0) fit = Math.min(fit, Math.max(1, (bounds.yRange / 2 - margin) / extent.up));
+  if (extent.reach > 0) fit = Math.min(fit, Math.max(1, (bounds.radius - margin) / extent.reach));
+  return fit;
 }
 
 /** Depth band as a fraction of the tank's vertical extent — the tank owns the

@@ -36,7 +36,8 @@ describe('farm manifest', () => {
   });
   it('carries the unminted breeds without ranges', () => {
     const un = BREEDS.filter((b) => !b.minted);
-    expect(un.length).toBeGreaterThanOrEqual(8);
+    expect(un.length).toBeGreaterThanOrEqual(7);
+    expect(un.map((b) => b.breed)).not.toContain('jellyfish'); // the draft model is out
     expect(un.every((b) => !b.range && b.count === 0 && !!b.model)).toBe(true);
     expect(un.map((b) => b.breed)).toContain('hackerfish');
   });
@@ -85,9 +86,12 @@ describe('fishMix over the whole collection', () => {
     expect(r.entries).toEqual([]);
     expect(r.problems[0]).toContain('not a minted token id (1-512)');
   });
-  it('still honours breed names and the curated catalog', () => {
+  it('still honours breed names — and counts cast distinct individuals', () => {
     expect(parseFishMix('seahorse').entries).toHaveLength(1);
-    expect(parseFishMix('257:2').entries[0]!.count).toBe(2);
+    const school = parseFishMix('257:2').entries;
+    expect(school).toHaveLength(2);
+    expect(school.map((e) => e.count)).toEqual([1, 1]); // two fish, once each
+    expect(school[0]!.id).not.toBe(school[1]!.id);
   });
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "@idle-screens/mac-web",
-  "version": "0.0.15",
+  "version": "0.0.27",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@idle-screens/core": "workspace:*",
+    "@idle-screens/saver-metaquarium": "workspace:*",
     "@idle-screens/savers-classic": "workspace:*",
     "@idle-screens/schema": "workspace:*"
   },

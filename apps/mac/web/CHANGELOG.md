@@ -1,5 +1,144 @@
 # @idle-screens/mac-web
 
+## 0.0.27
+
+### Patch Changes
+
+- Updated dependencies [db1569e]
+- Updated dependencies [db1569e]
+- Updated dependencies [db1569e]
+- Updated dependencies [db1569e]
+  - @idle-screens/saver-metaquarium@0.15.0
+
+## 0.0.26
+
+### Patch Changes
+
+- Updated dependencies [a183559]
+- Updated dependencies [a183559]
+- Updated dependencies [a183559]
+- Updated dependencies [a183559]
+- Updated dependencies [a183559]
+- Updated dependencies [a183559]
+  - @idle-screens/saver-metaquarium@0.14.0
+
+## 0.0.25
+
+### Patch Changes
+
+- Updated dependencies [eaf84f7]
+- Updated dependencies [eaf84f7]
+- Updated dependencies [eaf84f7]
+- Updated dependencies [eaf84f7]
+- Updated dependencies [eaf84f7]
+  - @idle-screens/saver-metaquarium@0.12.0
+  - @idle-screens/schema@3.11.0
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.24
+
+### Patch Changes
+
+- Updated dependencies [db21004]
+- Updated dependencies [971f03e]
+- Updated dependencies [58c0414]
+  - @idle-screens/saver-metaquarium@0.10.0
+  - @idle-screens/schema@3.9.1
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.23
+
+### Patch Changes
+
+- Updated dependencies [5e911f5]
+- Updated dependencies [8fc8ab5]
+- Updated dependencies [96baf08]
+- Updated dependencies [14cd2aa]
+  - @idle-screens/saver-metaquarium@0.9.0
+
+## 0.0.22
+
+### Patch Changes
+
+- Updated dependencies [afbb530]
+- Updated dependencies [52669c8]
+- Updated dependencies [f668083]
+- Updated dependencies [451308c]
+  - @idle-screens/schema@3.9.0
+  - @idle-screens/saver-metaquarium@0.8.0
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.21
+
+### Patch Changes
+
+- Updated dependencies [8a989d4]
+  - @idle-screens/schema@3.8.0
+  - @idle-screens/saver-metaquarium@0.7.2
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.20
+
+### Patch Changes
+
+- Updated dependencies [02b8f60]
+  - @idle-screens/schema@3.7.0
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.19
+
+### Patch Changes
+
+- Updated dependencies [acd6078]
+- Updated dependencies [4bfcd9e]
+  - @idle-screens/schema@3.6.1
+  - @idle-screens/saver-metaquarium@0.7.1
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.18
+
+### Patch Changes
+
+- Updated dependencies [cb1c4fd]
+- Updated dependencies [01a6e80]
+- Updated dependencies [3142a7d]
+- Updated dependencies [25cf7d8]
+- Updated dependencies [423b40f]
+  - @idle-screens/schema@3.6.0
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.17
+
+### Patch Changes
+
+- Updated dependencies [f43fb23]
+- Updated dependencies [5b194c6]
+- Updated dependencies [ffcf882]
+- Updated dependencies [a729243]
+- Updated dependencies [f43fb23]
+- Updated dependencies [ec9c568]
+- Updated dependencies [31f9d13]
+- Updated dependencies [c2d6757]
+  - @idle-screens/core@0.4.7
+  - @idle-screens/schema@3.5.0
+  - @idle-screens/saver-metaquarium@0.7.0
+  - @idle-screens/savers-classic@3.2.4
+
+## 0.0.16
+
+### Patch Changes
+
+- Updated dependencies [395cf2a]
+- Updated dependencies [7d26f97]
+- Updated dependencies [f204739]
+- Updated dependencies [0b510e2]
+- Updated dependencies [52e44ad]
+- Updated dependencies [4336460]
+  - @idle-screens/core@0.4.6
+  - @idle-screens/saver-metaquarium@0.6.0
+  - @idle-screens/savers-classic@3.2.4
+  - @idle-screens/schema@3.4.5
+
 ## 0.0.15
 
 ### Patch Changes

@@ -40,12 +40,12 @@ final class ChannelWSClientTests: XCTestCase {
     }
 
     func testWebSocketURL() async {
-        let url = await ChannelWSClient.webSocketURL(baseURL: baseURL, channelId: "abc")
+        let url = ChannelWSClient.webSocketURL(baseURL: baseURL, channelId: "abc")
         XCTAssertEqual(url.absoluteString, "wss://example.com/c/abc/ws")
     }
 
     func testWebSocketURLWithDeviceId() async {
-        let url = await ChannelWSClient.webSocketURL(
+        let url = ChannelWSClient.webSocketURL(
             baseURL: baseURL, channelId: "abc", deviceId: "tv-device-1"
         )
         XCTAssertEqual(url.absoluteString, "wss://example.com/c/abc/ws?device=tv-device-1")

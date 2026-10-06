@@ -1,6 +1,7 @@
 import { createRng } from '@idle-screens/core';
+import { polygonArea, polygonPoints } from './shapes';
 import { buildEntities, linkPairs, positionAt } from './simulate';
-import { LIMITS, type SaverSpec } from './types';
+import { LIMITS, type FinishSpec, type SaverSpec } from './types';
 
 export interface LayerSnapshot {
   key: string | undefined;
@@ -22,7 +23,8 @@ export interface SceneSnapshot {
 }
 
 export interface SceneDescription {
-  spec: { id: string; label: string; units: string };
+  /** `finish` is present only when the spec declares one — a print screen the luminance numbers do not include. */
+  spec: { id: string; label: string; units: string; finish?: FinishSpec };
   snapshots: SceneSnapshot[];
 }
 
@@ -62,7 +64,11 @@ export function describeScene(
       let pixArea = 0;
       for (const e of entities) {
         const r = e.size / 2;
-        pixArea += layer.sprite.kind === 'circle' ? Math.PI * r * r : e.size * e.size;
+        pixArea += layer.sprite.kind === 'circle'
+          ? Math.PI * r * r
+          : layer.sprite.kind === 'polygon'
+            ? polygonArea(polygonPoints(layer.sprite, r))
+            : e.size * e.size;
       }
       const coverage = pixArea / (w * h);
       const meanAlpha = entities.length > 0
@@ -132,7 +138,7 @@ export function describeScene(
   });
 
   return {
-    spec: { id: spec.id, label: spec.label, units: spec.units ?? 'px' },
+    spec: { id: spec.id, label: spec.label, units: spec.units ?? 'px', ...(spec.finish ? { finish: spec.finish } : {}) },
     snapshots,
   };
 }

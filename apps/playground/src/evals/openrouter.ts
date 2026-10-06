@@ -291,6 +291,17 @@ export class ChatError extends Error {
 export async function chatCompletion(req: ChatRequest): Promise<ChatResponse> {
   const key = getKey();
   if (!key) throw new ChatError('auth', 'No OpenRouter key — add one in Settings.');
+  return chatCompletionWith(key, req);
+}
+
+/**
+ * The transport itself, with the key as an argument — node-safe (no key
+ * store, no DOM). The headless eval runner uses this directly with the key
+ * from its process environment; the browser path above only adds the stored-
+ * key lookup. One implementation, so the request body, error taxonomy, and
+ * served-capture cannot drift between panel runs and headless runs (#98).
+ */
+export async function chatCompletionWith(key: string, req: ChatRequest): Promise<ChatResponse> {
   let res: Response;
   try {
     res = await fetch(CHAT_URL, {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakTextBlock } from './simulate';
+import { breakTextBlock, textMetricsClassFor, textWidthEm } from './simulate';
 import { validateSpec } from './validate';
 import { adviseSpec } from './advise';
 import { textSprites, perceiveScene, luminanceGrid, type PerceiveOptions, type LuminanceGrid } from './perceive';
@@ -441,5 +441,154 @@ describe('glyphFade in perceive', () => {
     const lit = luminanceGrid(textBlockSpec({ reveal: { mode: 'glyphFade', progress: 0.9 } }));
     const sum = (g: LuminanceGrid) => g.cells.reduce((a: number, b: number) => a + b, 0);
     expect(sum(lit)).toBeGreaterThan(sum(dim));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// anchor / font / opacity / lifted maxWidth (ambient presentations 1a)
+// ---------------------------------------------------------------------------
+
+describe('textBlock anchor / font / opacity validation', () => {
+  it('accepts every compass anchor', () => {
+    for (const anchor of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) {
+      expect(validateSpec(textBlockSpec({ anchor })).valid).toBe(true);
+    }
+  });
+
+  it('rejects an unknown anchor', () => {
+    const res = validateSpec(textBlockSpec({ anchor: 'middle' }));
+    expect(res.valid).toBe(false);
+    expect(res.errors.some((e) => e.path.endsWith('.anchor'))).toBe(true);
+  });
+
+  it('accepts a family/weight font and rejects one carrying a size', () => {
+    expect(validateSpec(textBlockSpec({ font: 'bold monospace' })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ font: "300 'Inter', sans-serif" })).valid).toBe(true);
+    for (const font of ['bold 14px monospace', '12pt serif', '1.2em sans-serif', '50% monospace', '50%monospace', '14pxmonospace', '']) {
+      const res = validateSpec(textBlockSpec({ font }));
+      expect(res.valid).toBe(false);
+      expect(res.errors.some((e) => e.path.endsWith('.font'))).toBe(true);
+    }
+    expect(validateSpec(textBlockSpec({ font: 12 })).valid).toBe(false);
+  });
+
+  it('accepts opacity in 0..1 and rejects outside', () => {
+    expect(validateSpec(textBlockSpec({ opacity: 0 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 0.4 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 1 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ opacity: 1.2 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ opacity: -0.1 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ opacity: '1' })).valid).toBe(false);
+  });
+
+  it('maxWidth may exceed the frame up to 2.0 of min(w,h)', () => {
+    expect(validateSpec(textBlockSpec({ maxWidth: 1.5 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ maxWidth: 2 })).valid).toBe(true);
+    expect(validateSpec(textBlockSpec({ maxWidth: 2.01 })).valid).toBe(false);
+    expect(validateSpec(textBlockSpec({ maxWidth: 0 })).valid).toBe(false);
+  });
+
+  it('the new fields are known properties (no unknown-property warning)', () => {
+    const res = validateSpec(textBlockSpec({ anchor: 'center', font: 'bold monospace', opacity: 0.8 }));
+    expect(res.valid).toBe(true);
+    expect(res.warnings?.some((w) => w.code === 'unknown-property')).toBeFalsy();
+  });
+});
+
+describe('textBlock anchor in perception and steering', () => {
+  const litCols = (grid: LuminanceGrid) => {
+    const cols: number[] = [];
+    for (let r = 0; r < grid.rows; r++)
+      for (let c = 0; c < grid.cols; c++)
+        if (grid.cells[r * grid.cols + c]! > grid.background[r]! + 0.01) cols.push(c);
+    return cols;
+  };
+
+  for (const [width, height] of [[1920, 1080], [1080, 1080]] as const) {
+    it(`anchor: 'center' at position 0.5/0.5 is centred in the luminance grid on ${width}×${height}`, () => {
+      const spec = textBlockSpec({ text: 'Centred title', maxWidth: 0.9, anchor: 'center' });
+      spec.layers[0]!.position = { x: 0.5, y: 0.5 };
+      const grid = luminanceGrid(spec, { t: 0, viewport: { width, height } });
+      const cols = litCols(grid);
+      expect(cols.length).toBeGreaterThan(0);
+      const mid = (Math.min(...cols) + Math.max(...cols) + 1) / 2 / grid.cols;
+      expect(Math.abs(mid - 0.5)).toBeLessThan(0.03);
+      const scene = perceiveScene(spec, { t: 0, viewport: { width, height } });
+      expect(Math.abs(scene.centroid!.y - 0.5)).toBeLessThan(0.05);
+    });
+  }
+
+  it('advisory boxes follow the anchor (text-off-screen)', () => {
+    const wide = (anchor?: string) => {
+      const spec = textBlockSpec({ text: 'A caption that is long enough to run off the frame', maxWidth: 1.2, fontSize: 0.06, ...(anchor ? { anchor } : {}) });
+      spec.layers[0]!.position = { x: 0.95, y: 0.5 };
+      return adviseSpec(spec).some((w) => w.code === 'text-off-screen');
+    };
+    expect(wide()).toBe(true);
+    expect(wide('top-left')).toBe(true);
+    expect(wide('right')).toBe(false);
+  });
+
+  it('anchor is structural; font and opacity are paint', () => {
+    const base = structuralSignature(textBlockSpec());
+    expect(structuralSignature(textBlockSpec({ anchor: 'center' }))).not.toBe(base);
+    expect(structuralSignature(textBlockSpec({ font: 'bold monospace', opacity: 0.3 }))).toBe(base);
+    // Gliding opacity keeps the signature equal — no rebuild.
+    const spec = textBlockSpec({ opacity: 1 });
+    const out = applyDeltasToSpec(spec, [{ t: 0, path: 'layers.0.sprite.opacity', value: 0 }]);
+    expect((out.layers[0]!.sprite as { opacity?: number }).opacity).toBe(0);
+    expect(structuralSignature(out)).toBe(structuralSignature(spec));
+  });
+
+  it('opacity scales perceived ink', () => {
+    const sum = (g: LuminanceGrid) => g.cells.reduce((a: number, b: number) => a + b, 0);
+    expect(sum(luminanceGrid(textBlockSpec({ opacity: 0.2 }), { t: 0 })))
+      .toBeLessThan(sum(luminanceGrid(textBlockSpec(), { t: 0 })));
+  });
+});
+
+describe('monospace metrics class (textBlock.font)', () => {
+  it('selects mono for monospace families and proportional otherwise', () => {
+    for (const f of ['monospace', 'bold monospace', "'SF Mono', monospace", 'Menlo', 'Courier New', 'ui-monospace', 'Fira Code', 'JetBrains Mono', 'SFMono-Regular', '-apple-system, BlinkMacSystemFont, "SFMono-Regular", Menlo, monospace']) {
+      expect(textMetricsClassFor(f)).toBe('mono');
+    }
+    for (const f of [undefined, 'bold sans-serif', "300 'Inter', sans-serif", 'serif', 'Monotype Corsiva']) {
+      expect(textMetricsClassFor(f)).toBe('proportional');
+    }
+  });
+
+  it('mono advances every glyph by the same cell', () => {
+    expect(textWidthEm('iiii', 'mono')).toBe(textWidthEm('mmmm', 'mono'));
+    expect(textWidthEm('a b', 'mono')).toBeCloseTo(1.8, 9);
+    expect(textWidthEm('iiii')).toBeLessThan(textWidthEm('mmmm'));
+  });
+
+  it('mono counts grapheme clusters, not UTF-16 code units — an emoji is one cell', () => {
+    // '😀' is a surrogate pair (2 UTF-16 units) but one grapheme / one advance cell.
+    expect(textWidthEm('a😀b', 'mono')).toBeCloseTo(3 * 0.6, 9);
+    expect(textWidthEm('a😀b', 'mono')).toBe(textWidthEm('abc', 'mono'));
+  });
+
+  it('breaks differ from the proportional table for narrow-heavy text; default is unchanged', () => {
+    const text = 'iiii iiii iiii iiii';
+    expect(breakTextBlock(text, 8).length).toBe(1);
+    expect(breakTextBlock(text, 8, 'proportional')).toEqual(breakTextBlock(text, 8));
+    const mono = breakTextBlock(text, 8, 'mono');
+    expect(mono.length).toBeGreaterThan(1);
+    expect(mono.every((l) => l.widthEm <= 8)).toBe(true);
+  });
+
+  it('a mono font widens the perceived box', () => {
+    const prop = textSprites(textBlockSpec({ text: 'iiii iiii', maxWidth: 1 }));
+    const mono = textSprites(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, font: 'monospace' }));
+    expect(prop[0]!.sizePx).toBe(mono[0]!.sizePx);
+    const cols = (spec: SaverSpec) => {
+      const g = luminanceGrid(spec, { t: 0 });
+      let n = 0;
+      for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) if (g.cells[r * g.cols + c]! > g.background[r]! + 0.01) n++;
+      return n;
+    };
+    expect(cols(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, font: 'monospace', fontSize: 0.08 })))
+      .toBeGreaterThan(cols(textBlockSpec({ text: 'iiii iiii', maxWidth: 1, fontSize: 0.08 })));
   });
 });

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Privacy manifest. Required since 2024-05 for any app whose bundle touches a
+	  required-reason API. Audited 2026-09-07 against this target's compiled
+	  sources: UserDefaults is the only required-reason category used. File
+	  timestamps, system boot time, disk space and active-keyboard APIs have no
+	  call sites, so they are deliberately absent rather than forgotten — adding a
+	  category the app does not use is its own review problem.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<!--
+	  No tracking, so no domains. There is no IDFA, no AppTrackingTransparency and
+	  no third-party SDK in either target; the only host contacted is the app's own
+	  backend.
+	-->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<!--
+	  The app can publish a scene to a channel (MCPClient.publishScene), and the
+	  server retains that scene and its history. That is user-authored content
+	  leaving the device, so it is declared. It is NOT linked to identity: this
+	  product has no accounts and issues capability tokens, not user ids.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+	<!--
+	  CA92.1 — app-owned defaults only. NOT 1C8F.1: that code is for defaults
+	  shared through an App Group, and there is no App Group in this project
+	  (IdleScreens.entitlements carries associated-domains and nothing else, and
+	  the Top Shelf extension reads no defaults at all). Re-check this code if an
+	  App Group is ever added.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

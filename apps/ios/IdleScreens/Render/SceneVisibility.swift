@@ -18,11 +18,18 @@ enum SceneVisibility {
     /// score well above it; sub-pixel or dark-on-dark scenes score near zero.
     private static let minInkFraction = 0.0004
 
+    /// Above this luminance the background itself is doing the work: a
+    /// visibly bright fill (or gradient) is not a black/blank tile no matter
+    /// how sparse or dark-on-dark the layers drawn over it are.
+    private static let brightBackgroundLuminance = 0.35
+
     static func verdict(layers: [CompiledLayer],
                         background: SpecSubset.Background?,
                         canvas: CGSize = CGSize(width: 1920, height: 1080)) -> Verdict {
         let canvasArea = canvas.width * canvas.height
-        let bgLum = luminance(hex: background?.primaryColor ?? "000000")
+        let bgLum = backgroundLuminance(background)
+        if bgLum >= brightBackgroundLuminance { return .visible }
+        let referenceLum = luminance(hex: background?.primaryColor ?? "000000")
         var ink = 0.0
 
         for layer in layers {
@@ -63,19 +70,69 @@ enum SceneVisibility {
                     let maxWPx = maxWidth * dim
                     let lineCount = breakTextBlock(text: text, maxWidthEm: maxWPx / fsPx).count
                     area = maxWPx * lh * Double(lineCount)
+                case .polygon(_, _, _, let sides, let points, _):
+                    let r = entity.size * dim
+                    guard r >= 0.5 else { continue }
+                    // Shoelace of the actual facet — a thin shard is not a disc.
+                    let verts = NativeSceneView.polygonPoints(sides: sides, points: points, radius: r)
+                    guard verts.count >= 3 else { continue }
+                    var doubleArea = 0.0
+                    for i in verts.indices {
+                        let a = verts[i], b = verts[(i + 1) % verts.count]
+                        doubleArea += a.x * b.y - b.x * a.y
+                    }
+                    area = abs(doubleArea) / 2
+                case .stroke(_, let points, _, _, let width, let smooth, _, _):
+                    let length = entity.size * dim
+                    guard length >= 0.5 else { continue }
+                    // Ink is the sampled path's real length × its width, so a
+                    // curled mark counts for more than its bounding box.
+                    let samples = NativeSceneView.strokeSamples(points: points,
+                                                                halfSize: length / 2,
+                                                                smooth: smooth)
+                    var pathLength = 0.0
+                    for i in 1..<max(1, samples.count) {
+                        pathLength += hypot(samples[i].x - samples[i - 1].x,
+                                            samples[i].y - samples[i - 1].y)
+                    }
+                    guard pathLength > 0 else { continue }
+                    area = pathLength * max(1, (width ?? (layer.units == .px ? 2 : 0.002)) * dim)
+                case .bar(let values, _, _, _, _, let maxValue, _):
+                    let len = entity.size * dim
+                        * NativeSceneView.barFraction(values: values, max: maxValue,
+                                                      index: entity.barIndex)
+                    guard len >= 0.5 else { continue }
+                    let thick = entity.thickness > 0 ? entity.thickness * dim : entity.size * dim * 0.2
+                    area = len * max(1, thick)
                 case .unknown:
                     continue
                 }
                 // Dark-on-dark is as invisible as sub-pixel: weight by
                 // luminance contrast against the background.
-                let contrast = abs(luminance(hex: entity.color) - bgLum)
-                // Cap any single entity at 4% of the canvas so one giant dim
-                // wash can't carry an otherwise-empty scene.
+                // Contrast is measured against the gradient's FIRST stop, the
+                // reference `minInkFraction` was calibrated on. `bgLum` above
+                // is the BRIGHTEST stop — right for "is the fill itself
+                // bright?", wrong here: one warm stop at the foot of a night
+                // gradient dragged every lantern's contrast down and a
+                // working channel was shown as "not broadcasting".
+                let contrast = abs(luminance(hex: entity.color) - referenceLum)
                 ink += min(area, canvasArea * 0.04) * entity.alpha * contrast
             }
         }
 
         return ink / canvasArea >= minInkFraction ? .visible : .invisible
+    }
+
+    /// Brightest color the background actually paints: the solid fill, or
+    /// the brightest of ALL gradient stops. `Background.primaryColor` only
+    /// looks at the first stop (or the solid color) — fine for a placeholder
+    /// tint, but it misses a bright stop further down the gradient, which is
+    /// exactly the case that lights up an otherwise sparse/dark-on-dark scene.
+    private static func backgroundLuminance(_ background: SpecSubset.Background?) -> Double {
+        guard let background else { return 0 }
+        if let color = background.color { return luminance(hex: color) }
+        guard let stops = background.stops, !stops.isEmpty else { return 0 }
+        return stops.map { luminance(hex: $0.color) }.max() ?? 0
     }
 
     /// Relative luminance (0…1) of a hex color, gamma-naive — fine for a

@@ -1,13 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, Texture } from 'three';
+import { Bone, Box3, BoxGeometry, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  BLOOM_COLORS,
+  chromeMatcap,
+  collectFishGlow,
   eyeNoseSign,
   forceOpaque,
   glowColorOf,
   MIAMI_VICE_COLORS,
+  NEON_COLORS,
 } from './materials';
 
 function npcFish(): { root: Group; body: Mesh; glow: Mesh; eyes: Mesh } {
@@ -41,6 +45,20 @@ describe('metaquarium material contract', () => {
     expect((a.body.material as MeshBasicMaterial).color.getHex()).toBe(
       (b.body.material as MeshBasicMaterial).color.getHex(),
     );
+  });
+
+  it('KEEP-* keeps its authored colour, flat or lit (the breed intake names these)', () => {
+    for (const lit of [false, true]) {
+      const geo = new SphereGeometry(1, 4, 4);
+      const screen = new Mesh(geo, new MeshStandardMaterial({ color: 0x0a0a0a }));
+      screen.material.name = 'KEEP-Screen';
+      const root = new Group(); root.add(screen);
+      applyNpcMaterials(root, createRng(7).fork(9), true, lit);
+      const mat = screen.material as unknown as MeshBasicMaterial | MeshLambertMaterial;
+      expect(mat).toBeInstanceOf(lit ? MeshLambertMaterial : MeshBasicMaterial);
+      expect(mat.color.getHex()).toBe(new Color(0x0a0a0a).getHex());
+      expect(mat.name).toBe('KEEP-Screen');
+    }
   });
 
   it('GLOW-* becomes colored emissive basic (unlit, no scene lights)', () => {
@@ -260,12 +278,33 @@ describe('glow halos — selective bloom without a composer', () => {
     const b = new Mesh(geo, soft);
     const root = new Group();
     root.add(a, b);
-    applyNpcMaterials(root, createRng(3));
+    applyNpcMaterials(root, createRng(3), false);
     const ra = a.material as unknown as MeshBasicMaterial;
     expect(ra).toBeInstanceOf(MeshBasicMaterial);
     expect(ra.map).toBe(tex); // same texture, unlit
     expect(ra.userData.mqOwned).toBe(true);
     expect(b.material).toBe(soft); // non-metal atlas untouched
+  });
+
+  it('reflective (default): metallic atlases wear the shared chrome matcap, never black', () => {
+    const geo = new SphereGeometry(1, 4, 4);
+    const tex = new Texture();
+    const a = new Mesh(geo, new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1 }));
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3));
+    const m = a.material as unknown as MeshMatcapMaterial;
+    expect(m).toBeInstanceOf(MeshMatcapMaterial);
+    expect(m.map).toBe(tex);
+    expect(m.matcap).toBe(chromeMatcap()); // one texture for every fish
+    expect(m.userData.mqOwned).toBe(true);
+    // Shared across tanks: must never be disposed with a fish.
+    expect(chromeMatcap().userData.mqOwned).toBeUndefined();
+    const px = chromeMatcap().image.data as Uint8Array;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < px.length; i += 4) { lo = Math.min(lo, px[i + 1]!); hi = Math.max(hi, px[i + 1]!); }
+    expect(lo).toBeGreaterThan(40); // no face ever goes black
+    expect(hi).toBeGreaterThan(235); // and there is a real highlight
   });
 
   it('the halo shader pushes along normals via one shared program key', () => {
@@ -297,5 +336,348 @@ describe('glow halos — selective bloom without a composer', () => {
     const g = new Group();
     g.add(multi);
     expect(addGlowHalos(g, createRng(1))).toBe(0);
+  });
+});
+
+describe('lit mode — fish that take light', () => {
+  it('coats take light; glow and eyes stay unlit (they ARE the light)', () => {
+    const { root, body, glow, eyes } = npcFish();
+    applyNpcMaterials(root, createRng(7).fork(1), true, true);
+    expect(body.material).toBeInstanceOf(MeshLambertMaterial);
+    expect(glow.material).toBeInstanceOf(MeshBasicMaterial);
+    expect(eyes.material).toBeInstanceOf(MeshBasicMaterial);
+  });
+
+  it('lit and flat pick the SAME coat from the same fork', () => {
+    const a = npcFish();
+    const b = npcFish();
+    applyNpcMaterials(a.root, createRng(7).fork(3), true, true);
+    applyNpcMaterials(b.root, createRng(7).fork(3), true, false);
+    expect((a.body.material as MeshLambertMaterial).color.getHex())
+      .toBe((b.body.material as MeshBasicMaterial).color.getHex());
+  });
+
+  it('metal plates become an owned PBR clone: coloured, polished, never a black mirror', () => {
+    const tex = new Texture();
+    const src = new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1, roughness: 1 });
+    const a = new Mesh(new SphereGeometry(1, 4, 4), src);
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3), true, true);
+    const m = a.material as unknown as MeshStandardMaterial;
+    expect(m).toBeInstanceOf(MeshStandardMaterial);
+    expect(m).not.toBe(src); // the template's material is never edited
+    expect(m.map).toBe(tex);
+    expect(m.metalness).toBeLessThanOrEqual(0.35);
+    expect(m.roughness).toBeLessThanOrEqual(0.3);
+    expect(src.metalness).toBe(1);
+  });
+});
+
+describe('the look is the default, and each part of it is optional', () => {
+  it('lit + fishMetal off: the plate is an ordinary lit surface wearing its atlas', () => {
+    const tex = new Texture();
+    const a = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ name: 'plate', map: tex, metalness: 1 }));
+    const root = new Group();
+    root.add(a);
+    applyNpcMaterials(root, createRng(3), false, true);
+    const m = a.material as unknown as MeshLambertMaterial;
+    expect(m).toBeInstanceOf(MeshLambertMaterial);
+    expect(m.map).toBe(tex);
+  });
+});
+
+describe('fish glow — GLOW parts as light sources', () => {
+  // Fixture names resolve through GLOW_NAME_COLORS (`pink` → #ff5ad0, `teal`
+  // → #00ffc8), so the colour a part wears is AUTHORED, and the assertions
+  // below can name the exact hex. (An unlisted name — `GLOW-HotPink` — would
+  // fall through to the seeded pick, and "its own colour" would be whatever
+  // the seed drew.)
+  const fin = (r: number, x: number, name = 'GLOW-Pink', emissive?: string): Mesh => {
+    const m = new Mesh(new SphereGeometry(r, 4, 4), new MeshStandardMaterial({ name, ...(emissive ? { emissive } : {}) }));
+    m.material.name = name;
+    m.position.x = x;
+    return m;
+  };
+  const rgb = (c: { r: number; g: number; b: number }): number[] => [c.r, c.g, c.b].map((v) => Number(v.toFixed(5)));
+
+  it('an accent fin earns full bloom, its own colour, and a repaintable core', () => {
+    const root = new Group();
+    const body = new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' }));
+    const f = fin(1, 5);
+    root.add(body, f);
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.cores).toHaveLength(1);
+    expect(g.cores[0]!.mat).toBe(f.material);
+    expect(g.cx).toBeCloseTo(5, 5); // centred on the fin, not the fish
+    expect(g.parts).toHaveLength(1);
+    expect(g.parts[0]!.x).toBeCloseTo(5, 5);
+    expect(g.gain).toBeGreaterThan(0.8);
+    // The bloom is the colour the part actually wears — the pink its name
+    // spells — never a second guess. Bloom is that colour scaled by one
+    // saturation gain (near 1 for a pink this pure), so the hue is exact.
+    const pink = new Color('#ff5ad0');
+    expect(rgb(g.cores[0]!.base)).toEqual(rgb(pink));
+    const k = g.r / pink.r;
+    expect(k).toBeGreaterThan(0.8);
+    expect(rgb(g)).toEqual(rgb(pink.clone().multiplyScalar(k)));
+  });
+
+  it('an authored emissive outranks the name, and an unlisted name is a seeded pick', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })), fin(1, 5, 'GLOW Blue.001', '#ff7a00'));
+    applyNpcMaterials(root, createRng(2));
+    const orange = new Color('#ff7a00'), g = collectFishGlow(root, createRng(2))!;
+    expect(rgb(g)).toEqual(rgb(orange.clone().multiplyScalar(g.r / orange.r)));
+    const named = new MeshStandardMaterial({ name: 'GLOW-HotPink' });
+    expect(BLOOM_COLORS.map((hex) => new Color(hex).getHex())).toContain(glowColorOf(named, createRng(2)).getHex());
+    expect(glowColorOf(named, createRng(2)).getHex()).toBe(glowColorOf(named, createRng(2)).getHex());
+  });
+
+  it('a glow part that IS the silhouette is a coat: never whitened, fainter bloom', () => {
+    const root = new Group();
+    const body = new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' }));
+    root.add(body, fin(4, 0, 'GLOW-Teal'));
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.cores).toHaveLength(0);
+    expect(g.gain).toBeLessThan(0.5);
+    expect(g.parts[0]!.coat).toBe(true); // a coat is not a lamp: no light, close rim only
+    const teal = new Color('#00ffc8'), p = g.parts[0]!;
+    expect(rgb(p)).toEqual(rgb(teal.clone().multiplyScalar(p.g / teal.g))); // still teal, not bleached
+  });
+
+  it('lists its parts largest first, keeps four, and takes the lead colour from the biggest', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(6, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));
+    // Five accents in five sizes, added smallest first so the order is earned.
+    const sizes = [0.4, 0.6, 0.8, 1, 1.2], names = ['GLOW-Yellow', 'GLOW-Pink', 'GLOW-Teal', 'GLOW-Purple', 'GLOW-Orange'];
+    sizes.forEach((r, i) => root.add(fin(r, i * 3, names[i])));
+    applyNpcMaterials(root, createRng(2));
+    const g = collectFishGlow(root, createRng(2))!;
+    expect(g.parts.map((p) => Number(p.radius.toFixed(4)))).toEqual([1.2, 1, 0.8, 0.6]);
+    const orange = new Color('#ff7a00');
+    expect(rgb(g)).toEqual(rgb(orange.clone().multiplyScalar(g.r / orange.r)));
+    expect(g.cores).toHaveLength(5); // …but every glowing material is still repaintable
+  });
+
+  it('a small WHITE glow part is a lamp — the glowfish\'s angler lure — and blooms; a big white coat still does not', () => {
+    const lure = new Group();
+    lure.add(new Mesh(new SphereGeometry(4, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' })), fin(0.6, 5, 'GLOW-White'));
+    applyNpcMaterials(lure, createRng(2));
+    const lamp = collectFishGlow(lure, createRng(2))!;
+    expect(lamp.gain).toBeGreaterThan(0.6);
+    const p = lamp.parts[0]!;
+    expect(Math.max(p.r, p.g, p.b)).toBeGreaterThan(0.5);
+    expect(p.r).toBeGreaterThanOrEqual(p.b); // a touch warm, like a bulb
+    expect(p.coat).toBe(false);
+
+    const coat = new Group();
+    coat.add(new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'PrimaryColor' })), fin(4, 0, 'GLOW-White'));
+    applyNpcMaterials(coat, createRng(2));
+    const fog = collectFishGlow(coat, createRng(2))!;
+    expect(Math.max(fog.parts[0]!.r, fog.parts[0]!.g, fog.parts[0]!.b)).toBeLessThan(0.2);
+  });
+
+  it('a fish with nothing that glows has no glow', () => {
+    const root = new Group();
+    root.add(new Mesh(new SphereGeometry(2, 4, 4), new MeshStandardMaterial({ name: 'VICE-body' })));
+    applyNpcMaterials(root, createRng(2));
+    expect(collectFishGlow(root, createRng(2))).toBeNull();
+  });
+});
+
+describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
+  const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
+  const dress = (seed: number, names: string[]): MeshLambertMaterial[] => {
+    const root = new Group(); const parts = names.map(part); root.add(...parts);
+    applyNpcMaterials(root, createRng(seed), true, true);
+    return parts.map((p) => p.material as MeshLambertMaterial);
+  };
+  it('VIVID-<n> runs one candy-bright gradient between the fish\'s two coats, glowing a little of its own colour', () => {
+    for (const seed of [1, 2, 3, 5, 8, 13]) {
+      const [a, mid, b] = dress(seed, ['VIVID-0', 'VIVID-50', 'VIVID-100']);
+      const ha = { h: 0, s: 0, l: 0 }, hb = { h: 0, s: 0, l: 0 };
+      a!.color.getHSL(ha); b!.color.getHSL(hb);
+      let dh = Math.abs(hb.h - ha.h); dh = Math.min(dh, 1 - dh);
+      expect(dh * 360, `seed ${seed}: the ends far enough apart to read as a gradient`).toBeGreaterThan(55);
+      for (const m of [a!, mid!, b!]) {
+        const hsl = { h: 0, s: 0, l: 0 }; m.color.getHSL(hsl);
+        expect(hsl.s).toBeGreaterThan(0.6);              // saturated, never washed out
+        expect(hsl.l).toBeGreaterThanOrEqual(0.45 - 1e-6); // never mud…
+        expect(hsl.l).toBeLessThanOrEqual(0.62 + 1e-6);    // …never chalk
+        expect(m.emissive.getHex()).not.toBe(0);           // its own light, so dark water does not dim it
+      }
+    }
+  });
+  it('VIVID is seeded per fish; PAINT-#hex is the same on every fish', () => {
+    const one = dress(3, ['VIVID-0', 'PAINT-#ffd23f']), two = dress(5, ['VIVID-0', 'PAINT-#ffd23f']);
+    expect(one[0]!.color.equals(two[0]!.color)).toBe(false);
+    expect(one[1]!.color.getHex()).toBe(new Color('#ffd23f').getHex());
+    expect(two[1]!.color.getHex()).toBe(one[1]!.color.getHex());
+    // Its own glow, so a yellow stays sunny under blue water light.
+    expect(one[1]!.emissive.r).toBeGreaterThan(0.3);
+  });
+});
+
+describe('EYES-Sparkle (a babyfish\'s catchlights)', () => {
+  it('a sparkle pupil is still a pupil, with one soft catchlight on the face that looks out of the head; a plain pupil is untouched', () => {
+    // Two pupils either side of the head, as the babyfish's: x ±3..±5, y 3..5, z 11..13.
+    const pupils = new BoxGeometry(2, 2, 2).translate(4, 4, 12);
+    pupils.boundingBox = new Box3(new Vector3(-5, 3, 11), new Vector3(5, 5, 13));
+    const mk = (name: string): Mesh => { const m = new Mesh(pupils, new MeshStandardMaterial({ color: 0x000000 })); m.material.name = name; return m; };
+    const spark = mk('EYES-Sparkle'), plain = mk('EYES-Black');
+    const root = new Group(); root.add(spark, plain);
+    applyNpcMaterials(root, createRng(1), true, true);
+    const s = spark.material as MeshBasicMaterial, p = plain.material as MeshBasicMaterial;
+    expect(s.userData.mqEye).toBe('pupil');
+    expect(s.userData.mqSparkle).toBe(true);
+    // The eyes spread along x; the catchlight sits on x-facing faces, placed in (z, y).
+    expect(s.customProgramCacheKey()).toBe('mq-eye-sparkle-v2-zyx');
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' };
+    s.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader).toContain('vSpkP = position');
+    expect(shader.fragmentShader).toContain('abs(vSpkN.x)');           // only the outward faces
+    expect(shader.fragmentShader).toContain('fwidth(uv)');             // soft edges
+    expect(shader.fragmentShader).toContain('vec2(vSpkP.z, vSpkP.y)');
+    expect((shader.uniforms.uSpkLo!.value as Vector2).toArray()).toEqual([11, 3]);
+    expect((shader.uniforms.uSpkSpan!.value as Vector2).toArray()).toEqual([2, 2]);
+    expect(shader.uniforms.uSpkMid!.value).toBe(0);
+    expect(p.userData.mqSparkle).toBeUndefined();
+  });
+});
+
+describe('METAL- parts (a glowfish\'s teeth)', () => {
+  const fishWith = (name: string): { root: Group; part: Mesh } => {
+    const part = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: 0x1a0030 }));
+    part.material.name = name;
+    const root = new Group(); root.add(part);
+    return { root, part };
+  };
+  it('lit: a satin metal plate that takes the environment, tinted only a little by its authored colour', () => {
+    const { root, part } = fishWith('METAL-Teeth');
+    applyNpcMaterials(root, createRng(1), true, true);
+    const m = part.material as MeshStandardMaterial;
+    expect(m).toBeInstanceOf(MeshStandardMaterial);
+    expect(m.metalness).toBeGreaterThan(0.6);
+    // Not a mirror: a flat face reflecting one direction flips white ↔ black
+    // as the jaw swings (the shark's teeth flickered). Blurred, with a floor.
+    expect(m.roughness).toBeGreaterThan(0.3);
+    expect(m.roughness).toBeLessThan(0.5);
+    expect(m.emissive.r + m.emissive.g + m.emissive.b).toBeGreaterThan(0.5);
+    expect(m.polygonOffset).toBe(true);
+    expect(m.color.r + m.color.g + m.color.b).toBeGreaterThan(2); // steel, not the dark purple it was authored
+    expect(m.userData.mqOwned).toBe(true);
+  });
+  it('flat: chrome; fishMetal off: the authored colour, matte, like KEEP-', () => {
+    const flat = fishWith('METAL-Teeth');
+    applyNpcMaterials(flat.root, createRng(1), true, false);
+    expect(flat.part.material).toBeInstanceOf(MeshMatcapMaterial);
+    const off = fishWith('METAL-Teeth');
+    applyNpcMaterials(off.root, createRng(1), false, true);
+    expect(off.part.material).toBeInstanceOf(MeshLambertMaterial);
+    expect((off.part.material as MeshLambertMaterial).color.getHex()).toBe(new Color(0x1a0030).getHex());
+  });
+});
+
+describe('the neon look (fishLook: neon)', () => {
+  const crabLike = (): { root: Group; coat: Mesh; pupil: Mesh; white: Mesh; glow: Mesh } => {
+    const geo = new SphereGeometry(1, 4, 4);
+    const mk = (name: string): Mesh => { const m = new Mesh(geo, new MeshStandardMaterial()); m.material.name = name; return m; };
+    const coat = mk('PrimaryColor'), pupil = mk('EYES-Black'), white = mk('EYES-White'), glow = mk('GLOW-claws');
+    const root = new Group(); root.add(coat, pupil, white, glow);
+    return { root, coat, pupil, white, glow };
+  };
+  it('off by default, and off draws nothing extra: a natural fish is what it always was', () => {
+    const a = crabLike(), b = crabLike();
+    applyNpcMaterials(a.root, createRng(9), true, true);
+    applyNpcMaterials(b.root, createRng(9), true, true, false);
+    for (const k of ['coat', 'pupil', 'white', 'glow'] as const) {
+      expect((b[k].material as MeshBasicMaterial).color.getHex()).toBe((a[k].material as MeshBasicMaterial).color.getHex());
+    }
+    expect((a.pupil.material as MeshBasicMaterial).userData.mqEye).toBe('pupil');
+  });
+  it('coats go near black; the dark of the eye glows a neon of its own and blooms; the white goes dark', () => {
+    const f = crabLike();
+    applyNpcMaterials(f.root, createRng(9), true, true, true);
+    const coat = (f.coat.material as MeshLambertMaterial).color;
+    expect(coat.r + coat.g + coat.b).toBeLessThan(0.1);
+    const pupil = f.pupil.material as MeshBasicMaterial;
+    expect(pupil.name).toBe('GLOW-Neon');
+    expect(pupil.userData.mqEye).toBeUndefined(); // light, not an eye display: eyeLife leaves it be
+    expect(NEON_COLORS.map((c) => new Color(c).getHex())).toContain(pupil.color.getHex());
+    expect(pupil.userData.mqGlowColor).toBe(pupil.color.getHex());
+    const white = (f.white.material as MeshBasicMaterial).color;
+    expect(white.r + white.g + white.b).toBeLessThan(0.1);
+    // The halo pass takes the neon as glow; the claws still glow as they did.
+    addGlowHalos(f.root, createRng(9));
+    const halos: string[] = [];
+    f.root.traverse((o) => { if (o.userData.mqHalo) halos.push(String(o.userData.mqHaloOf)); });
+    expect(halos).toContain('GLOW-Neon');
+    // The claws are a big piece of the animal: in blacklight they go dark, no halo.
+    expect((f.glow.material as MeshLambertMaterial).name).toBe('DARK-claws');
+    const claws = (f.glow.material as MeshLambertMaterial).color;
+    expect(claws.r + claws.g + claws.b).toBeLessThan(0.15);
+    expect(halos).not.toContain('GLOW-claws');
+  });
+  it('a small glow part (a lure) stays lit in neon', () => {
+    const f = crabLike();
+    const lure = new Mesh(new SphereGeometry(0.2, 4, 4), new MeshStandardMaterial());
+    lure.material.name = 'GLOW-Lure';
+    f.root.add(lure);
+    applyNpcMaterials(f.root, createRng(9), true, true, true);
+    expect((lure.material as unknown as MeshBasicMaterial).name).toBe('GLOW-Lure');
+    expect(lure.material).toBeInstanceOf(MeshBasicMaterial);
+  });
+});
+
+describe('one glow material on several meshes (a starfish\'s five tips)', () => {
+  it('shares one light: one colour drawn once, the same material on every mesh, lit in neon too', () => {
+    for (const neon of [false, true]) {
+      const shared = new MeshStandardMaterial(); shared.name = 'GLOW-Tips';
+      const root = new Group();
+      const body = new Mesh(new SphereGeometry(20, 4, 4), new MeshStandardMaterial()); body.material.name = 'PrimaryColor';
+      root.add(body);
+      const tips = [0, 1, 2, 3, 4].map((n) => {
+        const tip = new Mesh(new SphereGeometry(1.5, 4, 4), shared);
+        tip.position.set(18 * Math.sin(n * 1.26), 0, 18 * Math.cos(n * 1.26));
+        root.add(tip);
+        return tip;
+      });
+      applyNpcMaterials(root, createRng(4), true, true, neon);
+      const first = tips[0]!.material as unknown as MeshBasicMaterial;
+      expect(first).toBeInstanceOf(MeshBasicMaterial);
+      expect(first.name).toBe('GLOW-Tips');
+      for (const tip of tips) expect(tip.material).toBe(first);
+    }
+  });
+});
+
+describe('a glow part riding a bone (a glowfish\'s lure)', () => {
+  it('records the bone and its centre in the bone\'s frame, so its light follows the swing', () => {
+    const geo = new SphereGeometry(1, 4, 4).translate(5, 2, 0);
+    const n = geo.getAttribute('position').count;
+    geo.setAttribute('skinIndex', new Uint16BufferAttribute(new Uint16Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)), 4));
+    geo.setAttribute('skinWeight', new Float32BufferAttribute(new Float32Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)), 4));
+    const root = new Bone(), tip = new Bone();
+    tip.position.set(4, 0, 0); root.add(tip);
+    const mesh = new SkinnedMesh(geo, new MeshStandardMaterial());
+    mesh.material.name = 'GLOW-Lure';
+    const fish = new Group(); fish.add(root, mesh);
+    fish.updateMatrixWorld(true);
+    mesh.bind(new Skeleton([root, tip]));
+    applyNpcMaterials(fish, createRng(3));
+    const g = collectFishGlow(fish, createRng(3))!;
+    const part = g.parts.find((p) => p.name === 'GLOW-Lure')!;
+    expect(part.bone).toBe(tip);
+    expect(part.offset!.x).toBeCloseTo(1, 6); // the part's centre (5, 2, 0) less the bone's (4, 0, 0)
+    expect(part.offset!.y).toBeCloseTo(2, 6);
+    // Swing the bone: the part's world position goes with it.
+    tip.rotation.z = Math.PI / 2;
+    tip.updateWorldMatrix(true, false);
+    const at = part.offset!.clone().applyMatrix4(tip.matrixWorld);
+    expect(at.x).toBeCloseTo(2, 6);
+    expect(at.y).toBeCloseTo(1, 6);
   });
 });

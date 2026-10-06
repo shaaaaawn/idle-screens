@@ -6,7 +6,9 @@ mode = "channel"
 # channel id (e.g. "ballet") or a full URL
 channel = "ballet"
 
-# Pin one bundled saver by id (see /usr/share/idle-screens/web/savers.json)
+# Pin one bundled saver by id -- the tray's "Saver" submenu writes this key.
+# The catalog is savers.json inside the resolved web bundle (user-local
+# ~/.local/share/idle-screens/web, else /usr/share/idle-screens/web).
 #saver = "warp"
 # Cycle interval in minutes for bundled savers; <= 0 disables
 #cycle_minutes = 10

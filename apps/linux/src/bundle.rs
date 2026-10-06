@@ -16,7 +16,11 @@ use sha2::{Digest, Sha256};
 use crate::config::{data_dir, Settings};
 
 /// Shipped bundle location; overridable at build time and at runtime for dev.
+/// Also the fallback when nothing is found, so errors name the canonical path.
 const DEFAULT_SHIPPED: &str = "/usr/share/idle-screens/web";
+
+/// System bundle locations, searched in order after the user-local one.
+const SYSTEM_SHIPPED: &[&str] = &["/usr/local/share/idle-screens/web", DEFAULT_SHIPPED];
 
 #[derive(Deserialize, Debug)]
 struct Manifest {
@@ -30,11 +34,37 @@ struct ManifestFile {
     sha256: String,
 }
 
+/// Resolve the shipped bundle, preferring a user-local (`PREFIX=~/.local`,
+/// no sudo) install over a packaged one.
+///
+/// This used to be a single hardcoded `/usr/share` path while `install.sh`
+/// honored `PREFIX` for the bundle -- so a rootless install put the bundle
+/// somewhere the binary never looked, and it silently rendered whatever stale
+/// bundle a previous system install had left behind.
 pub fn shipped_root() -> PathBuf {
     if let Ok(dir) = std::env::var("IDLE_SCREENS_WEB") {
         return PathBuf::from(dir);
     }
-    PathBuf::from(option_env!("IDLE_SCREENS_WEB_DIR").unwrap_or(DEFAULT_SHIPPED))
+    if let Some(dir) = option_env!("IDLE_SCREENS_WEB_DIR") {
+        return PathBuf::from(dir);
+    }
+    let candidates =
+        std::iter::once(data_dir().join("web")).chain(SYSTEM_SHIPPED.iter().map(PathBuf::from));
+    first_bundle(candidates, is_bundle_dir).unwrap_or_else(|| PathBuf::from(DEFAULT_SHIPPED))
+}
+
+/// First candidate that holds a bundle. Split out from `shipped_root` so the
+/// search order is testable without touching the filesystem or $HOME.
+fn first_bundle(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    is_bundle: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    candidates.into_iter().find(|p| is_bundle(p))
+}
+
+/// A directory is a bundle if it has the two files every session loads.
+fn is_bundle_dir(dir: &Path) -> bool {
+    dir.join("index.html").is_file() && dir.join("assets/main.js").is_file()
 }
 
 fn cache_root() -> PathBuf {
@@ -72,7 +102,7 @@ pub fn resolve_web_root(settings: &Settings) -> PathBuf {
 }
 
 fn cache_is_valid(cache: &Path, shipped: &Path) -> bool {
-    if !cache.join("index.html").is_file() || !cache.join("assets/main.js").is_file() {
+    if !is_bundle_dir(cache) {
         return false;
     }
     // Anti-downgrade: never accept a cache with fewer savers than shipped.
@@ -83,6 +113,47 @@ fn cache_is_valid(cache: &Path, shipped: &Path) -> bool {
         (Some(_), None) => true, // no shipped catalog to compare against
         _ => false,
     }
+}
+
+/// One entry from the bundle's `savers.json`, for the tray's saver picker.
+#[derive(Clone)]
+pub struct SaverEntry {
+    pub id: String,
+    pub label: String,
+}
+
+/// Savers the resolved bundle ships. Empty when the catalog is missing or
+/// unreadable -- the tray just shows no picker rather than failing to start.
+pub fn saver_list(settings: &Settings) -> Vec<SaverEntry> {
+    let path = resolve_web_root(settings).join("savers.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        log::warn!("no saver catalog at {}", path.display());
+        return Vec::new();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("unreadable saver catalog {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    parsed
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item.get("id")?.as_str()?.to_string();
+                    let label = item
+                        .get("label")
+                        .and_then(|l| l.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
+                    Some(SaverEntry { id, label })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn saver_count(path: &Path) -> Option<usize> {
@@ -206,6 +277,38 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A user-local install must win over a packaged one, so `PREFIX=~/.local`
+    /// is not silently overridden by a stale /usr bundle left by an older
+    /// system install.
+    #[test]
+    fn user_local_bundle_wins_over_system() {
+        let user = PathBuf::from("/home/u/.local/share/idle-screens/web");
+        let candidates = vec![
+            user.clone(),
+            PathBuf::from("/usr/local/share/idle-screens/web"),
+            PathBuf::from(DEFAULT_SHIPPED),
+        ];
+        let found = first_bundle(candidates, |_| true);
+        assert_eq!(found, Some(user));
+    }
+
+    #[test]
+    fn falls_through_to_the_first_system_bundle_that_exists() {
+        let candidates = vec![
+            PathBuf::from("/home/u/.local/share/idle-screens/web"),
+            PathBuf::from("/usr/local/share/idle-screens/web"),
+            PathBuf::from(DEFAULT_SHIPPED),
+        ];
+        let found = first_bundle(candidates, |p| p == Path::new(DEFAULT_SHIPPED));
+        assert_eq!(found, Some(PathBuf::from(DEFAULT_SHIPPED)));
+    }
+
+    #[test]
+    fn no_bundle_anywhere_is_none() {
+        let candidates = vec![PathBuf::from("/nope")];
+        assert_eq!(first_bundle(candidates, |_| false), None);
+    }
 
     #[test]
     fn safe_paths() {

@@ -49,6 +49,77 @@
       "maxItems": 2,
       "description": "[min, max] px/sec, capped at 4000 so nothing teleports."
     },
+    "textReveal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mode": {
+          "enum": [
+            "typewriter",
+            "word",
+            "line",
+            "glyphFade"
+          ]
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "caret": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "blink": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3
+                },
+                "color": {
+                  "$ref": "#/definitions/hexColor"
+                }
+              }
+            }
+          ]
+        },
+        "fade": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      },
+      "description": "Animated reveal controls for a text block."
+    },
+    "finish": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Print finish over the finished frame, applied last. grain (0..1): a seeded zero-mean noise tile screened at up to 35% alpha; dither (0..1): an 8x8 ordered Bayer tile at up to 25% - a stylistic screen, not per-pixel dithering. Both composite with a symmetric blend (overlay), so mean luminance is unchanged: flash-safe, and ignored by luminanceGrid. The grain tile is generated once per mount from the spec seed; animate: true steps its offset from the frame's time bucket (12 Hz, seeded), ignored on the basic/minimal tiers. Never fed back into ghosting. grain/dither are steerable paint paths (finish.grain). Native clients ignore finish.",
+      "properties": {
+        "grain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dither": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "animate": {
+          "type": "boolean"
+        }
+      }
+    },
     "background": {
       "oneOf": [
         {
@@ -140,6 +211,80 @@
                 }
               },
               "description": "Slow oscillation of gradient stop positions \u2014 makes the background feel alive."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "scale",
+            "bands"
+          ],
+          "additionalProperties": false,
+          "description": "A scalar-field background: seeded, warped value noise quantised into bands (thermal maps, contour terrain, riso washes). Pure in (x, y, t, seed): rendered as a low-res raster (short side 96 px, 48 on basic/minimal tiers) scaled to the canvas, recomputed once per 100 ms while drifting; the perception grid samples the same function. Never touches the entity RNG. Native clients that ignore the field paint a vertical gradient through bands in order.",
+          "properties": {
+            "type": {
+              "const": "field"
+            },
+            "scale": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 8,
+              "description": "Noise features across the short side of the viewport."
+            },
+            "octaves": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "description": "Octaves of detail. Default 2."
+            },
+            "warp": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Domain-warp amount: 0 (default) round blobs, 1 smeared, folded contours."
+            },
+            "quantize": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8,
+              "not": { "const": 1 },
+              "description": "Levels to posterise into (2..8; hard bands), or 0 for smooth interpolation between bands. Default bands.length."
+            },
+            "bands": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/definitions/hexColor"
+              },
+              "description": "2..8 colours, read as a ramp from the field's low end to its high end."
+            },
+            "drift": {
+              "type": "object",
+              "required": [
+                "period"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "period": {
+                  "type": "number",
+                  "minimum": 10000,
+                  "description": "Full loop period in ms. Floor of 10 s (flash guard: drift is the only way a field changes over time)."
+                },
+                "amount": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Radius of the sample domain's slow circle, in feature units. Default 0.3."
+                }
+              },
+              "description": "Slow travel of the sample domain \u2014 the field's animate. The field loops exactly every period."
+            },
+            "seed": {
+              "type": "number",
+              "description": "Field seed. Defaults to the spec seed; independent of the entity stream either way."
             }
           }
         }
@@ -309,9 +454,45 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "dx": {
+              "type": "number",
+              "minimum": -17280,
+              "maximum": 17280,
+              "description": "Offset from x in min(w,h) units, within ±2 (px under units: 'px', within ±17280; the runtime validator enforces the unit's bound). x/y are fractions of width and height, sizes are fractions of min(w,h) — anchor parts on a shared fraction (the centre is the only aspect-safe one) and offset them with dx/dy so they register on every aspect. Placement (structural). Native clients ignore it."
+            },
+            "dy": {
+              "type": "number",
+              "minimum": -17280,
+              "maximum": 17280,
+              "description": "Offset from y in min(w,h) units. See dx."
             }
           },
           "description": "Exact fractional position for a single entity. Requires count: 1. Overrides region scatter."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Paint-level layer opacity (default 1): multiplies every entity's alpha and the life envelope at draw time. Unlike alpha (a range baked into entities), it is paint — setParam, a timeline key or a morph glide it without re-seeding. Native clients ignore it (1)."
+        },
+        "group": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+          "description": "The name of a groups entry this layer paints through (its transform wraps the layer's, its opacity multiplies)."
+        },
+        "transform": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px'; the runtime validator enforces the unit's bound)." },
+            "y": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px')." },
+            "scale": { "type": "number", "minimum": 0, "maximum": 8, "description": "Uniform scale about the viewport centre (default 1)." },
+            "scaleX": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra horizontal scale; toward 0 reads as a turn about the vertical axis, negative mirrors (default 1)." },
+            "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the transform's origin." },
+            "origin": { "enum": ["viewport", "anchor"], "description": "What scale/scaleX/rotate turn about: 'viewport' (default) the viewport centre — a camera; 'anchor' the layer's own position point (with dx/dy; a list/table block's anchor; else the centre of its region) — a word punches in place on every aspect." }
+          },
+          "description": "Paint-level transform of the whole layer at draw time, about the viewport centre. Outside the structural signature, so it glides under setParam, a timeline key or a morph — a camera for timed pieces, a slow drift for ambient ones. Native clients ignore it (identity)."
         },
         "trail": {
           "type": "object",
@@ -389,49 +570,151 @@
           "description": "Draw lines between entities. The layer's entity count (count field) must be <= 200 for performance."
         },
         "layout": {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "grid"
-            },
-            "columns": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "description": "Grid columns. Default: aspect-fit square-ish grid."
-            },
-            "jitter": {
-              "oneOf": [
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1
+          "oneOf": [
+        {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "const": "grid"
                 },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "x": {
+                "columns": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100,
+                  "description": "Grid columns. Default: aspect-fit square-ish grid."
+                },
+                "jitter": {
+                  "oneOf": [
+                    {
                       "type": "number",
                       "minimum": 0,
                       "maximum": 1
                     },
-                    "y": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 1
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      }
                     }
-                  }
+                  ],
+                  "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
                 }
-              ],
-              "description": "Seeded per-entity offset as a fraction of cell size (scalar or per-axis). { y: 1 } keeps columns crisp while scattering vertically (Matrix rain). Default 0."
+              },
+              "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
+            },
+            {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "list" },
+                "gap": { "type": "number", "exclusiveMinimum": 0, "description": "Row pitch in viewport units of min(w,h) (px in px specs). Default 0.06 / 40 px." }
+              },
+              "description": "Data layout: entities stacked in one column in reading order; strings[i], glyphs[i] and colors[i] are taken in order. position (any count) anchors the block's top-left; otherwise centred in region."
+            },
+            {
+              "type": "object",
+              "required": ["type", "columns"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "table" },
+                "columns": { "type": "integer", "minimum": 1, "maximum": 100 },
+                "gap": {
+                  "oneOf": [
+                    { "type": "number", "exclusiveMinimum": 0 },
+                    { "type": "object", "additionalProperties": false, "properties": { "x": { "type": "number", "exclusiveMinimum": 0 }, "y": { "type": "number", "exclusiveMinimum": 0 } } }
+                  ],
+                  "description": "Cell pitch, one number or {x, y}, in viewport units of min(w,h). Default 0.06."
+                }
+              },
+              "description": "Data layout: entities fill columns row-major in reading order (see list)."
+            }
+          ]
+        },
+        "emit": {
+          "type": "object",
+          "required": ["every", "life"],
+          "additionalProperties": false,
+          "properties": {
+            "every": {
+              "type": "number",
+              "minimum": 1000,
+              "maximum": 600000,
+              "description": "Event period in ms per entity (floor 1000: at most one event per second per entity)."
+            },
+            "life": {
+              "type": "number",
+              "minimum": 500,
+              "description": "Visible window per event in ms (floor 500; must be <= every). Fades in over the first quarter, out over the rest."
+            },
+            "jitter": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "0 = entities evenly staggered across the period (one event at a time while life <= every / count); 1 (default) = scattered offsets from a fixed low-discrepancy sequence (not seeded)."
+            },
+            "grow": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 8 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[from, to] size multipliers across the window \u2014 expansion rather than travel."
             }
           },
-          "description": "Place entities on a grid (row-major, within region) instead of random scatter \u2014 Matrix columns, LED walls, uniform dot fields."
+          "description": "Sparse events: each entity appears, expands and fades in place for `life` ms every `every` ms, dark in between. The one-ping primitive; a pure function of t."
+        },
+        "rotate": {
+          "description": "Static per-entity rotation in degrees (positive = clockwise). A scalar turns every entity the same way; a [min,max] range gives each entity a seeded angle. Composes with spin (added to its seeded start angle). spin: [0, 0] does NOT hold a seeded angle — a zero spin speed renders at 0. Native clients that read spin only render it as 0.",
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": -360,
+              "maximum": 360
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -360,
+                "maximum": 360
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Shared phase in turns (0..1). Default 0."
+            },
+            "rate": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 4,
+              "description": "Time multiplier for pulse/grow/cycle. Default 1. Their periods must satisfy period / rate >= 1000 ms."
+            }
+          },
+          "description": "Phase-lock: replaces the seeded per-entity phases of pulse, grow and cycle with one shared phase so layers can breathe in step."
         },
         "life": {
           "type": "object",
@@ -459,7 +742,16 @@
       "if": {
         "required": [
           "position"
-        ]
+        ],
+        "not": {
+          "required": ["layout"],
+          "properties": {
+            "layout": {
+              "required": ["type"],
+              "properties": { "type": { "enum": ["list", "table"] } }
+            }
+          }
+        }
       },
       "then": {
         "properties": {
@@ -540,6 +832,9 @@
             },
             "cycle": {
               "$ref": "#/definitions/cycle"
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           }
         },
@@ -676,6 +971,12 @@
             "color": {
               "$ref": "#/definitions/hexColor"
             },
+            "feather": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Soft edge: the fraction of the half-size that fades out toward the border (Rothko's block at 0.5\u20130.8). Default 0 = hard."
+            },
             "colors": {
               "type": "array",
               "minItems": 1,
@@ -689,6 +990,70 @@
             }
           },
           "description": "Axis-aligned rectangle (rotates with spin) \u2014 Mondrian blocks, confetti, city lights."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "values", "length", "thickness", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "bar" },
+            "values": { "type": "array", "minItems": 1, "maxItems": 400, "items": { "type": "number", "minimum": 0 }, "description": "One value per entity in reading order; bar i is length x values[i] / max. Paint: steer layers.N.sprite.values and the bars glide." },
+            "length": { "type": "number", "exclusiveMinimum": 0, "description": "Full-scale bar length (px or viewport-units of min(w,h))." },
+            "thickness": { "type": "number", "exclusiveMinimum": 0, "description": "Bar thickness (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "max": { "type": "number", "exclusiveMinimum": 0, "description": "Full-scale value. Default: the largest value." },
+            "direction": { "enum": ["right", "left", "up", "down"], "description": "Growth direction from the entity's position. Default right." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (in order under a list/table layout, seeded otherwise)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "A data bar whose length is a number. Pair with a list layout for a chart that is one layer."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "radius", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "polygon" },
+            "radius": { "$ref": "#/definitions/positiveRange", "description": "Circumradius range (px or viewport-units)." },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "sides": { "type": "integer", "minimum": 3, "maximum": 12, "description": "Regular n-gon, point up. Default 6. Not with points." },
+            "points": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 24,
+              "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 } },
+              "description": "Custom vertices in unit coordinates (-1..1), scaled by the radius. Not with sides."
+            },
+            "soft": { "type": "boolean", "description": "Feather the fill from the centre, like a soft circle." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "not": { "required": ["sides", "points"] },
+          "description": "Regular or custom polygon (rotates with spin) \u2014 a facet, a triangle, a plane, a mosaic tile."
+        },
+        {
+          "type": "object",
+          "required": ["kind", "length", "points", "color"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "stroke" },
+            "length": { "$ref": "#/definitions/positiveRange", "description": "Bounding size range of the mark (px or viewport-units); the unit box is scaled to it." },
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 24,
+              "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 } },
+              "description": "Path control points in unit coordinates (-1..1)."
+            },
+            "color": { "$ref": "#/definitions/hexColor" },
+            "width": { "type": "number", "exclusiveMinimum": 0, "description": "Stroke width (px or viewport-units). Default 0.002 viewport-units / 2 px." },
+            "curve": { "enum": ["smooth", "linear"], "description": "Catmull-Rom spline through the points (default) or a polyline." },
+            "taper": { "type": "boolean", "description": "Thin the mark to almost nothing at both ends \u2014 a brush stroke rather than a line." },
+            "orient": { "type": "boolean", "description": "Turn the path's +x along the entity's heading (like streak)." },
+            "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
+            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+          },
+          "description": "A freehand mark: a path stroked with round joins, optionally tapered and heading-oriented. Rotates with spin."
         },
         {
           "type": "object",
@@ -712,8 +1077,8 @@
             "maxWidth": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "maximum": 1.0,
-              "description": "Block width as a viewport fraction of min(w,h)."
+              "maximum": 2.0,
+              "description": "Wrap width as a viewport fraction of min(w,h), up to 2.0 (wider than the frame is legal; the text-off-screen advisory reports overflow)."
             },
             "fontSize": {
               "type": "number",
@@ -737,11 +1102,50 @@
             },
             "color": {
               "$ref": "#/definitions/hexColor"
+            },
+            "reveal": {
+              "$ref": "#/definitions/textReveal"
+            },
+            "anchor": {
+              "enum": [
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right"
+              ],
+              "description": "Which point of the rendered text (widest line × lines·lineHeight, as align lays it out) position names. Absent: position is the top-left of the maxWidth layout box (today's behaviour). 'center' centres the block at position on every aspect ratio. Placement (structural). Native clients without anchor render as absent."
+            },
+            "font": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!.*\\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)).*$",
+              "description": "CSS font family and/or weight/style only, e.g. 'bold monospace' or \"300 'Inter', sans-serif\" — a size inside it is rejected (fontSize owns size). A monospace family switches the line-breaker to a uniform advance. Default 'system-ui, sans-serif'; native clients fall back to the system face."
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Paint-level alpha multiplier for the block (default 1). Not structural — steer it with dur to fade the block in or out without a rebuild. Declare it to make the path steerable. Native clients without it render at 1."
+            },
+            "role": {
+              "$ref": "#/definitions/textRole"
             }
           },
-          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position."
+          "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
         }
       ]
+    },
+    "textRole": {
+      "enum": [
+        "read",
+        "atmosphere"
+      ],
+      "description": "What the text is for. 'read' opts the layer into the legibility advisories (text-legibility: WCAG ratio below 4.5:1 against the background at the box centre or against the brightest additive layer over it; text-safe-area: box within 5% of an edge). 'atmosphere' (or absent) keeps it silent. A declaration only — changes no pixel on any client."
     },
     "colorWeights": {
       "type": "array",
@@ -795,6 +1199,16 @@
               "type": "boolean",
               "description": "Randomly flip horizontal direction per entity (fish)."
             },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
+            },
             "bob": {
               "type": "number",
               "description": "Vertical wobble amplitude in px."
@@ -814,6 +1228,16 @@
             },
             "speed": {
               "$ref": "#/definitions/speedRange"
+            },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
             },
             "sway": {
               "type": "number",
@@ -866,7 +1290,7 @@
               "type": "array",
               "items": {
                 "type": "number",
-                "minimum": 0,
+                "minimum": -180,
                 "maximum": 180
               },
               "minItems": 2,
@@ -941,6 +1365,16 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "description": "Harmonic amplitude (px or viewport-units). Default ~0.05 viewport-units. How far paths curve away from the base line."
+            },
+            "ease": {
+              "type": "object",
+              "required": ["type", "tau"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "enum": ["settle", "buoyant"] },
+                "tau": { "type": "number", "minimum": 100, "maximum": 120000, "description": "Time constant in ms." }
+              },
+              "description": "Closed-form velocity easing: settle decelerates from speed to rest (travels speed x tau); buoyant accelerates from rest to speed. With emit, restarts every event."
             },
             "coherence": {
               "type": "number",
@@ -1099,6 +1533,10 @@
           ],
           "description": "Advisory intensity for capability/reduced-motion gating."
         },
+        "density": {
+          "enum": ["sparse", "normal", "dense"],
+          "description": "Declared density intent. sparse withholds the sparse-scene advisory (the emptiness is the point); dense withholds dense-scene. Checked against measured coverage (density-mismatch). A hint only — changes no pixel."
+        },
         "units": {
           "enum": [
             "px",
@@ -1120,6 +1558,62 @@
         },
         "background": {
           "$ref": "#/definitions/background"
+        },
+        "finish": {
+          "$ref": "#/definitions/finish"
+        },
+        "groups": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Multiplies every member layer's opacity." },
+              "transform": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number", "minimum": -17280, "maximum": 17280 },
+                  "y": { "type": "number", "minimum": -17280, "maximum": 17280 },
+                  "scale": { "type": "number", "minimum": 0, "maximum": 8 },
+                  "scaleX": { "type": "number", "minimum": -8, "maximum": 8 },
+                  "rotate": { "type": "number", "minimum": -3600, "maximum": 3600 },
+                  "origin": { "const": "viewport" }
+                },
+                "description": "Wraps every member's own transform; turns about the viewport centre (a camera)."
+              }
+            }
+          },
+          "description": "Named layer groups: members (layer.group) paint through the group's transform and opacity, so one steer, timeline key or morph moves a multi-layer subject as one thing. Paint, outside the structural signature. Native clients ignore it (identity, opacity 1)."
+        },
+        "timeline": {
+          "type": "object",
+          "required": ["keys"],
+          "additionalProperties": false,
+          "properties": {
+            "loop": { "type": "boolean", "description": "Repeat every duration ms. A looping path's value before its first key is its last key's value." },
+            "duration": { "type": "number", "exclusiveMinimum": 0, "maximum": 86400000, "description": "Lap length in ms; required with loop and greater than the latest key's t." },
+            "keys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "required": ["t", "path", "value"],
+                "additionalProperties": false,
+                "properties": {
+                  "t": { "type": "number", "minimum": 0, "description": "Scene time in ms (a sequence segment's own clock)." },
+                  "path": { "type": "string", "minLength": 1, "description": "A setParam dot-path that already exists on the spec (layers.0.sprite.color, key.opacity, background.stops.1.color, …)." },
+                  "value": { "description": "The target value; the spec must still validate with it applied." },
+                  "ease": { "enum": ["step", "linear", "smooth"], "description": "Default smooth." },
+                  "dur": { "type": "number", "minimum": 0, "maximum": 30000, "description": "Glide length in ms from t (default 1000; 0 = cut)." }
+                }
+              }
+            }
+          },
+          "description": "Authored keyframes on the scene's own clock. Each key glides its path to value at t; distinct key times on one path are >= 200 ms apart (flash safety). Live steering layers on top: a steer on a path no key touches is sticky (as on any scene); on an animated path it holds until that path's next key, then the timeline takes it back. Keys on structural paths rebuild (a pop) — animate paint (colour, opacity, transform, polygon points). Distinct from a channel track, whose t is a wall-clock stamp. Native clients ignore it and show the base spec — author the base as the piece's rest state."
         },
         "layers": {
           "type": "array",
@@ -1174,6 +1668,25 @@
           "type": "boolean",
           "description": "When true, global time wraps over the sum of segment durations. Requires every segment to have a duration."
         },
+        "sync": {
+          "enum": [
+            "mount",
+            "epoch"
+          ],
+          "description": "What the sequence clock is anchored to. 'mount' (default): every viewer starts at T = 0 when it mounts — a joiner sees segment 0 (pre-roll semantics). 'epoch': a viewer handed sequenceBaseT on its mount context (the host's Date.now() − epoch) starts its clock there, so every screen shows the same segment; a late joiner lands mid-loop. advance: 'input' holds stay armed under either. Native clients that anchor at their own mount behave as 'mount'."
+        },
+        "wrapMorph": {
+          "type": "boolean",
+          "description": "Honour a morph declared on the last segment at the loop wrap (the lap morphs back into segment 0 instead of cutting). Opt-in; takes effect only under loop: true when every segment morphs into the next and the last is a structural twin of the first (validateSequence warns wrap-morph-inactive otherwise). Native clients cut."
+        },
+        "bed": {
+          "$ref": "#/definitions/saverSpec",
+          "description": "A scene drawn under every segment on the sequence's global clock — the ground that does not reset at a boundary or under a sequence.segment steer. Segments render over it transparently (their background and ghosting are ignored; validateSequence warns bed-hides-segment-background). Its entities plus the largest segment's must stay within the 800 cap (enforced by validateSequence). Steer it with bed.<path>. Native clients that ignore it render segments with their own backgrounds."
+        },
+        "finish": {
+          "$ref": "#/definitions/finish",
+          "description": "A print finish applied once per composed frame (bed + segment + fade) on the sequence's presentation canvas. Overrides every segment's own finish while set; absent, the active segment's finish applies. A bed's finish is ignored. Native clients ignore it."
+        },
         "segments": {
           "type": "array",
           "minItems": 1,
@@ -1214,7 +1727,7 @@
             "input",
             "either"
           ],
-          "description": "How the segment advances. Validated; runtime drivers planned for a follow-up."
+          "description": "How the segment advances. 'auto' (default) and 'either' advance on the timer; 'input' holds a timed segment at the end of its duration (the scene keeps animating) until a sequence.segment steer releases it — the clicker. A durationless final segment holds regardless."
         },
         "transition": {
           "type": "object",
@@ -1236,6 +1749,23 @@
                   "minimum": 200,
                   "maximum": 5000,
                   "description": "Morph glide duration in ms. Requires structurally identical adjacent segments."
+                },
+                "text": {
+                  "enum": ["step", "crossfade", "dip"],
+                  "description": "How text / textBlock strings change during the morph. 'step' (default, today's behaviour): the incoming string shows from the first frame. 'crossfade': each text layer whose string(s) differ is drawn twice for dur — the outgoing words at 1 − k, the incoming at k (k = the eased progress). 'dip': the same two passes in turn — the outgoing words fade out over the first half, the incoming fade in over the second, never both at once. Native clients step (tvOS already cross-fades whole frames on a segment change)."
+                }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "fade" },
+                "dur": {
+                  "type": "number",
+                  "minimum": 200,
+                  "maximum": 5000,
+                  "description": "Cross-fade duration in ms: the outgoing segment keeps animating on its own canvas and is composited over the incoming one at 1 − easeSmooth(localT / dur). No structural requirement. Hosts on the 'basic' or 'minimal' capability tier render it as cut."
                 }
               },
               "required": ["type", "dur"],

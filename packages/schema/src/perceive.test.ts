@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, renderBrailleMap, renderDensityMap } from './perceive';
+import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap } from './perceive';
+import type { IdleSequence } from './types';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
-import type { SaverSpec } from './types';
+import { LIMITS, type SaverSpec } from './types';
 
 const BLANK_BRAILLE = String.fromCharCode(0x2800);
 
@@ -55,6 +56,202 @@ describe('luminanceGrid', () => {
   it('counts chain link lines as visual mass (Mystify-style scenes)', () => {
     const grid = luminanceGrid(POLYGONS_SPEC);
     expect(grid.coverage).toBeGreaterThan(0.005);
+  });
+
+  it('a static streak (headingAt null) orients along `rotate`, matching the renderer, instead of painting the same heading regardless', () => {
+    const streak = (rotate: number): SaverSpec => spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'streak', length: [300, 300], color: '#ffffff', width: 20 }, motion: { type: 'static' }, rotate },
+    ]);
+    const viewport = { width: 1600, height: 900 };
+    const horizontal = luminanceGrid(streak(0), { viewport });
+    const vertical = luminanceGrid(streak(90), { viewport });
+    expect(horizontal.cells).not.toEqual(vertical.cells);
+    // A horizontal streak (rotate: 0) spreads its mass across columns at
+    // roughly one row; rotated 90° it spreads down roughly one column — so
+    // the row/col spread should swap.
+    const spread = (profile: number[]): number => profile.filter((v) => v > 0).length;
+    expect(spread(vertical.rowProfile)).toBeGreaterThan(spread(horizontal.rowProfile));
+    expect(spread(horizontal.colProfile)).toBeGreaterThan(spread(vertical.colProfile));
+  });
+});
+
+describe('rect and bar splat by area (fillRect coverage)', () => {
+  const mean = (g: { cells: ArrayLike<number> }): number => Array.from(g.cells).reduce((s, v) => s + v, 0) / g.cells.length;
+
+  it('270 thin scan lines over grey read as a light texture, not a black veil', () => {
+    // 270 rows × 0.002 × 1080 px = 54 % of the frame, 35 % black. Chromium
+    // paints this at mean 0.406; the whole-cell splat read 0.035.
+    const s: SaverSpec = {
+      schemaVersion: 1,
+      id: 'scan',
+      label: 'Scan',
+      background: { type: 'solid', color: '#808080' },
+      layers: [{
+        count: 270,
+        region: { x: [0.5, 0.5], y: [0, 1] },
+        layout: { type: 'grid', columns: 1 },
+        sprite: { kind: 'rect', width: [2, 2], aspect: [0.001, 0.001], color: '#000000' },
+        alpha: [0.35, 0.35],
+        motion: { type: 'static' },
+      }],
+    };
+    const g = luminanceGrid(s, { viewport: { width: 1920, height: 1080 }, cols: 80, rows: 48 });
+    expect(mean(g)).toBeCloseTo((128 / 255) * (1 - 0.35 * 0.54), 1);
+    expect(Math.abs(mean(g) - 0.406)).toBeLessThan(0.02);
+  });
+
+  it('a sub-cell line straddling a row boundary splits its ink and conserves it', () => {
+    // 20 × 20 px cells; a 4 px line centred on the y = 400 boundary.
+    const s = spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'rect', width: [1200, 1200], aspect: [4 / 1200, 4 / 1200], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    const ink = Array.from(g.cells).reduce((acc, v) => acc + v, 0) * 20 * 20;
+    expect(ink).toBeCloseTo(1200 * 4, -1);
+    expect(g.cells[19 * 80 + 40]).toBeCloseTo(0.1, 5);
+    expect(g.cells[20 * 80 + 40]).toBeCloseTo(0.1, 5);
+  });
+
+  it('a large rect still fills its interior cells at full weight', () => {
+    const s = spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'rect', width: [810, 810], aspect: [410 / 810, 410 / 810], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    expect(g.cells[20 * 80 + 40]).toBe(1);
+    // 810 × 410 px over 20 px cells: the edge columns and rows are a quarter covered.
+    expect(g.cells[20 * 80 + 19]).toBeCloseTo(0.25, 5);
+    expect(g.cells[9 * 80 + 40]).toBeCloseTo(0.25, 5);
+  });
+
+  it('a thin bar row is weighted by its thickness too', () => {
+    const s = spec([{ count: 1, position: { x: 0.1, y: 0.5 }, sprite: { kind: 'bar', length: 800, thickness: 2, values: [1], color: '#ffffff' }, motion: { type: 'static' } }]);
+    const g = luminanceGrid(s, { viewport: { width: 1600, height: 800 }, cols: 80, rows: 40 });
+    // 800 × 2 px of white, not 800 × 20 px: the whole-cell splat lit ten times the ink.
+    const ink = Array.from(g.cells).reduce((acc, v) => acc + v, 0) * 20 * 20;
+    expect(ink).toBeCloseTo(800 * 2, -1);
+  });
+});
+
+describe('polygon outline rasterization', () => {
+  // The flat-band repro: a 1.2-wide, 0.12-tall rectangle authored as `points`.
+  // Its circumradius is 0.6, so the old disc splat lit a full circle.
+  const BAND: Array<[number, number]> = [[-1, -0.1], [1, -0.1], [1, 0.1], [-1, 0.1]];
+  const GRID = { viewport: { width: 1920, height: 1080 }, cols: 24, rows: 10, t: 0 };
+  const one = (sprite: SaverSpec['layers'][number]['sprite'], extra: Partial<SaverSpec['layers'][number]> = {}, bg = '#808080'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'poly',
+    label: 'Poly',
+    background: { type: 'solid', color: bg },
+    layers: [{ count: 1, sprite, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 }, ...extra }],
+  });
+
+  it('a flat `points` band rasterizes as a bar, like the equivalent rect — not as its circumscribed disc', () => {
+    const band = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }), GRID);
+    const rect = luminanceGrid(one({ kind: 'rect', width: [1.2, 1.2], aspect: [0.1, 0.1], color: '#ffffff' }), GRID);
+    // The band is 129.6 px tall, centred on y = 540: rows 4 and 5 of 108 px each.
+    for (let r = 0; r < GRID.rows; r++) {
+      if (r === 4 || r === 5) expect(band.rowProfile[r]).toBeGreaterThan(0.1);
+      else expect(band.rowProfile[r]).toBe(0);
+    }
+    // Both paint by area now; coverage thresholds the end cells, so allow
+    // the four of them to land either side of it.
+    expect(Math.abs(band.coverage - rect.coverage)).toBeLessThanOrEqual(4 / (GRID.cols * GRID.rows) + 1e-9);
+    expect(band.coverage).toBeLessThan(0.2); // the disc model reported 0.63
+    expect(band.centroid!.x).toBeCloseTo(0.5, 5);
+    expect(band.centroid!.y).toBeCloseTo(0.5, 5);
+  });
+
+  it('honours rotate: the same band turned 90° is a vertical bar', () => {
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: BAND }, { rotate: 90 }), GRID);
+    // 86.4 px wide about x = 960: columns 11 and 12 of 80 px each.
+    for (let c = 0; c < GRID.cols; c++) {
+      if (c === 11 || c === 12) expect(g.colProfile[c]).toBeGreaterThan(0.1);
+      else expect(g.colProfile[c]).toBe(0);
+    }
+    expect(g.rowProfile[0]).toBe(0); // 864 px tall: rows 1..8 only
+    expect(g.rowProfile[5]).toBeGreaterThan(0);
+  });
+
+  it('honours spin at the sampled time', () => {
+    // 90°/s from a seeded phase: a quarter turn changes the picture, a half
+    // turn maps the symmetric band back onto itself.
+    const spun = one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: BAND }, { spin: 90 });
+    const at = (t: number): number[] => luminanceGrid(spun, { ...GRID, t }).cells;
+    const t0 = at(0);
+    const quarter = at(1000);
+    const half = at(2000);
+    expect(quarter.some((v, i) => Math.abs(v - t0[i]!) > 0.05)).toBe(true);
+    for (let i = 0; i < t0.length; i++) expect(half[i]).toBeCloseTo(t0[i]!, 6);
+  });
+
+  it('a full-width ridge silhouette at the bottom edge covers what it paints, not a dome', () => {
+    const ridge: Array<[number, number]> = [
+      [-1, 1], [-1, -0.25], [-0.7, -0.35], [-0.45, -0.2], [-0.2, -0.4], [0.05, -0.25],
+      [0.3, -0.33], [0.6, -0.18], [0.85, -0.28], [1, -0.22], [1, 1],
+    ];
+    const vp = { width: 1920, height: 1080 };
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [1, 1], color: '#ffffff', points: ridge }, { position: { x: 0.5, y: 1 } }), { viewport: vp, cols: 48, rows: 20, t: 0 });
+    // Ground truth: fraction of the viewport inside the outline, finely sampled.
+    const r = Math.min(vp.width, vp.height);
+    const abs = ridge.map(([x, y]) => ({ x: vp.width / 2 + x * r, y: vp.height + y * r }));
+    const inside = (x: number, y: number): boolean => {
+      let hit = false;
+      for (let i = 0, j = abs.length - 1; i < abs.length; j = i++) {
+        const a = abs[i]!;
+        const b = abs[j]!;
+        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+      }
+      return hit;
+    };
+    let lit = 0;
+    const N = 400;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (inside(((i + 0.5) / N) * vp.width, ((j + 0.5) / N) * vp.height)) lit++;
+    const truth = lit / (N * N);
+    expect(truth).toBeGreaterThan(0.2);
+    expect(truth).toBeLessThan(0.35);
+    // Coverage counts every cell with visible ink, so the ridge line's cells
+    // add up to one row's worth on top of the painted area.
+    expect(g.coverage).toBeGreaterThanOrEqual(truth - 0.02);
+    expect(g.coverage).toBeLessThanOrEqual(truth + 1 / 20 + 0.02); // the disc model reported ~0.87
+    expect(g.centroid!.y).toBeGreaterThan(0.8);
+    for (let row = 0; row < 10; row++) expect(g.rowProfile[row]).toBe(0);
+  });
+
+  it('a soft polygon keeps its outline and fades from its centre, as the clipped radial gradient does', () => {
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }), GRID);
+    for (const r of [0, 1, 2, 3, 6, 7, 8, 9]) expect(g.rowProfile[r]).toBe(0);
+    const at = (c: number): number => g.cells[4 * GRID.cols + c]! - g.background[4]!;
+    expect(at(11)).toBeGreaterThan(at(6));
+    expect(at(6)).toBeGreaterThan(at(3));
+  });
+
+  it('a soft additive polygon blooms past its outline by its thickness, not its circumradius', () => {
+    const glow = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }, { blend: 'lighter' }, '#101010'), GRID);
+    const hard = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }, {}, '#101010'), GRID);
+    expect(glow.coverage).toBeGreaterThan(hard.coverage); // the halo shows
+    expect(glow.coverage).toBeLessThan(0.4); // but a flat band is not a screen-filling dome
+    expect(glow.rowProfile[0]).toBe(0);
+    expect(glow.rowProfile[9]).toBe(0);
+    // A soft additive hexagon still blooms about as far as the disc model had it.
+    const hex = luminanceGrid(one({ kind: 'polygon', radius: [0.1, 0.1], sides: 6, color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    const disc = luminanceGrid(one({ kind: 'circle', radius: [0.1, 0.1], color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    expect(hex.coverage).toBeGreaterThan(disc.coverage * 0.6);
+    expect(hex.coverage).toBeLessThanOrEqual(disc.coverage);
+  });
+
+  it('fills with the canvas nonzero rule: a pentagram lights its centre', () => {
+    const star: Array<[number, number]> = [0, 2, 4, 1, 3].map((k) => {
+      const a = -Math.PI / 2 + (2 * Math.PI * k) / 5;
+      return [Math.cos(a), Math.sin(a)];
+    });
+    const g = luminanceGrid(one({ kind: 'polygon', radius: [0.4, 0.4], color: '#ffffff', points: star }, {}, '#000000'), { ...GRID, cols: 48, rows: 20 });
+    const centre = g.cells[10 * 48 + 24]!;
+    expect(centre).toBeGreaterThan(0.9);
+  });
+
+  it('a polygon under the size threshold keeps the cheap disc splat, weighted by its fill', () => {
+    const vp = { viewport: { width: 1920, height: 1080 } };
+    const hex = luminanceGrid(spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'polygon', radius: [20, 20], sides: 6, color: '#ffffff' }, motion: { type: 'static' } }]), vp);
+    const disc = luminanceGrid(spec([{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [20, 20], color: '#ffffff' }, motion: { type: 'static' } }]), vp);
+    const fill = (3 * Math.sqrt(3)) / (2 * Math.PI); // regular hexagon / circumscribed disc
+    expect(disc.coverage).toBeGreaterThan(0);
+    for (let i = 0; i < disc.cells.length; i++) expect(hex.cells[i]).toBeCloseTo(disc.cells[i]! * fill, 9);
   });
 });
 
@@ -219,6 +416,20 @@ describe('dominanceRanking', () => {
     const later = ranks.find((r) => r.key === 'later')!;
     expect(later.share).toBe(0);
   });
+
+  it('a faded textBlock is not ranked as if it were fully opaque', () => {
+    const s = spec([
+      { key: 'disc', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [40, 40], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'faint', count: 1, position: { x: 0.7, y: 0.7 }, sprite: { kind: 'textBlock', text: 'hush', maxWidth: 0.5, fontSize: 0.08, opacity: 0.05 }, motion: { type: 'static' } },
+    ], { units: undefined });
+    const opaque = spec([
+      { key: 'disc', count: 1, position: { x: 0.2, y: 0.2 }, sprite: { kind: 'circle', radius: [40, 40], color: '#ffffff' }, motion: { type: 'static' } },
+      { key: 'faint', count: 1, position: { x: 0.7, y: 0.7 }, sprite: { kind: 'textBlock', text: 'hush', maxWidth: 0.5, fontSize: 0.08 }, motion: { type: 'static' } },
+    ], { units: undefined });
+    const faded = dominanceRanking(s).find((r) => r.key === 'faint')!;
+    const full = dominanceRanking(opaque).find((r) => r.key === 'faint')!;
+    expect(faded.share).toBeLessThan(full.share);
+  });
 });
 
 describe('motionStats', () => {
@@ -271,5 +482,166 @@ describe('perceiveScene across all shipped examples', () => {
       expect(p.dominance.length).toBe(s.layers.length);
       expect(p.motion.length).toBe(s.layers.length);
     }
+  });
+});
+
+describe('perceiveSequenceFrame (1d — bed + segment)', () => {
+  const dark: SaverSpec = {
+    schemaVersion: 1, id: 'dark', label: 'Dark',
+    background: { type: 'solid', color: '#101010' },
+    layers: [{ key: 'dot', count: 1, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' }, position: { x: 0.8, y: 0.8 } }],
+  };
+  const bed: SaverSpec = {
+    schemaVersion: 1, id: 'bed', label: 'Bed',
+    background: { type: 'solid', color: '#202030' },
+    layers: [{ key: 'orb', count: 1, sprite: { kind: 'circle', radius: [0.15, 0.15], color: '#ffffff' }, motion: { type: 'drift', speed: [0.05, 0.05], angle: 0 }, position: { x: 0.2, y: 0.3 } }],
+  };
+  const seqOf = (withBed: boolean): IdleSequence => ({
+    format: 'idle-sequence', schemaVersion: 1, id: 'p', label: 'P', loop: false, seed: 7,
+    ...(withBed ? { bed } : {}),
+    segments: [
+      { key: 'a', scene: dark, duration: 5000 },
+      { key: 'b', scene: { ...dark, id: 'b', layers: [{ ...dark.layers[0]!, key: 'text', sprite: { kind: 'textBlock', text: 'Act II', fontSize: 0.05, maxWidth: 0.5 } }] }, duration: 5000 },
+    ],
+  });
+
+  it('without a bed it is perceiveScene of the resolved segment at localT, plus the segment field', () => {
+    const p = perceiveSequenceFrame(seqOf(false), 6000);
+    expect(p.bed).toBe(false);
+    expect(p.segment).toEqual({ index: 1, key: 'b', localT: 1000 });
+    const plain = perceiveScene(seqOf(false).segments[1]!.scene, { t: 1000, seed: 8 }); // seq.seed 7 + index 1, mirroring the renderer
+    expect(p.braille).toBe(plain.braille);
+    expect(p.coverage).toBe(plain.coverage);
+    expect(p.dominance).toEqual(plain.dominance);
+    expect(p.text).toEqual(plain.text);
+    expect(p.t).toBe(1000);
+  });
+
+  it('with a bed the maps are the composite: more coverage than either alone, bed layers keyed bed:', () => {
+    const p = perceiveSequenceFrame(seqOf(true), 2000);
+    expect(p.bed).toBe(true);
+    expect(p.segment.index).toBe(0);
+    const bedAlone = perceiveScene(bed, { t: 2000, seed: 7 });
+    const segAlone = perceiveScene(dark, { t: 2000 });
+    expect(p.coverage).toBeGreaterThanOrEqual(bedAlone.coverage);
+    expect(p.coverage).toBeGreaterThanOrEqual(segAlone.coverage);
+    expect(p.coverage).toBeGreaterThan(bedAlone.coverage - 1e-9 + segAlone.coverage * 0.5);
+    expect(p.dominance.map((d) => d.key).sort()).toEqual(['bed:orb', 'dot']);
+    expect(p.dominance[0]!.key).toBe('bed:orb'); // the big bright orb outranks the dot
+    expect(p.dominance.reduce((s, d) => s + d.share, 0)).toBeCloseTo(1, 9);
+    expect(p.motion.map((m) => m.key)).toEqual(['bed:orb', 'dot']);
+    expect(p.motion[0]!.moving).toBe(true);
+    expect(p.motion[1]!.layerIndex).toBe(1); // segment indices shift past the bed's layers
+  });
+
+  it("the bed runs on the global clock: its centroid is continuous across the boundary while the segment's clock resets", () => {
+    const before = perceiveSequenceFrame(seqOf(true), 4990);
+    const after = perceiveSequenceFrame(seqOf(true), 5010);
+    expect(before.segment.index).toBe(0);
+    expect(after.segment).toEqual({ index: 1, key: 'b', localT: 10 });
+    // Assert on the bed's own centroid, not the merged grid: the ink swaps
+    // from a dot to a text block across this boundary, so a merged-centroid
+    // comparison would depend on that unrelated content change rather than
+    // on whether the bed's clock is actually continuous.
+    const bx = (T: number) => luminanceGrid(bed, { t: T, seed: 7 }).centroid!.x;
+    expect(Math.abs(bx(5010) - bx(4990))).toBeLessThan(0.01);
+    expect(after.text.map((t) => t.key)).toEqual(['text']); // segment b's caption, listed after the bed's (none)
+    expect(after.text[0]!.layerIndex).toBe(1);
+  });
+
+  it('bed advisories are prefixed bed.; the segment background never fires against the bed', () => {
+    const p = perceiveSequenceFrame(seqOf(true), 2000);
+    for (const a of p.advisories) expect(a.path.startsWith('bed.') || a.path.startsWith('layers')).toBe(true);
+  });
+
+  it('renders the bed and segment at the seeds SequenceInstance actually uses (own seed, else seq.seed offset), not raw seq.seed', () => {
+    // A single fixed-position entity (the `bed`/`dark` fixtures above) doesn't
+    // move when the seed changes, so it can't distinguish a correct seed from
+    // a wrong one. This fixture scatters several entities over a position
+    // range, so its centroid does depend on which seed rendered it.
+    const scatter = (id: string): SaverSpec => ({
+      schemaVersion: 1, id, label: id,
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    });
+    const scatterBed = scatter('scatter-bed');
+    const scatterSeg = scatter('scatter-seg');
+    const seq: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 7, bed: scatterBed, segments: [{ key: 'a', scene: scatterSeg, duration: 5000 }] };
+
+    // compile.ts: bed seed = seq.seed + LIMITS.maxSegments; segment 0 seed = seq.seed + 0.
+    const bedGrid = luminanceGrid(scatterBed, { t: 1000, seed: 7 + LIMITS.maxSegments });
+    const segGrid = luminanceGrid(scatterSeg, { t: 1000, seed: 7 });
+    const cells = bedGrid.cells.map((v, i) => Math.min(1, v + segGrid.cells[i]!));
+    let cx = 0, dev = 0;
+    for (let r = 0; r < bedGrid.rows; r++) {
+      for (let c = 0; c < bedGrid.cols; c++) {
+        const i = r * bedGrid.cols + c;
+        const d = Math.abs(cells[i]! - bedGrid.background[r]!);
+        cx += d * (c + 0.5);
+        dev += d;
+      }
+    }
+    const expectedCentroidX = cx / dev / bedGrid.cols;
+
+    const p = perceiveSequenceFrame(seq, 1000);
+    expect(p.centroid!.x).toBeCloseTo(expectedCentroidX, 9);
+    // Sanity: the raw, unoffset seq.seed would have produced a visibly
+    // different composite for this fixture — otherwise this test proves
+    // nothing about which seed was actually used.
+    const bedAtRawSeed = luminanceGrid(scatterBed, { t: 1000, seed: 7 });
+    expect(bedAtRawSeed.centroid!.x).not.toBeCloseTo(bedGrid.centroid!.x, 2);
+  });
+
+  it('normalizes a valid seq.seed: 0 exactly like SpecInstance does (0 is falsy, so it lands on 1)', () => {
+    const scatter: SaverSpec = {
+      schemaVersion: 1, id: 'scatter', label: 'Scatter',
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    // seq.seed: 0 + segment index 0 = a raw candidate seed of 0. SpecInstance's
+    // `(seed >>> 0) || 1` would render this with seed 1, not 0.
+    const seq: IdleSequence = { format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 0, segments: [{ key: 'a', scene: scatter, duration: 5000 }] };
+    const atNormalizedSeed = luminanceGrid(scatter, { t: 1000, seed: 1 });
+    const atRawZeroSeed = luminanceGrid(scatter, { t: 1000, seed: 0 });
+    // buildScene normalizes its own `opts.seed ?? spec.seed` exactly like
+    // SpecInstance, so a bare `luminanceGrid(..., { seed: 0 })` call already
+    // matches the seed-1 renderer output — not just perceiveSequenceFrame's
+    // (already-normalized) segmentRenderSeed path.
+    expect(atRawZeroSeed.centroid!.x).toBeCloseTo(atNormalizedSeed.centroid!.x, 9);
+    // Sanity: this fixture is seed-sensitive at all (an unrelated seed differs).
+    const atOtherSeed = luminanceGrid(scatter, { t: 1000, seed: 2 });
+    expect(atOtherSeed.centroid!.x).not.toBeCloseTo(atNormalizedSeed.centroid!.x, 2);
+    const p = perceiveSequenceFrame(seq, 1000);
+    expect(p.centroid!.x).toBeCloseTo(atNormalizedSeed.centroid!.x, 9);
+  });
+
+  it('a settled morph-chained segment renders at its chain root\'s seed, not seq.seed + its own index', () => {
+    const shapeA: SaverSpec = {
+      schemaVersion: 1, id: 'a', label: 'A',
+      background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 12, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ffffff' }, motion: { type: 'static' } }],
+    };
+    // Same structural signature as shapeA (same layer count/sprite kind/motion,
+    // just a different color) — the morph-eligibility check in `canMorph`
+    // only compares structure, so this pair is a legal morph chain.
+    const shapeB: SaverSpec = { ...shapeA, id: 'b', layers: [{ ...shapeA.layers[0]!, sprite: { kind: 'circle', radius: [0.02, 0.02], color: '#ff0000' } }] };
+    const seq: IdleSequence = {
+      format: 'idle-sequence', schemaVersion: 1, id: 's', label: 'S', loop: false, seed: 7,
+      segments: [
+        { key: 'a', scene: shapeA, duration: 3000, transition: { type: 'morph', dur: 500 } },
+        { key: 'b', scene: shapeB, duration: 3000 },
+      ],
+    };
+    // T = 3600: segment 1, localT = 600 — past the 500ms morph window, so the
+    // morph has settled and SequenceInstance keeps rendering with the chain
+    // root's (segment 0's) seed forever after, never re-seeding at the
+    // boundary. seq.seed + index (7 + 1 = 8) would be a different stream.
+    const p = perceiveSequenceFrame(seq, 3600);
+    expect(p.segment).toEqual({ index: 1, key: 'b', localT: 600 });
+    const atChainRootSeed = luminanceGrid(shapeB, { t: 600, seed: 7 });
+    const atOwnIndexSeed = luminanceGrid(shapeB, { t: 600, seed: 8 });
+    // Sanity: the two candidate seeds actually render differently here.
+    expect(atOwnIndexSeed.centroid!.x).not.toBeCloseTo(atChainRootSeed.centroid!.x, 2);
+    expect(p.centroid!.x).toBeCloseTo(atChainRootSeed.centroid!.x, 9);
   });
 });

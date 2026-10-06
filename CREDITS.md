@@ -33,7 +33,9 @@ This library's ports are original TypeScript/canvas2d reimplementations, also MI
 
 ## Original savers
 
-The following savers are original to this project:
+The following savers are original to this project. The declarative ones are
+exported from `packages/schema/src/examples/` — `SCHEMA_EXAMPLES` there is the
+truth if this table drifts.
 
 | Saver | Notes |
 | --- | --- |
@@ -50,7 +52,7 @@ The following savers are original to this project:
 | Snowfall | Snowfall particles. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Night Lanterns | Yi Peng festival lantern sky. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Sakura Drift | Cherry blossom petals. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
-| Dev Dashboard | Developer dashboard. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Control Center | Developer dashboard (spec id `dev-dashboard`). Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Orrery | Solar system orrery. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Constellation | Star constellation map. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Comet Shower | Comet trails. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
@@ -59,6 +61,13 @@ The following savers are original to this project:
 | Polygons | Drifting polygon shapes. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Matrix Rain | Matrix-style falling code. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Night Procession | Festival lantern procession. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Aquarium | Fish tank re-authored as pure data — the test that the schema is expressive enough to reproduce a hand-coded saver. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Rain | Falling rain. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Nostalghia's Candle | A single candle flame in near-darkness, after Tarkovsky's _Nostalghia_ (1983). Homage in composition only — no assets or footage from the film. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Haiku | A centered haiku drifting slowly over deep indigo. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Pings | Three rings taking turns against near-black; almost nothing, almost never. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Facets | Soft colour planes behind tumbling triangular facets and tapered brush arcs — every glyph a path, not a disc. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
+| Relay Board | A six-row live status chart: labels, bars and readouts over a slow dust field. Original, authored as a declarative `SaverSpec` and compiled by `@idle-screens/schema`. |
 | Fluid | Navier-Stokes fluid simulation. Original canvas2d + WebGPU compute implementation. |
 | Reaction Diffusion | Gray-Scott reaction-diffusion. Original canvas2d + WebGPU compute implementation. Clean-room math — no code from external sources. |
 | Mystify | Bouncing morphing polygon trails. Original canvas2d implementation. Inspired by the Windows XP "Mystify" screensaver concept (clean-room). |

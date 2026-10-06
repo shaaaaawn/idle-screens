@@ -1,6 +1,6 @@
 import type { SaverPlugin } from '@idle-screens/core';
 import { perceiveScene, EXAMPLE_BY_ID, type SaverSpec, type ScenePerception } from '@idle-screens/schema';
-import { perceiveSaverFrame, type FramePerception } from './frame-perception';
+import { perceiveSaverFrame, releasePerceptionInstance, type FramePerception } from './frame-perception';
 import type { PageContext } from '@idle-screens/core';
 
 export interface PerceptionSaverOptions {
@@ -253,6 +253,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
       seed: currentOpts.seed,
       page: currentOpts.page,
       t,
+      reuse: true,
     }).then((p) => {
       if (token !== frameToken) return; // superseded
       showFrame(p, saver.manifest.label);
@@ -261,6 +262,10 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
 
   return {
     setSaver(id: string, opts: PerceptionSaverOptions = {}) {
+      // A new saver, or the same passthrough saver on a new stage (a new page
+      // mirror), is a new performance: let the kept instance and anything
+      // queued against it go.
+      if (id !== currentId || opts.page !== currentOpts.page) releasePerceptionInstance();
       currentId = id;
       currentOpts = opts;
       overrideSpec = null;
@@ -286,6 +291,7 @@ export function buildPerceptionPanel(mount: HTMLElement): PerceptionHandle {
     },
 
     dispose() {
+      releasePerceptionInstance();
       mount.innerHTML = '';
     },
   };

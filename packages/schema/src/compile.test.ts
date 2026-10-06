@@ -29,6 +29,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     stroke: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
+    closePath: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
     translate: vi.fn(),
@@ -37,6 +38,12 @@ function stub2dContext(): CanvasRenderingContext2D {
     setTransform: vi.fn(),
     createLinearGradient: vi.fn(() => stubGradient()),
     createRadialGradient: vi.fn(() => stubGradient()),
+    // A `field` background rasters into ImageData and draws it scaled.
+    createImageData: vi.fn((w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })),
+    putImageData: vi.fn(),
+    drawImage: vi.fn(),
+    createPattern: vi.fn(() => ({})), // a `finish` screens repeat-pattern tiles
+    imageSmoothingEnabled: true,
     fillStyle: '',
     strokeStyle: '',
     globalAlpha: 1,
@@ -46,6 +53,7 @@ function stub2dContext(): CanvasRenderingContext2D {
     textBaseline: 'middle',
     lineWidth: 1,
     lineCap: 'butt',
+    lineJoin: 'miter',
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -171,6 +179,28 @@ describe('compileSaver', () => {
     expect(typeof inst.applyTrack).toBe('function');
     // An empty track should not throw.
     expect(() => inst.applyTrack!({ program: 'test', seed: 42, deltas: [] })).not.toThrow();
+    inst.dispose();
+  });
+
+  it('renders an omitted link width as one pixel at the reference viewport', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1,
+      id: 'default-link-width',
+      label: 'Default link width',
+      layers: [{
+        count: 2,
+        sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#fff' },
+        motion: { type: 'static' },
+        links: { k: 1, maxDist: 1, mode: 'chain' },
+      }],
+    };
+    // stub2dContext() already initializes lineWidth to 1 — reset it to a
+    // sentinel so the assertion below actually exercises drawLinks' default,
+    // rather than passing whether or not it ever assigns lineWidth.
+    mockCtx.lineWidth = -1;
+    const inst = mountSync(compileSaver(spec), saverCtx({ width: 1080, height: 1080, reducedMotion: true }));
+    expect(mockCtx.stroke).toHaveBeenCalled();
+    expect(mockCtx.lineWidth).toBe(1);
     inst.dispose();
   });
 });
@@ -475,6 +505,21 @@ describe('textBlock glyphFade drawing', () => {
     const full = renderAndCollect(glyphFadeSpec(1));
     expect(full.map((c) => c.text).join('')).toBe('Hi there');
     expect(full.every((c) => c.alpha === 1)).toBe(true);
+    // Fully revealed, the whole line is ONE draw call — identical to the
+    // no-reveal path, so ligatures and kerning match it exactly (#97).
+    expect(full.length).toBe(1);
+  });
+
+  it('batches the opaque prefix into one fillText and fades only the tail', () => {
+    // fade 0.5 at progress 0.9: glyphs 0–6 have saturated (alpha 1), glyph 7
+    // is still fading — so exactly two draws: the batched run, then the tail
+    // glyph positioned at the run's advance (mock measureText: 8px/char).
+    const calls = renderAndCollect(glyphFadeSpec(0.9, { fade: 0.5 }));
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatchObject({ text: 'Hi ther', alpha: 1 });
+    expect(calls[1]!.text).toBe('e');
+    expect(calls[1]!.alpha).toBeLessThan(1);
+    expect(calls[1]!.x - calls[0]!.x).toBe('Hi ther'.length * 8);
   });
 
   it('draws a partial reveal glyph-by-glyph with falling alpha', () => {
@@ -488,11 +533,259 @@ describe('textBlock glyphFade drawing', () => {
   });
 
   it('glyph positions come from prefix advances and never shift as alpha ramps', () => {
-    const some = renderAndCollect(glyphFadeSpec(0.4, { fade: 0.5 }));
-    const more = renderAndCollect(glyphFadeSpec(0.9, { fade: 0.5 }));
+    // Index-wise call comparison is only valid while no glyph has saturated —
+    // once one hits alpha 1 it joins the batched prefix draw (#97). fade 0.5:
+    // at 0.25 and 0.45 every drawn glyph is still mid-fade, so both renders
+    // are pure per-glyph and positions must be bit-identical.
+    const some = renderAndCollect(glyphFadeSpec(0.25, { fade: 0.5 }));
+    const more = renderAndCollect(glyphFadeSpec(0.45, { fade: 0.5 }));
+    expect(some.length).toBeGreaterThan(0);
     for (let i = 0; i < some.length; i++) {
       expect(more[i]!.text).toBe(some[i]!.text);
       expect(more[i]!.x).toBe(some[i]!.x);
     }
+  });
+});
+
+describe('shape glyphs draw (#46)', () => {
+  const scene = (sprite: SaverSpec['layers'][number]['sprite'], blend?: 'lighter'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'shapes',
+    label: 'Shapes',
+    units: 'px',
+    layers: [{ count: 2, sprite, motion: { type: 'drift', speed: [10, 20] }, spin: 30, ...(blend ? { blend } : {}) }],
+  });
+  const calls = (fn: unknown): number => (fn as { mock: { calls: unknown[] } }).mock.calls.length;
+  // A reduced-motion mount paints one frame; renderFrame paints a second — so
+  // every per-frame count below is doubled.
+  const FRAMES = 2;
+  const render = (spec: SaverSpec): void => {
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    inst.renderFrame!(1234, 42);
+    inst.dispose();
+  };
+
+  it('polygon: one closed path per entity, a radial gradient only when soft', () => {
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', sides: 5 }));
+    expect(calls(mockCtx.closePath)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.fill)).toBeGreaterThanOrEqual(2);
+    expect(calls(mockCtx.createRadialGradient)).toBe(0);
+    render(scene({ kind: 'polygon', radius: [10, 20], color: '#fff', points: [[-1, 1], [0, -1], [1, 1]], soft: true }));
+    expect(calls(mockCtx.createRadialGradient)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('stroke: a single stroked path, or one segment per sample when tapered', () => {
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3 }));
+    const plain = calls(mockCtx.stroke);
+    expect(plain).toBe(FRAMES * 2);
+    render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3, taper: true, orient: true }));
+    expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
+  });
+
+  it('feathered rect paints outside-in: the full-size fill faintest first, the core at full alpha last', () => {
+    const seen: Array<{ w: number; a: number }> = [];
+    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number, h: number) => void }).fillRect = (_x, _y, w) => {
+      seen.push({ w, a: (mockCtx as unknown as { globalAlpha: number }).globalAlpha });
+    };
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'f', label: 'F', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], color: '#fff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const fills = seen.slice(1); // drop the background
+    expect(fills).toHaveLength(6);
+    expect(fills[0]!.w).toBeCloseTo(60, 9); // full size first …
+    expect(fills[0]!.a).toBeCloseTo(1 / 6, 9); // … at the faintest alpha
+    expect(fills[5]!.w).toBeCloseTo(60 * (1 - 0.5 * 5 / 6), 9); // the core last …
+    expect(fills[5]!.a).toBeCloseTo(1, 9); // … at full alpha
+    for (let i = 1; i < 6; i++) expect(fills[i]!.w).toBeLessThan(fills[i - 1]!.w);
+    inst.dispose();
+  });
+
+  it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
+    const hard = calls(mockCtx.fillRect);
+    expect(hard).toBe(FRAMES * (1 + 2)); // background + two entities per frame
+    render(scene({ kind: 'rect', width: [20, 30], color: '#fff', feather: 0.5 }, 'lighter'));
+    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
+  });
+});
+
+describe('bar sprites draw (#49)', () => {
+  it('one fillRect per bar with a non-zero value, sized by value / max', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'bars', label: 'Bars', units: 'px',
+      layers: [{ count: 3, sprite: { kind: 'bar', values: [50, 100, 0], max: 100, length: 200, thickness: 10, color: '#fff' }, motion: { type: 'static' }, position: { x: 0.1, y: 0.1 }, layout: { type: 'list', gap: 30 } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance; // paints one frame
+    const rects = (mockCtx.fillRect as unknown as { mock: { calls: number[][] } }).mock.calls.slice(1); // drop the background
+    expect(rects).toHaveLength(2); // the zero-value bar draws nothing
+    expect(rects[0]![2]).toBeCloseTo(100, 6); // 200 × 50 / 100
+    expect(rects[1]![2]).toBeCloseTo(200, 6);
+    inst.dispose();
+  });
+});
+
+describe('streak sprite orientation (#169 review)', () => {
+  it('a static streak (no motion, headingAt null) orients along `rotate` instead of always defaulting to heading 0', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'streak-rotate', label: 'Streak', units: 'px',
+      layers: [{
+        count: 1,
+        sprite: { kind: 'streak', length: [50, 50], color: '#ffffff', width: 2 },
+        motion: { type: 'static' },
+        position: { x: 0.5, y: 0.5 },
+        rotate: 90,
+      }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const moveCalls = (mockCtx.moveTo as unknown as { mock: { calls: number[][] } }).mock.calls;
+    const lineCalls = (mockCtx.lineTo as unknown as { mock: { calls: number[][] } }).mock.calls;
+    const [tailX, tailY] = moveCalls.at(-1)!;
+    const [headX, headY] = lineCalls.at(-1)!;
+    // heading = rotate (90° = π/2): the tail sits directly above the head
+    // (same x, smaller y) — the pre-fix heading of 0 would instead put the
+    // tail to the left of the head at the same y.
+    expect(tailX).toBeCloseTo(headX, 5);
+    expect(tailY).toBeLessThan(headY - 1);
+    inst.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textBlock anchor / font / opacity (ambient presentations 1a)
+// ---------------------------------------------------------------------------
+
+import { breakTextBlock } from './simulate';
+
+describe('textBlock anchor / font / opacity draw (1a)', () => {
+  const TEXT = 'Centred on every aspect ratio';
+
+  function anchoredSpec(overrides: Record<string, unknown> = {}): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'anchored',
+      label: 'Anchored',
+      background: { type: 'solid', color: '#05050a' },
+      layers: [
+        {
+          key: 'h',
+          count: 1,
+          sprite: { kind: 'textBlock', text: TEXT, maxWidth: 0.9, fontSize: 0.05, ...overrides },
+          motion: { type: 'static' },
+          position: { x: 0.5, y: 0.5 },
+        },
+      ],
+    } as SaverSpec;
+  }
+
+  /** Render one frame; return the summed translate (the block origin) and every fillText. */
+  function renderBlock(spec: SaverSpec, width: number, height: number, t = 0, inst?: SaverInstance) {
+    const translates: Array<[number, number]> = [];
+    const fills: Array<{ text: string; x: number; y: number; alpha: number; font: string }> = [];
+    (mockCtx as { translate: unknown }).translate = vi.fn((x: number, y: number) => translates.push([x, y]));
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string, x: number, y: number) => {
+      const c = mockCtx as { globalAlpha: number; font: string };
+      fills.push({ text, x, y, alpha: c.globalAlpha, font: c.font });
+    });
+    const own = inst ?? mountSync(compileSaver(spec), saverCtx({ width, height }));
+    own.renderFrame!(t, 42);
+    if (!inst) own.dispose();
+    const origin = translates.reduce<[number, number]>((acc, [x, y]) => [acc[0] + x, acc[1] + y], [0, 0]);
+    return { origin, fills };
+  }
+
+  for (const [w, h] of [[1920, 1080], [1080, 1080]] as const) {
+    it(`anchor: 'center' centres the rendered block at position on ${w}×${h}`, () => {
+      const { origin, fills } = renderBlock(anchoredSpec({ anchor: 'center' }), w, h);
+      const unit = Math.min(w, h);
+      const fsPx = 0.05 * unit;
+      const lines = breakTextBlock(TEXT, (0.9 * unit) / fsPx);
+      const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+      const totalH = lines.length * 1.4 * fsPx;
+      // Left-aligned: the first fillText sits at the origin's x, so the ink
+      // spans [origin.x, origin.x + maxLineW] — its centre must be the frame's.
+      expect(fills.length).toBe(lines.length);
+      expect(fills[0]!.x).toBe(0);
+      expect(origin[0] + maxLineW / 2).toBeCloseTo(w / 2, 6);
+      expect(origin[1] + totalH / 2).toBeCloseTo(h / 2, 6);
+    });
+  }
+
+  it('absent anchor keeps position as the layout top-left (one translate, as before)', () => {
+    const { origin } = renderBlock(anchoredSpec(), 1920, 1080);
+    expect(origin).toEqual([960, 540]);
+    expect((mockCtx.translate as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it("anchor: 'bottom-right' puts the ink's bottom-right corner on position", () => {
+    const { origin } = renderBlock(anchoredSpec({ anchor: 'bottom-right' }), 1920, 1080);
+    const fsPx = 0.05 * 1080;
+    const lines = breakTextBlock(TEXT, (0.9 * 1080) / fsPx);
+    const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+    expect(origin[0] + maxLineW).toBeCloseTo(960, 6);
+    expect(origin[1] + lines.length * 1.4 * fsPx).toBeCloseTo(540, 6);
+  });
+
+  it("anchor: 'center' with align: 'right' still centres the ink (align only shapes the ragged edge)", () => {
+    const { origin, fills } = renderBlock(anchoredSpec({ anchor: 'center', align: 'right' }), 1920, 1080);
+    // Right-aligned lines draw at xOff = maxWPx with textAlign right, so the
+    // ink's right edge is origin.x + maxWPx — and it must sit maxLineW/2 past centre.
+    const fsPx = 0.05 * 1080;
+    const maxWPx = 0.9 * 1080;
+    const lines = breakTextBlock(TEXT, maxWPx / fsPx);
+    const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+    expect(fills[0]!.x).toBe(maxWPx);
+    expect(origin[0] + maxWPx).toBeCloseTo(960 + maxLineW / 2, 6);
+  });
+
+  it('font composes family/weight with the scaled size; absent keeps system-ui', () => {
+    const { fills } = renderBlock(anchoredSpec({ font: 'bold monospace' }), 640, 400);
+    expect(fills[0]!.font).toBe('bold 20px monospace');
+    const plain = renderBlock(anchoredSpec(), 640, 400);
+    expect(plain.fills[0]!.font).toBe('20px system-ui, sans-serif');
+  });
+
+  it('opacity multiplies the block alpha and glides via applyTrack without a rebuild', () => {
+    const inst = mountSync(compileSaver(anchoredSpec({ opacity: 1 })), saverCtx({ width: 640, height: 400 }));
+    expect(renderBlock(anchoredSpec(), 640, 400, 0, inst).fills[0]!.alpha).toBe(1);
+    inst.applyTrack!({ deltas: [{ t: 0, path: 'h.sprite.opacity', value: 0, dur: 1000 }] } as never);
+    // Mid-glide: a paint lerp, so the block is partly transparent — a rebuild
+    // would have snapped it to the target.
+    const mid = renderBlock(anchoredSpec(), 640, 400, 500, inst).fills[0]!.alpha;
+    expect(mid).toBeGreaterThan(0.2);
+    expect(mid).toBeLessThan(0.8);
+    expect(renderBlock(anchoredSpec(), 640, 400, 2000, inst).fills[0]!.alpha).toBe(0);
+    inst.dispose();
+  });
+});
+
+describe('textBlock font selects the line-breaker metrics class (1a)', () => {
+  function spec(font?: string): SaverSpec {
+    return {
+      schemaVersion: 1,
+      id: 'mono',
+      label: 'Mono',
+      layers: [{
+        count: 1,
+        // 4 narrow words: 6.5 em proportional (one line at 8 em), 11.4 em mono (wraps).
+        sprite: { kind: 'textBlock', text: 'iiii iiii iiii iiii', maxWidth: 0.4, fontSize: 0.05, ...(font ? { font } : {}) },
+        motion: { type: 'static' },
+        position: { x: 0.1, y: 0.1 },
+      }],
+    } as SaverSpec;
+  }
+  function lineCount(s: SaverSpec): number {
+    const fills: string[] = [];
+    (mockCtx as { fillText: unknown }).fillText = vi.fn((text: string) => fills.push(text));
+    const inst = mountSync(compileSaver(s), saverCtx({ width: 640, height: 400 }));
+    inst.renderFrame!(0, 42);
+    inst.dispose();
+    return fills.length;
+  }
+  it('wraps a monospace block by the uniform advance and a default block by the proportional table', () => {
+    expect(lineCount(spec())).toBe(1);
+    expect(lineCount(spec('bold sans-serif'))).toBe(1);
+    expect(lineCount(spec('monospace'))).toBeGreaterThan(1);
   });
 });

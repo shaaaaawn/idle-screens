@@ -87,6 +87,8 @@ describe('public identity', () => {
    * changes, refresh `runs/latest` via `WRITE_STYLE_EVAL_BASELINE=1` and land
    * that artifact in the same PR — do not weaken this assertion.
    */
+  // Scores 150 screens. Under `vitest --coverage` the v8 instrumentation
+  // pushes this past the 5s default; isolated it finishes in ~1s.
   it('scores match the committed baseline', () => {
     const prior = new Map(
       readFileSync(new URL('./runs/latest/results.jsonl', import.meta.url), 'utf8')
@@ -107,5 +109,5 @@ describe('public identity', () => {
       })
       .filter(Boolean);
     expect(moved).toEqual([]);
-  });
+  }, 20_000);
 });

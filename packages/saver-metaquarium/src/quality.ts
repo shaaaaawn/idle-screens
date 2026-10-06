@@ -13,16 +13,22 @@ export interface TankQuality {
    *  ceiling costs 1, rays 2, terrain is free. A weak device keeps the
    *  ceiling and loses the rays. */
   envBudget: number;
+  /** Scenery budget: clusters in the scene, shards in one cluster, and
+   *  whether shards get their halo shell (it doubles their draw calls). */
+  props: { clusters: number; shards: number; halo: boolean };
+  /** Point lights that ride glow parts in lit mode. Every one is a term in
+   *  every lit fragment, so the weakest tier lights by key + fill alone. */
+  glowLights: number;
 }
 
 export function qualityFor(tier: CapabilityTier): TankQuality {
   switch (tier) {
     case 'high':
-      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400, envBudget: 3 };
+      return { maxPixelRatio: 1.25, antialias: true, fishCap: 24, pixelBudget: 1_800_000, moteCap: 400, envBudget: 3, props: { clusters: 12, shards: 32, halo: true }, glowLights: 4 };
     case 'standard':
-      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250, envBudget: 2 };
+      return { maxPixelRatio: 1, antialias: true, fishCap: 16, pixelBudget: 1_200_000, moteCap: 250, envBudget: 2, props: { clusters: 8, shards: 20, halo: true }, glowLights: 3 };
     default:
-      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120, envBudget: 1 };
+      return { maxPixelRatio: 1, antialias: false, fishCap: 8, pixelBudget: 900_000, moteCap: 120, envBudget: 1, props: { clusters: 4, shards: 12, halo: false }, glowLights: 0 };
   }
 }
 
@@ -51,5 +57,12 @@ export function probeSoftwareGL(): boolean {
   const renderer = String(
     dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
   );
+  // This scratch context is never used again — lose it explicitly rather than
+  // leaving it for GC. Harmless on its own, but every tank mount calls this
+  // before creating its real WebGLRenderer, and now also builds a per-mount
+  // PMREM environment (studio.ts) that is heavy enough to pile up un-GC'd
+  // contexts faster than Chrome reclaims them, tipping repeated mount/dispose
+  // cycles over the browser's live-context cap (MQ3).
+  gl.getExtension('WEBGL_lose_context')?.loseContext();
   return isSoftwareGL(renderer);
 }

@@ -1,11 +1,12 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SpriteSpec } from './types';
+import type { CycleSpec, LayerSpec, SpriteSpec, TextBlockAnchor } from './types';
 import { LIMITS } from './types';
+import { isShapedSprite } from './shapes';
 
 /** Near plane for warp motion. z lives in [WARP_NEAR, 1]; screen scale is 1/z. */
 export const WARP_NEAR = 0.08;
 /** Cap on the 1/z size multiplier so near stars don't blow out. */
-const WARP_MAX_SCALE = 8;
+export const WARP_MAX_SCALE = 8;
 
 /** One axis-pair of seeded harmonic octaves for wander motion (amps px, freqs rad/ms). */
 export interface WanderOsc {
@@ -46,14 +47,30 @@ export interface Entity {
   orbitCy: number; // orbit center y (px)
   colorIndex: number; // index into sprite colors[] (-1 = use sprite.color)
   cyclePeriod: number; // ms (0 = no cycling)
-  /** Rect sprite second dimension (height px). Only set for rect sprites. */
+  /** Rect sprite second dimension (height px), or bar thickness. Only set for rect / bar sprites. */
   size2?: number;
+  /** Reading-order index into `bar.values`. Only set for bar sprites. */
+  barIndex?: number;
+  /** Placed by a list/table layout: variants cycle from the ordered base index, in step. Only set for data layouts. */
+  ordered?: true;
   /** Orbit parent layer key (motion.center = { layer }). Center resolved at render time. */
   orbitParent?: string;
+  /** Present only when the layer explicitly disables edge wrapping. */
+  wrapDisabled?: true;
   /** Harmonic drift params. Only set for wander motion. */
   wander?: { own: WanderOsc; shared: WanderOsc; coherence: number; margin: number };
   /** Depth-axis params. Only set for warp motion. */
   warp?: { ux: number; uy: number; z0: number; vz: number; cx: number; cy: number };
+  /** Sparse-event window. Only set when `layer.emit` is declared. `phase` ms offset. */
+  emit?: { every: number; life: number; phase: number; growFrom: number; growTo: number };
+  /** Shared-clock time multiplier for pulse/grow/cycle. Only set when `layer.clock` is declared. */
+  clockRate?: number;
+  /** Shared cycle phase (radians). Only set when `layer.clock` is declared. */
+  cyclePhase?: number;
+  /** Velocity easing. Only set when the motion declares `ease`. */
+  ease?: { type: 'settle' | 'buoyant'; tau: number };
+  /** Static rotation (radians), added to any spin. Only set when `layer.rotate` is declared. */
+  rotate?: number;
   /** Spline params (pts in px, shared per layer). Only set for path motion. */
   path?: {
     pts: Array<{ x: number; y: number }>;
@@ -101,6 +118,36 @@ function drawOsc(rng: Rng, amp: number): WanderOsc {
   return osc;
 }
 
+const GOLDEN = 0.6180339887498949;
+
+/**
+ * Per-entity sparse-event parameters. NO rng draws: the scattered offset is a
+ * fixed low-discrepancy (golden-ratio) sequence over the entity index, so
+ * declaring `emit` never disturbs this layer's — or any later layer's —
+ * seeded stream, and the same spec times its events identically under every
+ * seed (event timing is composition, like a grid, not scatter). `jitter`
+ * blends an even stagger (entity i at i/n of the period — a metronome) with
+ * that scattered offset.
+ */
+function emitParams(
+  emit: NonNullable<LayerSpec['emit']>,
+  i: number,
+  n: number,
+): NonNullable<Entity['emit']> {
+  const every = emit.every;
+  const jitter = Math.max(0, Math.min(1, emit.jitter ?? 1));
+  const scattered = (((i + 0.5) * GOLDEN) % 1) * every;
+  const even = (i / Math.max(1, n)) * every;
+  const phase = ((even * (1 - jitter) + scattered * jitter) % every + every) % every;
+  return {
+    every,
+    life: Math.min(emit.life, every),
+    phase,
+    growFrom: emit.grow?.[0] ?? 1,
+    growTo: emit.grow?.[1] ?? 1,
+  };
+}
+
 /** Weighted index pick from a single uniform draw. Weights are validated positive. */
 function weightedIndex(u: number, weights: number[]): number {
   const total = weights.reduce((a, b) => a + b, 0);
@@ -125,21 +172,22 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   // showed it full-width — a renderer-vs-perception split that burned four
   // publishes to isolate. Upscaling is equally wrong: it invents phantom cells
   // beyond the authored lattice. Grid cost is already bounded by maxPerLayer.
-  const effectiveCount = countScale === 1 || layer.layout?.type === 'grid'
+  const effectiveCount = countScale === 1 || layer.layout !== undefined
     ? layer.count
     : Math.max(1, Math.min(
         Math.round(layer.count * countScale),
         layer.links ? LIMITS.maxLinkLayerCount : LIMITS.maxPerLayer,
       ));
-  const [smin, smax] = layer.size ?? [20, 40];
+  // Defaults are authored as their 1080p-equivalent viewport fractions. Using
+  // the legacy px defaults directly would multiply 20..40 by the viewport.
+  const defaultSize = scale === 1
+    ? [20, 40] as const
+    : [20 / LIMITS.referenceViewport, 40 / LIMITS.referenceViewport] as const;
+  const [smin, smax] = layer.size ?? defaultSize;
   const variants = spriteVariants(layer.sprite);
   const sprite = layer.sprite;
-  const spriteColors = (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect')
-    ? sprite.colors
-    : undefined;
-  const colorWeights = (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect')
-    ? sprite.colorWeights
-    : undefined;
+  const spriteColors = isShapedSprite(sprite) ? sprite.colors : undefined;
+  const colorWeights = isShapedSprite(sprite) ? sprite.colorWeights : undefined;
   const colorsLen = spriteColors?.length ?? 0;
   const cycle: CycleSpec | undefined = (sprite.kind === 'emoji' || sprite.kind === 'text') ? sprite.cycle : undefined;
 
@@ -156,9 +204,39 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   if (mSpec.type === 'path') {
     pathPts = mSpec.points.map((p) => ({ x: p.x * w, y: p.y * h }));
   }
+  const ease = (mSpec.type === 'drift' || mSpec.type === 'rise' || mSpec.type === 'wander') ? mSpec.ease : undefined;
+  const clockPhase = layer.clock ? ((layer.clock.phase ?? 0) % 1) * Math.PI * 2 : 0;
 
   // Grid layout geometry (pure — no draws).
   const layout = layer.layout;
+  // Data layouts (list / table): reading order from an anchor, no scatter.
+  const ordered = layout?.type === 'list' || layout?.type === 'table';
+  let gapX = 0;
+  let gapY = 0;
+  let listX0 = 0;
+  let listY0 = 0;
+  let listCols = 1;
+  if (layout?.type === 'list' || layout?.type === 'table') {
+    const dflt = scale === 1 ? LIMITS.defaultListGapPx : LIMITS.defaultListGap;
+    const g = layout.gap ?? dflt;
+    gapX = (typeof g === 'number' ? g : g.x ?? dflt) * scale;
+    gapY = (typeof g === 'number' ? g : g.y ?? dflt) * scale;
+    listCols = layout.type === 'list' ? 1 : Math.max(1, Math.round(layout.columns));
+    const rows = Math.max(1, Math.ceil(effectiveCount / listCols));
+    if (layer.position) {
+      listX0 = layer.position.x * w;
+      listY0 = layer.position.y * h;
+      // `dx`/`dy`: an offset in min(w,h) units (#71). Only added when set, so
+      // every existing anchor is the same float it always was.
+      if (layer.position.dx) listX0 += layer.position.dx * scale;
+      if (layer.position.dy) listY0 += layer.position.dy * scale;
+    } else {
+      const [rx0, rx1] = layer.region?.x ?? [0, 1];
+      const [ry0, ry1] = layer.region?.y ?? [0, 1];
+      listX0 = ((rx0 + rx1) / 2) * w - ((listCols - 1) * gapX) / 2;
+      listY0 = ((ry0 + ry1) / 2) * h - ((rows - 1) * gapY) / 2;
+    }
+  }
   let gridCols = 0;
   let cellW = 0;
   let cellH = 0;
@@ -185,17 +263,21 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     const size =
       sprite.kind === 'textBlock'
         ? sprite.fontSize * scale
-        : sprite.kind === 'circle' || sprite.kind === 'ring'
+        : sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'polygon'
           ? rng.range(sprite.radius[0], sprite.radius[1]) * 2 * scale
-          : sprite.kind === 'streak'
+          : sprite.kind === 'streak' || sprite.kind === 'stroke'
             ? rng.range(sprite.length[0], sprite.length[1]) * scale
             : sprite.kind === 'rect'
               ? rng.range(sprite.width[0], sprite.width[1]) * scale
-              : rng.range(smin, smax) * scale;
+              : sprite.kind === 'bar'
+                ? sprite.length * scale
+                : rng.range(smin, smax) * scale;
     // Guarded extra draw: only rect sprites with an aspect range consume it.
     const size2 = sprite.kind === 'rect'
       ? size * (sprite.aspect ? rng.range(sprite.aspect[0], sprite.aspect[1]) : 1)
-      : undefined;
+      : sprite.kind === 'bar'
+        ? sprite.thickness * scale
+        : undefined;
 
     let vx = 0;
     let vy = 0;
@@ -261,6 +343,15 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
     if (layer.position && layer.count === 1) {
       x0 = layer.position.x * w;
       y0 = layer.position.y * h;
+      if (layer.position.dx) x0 += layer.position.dx * scale;
+      if (layer.position.dy) y0 += layer.position.dy * scale;
+    } else if (layout?.type === 'list' || layout?.type === 'table') {
+      // Reading order from the anchor. Burn the two scatter draws so toggling a
+      // data layout on or off leaves the rest of this layer's stream intact.
+      rng.next();
+      rng.next();
+      x0 = listX0 + (i % listCols) * gapX;
+      y0 = listY0 + Math.floor(i / listCols) * gapY;
     } else if (layout?.type === 'grid') {
       // Grid cells row-major; same 2-draw budget as scatter so toggling layout
       // shifts only THIS layer's stream (layout is structural — rebuild anyway).
@@ -287,7 +378,10 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       x0,
       y0,
       size,
-      spriteIndex: variants > 1 ? rng.int(0, variants - 1) : 0,
+      // Data layouts read variants in order — strings[i] beside bar i. The
+      // seeded draw is still consumed so a layout is placement only: toggling
+      // list/table never disturbs the layer's alpha, pulse or spin stream.
+      spriteIndex: variants > 1 ? (ordered ? (rng.int(0, variants - 1), i % variants) : rng.int(0, variants - 1)) : 0,
       phase: rng.range(0, Math.PI * 2),
       vx,
       vy,
@@ -319,12 +413,17 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       colorIndex: colorsLen > 0
         ? (colorWeights && colorWeights.length === colorsLen
             ? weightedIndex(rng.next(), colorWeights)
-            : rng.int(0, colorsLen - 1))
+            : ordered
+              ? (rng.int(0, colorsLen - 1), i % colorsLen) // data layouts: palette in reading order; draw burned for stream parity
+              : rng.int(0, colorsLen - 1))
         : -1,
       cyclePeriod: cycle ? cycle.period : 0,
       // Optional feature fields last (guarded draws inside — wander draws 18 here).
       ...(size2 !== undefined ? { size2 } : {}),
+      ...(sprite.kind === 'bar' ? { barIndex: i } : {}),
+      ...(ordered ? { ordered: true as const } : {}),
       ...(orbitParent ? { orbitParent } : {}),
+      ...(layer.wrap === false ? { wrapDisabled: true as const } : {}),
       ...(m.type === 'wander'
         ? {
             wander: {
@@ -349,16 +448,42 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
             },
           }
         : {}),
+      // Time-structure fields (2026-09): ease draws nothing; emit's one draw
+      // per entity happens in a pass AFTER this loop (see below).
+      ...(ease ? { ease: { type: ease.type, tau: ease.tau } } : {}),
+      // Static rotation (2026-09-10): a scalar draws nothing; the range form
+      // draws one value here, last, only when declared.
+      ...(typeof layer.rotate === 'number'
+        ? { rotate: (layer.rotate * Math.PI) / 180 }
+        : Array.isArray(layer.rotate)
+          ? { rotate: (rng.range(layer.rotate[0], layer.rotate[1]) * Math.PI) / 180 }
+          : {}),
     });
 
+    if (layer.clock) {
+      // Phase-lock: the seeded pulse/grow phases were drawn above (stream
+      // stays put); the shared phase replaces them here. Cycle gets its own
+      // field — `phase` also drives bob/sway/orbit, which must stay per-entity.
+      const ent = out[out.length - 1]!;
+      ent.pulsePhase = clockPhase;
+      ent.growPhase = clockPhase;
+      ent.cyclePhase = clockPhase;
+      ent.clockRate = layer.clock.rate ?? 1;
+    }
     if (layer.pulse?.wave) {
       // Position-derived phase: sin(ωt + phase) becomes a traveling wave along
       // `angle`. Patched AFTER the push so the seeded pulsePhase draw stays in its
       // historical stream position (toggling wave must not shift other draws).
+      // A clock's phase offsets the wave rather than flattening it.
       const wl = Math.max(1e-6, layer.pulse.wave.wavelength * scale);
       const ang = ((layer.pulse.wave.angle ?? 0) * Math.PI) / 180;
-      out[out.length - 1]!.pulsePhase = -((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
+      out[out.length - 1]!.pulsePhase = clockPhase - ((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
     }
+  }
+  if (layer.emit) {
+    // Assigned after the loop and without any rng draw (see emitParams), so
+    // toggling `emit` rearranges nothing — not this layer, not the ones after.
+    for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length);
   }
   return out;
 }
@@ -369,15 +494,65 @@ function warpZ(e: Entity, t: number): number {
   return wrap(wp.z0 - wp.vz * (t / 1000), WARP_NEAR, 1);
 }
 
+function smoothstep(x: number): number {
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return c * c * (3 - 2 * c);
+}
+
+/** Fraction of an emit window spent fading in; the rest fades out. */
+const EMIT_ATTACK = 0.25;
+
+/**
+ * Where entity `e` sits in its current emit window at time `t`: 0..1 across
+ * the visible `life` ms, or null while dark (or when the layer has no `emit`).
+ * Pure — the window index is `floor((t - phase) / every)`, no state.
+ */
+export function emitWindow(e: Entity, t: number): number | null {
+  const em = e.emit;
+  if (!em) return null;
+  const local = (((t - em.phase) % em.every) + em.every) % em.every;
+  return local < em.life ? local / em.life : null;
+}
+
+/** Alpha envelope across an emit window: fast smooth attack, slow smooth decay. */
+export function emitEnvelope(u: number): number {
+  if (u < 0 || u >= 1) return 0;
+  return u < EMIT_ATTACK ? smoothstep(u / EMIT_ATTACK) : 1 - smoothstep((u - EMIT_ATTACK) / (1 - EMIT_ATTACK));
+}
+
+/** Scene time as the layer's clock sees it (pulse/grow/cycle only). */
+function clockTime(e: Entity, t: number): number {
+  return e.clockRate ? t * e.clockRate : t;
+}
+
+/**
+ * Seconds of travel at time `t` for the velocity-integral motions. Identity
+ * without `ease`. `settle`: τ(1 − e^(−t/τ)) — decelerates to rest having
+ * travelled speed·τ. `buoyant`: t − τ(1 − e^(−t/τ)) — from rest to terminal
+ * speed. With `emit`, t is window-local so every event restarts the travel.
+ */
+function motionSeconds(e: Entity, t: number): number {
+  if (!e.ease) return t / 1000;
+  let tl = t;
+  if (e.emit) tl = (((t - e.emit.phase) % e.emit.every) + e.emit.every) % e.emit.every;
+  const tau = e.ease.tau;
+  const k = 1 - Math.exp(-tl / tau);
+  return (e.ease.type === 'settle' ? tau * k : tl - tau * k) / 1000;
+}
+
 /** Analytic opacity of an entity at logical time `t` (ms). Pure, clamped to 0..1. */
 export function alphaAt(e: Entity, t: number): number {
   let a = e.alpha;
-  if (e.pulseAmp) a = e.alpha + e.pulseAmp * Math.sin((t * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
+  if (e.pulseAmp) a = e.alpha + e.pulseAmp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.pulsePeriod + e.pulsePhase);
   if (e.motion === 'warp') {
     // Fade in over the first 20% of depth after respawning at the far plane,
     // masking the wrap pop-in.
     const z = warpZ(e, t);
     a *= Math.max(0, Math.min(1, (1 - z) / 0.2));
+  }
+  if (e.emit) {
+    const u = emitWindow(e, t);
+    a = u === null ? 0 : a * emitEnvelope(u);
   }
   return a < 0 ? 0 : a > 1 ? 1 : a;
 }
@@ -385,15 +560,26 @@ export function alphaAt(e: Entity, t: number): number {
 /** Analytic size multiplier at time `t` (ms). Pure, clamped to > 0. */
 export function sizeAt(e: Entity, t: number): number {
   let s = e.size;
-  if (e.growAmp) s = e.size * (1 + e.growAmp * Math.sin((t * 2 * Math.PI) / e.growPeriod + e.growPhase));
+  if (e.growAmp) s = e.size * (1 + e.growAmp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.growPeriod + e.growPhase));
   if (e.motion === 'warp') s *= Math.min(1 / warpZ(e, t), WARP_MAX_SCALE);
+  if (e.emit && (e.emit.growFrom !== 1 || e.emit.growTo !== 1)) {
+    const u = emitWindow(e, t);
+    if (u !== null) s *= e.emit.growFrom + (e.emit.growTo - e.emit.growFrom) * u;
+  }
   return s > 0 ? s : 0.1;
 }
 
-/** Analytic rotation angle at time `t` (ms) in radians. Pure. */
+/**
+ * Analytic rotation angle at time `t` (ms) in radians. Pure. A static
+ * `rotate` is the base; a spinning entity adds its seeded start angle and
+ * speed × t on top. With neither, 0 — and with `spin: [0, 0]` also 0: a zero
+ * spin speed never rotates, so its seeded phase is not applied (that is what
+ * `rotate` is for).
+ */
 export function rotationAt(e: Entity, t: number): number {
-  if (!e.spinSpeed) return 0;
-  return e.spinPhase + e.spinSpeed * (t / 1000);
+  const base = e.rotate ?? 0;
+  if (!e.spinSpeed) return base;
+  return base + e.spinPhase + e.spinSpeed * (t / 1000);
 }
 
 /** Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is unset. */
@@ -487,7 +673,7 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
     const pos = pathPosition(e, t);
     return { x: pos.x, y: pos.y, flip: false };
   }
-  const dt = t / 1000;
+  const dt = motionSeconds(e, t);
   const m = e.size;
   if (e.motion === 'bounce') {
     return {
@@ -497,9 +683,10 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
     };
   }
   if (e.motion === 'rise') {
+    const y = e.y0 + e.vy * dt;
     return {
       x: e.x0 + (e.bob ? e.bob * Math.sin(t / 700 + e.phase) : 0),
-      y: wrap(e.y0 + e.vy * dt, -m, h + m),
+      y: e.wrapDisabled ? y : wrap(y, -m, h + m),
       flip: false,
     };
   }
@@ -519,15 +706,19 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
       }
     }
     const margin = m + wp.margin;
+    const x = e.x0 + e.vx * dt + hx;
+    const y = e.y0 + e.vy * dt + hy;
     return {
-      x: wrap(e.x0 + e.vx * dt + hx, -margin, w + margin),
-      y: wrap(e.y0 + e.vy * dt + hy, -margin, h + margin),
+      x: e.wrapDisabled ? x : wrap(x, -margin, w + margin),
+      y: e.wrapDisabled ? y : wrap(y, -margin, h + margin),
       flip: e.headingLeft,
     };
   }
   // drift
-  const x = wrap(e.x0 + e.vx * dt, -m, w + m);
-  let y = e.vy !== 0 ? wrap(e.y0 + e.vy * dt, -m, h + m) : e.y0;
+  const rawX = e.x0 + e.vx * dt;
+  const x = e.wrapDisabled ? rawX : wrap(rawX, -m, w + m);
+  const rawY = e.y0 + e.vy * dt;
+  let y = e.vy !== 0 && !e.wrapDisabled ? wrap(rawY, -m, h + m) : rawY;
   if (e.bob) y += e.bob * Math.sin(t / 500 + e.phase);
   return { x, y, flip: e.headingLeft };
 }
@@ -553,7 +744,10 @@ export function headingAt(e: Entity, t: number, w: number, h: number): number | 
 /** Time-varying sprite index for text/emoji cycling. Returns static index when cyclePeriod is 0. */
 export function spriteIndexAt(e: Entity, t: number, variants: number): number {
   if (!e.cyclePeriod || variants <= 1) return e.spriteIndex;
-  return Math.floor(t / e.cyclePeriod + e.phase / (2 * Math.PI)) % variants;
+  // Under a data layout the rows keep their reading order and advance in
+  // step — a marquee — instead of each entity cycling from its own phase.
+  if (e.ordered) return (e.spriteIndex + Math.floor(clockTime(e, t) / e.cyclePeriod)) % variants;
+  return Math.floor(clockTime(e, t) / e.cyclePeriod + (e.cyclePhase ?? e.phase) / (2 * Math.PI)) % variants;
 }
 
 /** An inter-entity link edge with its (wrap-aware) distance, for falloff alpha. */
@@ -681,21 +875,51 @@ const CHAR_NARROW = new Set('iIljtf1!|.,;:\'"()[]{}');
 const CHAR_WIDE = new Set('mwMWGOQD@%');
 
 /**
+ * Which advance table the line-breaker uses. `proportional` is the
+ * character-class table below (the default, and the only table until
+ * `textBlock.font` existed); `mono` is a uniform 0.6 em advance — the classic
+ * monospace cell (Courier, Menlo, SF Mono all sit within a percent of it).
+ */
+export type TextMetricsClass = 'proportional' | 'mono';
+
+const MONO_FAMILY_RE = /\b(?:ui-)?mono(?:space)?\b|courier|menlo|monaco|sfmono|consolas|inconsolata|fira\s*code|source\s*code|jetbrains|ibm\s*plex\s*mono|roboto\s*mono/i;
+
+/**
+ * Metrics class for a `textBlock.font` string: `mono` when the family names
+ * a monospace face (the generic `monospace`, or a well-known fixed-pitch
+ * family), else `proportional`. Absent font ⇒ proportional, as before.
+ */
+export function textMetricsClassFor(font?: string): TextMetricsClass {
+  return font && MONO_FAMILY_RE.test(font) ? 'mono' : 'proportional';
+}
+
+const MONO_ADVANCE_EM = 0.6;
+
+/**
  * Approximate glyph width as a fraction of em. Uses character-class buckets
  * so line breaks are identical across platforms (no measureText). The average
  * across Latin text lands near 0.55, close to perceive.ts's 0.62 heuristic
- * but with per-class refinement.
+ * but with per-class refinement. Under `mono` every glyph (space included)
+ * advances the same cell.
  */
-function charWidthEm(ch: string): number {
+function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): number {
+  if (metrics === 'mono') return MONO_ADVANCE_EM;
   if (ch === ' ' || ch === '\t') return 0.3;
   if (CHAR_NARROW.has(ch)) return 0.35;
   if (CHAR_WIDE.has(ch)) return 0.72;
   return 0.55;
 }
 
-function textWidthEm(str: string): number {
+/**
+ * Em-width of a string under the same character-class table `breakTextBlock`
+ * uses. `mono` counts grapheme clusters, not UTF-16 code units — an emoji or
+ * combining/ZWJ sequence is one advance-width cell, matching what's painted,
+ * not one cell per surrogate half or combining mark.
+ */
+export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
+  if (metrics === 'mono') return graphemeClusters(str).length * MONO_ADVANCE_EM;
   let w = 0;
-  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!);
+  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!, metrics);
   return w;
 }
 
@@ -709,7 +933,7 @@ export interface TextBlockLine {
  * whitespace; a single word wider than the limit gets its own line unbroken.
  * Explicit `\n` always forces a break. Pure, deterministic, no canvas needed.
  */
-export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[] {
+export function breakTextBlock(text: string, maxWidthEm: number, metrics: TextMetricsClass = 'proportional'): TextBlockLine[] {
   const paragraphs = text.split('\n');
   const lines: TextBlockLine[] = [];
 
@@ -725,12 +949,12 @@ export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[
     }
 
     let lineText = words[0]!;
-    let lineW = textWidthEm(lineText);
-    const spaceW = charWidthEm(' ');
+    let lineW = textWidthEm(lineText, metrics);
+    const spaceW = charWidthEm(' ', metrics);
 
     for (let i = 1; i < words.length; i++) {
       const word = words[i]!;
-      const wordW = textWidthEm(word);
+      const wordW = textWidthEm(word, metrics);
       if (lineW + spaceW + wordW <= maxWidthEm) {
         lineText += ' ' + word;
         lineW += spaceW + wordW;
@@ -744,6 +968,30 @@ export function breakTextBlock(text: string, maxWidthEm: number): TextBlockLine[
   }
 
   return lines;
+}
+
+/**
+ * Where an anchored textBlock's layout origin sits relative to `position`:
+ * the (dx, dy) to ADD to `position` so that the named point of the rendered
+ * text lands on it. The rendered box is the widest line wide (placed inside
+ * the `maxWidth` box by `align`) and `lines × lineHeight` tall — so `anchor`
+ * says where the block sits and `align` only shapes its ragged edge. Absent
+ * anchor ⇒ (0, 0): `position` stays the layout box's top-left, exactly as
+ * before the field existed. Renderer, perception and advisories all call
+ * this, so their boxes agree by construction.
+ */
+export function textBlockAnchorOffset(
+  s: { anchor?: TextBlockAnchor; align?: 'left' | 'center' | 'right' },
+  maxWPx: number,
+  maxLineW: number,
+  totalH: number,
+): { dx: number; dy: number } {
+  if (!s.anchor) return { dx: 0, dy: 0 };
+  const ax = s.anchor.endsWith('left') ? 0 : s.anchor.endsWith('right') ? 1 : 0.5;
+  const ay = s.anchor.startsWith('top') ? 0 : s.anchor.startsWith('bottom') ? 1 : 0.5;
+  // Ink left edge relative to the layout origin, as `align` places it.
+  const inkX0 = s.align === 'center' ? (maxWPx - maxLineW) / 2 : s.align === 'right' ? maxWPx - maxLineW : 0;
+  return { dx: -(inkX0 + ax * maxLineW), dy: -(ay * totalH) };
 }
 
 // ---------------------------------------------------------------------------

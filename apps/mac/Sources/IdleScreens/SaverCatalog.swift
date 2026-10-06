@@ -24,6 +24,7 @@ enum SaverCatalog {
     SaverEntry(id: "fluid", label: "Fluid"),
     SaverEntry(id: "reaction-diffusion", label: "Reaction Diffusion"),
     SaverEntry(id: "mystify", label: "Mystify"),
+    SaverEntry(id: "metaquarium", label: "Metaquarium"),
     SaverEntry(id: "snowfall", label: "Snowfall"),
     SaverEntry(id: "lanterns", label: "Night Lanterns"),
     SaverEntry(id: "sakura", label: "Sakura Drift"),

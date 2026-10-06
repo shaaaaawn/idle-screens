@@ -1,3 +1,9 @@
+import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
+import { buildScenery, type Scenery } from './scenery';
+import { parseFloraMix } from './flora';
+import { parseFloraPalette } from './flora-mix';
+import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
+import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
   defaultParams,
@@ -17,7 +23,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry,
+  CircleGeometry, PointLight, Vector4, Matrix4,
   Color,
   ConeGeometry,
   Fog,
@@ -29,8 +35,10 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   Points,
+  Quaternion,
   Scene,
   ShaderMaterial,
+  BackSide,
   DoubleSide,
   PlaneGeometry,
   CylinderGeometry,
@@ -47,21 +55,65 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
-import { affordableLayers, environmentOf, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
+import { affordableLayers, environmentOf, roomColor, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
-  bandRange, FISH_LENGTH, fishVariation, FORMATION_SHAPES, formationExtent,
-  formationSlot, swimStyleOf, type FormationShape,
-} from './swim';
+  anchorFraction, bandRange, breedSize, FISH_LENGTH, fishHash, fishSizeMul, fishVariation, FORMATION_SHAPES,
+  formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
-import { expandFishMix, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
+import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
+import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
+import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
+import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { FinishPass } from './finish';
+import { buildStudio, type Studio } from './studio';
+import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
+import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
+import {
+  classSpot, coupleSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
+  type DuetRole, type StarfishDanceMode, type StarfishOutput, type StarfishRig,
+} from './starfish';
+import { anglerFrame, rigAngler, type AnglerRig } from './angler';
+import { hackerFrame, rigHacker, type HackerRig } from './hacker';
+import { rigShark, sharkFrame, type SharkRig } from './shark';
+import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
+import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
+import {
+  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusPlaced, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
+  type OctopusRig, type OctopusSkin,
+} from './octopus';
+import { InkLayer } from './ink';
+import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
+import { BurpLayer } from './burps';
+import { rigScreen, setScreen, type ScreenRig } from './screen';
+import { rigSeahorse } from './seahorse';
+
+const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
+import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
+import {
+  clusterClearance, clusterMound, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
+  type Cluster, type Emitter,
+} from './crystals';
+import {
+  buildCrystalField, buildGlowCards, buildSpotBeam, emptyPoolUniforms, fillPoolUniforms, installFloorPools, MAX_POOLS, writePaths, writePoolSlots,
+  type CrystalField, type GlowCards, type SpotBeam,
+} from './crystal-mesh';
+import { BUNDLED_BREED_SCHEME, expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
+import { BUNDLED_BREEDS } from './breeds';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
   applyNpcMaterials,
+  collectFishGlow,
+  type FishGlow,
   eyeNoseSign,
   forceOpaque,
+  isGlow,
   MIAMI_VICE_COLORS,
 } from './materials';
+import { applyCaustics, CAUSTIC, CAUSTIC_FUNCS, CAUSTIC_LAYERS, CAUSTIC_WINDOW, causticUniforms } from './caustics';
 import {
   compileSwimPlan,
   PATH_SHAPES,
@@ -72,15 +124,24 @@ import {
   type SwimPose,
   type TankBounds,
 } from './plan';
+import { Shoal, SHOAL_KINDS, type Carrier, type ShoalKind } from './shoal';
 import {
   effectivePixelRatio,
   probeSoftwareGL,
   qualityFor,
   type TankQuality,
 } from './quality';
+import { LogicalClock, rateOffset } from './runtime';
+import { ContactShadows } from './contact-shadow';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
+const CAMERA_FAR = 1400;
+/** Floor-pool slots kept free of fixed light, for the sources that move. */
+const MOVING_POOLS = 4;
 const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
+/** The longest line of babies a moment can travel down (babyLeader). */
+const BABY_LINE = 8;
+const Y_AXIS = new Vector3(0, 1, 0);
 const GLB_CONCURRENCY = 3;
 
 // ---------------------------------------------------------------------------
@@ -90,12 +151,22 @@ const GLB_CONCURRENCY = 3;
 interface FishTemplate {
   scene: Object3D;
   clip: AnimationClip | null;
+  /** Every clip the model carries, by name (a rigged breed's: the crab's six, the glowfish's four). */
+  clips: AnimationClip[];
   norm: number;
   yaw: number;
   /** True when this template was decoded with Draco (not a fallback blob). */
   draco: boolean;
 }
 
+
+/** A bundled breed's GLB, from the base64 its chunk carries. */
+function bundledGlb(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
 
 /** One decoder per decoder path, created on first use and kept for the page.
  *  Keyed by path so two tanks with different `dracoPath` values do not share
@@ -135,9 +206,8 @@ function dracoLoader(path: string): DRACOLoader {
   return loader;
 }
 
-/** Tanks currently able to decode, per decoder path. The decoder outlives any
- *  single tank (templates are cached page-wide) but must not outlive the LAST
- *  one, or its worker leaks for the life of the page. */
+/** Active decode tasks per decoder path. A template no longer needs Draco
+ *  after parsing, so lifetime follows the work instead of any tank. */
 const DRACO_USERS = new Map<string, number>();
 
 function retainDraco(path: string): void {
@@ -156,6 +226,21 @@ function releaseDraco(path: string): void {
   DRACO_BY_PATH.get(k)?.dispose();
   DRACO_BY_PATH.delete(k);
 }
+
+async function withDracoLoader<T>(
+  path: string,
+  task: (loader: DRACOLoader) => Promise<T>,
+): Promise<T> {
+  retainDraco(path);
+  try {
+    return await task(dracoLoader(path));
+  } finally {
+    releaseDraco(path);
+  }
+}
+
+/** Test seam for the shared decoder lifetime; not exported by the package. */
+export const __withDracoLoaderForTest = withDracoLoader;
 
 /**
  * The water ceiling: one translucent plane above the fish, rippling in the
@@ -180,32 +265,56 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
       uTime: { value: 0 },
       uColor: { value: new Color(color) },
       uOpacity: { value: opacity },
+      ...causticUniforms(),
+      tMirror: { value: null },
+      uMirrorMatrix: { value: new Matrix4() },
+      uMirror: { value: new Vector3() },
+      uMirrorDeep: { value: new Color() },
+      uMirrorLit: { value: new Color() },
     },
     vertexShader: `
       uniform float uTime;
       varying float vRipple;
+      varying vec3 vW;
       void main() {
         vec3 p = position;
         float r = sin(p.x * 0.012 + uTime * 0.5) * cos(p.z * 0.014 - uTime * 0.37);
         p.y += r * 6.0;
         vRipple = r;
+        vW = (modelMatrix * vec4(p, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor;
       uniform float uOpacity;
       varying float vRipple;
+      varying vec3 vW;
+      ${MIRROR_GLSL}
       void main() {
         // Caustic-ish banding: the ripple itself modulates brightness, so the
         // surface reads as moving water rather than a tinted sheet of glass.
         float band = 0.65 + 0.35 * vRipple;
-        gl_FragColor = vec4(uColor * band, uOpacity * band);
+        float alpha = uOpacity * band;
+        if (uMqCaustic.x > 0.0) {
+          // The same net the floor gets, seen from below where it is made —
+          // and the far sheet fades into the water instead of drawing a hard
+          // line to the horizon.
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 6.0);
+          band = mix(band, 0.35 + 0.45 * net, uMqCaustic.x);
+          float far = 1.0 - smoothstep(320.0, 900.0, length(vW - cameraPosition));
+          alpha = uOpacity * band * mix(1.0, far, uMqCaustic.x);
+        }
+        gl_FragColor = vec4(uColor * band, alpha);
+        // From below, with the mirror on: Snell's window and the reflected tank.
+        if (uMirror.x > 0.0 && cameraPosition.y < vW.y) gl_FragColor = mqSurfaceUnderside(gl_FragColor.rgb, gl_FragColor.a);
       }`,
   });
   mat.userData.mqOwned = true;
   const mesh = new Mesh(geo, mat);
   mesh.position.y = y;
   mesh.frustumCulled = false;
+  mesh.userData.mqMirrorSkip = true;
   return { mesh, material: mat };
 }
 
@@ -228,7 +337,9 @@ function buildWaterCeiling(y: number, color: string, opacity: number): {
  *  clamped against the SAME expression the mesh is built from. A `dunes` or
  *  `ridges` floor reaches +46, well above the bottom of the fish's depth band,
  *  so without this a bottom-hugger swims through the hill it is hugging. */
-function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
+const smooth01 = (t: number): number => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+export function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => number {
   const R = 620;
   // Two seeded octaves — enough for a silhouette, cheap enough to build in a
   // frame. Phases come from the rng so two tanks are never the same hill.
@@ -251,15 +362,39 @@ function terrainHeightFn(kind: FloorKind, rng: Rng): (x: number, z: number) => n
       // The bowl stays, but a shorter ripple gives the near floor a surface —
       // d² alone is near-constant inside the tank radius.
       h = d * d * 150 - 60 + Math.sin(x * 0.024 + a) * 7 + Math.cos(z * 0.02 + c) * 5;
+    } else if (kind === 'shelf') {
+      // The town on a raised shelf: a plateau round the village (it sits a
+      // little behind the middle), its edge wandering, falling in two steps —
+      // a terraced lip — to a lower, gently rolling floor.
+      const dx = x, dz = z + 30, th = Math.atan2(dz, dx);
+      const edge = 165 + Math.sin(th * 3 + a) * 22 + Math.sin(th * 5 + b) * 10;
+      const r = Math.hypot(dx, dz);
+      const upper = 1 - smooth01((r - edge) / 12), lower = 1 - smooth01((r - edge - 40) / 14);
+      const roll = Math.sin(x * 0.03 + a) * 4 + Math.cos(z * 0.026 + c) * 3;
+      h = upper * 20 + lower * 18 - 22 + roll * (1 - lower) + Math.sin(x * 0.05 + b) * 1.2 * upper;
+    } else if (kind === 'trench') {
+      // A channel meandering across the front of the town, steep-walled and
+      // deep enough for a fish to hide in, the floor either side gently rolling.
+      const zc = 95 + Math.sin(x * 0.011 + a) * 32 + Math.sin(x * 0.027 + b) * 10;
+      const w = 34 + Math.sin(x * 0.017 + c) * 8;
+      const q = (z - zc) / w;
+      const cut = Math.exp(-q * q * q * q);
+      h = -48 * cut + Math.sin(x * 0.029 + a) * 5 * (1 - cut) + Math.cos(z * 0.024 + c) * 4 * (1 - cut);
+    } else if (kind === 'terraces') {
+      // Tiers stepping up behind the town: each a flat tread and a short
+      // steep riser, wandering a little so they read as rock, not stairs.
+      const back = Math.max(0, -z - 45 + Math.sin(x * 0.015 + a) * 20);
+      const tread = 38, k = back / tread, step = Math.floor(k), f = k - step;
+      h = (step + smooth01((f - 0.78) / 0.22)) * 20 + Math.sin(x * 0.04 + b) * 1.5 + Math.cos(z * 0.03 + c) * 2;
     }
     // Feather the rim to nothing so the terrain never shows a cut edge.
     return h * Math.max(0, 1 - d * d);
   };
 }
 
-function buildTerrain(height: (x: number, z: number) => number, color: string): Mesh {
+function buildTerrain(height: (x: number, z: number) => number, color: string, detail = 72, carved = false): Mesh {
   const R = 620;
-  const geo = new PlaneGeometry(R * 2, R * 2, 72, 72);
+  const geo = new PlaneGeometry(R * 2, R * 2, detail, detail);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position!;
   for (let i = 0; i < pos.count; i++) {
@@ -277,7 +412,10 @@ function buildTerrain(height: (x: number, z: number) => number, color: string): 
   const lx = -0.45, ly = 0.78, lz = -0.43;
   for (let i = 0; i < pos.count; i++) {
     const lambert = Math.max(0, normal.getX(i) * lx + normal.getY(i) * ly + normal.getZ(i) * lz);
-    const v = 0.45 + 0.55 * lambert;
+    // A carved floor (shelf, trench, terraces) darkens with slope as well, so
+    // a lip, a riser or a trench wall reads as rock face, whichever way the sun is.
+    const slope = carved ? 0.45 + 0.55 * Math.pow(Math.max(0, normal.getY(i)), 6) : 1;
+    const v = (0.45 + 0.55 * lambert) * slope;
     shadeArr[i * 3] = v;
     shadeArr[i * 3 + 1] = v;
     shadeArr[i * 3 + 2] = v;
@@ -311,16 +449,20 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
     depthWrite: false,
     blending: AdditiveBlending,
     side: DoubleSide,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength } },
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
     vertexShader: `
       varying float vY;
+      varying vec3 vW;
       void main() {
         vY = uv.y;
+        vW = (modelMatrix * vec4(position, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `
+      ${CAUSTIC_FUNCS}
       uniform vec3 uColor; uniform float uStrength; uniform float uTime;
       varying float vY;
+      varying vec3 vW;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone.
@@ -329,7 +471,16 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
         // 0.13, not more: with the shaft finally IN frame, alpha is the whole
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
-        gl_FragColor = vec4(uColor, fade * uStrength * 0.13 * breathe);
+        float a = fade * uStrength * 0.13 * breathe;
+        // With caustics on, a shaft is the same rippled light that lands on
+        // the floor: brighter where the net focuses at the surface above this
+        // streak, darker between, with slow bands running down it.
+        if (uMqCaustic.x > 0.0) {
+          float net = mqCausticNet1(vec3(vW.x, uMqCaustic.w, vW.z), 3.0);
+          float band = 0.8 + 0.2 * sin(vW.y * 0.045 - uMqCaustic.z * ${((Math.PI * 2 * 118) / 1200).toFixed(8)} + vW.x * 0.03);
+          a *= mix(1.0, net * band, uMqCaustic.x * 0.8);
+        }
+        gl_FragColor = vec4(uColor, a);
       }`,
   });
   mat.userData.mqOwned = true;
@@ -344,6 +495,7 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
   geo.userData.mqOwned = true;
   for (let i = 0; i < count; i++) {
     const m = new Mesh(geo, mat);
+    m.userData.mqMirrorSkip = true; // light in the water, not a thing the surface reflects
     const a = rng.next() * Math.PI * 2;
     const r = 45 + rng.next() * 130;
     m.position.set(Math.cos(a) * r, 72, Math.sin(a) * r);
@@ -422,6 +574,81 @@ interface Fish {
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
+  /** Materials this fish owns for crystal tinting, with their untinted
+   *  colours. Created on the first tinted frame — never, by default. */
+  /** What this fish's GLOW parts add up to; null when nothing on it glows. */
+  glow: FishGlow | null;
+  /** Eye rig: undefined until first asked for, null when the model has no eyes. */
+  eyes?: EyeRig | null;
+  /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
+  wave?: WaveRig | null;
+  /** A breed rigged in Blender, driven by its own module: it, not the generic
+   *  clip path, sets the mixer. The crab walks the floor instead of swimming
+   *  (crab.ts); the glowfish fishes with its lure (angler.ts); the hackerfish
+   *  hacks, crashes and reboots, its face a screen (hacker.ts, screen.ts); the
+   *  shark patrols and strikes (shark.ts). `lights` are
+   *  this frame's levels for its glowing parts, by material name. */
+  rig?: {
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
+    lights: Record<string, number>;
+    /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
+     *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
+    bloom?: number;
+  } | null;
+  tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
+  tinted?: boolean;
+}
+
+/** One fish as `inspect()` reports it — the analytic view of a frame. */
+interface InspectFish {
+  index: number;
+  url: string;
+  breed: string | null;
+  style: string;
+  band: string;
+  bond: string;
+  /** Formation seat, or null for a free fish. */
+  seat: number | null;
+  /** Whether the swim wave is bending this fish (false for a breed it skips, or `swimWave: 0`). */
+  waving: boolean;
+  x: number;
+  y: number;
+  z: number;
+  /** Compass heading in the ground plane, degrees (0 = +z, 90 = +x). */
+  heading: number;
+  /** Body length against a minted fish: breed × token `*size` × this fish's own × `fishSize`. */
+  size: number;
+  /** A maneuver event is displacing this fish right now. */
+  maneuvering: boolean;
+  /** A rigged breed's current business: a crab's walk, turn, forage, pinch, wave, cheer, look or idle (crab.ts); a glowfish's swim, lure or chomp (angler.ts); a hackerfish's swim, hack, crash or boot (hacker.ts); a shark's swim or bite (shark.ts); a starfish's crawl, turn, idle, look, wave, stand or curl (starfish.ts); a dori's swim, hover, burst, pick, flare, headstand, flop or wary (tang.ts); an octopus's crawl, jet, ink, drift, tiptoe, turn, look, wave, beckon, reach, peek, pounce or sleep (octopus.ts). */
+  doing?: string;
+  /** A dori's gaze (tang.ts): what its eyes are on, and how many degrees they point off the viewer (null: no viewer in front of it). */
+  looking?: string;
+  offViewer?: number | null;
+  /** An octopus's (octopus.ts): how far its pupils turn to stay level, and how far its body is rolled (degrees). */
+  pupilRoll?: number;
+  bodyRoll?: number;
+  /** A blowfish's (puffer.ts): how puffed (0..1), how shut each eye (left, right), and the flirt its eyes are making. */
+  puff?: number;
+  lids?: [number, number];
+  flirt?: string | null;
+}
+
+/** The leader a bonded fish rides: plan, where along it, and the light pull
+ *  it took this frame so the file moves as one. */
+interface LeaderFrame {
+  plan: SwimPlan;
+  /** The leader's style — a follower swims in its leader's depth band, so an
+   *  escort behind a surface turtle skims with it instead of riding the raw
+   *  spline thirty units below. */
+  style: SwimStyleSpec;
+  d: number;
+  effort: number;
+  phase: number;
+  pullX: number;
+  pullZ: number;
+  /** The leader's body length now — a follower keeps station in ITS lengths. */
+  len: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +661,12 @@ class TankInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement;
   private readonly ownsCanvas: boolean;
   private readonly renderer: WebGLRenderer;
+  /** The renderer's own render, kept before anything wraps it (the finish): the mirror pass draws with it. */
+  private readonly rawRender: (scene: Object3D, camera: import('three').Camera) => void;
+  /** The surface mirror (high tier), made the first frame it is asked for. */
+  private mirror: SurfaceMirror | null = null;
+  private mirrorDrawn = false;
+  private clockSec = 0;
   private quality: TankQuality;
   private govScale = 1;
   private frameTimes: number[] = [];
@@ -444,6 +677,9 @@ class TankInstance implements SaverInstance {
   private readonly camera: PerspectiveCamera;
   private readonly fogColor = new Color();
   private readonly floorMat: MeshBasicMaterial;
+  /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
+  private finishPass: FinishPass | null = null;
+  private finishAmount = 0;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -452,14 +688,128 @@ class TankInstance implements SaverInstance {
   private roomKey = '';
   private waterMat: ShaderMaterial | null = null;
   private terrainMat: MeshBasicMaterial | null = null;
+  /** Caustics: installed the first frame `caustics` goes above 0, then kept (0 multiplies by 1). */
+  private causticsInstalled = false;
+  private readonly causticState = new Vector4(0, 12, 0, 132);
   /** World-space seabed height, or null on a flat floor. Set by buildRoom. */
   private floorHeightAt: ((x: number, z: number) => number) | null = null;
+  /** What a crab stands on: the seabed, the stone's own top, a cluster's mound. */
+  private readonly crabGround = (x: number, z: number): number => Math.max(
+    this.terrainAt ? this.terrainAt(x, z) : 0, this.scenery?.groundAt(x, z) ?? -Infinity, clusterMound(this.clusters, x, z));
+  private readonly crabSpots: number[] = [];
+  /** Elbow room (avoid.ts): one body per fish on screen, reused frame to frame. */
+  private readonly avoidPool: AvoidBody[] = [];
+  /** Lowest y a dodged fish may take at (x, z): the seabed's clearance, as in the draw half. */
+  private readonly fishFloorAt = (x: number, z: number): number =>
+    Math.min(BOUNDS.yMax, (this.floorHeightAt?.(x, z) ?? -Infinity) + FISH_LENGTH * 0.5);
+  private readonly avoidBodies: AvoidBody[] = [];
+  private readonly avoidFinish: Array<() => void> = [];
+  private readonly avoidOff = new Float64Array(MAX_FISH * 3);
+  private readonly avoidRate = new Float64Array(MAX_FISH * 3);
+  private readonly avoidAhead = new Float64Array(MAX_FISH * 3);
+  private readonly avoidScratch = new Float64Array(MAX_FISH * 3);
+  private readonly crowdAt = new Float64Array(MAX_FISH * 4);
+  /** The fish slot of each avoid body. */
+  private readonly avoidSlot: number[] = [];
+  /** Who touched whom in the last frame, with and without the dodge — `inspect().crowding`. */
+  private lastCrowding: (Crowding & { without: number }) | null = null;
+  private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
+  private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, focusX: 0, focusZ: 0, doing: 'crawl', bloom: 0 };
+  /** The bare terrain, before any cluster stands on it (null = flat at 0). */
+  private terrainAt: ((x: number, z: number) => number) | null = null;
+  // Scenery. Everything below stays null/empty until a scene asks for props.
+  private scenery: Scenery | null = null;
+  private sceneryKey = "";
+  private crystals: CrystalField | null = null;
+  /** The colonies that burst out of the rocks: the same field, fed by the scenery. */
+  private rockCrystals: CrystalField | null = null;
+  /** Under each crab, a soft shadow on the ground it stands on (made when the first crab lands). */
+  private walkShadows: ContactShadows | null = null;
+  private walkShadowN = 0;
+  /** The shard shapes this scene's crystals wear — rock colonies wear them too. */
+  private shardVariants: ReturnType<typeof shardGeometry>[] | null = null;
+  private clusters: Cluster[] = [];
+  private emitters: Emitter[] = [];
+  /** The fixed emitters that hold a floor-pool slot: the light field has no
+   *  cap, the floor has `MAX_POOLS`. Biggest pools first, and never every
+   *  slot — a moving source (a glowing fish, a sinking lantern) always has
+   *  somewhere to land. */
+  private fixedPools: Emitter[] = [];
+  private propsKey = '';
+  private warnedProps = '';
+  private warnedFlora = '';
+  private warnedPalette = '';
+  /** Scratch for the garden's view of the cast (setFish), reused every frame. */
+  private readonly floraFish = Array.from({ length: 24 }, () => ({ x: 0, y: 0, z: 0, r: 0 }));
+  private readonly floraFishAt = new Vector3();
+  private readonly poolUniforms = emptyPoolUniforms();
+  private readonly lightScratch: [number, number, number] = [0, 0, 0];
+  // Fish glow: built on the first glowing fish, never for a cast without one.
+  private glowCards: GlowCards | null = null;
+  /** Follow-spot: the beam, and where its fish was this frame. */
+  private readonly spotBeams: (SpotBeam | undefined)[] = [];
+  private readonly spotLights: (PointLight | undefined)[] = [];
+  private readonly spotAt = [new Vector3(), new Vector3(), new Vector3()];
+  private readonly spotSeen = [false, false, false];
+  /** Heading (xz) of each spotted fish, for its shadow. */
+  private readonly spotHead = [new Vector3(0, 0, 1), new Vector3(0, 0, 1), new Vector3(0, 0, 1)];
+  /** Follow camera (`cameraFollow`): where its fish is, which way it is headed,
+   *  and where it was a few lengths back along its own path. All three are
+   *  written by the fish loop from closed-form poses — never smoothed across
+   *  frames — so the shot at `t` is the same however you arrived at `t`. */
+  private readonly followAt = new Vector3();
+  private readonly followHead = new Vector3(0, 0, 1);
+  private readonly followTrail = new Vector3();
+  private followSeen = false;
+  private followHasTrail = false;
+  private followState: { slot: number; x: number; y: number; z: number } | null = null;
+  /** Named shots: the pose scratch, and the landmark `macro` frames (picked once per azimuth). */
+  private readonly shotScratch: ShotPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: ORBIT_FOV };
+  private landmark: { x: number; y: number; z: number; size: number } | null = null;
+  private landmarkKey = '';
+  private readonly spotLevel = [0, 0, 0];
+  /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
+  private waterInstalled = false;
+  private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+  private spotRig: SpotSpec[] = [];
+  private spotSheet: SpotSheet | null = null;
+  private spotKey = '\u0000';
+  private readonly spotLamp = new Vector3();
+  private readonly spotHit = new Vector3();
+  private readonly spotTint = new Color();
+  /** The swim wave's per-fish state, reused every frame. */
+  private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
+  /** The scripted scene the first fish of the cast are playing, if any. */
+  private vignette: Vignette | null = null;
+  private vignetteKey = '';
+  private warnedVignette = '';
+  /** Lit mode: the rig, and the glow parts competing for its point lights. */
+  private lit = false;
+  private readonly flatFill: HemisphereLight;
+  private studio: Studio | null = null;
+  private readonly lightBids: Array<{ d: number; x: number; y: number; z: number; r: number; g: number; b: number; size: number; power: number }> = [];
+  private readonly glowPos = new Vector3();
+  private readonly fishEmitters: Emitter[] = [];
+  private tintEmitters: Emitter[] = [];
+  private poolsInstalled = false;
   private rayMat: ShaderMaterial | null = null;
   private ceiling: Mesh | null = null;
   private presetWaterY = 0;
   /** The active room's palette — consulted only where the author left the
    *  matching param at its manifest default. */
-  private roomPalette: { fog: string; floor: string; mote: string } | null = null;
+  private roomPalette: { fog: string; floor: string; mote: string; tint?: string } | null = null;
+  /** The room's surface and shaft colours: where the fish's light from above comes from, absent a tint. */
+  private roomSurface: string | null = null;
+  private roomRays: string | null = null;
+  /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
+  private houseLevel = 1;
+  private fishLightInstalled = false;
+  /** Params a control track steers: an authored value, so a room palette never overrides them. */
+  private trackedPaths = new Set<string>();
+  /** The background when a water tint is on: a dome shaded with the same in-scatter the fog fades to. */
+  private waterDome: Mesh | null = null;
+  private readonly tintColor = new Color();
+  private readonly horizonColor = new Color();
   private presetRayStrength = 0;
   private readonly floorDisc: Mesh;
   /** Sparse, indexed by spawn slot — holes are still-loading fish. */
@@ -468,6 +818,53 @@ class TankInstance implements SaverInstance {
    *  population. reconcile() diffs fish against it; spawn workers re-check
    *  wantKey after every await, so a stale load can never seat a fish. */
   private wantUrls: string[] = [];
+  /** Per-slot style from `@style` tokens (MQ30); null = the scene's swimStyle. */
+  private wantStyles: Array<SwimStyleSpec | null> = [];
+  /** Per-slot breed from the mix, for `swimStyle: 'auto'` (MQ33). */
+  private wantBreeds: string[] = [];
+  /** A babyfish's hiccup bubbles: made with the first baby, so a tank without one draws nothing new. */
+  private burps: BurpLayer | null = null;
+  /** An octopus's ink clouds: made with the first octopus (ink.ts). */
+  private ink: InkLayer | null = null;
+  /** This frame's octopus, one at a time through the fish loop (octopus.ts). */
+  private readonly octoOutput = newOctopusOutput();
+  private readonly floorColor = new Color();
+  private readonly burpFrom = new Vector3();
+  /**
+   * Where the viewer is, for a fish that looks at them (tang.ts, puffer.ts).
+   * The follow camera is placed AFTER the fish (it needs their positions), so
+   * during the fish loop `camera.position` is still the shot's: a fish would
+   * look at an orbit camera nobody is watching through. So: last frame's
+   * camera, one frame behind, when following.
+   */
+  private readonly viewerAt = new Vector3();
+  private viewerSeen = false;
+  private readonly burpAt = new Vector3();
+  private readonly burpTmp = new Vector3();
+  /**
+   * Who a baby copies (babyfish.ts): the baby just before it in the mix — in a
+   * `@follow` line, the one ahead. A run of babies is cut into lines of
+   * BABY_LINE, so a moment travels at most that far and the lookup stays short.
+   */
+  private readonly babyLeader: BabyLeader = (i) => {
+    const b = this.wantBreeds;
+    if (i <= 0 || b[i - 1] !== 'babyfish') return null;
+    let run = 1;
+    while (i - run - 1 >= 0 && b[i - run - 1] === 'babyfish') run++;
+    return run % BABY_LINE === 0 ? null : i - 1;
+  };
+  /** Per-slot `*size` from the mix (1 when the token has none). */
+  private wantSizes: number[] = [];
+  /** The body length (units) of the fish each spot follows, for its shadow. */
+  private readonly spotLen = [FISH_LENGTH, FISH_LENGTH, FISH_LENGTH];
+  /** Ground-plane centres of the room's light shafts — what `lightSeek`
+   *  pulls toward (MQ32). Empty when the room has no rays. */
+  private rayPools: Array<[number, number]> = [];
+  /** What the last rendered frame looked like, in numbers — `inspect()`. */
+  private lastFish: InspectFish[] = [];
+  private lastFrameT = 0;
+  /** `inspect()` answers null until a frame has actually been rendered. */
+  private rendered = false;
   private wantKey = '';
   private wantInputKey = '';
   /** Last fishMix string whose parse problems were warned — once per mix,
@@ -480,8 +877,8 @@ class TankInstance implements SaverInstance {
   private h: number;
   private frameId: number | null = null;
   private paused = false;
-  private startT = 0;
   private t = 0;
+  private readonly clock = new LogicalClock();
 
   private params: Record<string, ParamValue>;
   private track: ControlTrack | null = null;
@@ -490,18 +887,108 @@ class TankInstance implements SaverInstance {
    *  (speed changes glide); when it does not, the legacy constant-speed
    *  formula is kept bit-for-bit. */
   private speedTracked = false;
+  private autoRotateTracked = false;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
    *  into `school` never respawns a fish. */
   private carrierPlan: SwimPlan;
+  /** The ambient school (`shoal`): its own route, rebuilt only when its key changes. */
+  private shoal: Shoal | null = null;
+  private shoalKey = '';
+  private shoalPlan: SwimPlan | null = null;
+  private shoalTau = 0;
+  /** What the school keeps above: ground, rocks, crystals and the plants' swept tips (canopy.ts). */
+  private shoalCanopy: Canopy | null = null;
+  /** The canopy along the school's route (max over the next six lengths), sampled round the loop. */
+  private shoalLift: Float64Array | null = null;
+  private shoalSpeedTracked = false;
+  private danceTempoTracked = false;
+  /** This frame's dance class: each dancer's feet, by fish index (starfish.ts classSpot). */
+  private readonly danceSpots = new Map<number, [number, number]>();
+  private danceYaw = 0;
+  /** The partner dance: each dancer's part, and its partner's fish index. */
+  private readonly danceRoles = new Map<number, { role: DuetRole; partner: number }>();
+  /** A partner dancer's part and its partner's feet (empty outside the partner dance). */
+  private partnerOf(index: number): { role?: DuetRole; partnerX?: number; partnerZ?: number } {
+    const r = this.danceRoles.get(index);
+    const at = r ? this.danceSpots.get(r.partner) : undefined;
+    return r && at ? { role: r.role, partnerX: at[0], partnerZ: at[1] } : {};
+  }
+  /** Beats danced by `tSec` (starfish.ts danceBeats). */
+  private danceBeats(tSec: number): number {
+    return danceBeats(tSec, this.num('danceTempo'), this.space, this.track, this.danceTempoTracked);
+  }
+  /** Travel time for the school at a moment, cached for the two instants a frame asks about. */
+  private shoalWarpMemo: [number, number, number, number] = [NaN, 0, NaN, 0];
+  private readonly shoalFloor = (x: number, z: number): number =>
+    this.shoalCanopy ? this.shoalCanopy.at(x, z) : this.floorHeightAt?.(x, z) ?? 0;
+  /** How far along its route the school has travelled by `tSec`: its own
+   *  `shoalSpeed`, not the cast's — integrated when steered, so a change glides. */
+  private shoalWarp(tSec: number): number {
+    const m = this.shoalWarpMemo;
+    if (m[0] === tSec) return m[1];
+    if (m[2] === tSec) return m[3];
+    const def = this.space.shoalSpeed;
+    const w = this.shoalSpeedTracked && this.track
+      ? integrateParam(this.space, this.track, 'shoalSpeed', tSec * 1000, {
+          ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}),
+        }) / 1000
+      : tSec * this.num('shoalSpeed');
+    m[2] = m[0]; m[3] = m[1]; m[0] = tSec; m[1] = w;
+    return w;
+  }
+  /** The school's centre at a moment, for a fish `along` its length: that fish
+   *  rides the route at its own distance (so the school bends through a turn),
+   *  lifted over the canopy a few lengths ahead of it, and kept in open water —
+   *  under a band top of the surface less two lengths (at most 110), not the
+   *  cast's 72, so a tall kelp bed does not squeeze the band shut. */
+  /** Per-instant memo: a frame asks for the same (t, along) from the position
+   *  solve and again from the heading, and each answer is several spline samples. */
+  private shoalCarrierMemo: [number, Map<number, Carrier>, number, Map<number, Carrier>] = [NaN, new Map(), NaN, new Map()];
+  private readonly shoalCarrier = (tSec: number, along: number): Carrier => {
+    const memo = this.shoalCarrierMemo;
+    let bucket = memo[0] === tSec ? memo[1] : memo[2] === tSec ? memo[3] : null;
+    if (!bucket) {
+      // Keep the newer instant, recycle the older map.
+      const recycled = memo[3]; recycled.clear();
+      memo[2] = memo[0]; memo[3] = memo[1]; memo[0] = tSec; memo[1] = recycled;
+      bucket = recycled;
+    }
+    const hit = bucket.get(along);
+    if (hit) return hit;
+    const out = this.shoalCarrierAt(tSec, along);
+    bucket.set(along, out);
+    return out;
+  };
+  private shoalCarrierAt(tSec: number, along: number): Carrier {
+    const plan = this.shoalPlan!, L = this.shoal!.length, g = Math.cbrt(this.shoal!.count / 30);
+    const d = distanceAt(plan, this.shoalWarp(tSec), 0.8) + along;
+    const c = swimPoseAtDistance(plan, d);
+    const a = swimPoseAtDistance(plan, d + L * 2), b = swimPoseAtDistance(plan, d - L * 2);
+    let fx = a.x - b.x, fz = a.z - b.z;
+    if (Math.hypot(fx, fz) < 1e-3) { fx = c.fx; fz = c.fz; }
+    const reach = (2.4 * g + 1) * L, up = (1.6 * g + 1) * L;
+    const maxR = Math.max(0, BOUNDS.radius - reach), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+    let y = c.y;
+    const lift = this.shoalLift;
+    if (lift) {
+      // The canopy along the route a few lengths ahead, precomputed at build.
+      const n = lift.length, f = ((((d / plan.totalLength) % 1) + 1) % 1) * n;
+      const i = Math.floor(f) % n, u = f - Math.floor(f);
+      y = Math.max(y, lift[i]! * (1 - u) + lift[(i + 1) % n]! * u + 1.2 * L + 1.6 * g * L * 0.6);
+    }
+    const top = Math.min(this.ceiling ? this.ceiling.position.y - 2 * L : Infinity, 110) - up * 0.5;
+    y = Math.max(BOUNDS.yMin + up, Math.min(top, y));
+    return { x: c.x * cs, y, z: c.z * cs, fx, fz };
+  }
   /** Shape every live plan was compiled on — setState recompiles when the
    *  steered value moves. Plans are cheap (one arc table); rebuilding them
    *  beats respawning fish, which would drop GLBs mid-scene. */
   private pathShape: PathShape = 'wander';
-  /** Decoder paths this tank retained, released on dispose. */
-  private readonly dracoPaths = new Set<string>();
-
+  /** The camera azimuth every `crossing` lane in the tank is laid against.
+   *  Owned here so spawn-time and steer-time compiles agree. */
+  private laneAzimuth = 0;
   constructor(
     ctx: SaverContext,
     space: ParamSpace,
@@ -537,13 +1024,17 @@ class TankInstance implements SaverInstance {
       stencil: false,
       powerPreference: 'high-performance',
     });
+    this.rawRender = this.renderer.render.bind(this.renderer);
     this.renderer.setPixelRatio(this.pr());
     this.renderer.setSize(this.w, this.h, false);
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = LinearToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
-    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, 1200);
+    // Far enough for the horizon's outer ring (radius 820 ± 45) seen across
+    // the tank from the widest orbit (`cameraDistance` 400): the far side of
+    // that ring is ~1270 out. Nothing past the fog is visible anyway.
+    this.camera = new PerspectiveCamera(55, this.w / this.h, 1, CAMERA_FAR);
 
     const fogHex = String(this.space.fogColor?.default ?? '#030009');
     this.fogColor.set(fogHex);
@@ -622,7 +1113,10 @@ class TankInstance implements SaverInstance {
 
     // Gentle hemisphere so MeshStandardMaterial eyes render their authored detail.
     // MeshBasicMaterial body/glow coats ignore it — zero visual cost for them.
-    this.scene.add(new HemisphereLight(0xffffff, 0x4466aa, 1.5));
+    // Flat mode's one light: a gentle hemisphere so authored PBR eyes and
+    // atlases render. Lit mode swaps it for the studio (ensureStudio).
+    this.flatFill = new HemisphereLight(0xffffff, 0x4466aa, 1.5);
+    this.scene.add(this.flatFill);
 
     this.reconcile();
 
@@ -678,6 +1172,7 @@ class TankInstance implements SaverInstance {
       this.terrainMat = null;
       this.rayMat = null;
       this.ceiling = null;
+      this.rayPools = [];
     }
     const preset: EnvironmentPreset = environmentOf(envName);
     const can = affordableLayers(this.quality.envBudget, preset);
@@ -694,17 +1189,23 @@ class TankInstance implements SaverInstance {
       ? (floorOverride as FloorKind)
       : preset.floor;
     if (kind !== 'flat') {
-      const floorHex = String(this.params.floorColor ?? preset.palette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+      const floorHex = String(this.paletteOr('floorColor', preset.palette?.floor) ?? '#0a1d33');
       const height = terrainHeightFn(kind, this.ctxSaver.rng.fork(0x7e88 ^ preset.seedSalt));
-      const terrain = buildTerrain(height, floorHex);
+      // Shelves, trenches and terraces have edges: a finer mesh, so a lip reads as a lip.
+      const carved = kind === 'shelf' || kind === 'trench' || kind === 'terraces';
+      const terrain = buildTerrain(height, floorHex, carved ? 240 : 72, carved);
       terrain.position.y = -2;
       // World-space seabed, for the swim clamp. Same expression, same seed.
-      this.floorHeightAt = (x, z) => height(x, z) + terrain.position.y;
+      this.terrainAt = (x, z) => height(x, z) + terrain.position.y;
+      this.floorHeightAt = this.terrainAt;
       group.add(terrain);
       this.terrainMat = terrain.material as MeshBasicMaterial;
     }
     // A flat floor has no hills to avoid; clear any the previous room left.
-    if (kind === 'flat') this.floorHeightAt = null;
+    if (kind === 'flat') {
+      this.floorHeightAt = null;
+      this.terrainAt = null;
+    }
     this.floorDisc.visible = kind === 'flat';
     if (can.water && preset.water) {
       const y = waterY >= 0 ? waterY : preset.water.y;
@@ -725,14 +1226,682 @@ class TankInstance implements SaverInstance {
       );
       material.visible = strength > 0;
       group.add(rg);
+      // Where the light falls, for light-seeking fish. Read once per room —
+      // the shafts never move.
+      this.rayPools = rg.children.map((m) => [m.position.x, m.position.z]);
       this.rayMat = material;
       this.presetRayStrength = preset.rays.strength;
     }
     this.room = group;
     this.scene.add(group);
+    // A rebuilt terrain is a new material: it must learn the light field too.
+    if (this.poolsInstalled) this.installPools();
     this.applyRoomParams(waterY, rayStrength);
     this.roomPalette = preset.palette ?? null;
+    this.roomSurface = can.water && preset.water ? preset.water.color : null;
+    this.roomRays = preset.rays ? preset.rays.color : null;
     this.ctxSaver.host.dataset.mqEnv = preset.name;
+  }
+
+  /**
+   * Scenery for the current `propMix` — crystals, generated from the seed.
+   *
+   * Keyed like the room. With no tokens this returns before touching the rng,
+   * the scene graph or any material, so a propless tank is byte-for-byte the
+   * tank it was before props existed.
+   */
+  private buildProps(): void {
+    const envName = this.str('environment');
+    let mix = this.str('propMix').trim();
+    if (!mix && this.str('envProps') === 'on') {
+      mix = ENV_PROP_MIX[environmentOf(envName).name] ?? '';
+    }
+    const scale = this.num('crystalScale');
+    const wild = this.num('crystalWild');
+    const budget = this.quality.props;
+    const key = `${mix}|${scale}|${wild}|${this.num('rockDensity')}|${this.roomKey}|${budget.clusters}|${budget.shards}|${budget.halo}`;
+    if (key === this.propsKey) return;
+    this.propsKey = key;
+
+    if (this.crystals) {
+      this.scene.remove(this.crystals.group);
+      disposeOwned(this.crystals.group);
+      this.crystals = null;
+      this.clusters = [];
+      this.emitters = [];
+      this.fixedPools = [];
+      this.poolUniforms.uMqPoolN!.value = 0;
+      this.floorHeightAt = this.terrainAt;
+    }
+    delete this.ctxSaver.host.dataset.mqProps;
+    if (!mix) return;
+
+    const parsed = parsePropMix(mix);
+    const preset = environmentOf(envName);
+    const rng = this.ctxSaver.rng.fork(0xc257a1 ^ preset.seedSalt);
+    const VARIANTS = 3;
+    const layout = layoutCrystals(parsed.entries, rng.fork(1), {
+      environment: preset.name,
+      clusterCap: budget.clusters,
+      shardCap: budget.shards,
+      variants: VARIANTS,
+      scale,
+      wild,
+    });
+    const problems = [...parsed.problems, ...layout.problems];
+    if (problems.length > 0 && mix !== this.warnedProps) {
+      this.warnedProps = mix;
+      console.warn(`[metaquarium] propMix "${mix}": ${problems.join('; ')}`);
+    }
+    if (!layout.clusters.length) return;
+
+    const terrain = this.terrainAt;
+    for (const c of layout.clusters) c.y = (terrain ? terrain(c.x, c.z) : 0) + (this.num('rockDensity') > 0 ? 6 * scale : 0);
+    this.clusters = layout.clusters;
+    this.emitters = emittersOf(this.clusters);
+    const variants = Array.from({ length: VARIANTS }, (_, i) => shardGeometry(rng.fork(0x100 + i)));
+    this.shardVariants = variants;
+    this.crystals = buildCrystalField(
+      this.clusters, variants, this.emitters, { halo: budget.halo }, this.poolUniforms,
+    );
+    this.scene.add(this.crystals.group);
+    this.installPools();
+    // Floor-huggers ride over a cluster instead of through it.
+    const clusters = this.clusters;
+    this.floorHeightAt = (x, z) => Math.max(terrain ? terrain(x, z) : 0, clusterClearance(clusters, x, z));
+    this.ctxSaver.host.dataset.mqProps = String(this.clusters.length);
+  }
+
+  /** `floraPalette`, parsed; a bad colour is dropped with one warning, like `floraMix`. */
+  private floraPaletteParsed(src: string): string[] | undefined {
+    const parsed = parseFloraPalette(src, this.ctxSaver.rng.fork(0xf1a).next());
+    if (parsed.problems.length > 0 && src !== this.warnedPalette) {
+      this.warnedPalette = src;
+      console.warn(`[metaquarium] floraPalette "${src}": ${parsed.problems.join('; ')}`);
+    }
+    return parsed.palette;
+  }
+
+  /** `floraMix`, parsed; a bad entry is dropped with one warning, like `propMix`. */
+  private floraMixParsed(mix: string): ReturnType<typeof parseFloraMix>['mix'] {
+    const parsed = parseFloraMix(mix);
+    if (parsed.problems.length > 0 && mix !== this.warnedFlora) {
+      this.warnedFlora = mix;
+      console.warn(`[metaquarium] floraMix "${mix}": ${parsed.problems.join('; ')}`);
+    }
+    return parsed.mix;
+  }
+
+  private buildScenery(): void {
+    const rocks = this.num('rockDensity');
+    const homes = this.num('geodeHomes');
+    const veins = this.num('rockVeins');
+    const interior = this.str('interior') === 'geode';
+    const flora = this.num('floraDensity');
+    const floraMix = this.str('floraMix').trim(), environment = this.str('environment'), floraPalette = this.str('floraPalette').trim(), floraLayout = this.str('floraLayout') === 'gallery' ? 'gallery' as const : 'garden' as const;
+    const fountain = this.str('fountain') as 'none' | 'vent' | 'geode', streetLamps = this.num('streetLamps');
+    const geodes = this.num('geodes'), geodeMix = this.str('geodeMix').trim(), geodeMineral = this.str('geodeMineral').trim(), geodeLayout = this.str('geodeLayout') === 'gallery' ? 'gallery' as const : 'field' as const;
+    const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
+    const pearling = this.num('pearling'), mist = this.num('co2Mist');
+    const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
+    const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    if (key === this.sceneryKey) return;
+    this.sceneryKey = key;
+    if (this.scenery) {
+      this.scene.remove(this.scenery.group);
+      disposeOwned(this.scenery.group);
+      this.scenery = null;
+    }
+    if (this.rockCrystals) {
+      this.scene.remove(this.rockCrystals.group);
+      disposeOwned(this.rockCrystals.group);
+      this.rockCrystals = null;
+    }
+    const terrain = this.terrainAt ?? (() => 0);
+    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+      this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
+        { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
+          fountain, lamps: streetLamps,
+          geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
+          bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
+          wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
+      this.scene.add(this.scenery.group);
+      // Plants take the crystal and spot light on the tiers that can afford
+      // one more light loop per vertex; the low tier keeps the baked colour.
+      if (this.quality.glowLights >= 3) {
+        for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
+        // The geodes stand in the same light: a crystal tints the stone and agate beside it.
+        for (const m of this.scenery.geodeMaterials) installFloraLight(m, this.poolUniforms, false);
+      }
+      // What broke out of the rocks is the same crystal as `propMix`: same
+      // shard shapes, material, pulse, fog and halo — one more instanced
+      // field, no new program. It lends no light to the floor (a throwaway
+      // pool set), so night floors keep their colour.
+      const colonies = this.scenery.rockClusters;
+      if (colonies.length) {
+        const variants = this.shardVariants
+          ?? Array.from({ length: 3 }, (_, i) => shardGeometry(this.ctxSaver.rng.fork(0x70c5).fork(0x100 + i)));
+        this.rockCrystals = buildCrystalField(colonies, variants, [], { halo: this.quality.props.halo }, emptyPoolUniforms());
+        this.scene.add(this.rockCrystals.group);
+      }
+    }
+    // Homes are light sources too: their doors and windows join the same
+    // field the crystals feed, so they pool on the floor and tint a fish
+    // that swims past the door.
+    const lights = this.scenery?.emitters ?? [];
+    const walks = this.scenery?.paths ?? [];
+    writePaths(this.poolUniforms, walks, this.num('crystalScale'));
+    if (walks.length && !this.poolsInstalled) this.installPools();
+    this.emitters = [...emittersOf(this.clusters), ...lights];
+    // A castle brings a dozen lamps of its own; queued behind twelve clusters
+    // and the homes they would never reach the floor, and nothing moving
+    // could either. The biggest pools win the slots; the field itself keeps
+    // every source.
+    this.fixedPools = [...this.emitters].sort((a, b) => b.reach - a.reach).slice(0, MAX_POOLS - MOVING_POOLS);
+    if (this.emitters.length) {
+      fillPoolUniforms(this.poolUniforms, this.fixedPools);
+      this.installPools();
+    }
+    this.floorHeightAt = (x, z) => Math.max(terrain(x, z), clusterClearance(this.clusters, x, z), this.scenery?.clearance(x, z) ?? -Infinity);
+  }
+
+  /**
+   * One glowing fish, one frame: place its bloom card, breathe its core, and
+   * enter it in the light field. The fish's GLOW parts are SOURCES — that is
+   * what the original renders say and what a flat unlit colour never did.
+   */
+  /** Body-local → world, by hand: the scene graph's matrices are a frame
+   *  stale here. The body may sit off the group's origin (a crab stands its
+   *  feet on it), so its position counts. */
+  private bodyToWorld(f: Fish, x: number, y: number, z: number, out: Vector3): Vector3 {
+    const body = f.body!;
+    out.set(x, y, z).multiplyScalar(body.scale.x).applyAxisAngle(Y_AXIS, body.rotation.y).add(body.position);
+    return out.multiplyScalar(f.group.scale.x).applyQuaternion(f.group.quaternion).add(f.group.position);
+  }
+
+  private glowFish(f: Fish, n: number, amount: number, pulse: number, tSec: number): number {
+    const g = f.glow!;
+    const body = f.body!;
+    const phase = f.index * 1.7;
+    // At 0 the cores are their authored colour, static — no heat, no breath:
+    // `fishGlow: 0` is the tank before glow existed. Still written, not
+    // skipped, so turning the dial down un-latches the last hot frame.
+    const beat = amount > 0 ? 1 - pulse * 0.15 * (0.5 + 0.5 * Math.sin(tSec * 0.754 + phase)) : 1;
+    // White-hot core: emissive without HDR. The halo and card stay saturated,
+    // so the part reads as brighter than its own colour.
+    const hot = 0.34 * amount;
+    // A rigged breed's light lives with it (angler.ts: the lure breathes,
+    // beckons, goes dark at the strike): its level per part, by material. Not
+    // at `fishGlow: 0`, which is the authored colour, static.
+    const lights = amount > 0 ? f.rig?.lights : undefined;
+    const bloom = f.rig?.bloom ?? 1;
+    for (const c of g.cores) {
+      const lvl = beat * (lights?.[c.mat.name] ?? 1);
+      c.mat.color.setRGB(
+        (c.base.r + (1 - c.base.r) * hot) * lvl,
+        (c.base.g + (1 - c.base.g) * hot) * lvl,
+        (c.base.b + (1 - c.base.b) * hot) * lvl,
+      );
+    }
+    if (lights) for (const h of g.halos) h.mat.opacity = h.opacity * (lights[h.of] ?? 1);
+    if (amount <= 0) return n;
+    // Body-local → world, by hand: the scene graph's matrices are a frame
+    // stale here, and updating 24 skinned hierarchies to read a few points
+    // would cost more than the glow.
+    const scale = body.scale.x * f.group.scale.x;
+    if (!this.glowCards) {
+      this.glowCards = buildGlowCards(MAX_FISH * 4);
+      this.scene.add(this.glowCards.mesh);
+    }
+    const cam = this.camera.position;
+    const p = this.glowPos;
+    // One card PER glowing part, in the part's own colour: the bloom hugs the
+    // fin that glows instead of fogging the whole fish.
+    for (const part of g.parts) {
+      if (part.bone && part.offset) {
+        // A part riding a bone (a glowfish's lure) is where the bone has
+        // swung it, not where the bind pose had it. The group was placed this
+        // frame and the clip set, so its chain's matrices are brought up to date.
+        part.bone.updateWorldMatrix(true, false);
+        p.copy(part.offset).applyMatrix4(part.bone.matrixWorld);
+      } else this.bodyToWorld(f, part.x, part.y, part.z, p);
+      // A COAT (a glow part that is most of the silhouette — the angelfish's
+      // whole fin outline) is not a lamp. Sized and lit like an accent it
+      // washed a quarter of the frame in its colour, in every scene, from a
+      // single fish: it keeps a close, faint rim and casts nothing.
+      const size = (part.coat
+        ? Math.min(part.radius * scale, FISH_LENGTH * scale) * 1.7
+        : Math.max(part.radius * scale, FISH_LENGTH * 0.16) * 4.2) * Math.sqrt(bloom);
+      const k = g.gain * (part.coat ? 0.5 : 1) * (lights?.[part.name] ?? 1) * bloom;
+      this.glowCards.set(n, p.x, p.y, p.z, size, part.r * k, part.g * k, part.b * k, phase);
+      n += 1;
+      if (this.studio?.lights.length && !part.coat) {
+        this.lightBids.push({
+          d: Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / Math.max(0.2, g.gain),
+          x: p.x, y: p.y, z: p.z, r: part.r, g: part.g, b: part.b,
+          size, power: amount * g.gain * beat * (lights?.[part.name] ?? 1) * bloom,
+        });
+      }
+    }
+    this.bodyToWorld(f, g.cx, g.cy, g.cz, p);
+    // The floor takes light from accents only, over a fish-sized reach. The
+    // source is as strong as the dial says: what it throws on the floor and
+    // on a neighbour scales with `fishGlow` like the bloom does.
+    if (!g.cores.length && g.parts.every((q) => q.coat)) return n;
+    const reach = Math.min(Math.max(g.radius * scale, FISH_LENGTH * 0.35) * 1.8, FISH_LENGTH * 1.6);
+    const emit = 0.7 * g.gain * amount * bloom;
+    this.fishEmitters.push({
+      x: p.x, y: p.y, z: p.z, r: g.r * emit, g: g.g * emit, b: g.b * emit,
+      reach, phase, owner: f.index,
+    });
+    return n;
+  }
+
+  /** After the cast: the cards in use, and the glowing fish nearest the floor
+   *  into the pool slots the clusters left free. */
+  private commitGlow(n: number, amount: number, pulse: number, tSec: number): void {
+    const fog = this.scene.fog as Fog;
+    this.glowCards?.commit(n, tSec, amount, pulse, { color: this.fogColor, near: fog.near, far: fog.far });
+    // The point lights go to the glow parts nearest the lens — where light
+    // falling on a neighbouring voxel is actually seen. The rest keep their
+    // bloom; nobody can tell a distant fin is not casting.
+    if (this.studio) {
+      this.lightBids.sort((a, b) => a.d - b.d);
+      this.studio.lights.forEach((light, i) => {
+        const bid = this.lightBids[i];
+        if (!bid || amount <= 0) { light.intensity = 0; return; }
+        // A glow part sits IN the surface it should light, so from its own
+        // centre every neighbouring face is edge-on and takes nothing. Lifted
+        // toward the lens, it lights the faces the viewer is looking at —
+        // which is where a renderer's bounce and bloom put that colour.
+        const cam = this.camera.position;
+        const k = (bid.size * 0.3) / Math.max(1, Math.hypot(cam.x - bid.x, cam.y - bid.y, cam.z - bid.z));
+        light.position.set(bid.x + (cam.x - bid.x) * k, bid.y + (cam.y - bid.y) * k, bid.z + (cam.z - bid.z) * k);
+        light.color.setRGB(bid.r, bid.g, bid.b);
+        light.distance = bid.size * 3;
+        light.intensity = bid.power * bid.size * bid.size * 2.5;
+      });
+      this.lightBids.length = 0;
+    }
+    // Lanterns are moving light too: they tint a fish that passes under one
+    // and, when they sink low, pool on the floor like a glowing fin does.
+    const sky = this.scenery?.moving ?? [];
+    const dynamic = amount > 0 ? [...sky, ...this.fishEmitters] : sky;
+    this.tintEmitters = dynamic.length ? [...this.emitters, ...dynamic] : this.emitters;
+    const clusterSlots = this.fixedPools.length;
+    // Without crystals nobody else drives the pool look — homes alone, or
+    // glowing fish alone, or lanterns alone, must still light the floor. The
+    // gain is the room's (`crystalGlow`) when the room has fixed light, else
+    // full: a moving source already carries its own strength in its colour
+    // (a fish its `fishGlow`, a lantern its beat), so it is not scaled twice.
+    if (!this.crystals && this.poolsInstalled) {
+      this.poolUniforms.uMqPoolGain!.value = 0.4 * (this.emitters.length ? this.num('crystalGlow') : 1);
+      this.poolUniforms.uMqPoolTime!.value = tSec;
+      this.poolUniforms.uMqPoolPulse!.value = pulse;
+    }
+    if (!dynamic.length) {
+      if (this.poolsInstalled) this.poolUniforms.uMqPoolN!.value = clusterSlots;
+      return;
+    }
+    if (!this.poolsInstalled) this.installPools();
+    const floorAt = this.terrainAt;
+    const low = dynamic
+      .map((e) => ({ e, h: e.y - (floorAt ? floorAt(e.x, e.z) : 0) }))
+      .filter((c) => c.h < c.e.reach * 2.2)
+      .sort((a, b) => a.h - b.h)
+      .map((c) => c.e);
+    writePoolSlots(this.poolUniforms, low, clusterSlots);
+  }
+
+  /**
+   * Lit or flat, decided per frame from the param — on a channel the scene's
+   * params arrive as a track AFTER mount, so a constructor read would make
+   * `flat` unreachable from exactly the place it is steered. The rig is built
+   * once, on the first lit frame; a fish wears the look it was spawned under.
+   */
+  private ensureStudio(): void {
+    const want = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    if (want === this.lit) return;
+    this.lit = want;
+    if (want && !this.studio) {
+      this.studio = buildStudio(this.renderer, this.quality.glowLights);
+      this.scene.add(...this.studio.objects);
+    }
+    this.scene.environment = want ? this.studio!.environment : null;
+    for (const o of this.studio?.objects ?? []) o.visible = want;
+    this.flatFill.visible = !want;
+  }
+
+  /** Parse the `vignette` param when it (or the space it plays in) changes. */
+  private buildVignette(): void {
+    const script = resolveVignette(this.str('vignette'));
+    const indoors = this.str('interior') === 'geode';
+    const scale = this.num('crystalScale');
+    const key = `${script}|${indoors}|${scale}|${this.sceneryKey}`;
+    if (key === this.vignetteKey) return;
+    this.vignetteKey = key;
+    this.vignette = null;
+    if (!script) return;
+    const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
+    const k = indoors ? scale : 1;
+    // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
+    const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
+    const parsed = parseVignette(script, marks);
+    if (parsed.problems.length && script !== this.warnedVignette) {
+      this.warnedVignette = script;
+      console.warn(`[metaquarium] vignette: ${parsed.problems.join('; ')}`);
+    }
+    if (parsed.actors > 0 && parsed.duration > 0) this.vignette = parsed;
+  }
+
+  /**
+   * The follow-spot. A lamp fixed high in the rig throws a cone through its
+   * fish to the floor, where it lands as a pool of moving caustics; a light
+   * rides with the fish so IT is lit, and the house lights come down by the
+   * spot's strength — a performer on a stage. All of it follows the fish's
+   * closed-form position, so it is as deterministic as the swim.
+   */
+  private aimSpot(tSec: number): void {
+    const rig = this.spotRig;
+    const spots = this.poolUniforms.uMqSpot!.value as Vector4[];
+    const tints = this.poolUniforms.uMqSpotColor!.value as Color[];
+    const strength = this.num('spotStrength');
+    spotLevels(this.spotSheet, rig.length, tSec, this.spotLevel);
+    // The house comes down for the SHOW, not per lamp: it stays down through
+    // a blackout cue, which is what makes the next spot an entrance.
+    const show = rig.some((_, i) => this.spotSeen[i]) ? strength : 0;
+    this.houseLevel = 1 - 0.6 * show;
+    if (this.studio) {
+      this.studio.hemi.intensity = 1.15 * (1 - 0.6 * show);
+      this.studio.key.intensity = 2.1 * (1 - 0.6 * show);
+      this.studio.follow.intensity = 0;
+      for (const l of this.spotLights) if (l) l.intensity = 0;
+    }
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const spec = rig[i];
+      const gain = spec && this.spotSeen[i] ? strength * this.spotLevel[i]! : 0;
+      const beam = this.spotBeams[i];
+      if (gain <= 0.001 || !spec) {
+        if (beam) beam.mesh.visible = false;
+        spots[i]!.set(0, 0, 1, 0);
+        (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.z = 0;
+        continue;
+      }
+      if (!this.spotBeams[i]) {
+        this.spotBeams[i] = buildSpotBeam();
+        this.scene.add(this.spotBeams[i]!.mesh);
+      }
+      if (!this.poolsInstalled) this.installPools();
+      const f = this.spotAt[i]!;
+      // Lamps hang over the stage a little toward the house, spread across
+      // the rig so three beams fan instead of stacking.
+      this.spotLamp.set(f.x * 0.25 + (i - (rig.length - 1) / 2) * 46, 210, f.z * 0.25 + 30);
+      const floorY = this.terrainAt ? this.terrainAt(f.x, f.z) : 0;
+      const k = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      this.spotHit.set(this.spotLamp.x + (f.x - this.spotLamp.x) * k, floorY, this.spotLamp.z + (f.z - this.spotLamp.z) * k);
+      this.spotTint.set(spec.color);
+      this.spotBeams[i]!.aim(this.spotLamp, this.spotHit, spec.radius, this.spotTint, gain, tSec);
+      spots[i]!.set(this.spotHit.x, this.spotHit.z, spec.radius, gain * 0.9);
+      // Its shadow: the fish's plan, magnified by how far above the floor it
+      // swims (the lamp is a point), and softened the same way.
+      const lift = Math.max(0, f.y - floorY), grow = (this.spotLamp.y - floorY) / Math.max(1, this.spotLamp.y - f.y);
+      const half = this.spotLen[i]! * 0.5 * grow * this.num('spotShadow');
+      const h = this.spotHead[i]!;
+      (this.poolUniforms.uMqSpotShade!.value as Vector4[])[i]!.set(h.x, h.z, half, half * 0.42);
+      (this.poolUniforms.uMqSpotSoft!.value as number[])[i] = Math.min(0.6, 0.1 + lift / 160);
+      tints[i]!.copy(this.spotTint);
+      if (!this.crystals) this.poolUniforms.uMqPoolTime!.value = tSec;
+      if (this.studio) {
+        // Spot 0 uses the studio's own follow light; more spots bring their
+        // own, added once — a one-time recompile, only in scenes that ask.
+        let light = i === 0 ? this.studio.follow : this.spotLights[i - 1];
+        if (!light) {
+          light = new PointLight(0xffffff, 0, 95, 2);
+          this.spotLights[i - 1] = light;
+          this.scene.add(light);
+        }
+        light.position.set(f.x + (this.spotLamp.x - f.x) * 0.12, f.y + 16, f.z + (this.spotLamp.z - f.z) * 0.12 + 8);
+        light.color.copy(this.spotTint);
+        light.distance = 95;
+        light.intensity = 5200 * gain;
+      }
+    }
+  }
+
+  /** `spotRig` when given, else the single `followSpot` — parsed on change. */
+  private buildSpotRig(): void {
+    const rigText = this.str('spotRig'), cues = this.str('spotCues');
+    const single = Math.round(this.num('followSpot')), color = this.str('spotColor');
+    const key = `${rigText}|${cues}|${single}|${color}`;
+    if (key === this.spotKey) return;
+    this.spotKey = key;
+    const parsed = parseSpotRig(rigText);
+    this.spotRig = parsed.spots.length ? parsed.spots : single >= 0 ? [{ slot: single, color, radius: 30 }] : [];
+    this.spotSheet = cues.trim() ? parseSpotCues(cues, this.spotRig.length) : null;
+    const problems = [...parsed.problems, ...(this.spotSheet?.problems ?? [])];
+    if (problems.length) console.warn(`[metaquarium] spots: ${problems.join('; ')}`);
+  }
+
+  /** Where a fish should look to meet the viewer's eye (see `viewerAt`). */
+  private viewer(followSlot: number): Vector3 {
+    return followSlot >= 0 && this.viewerSeen ? this.viewerAt : this.camera.position;
+  }
+
+  /** The shot's camera, before the fish loop (follow, if on, overrides it after). */
+  private placeShot(azimuth: number): void {
+    const name = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    if (name === 'macro' && this.landmarkKey !== `${this.clusters.length}|${this.num('cameraAzimuth')}`) {
+      this.landmarkKey = `${this.clusters.length}|${this.num('cameraAzimuth')}`;
+      this.landmark = pickLandmark(this.clusters.map((c) => ({ x: c.x, y: c.y + c.height, z: c.z, size: Math.max(c.height, c.radius * 2) })), this.num('cameraAzimuth'));
+    }
+    const p = shotPose(name, {
+      azimuth, elevation: this.num('cameraElevation'), distance: this.num('cameraDistance'),
+      ceiling: this.ceiling ? this.ceiling.position.y : null,
+      floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0,
+      landmark: this.landmark,
+    }, this.shotScratch);
+    this.camera.position.set(p.x, p.y, p.z);
+    this.camera.lookAt(p.tx, p.ty, p.tz);
+    // Follow keeps the classic lens.
+    const fov = this.num('cameraFollow') >= 0 ? ORBIT_FOV : p.fov;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+  }
+
+  /** A fish's body length against a minted fish, now: its breed's nominal
+   *  size × its token's `*size` × its own seeded spread (`sizeVariance`) ×
+   *  `fishSize`. Everything that spaces fish in body lengths reads this. */
+  private fishSizeAt(i: number): number {
+    return breedSize(this.wantBreeds[i]) * (this.wantSizes[i] ?? 1)
+      * fishSizeMul(i, this.num('sizeVariance')) * this.num('fishSize');
+  }
+
+  /**
+   * The follow camera. Placed after the fish loop (a fish's position is only
+   * known there) and before anything after it reads the camera — the glow's
+   * lift toward the lens, the spots, the scenery's cards. Eye glances and
+   * glow-light ordering inside the loop still see the orbit camera; both
+   * are cosmetic.
+   *
+   * Chase (`followDistance` ≥ a body length): `followDistance` behind it along
+   * the way it has been swimming, lifted a little, looking just past it.
+   * Eye (below that): at the fish, looking where it goes; the fish is hidden.
+   * Kept above the floor and any scenery, and inside the room.
+   */
+  private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH): void {
+    if (slot < 0 || !this.followSeen) { this.followState = null; return; }
+    const at = this.followAt, head = this.followHead, cam = this.camera.position;
+    const lift = pov ? 1.5 : len * 0.35 + back * 0.18;
+    if (pov) {
+      cam.set(at.x, at.y + lift, at.z);
+    } else {
+      // Behind it along the direction it has been swimming over its last
+      // couple of lengths — the chord to where it was a moment ago. Smoother
+      // than the instant tangent (a wiggle or a kick does not swing the shot),
+      // and unlike riding the path itself it keeps the fish dead ahead on a
+      // tight turn instead of sliding it to the side of the frame.
+      let dx = head.x, dz = head.z;
+      if (this.followHasTrail) {
+        const tx = at.x - this.followTrail.x, tz = at.z - this.followTrail.z, tl = Math.hypot(tx, tz);
+        if (tl > len * 0.4) { dx = tx / tl; dz = tz / tl; }
+      }
+      // `followAngle` swings the camera round the fish: 180 stands in front of
+      // it. Measured from where the fish is heading NOW, not the chord: a long
+      // fish's chord (a shark's is 80 units) can lie far off its heading, and a
+      // side or face camera must be square to the animal.
+      // The reference fades from the chord (angle 0) to the heading (90 and on)
+      // with the cosine, and the blend is swung round: an eased angle never snaps the shot.
+      const turn = (this.num('followAngle') * Math.PI) / 180;
+      if (turn !== 0) {
+        const w = Math.max(0, Math.cos(turn)), c = Math.cos(turn), s = Math.sin(turn);
+        const bx = dx * w + head.x * (1 - w), bz = dz * w + head.z * (1 - w), bl = Math.hypot(bx, bz) || 1;
+        [dx, dz] = [(bx * c - bz * s) / bl, (bx * s + bz * c) / bl];
+      }
+      cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
+    }
+    // Inside the room, above the ground and whatever stands on it.
+    const r = Math.hypot(cam.x, cam.z), rMax = BOUNDS.radius * 2.2;
+    if (r > rMax) { cam.x *= rMax / r; cam.z *= rMax / r; }
+    const floor = this.floorHeightAt ? this.floorHeightAt(cam.x, cam.z) : 0;
+    cam.y = Math.max(cam.y, floor + 7);
+    if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
+    // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
+    // Turned round to face it, the camera looks at the fish itself, not past it.
+    // The look-ahead fades out with the angle (full at 0, none from 90 on), so
+    // a followAngle that is being eased never snaps the aim.
+    const ahead = pov ? 60 : len * 0.5 * Math.max(0, Math.cos((this.num('followAngle') * Math.PI) / 180));
+    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
+    this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
+  }
+
+  /**
+   * The finish wraps the renderer's own render for THIS scene only (the
+   * passes it draws go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets it, and at 0 the call is the original.
+   * Mid and high tiers only; bloom on high.
+   */
+  private updateFinish(): void {
+    const amount = this.num('finish');
+    const tier = this.quality.glowLights;
+    this.finishAmount = tier >= 3 ? amount : 0;
+    if (this.finishAmount <= 0 || this.finishPass) return;
+    const pass = new FinishPass({ bloom: tier >= 4 });
+    this.finishPass = pass;
+    const raw = this.renderer.render.bind(this.renderer);
+    this.renderer.render = (scene, camera) => {
+      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      else raw(scene, camera);
+    };
+  }
+
+  private installPools(): void {
+    this.poolsInstalled = true;
+    installFloorPools(this.floorMat, this.poolUniforms);
+    if (this.terrainMat) installFloorPools(this.terrainMat, this.poolUniforms);
+  }
+
+  /** Opt-in (`crystalTint` > 0): a fish near a cluster picks up its colour.
+   *  The fish's materials are cloned on its first tinted frame so clones of
+   *  one template never share a tint; at 0 nothing here ever runs. */
+  private tintFish(f: Fish, amount: number, tSec: number, pulse: number): void {
+    if (amount <= 0 || !this.tintEmitters.length) {
+      if (f.tinted && f.tint) {
+        for (const t of f.tint) t.mat.color.copy(t.base);
+        f.tinted = false;
+      }
+      return;
+    }
+    if (!f.tint) {
+      const list: NonNullable<Fish['tint']> = [];
+      const cloned = new Map<MeshBasicMaterial, MeshBasicMaterial>();
+      // The GROUP, not f.body: f.body is null BY DESIGN for a fallback
+      // (non-GLB) fish — it gates the GLB-only wiggle animation, not "has a
+      // paintable body" — so gating tint on it silently skipped every
+      // fallback fish. The fallback's sphere+cone share one material and are
+      // both direct children of the group, so traversing it tints them too.
+      f.group.traverse((o) => {
+        const mesh = o as Mesh;
+        if (!mesh.isMesh || mesh.userData.mqHalo) return;
+        const swap = (m: MeshBasicMaterial): MeshBasicMaterial => {
+          // Eyes stay pure; GLOW parts are sources, not receivers — including
+          // the textured (betafish-generation) ones, which keep their
+          // template name but never get tagged mqGlowColor.
+          if (!m.color || /eye/i.test(m.name) || m.userData.mqGlowColor || isGlow(m)) return m;
+          let own = cloned.get(m);
+          if (!own) {
+            own = m.clone();
+            own.userData.mqOwned = true;
+            cloned.set(m, own);
+            list.push({ mat: own, base: own.color.clone() });
+            // `m` is either this fish's own material (applyNpcMaterials owns
+            // everything it creates) or the template's shared, untouched
+            // texture atlas. The clone above permanently replaces it on this
+            // mesh, so an owned `m` becomes unreachable from here on — dispose
+            // it now or its GPU program leaks until the tank tears down. The
+            // shared atlas case is never mqOwned, so it is left for the
+            // template's other clones.
+            if (m.userData.mqOwned) m.dispose();
+          }
+          return own;
+        };
+        mesh.material = Array.isArray(mesh.material)
+          ? (mesh.material as MeshBasicMaterial[]).map(swap)
+          : swap(mesh.material as MeshBasicMaterial);
+      });
+      f.tint = list;
+    }
+    const p = f.group.position;
+    const l = sampleLight(this.tintEmitters, p.x, p.y, p.z, tSec, pulse, this.lightScratch, f.index);
+    const k = amount * 1.8 * this.num('crystalGlow');
+    for (const t of f.tint) {
+      t.mat.color.setRGB(t.base.r * (1 + l[0] * k) + l[0] * k * 0.12, t.base.g * (1 + l[1] * k) + l[1] * k * 0.12, t.base.b * (1 + l[2] * k) + l[2] * k * 0.12);
+    }
+    f.tinted = true;
+  }
+
+  /** The ambient school: count from `shoal` and the tier, look from `shoalKind`. */
+  private buildShoal(): void {
+    const count = Math.round(this.num('shoal') * this.quality.fishCap * 2.5);
+    const rawKind = this.str('shoalKind');
+    // str() is unvalidated (the classic lane is intake-unvalidated, MQ17),
+    // so an out-of-enum value must not reach PALETTES[kind] in shoal.ts.
+    const kind: ShoalKind = (SHOAL_KINDS as readonly string[]).includes(rawKind) ? (rawKind as ShoalKind) : 'neon';
+    const lit = this.str('fishLighting') !== 'flat' && !this.thumbnail;
+    // In front of the camera: a crossing lane across the shot when nothing
+    // orbits; the figure of eight over the whole tank when the camera goes round.
+    const orbiting = this.num('autoRotate') !== 0 || this.autoRotateTracked;
+    const shot = (SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit';
+    const laneAz = Math.round(this.num('cameraAzimuth') + shotAzimuthOffset(shot));
+    const route = orbiting ? 'eight' : `crossing@${laneAz}`;
+    const key = `${count}|${kind}|${lit}|${route}|${this.sceneryKey}|${this.propsKey}`;
+    if (key === this.shoalKey) return;
+    this.shoalKey = key;
+    if (this.shoal) {
+      this.scene.remove(this.shoal.mesh);
+      disposeOwned(this.shoal.mesh);
+      // Its instance buffers are not the geometry's: free them too.
+      this.shoal.mesh.dispose();
+      this.shoal = null;
+    }
+    if (count < 3) return;
+    // Its own route whatever the cast swims.
+    this.shoalPlan = orbiting
+      ? compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'eight')
+      : compileSwimPlan(this.ctxSaver.rng.fork(0x5a0a1), BOUNDS, 'crossing', { cameraAzimuthDeg: laneAz });
+    const ground = this.floorHeightAt ?? (() => 0);
+    this.shoalCanopy = buildCanopy(ground, this.scenery?.canopyTips ?? []);
+    {
+      // Where the school's centre actually goes: the route pulled in by the same radius clamp the carrier uses.
+      const plan = this.shoalPlan, L = FISH_LENGTH * 0.32, g = Math.cbrt(count / 30);
+      const maxR = Math.max(0, BOUNDS.radius - (2.4 * g + 1) * L);
+      this.shoalLift = shoalLiftTable(plan.totalLength, this.shoalCanopy, L, (d) => {
+        const c = swimPoseAtDistance(plan, d), cr = Math.hypot(c.x, c.z), cs = cr > maxR && cr > 0 ? maxR / cr : 1;
+        return { x: c.x * cs, z: c.z * cs };
+      });
+    }
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
+    this.shoal = new Shoal(this.ctxSaver.rng.fork(0x5a0a2), { count, kind, lit, length: FISH_LENGTH * 0.32, clear: 1.2 });
+    this.scene.add(this.shoal.mesh);
   }
 
   /**
@@ -821,6 +1990,9 @@ class TankInstance implements SaverInstance {
     this.wantInputKey = inputKey;
 
     let want: string[] = [];
+    let styles: Array<SwimStyleSpec | null> = [];
+    let breeds: string[] = [];
+    let sizes: number[] = [];
     this.mixMode = false;
     if (mixStr !== '') {
       const parsed = parseFishMix(mixStr, this.catalog);
@@ -829,7 +2001,11 @@ class TankInstance implements SaverInstance {
         const fallback = parsed.entries.length === 0 ? ' — falling back to fishUrl/fishCount' : '';
         console.warn(`[metaquarium] fishMix "${mixStr}": ${parsed.problems.join('; ')}${fallback}`);
       }
-      want = expandFishMix(parsed.entries, cap);
+      const slots = expandFishMixSlots(parsed.entries, cap);
+      want = slots.map((sl) => sl.url);
+      styles = slots.map((sl) => (sl.style ? swimStyleOf(sl.style) : null));
+      breeds = slots.map((sl) => sl.breed);
+      sizes = slots.map((sl) => sl.size ?? 1);
       this.mixMode = want.length > 0;
     }
     if (!this.mixMode) {
@@ -844,6 +2020,9 @@ class TankInstance implements SaverInstance {
       want = Array.from({ length: len }, () => url);
     }
     this.wantUrls = want;
+    this.wantStyles = this.mixMode ? styles : [];
+    this.wantBreeds = this.mixMode ? breeds : [];
+    this.wantSizes = this.mixMode ? sizes : [];
     this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
     if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
     else delete this.ctxSaver.host.dataset.mqMix;
@@ -883,7 +2062,7 @@ class TankInstance implements SaverInstance {
       }
     };
     await Promise.all(Array.from({ length: GLB_CONCURRENCY }, worker));
-    if (this.paused) this.renderStill();
+    if (!this.disposed && this.paused) this.renderStill();
   }
 
   private template(url: string, dracoPath = ''): Promise<FishTemplate | null> {
@@ -896,6 +2075,12 @@ class TankInstance implements SaverInstance {
           // one flaky gateway degrades to the next instead of to a fallback
           // blob. Non-ipfs URLs have a single candidate.
           const buf = await (async (): Promise<ArrayBuffer> => {
+            // A bundled breed: its own lazy chunk, decoded in place — no fetch.
+            if (url.startsWith(BUNDLED_BREED_SCHEME)) {
+              const load = BUNDLED_BREEDS[url.slice(BUNDLED_BREED_SCHEME.length)];
+              if (!load) throw new Error(`no bundled breed ${url}`);
+              return bundledGlb((await load()).default);
+            }
             let lastErr: unknown = new Error('no gateway candidates');
             for (const candidate of resolveIpfsUrls(url)) {
               const ctl = new AbortController();
@@ -914,23 +2099,22 @@ class TankInstance implements SaverInstance {
           })();
           const loader = new GLTFLoader();
           const draco = needsDraco(buf);
-          if (draco) {
-            // Retain ONCE per path per tank — the release side is one call per
-            // unique path at dispose, so retaining per model would leak the
-            // refcount and the worker would never be freed.
-            const key = dracoDecoderPath(dracoPath);
-            if (!this.dracoPaths.has(key)) {
-              this.dracoPaths.add(key);
-              retainDraco(dracoPath);
-            }
-            loader.setDRACOLoader(dracoLoader(dracoPath));
-          }
-          const gltf = await loader.parseAsync(buf, '');
+          const gltf = draco
+            ? await withDracoLoader(dracoPath, async (decoder) => {
+                loader.setDRACOLoader(decoder);
+                return loader.parseAsync(buf, '');
+              })
+            : await loader.parseAsync(buf, '');
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
-          const longX = size.x > size.z;
-          const nose = eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
+          // A rig (breeds/rig/*.py) faces +z by construction: never guess. The
+          // guess reads a fish's long side as its length, and a blowfish —
+          // wider than long, fins and spines out — swam sideways.
+          let rigged = false;
+          scene.traverse((o) => { if (o.userData?.mqRig) rigged = true; });
+          const longX = !rigged && size.x > size.z;
+          const nose = rigged ? 1 : eyeNoseSign(scene, longX ? 'x' : 'z') || 1;
           const yaw = longX
             ? nose > 0
               ? -Math.PI / 2
@@ -941,6 +2125,7 @@ class TankInstance implements SaverInstance {
           return {
             scene,
             clip: gltf.animations[0] ?? null,
+            clips: gltf.animations,
             norm: FISH_LENGTH / (Math.max(size.x, size.y, size.z) || 1),
             yaw,
             draco,
@@ -961,24 +2146,75 @@ class TankInstance implements SaverInstance {
 
   private spawn(tpl: FishTemplate | null, index: number, url: string): void {
     const rng = this.ctxSaver.rng.fork(0x715);
-    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape);
+    const plan = compileSwimPlan(rng.fork(index), BOUNDS, this.pathShape, { cameraAzimuthDeg: this.laneAzimuth });
     const group = new Group();
     let mixer: AnimationMixer | null = null;
     let tail: Object3D | null = null;
     let bodyNode: Object3D | null = null;
     let clipDuration = 0;
+    let fishGlow: FishGlow | null = null;
+    let crab: CrabRig | null = null;
+    let starfish: StarfishRig | null = null;
+    let angler: AnglerRig | null = null;
+    let hacker: HackerRig | null = null;
+    let shark: SharkRig | null = null;
+    let baby: BabyRig | null = null;
+    let tang: TangRig | null = null;
+    let puffer: PufferRig | null = null;
+    let octopus: OctopusRig | null = null;
+    let octoSkin: OctopusSkin | null = null;
+    let screen: ScreenRig | null = null;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
-      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      // Rigged at identity, before the tank scales and turns the body. The
+      // breed is the mix's, or — single-breed fishUrl mode — the bundled one the url names.
+      const url = this.wantUrls[index] ?? '';
+      const rigged = this.wantBreeds[index] ?? (url.startsWith(BUNDLED_BREED_SCHEME) ? url.slice(BUNDLED_BREED_SCHEME.length) : null);
+      if (rigged === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
+      if (rigged === 'starfish') starfish = rigStarfish(body, tpl.clips, tpl.norm);
+      if (rigged === 'glowfish') angler = rigAngler(body, tpl.clips);
+      if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
+      if (rigged === 'shark') shark = rigShark(body, tpl.clips);
+      if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
+      if (rigged === 'dori') tang = rigTang(body, tpl.clips);
+      if (rigged === 'blowfish') puffer = rigPuffer(body, tpl.clips);
+      if (rigged === 'octopus') octopus = rigOctopus(body, tpl.clips, tpl.norm, index);
+      if (octopus && !this.ink) {
+        this.ink = new InkLayer(this.scene);
+        if (this.waterInstalled) patchWater(this.ink.mesh.material as Material, this.str('dither') === 'on');
+      }
+      if ((baby || puffer) && !this.burps) {
+        this.burps = new BurpLayer(this.scene);
+        if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
+      }
+      // Not `this.lit`: a fish spawned before the first `ensureStudio()` call
+      // (still `false` at construction) would get flat materials even though
+      // `fishLighting` defaults to 'lit'. Derive the same value directly.
+      applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
+        this.str('fishLighting') !== 'flat' && !this.thumbnail, this.str('fishLook') === 'neon');
+      tagFishMaterials(body);
+      // A screen face is measured once its display material is on (screen.ts).
+      if (hacker) screen = rigScreen(body, fishHash(index, 917));
       // Selective bloom on the GLOW parts — same fork, so a fish's halo color
       // agrees with the coat pass when both fall through to the seeded pick.
       addGlowHalos(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      fishGlow = collectFishGlow(body, this.ctxSaver.rng.fork(0xc0a7 + index));
+      // An octopus's skin changes with its mood: its coat as dressed, and the passing clouds (octopus.ts).
+      if (octopus) octoSkin = octopusSkin(body, index);
       body.scale.setScalar(tpl.norm);
       body.rotation.y = tpl.yaw;
       group.add(body);
       bodyNode = body;
-      if (tpl.clip) {
+      const walker = crab ?? starfish ?? octopus;
+      if (walker) {
+        // Front along the group's +z, feet on the group's origin: crab.ts (starfish.ts, octopus.ts) aims and stands the group.
+        body.rotation.y = 0;
+        body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
+        mixer = walker.mixer;
+      } else if (angler || hacker || shark || baby || tang || puffer) {
+        mixer = (angler ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
+      } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
         clipDuration = tpl.clip.duration;
@@ -1003,7 +2239,9 @@ class TankInstance implements SaverInstance {
       tail = tailMesh;
     }
 
-    const baseScale = plan.cruise > 10 ? 1.1 : 0.8 + (index % 5) * 0.1;
+    // Size is `fishSizeAt` (breed × token × this fish's own × fishSize); the
+    // old index cycle (0.8…1.2 by slot) made every fifth fish the same size.
+    const baseScale = plan.cruise > 10 ? 1.1 : 1;
     group.scale.multiplyScalar(baseScale);
     // Hidden until setState has placed it. A group joins the scene at the
     // ORIGIN, so a fish that finished loading after this frame's setState was
@@ -1015,7 +2253,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
-      baseYaw: tpl ? tpl.yaw : 0,
+      baseYaw: tpl && !crab && !starfish && !octopus ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -1023,6 +2261,10 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
+      glow: fishGlow,
+      rig: crab || starfish || angler || hacker || shark || baby || tang || puffer || octopus
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
+        : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
     if (tpl?.draco) this.ctxSaver.host.dataset.mqDraco = '1';
@@ -1074,7 +2316,9 @@ class TankInstance implements SaverInstance {
 
   private setState(t: number): void {
     const tSec = t / 1000;
+    this.clockSec = tSec;
     this.applyParams(t);
+    this.updateFinish();
     const speed = this.num('swimSpeed');
     // Warped swim time: ∫ speed dτ. With a steered speed this makes changes
     // glide (MQ11 — multiplying the whole elapsed integral teleported every
@@ -1093,24 +2337,20 @@ class TankInstance implements SaverInstance {
         }) / 1000
       : tSec * speed;
 
+    this.ensureStudio();
     this.reconcile();
+    this.updateCaustics(tSec);
+    this.updateFishLight();
 
-    // Camera orbit
-    const az = MathUtils.degToRad(
-      this.num('cameraAzimuth') + this.num('autoRotate') * tSec,
+    // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
+    const rotation = rateOffset(
+      this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
-    const el = MathUtils.degToRad(this.num('cameraElevation'));
-    const dist = this.num('cameraDistance');
-    this.camera.position.set(
-      Math.cos(el) * Math.sin(az) * dist,
-      Math.max(10, 15 + Math.sin(el) * dist),
-      Math.cos(el) * Math.cos(az) * dist,
-    );
-    this.camera.lookAt(0, 35, 0);
+    this.placeShot(this.num('cameraAzimuth') + rotation);
 
     // Fog color
     const fogHex = String(
-      this.params.fogColor ?? this.roomPalette?.fog ?? this.space.fogColor?.default ?? '#030009',
+      this.paletteOr('fogColor', this.roomPalette?.fog) ?? '#030009',
     );
     this.fogColor.set(fogHex);
     (this.scene.fog as Fog).color.copy(this.fogColor);
@@ -1119,8 +2359,13 @@ class TankInstance implements SaverInstance {
     // this block is provably invisible until steered.
     const fog = this.scene.fog as Fog;
     fog.near = this.num('fogNear');
-    fog.far = Math.max(this.num('fogFar'), fog.near + 20);
-    const floorHex = String(this.params.floorColor ?? this.roomPalette?.floor ?? this.space.floorColor?.default ?? '#0a1d33');
+    // Clarity stretches or closes the reach — only when water is on (at 0.5, ×1 exactly).
+    const reach = this.num('water') > 0 ? clarityReach(this.num('waterClarity')) : 1;
+    fog.far = Math.max(this.num('fogFar') * reach, fog.near + 20);
+    // A water tint replaces the flat background with a dome of the same in-scatter.
+    const tint = this.waterTint();
+    this.updateWaterDome(!!tint);
+    const floorHex = String(this.paletteOr('floorColor', this.roomPalette?.floor) ?? '#0a1d33');
     this.floorMat.color.set(floorHex);
     // Terrain follows floorColor as well — the environment supplies the SHAPE,
     // the author keeps the palette.
@@ -1132,7 +2377,7 @@ class TankInstance implements SaverInstance {
       this.motes.geometry.setDrawRange(0, active);
       this.moteMat.uniforms.uTime!.value = tSec;
       (this.moteMat.uniforms.uColor!.value as Color).set(
-        String(this.params.moteColor ?? this.roomPalette?.mote ?? this.space.moteColor?.default ?? '#7fd6ff'),
+        String(this.paletteOr('moteColor', this.roomPalette?.mote) ?? '#7fd6ff'),
       );
     }
     this.ctxSaver.host.dataset.mqMotes = String(active);
@@ -1140,12 +2385,41 @@ class TankInstance implements SaverInstance {
     // The room: rebuilt only on change, then driven by the same clock as
     // everything else so it stays pure in t.
     this.buildRoom();
+    this.buildProps();
+    this.buildScenery();
+    // After the scenery: a vignette may name the world's own marks (home doors, a gate).
+    this.buildVignette();
+    this.scenery?.setSurface(this.ceiling ? this.ceiling.position.y : null);
+    // The horizon sits on the level, where the in-scatter is half tint.
+    if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
+    else this.horizonColor.copy(this.fogColor);
+    this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
+    this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
+    this.rockCrystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
+      color: this.fogColor, near: fog.near, far: fog.far,
+    });
     if (this.waterMat) this.waterMat.uniforms.uTime!.value = tSec;
     if (this.rayMat) this.rayMat.uniforms.uTime!.value = tSec;
+    this.buildShoal();
+    if (this.shoal) {
+      // Life (tails, breathing, excursions) on the real clock; travel on the school's own speed.
+      this.shoalTau = tSec;
+      this.shoal.update(tSec, this.shoalCarrier, this.shoalFloor);
+    }
 
-    const style = swimStyleOf(this.str('swimStyle'));
+    const sceneStyleName = this.str('swimStyle');
+    // `auto` is not a style: each untagged fish resolves to its breed's
+    // default (MQ33). swimStyleOf('auto') falls back to loop, which is what
+    // a fish with no known breed (single-breed fishUrl mode) should do.
+    const autoMode = sceneStyleName === 'auto';
+    const sceneStyle = swimStyleOf(sceneStyleName);
     const variance = this.num('swimVariance');
     const wiggle = this.num('bodyWiggle');
+    const seek = this.num('lightSeek');
+    const pools = this.rayPools;
+    const lattice = formationBreathe(tSec, this.num('formationBreathe'));
 
     const spec = maneuverSpecOf(this.str('maneuver'));
     const mnvRate = this.num('maneuverRate');
@@ -1157,12 +2431,26 @@ class TankInstance implements SaverInstance {
     const shape = (PATH_SHAPES as readonly string[]).includes(shapeRaw)
       ? (shapeRaw as PathShape)
       : 'wander';
-    if (shape !== this.pathShape) {
+    // `crossing` is laid against the camera, and the camera moves: a steered
+    // cameraAzimuth or an autoRotate orbit would otherwise leave the parade
+    // running across a view that is no longer there, and a fish spawned later
+    // would lay its lane at a different angle from the shoal's. One lane
+    // azimuth is owned by the tank (`laneAzimuth`), used by every compile —
+    // spawn included — and re-laid when the EFFECTIVE azimuth has turned by
+    // more than 2°. Re-laying rotates the whole lane while every fish keeps
+    // its arc distance, so the parade turns with the camera instead of
+    // jumping. Other shapes ignore the azimuth and are never re-laid for it.
+    const azEff = this.num('cameraAzimuth') + this.num('autoRotate') * tSec;
+    const laneMoved = shape === 'crossing'
+      && Math.abs(((azEff - this.laneAzimuth + 540) % 360) - 180) > 2;
+    if (shape !== this.pathShape || laneMoved) {
       this.pathShape = shape;
-      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape);
+      this.laneAzimuth = azEff;
+      const planOpts = { cameraAzimuthDeg: this.laneAzimuth };
+      this.carrierPlan = compileSwimPlan(this.ctxSaver.rng.fork(0x5c1), BOUNDS, shape, planOpts);
       const rng = this.ctxSaver.rng.fork(0x715);
       for (const f of this.fish) {
-        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape);
+        if (f) f.plan = compileSwimPlan(rng.fork(f.index), BOUNDS, shape, planOpts);
       }
     }
 
@@ -1179,16 +2467,162 @@ class TankInstance implements SaverInstance {
     const fshape = (FORMATION_SHAPES as readonly string[]).includes(fshapeRaw)
       ? (fshapeRaw as FormationShape)
       : 'phalanx';
-    const extent = style.formation ? formationExtent(visible, variance, fshape) : null;
-    const carrier = extent ? this.carrierFrame(extent, style, tSec, warpSec, speed) : null;
+    // Effective style per slot: a token's `@style` wins, else the scene's.
+    // Formation seats are handed out over the SUBSET of fish whose effective
+    // style forms — a `@school` trio inside a hovering tank is a school of
+    // three, seated 0..2, not three fish holding seats in a school of eight.
+    const styleAt = (i: number): SwimStyleSpec =>
+      this.wantStyles[i] ?? (autoMode ? autoStyleFor(this.wantBreeds[i]) : sceneStyle);
+    const formationSeat = new Map<number, number>();
+    for (let i = 0; i < visible; i++) {
+      if (styleAt(i).formation) formationSeat.set(i, formationSeat.size);
+    }
+    const fcount = formationSeat.size;
+    const formationStyle = fcount > 0 ? styleAt(formationSeat.keys().next().value as number) : null;
+    // A school spaces in its BIGGEST member's lengths, so no pair interpenetrates.
+    let formLen = FISH_LENGTH;
+    for (const i of formationSeat.keys()) formLen = Math.max(formLen, FISH_LENGTH * this.fishSizeAt(i));
+    const extent0 = fcount > 0 ? formationExtent(fcount, variance, fshape, formLen) : null;
+    // Breathing scales seats AND extent together, so the carrier's inward
+    // pull still measures the shoal it is actually keeping in the glass —
+    // and only as far as the glass allows (fitBreath: a full breath on a
+    // tall ring or stacked wedge would otherwise push seats out of the
+    // water column, because the carrier moves the centre, not the fish).
+    const breath = extent0
+      ? fitBreath(extent0, lattice, { yRange: BOUNDS.yMax - BOUNDS.yMin, radius: BOUNDS.radius })
+      : lattice;
+    const extent = extent0
+      ? { side: extent0.side * breath, up: extent0.up * breath, back: extent0.back * breath, reach: extent0.reach * breath }
+      : null;
+    const carrier = extent && formationStyle ? this.carrierFrame(extent, formationStyle, tSec, warpSec, speed) : null;
+    // Relationships (MQ31), resolved in SLOT order: a bonded fish rides the
+    // most recent unbonded free fish before it. `pair` seats two on one
+    // plan; a third opens a new pair. Nothing here accumulates — a follower
+    // is the leader's closed form sampled at a lag.
+    let leader: LeaderFrame | null = null;
+    let followRank = 0;
+    let pendingPair: LeaderFrame | null = null;
+    // Proximity startle (MQ31): free fish flinch in a wave from a SENTINEL —
+    // the first free fish in slot order — delayed by ground distance, the
+    // same 90 u/s the formation wave uses. The sentinel is fixed per scene so
+    // no fish changes epicentre mid-flinch.
+    let sentinel: { x: number; z: number } | null = null;
+    const report: InspectFish[] = [];
+    const fishGlow = this.num('fishGlow');
+    const eyeLife = this.num('eyeLife');
+    const swimWave = this.num('swimWave');
+    this.buildSpotRig();
+    this.spotSeen.fill(false);
+    const followSlot = Math.round(this.num('cameraFollow'));
+    // `followDistance` is quoted for a minted fish: the camera stands as many
+    // of THIS fish's lengths back, so a shark is framed like a shark.
+    const followLen = followSlot >= 0 ? FISH_LENGTH * this.fishSizeAt(followSlot) : FISH_LENGTH;
+    const followBack = Math.max(0, this.num('followDistance')) * (followLen / FISH_LENGTH);
+    // Close enough that the camera would sit inside the fish: it is the eye.
+    const followPov = followSlot >= 0 && followBack < followLen * 0.9;
+    this.followSeen = false; this.followHasTrail = false;
+    const glowPulse = this.num('crystalPulse');
+    let glowN = 0;
+    this.fishEmitters.length = 0;
+    // Tint reads LAST frame's fish emitters (this frame's are still being
+    // gathered) — one frame of lag on a 0.12 Hz light is invisible.
+    const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
+    const tintPulse = this.num('crystalPulse');
+    this.walkShadowN = 0;
+    // Every floor creature's own spot first (crabs and starfish), so each can
+    // give the others room (crab.ts).
+    const crabSpots = this.crabSpots;
+    crabSpots.length = 0;
+    // A dance scene: every starfish (not seated in a formation) joins the
+    // class at the tank's centre, in rows facing the camera (starfish.ts).
+    const danceMode = this.str('starfishDance');
+    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle' || danceMode === 'duet';
+    const danceSpots = this.danceSpots;
+    danceSpots.clear();
+    if (dancing) {
+      const dancers = this.fish.filter((f): f is NonNullable<typeof f> => !!f?.rig?.starfish && f.index < visible && !styleAt(f.index).formation);
+      // Facing the camera — but never the FOLLOW camera, which is placed from
+      // the followed dancer's own facing: the class would chase it round. Then
+      // it faces the orbit's azimuth, which nothing here moves.
+      const camX = this.camera.position.x, camZ = this.camera.position.z;
+      const yaw = followSlot >= 0 ? (this.num('cameraAzimuth') * Math.PI) / 180
+        : Math.hypot(camX, camZ) > 1e-6 ? Math.atan2(camX, camZ) : 0;
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      // The front of the class (the instructor) at the tank's centre, the rows
+      // behind it: the camera looks at the centre from above, so a dancer
+      // nearer than that falls out of the bottom of the frame.
+      // The partner dance: couples side by side across the view, each pair
+      // facing each other, a dancer's part and its partner (starfish.ts coupleSpot).
+      const duet = danceMode === 'duet';
+      const spots = dancers.map((_, slot) => (duet ? coupleSpot(slot, dancers.length) : classSpot(slot, dancers.length)));
+      const mid = spots.length ? Math.max(...spots.map((s) => s.depth)) : 0;
+      const roles = this.danceRoles;
+      roles.clear();
+      dancers.forEach((f, slot) => {
+        const { side } = spots[slot]!, depth = spots[slot]!.depth - mid;
+        const gap = FISH_LENGTH * this.fishSizeAt(f.index) * 1.7;
+        danceSpots.set(f.index, [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap]);
+      });
+      if (duet) {
+        dancers.forEach((f, slot) => {
+          const c = coupleSpot(slot, dancers.length);
+          roles.set(f.index, { role: c.role, partner: dancers[c.partner]!.index });
+        });
+      }
+      this.danceYaw = yaw;
+    }
+    for (const f of this.fish) {
+      if (!f?.rig || f.index >= visible) continue;
+      const d = danceSpots.get(f.index);
+      const s = d ? { x: d[0], z: d[1] } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
+        : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index))
+        : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index)) : null;
+      if (s) crabSpots.push(f.index, s.x, s.z);
+    }
+    // The camera a crab turns to face — known for THIS t before any fish moves:
+    // the shot's, or, following a crab, where the chase camera will stand
+    // (behind it along its route). Following a fish, or riding in a crab's
+    // eye, there is none to turn to.
+    let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
+    if (followSlot >= 0) {
+      const ff = this.fish[followSlot];
+      if ((ff?.rig?.crab || ff?.rig?.starfish || ff?.rig?.octopus) && !followPov) {
+        const s = ff.rig.crab ? crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index))
+          : ff.rig.starfish ? starfishSpot(ff.index, tSec, ff.plan, starfishStart(ff.plan, ff.index))
+          : octopusSpot(ff.index, tSec, ff.plan, octopusStart(ff.plan, ff.index));
+        const turn = (this.num('followAngle') * Math.PI) / 180, c = Math.cos(turn), sn = Math.sin(turn);
+        crabCamX = s.x - (s.fx * c - s.fz * sn) * followBack; crabCamZ = s.z - (s.fx * sn + s.fz * c) * followBack;
+      } else { crabCamX = NaN; crabCamZ = NaN; }
+    }
+    // Elbow room (avoid.ts). The loop runs in two halves: the first puts every
+    // fish on its route, then each pair about to meet makes way, then the
+    // second half draws each fish where it ended up — so no fish dodges a
+    // neighbour that has not been placed yet, and the frame is still a pure
+    // function of t.
+    const avoid = Math.max(0, Math.min(1, this.num('fishAvoid')));
+    const bodies = this.avoidBodies;
+    bodies.length = 0;
+    const finish = this.avoidFinish;
+    finish.length = 0;
+    const off = this.avoidOff, offRate = this.avoidRate;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
+      const style = styleAt(f.index);
+      const seat = formationSeat.get(f.index) ?? f.index;
+      const bond = style.bond ?? 'none';
+      // Whose depth band this fish swims in: its own, or its leader's.
+      let bandStyle: SwimStyleSpec = style;
+      // A chaser's extra tail work — kept OUT of `mnv`, which may be the
+      // shared idle constant.
+      let flurryBoost = 0;
 
       // Style + per-fish variation. Both are pure functions of (index, t), so
       // a scene stays frame-addressable no matter how varied it looks.
       const varn = fishVariation(f.index, variance);
+      const size = this.fishSizeAt(f.index);
+      const L = FISH_LENGTH * size;
       const styleSpeed = style.speedMul * varn.speedMul;
       // `effort` is how hard the fish is working; `d` is where that puts it.
       // They differ for styles that hold station: a hovering fish still beats
@@ -1204,12 +2638,10 @@ class TankInstance implements SaverInstance {
         ? distanceAt(f.plan, warpSec, styleSpeed)
         : distanceAt(f.plan, tSec, speed * styleSpeed);
       // Every style spreads its cast along the loop, not only the
-      // station-keepers. Without this, patrol/bottom/surface all mounted as
-      // one knot dead-centre (every compiled spline starts near azimuth 0)
-      // and took minutes to disperse — watched happen three times in a row
-      // on a live channel. `loop` alone stays anchorless: it promises to be
-      // exactly the pre-style behaviour, frame for frame.
-      const anchor = style.name === 'loop' ? 0 : varn.anchor * f.plan.totalLength;
+      // station-keepers; `loop` alone stays anchorless. The rule and the bug
+      // that earned it live in swim.ts's `anchorFraction`, where a test can
+      // reach them.
+      const anchor = anchorFraction(style, f.index, variance) * f.plan.totalLength;
       // Maneuvers displace, never re-rate: `along` moves the fish on its own
       // path, the kick is added to the pose after banding. Both closed-form.
       // Contagious events (startle) propagate through a formation as a wave:
@@ -1218,18 +2650,35 @@ class TankInstance implements SaverInstance {
       // twitching on its own private clock. Free fish keep their own schedule.
       let seatDelay: number | null = null;
       if (spec?.contagious && style.formation) {
-        const slot0 = formationSlot(f.index, visible, variance, undefined, fshape);
+        const slot0 = formationSlot(seat, fcount, variance, undefined, fshape, formLen);
         seatDelay = Math.hypot(slot0.side, slot0.up, slot0.back) / 90;
+      } else if (spec?.contagious) {
+        // Undisplaced position — where the fish would be with no event in
+        // flight — so the delay itself never depends on the flinch it times.
+        const base = swimPoseAtDistance(f.plan, anchor + effort * style.travel);
+        if (!sentinel) {
+          sentinel = { x: base.x, z: base.z };
+          seatDelay = 0;
+        } else {
+          seatDelay = Math.hypot(base.x - sentinel.x, base.z - sentinel.z) / 90;
+        }
       }
       const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
-      const d = anchor + effort * style.travel + mnv.along * FISH_LENGTH;
+      // A dori holds still for a headstand, plays dead without being towed,
+      // backs off when wary — then catches up (tang.ts). Before the pose, so a
+      // follower behind it stops too.
+      const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold : null;
+      const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
+      const d = anchor + effort * style.travel + mnv.along * L - held;
 
       // What drives the animation. For a free fish that is its own effort; for
       // a fish in formation it is the carrier's, because the carrier is what
       // is actually moving it. Beating to its own unused loop made a shoal
       // whose tails were out of step with its travel — fish moonwalking.
       let beat = effort;
-      let pose;
+      let pose: SwimPose;
+      // Where the fish's heading comes from, for the swim wave's C-bend.
+      let turnPlan: SwimPlan | null = null, turnD = 0;
       if (style.formation) {
         // Carrier school: ONE route, fish held in slots in its local frame, so
         // the shoal turns as a body.
@@ -1245,15 +2694,36 @@ class TankInstance implements SaverInstance {
         // spike's boids prototype, not this port, and the port's first draft
         // measured WORSE than loop at 27.3%. Rigid offsets from one arc sample
         // are what actually fixed it.
-        const slot = formationSlot(f.index, visible, variance, undefined, fshape);
+        const slot = formationSlot(seat, fcount, variance, undefined, fshape, formLen);
+        slot.side *= breath;
+        slot.up *= breath;
+        slot.back *= breath;
         // A seated fish darts AHEAD of its slot and settles back — the
         // closing displacement, because the permanent one would walk it out
         // of the school forever.
-        const seatBack = slot.back - mnv.alongBump * FISH_LENGTH;
+        const seatBack = slot.back - mnv.alongBump * L;
         const cf = carrier ?? this.carrierFrame(
-          extent ?? formationExtent(visible, variance, fshape), style, tSec, warpSec, speed,
+          extent ?? formationExtent(fcount, variance, fshape, formLen), formationStyle ?? style, tSec, warpSec, speed,
         );
+        if (f.index === followSlot) {
+          // A schooled fish's own trail is the carrier's — the whole body
+          // turns together, so where the carrier was is close enough for the
+          // chase camera's chord (it does not chase the slot offset, same as
+          // the `rel` bonds below).
+          const tr = swimPoseAtDistance(this.carrierPlan, cf.lead - L * 2);
+          this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+        }
         beat = cf.lead;
+        turnPlan = this.carrierPlan; turnD = cf.lead;
+        // A seated fish can lead too: a bonded fish after a school trails
+        // the CARRIER route behind the whole formation, which is what
+        // "follow the school" should mean. Retires any half-formed pair.
+        leader = {
+          plan: this.carrierPlan, style, d: cf.lead - (extent?.back ?? 0), effort: cf.lead,
+          phase: varn.phase, pullX: 0, pullZ: 0, len: formLen,
+        };
+        followRank = 0;
+        pendingPair = null;
         // A rigid body means every fish points EXACTLY the same way, which
         // measures as polarisation 1.00 and looks like a formation flight.
         // A few degrees of per-fish yaw, scaled by variance, buys back the
@@ -1269,7 +2739,107 @@ class TankInstance implements SaverInstance {
           fz: cf.fwdX * sy2 + cf.fwdZ * cy2,
         };
       } else {
-        pose = swimPoseAtDistance(f.plan, d);
+        // A pair is two CONSECUTIVE pair fish; anything else between them
+        // retires the half-formed one, so a later `@pair` never bonds
+        // across an unrelated fish.
+        if (bond !== 'pair') pendingPair = null;
+        const rel = bond === 'pair' ? pendingPair : bond === 'follow' || bond === 'chase' ? leader : null;
+        if (rel) bandStyle = rel.style;
+        let flurryExtra = 0;
+        if (rel) {
+          // Ride the leader's route behind it. A chaser's lag breathes —
+          // closing in, falling back — and its tail works hardest as it
+          // closes; a follower keeps a fixed station in the file.
+          let lag = 0;
+          if (bond === 'follow') {
+            lag = Math.max(L, rel.len) * 1.7 * (followRank + 1);
+          } else if (bond === 'chase') {
+            const c = 0.5 + 0.5 * Math.sin(tSec * 0.7 + varn.phase);
+            lag = Math.max(L, rel.len) * (1.3 + 1.6 * c);
+            flurryExtra = (1 - c) * 0.8;
+          }
+          pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          if (f.index === followSlot) {
+            const tr = swimPoseAtDistance(rel.plan, rel.d - lag - L * 2);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
+          turnPlan = rel.plan; turnD = rel.d - lag;
+          beat = rel.effort - lag;
+          const hl = Math.hypot(pose.fx, pose.fz) || 1;
+          const rxn = pose.fz / hl, rzn = -pose.fx / hl;
+          let ox = rel.pullX, oz = rel.pullZ, oy = 0;
+          if (bond === 'pair') {
+            // The second of the pair, opposite its partner on the shared orbit.
+            const th = tSec * 0.6 + rel.phase + Math.PI;
+            // The first of the pair set the orbit; ride it at the larger size.
+            const R = Math.max(L, rel.len) * 1.1;
+            ox += rxn * R * Math.cos(th);
+            oz += rzn * R * Math.cos(th);
+            oy = R * 0.5 * Math.sin(th);
+            pendingPair = null;
+          } else {
+            // Off the leader's exact line, so a file is not a stack.
+            const off = (fishHash(f.index, 61) - 0.5) * L * (bond === 'follow' ? 0.8 : 0.5);
+            ox += rxn * off;
+            oz += rzn * off;
+            followRank += 1;
+          }
+          pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
+        } else {
+          pose = swimPoseAtDistance(f.plan, d);
+          if (f.index === followSlot) {
+            // Where this fish was `followBack` along its own path: the camera
+            // rides the path it swam, which smooths turns and threads the gaps
+            // the fish itself threaded.
+            const tr = swimPoseAtDistance(f.plan, d - L * 2);
+            this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
+          }
+          turnPlan = f.plan; turnD = d;
+          // Light-seeking: each free fish is drawn toward ITS shaft (chosen
+          // by index, so the choice never flips as it moves) by a per-fish
+          // appetite. The loop shrinks toward the pool — still the same
+          // closed form, translated — and followers take the same pull.
+          let pullX = 0, pullZ = 0;
+          if (seek > 0 && pools.length > 0) {
+            const pool = pools[Math.floor(fishHash(f.index, 53) * pools.length) % pools.length]!;
+            const k = seek * 0.7 * (0.5 + 0.5 * fishHash(f.index, 59));
+            // A shaft can stand at the glass or beyond it (rooms place their
+            // lights, the tank does not); the pull is toward it, never past
+            // the radius.
+            const tx = (pool[0] - pose.x) * k;
+            const tz = (pool[1] - pose.z) * k;
+            const tr = Math.hypot(pose.x + tx, pose.z + tz);
+            const ts = tr > BOUNDS.radius ? BOUNDS.radius / tr : 1;
+            pullX = (pose.x + tx) * ts - pose.x;
+            pullZ = (pose.z + tz) * ts - pose.z;
+          }
+          const me: LeaderFrame = { plan: f.plan, style, d, effort, phase: varn.phase, pullX, pullZ, len: L };
+          let oy = 0;
+          if (bond === 'pair') {
+            // First of a pair: takes one side of the shared orbit and waits
+            // for a partner. An odd pair fish simply swims its own route.
+            const th = tSec * 0.6 + varn.phase;
+            const R = L * 1.1;
+            const hl = Math.hypot(pose.fx, pose.fz) || 1;
+            pullX += (pose.fz / hl) * R * Math.cos(th);
+            pullZ += (-pose.fx / hl) * R * Math.cos(th);
+            oy = R * 0.5 * Math.sin(th);
+            pendingPair = me;
+          } else {
+            leader = me;
+            followRank = 0;
+          }
+          // Idle micro-motion: a station-keeper turns in place (MQ36).
+          const sway = idleSway(style, tSec, varn.phase);
+          let fx = pose.fx, fz = pose.fz;
+          if (sway !== 0) {
+            const cs = Math.cos(sway), sn = Math.sin(sway);
+            fx = pose.fx * cs - pose.fz * sn;
+            fz = pose.fx * sn + pose.fz * cs;
+          }
+          pose = { ...pose, x: pose.x + pullX, y: pose.y + oy, z: pose.z + pullZ, fx, fz };
+        }
+        flurryBoost = flurryExtra;
       }
 
       // Depth band, then bob. Clamping BEFORE the bob keeps a bottom-hugger
@@ -1281,7 +2851,7 @@ class TankInstance implements SaverInstance {
       // Clamp AFTER the bob. Clamping first let a fish bob straight back out
       // of the band it was just put in — a bottom-hugger that leaves the floor
       // is not band-limited, it is just a fish.
-      const band = bandRange(style.band);
+      const band = bandRange(bandStyle.band);
       if (band) {
         let lo = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.lo;
         let hi = BOUNDS.yMin + (BOUNDS.yMax - BOUNDS.yMin) * band.hi;
@@ -1290,7 +2860,7 @@ class TankInstance implements SaverInstance {
         // "surface" turtles cruised mid-frame far below the ceiling they were
         // named for. Ride just under the actual plane, capped so a steered
         // waterY of 220 cannot fly the cast out of every camera's frame.
-        if (style.band === 'ceiling' && this.ceiling) {
+        if (bandStyle.band === 'ceiling' && this.ceiling) {
           const wparam = this.num('waterY');
           const wy = wparam >= 0 ? wparam : this.presetWaterY;
           const ceilY = Math.min(wy - FISH_LENGTH * 0.8, BOUNDS.yMax + 60);
@@ -1343,12 +2913,311 @@ class TankInstance implements SaverInstance {
         const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
         if (y < clear) y = Math.min(BOUNDS.yMax, clear);
       }
+      // An actor in a vignette is not swimming: the script places it. The
+      // GROUND still holds, though: an open-stage mark is authored for a flat
+      // floor, and on `ridges` it can sit inside a hill. Terrain only — not
+      // the scenery domes — because a script sends a fish INTO a home's
+      // throat or under a gate on purpose, and a dome would lift it out.
+      const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
+      if (act) {
+        px = act.x; y = act.y; pz = act.z;
+        if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
+      }
+      // This fish's body for the dodge: where it is, where it is going. A
+      // floor creature walks its own spot (crab.ts) and keeps it — it is in
+      // the way, it does not get out of it; nor does an actor, whose script
+      // places it. A seated fish gives a little, so the school keeps shape.
+      const walker = (f.rig?.crab || f.rig?.starfish || f.rig?.octopus) && !act && !style.formation;
+      const give = act || walker ? 0 : style.formation ? 0.35 : 1;
+      const k = bodies.length;
+      const body = this.avoidPool[k] ?? (this.avoidPool[k] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, len: 0, give: 0 });
+      body.x = px; body.y = y; body.z = pz; body.vx = body.vy = body.vz = 0; body.len = L; body.give = give;
+      // The seabed a dodge cannot push a fish under (the clamp in the draw half).
+      body.floorAt = give > 0 && this.floorHeightAt ? this.fishFloorAt : undefined;
+      if (walker) {
+        for (let ci = 0; ci < crabSpots.length; ci += 3) {
+          if (crabSpots[ci] !== f.index) continue;
+          body.x = crabSpots[ci + 1]!; body.z = crabSpots[ci + 2]!;
+          body.y = (this.floorHeightAt?.(body.x, body.z) ?? 0) + L * 0.3;
+          break;
+        }
+      } else if (act) {
+        // A script's actor holds its ground in the dodge but keeps walking: its
+        // velocity is its next scripted pose, so swimmers see it coming.
+        const nx = poseOf(this.vignette!, f.index, tSec + 0.25);
+        if (nx) { body.vx = (nx.x - act.x) * 4; body.vy = (nx.y - act.y) * 4; body.vz = (nx.z - act.z) * 4; }
+      } else {
+        // Where its route takes it over the next half second, as a chord: a
+        // route's tangent can swing right round in a tight curl, and the
+        // dodge reads its direction off this.
+        const pace = f.plan.cruise * speed * styleSpeed * style.travel;
+        if (turnPlan && pace > 1e-3) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD + pace * 0.5);
+          body.vx = (b.x - a.x) * 2; body.vy = band ? 0 : (b.y - a.y) * 2; body.vz = (b.z - a.z) * 2;
+        } else {
+          const hl = Math.hypot(pose.fx, fy, pose.fz) || 1;
+          body.vx = (pose.fx / hl) * pace; body.vy = (fy / hl) * pace; body.vz = (pose.fz / hl) * pace;
+        }
+      }
+      bodies.push(body);
+      this.avoidSlot[k] = f.index;
+      finish.push(() => {
+      // The facing it is drawn with: its route's, turned into its dodge.
+      let lfx = pose.fx, lfy = fy, lfz = pose.fz;
+      if (give > 0 && avoid > 0) {
+        px += off[k * 3]!; y += off[k * 3 + 1]!; pz += off[k * 3 + 2]!;
+        const kr = Math.hypot(px, pz);
+        if (kr > BOUNDS.radius) { px *= BOUNDS.radius / kr; pz *= BOUNDS.radius / kr; }
+        // Never out of the water: not under the floor's base, not through the
+        // surface — unless the route itself put it higher.
+        let top = BOUNDS.yMax + 60;
+        if (this.ceiling) top = Math.min(top, this.ceiling.position.y - FISH_LENGTH * 0.8);
+        y = Math.min(Math.max(y, BOUNDS.yMin), Math.max(body.y, top));
+        if (this.floorHeightAt) {
+          const clear = this.floorHeightAt(px, pz) + FISH_LENGTH * 0.5;
+          if (y < clear) y = Math.max(y, Math.min(BOUNDS.yMax, clear));
+        }
+        // Nose into the dodge: the route's velocity plus how fast the dodge
+        // is moving it, the turn held to a third of a right angle either way.
+        const rx = offRate[k * 3]!, ry = offRate[k * 3 + 1]!, rz = offRate[k * 3 + 2]!;
+        if (rx * rx + ry * ry + rz * rz > 1e-4) {
+          const hl = Math.hypot(body.vx, body.vz);
+          const yaw0 = Math.atan2(body.vx, body.vz);
+          let turn = Math.atan2(body.vx + rx, body.vz + rz) - yaw0;
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          // A fish hardly moving turns less: a sideways shuffle is not a heading.
+          turn = Math.max(-0.5, Math.min(0.5, turn)) * Math.min(1, hl / 4);
+          const c = Math.cos(turn), sn = Math.sin(turn);
+          const fx0 = lfx, fz0 = lfz;
+          lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
+          const fl = Math.hypot(lfx, lfz) || 1;
+          lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? (ry / Math.max(hl, 4)) * fl : 0)));
+        }
+      }
+      // A crab walks the floor on its own legs (crab.ts) and takes over its
+      // place and facing; a script's actor or a seated one just idles.
+      const crabRig = f.rig?.crab;
+      const crab = crabRig && !act && !style.formation
+        ? crabFrame(crabRig, {
+            t: tSec, index: f.index, plan: f.plan, start: crabStart(f.plan, f.index), len: L,
+            scale: crabRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+          }, this.crabOut)
+        : null;
+      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (crabRig) crabIdle(crabRig, tSec, f.index);
+      // A starfish crawls the floor the same way (starfish.ts).
+      const starRig = f.rig?.starfish;
+      const star = starRig && !act && !style.formation
+        ? starfishFrame(starRig, {
+            t: tSec, index: f.index, plan: f.plan, start: starfishStart(f.plan, f.index), len: L,
+            scale: starRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+            ...(this.danceSpots.has(f.index) ? { dance: {
+              mode: this.str('starfishDance') as StarfishDanceMode, beats: this.danceBeats(tSec),
+              x: this.danceSpots.get(f.index)![0], z: this.danceSpots.get(f.index)![1], yaw: this.danceYaw,
+              ...this.partnerOf(f.index),
+            } } : {}),
+          }, this.starOut)
+        : null;
+      if (star) { px = star.x; y = star.y; pz = star.z; f.rig!.bloom = star.bloom; } else if (starRig) {
+        // Placed by a script or a formation: idle, and still lying down — its glow kept low (starfish.ts).
+        starfishIdle(starRig, tSec, f.index);
+        f.rig!.bloom = STARFISH_BLOOM;
+      }
+      // An octopus crawls it too — and jets off it, and walks on two arms (octopus.ts).
+      const octoRig = f.rig?.octopus;
+      const octo = octoRig && !act && !style.formation
+        ? octopusFrame(octoRig, {
+            t: tSec, index: f.index, plan: f.plan, start: octopusStart(f.plan, f.index), len: L,
+            scale: octoRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+          }, this.octoOutput)
+        : null;
+      if (octo) { px = octo.x; y = octo.y; pz = octo.z; f.rig!.lights['GLOW-Rings'] = octo.mood.rings; f.rig!.bloom = 0.35 + 0.65 * octo.lift; }
+      else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.lights['GLOW-Rings'] = 0.3; f.rig!.bloom = 0.35; }
+      const floor = crab ?? star ?? octo;
+      // A glowfish swims where the tank puts it; its module sets its clips and its light.
+      const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
+      if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
+      // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
+      const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;
+      if (hacker) {
+        if (f.rig!.screen) setScreen(f.rig!.screen, tSec, hacker.screen);
+        f.rig!.lights['SCREEN-Glass'] = f.rig!.lights['SCREEN-Pixels'] = hacker.screen.level;
+      }
+      const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
+      // A babyfish swims where the tank puts it (it schools); its module sets its clips.
+      const baby = f.rig?.baby ? babyFrame(f.rig.baby, tSec, f.index, beat, this.babyLeader) : null;
+      // A dori flies on its fins (tang.ts): cruising or holding station by its
+      // pace, the tail only when the tank makes it dart.
+      const tang = f.rig?.tang ? tangFrame(f.rig.tang, tSec, f.index, beat, {
+        pace: speed * styleSpeed * style.travel, flurry: mnv.flurry + flurryBoost,
+      }) : null;
+      // A blowfish (puffer.ts): its puff, its act, the clips for both.
+      const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, { pace: speed * styleSpeed * style.travel }) : null;
+      // A hiccuping baby's speed, for the momentum its bubble leaves with.
+      if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
       f.group.position.set(px, y, pz);
-      f.group.lookAt(px + pose.fx, y + fy, pz + pose.fz);
-      f.group.rotateZ(pose.roll);
+      if (f.index === followSlot) {
+        // A standing starfish is where its feet are, ahead of its resting place.
+        this.followAt.set(star ? star.focusX : px, y, star ? star.focusZ : pz); this.followSeen = true;
+        this.followHead.set(act ? act.fx : lfx, 0, act ? act.fz : lfz);
+        // A crab's route is its own (crab.ts): chase along it, not the swim plan's.
+        if (floor) { this.followHead.set(floor.tx, 0, floor.tz); this.followTrail.set(floor.trailX, y, floor.trailZ); this.followHasTrail = true; }
+        if (this.followHead.lengthSq() < 1e-6) this.followHead.set(0, 0, 1);
+        this.followHead.normalize();
+        if (act && this.vignette) {
+          // An actor's trail is the script's own past, a beat behind.
+          const back = poseOf(this.vignette, f.index, tSec - (L * 2) / 17);
+          if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
+        }
+      }
+      // The eye does not see itself. The GROUP, not f.body: f.body is null
+      // BY DESIGN for a fallback (non-GLB) fish (see tintFish), so gating on
+      // it would leave the fallback blob visible right at the camera.
+      f.group.visible = !(followPov && f.index === followSlot);
+      for (let si = 0; si < this.spotRig.length; si++) {
+        if (this.spotRig[si]!.slot === f.index) {
+          this.spotAt[si]!.set(px, y, pz); this.spotSeen[si] = true; this.spotLen[si] = L;
+          this.spotHead[si]!.set(act ? act.fx : lfx, 0, act ? act.fz : lfz).normalize();
+        }
+      }
+      if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
+      if (act) {
+        f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
+        f.group.rotateZ(act.roll);
+      } else {
+        f.group.lookAt(px + lfx, y + lfy, pz + lfz);
+        f.group.rotateZ(pose.roll);
+      }
+      if (floor) f.group.quaternion.copy(floor.quaternion);
+      // A floor creature (a crab, a starfish) stands in a soft shadow of its own: without one, feet on the
+      // sand still read as hovering. Its feet are the group's origin (crab.ts, starfish.ts).
+      if (floor && f.group.visible) {
+        if (!this.walkShadows) { this.walkShadows = new ContactShadows(MAX_FISH); this.scene.add(this.walkShadows.mesh); }
+        // On the floor even when a jet lifts the octopus, and smaller the higher it goes.
+        const gy = octo ? octo.groundY : floor.y, far = octo ? 1 - 0.6 * octo.lift : 1;
+        this.walkShadows.set(this.walkShadowN++, floor.x, gy + 0.15, floor.z, floor.quaternion, L * 1.15 * far, L * 0.95 * far);
+      }
+      // An octopus's eyes — each pupil turned level with the world — its skin, its ink (octopus.ts, ink.ts).
+      let oLook: ReturnType<typeof octopusLook> | null = null;
+      // Placed by a script or a formation it has no stops, but it still keeps its pupils level and changes colour.
+      const oState = octo ?? (f.rig?.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
+      if (oState && f.rig?.octopus) {
+        f.group.updateMatrixWorld(true);
+        oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: oState });
+        if (f.rig!.octoSkin) setOctopusSkin(f.rig!.octoSkin, oState.mood, this.floorMat ? this.floorColor.copy(this.floorMat.color) : null, oState.coat);
+        const siphon = f.rig!.octopus.siphon;
+        if (oState.ink && siphon && this.ink) {
+          siphon.getWorldPosition(this.burpAt);
+          this.ink.emit(oState.ink.key, oState.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
+        }
+      }
+      // A dori's eyes, now the fish is placed: who it is looking at (tang.ts).
+      // Not the camera it is riding in.
+      let look: ReturnType<typeof tangLook> | null = null;
+      if (tang && f.rig!.tang) {
+        f.group.updateMatrixWorld(true);
+        look = tangLook(f.rig!.tang, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: tang });
+      }
+      // A blowfish turns to whoever it is kissing or waving at (a kiss given
+      // sideways is no kiss at all), then its eyes, then its bubbles.
+      let pLook: ReturnType<typeof pufferLook> | null = null;
+      if (puffer && f.rig!.puffer) {
+        const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
+        if (viewer && puffer.face > 0.01) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
+          let turn = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          f.group.rotateOnWorldAxis(Y_AXIS, Math.max(-0.9, Math.min(0.9, turn)) * puffer.face);
+        }
+        f.group.updateMatrixWorld(true);
+        pLook = pufferLook(f.rig!.puffer, tSec, f.index, { viewer, state: puffer });
+        const mouth = f.rig!.puffer.mouth;
+        if (puffer.bubble && mouth && this.burps) {
+          mouth.getWorldPosition(this.burpAt);
+          this.burps.emit(puffer.bubble.key, puffer.bubble.t, this.burpAt.x, this.burpAt.y, this.burpAt.z,
+            L * puffer.bubble.size, fishHash(f.index, puffer.bubble.key.length + Math.round(puffer.bubble.t)));
+        }
+      }
+      // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
+      if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
+        const hx = act ? act.fx : lfx, hy = act ? act.fy : lfy, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hy, hz) || 1;
+        // The mouth: between the eyes, a little ahead and below — the model's
+        // origin is back by its tail, so the group's position will not do.
+        const eyes = f.rig!.baby!.eyes, m = this.burpAt;
+        if (eyes) {
+          eyes[0].getWorldPosition(m); eyes[1].getWorldPosition(this.burpTmp);
+          m.add(this.burpTmp).multiplyScalar(0.5);
+        } else m.set(px + (hx / hl) * L * 0.8, y, pz + (hz / hl) * L * 0.8);
+        // The snout is 1/8 of a length past the eyes, the mouth 1/6 below them;
+        // the bubble's centre is its own radius further out.
+        const out = L * 0.22;
+        m.x += (hx / hl) * out; m.y += (hy / hl) * out - L * 0.15; m.z += (hz / hl) * out;
+        const dt = (t - this.lastFrameT) / 1000;
+        const v = dt > 0 && dt < 0.25 && this.burpFrom.lengthSq() > 0 ? 1 / dt : 0;
+        this.burps.emit(`${f.index}:${baby.start.toFixed(3)}`, baby.start + HICCUP_JOLT,
+          m.x, m.y, m.z, L * 0.09, fishHash(f.index, Math.round(baby.start * 10)),
+          (px - this.burpFrom.x) * v, (y - this.burpFrom.y) * v, (pz - this.burpFrom.z) * v);
+      }
+
+      // Eye life: blinks, saccades, a look at whoever it is talking to, a
+      // glance at the lens. Rigged on the first frame that asks for it, so
+      // `eyeLife: 0` compiles the stock eye program and costs nothing.
+      // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
+      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
+        if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
+        if (f.eyes) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
+          const toward = (tx: number, ty: number, tz: number): { fwd: number; up: number } => {
+            const dx = tx - px, dy = ty - y, dz = tz - pz, dl = Math.hypot(dx, dy, dz) || 1;
+            return { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl };
+          };
+          const cam = this.camera.position;
+          const look = act?.lookAt ?? null;
+          eyeMood(tSec, f.index, {
+            doing: act ? act.doing : '',
+            target: look ? toward(look.x, look.y, look.z) : null,
+            camera: toward(cam.x, cam.y, cam.z),
+            climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
+          }, eyeLife, this.eyeState);
+          f.eyes.set(this.eyeState);
+        }
+      } else if (f.eyes) {
+        f.eyes.set(EYES_AT_REST);
+      }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
-      f.group.scale.setScalar(f.baseScale * breathe * varn.scaleMul);
+      f.group.scale.setScalar(f.baseScale * breathe * size);
+      if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
+
+      // The swim wave (MQ: Amano study). Rigged on the first frame that asks
+      // for it, so `swimWave: 0` compiles the stock programs and costs nothing.
+      // While it runs it REPLACES the rigid yaw and a whole-node clip: both
+      // move the meshes inside the fish frame the wave was measured in.
+      if (swimWave > 0 && f.body && f.wave === undefined) {
+        f.body.rotation.y = f.baseYaw;
+        if (f.mixer && !f.rig) f.mixer.setTime(0);
+        const breed = this.wantBreeds[f.index] ?? null;
+        // A seahorse does not wave: it flutters its fin, coils its tail and nods.
+        // A rigged breed's skeleton is its motion (crab.ts, angler.ts).
+        f.wave = f.rig ? null : breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
+          : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+      }
+      const waving = swimWave > 0 && !!f.wave;
+      if (f.wave) {
+        f.wave.ensure();
+        let turn = 0;
+        if (waving && turnPlan && !act) {
+          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
+          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        }
+        const flurry = mnv.flurry + flurryBoost;
+        const ws = waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch);
+        ws.t = tSec;
+        f.wave.set(ws);
+      }
 
       // Most of the breed library carries NO animation clip, so those fish
       // translated along their spline completely rigidly — gliding cardboard.
@@ -1358,32 +3227,387 @@ class TankInstance implements SaverInstance {
         // Write every frame, scaled by wiggle. Skipping the write at 0 left the
         // last offset latched, so turning the dial down stopped the motion but
         // never returned the fish to its own heading.
-        const w = Math.min(1.6, wiggle + mnv.flurry * 0.6);
+        const w = waving ? 0 : Math.min(1.6, wiggle + (mnv.flurry + flurryBoost) * 0.6);
         f.body.rotation.y = f.baseYaw + Math.sin(beat * 0.06 + varn.phase) * 0.55 * w;
       }
 
       if (f.mixer && f.clipDuration > 0) {
         f.mixer.setTime(
-          (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
+          waving ? 0 : (((beat * 0.045) % f.clipDuration) + f.clipDuration) % f.clipDuration,
         );
       } else if (f.tail) {
         // warpSec === tSec·speed when speed is constant — same phase as before.
         f.tail.rotation.y = Math.sin(warpSec * 6 + f.index) * 0.5;
       }
+
+      report.push({
+        index: f.index,
+        url: f.url,
+        breed: this.wantBreeds[f.index] ?? null,
+        style: style.name,
+        band: bandStyle.band,
+        bond,
+        seat: style.formation ? seat : null,
+        waving,
+        x: Math.round(px * 10) / 10,
+        // Where it is drawn: a crab stands on the ground, below its swim band.
+        y: Math.round(f.group.position.y * 10) / 10,
+        z: Math.round(pz * 10) / 10,
+        // The facing the frame shows: the script's, for an actor.
+        heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : lfx, floor ? floor.fz : act ? act.fz : lfz) * 180) / Math.PI + 360) % 360),
+        maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
+        size: Math.round(size * 100) / 100,
+        ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
+ : {}),
+      });
+      });
     }
+    avoidFrame(bodies, avoid, off, offRate, this.avoidScratch, this.avoidAhead);
+    for (const fn of finish) fn();
+    finish.length = 0;
+    // Who is touching whom now, and who would have been without the dodge.
+    const at = this.crowdAt;
+    at.fill(NaN);
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i]!, slot = this.avoidSlot[i]!;
+      at[slot * 4] = b.x; at[slot * 4 + 1] = b.y; at[slot * 4 + 2] = b.z; at[slot * 4 + 3] = b.len;
+    }
+    const without = crowding(at, MAX_FISH).touching;
+    at.fill(NaN);
+    for (const f of this.fish) {
+      if (!f || f.index >= visible) continue;
+      const q = f.group.position;
+      at[f.index * 4] = q.x; at[f.index * 4 + 1] = q.y; at[f.index * 4 + 2] = q.z; at[f.index * 4 + 3] = FISH_LENGTH * this.fishSizeAt(f.index);
+    }
+    this.lastCrowding = { ...crowding(at, MAX_FISH), without };
+    this.walkShadows?.commit(this.walkShadowN);
+    // The garden answers the cast: crowns fold, worms duck, pods swell as a fish passes —
+    // after the cast is placed, so it answers this frame's fish, not last frame's.
+    if (this.scenery) {
+      let n = 0;
+      for (const f of this.fish) {
+        if (!f || !f.group.visible || n >= this.floraFish.length) continue;
+        f.group.getWorldPosition(this.floraFishAt);
+        const slot = this.floraFish[n++]!;
+        slot.x = this.floraFishAt.x; slot.y = this.floraFishAt.y; slot.z = this.floraFishAt.z;
+        slot.r = 12 + FISH_LENGTH * 0.9; // about a fish and a half: close enough to startle, not the whole bed
+      }
+      this.scenery.setFish(this.floraFish.slice(0, n));
+    }
+    this.placeFollowCamera(followSlot, followBack, followPov, followLen);
+    this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
+    this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
+    this.ink?.update(tSec);
+    this.commitGlow(glowN, fishGlow, glowPulse, tSec);
+    this.aimSpot(tSec);
+    this.lastFish = report;
+    this.lastFrameT = t;
+    this.rendered = true;
+  }
+
+  /**
+   * The frame in numbers (MQ38): what is in the tank, where, doing what —
+   * for `perceiveChannel`, which cannot read a classic saver's pixels into
+   * meaning. Reads the last rendered frame; never simulates. Small on
+   * purpose: 24 fish × a dozen fields.
+   */
+  inspect(): Record<string, unknown> | null {
+    // "Nothing yet" is null by contract — not an empty tank at t=0.
+    if (!this.rendered) return null;
+    const fish = this.lastFish;
+    const byStyle: Record<string, number> = {};
+    for (const f of fish) byStyle[f.style] = (byStyle[f.style] ?? 0) + 1;
+    const maneuvering = fish.filter((f) => f.maneuvering).length;
+    const cx = fish.length ? fish.reduce((a, f) => a + f.x, 0) / fish.length : 0;
+    const cy = fish.length ? fish.reduce((a, f) => a + f.y, 0) / fish.length : 0;
+    const cz = fish.length ? fish.reduce((a, f) => a + f.z, 0) / fish.length : 0;
+    const spread = fish.length
+      ? Math.sqrt(fish.reduce((a, f) => a + (f.x - cx) ** 2 + (f.y - cy) ** 2 + (f.z - cz) ** 2, 0) / fish.length)
+      : 0;
+    return {
+      saver: 'metaquarium',
+      t: this.lastFrameT,
+      ...(this.burps?.size ? { burps: this.burps.list() } : {}),
+      // Fish passing through fish: pairs closer than touching now, the worst
+      // three ([slot, slot, overlap]), and how many would be without `fishAvoid`.
+      ...(this.lastCrowding ? { crowding: { avoid: this.num('fishAvoid'), ...this.lastCrowding } } : {}),
+      camera: {
+        // Following a fish: the orbit params are ignored while this is set.
+        follow: this.followState,
+        shot: this.str('shot'),
+        azimuth: this.num('cameraAzimuth'),
+        elevation: this.num('cameraElevation'),
+        distance: this.num('cameraDistance'),
+        autoRotate: this.num('autoRotate'),
+      },
+      room: {
+        environment: this.str('environment'),
+        floorKind: this.str('floorKind'),
+        waterY: this.ceiling ? (this.num('waterY') >= 0 ? this.num('waterY') : this.presetWaterY) : null,
+        rayStrength: this.rayMat ? (this.num('rayStrength') >= 0 ? this.num('rayStrength') : this.presetRayStrength) : 0,
+        rayPools: this.rayPools.length,
+      },
+      // Only what the frame shows: a slot hidden by a lower `fishCount` keeps
+      // its rig for when it comes back, but it is not on screen now.
+      eyes: this.fish.map((f) => (f?.group.visible ? f.eyes?.grids.map((g) => g.signature).join(' · ') ?? null : null)),
+      vignette: this.vignette ? {
+        actors: this.vignette.actors,
+        beats: this.vignette.beats.length,
+        duration: Math.round(this.vignette.duration * 10) / 10,
+        doing: Array.from({ length: this.vignette.actors }, (_, i) => poseOf(this.vignette!, i, this.lastFrameT / 1000)?.doing ?? null),
+      } : null,
+      glow: {
+        lighting: this.lit ? 'lit' : 'flat',
+        glowLights: this.studio?.lights.filter((l) => l.intensity > 0).length ?? 0,
+        fishGlow: this.num('fishGlow'),
+        fishMetal: this.str('fishMetal'),
+        glowing: this.fish.filter((f) => f?.glow && f.group.visible).length,
+        floorPools: Number(this.poolUniforms.uMqPoolN!.value) - this.fixedPools.length,
+      },
+      props: {
+        scenery: this.scenery?.counts ?? {},
+        propMix: this.str('propMix'),
+        envProps: this.str('envProps'),
+        budget: this.quality.props,
+        drawCalls: (this.crystals?.drawCalls ?? 0) + (this.rockCrystals?.drawCalls ?? 0) + (this.scenery?.drawCalls ?? 0),
+        triangles: (this.crystals?.triangles ?? 0) + (this.rockCrystals?.triangles ?? 0) + (this.scenery?.triangles ?? 0),
+        clusters: this.clusters.map((c) => ({
+          id: c.id, kind: 'crystal', habit: c.habit, color: c.color, glass: c.glass,
+          x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z),
+          radius: Math.round(c.radius), height: Math.round(c.height), shards: c.shards.length,
+        })),
+      },
+      cast: {
+        fishMix: this.str('fishMix'),
+        mixMode: this.mixMode,
+        wanted: this.wantUrls.length,
+        loaded: this.loadedCount(),
+        visible: fish.length,
+        cap: this.quality.fishCap,
+        byStyle,
+        swimStyle: this.str('swimStyle'),
+        pathShape: this.pathShape,
+        formationShape: this.str('formationShape'),
+      },
+      maneuver: {
+        name: this.str('maneuver'),
+        rate: this.num('maneuverRate'),
+        intensity: this.num('maneuverIntensity'),
+        active: maneuvering,
+      },
+      motion: {
+        centroid: { x: Math.round(cx * 10) / 10, y: Math.round(cy * 10) / 10, z: Math.round(cz * 10) / 10 },
+        spread: Math.round(spread * 10) / 10,
+        lightSeek: this.num('lightSeek'),
+        formationBreathe: this.num('formationBreathe'),
+      },
+      quality: { fishCap: this.quality.fishCap, envBudget: this.quality.envBudget, governor: Math.round(this.govScale * 100) / 100 },
+      // What the GPU did for the last frame: compiled programs (a feature at
+      // its default must not add one) and draw calls.
+      render: { programs: this.renderer.info.programs?.length ?? 0, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles },
+      shoal: this.shoal ? this.shoal.stats(this.shoalTau, this.shoalCarrier, this.shoalFloor, this.camera) : null,
+      mirror: this.mirror ? { drawn: this.mirrorDrawn, latchedOff: this.mirror.off } : null,
+      fish,
+    };
+  }
+
+  /**
+   * Caustics (caustics.ts): the net of light from the surface on every
+   * opaque surface. Patched the first frame it is asked for, so `caustics: 0`
+   * compiles the stock programs; the shared uniform is written in the scene's
+   * onBeforeRender so crossfading tanks each draw with their own.
+   */
+  private updateCaustics(tSec: number): void {
+    const strength = this.num('caustics');
+    // The clock runs whenever anything reads the net: the surfaces, or a
+    // follow-spot's web (which shares it), so the spot never freezes at 0.
+    const spotOn = this.spotRig.length > 0;
+    if ((strength > 0 || spotOn) && !this.causticsInstalled) {
+      this.causticsInstalled = true;
+      this.scene.onBeforeRender = () => {
+        // The ceiling moves with waterY; read it at draw time.
+        this.causticState.w = this.ceiling ? this.ceiling.position.y : BOUNDS.yMax + 60;
+        CAUSTIC.value.copy(this.causticState);
+      };
+    }
+    if (!this.causticsInstalled) return;
+    this.causticState.set(strength, 12 * this.num('causticScale'), ((tSec % CAUSTIC_WINDOW) + CAUSTIC_WINDOW) % CAUSTIC_WINDOW, this.causticState.w);
+    CAUSTIC_LAYERS.value = this.quality.glowLights >= 3 ? 2 : 1;
+    // Fish arrive and scenery rebuilds: a tag check per material, patching only what is new.
+    if (strength > 0) applyCaustics(this.scene);
+  }
+
+  /**
+   * The fish's water light (fishlight.ts): patched onto the lit coats and
+   * plates the first frame `fishAmbient` is on, then fed the scene's colours
+   * every frame. Lit mode only — flat fish have no lights to add to.
+   */
+  private updateFishLight(): void {
+    const amount = this.num('fishAmbient');
+    if (amount > 0) this.fishLightInstalled = true;
+    if (!this.fishLightInstalled) return;
+    setFishWater({
+      tint: this.waterTint(), surface: this.roomSurface, rays: this.roomRays,
+      fog: this.fogColor, floor: this.floorMat.color,
+      caustics: this.num('caustics'), house: this.houseLevel, amount,
+    });
+    const patch = (o: Object3D): void => o.traverse((n) => {
+      const mat = (n as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) patchFishLight(m);
+    });
+    for (const f of this.fish) if (f) patch(f.group);
+    if (this.shoal) patch(this.shoal.mesh);
   }
 
   // ---- render ----
 
   private renderScene(): void {
     if (this.renderer.getContext()?.isContextLost?.()) return;
+    this.applyWater();
+    this.renderMirror();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * The surface mirror (mirror.ts), before the main render: high tier draws
+   * the reflection when it can be seen; mid tier reflects the gradient; low
+   * tier and open water leave the surface as it was.
+   */
+  private renderMirror(): void {
+    const mat = this.waterMat;
+    if (!mat?.uniforms.uMirror) return;
+    const u = mat.uniforms;
+    const amount = this.num('surfaceMirror'), tier = this.quality.glowLights;
+    const on = amount > 0 && tier >= 3 && !!this.ceiling;
+    (u.uMirror!.value as Vector3).set(on ? amount : 0, 0, this.clockSec);
+    if (!on) return;
+    // The colours the window and the mid-tier mirror use (display space).
+    const tint = this.waterTint();
+    const lit = (u.uMirrorLit!.value as Color).set(tint || this.roomSurface || '#bfe9ff').multiplyScalar(1.25);
+    lit.convertLinearToSRGB();
+    // Mid tier reflects the water the light comes through: lit, with a tint.
+    const deep = (u.uMirrorDeep!.value as Color).copy(this.fogColor).lerp(this.floorMat.color, 0.35);
+    if (tint) deep.lerp(this.tintColor.set(tint), tintWeight(0.25));
+    deep.convertLinearToSRGB();
+    if (tier < 4) return;
+    if (!this.mirror) {
+      this.mirror = new SurfaceMirror();
+      this.camera.layers.enable(MIRROR_SKIP_LAYER);
+    }
+    if (this.govScale < 0.8) this.mirror.latchOff();
+    // What the mirror must not draw: the surface itself, the shafts, particles.
+    this.scene.traverse((o) => {
+      if (o.userData.mqMirrorSkip || (o as { isPoints?: boolean }).isPoints) o.layers.set(MIRROR_SKIP_LAYER);
+    });
+    const ceilingY = this.ceiling!.position.y;
+    // The reflected light really travels up into the lit water: flip the in-scatter for this pass.
+    const tintOn = TINT.value.w;
+    if (tintOn > 0) TINT.value.w = 2;
+    const drew = this.mirror.render(this.renderer, this.rawRender, this.scene, this.camera, ceilingY, { radius: BOUNDS.radius * 1.6, top: BOUNDS.yMax + 40 });
+    TINT.value.w = tintOn;
+    if (drew) {
+      u.tMirror!.value = this.mirror.texture;
+      (u.uMirrorMatrix!.value as Matrix4).copy(this.mirror.textureMatrix);
+      (u.uMirror!.value as Vector3).y = 1;
+    }
+    this.mirrorDrawn = drew;
+  }
+
+  /**
+   * A room colour where the author left the param alone: not set in the
+   * scene (its resolved default is still the manifest's) and not steered by
+   * a track. The palettes were meant to work this way from the start — the
+   * `??` fallback never fired, because every param arrives pre-filled.
+   */
+  private paletteOr(path: 'fogColor' | 'floorColor' | 'moteColor', room: string | undefined): string | undefined {
+    return roomColor({
+      resolvedDefault: this.space[path]?.default, manifestDefault: METAQUARIUM_PARAMS[path].default,
+      tracked: this.trackedPaths.has(path), current: this.params[path],
+    }, room);
+  }
+
+  /** The tint in force: the author's `waterTint`, else the room's when water is on. */
+  private waterTint(): string {
+    const own = this.str('waterTint');
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(own)) return own;
+    return this.num('water') > 0 && this.roomPalette?.tint ? this.roomPalette.tint : '';
+  }
+
+  /** The background dome: shown (and the flat background hidden) only while a tint is on. */
+  private updateWaterDome(tinted: boolean): void {
+    if (tinted && !this.waterDome) {
+      const mat = new ShaderMaterial({
+        uniforms: { uFog: { value: new Color() }, ...waterUniforms() },
+        vertexShader: `
+          varying vec3 vDir;
+          void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position * ${(CAMERA_FAR * 0.9).toFixed(1)}, 1.0); }`,
+        fragmentShader: `
+          ${WATER_INSCATTER_GLSL}
+          uniform vec3 uFog;
+          varying vec3 vDir;
+          // Display space, like three's own fog mix: the far fade lands on exactly this.
+          void main() { gl_FragColor = vec4(mix(mqToDisplay(uFog), mqToDisplay(uMqTint.rgb), mqTintWeight(normalize(vDir))), 1.0); }`,
+        side: BackSide, depthWrite: false, depthTest: false, fog: false,
+      });
+      mat.userData.mqOwned = true;
+      const geo = new SphereGeometry(1, 32, 16);
+      geo.userData.mqOwned = true;
+      const dome = new Mesh(geo, mat);
+      dome.name = 'water-dome';
+      dome.frustumCulled = false;
+      dome.renderOrder = -1000;
+      // Centred on whichever camera draws it (the main one, a mirror, a still).
+      dome.onBeforeRender = (_r, _s, camera) => { dome.position.copy(camera.position); dome.updateMatrixWorld(); };
+      this.scene.add(dome);
+      this.waterDome = dome;
+    }
+    if (this.waterDome) {
+      this.waterDome.visible = tinted;
+      (this.waterDome.material as ShaderMaterial).uniforms.uFog!.value.copy(this.fogColor);
+    }
+    this.scene.background = tinted ? null : this.fogColor;
+  }
+
+  /**
+   * Water and dither, set right before THIS tank renders: `WATER` is one
+   * module uniform, and two tanks on a page (the Dev Tools crossfade) each
+   * write their own value and render with it in the same call.
+   *
+   * Materials are patched as they appear — fish arrive asynchronously, and a
+   * scenery rebuild makes new ones — so this walks the scene each frame and
+   * skips what it has seen. Water is installed only once it has been turned
+   * on: a tank that never asks for it compiles the stock fog.
+   */
+  private applyWater(): void {
+    const water = this.num('water');
+    const dither = this.str('dither') === 'on';
+    WATER.value = water;
+    const r = clarityRatio(this.num('waterClarity'));
+    RATIO.value[0] = r[0]; RATIO.value[1] = r[1]; RATIO.value[2] = r[2];
+    const tint = this.waterTint();
+    if (tint) {
+      this.tintColor.set(tint);
+      TINT.value.set(this.tintColor.r, this.tintColor.g, this.tintColor.b, 1);
+    } else TINT.value.w = 0;
+    if (water > 0 || tint) this.waterInstalled = true;
+    const install = this.waterInstalled;
+    this.scene.traverse((o) => {
+      const mat = (o as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        if (install) patchWater(m, dither);
+        else setDither(m, dither);
+      }
+    });
   }
 
   private start(): void {
     if (this.frameId !== null || typeof requestAnimationFrame === 'undefined')
       return;
-    this.startT = 0;
+    this.clock.resume();
     this.frameId = requestAnimationFrame((now) => this.loop(now));
   }
 
@@ -1392,13 +3616,13 @@ class TankInstance implements SaverInstance {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    this.clock.pause();
   }
 
   private loop(now: number): void {
     this.frameId = requestAnimationFrame((n) => this.loop(n));
-    if (this.startT === 0) this.startT = now;
     this.governFrame(now);
-    this.t = now - this.startT;
+    this.t = this.clock.sample(now);
     this.setState(this.t);
     this.renderScene();
   }
@@ -1468,13 +3692,39 @@ class TankInstance implements SaverInstance {
   applyTrack(track: ControlTrack): void {
     this.track = track;
     this.speedTracked = track.deltas.some((d) => d.path === 'swimSpeed');
+    this.trackedPaths = new Set(track.deltas.map((d) => d.path));
+    this.shoalSpeedTracked = track.deltas.some((d) => d.path === 'shoalSpeed');
+    this.danceTempoTracked = track.deltas.some((d) => d.path === 'danceTempo');
+    this.shoalWarpMemo = [NaN, 0, NaN, 0];
+    this.shoalCarrierMemo = [NaN, new Map(), NaN, new Map()];
+    this.autoRotateTracked = track.deltas.some((d) => d.path === 'autoRotate');
     if (this.paused) this.renderStill();
   }
 
   renderFrame(t: number, _seed: number): void {
     this.t = t;
+    this.clock.seek(t);
     this.setState(t);
     this.renderScene();
+  }
+
+  /**
+   * Snapshot the current frame (SaverInstance.capture). Renders fresh and
+   * reads in the SAME task: a WebGL buffer without preserveDrawingBuffer is
+   * cleared once the frame is presented, so any read from outside the render
+   * tick sees black — which also makes this work in a hidden tab, where rAF
+   * never fires and there is no render tick to race at all.
+   */
+  async capture(): Promise<ImageBitmap | null> {
+    if (this.disposed || this.renderer.getContext()?.isContextLost?.()) return null;
+    this.renderStill();
+    try {
+      // createImageBitmap snapshots the source at CALL time; the await only
+      // covers the decode. Called here, pre-present, the buffer is intact.
+      return await createImageBitmap(this.canvas);
+    } catch {
+      return null;
+    }
   }
 
   composition(): SaverLayer[] {
@@ -1492,9 +3742,9 @@ class TankInstance implements SaverInstance {
 
   dispose(): void {
     this.disposed = true;
+    this.finishPass?.dispose();
+    this.mirror?.dispose();
     this.stop();
-    for (const p of this.dracoPaths) releaseDraco(p);
-    this.dracoPaths.clear();
     for (const f of this.fish) {
       if (!f) continue;
       f.mixer?.stopAllAction();
@@ -1508,6 +3758,7 @@ class TankInstance implements SaverInstance {
       this.scene.remove(f.group);
     }
     this.fish = [];
+    this.studio?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
@@ -1515,6 +3766,7 @@ class TankInstance implements SaverInstance {
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
     delete this.ctxSaver.host.dataset.mqEnv;
+    delete this.ctxSaver.host.dataset.mqProps;
     delete this.ctxSaver.host.dataset.mqDraco;
     delete this.ctxSaver.host.dataset.mqBackend;
   }

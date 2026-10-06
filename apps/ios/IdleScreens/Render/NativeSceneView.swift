@@ -6,6 +6,14 @@ import SwiftUI
 struct NativeSceneView: View {
     let layers: [CompiledLayer]
     let background: SpecSubset.Background?
+    /// 0…1 frame persistence. The web engine gets this free by compositing
+    /// each frame over the last one; a SwiftUI Canvas has no accumulation
+    /// buffer, so motion is smeared by re-drawing each entity at a few
+    /// earlier instants with decaying alpha. Close for moving sprites (what
+    /// ghosting is for) and bounded — see `ghostEchoes`.
+    var ghosting: Double = 0
+    /// Sizes the ghost-echo budget; the tier still decides the renderer.
+    var renderClass: RenderClass = .standard
     let tier: CapabilityTier
     var watchdog: FrameWatchdog?
     var onDowngrade: () -> Void = {}
@@ -23,6 +31,10 @@ struct NativeSceneView: View {
     var referenceSize: CGSize?
     /// One frame, no animation loop — for tiles beyond the animation budget.
     var staticFrame: Bool = false
+    /// Which instant a static frame shows, in seconds. Zero is the honest
+    /// poster; tests render later instants to reach life envelopes, emitters
+    /// and trails without an animation loop.
+    var staticTime: TimeInterval = 0
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -30,7 +42,7 @@ struct NativeSceneView: View {
     var body: some View {
         if staticFrame {
             Canvas { ctx, size in
-                draw(into: &ctx, size: size, t: 0)
+                draw(into: &ctx, size: size, t: staticTime)
             }
             .ignoresSafeArea()
         } else {
@@ -80,44 +92,223 @@ struct NativeSceneView: View {
             ctx.scaleBy(x: scale, y: scale)
         }
 
-        drawBackground(ctx: ctx, size: space)
+        drawBackground(ctx: ctx, size: space, t: t)
         let minDim = min(space.width, space.height)
         // t2 load shedding: thin every layer by the same stride so the
         // composition survives (dropping whole trailing layers would cut the
         // foreground accents first).
         let total = layers.reduce(0) { $0 + $1.entities.count }
         let stride = tier == .t3 ? 1 : max(1, Int((Double(total) / 150.0).rounded(.up)))
+        let echoes = ghostEchoes(entityCount: total)
         for layer in layers {
             // Dimensional values (sizes, speeds, stroke widths) scale by
             // min(w,h) for viewport specs and by 1 for px specs. Positions
             // (x/y) are always fractions of w/h — never scaled.
             let dim = layer.units == .px ? 1 : minDim
+            // Layer lifecycle: the whole layer fades in and out on its own
+            // envelope, and is skipped outright before it enters / after it
+            // leaves (web parity: compile.ts `lifeAlphaAt` gate).
+            let lifeAlpha = layer.life?.alpha(at: t * 1000) ?? 1
+            if lifeAlpha <= 0 { continue }
+            // A parented orbit rides another layer's first entity (web
+            // parity: compile.ts `parentEntityFor`), which is how a compound
+            // creature keeps its parts attached.
+            let parentEntity = layer.orbitParentKey.flatMap { key in
+                layers.first { $0.key == key }?.entities.first
+            }
             if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
+            if let links = layer.links {
+                drawLinks(links, layer: layer, at: t, in: space, dim: dim,
+                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &ctx)
+            }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
-                let point = position(of: entity, at: t, in: space, dim: dim, wrap: layer.wrap)
-                var alpha = entity.alpha
-                if let pulse = layer.pulse {
-                    let wave = sin(2 * .pi * (t * 1000 / pulse.period) + entity.phase)
-                    alpha = min(1, max(0, alpha * (1 + pulse.amp * wave)))
-                }
+                let point = SceneMotion.position(of: entity, at: t, in: space, dim: dim,
+                                                 wrap: layer.wrap, parent: parentEntity)
+                // One alpha model for both tiers. This used to be computed
+                // inline, which quietly skipped everything SceneMotion knows
+                // about — the warp fade-in and the emit window included, so
+                // those worked on the sprite tier and nowhere else.
+                let alpha = SceneMotion.pulsedAlpha(of: entity, layer: layer, at: t)
                 // Web engine sizeAt(): margins/wrap above intentionally use the
                 // base size, like web.
+                // Ghost echoes first, so the live sprite paints over its trail.
+                if echoes > 0 {
+                    for k in (1...echoes).reversed() {
+                        let back = t - Double(k) * Self.ghostStep
+                        guard back >= 0 else { continue }
+                        let ghostPoint = SceneMotion.position(of: entity, at: back, in: space,
+                                                              dim: dim, wrap: layer.wrap,
+                                                              parent: parentEntity)
+                        // A wrapped sprite that jumped the edge would smear a
+                        // line across the whole frame; drop those echoes.
+                        if layer.wrap,
+                           hypot(ghostPoint.x - point.x, ghostPoint.y - point.y)
+                            > min(space.width, space.height) / 2 { continue }
+                        let decay = pow(ghosting, Double(k))
+                        draw(entity: entity,
+                             size: entity.size * SceneMotion.growScale(of: entity, at: back),
+                             sprite: layer.sprite, textStyle: layer.textStyle, units: layer.units, at: ghostPoint,
+                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
+                    }
+                }
+                if let trail = layer.trail {
+                    drawTrail(trail, entity: entity, layer: layer, at: t, head: point,
+                              in: space, dim: dim, alpha: alpha * lifeAlpha,
+                              parent: parentEntity, ctx: &ctx)
+                }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
-                draw(entity: entity, size: grownSize, sprite: layer.sprite,
+                draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
                      units: layer.units, at: point,
-                     dim: dim, alpha: alpha, t: t, ctx: &ctx)
+                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &ctx)
             }
             ctx.blendMode = .normal
         }
     }
 
+    /// One echo per ~30fps frame back in time.
+    static let ghostStep: TimeInterval = 1.0 / 30
+
+    /// How many echoes to afford. Heavier persistence wants a longer tail, but
+    /// each echo re-draws every entity — so the budget, not the spec, has the
+    /// last word, and below t3 there are none at all.
+    private func ghostEchoes(entityCount: Int) -> Int {
+        guard ghosting > 0.01, tier == .t3, !staticFrame else { return 0 }
+        let wanted = ghosting > 0.6 ? 4 : (ghosting > 0.3 ? 3 : 2)
+        let budget = renderClass.ghostDrawBudget
+        let affordable = entityCount > 0 ? max(0, budget / entityCount - 1) : wanted
+        return min(wanted, affordable)
+    }
+
+    // MARK: - Trail and links
+
+    /// Afterglow sampled from the entity's OWN past positions — the motion is
+    /// analytic, so the trail is exact rather than a recorded history.
+    private func drawTrail(_ trail: SpecSubset.Trail, entity: CompiledEntity,
+                           layer: CompiledLayer, at t: TimeInterval, head: CGPoint,
+                           in space: CGSize, dim: CGFloat, alpha: Double,
+                           parent: CompiledEntity?, ctx: inout GraphicsContext) {
+        let fade = trail.fade ?? 1
+        let samples = min(Int((trail.length / 50).rounded(.up)), 24)
+        guard samples > 0, alpha > 0 else { return }
+        let headSize = entity.size * SceneMotion.growScale(of: entity, at: t)
+        let color = Color(.sRGB, red: entity.red, green: entity.green, blue: entity.blue,
+                          opacity: 1)
+        var prev = head
+        for step in 1...samples {
+            let k = Double(step) / Double(samples)
+            let past = t - k * trail.length / 1000
+            guard past >= 0 else { break }
+            let p = SceneMotion.position(of: entity, at: past, in: space, dim: dim,
+                                         wrap: layer.wrap, parent: parent)
+            // A wrapped entity that jumped the seam would smear a line across
+            // the frame; stop the trail at the jump instead.
+            if layer.wrap,
+               abs(p.x - prev.x) > space.width / 2 || abs(p.y - prev.y) > space.height / 2 {
+                break
+            }
+            prev = p
+            let a = alpha * (1 - k * fade)
+            if a <= 0 { break }
+            let r = headSize * dim * (1 - k * 0.7)
+            if r < 0.2 { break }
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                     with: .color(color.opacity(a)))
+        }
+    }
+
+    /// Lines between nearby entities — constellations and webs. Only motions
+    /// that actually wrap get toroidal neighbours; a bounce or orbit entity
+    /// never crosses an edge, so a "nearest image" line would cut the screen.
+    private func drawLinks(_ links: SpecSubset.Links, layer: CompiledLayer,
+                           at t: TimeInterval, in space: CGSize, dim: CGFloat,
+                           lifeAlpha: Double, parent: CompiledEntity?,
+                           ctx: inout GraphicsContext) {
+        let entities = layer.entities
+        guard entities.count > 1, links.k > 0 else { return }
+        // O(n²) neighbour search: bounded so a large layer cannot stall a frame.
+        guard entities.count <= 220 else { return }
+        let wraps = ["drift", "rise", "wander"].contains(entities[0].motionType) && layer.wrap
+        let positions = entities.map {
+            SceneMotion.position(of: $0, at: t, in: space, dim: dim,
+                                 wrap: layer.wrap, parent: parent)
+        }
+        let maxDist = links.maxDist * dim
+        let width = max(0.5, (links.width ?? (layer.units == .px ? 1 : 1.0 / 1080)) * dim)
+
+        func delta(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            var dx = b.x - a.x, dy = b.y - a.y
+            if wraps {
+                if abs(dx) > space.width / 2 { dx += dx > 0 ? -space.width : space.width }
+                if abs(dy) > space.height / 2 { dy += dy > 0 ? -space.height : space.height }
+            }
+            return CGPoint(x: dx, y: dy)
+        }
+
+        var seen = Set<Int64>()
+        func emit(_ i: Int, _ j: Int) {
+            let lo = min(i, j), hi = max(i, j)
+            let key = Int64(lo) << 32 | Int64(hi)
+            guard !seen.contains(key) else { return }
+            let d = delta(positions[lo], positions[hi])
+            let dist = hypot(d.x, d.y)
+            guard dist <= maxDist else { return }
+            seen.insert(key)
+            var a = links.alpha ?? SceneMotion.pulsedAlpha(of: entities[lo], layer: layer, at: t)
+            if links.falloff == true { a *= max(0, 1 - dist / maxDist) }
+            a *= lifeAlpha
+            guard a > 0.004 else { return }
+            let color = links.color.map { Color(hex: $0) }
+                ?? Color(.sRGB, red: entities[lo].red, green: entities[lo].green,
+                         blue: entities[lo].blue, opacity: 1)
+            var path = Path()
+            path.move(to: positions[lo])
+            path.addLine(to: CGPoint(x: positions[lo].x + d.x, y: positions[lo].y + d.y))
+            ctx.stroke(path, with: .color(color.opacity(a)),
+                       style: StrokeStyle(lineWidth: width, lineCap: .butt))
+        }
+
+        switch links.mode {
+        case "chain":
+            for i in 0..<(entities.count - 1) { emit(i, i + 1) }
+            if links.closed == true, entities.count > 2 { emit(entities.count - 1, 0) }
+        case "random":
+            // Golden-ratio stride spreads partners instead of clustering.
+            let n = entities.count
+            let strideBy = max(1, Int((Double(n) * 0.381_966).rounded()))
+            for i in 0..<n {
+                for m in 1...links.k {
+                    let j = (i + m * strideBy) % n
+                    if j != i { emit(i, j) }
+                }
+            }
+        default:  // nearest
+            for i in positions.indices {
+                var neighbours: [(dist: Double, j: Int)] = []
+                for j in positions.indices where j != i {
+                    let d = delta(positions[i], positions[j])
+                    let dist = hypot(d.x, d.y)
+                    if dist <= maxDist { neighbours.append((dist, j)) }
+                }
+                neighbours.sort { $0.dist != $1.dist ? $0.dist < $1.dist : $0.j < $1.j }
+                for n in neighbours.prefix(links.k) { emit(i, n.j) }
+            }
+        }
+    }
+
     // MARK: - Background
 
-    private func drawBackground(ctx: GraphicsContext, size: CGSize) {
+    private func drawBackground(ctx: GraphicsContext, size: CGSize, t: TimeInterval) {
         let rect = CGRect(origin: .zero, size: size)
         let path = Path(rect)
-        if let stops = background?.stops, !stops.isEmpty {
+        if let background, let raw = background.stops, !raw.isEmpty {
+            // Drift can carry one stop past its neighbour; a canvas gradient
+            // sorts by offset, so do the same (stably) before handing over.
+            let stops = background.driftedStops(at: t * 1000)
+                .enumerated()
+                .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at
+                                                         : $0.offset < $1.offset }
+                .map(\.element)
             let gradient = Gradient(stops: stops.map {
                 Gradient.Stop(color: Color(hex: $0.color), location: CGFloat(min(1, max(0, $0.at))))
             })
@@ -126,10 +317,19 @@ struct NativeSceneView: View {
                 startPoint: CGPoint(x: rect.midX, y: rect.minY),
                 endPoint: CGPoint(x: rect.midX, y: rect.maxY)
             ))
-        } else if let color = background?.color {
+        } else if let color = background?.primaryColor {
             ctx.fill(path, with: .color(Color(hex: color)))
         } else {
-            ctx.fill(path, with: .color(.black))
+            // The web engine's own default, not pure black.
+            ctx.fill(path, with: .color(Color(hex: "05050a")))
+        }
+        if let band = background?.band, band.height > 0 {
+            // Band height is dimensional, so it follows the spec's units —
+            // which every compiled layer carries.
+            let px = layers.first?.units == .px
+            let h = band.height * (px ? 1 : min(size.width, size.height))
+            ctx.fill(Path(CGRect(x: 0, y: size.height - h, width: size.width, height: h)),
+                     with: .color(Color(hex: band.color)))
         }
     }
 
@@ -153,13 +353,15 @@ struct NativeSceneView: View {
     // MARK: - Sprites
 
     private func draw(entity: CompiledEntity, size: Double, sprite: SpecSubset.Sprite,
+                      textStyle: SpecSubset.TextStyle? = nil,
                       units: SpecSubset.Units,
                       at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
                       ctx: inout GraphicsContext) {
         // Pre-parsed components — no hex-string Scanner in the hot loop.
         let color = Color(.sRGB, red: entity.red, green: entity.green,
                           blue: entity.blue, opacity: alpha)
-        let spin = entity.spinAngle + entity.spinSpeed * t
+        // Shared with the sprite tier — static `rotate` included.
+        let spin = SceneMotion.rotationDegrees(of: entity, at: t)
         /// Web engine default stroke width: 2px for px specs, 0.002 for viewport.
         let defaultWidth = units == .px ? 2.0 : 0.002
 
@@ -225,19 +427,160 @@ struct NativeSceneView: View {
 
         case .textBlock(let tbText, let maxWidth, let fontSize, let lineHeight,
                         let align, let tbColor, let reveal):
-            drawTextBlock(text: tbText, maxWidth: maxWidth, fontSize: fontSize,
+            drawTextBlock(style: textStyle, text: tbText, maxWidth: maxWidth, fontSize: fontSize,
                           lineHeight: lineHeight, align: align, color: tbColor,
                           reveal: reveal, at: point, dim: dim, alpha: alpha,
                           spin: spin, t: t, ctx: &ctx)
+
+        case .polygon(_, _, _, let sides, let points, let soft):
+            let r = size * dim
+            guard r >= 0.25 else { return }
+            let verts = Self.polygonPoints(sides: sides, points: points, radius: r)
+            guard verts.count >= 3 else { return }
+            var path = Path()
+            path.move(to: verts[0])
+            for v in verts.dropFirst() { path.addLine(to: v) }
+            path.closeSubpath()
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            if soft, tier == .t3 {
+                // Same falloff as a soft circle: bright core to 35%, then out.
+                layer.fill(path, with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: color, location: 0),
+                        .init(color: color.opacity(0.75), location: 0.35),
+                        .init(color: color.opacity(0), location: 1),
+                    ]),
+                    center: .zero, startRadius: 0, endRadius: r))
+            } else {
+                layer.fill(path, with: .color(color))
+            }
+
+        case .stroke(_, let pts, _, _, let width, let smooth, let taper, let orient):
+            // Unit points span a −1…1 box scaled by HALF the seeded length,
+            // so `length` is the mark's bounding diameter (streak's rule).
+            let samples = Self.strokeSamples(points: pts, halfSize: size * dim / 2,
+                                             smooth: smooth)
+            guard samples.count >= 2 else { return }
+            let lw = max(0.5, (width ?? defaultWidth) * dim)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            var angle = spin
+            if orient, entity.vx != 0 || entity.vy != 0 {
+                angle += atan2(entity.vy, entity.vx) * 180 / .pi
+            }
+            layer.rotate(by: .degrees(angle))
+            if taper {
+                // A brush mark: every sampled segment at its own width.
+                for i in 1..<samples.count {
+                    var seg = Path()
+                    seg.move(to: samples[i - 1])
+                    seg.addLine(to: samples[i])
+                    let u = (Double(i) - 0.5) / Double(samples.count - 1)
+                    layer.stroke(seg, with: .color(color),
+                                 style: StrokeStyle(lineWidth: max(0.5, lw * Self.strokeTaper(u)),
+                                                    lineCap: .round, lineJoin: .round))
+                }
+            } else {
+                var path = Path()
+                path.move(to: samples[0])
+                for pt in samples.dropFirst() { path.addLine(to: pt) }
+                layer.stroke(path, with: .color(color),
+                             style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
+            }
+
+        case .bar(let values, _, _, _, _, let maxValue, let direction):
+            // `values` are paint, read at draw time, so a steered value glides.
+            let fraction = Self.barFraction(values: values, max: maxValue, index: entity.barIndex)
+            let len = size * dim * fraction
+            guard len > 0.25 else { return }
+            let thick = entity.thickness > 0 ? entity.thickness * dim : size * dim * 0.2
+            let box = Self.barBox(direction: direction, length: len, thickness: thick)
+            var layer = ctx
+            layer.translateBy(x: point.x, y: point.y)
+            layer.rotate(by: .degrees(spin))
+            layer.fill(Path(box), with: .color(color))
 
         case .unknown:
             break
         }
     }
 
+    // MARK: - Shape geometry (port of packages/schema/src/shapes.ts)
+
+    /// Polygon vertices about the origin. `points` (unit −1…1) wins; otherwise
+    /// a regular n-gon of `sides` (default 6), point up.
+    static func polygonPoints(sides: Int?, points: [[Double]]?, radius: Double) -> [CGPoint] {
+        if let points, points.count >= 3 {
+            return points.compactMap {
+                $0.count >= 2 ? CGPoint(x: $0[0] * radius, y: $0[1] * radius) : nil
+            }
+        }
+        let n = max(3, sides ?? 6)
+        return (0..<n).map { k in
+            let a = -Double.pi / 2 + 2 * .pi * Double(k) / Double(n)
+            return CGPoint(x: cos(a) * radius, y: sin(a) * radius)
+        }
+    }
+
+    /// The stroke path, sampled. Smooth strokes run Catmull-Rom through the
+    /// control points; enough samples that every segment keeps its curve.
+    static func strokeSamples(points: [[Double]], halfSize: Double, smooth: Bool) -> [CGPoint] {
+        let pts = points.compactMap {
+            $0.count >= 2 ? (x: $0[0] * halfSize, y: $0[1] * halfSize) : nil
+        }
+        let m = pts.count
+        guard m >= 2 else { return pts.map { CGPoint(x: $0.x, y: $0.y) } }
+        let curved = smooth && m >= 3
+        let segs = m - 1
+        let n = max(24, segs * 6 + 1)
+        func at(_ k: Int) -> (x: Double, y: Double) { pts[max(0, min(m - 1, k))] }
+        return (0..<n).map { i in
+            let u = Double(i) / Double(n - 1) * Double(segs)
+            let seg = min(segs - 1, Int(u.rounded(.down)))
+            let local = u - Double(seg)
+            let p1 = at(seg), p2 = at(seg + 1)
+            guard curved else {
+                return CGPoint(x: p1.x + (p2.x - p1.x) * local,
+                               y: p1.y + (p2.y - p1.y) * local)
+            }
+            let p0 = at(seg - 1), p3 = at(seg + 2)
+            return CGPoint(x: SceneMotion.catmullRom(p0.x, p1.x, p2.x, p3.x, local),
+                           y: SceneMotion.catmullRom(p0.y, p1.y, p2.y, p3.y, local))
+        }
+    }
+
+    /// Brush profile along a mark — thin at both ends, floored so it never
+    /// vanishes mid-stroke on a coarse display.
+    static func strokeTaper(_ u: Double) -> Double {
+        max(0.15, sin(.pi * min(1, max(0, u))))
+    }
+
+    /// 0…1 fill of bar `index`: `values[i] / max`, max defaulting to the
+    /// largest value.
+    static func barFraction(values: [Double], max maxValue: Double?, index: Int) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let v = values[((index % values.count) + values.count) % values.count]
+        let top = maxValue ?? values.reduce(0) { Swift.max($0, $1) }
+        guard top > 0 else { return 0 }
+        return Swift.min(1, Swift.max(0, v / top))
+    }
+
+    /// Box of a bar growing from the origin toward `direction`.
+    static func barBox(direction: String, length: Double, thickness: Double) -> CGRect {
+        switch direction {
+        case "left":  return CGRect(x: -length, y: -thickness / 2, width: length, height: thickness)
+        case "up":    return CGRect(x: -thickness / 2, y: -length, width: thickness, height: length)
+        case "down":  return CGRect(x: -thickness / 2, y: 0, width: thickness, height: length)
+        default:      return CGRect(x: 0, y: -thickness / 2, width: length, height: thickness)
+        }
+    }
+
     // MARK: - TextBlock (t3 only — full reveal animation)
 
     private func drawTextBlock(
+        style: SpecSubset.TextStyle? = nil,
         text tbText: String, maxWidth: Double, fontSize: Double,
         lineHeight: Double, align: String, color tbColor: String,
         reveal: SpecSubset.TextRevealSpec?, at point: CGPoint,
@@ -256,12 +599,22 @@ struct NativeSceneView: View {
         let visibleLines = rs?.fullLines ?? lines.count
 
         let rgb = SpecSubset.Layer.rgb(from: tbColor)
+        // Paint-level opacity for the block only (layer alpha is per entity).
         let fillColor = Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2,
-                               opacity: alpha)
+                               opacity: alpha * min(1, max(0, style?.opacity ?? 1)))
 
         var layer = ctx
         layer.translateBy(x: point.x, y: point.y)
         if spin != 0 { layer.rotate(by: .degrees(spin)) }
+        if let style, style.anchor != nil {
+            // `position` names a point of the rendered INK, not the layout
+            // box's top-left; rotation stays about that point.
+            let widest = (lines.map(\.widthEm).max() ?? 0) * fsPx
+            let off = style.anchorOffset(align: align, maxWidthPx: maxWPx,
+                                         widestLinePx: widest,
+                                         totalHeightPx: Double(lines.count) * lh)
+            layer.translateBy(x: off.dx, y: off.dy)
+        }
 
         let anchor: UnitPoint
         let xOff: CGFloat
@@ -271,7 +624,14 @@ struct NativeSceneView: View {
         default: anchor = .topLeading; xOff = 0
         }
 
-        let font: Font = .system(size: fsPx)
+        // A CSS font shorthand can only be honoured in kind on a system
+        // font: weight, slant, and serif / mono / rounded.
+        let traits = style?.fontTraits ?? (bold: false, italic: false, design: "default")
+        let design: Font.Design = traits.design == "mono" ? .monospaced
+            : traits.design == "serif" ? .serif
+            : traits.design == "rounded" ? .rounded : .default
+        var font: Font = .system(size: fsPx, weight: traits.bold ? .bold : .regular, design: design)
+        if traits.italic { font = font.italic() }
         for li in 0..<visibleLines {
             let lineView = Text(lines[li].text).font(font).foregroundStyle(fillColor)
             layer.draw(lineView, at: CGPoint(x: xOff, y: CGFloat(li) * lh),

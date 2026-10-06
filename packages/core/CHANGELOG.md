@@ -1,5 +1,17 @@
 # @idle-screens/core
 
+## 0.4.7
+
+### Patch Changes
+
+- f43fb23: `SaverInstance.inspect?()` — an optional synchronous state dump (plain JSON, a few KB) that says what a pixel capture cannot: which objects exist, where they are, what behaviour is in flight. Worker savers answer it over new `inspect`/`inspected` protocol verbs; the mounted `SaverInstance` the element hands out exposes `inspect()` (the last answer, null until one has arrived) and `inspectAsync()` (a round trip, 2 s timeout), and `<idle-screen>` itself carries the same two as conveniences that forward to whatever is mounted (null when nothing is).
+
+## 0.4.6
+
+### Patch Changes
+
+- 395cf2a: Engine-side frame capture: `SaverInstance.capture()` snapshots the current frame as an ImageBitmap, covering the two cases page JS cannot read — worker-transferred canvases (new `capture`/`captured` verbs in the worker protocol, correlated by id, with the element's worker proxy implementing `capture()` end to end) and WebGL canvases in hidden tabs (metaquarium renders a fresh frame and reads it in the same task, before the non-preserveDrawingBuffer buffer is cleared by presentation). Hosts that upload viewer thumbnails or answer on-demand capture requests should prefer `instance.capture()` when present.
+
 ## 0.4.5
 
 ### Patch Changes

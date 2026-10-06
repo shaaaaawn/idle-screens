@@ -7,20 +7,49 @@ import {
   type SaverManifest,
   type SaverPlugin,
 } from '@idle-screens/core';
-import { assertValidSpec, assertValidSequence, validateSpec } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, type Entity } from './simulate';
+import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
+import { alphaAt, breakTextBlock, buildEntities, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
+  canonicalSpecPath,
   easeSmooth,
   lerpSpec,
+  lerpValue,
+  readSpecPath,
+  resolveSpecPath,
   structuralSignature,
+  textStringsDiffer,
   type SteerDelta,
 } from './steer';
-import type { IdleSequence, LayerSpec, SaverSpec } from './types';
+import { transformOrigin } from './paint';
+import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
+import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
-import { resolveSegment } from './sequence';
+import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
+import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
+import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
+import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
 
 const DEFAULT_STEER_DUR = 1000;
+
+/**
+ * Apply steering deltas to a spec one at a time, keeping each only if its
+ * path resolves on this spec AND the result validates. This is the routing
+ * rule for a sequence's retained track: a key path (`bars.sprite.values`) lands on
+ * whichever segment owns the key and is a no-op on the others, and one delta
+ * that is out of bounds for a given segment does not take the rest down with
+ * it. Returns `spec` itself (same reference) when nothing applied, so callers
+ * can skip work — and so a sequence with no track is byte-identical.
+ */
+function applyRetainedDeltas(spec: SaverSpec, deltas: Iterable<SteerDelta>): SaverSpec {
+  let out = spec;
+  for (const d of deltas) {
+    if (!resolveSpecPath(out, d.path)) continue;
+    const next = applyDeltasToSpec(out, [d]);
+    if (validateSpec(next).valid) out = next;
+  }
+  return out;
+}
 
 /** Expand #rgb/#rrggbb to an rgba() string — needed for gradient stops with alpha. */
 function hexToRgba(hex: string, alpha: number): string {
@@ -99,9 +128,186 @@ interface Built {
   entities: Entity[];
 }
 
+/**
+ * Internal, per-layer: paint the layer twice for a window — the `outgoing`
+ * sprite (the same sprite with the previous words) at `1 − k`, the layer's
+ * own sprite at `k`. Set by a `SequenceInstance` for the `text` / `textBlock`
+ * layers of a morph declared `text: 'crossfade'`; never from a spec field.
+ * Only text sprites are ever drawn this way.
+ */
+interface LayerPaintOverride {
+  outgoing: SpriteSpec;
+  k: number;
+  /**
+   * `crossfade` (absent): outgoing at `1 − k` over incoming at `k`, both
+   * strings on screen mid-morph. `dip`: outgoing fades out over the first
+   * half, incoming fades in over the second — never two strings at once.
+   */
+  mode?: 'crossfade' | 'dip';
+}
+
+/** One draw's paint override: which sprite to paint, and an alpha multiplier on top of the entity's own. */
+interface PaintPass {
+  sprite?: SpriteSpec;
+  alpha: number;
+}
+
+/**
+ * The device's compute tier (`computeTier` from `@idle-screens/capabilities`;
+ * the string union is repeated here so schema does not depend on that
+ * package). Hosts pass it on the mount context; a compiled scene reads it to
+ * step down work that a `basic` / `minimal` device cannot afford.
+ */
+export type CapabilityTier = 'minimal' | 'basic' | 'standard' | 'high';
+
+/**
+ * Mount context for a compiled spec. A plain `SaverContext` works — every
+ * field here is optional. `capabilityTier` `basic` / `minimal` halves a
+ * `field` background's raster resolution (48 px short side instead of 96).
+ * Absent ⇒ full resolution.
+ */
+export interface SpecMountContext extends SaverContext {
+  capabilityTier?: CapabilityTier;
+}
+
+/**
+ * A `field` background's cached raster: the field sampled once per cell at
+ * the bucketed time, kept until the bucket, the config or the canvas size
+ * changes. Drawing a frame is one `drawImage` of this, scaled to the canvas.
+ */
+interface FieldRaster {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  cols: number;
+  rows: number;
+  /** `JSON.stringify` of the config plus dims plus the sample time it was painted for. */
+  key: string;
+}
+
+/** Per-instance options a host (today: `SequenceInstance`) sets; a plain compileSaver mount sets none. */
+interface SpecInstanceOptions {
+  /** See `SpecMountContext.capabilityTier`. */
+  capabilityTier?: CapabilityTier;
+  /**
+   * The host presents the frame and applies any `finish` itself (a
+   * `SequenceInstance` does, once per composed frame), so this instance
+   * never opens a presentation pass of its own — its spec's `finish` is the
+   * host's to honour. A plain compileSaver mount presents itself.
+   */
+  hostPresents?: boolean;
+  /**
+   * Draw over whatever is already on the surface: `drawBackground` is skipped,
+   * the frame is not cleared to a colour, and `ghosting` is ignored (a smear
+   * needs an opaque ground to decay into — the surface owner may declare its
+   * own). The instance never clears the surface either; the owner does.
+   * A sequence's segment children over a `bed` render this way.
+   */
+  transparent?: boolean;
+  /**
+   * Skip the constructor's own eager paused-mount paint. For a transparent
+   * instance whose owner is about to call `renderFrame` again immediately
+   * with paint overrides already set (a morph chain-root child, mounted
+   * mid-morph) — the constructor's plain paint would otherwise leave a
+   * stray full-opacity frame on the shared surface underneath, which a
+   * partial-alpha override pass (`text: 'crossfade'`) then composites over
+   * rather than replaces.
+   */
+  skipInitialPaint?: boolean;
+}
+
+const clamp01 = (v: number): number => (v <= 0 ? 0 : v >= 1 ? 1 : v);
+
+/** A live steer held on a timeline scene — see `SpecInstance.overrides`. */
+interface TimelineOverride {
+  /** The path's last segment — lets a whole-`transform` glide fill identity fields (see `lerpValue`). */
+  leaf: string;
+  from: unknown;
+  to: unknown;
+  t0: number;
+  dur: number;
+  until: number;
+  outDur: number;
+}
+const EXPIRED = Symbol('expired');
+
+/** An override's glide-in value at scene time `t` (before `until`). */
+function overrideHeldAt(o: TimelineOverride, t: number): unknown {
+  const k = o.dur > 0 ? easeSmooth(clamp01((t - o.t0) / o.dur)) : 1;
+  return k >= 1 ? o.to : lerpValue(o.from, o.to, k, false, o.leaf);
+}
+
+/**
+ * An override's value at scene time `t`: glide in, hold, glide back to the
+ * timeline, then expire. The glide back starts from wherever the glide in
+ * had reached at `until` — a key that lands mid-glide takes the path back
+ * from there, not from the steer's target (which would be a jump).
+ */
+function overrideValueAt(o: TimelineOverride, t: number, timelineValue: () => unknown): unknown {
+  if (t < o.until) return overrideHeldAt(o, t);
+  if (o.outDur > 0 && t < o.until + o.outDur) return lerpValue(overrideHeldAt(o, o.until), timelineValue(), easeSmooth((t - o.until) / o.outDur), false, o.leaf);
+  return EXPIRED;
+}
+
+/** A steer's identity across re-sends: the server's stamp and the value (see `SpecInstance.seenSteers`). */
+const steerId = (d: SteerDelta): string => `${d.t}|${JSON.stringify(d.value)}`;
+
+/** Arm one steer on a timeline scene at scene time `now` — the steering rule: held until the path's next key, or sticky when no key will touch it. */
+function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number): TimelineOverride {
+  const next = nextKeyAfter(authored, path, now);
+  return { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+}
+
+/**
+ * `resolved` (a timeline resolved at `t`) with the live overrides layered on.
+ * `expired` collects the paths whose override has run out, so an owner can
+ * drop them; nothing is mutated here.
+ */
+function applyOverridesAt(resolved: SaverSpec, overrides: ReadonlyMap<string, TimelineOverride>, t: number, expired?: string[]): SaverSpec {
+  if (overrides.size === 0) return resolved;
+  const deltas: SteerDelta[] = [];
+  for (const [path, o] of overrides) {
+    const v = overrideValueAt(o, t, () => readSpecPath(resolved, path));
+    if (v === EXPIRED) { expired?.push(path); continue; }
+    deltas.push({ t: 0, path, value: v });
+  }
+  return deltas.length > 0 ? applyDeltasToSpec(resolved, deltas) : resolved;
+}
+
+/**
+ * Whether a timeline scene stays valid with these overrides on it — now, and
+ * at every key boundary still ahead (a sticky steer outlives the keys, and
+ * two values each valid alone can break a flash-safety ratio together).
+ */
+function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, TimelineOverride>, now: number): boolean {
+  // Only the layers (or background/finish) the overrides live in can be broken
+  // by them — the timeline alone was validated with the spec — so judge just
+  // those, and only at states not already judged.
+  const paths = [...overrides.keys()];
+  if (paths.length === 0) return true;
+  const groupOf = (p: string): string => p.split('.').slice(0, p.startsWith('layers.') ? 2 : 1).join('.');
+  const groups = [...new Set(paths.map(groupOf))];
+  // The keys that can combine with these steers are those in the same
+  // groups (or any, when a steer falls back to the full check).
+  const full = paths.some((p) => /^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p) || p === 'groups' || !/^(layers|background|finish|groups)(\.|$)/.test(p));
+  const only = full ? undefined : (p: string): boolean => groups.includes(groupOf(p));
+  const seen = new Set<string>();
+  for (const t of [now, ...timelineSampleTimesAfter(authored, now, false, only)]) {
+    const held = new Map<string, TimelineOverride>();
+    // Judge each override at its held value (the glide-back runs between two valid values).
+    for (const [p, o] of overrides) if (t < o.until) held.set(p, { ...o, t0: Number.NEGATIVE_INFINITY });
+    const r = applyOverridesAt(resolveTimelineAt(authored, t), held, t);
+    const state = JSON.stringify(groups.map((g) => readSpecPath(r, g))) + '|' + [...held.keys()].join(',');
+    if (seen.has(state)) continue;
+    seen.add(state);
+    if (!validateSpecPaths(r, paths)) return false;
+  }
+  return true;
+}
+
 class SpecInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly ownsCanvas: boolean;
+  private readonly transparent: boolean;
   private readonly ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private readonly saverCtx: SaverContext;
   private readonly seed: number;
@@ -121,14 +327,67 @@ class SpecInstance implements SaverInstance {
   /** Active glide between two resolved specs (live setParam/applyTrack). */
   private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null = null;
   private lastStructural = '';
+  /** See `LayerPaintOverride`; null (the default, and every plain mount) draws every layer once. */
+  private paintOverrides: ReadonlyMap<number, LayerPaintOverride> | null = null;
+  /**
+   * The authored spec when it carries a `timeline` (null for every other
+   * scene — which then never enters the timeline path). Each painted frame
+   * resolves it at that frame's own time, so ghosting's warm-up replay and
+   * any seek see the timeline exactly where it was.
+   */
+  private authored: SaverSpec | null = null;
+  /**
+   * Live steers on a timeline scene, by index-form path. A steer on a path no
+   * key animates holds forever (sticky, exactly as on a scene without a
+   * timeline); on an animated path it holds `until` that path's next key,
+   * then glides back to the timeline over `outDur`.
+   */
+  private overrides: Map<string, TimelineOverride> = new Map();
+  /**
+   * The last registered steer per path, as `t|value`. A host re-sends the
+   * whole channel track on every steer (idle-server broadcasts the full track
+   * so viewers converge), and a steer's `t` is the server's stamp — stable
+   * across re-sends. Without this, an unrelated later steer would re-arm a
+   * hold the timeline had already taken back. Keyed by path (not by the full
+   * `path|t|value` history) so a long-running instance re-steered thousands
+   * of times doesn't accumulate an unbounded set — only the most recent id
+   * per path can ever recur.
+   */
+  private seenSteers = new Map<string, string>();
+  /** Raster short side for a `field` background — halved on the low tiers. */
+  private readonly fieldShortSide: number;
+  /** The `field` background's cached raster; null until a field is first painted. */
+  private field: FieldRaster | null = null;
+  /**
+   * The presentation pass when this instance applies a `finish`: the
+   * visible canvas plus the cached screen tiles. When set, `this.canvas` is
+   * an offscreen SCENE canvas — the surface every layer (and `ghosting`'s
+   * persistence) draws into — and each frame ends by copying it to the
+   * visible canvas and screening the finish over the copy. The finish thus
+   * never enters the persistence loop. Null (every plain mount without a
+   * finish, every sequence child) draws straight onto the visible canvas,
+   * exactly as before the field existed.
+   */
+  private finishPass: FinishPass | null = null;
+  /** False on the `basic`/`minimal` tiers — `finish.animate` renders as a static tile. */
+  private readonly animateFinish: boolean;
 
   constructor(
     private readonly spec: SaverSpec,
     ctx: SaverContext,
+    opts: SpecInstanceOptions = {},
   ) {
     this.effSpec = spec;
+    if (spec.timeline) {
+      this.authored = spec;
+      this.effSpec = resolveTimelineAt(spec, 0);
+    }
     this.saverCtx = ctx;
-    this.seed = ((spec.seed ?? ctx.seed) >>> 0) || 1;
+    this.transparent = opts.transparent === true;
+    const tier = opts.capabilityTier;
+    this.fieldShortSide = tier === 'basic' || tier === 'minimal' ? FIELD_RASTER_SHORT_SIDE_LOW : FIELD_RASTER_SHORT_SIDE;
+    this.animateFinish = tier !== 'basic' && tier !== 'minimal';
+    this.seed = normalizeSeed(spec.seed ?? ctx.seed);
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (ctx.surface) {
       canvas = ctx.surface;
@@ -141,8 +400,23 @@ class SpecInstance implements SaverInstance {
       canvas = el;
       this.ownsCanvas = true;
     }
+    if (spec.finish !== undefined && !this.transparent && !opts.hostPresents) {
+      // Present through a pass: the visible canvas becomes the pass's, and
+      // the scene draws offscreen. Decided once, from the mounted spec — a
+      // steer can only change a `finish` that already exists.
+      const pass = createFinishPass(canvas, this.seed);
+      if (pass) {
+        this.finishPass = pass;
+        canvas = createSceneCanvas(ctx.width, ctx.height);
+      }
+    }
     this.canvas = canvas;
-    const c2d = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    // Transparent instances (a bed's own offscreen fade canvas) never paint a
+    // background, so their cleared/unpainted pixels must stay actually
+    // transparent for `composite()`'s drawImage to blend only the ink onto
+    // the bed — an opaque (alpha: false) context turns those pixels solid
+    // black instead. Opaque instances keep alpha: false (unchanged).
+    const c2d = canvas.getContext('2d', { alpha: this.transparent }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!c2d) throw new Error('schema saver: no 2d context');
     this.ctx = c2d;
 
@@ -152,8 +426,11 @@ class SpecInstance implements SaverInstance {
     this.rebuild();
 
     this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderFrame(0, this.seed);
-    else this.start();
+    if (this.paused) {
+      if (!opts.skipInitialPaint) this.renderFrame(0, this.seed);
+    } else {
+      this.start();
+    }
   }
 
   /** Viewport factor for absolute px sizes — 1 for `units: 'px'` specs. */
@@ -164,9 +441,23 @@ class SpecInstance implements SaverInstance {
 
   private sizeCanvas(): void {
     const dpr = Math.min(this.saverCtx.dpr, 2);
-    this.canvas.width = Math.max(1, Math.round(this.w * dpr));
-    this.canvas.height = Math.max(1, Math.round(this.h * dpr));
+    // Assign only on a real change: writing `width`/`height` wipes a canvas
+    // even when the value is the same, and a sequence child shares its
+    // parent's surface — a segment mounting over a `bed` used to erase the
+    // bed painted a moment earlier, one black frame at every cut. A fresh
+    // canvas is blank anyway, and every frame repaints (or, after a resize,
+    // the ghosting warm-up below replays from a full clear).
+    const cw = Math.max(1, Math.round(this.w * dpr));
+    const ch = Math.max(1, Math.round(this.h * dpr));
+    if (this.canvas.width !== cw) this.canvas.width = cw;
+    if (this.canvas.height !== ch) this.canvas.height = ch;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.finishPass) {
+      // The visible canvas mirrors the scene canvas, same size and transform.
+      if (this.finishPass.canvas.width !== cw) this.finishPass.canvas.width = cw;
+      if (this.finishPass.canvas.height !== ch) this.finishPass.canvas.height = ch;
+      this.finishPass.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
     // Resizing clears the canvas — force a ghosting warm-up on the next frame.
     this.lastRenderT = Number.NEGATIVE_INFINITY;
   }
@@ -215,6 +506,10 @@ class SpecInstance implements SaverInstance {
       ctx.fillRect(0, 0, w, h);
       return;
     }
+    if (bg.type === 'field') {
+      this.drawField(bg, t);
+      return;
+    }
     const g = ctx.createLinearGradient(0, 0, 0, h);
     const drift = bg.drift;
     for (let i = 0; i < bg.stops.length; i++) {
@@ -234,6 +529,65 @@ class SpecInstance implements SaverInstance {
       const bh = bg.band.height * (this.effSpec.units === 'px' ? 1 : Math.min(w, h));
       ctx.fillRect(0, h - bh, w, bh);
     }
+  }
+
+  /**
+   * Paint a `field` background: sample the field into a low-res raster (short
+   * side `fieldShortSide`, the long side by aspect) and draw it scaled to the
+   * canvas — nearest-neighbour for quantised bands so contours stay crisp,
+   * smoothed for `quantize: 0`. The raster is recomputed only when its key
+   * changes: the config (steering glides it), the canvas size, or — while
+   * drifting — the 100 ms bucket `t` falls in (`fieldSampleTime`); a static
+   * field is sampled exactly once per mount. `luminanceGrid` samples the same
+   * function at the same bucketed time, so perception and paint agree.
+   */
+  private drawField(bg: FieldBackground, t: number): void {
+    const { ctx, w, h } = this;
+    const short = Math.max(1, Math.min(w, h));
+    const cols = Math.max(1, Math.round((this.fieldShortSide * w) / short));
+    const rows = Math.max(1, Math.round((this.fieldShortSide * h) / short));
+    const ft = fieldSampleTime(bg, t);
+    // `w`x`h`, not just the rounded `cols`x`rows`: a resize that changes the
+    // aspect ratio without moving the rounded raster size would otherwise
+    // reuse a raster sampled for the old aspect ratio.
+    const key = `${JSON.stringify(bg)}|${w}x${h}|${cols}x${rows}|${ft}`;
+    let raster = this.field;
+    if (!raster || raster.key !== key) {
+      if (!raster || raster.cols !== cols || raster.rows !== rows) {
+        const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
+          ? document.createElement('canvas')
+          : new OffscreenCanvas(cols, rows);
+        canvas.width = cols;
+        canvas.height = rows;
+        const rctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+        if (!rctx) return;
+        raster = { canvas, ctx: rctx, cols, rows, key: '' };
+      }
+      const img = raster.ctx.createImageData(cols, rows);
+      const data = img.data;
+      const seed = this.seed;
+      let i = 0;
+      for (let r = 0; r < rows; r++) {
+        // Cell centres in short-side units — the same normalisation perceive uses.
+        const v = ((r + 0.5) * h) / rows / short;
+        for (let c = 0; c < cols; c++) {
+          const u = ((c + 0.5) * w) / cols / short;
+          const rgb = fieldRgbAt(u, v, ft, bg, seed);
+          data[i++] = rgb[0];
+          data[i++] = rgb[1];
+          data[i++] = rgb[2];
+          data[i++] = 255;
+        }
+      }
+      raster.ctx.putImageData(img, 0, 0);
+      raster.key = key;
+      this.field = raster;
+    }
+    const smooth = Math.round(bg.quantize ?? bg.bands.length) < 2;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = smooth;
+    ctx.drawImage(raster.canvas, 0, 0, w, h);
+    ctx.imageSmoothingEnabled = prev;
   }
 
   /** Position with parent-orbit resolution: a layer-parented orbit entity's
@@ -266,7 +620,7 @@ class SpecInstance implements SaverInstance {
     const headAlpha = alphaAt(e, t) * lifeA;
     const headSize = sizeAt(e, t);
     const sprite = built.layer.sprite;
-    const resolvedColor = sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect'
+    const resolvedColor = isShapedSprite(sprite)
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
       : sprite.kind === 'text' || sprite.kind === 'textBlock' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
@@ -311,14 +665,14 @@ class SpecInstance implements SaverInstance {
     }
   }
 
-  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null): void {
+  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass): void {
     const { ctx } = this;
     const p = this.entityPos(e, t, parentE);
-    const sprite = built.layer.sprite;
+    const sprite = paint?.sprite ?? built.layer.sprite;
     const sz = sizeAt(e, t);
     const rot = rotationAt(e, t);
     const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
-    ctx.globalAlpha = alphaAt(e, t) * lifeA;
+    ctx.globalAlpha = alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
     if (sprite.kind === 'ring') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
@@ -331,7 +685,7 @@ class SpecInstance implements SaverInstance {
     }
     if (sprite.kind === 'streak') {
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      const heading = headingAt(e, t, this.w, this.h) ?? 0;
+      const heading = (headingAt(e, t, this.w, this.h) ?? 0) + rot;
       const tailX = p.x - Math.cos(heading) * sz;
       const tailY = p.y - Math.sin(heading) * sz;
       const g = ctx.createLinearGradient(tailX, tailY, p.x, p.y);
@@ -355,7 +709,96 @@ class SpecInstance implements SaverInstance {
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
       ctx.fillStyle = resolvedColor;
-      ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
+      const feather = sprite.feather ?? 0;
+      if (feather > 0) {
+        // Soft edge: nested fills from the OUTSIDE IN — the full-size rect
+        // first at the faintest alpha, the core last at full — so the
+        // composited alpha ramps linearly across the feathered band (see
+        // featherAlphas). Only `lighter` sums alphas; `screen` still
+        // composites source-over, so it takes the source-over schedule.
+        const base = ctx.globalAlpha;
+        const additive = built.layer.blend === 'lighter';
+        const alphas = featherAlphas(FEATHER_STEPS, additive);
+        for (let j = 1; j <= FEATHER_STEPS; j++) {
+          const f = 1 - (feather * (j - 1)) / FEATHER_STEPS; // j=1 full size … j=K the core
+          const fw = sz * f;
+          const fh = rh * f;
+          ctx.globalAlpha = base * alphas[j - 1]!;
+          ctx.fillRect(-fw / 2, -fh / 2, fw, fh);
+        }
+        ctx.globalAlpha = base;
+      } else {
+        ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
+      }
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'bar') {
+      const len = sz * barFraction(sprite, e.barIndex ?? 0);
+      if (len <= 0) return;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+      const box = barBox(sprite.direction ?? 'right', len, th);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      ctx.fillStyle = resolvedColor;
+      ctx.fillRect(box.cx - box.halfX, box.cy - box.halfY, box.halfX * 2, box.halfY * 2);
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'polygon') {
+      const r = sz / 2;
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const pts = polygonPoints(sprite, r);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (rot) ctx.rotate(rot);
+      if (sprite.soft) {
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        g.addColorStop(0, resolvedColor);
+        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
+        g.addColorStop(1, hexToRgba(resolvedColor, 0));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = resolvedColor;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pts[0]!.x, pts[0]!.y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (sprite.kind === 'stroke') {
+      const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
+      const pts = strokeSamples(sprite, sz / 2);
+      const lw = strokeWidthPx(sprite, unitScale);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      let angle = rot;
+      if (sprite.orient) angle += headingAt(e, t, this.w, this.h) ?? 0;
+      if (angle) ctx.rotate(angle);
+      ctx.strokeStyle = resolvedColor;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (sprite.taper) {
+        // A brush mark: each sampled segment at its own width.
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineWidth = Math.max(0.5, lw * strokeTaper((i - 0.5) / (pts.length - 1)));
+          ctx.beginPath();
+          ctx.moveTo(pts[i - 1]!.x, pts[i - 1]!.y);
+          ctx.lineTo(pts[i]!.x, pts[i]!.y);
+          ctx.stroke();
+        }
+      } else {
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        ctx.moveTo(pts[0]!.x, pts[0]!.y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+        ctx.stroke();
+      }
       ctx.restore();
       return;
     }
@@ -389,7 +832,7 @@ class SpecInstance implements SaverInstance {
       const lh = (sprite.lineHeight ?? 1.4) * fsPx;
       const maxWPx = sprite.maxWidth * unitScale;
       const maxWEm = maxWPx / fsPx;
-      const lines = breakTextBlock(sprite.text, maxWEm);
+      const lines = breakTextBlock(sprite.text, maxWEm, textMetricsClassFor(sprite.font));
       const align = sprite.align ?? 'left';
       // Reveal masks glyphs; layout above always ran on the full text, so
       // lines never reflow while typing.
@@ -399,16 +842,32 @@ class SpecInstance implements SaverInstance {
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
-      ctx.font = `${fsPx}px system-ui, sans-serif`;
+      if (sprite.anchor) {
+        // `position` names a point of the rendered text, not the layout box's
+        // top-left. Offset after line-breaking so the block's real extent
+        // (widest line × lines) is what gets anchored; rotation stays about
+        // the anchor point. Same arithmetic as perceive/advise (simulate.ts).
+        const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
+        const { dx, dy } = textBlockAnchorOffset(sprite, maxWPx, maxLineW, lines.length * lh);
+        if (dx !== 0 || dy !== 0) ctx.translate(dx, dy);
+      }
+      // Paint-level alpha for the block only (layer `alpha` is baked per entity).
+      if (sprite.opacity !== undefined) ctx.globalAlpha *= sprite.opacity;
+      ctx.font = sprite.font ? composeFontShorthand(fsPx, sprite.font) : `${fsPx}px system-ui, sans-serif`;
       ctx.fillStyle = sprite.color ?? '#e6e8ef';
       ctx.textBaseline = 'top';
       ctx.textAlign = align;
       const xOff = align === 'center' ? maxWPx / 2 : align === 'right' ? maxWPx : 0;
       if (rs?.glyphAlphas) {
-        // glyphFade: every glyph draws individually at its full-line prefix
-        // advance. measureText is paint-only (the caret's trick) — positions
-        // come from the platform's real glyph widths, never the em table, and
-        // depend only on the fixed prefix, so glyphs never shift as they fade.
+        // glyphFade: the contiguous fully-opaque leading run draws as ONE
+        // fillText — a single draw forms ligatures and pair kerning exactly
+        // like the un-revealed path (pixel parity once fully revealed), and it
+        // drops the O(n²) per-frame prefix re-measure for glyphs that have
+        // finished fading. Only the fading tail draws glyph-by-glyph, each at
+        // its full-line prefix advance. measureText is paint-only (the caret's
+        // trick) — positions come from the platform's real glyph widths, never
+        // the em table, and depend only on the fixed prefix, so glyphs never
+        // shift as they fade.
         ctx.textAlign = 'left';
         const baseAlpha = ctx.globalAlpha;
         for (let li = 0; li < lines.length; li++) {
@@ -417,8 +876,15 @@ class SpecInstance implements SaverInstance {
           const clusters = graphemeClusters(lines[li]!.text);
           const lw = ctx.measureText(lines[li]!.text).width;
           const x0 = align === 'center' ? (maxWPx - lw) / 2 : align === 'right' ? maxWPx - lw : 0;
+          let opaque = 0;
+          while (opaque < clusters.length && (alphas[opaque] ?? 0) >= 1) opaque++;
           let prefix = '';
-          for (let gi = 0; gi < clusters.length; gi++) {
+          if (opaque > 0) {
+            prefix = clusters.slice(0, opaque).join('');
+            ctx.globalAlpha = baseAlpha;
+            ctx.fillText(prefix, x0, li * lh);
+          }
+          for (let gi = opaque; gi < clusters.length; gi++) {
             const a = alphas[gi] ?? 0;
             if (a <= 0) break; // alphas only fall in reading order
             ctx.globalAlpha = baseAlpha * a;
@@ -502,6 +968,12 @@ class SpecInstance implements SaverInstance {
    */
   applyTrack(track: ControlTrack): void {
     const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    if (this.authored) {
+      const glide = deltas.length ? deltas.reduce((m, d) => Math.max(m, d.dur ?? DEFAULT_STEER_DUR), 0) : DEFAULT_STEER_DUR;
+      if (!this.overrideAuthored(deltas, this.paused ? 0 : glide)) return;
+      if (this.paused) this.renderFrame(this.sceneNow(), this.seed);
+      return;
+    }
     const target = applyDeltasToSpec(this.effSpec, deltas);
     if (!validateSpec(target).valid) return;
     const dur = deltas.length
@@ -523,6 +995,42 @@ class SpecInstance implements SaverInstance {
     }
   }
 
+  /**
+   * Apply steering deltas immediately: no glide, no frame painted. Each delta
+   * is routed by `applyRetainedDeltas` (unresolvable or invalid ones are
+   * skipped on this spec alone). `SequenceInstance` uses this to hand a
+   * freshly created child the track the sequence has retained, so a steer
+   * made while another segment was active lands on the segment that owns the
+   * path. Not painting matters: a child is created inside the parent's
+   * renderFrame, and a stray t=0 paint here would make the real frame that
+   * follows look "contiguous" to the ghosting warm-up — but the constructor
+   * already painted ONE stray t=0 frame of the pre-steer spec (SpecInstance's
+   * own mount does an immediate render when paused, which every sequence
+   * child is), so `lastRenderT` must be reset too: otherwise, with `ghosting`
+   * on, the real frame that follows still finds itself "contiguous" with
+   * that stray paint and composites over it at partial alpha, briefly
+   * showing a ghost of the un-steered scene.
+   */
+  applyDeltasNow(deltas: Iterable<SteerDelta>): void {
+    if (this.authored) {
+      // Retained steers land under the timeline's steering rule — as one
+      // batch when they validate together (one composed check), else per
+      // delta, skipping any that don't (as `applyRetainedDeltas` does).
+      const all = [...deltas];
+      if (!this.overrideAuthored(all, 0)) for (const d of all) this.overrideAuthored([d], 0);
+      this.transition = null;
+      this.lastRenderT = Number.NEGATIVE_INFINITY;
+      return;
+    }
+    const next = applyRetainedDeltas(this.effSpec, deltas);
+    if (next === this.effSpec) return;
+    this.transition = null;
+    this.lastRenderT = Number.NEGATIVE_INFINITY;
+    this.effSpec = next;
+    if (structuralSignature(this.effSpec) !== this.lastStructural) this.rebuild();
+    else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
+  }
+
   private drawLinks(built: Built, t: number, lifeA: number, parentE: Entity | null): void {
     const { links } = built.layer;
     if (!links) return;
@@ -535,7 +1043,9 @@ class SpecInstance implements SaverInstance {
     const positions = built.entities.map((e) => this.entityPos(e, t, parentE));
     const maxDistPx = links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
     const edges = linkEdges(links, positions, maxDistPx, wrap, this.w, this.h);
-    const lw = (links.width ?? 1) * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
+    const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
+    const defaultWidth = unitScale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+    const lw = (links.width ?? defaultWidth) * unitScale;
     ctx.lineWidth = lw;
     ctx.lineCap = 'butt'; // streak sprites set 'round'; reset so link ends stay crisp
 
@@ -546,7 +1056,7 @@ class SpecInstance implements SaverInstance {
       let resolvedColor = links.color;
       if (!resolvedColor) {
         const sprite = built.layer.sprite;
-        if (sprite.kind === 'circle' || sprite.kind === 'ring' || sprite.kind === 'streak' || sprite.kind === 'rect') {
+        if (isShapedSprite(sprite)) {
           resolvedColor = sprite.colors?.[ei.colorIndex] ?? sprite.color;
         } else resolvedColor = '#e6e8ef';
       }
@@ -572,23 +1082,132 @@ class SpecInstance implements SaverInstance {
    *  showing through — the ghosting smear. */
   private paintFrame(t: number, bgAlpha: number): void {
     const { ctx } = this;
-    ctx.globalAlpha = bgAlpha;
-    ctx.globalCompositeOperation = 'source-over';
-    this.drawBackground(t);
+    if (this.authored) this.resolveAuthored(t);
+    if (!this.transparent) {
+      ctx.globalAlpha = bgAlpha;
+      ctx.globalCompositeOperation = 'source-over';
+      this.drawBackground(t);
+    }
     ctx.globalAlpha = 1;
-    for (const built of this.layers) {
-      const lifeA = lifeAlphaAt(built.layer.life, t);
+    for (let li = 0; li < this.layers.length; li++) {
+      const built = this.layers[li]!;
+      const opacity = built.layer.opacity;
+      // A grouped layer paints through its group too (`groups`): opacity
+      // multiplies, the group's transform wraps the layer's own. Ungrouped
+      // layers take exactly the path they always have.
+      const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
+      let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
+      if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
       if (lifeA <= 0) continue;
       const parentE = this.parentEntityFor(built);
+      const tf = built.layer.transform;
+      const gtf = group?.transform;
+      if (tf || gtf) {
+        ctx.save();
+        if (gtf) this.applyLayerTransform(gtf, null);
+        if (tf) this.applyLayerTransform(tf, built.layer);
+      }
       ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
       this.drawLinks(built, t, lifeA, parentE);
+      const override = this.paintOverrides?.get(li) ?? null;
       for (const e of built.entities) {
         this.drawTrail(built, e, t, lifeA, parentE);
-        this.drawEntity(built, e, t, lifeA, parentE);
+        if (override === null) {
+          this.drawEntity(built, e, t, lifeA, parentE);
+          continue;
+        }
+        // A text cross-fade: the previous words fading out under the new
+        // ones fading in. Either pass at alpha 0 is skipped, so k = 0 and
+        // k = 1 each cost exactly one draw, like a plain frame.
+        const [aOut, aIn] = override.mode === 'dip'
+          ? [Math.max(0, 1 - 2 * override.k), Math.max(0, 2 * override.k - 1)]
+          : [1 - override.k, override.k];
+        if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
+        if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
       }
+      if (tf || gtf) ctx.restore();
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * A `transform`, in min(w,h) units (px under `units: 'px'`), about the
+   * viewport centre — or, with `origin: 'anchor'`, about `layer`'s own anchor
+   * (a group's transform passes no layer: always the viewport centre).
+   */
+  private applyLayerTransform(tf: LayerTransform, layer: LayerSpec | null): void {
+    const { ctx, w, h } = this;
+    const unit = this.effSpec.units === 'px' ? 1 : Math.min(w, h);
+    const { x: cx, y: cy } = transformOrigin(tf, layer, w, h, unit);
+    ctx.translate(cx + (tf.x ?? 0) * unit, cy + (tf.y ?? 0) * unit);
+    if (tf.rotate) ctx.rotate((tf.rotate * Math.PI) / 180);
+    const s = tf.scale ?? 1;
+    ctx.scale(s * (tf.scaleX ?? 1), s);
+    ctx.translate(-cx, -cy);
+  }
+
+  /** Scene time for a timeline decision: the last painted frame's, else the loop clock's. */
+  private sceneNow(): number {
+    return this.lastRenderT !== Number.NEGATIVE_INFINITY ? this.lastRenderT : this.lastT;
+  }
+
+  /** Resolve the authored timeline at `t`, layer the live overrides on top, and adopt the result. */
+  private resolveAuthored(t: number): void {
+    const expired: string[] = [];
+    const spec = applyOverridesAt(resolveTimelineAt(this.authored!, t), this.overrides, t, expired);
+    for (const p of expired) this.overrides.delete(p);
+    this.effSpec = spec;
+    const sig = structuralSignature(spec);
+    if (sig !== this.lastStructural) this.rebuild();
+    else this.layers.forEach((b, i) => { b.layer = spec.layers[i] ?? b.layer; });
+  }
+
+  /** Register live steers on a timeline scene under the steering rule (see `overrides`). */
+  private overrideAuthored(deltas: readonly SteerDelta[], glide: number): boolean {
+    const now = this.sceneNow();
+    const shown = this.effSpec;
+    // One steer per field: a re-sent track can carry several deltas that
+    // address the same field (an appended track, key- and index-form paths),
+    // and only the last is the steer — otherwise each re-send would flip the
+    // dedup id below and re-arm a hold the timeline already took back.
+    const latest = new Map<string, SteerDelta>();
+    for (const d of deltas) {
+      const path = canonicalSpecPath(shown, d.path);
+      if (!path) continue;
+      latest.delete(path);
+      latest.set(path, d);
+    }
+    const next = new Map(this.overrides);
+    const armed: Array<[string, string]> = [];
+    for (const [path, d] of latest) {
+      const id = steerId(d);
+      if (this.seenSteers.get(path) === id) continue;
+      armed.push([path, id]);
+      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide));
+    }
+    if (armed.length === 0) return true;
+    // Validate the scene as it will actually be — every live override, now
+    // and at each key still ahead — not the new deltas alone.
+    if (!overridesStayValid(this.authored!, next, now)) return false;
+    for (const [p, id] of armed) this.seenSteers.set(p, id);
+    this.overrides = next;
+    return true;
+  }
+
+  /** A copy of the live overrides — a sequence carries them into a morph's outgoing endpoint. */
+  timelineOverrides(): Map<string, TimelineOverride> | null {
+    return this.authored ? new Map(this.overrides) : null;
+  }
+
+  /** A copy of which server steers this child already applied, per field (see `seenSteers`). */
+  timelineSeen(): Map<string, string> {
+    return new Map(this.seenSteers);
+  }
+
+  /** The spec painted by the last frame (timeline and overrides resolved). */
+  presentedSpec(): SaverSpec {
+    return this.effSpec;
   }
 
   /**
@@ -602,7 +1221,7 @@ class SpecInstance implements SaverInstance {
    */
   renderFrame(t: number, _seed: number): void {
     this.stepTransition(t);
-    const g = this.effSpec.ghosting ?? 0;
+    const g = this.transparent ? 0 : (this.effSpec.ghosting ?? 0);
     if (g > 0) {
       const dt = 1000 / 60;
       const contiguous = this.lastRenderT !== Number.NEGATIVE_INFINITY
@@ -621,6 +1240,10 @@ class SpecInstance implements SaverInstance {
       this.paintFrame(t, 1);
     }
     this.lastRenderT = t;
+    // Presentation, last of all: the finished scene (ghosting included) is
+    // copied to the visible canvas and the finish screened over the copy —
+    // after persistence has done its work, and never into it.
+    if (this.finishPass) presentWithFinish(this.finishPass, this.canvas, this.w, this.h, t, this.effSpec.finish, this.animateFinish);
   }
 
   setPaused(paused: boolean): void {
@@ -643,25 +1266,106 @@ class SpecInstance implements SaverInstance {
 
   /**
    * Replace the rendered spec without triggering a transition glide.
-   * Checks structural signature — use `hotSwapPaint` when the caller
-   * already knows the signature is unchanged (e.g. mid-morph lerp).
+   * Checks structural signature — use `hotSwapPaint` only when the caller
+   * already knows the signature is unchanged.
    */
   hotSwapSpec(spec: SaverSpec): void {
+    this.adoptAuthored(spec);
+    if (this.authored) { this.resolveAuthored(this.sceneNow()); return; }
     this.effSpec = spec;
     const sig = structuralSignature(this.effSpec);
     if (sig !== this.lastStructural) this.rebuild();
     else this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
   }
 
+  /**
+   * Track whether `spec` carries a timeline. Live overrides belong to the
+   * scene they were made on: a different spec (a new publish, a sequence's
+   * re-steered segment, a morph frame) drops them, as a plain hot-swap
+   * replaces `effSpec` wholesale; the host re-sends the live track.
+   */
+  private adoptAuthored(spec: SaverSpec, keepSteers = false): void {
+    const next = spec.timeline ? spec : null;
+    if (next !== this.authored && !(keepSteers && next && this.authored)) {
+      this.overrides.clear();
+      this.seenSteers.clear();
+    }
+    this.authored = next;
+  }
+
+  /**
+   * A sequence's hot swap of a timeline segment: the new scene replaces the
+   * old, but the live steers (and which server steers were already applied)
+   * carry over — a steer the timeline already took back stays taken back —
+   * and only a steer this child has never seen is armed, now. Frame
+   * continuity is kept, so ghosting trails do not restart.
+   */
+  hotSwapKeepingSteers(spec: SaverSpec, retained: Iterable<SteerDelta>): void {
+    if (!spec.timeline) {
+      this.hotSwapSpec(spec);
+      return;
+    }
+    if (!this.authored) {
+      // The swap adds a timeline: the old scene carried the retained steers
+      // baked in, the new one takes them as live steers from here.
+      this.hotSwapSpec(spec);
+      this.applyDeltasNow(retained);
+      return;
+    }
+    this.adoptAuthored(spec, true);
+    for (const d of retained) this.overrideAuthored([d], 0);
+    this.resolveAuthored(this.sceneNow());
+  }
+
+  /** Arm a steer made while a sequence was mid-morph, on the outgoing end's override set, at that end's scene time. */
+  static armInto(authored: SaverSpec, overrides: Map<string, TimelineOverride>, seen: Map<string, string>, deltas: readonly SteerDelta[], now: number): void {
+    const at = resolveTimelineAt(authored, now);
+    // As `overrideAuthored`: the last delta per field is the steer, and a
+    // re-sent one (the host re-broadcasts the whole track) is not re-armed.
+    const latest = new Map<string, SteerDelta>();
+    for (const d of deltas) {
+      const path = canonicalSpecPath(at, d.path);
+      if (!path) continue;
+      latest.delete(path);
+      latest.set(path, d);
+    }
+    for (const [path, d] of latest) {
+      const id = steerId(d);
+      if (seen.get(path) === id) continue;
+      const trial = new Map(overrides).set(path, armOverride(authored, path, d.value, d.value, now, 0));
+      if (overridesStayValid(authored, trial, now)) {
+        overrides.set(path, trial.get(path)!);
+        seen.set(path, id);
+      }
+    }
+  }
+
   /** Paint-only hot-swap: skips structuralSignature (caller guarantees match). */
   hotSwapPaint(spec: SaverSpec): void {
+    this.adoptAuthored(spec);
+    if (this.authored) { this.resolveAuthored(this.sceneNow()); return; }
     this.effSpec = spec;
     this.layers.forEach((b, i) => { b.layer = this.effSpec.layers[i] ?? b.layer; });
   }
 
+  /**
+   * Internal (see `LayerPaintOverride`): draw the listed layers twice —
+   * outgoing sprite at `1 − k`, own sprite at `k` — until cleared with
+   * `null`. Keyed by layer index. A `SequenceInstance` sets it per morph
+   * frame under `text: 'crossfade'`; nothing else does.
+   */
+  setLayerPaintOverrides(overrides: ReadonlyMap<number, LayerPaintOverride> | null): void {
+    this.paintOverrides = overrides && overrides.size > 0 ? overrides : null;
+  }
+
   dispose(): void {
     this.stop();
-    if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement) this.canvas.remove();
+    this.field = null; // the raster canvas was never attached; dropping the reference frees it
+    // With a finish, the visible canvas is the pass's and `this.canvas` is
+    // the offscreen scene (never attached) — drop the pass and its tiles.
+    const visible = this.finishPass?.canvas ?? this.canvas;
+    this.finishPass = null;
+    if (this.ownsCanvas && typeof HTMLCanvasElement !== 'undefined' && visible instanceof HTMLCanvasElement) visible.remove();
   }
 }
 
@@ -674,7 +1378,7 @@ export function compileSaver(spec: unknown): SaverPlugin {
   const valid = assertValidSpec(spec);
   return {
     manifest: manifestFor(valid),
-    mount: (ctx: SaverContext) => new SpecInstance(valid, ctx),
+    mount: (ctx: SaverContext) => new SpecInstance(valid, ctx, { capabilityTier: (ctx as SpecMountContext).capabilityTier }),
     spec: valid,
   };
 }
@@ -683,8 +1387,72 @@ export function compileSaver(spec: unknown): SaverPlugin {
 // Sequence — multi-segment timeline compiled as a single SaverPlugin
 // ---------------------------------------------------------------------------
 
-class SequenceInstance implements SaverInstance {
-  private readonly seq: IdleSequence;
+/**
+ * Mount context for a compiled sequence. A plain `SaverContext` works — the
+ * clock starts at 0, as every SaverPlugin's does. `sequenceBaseT` is read
+ * only when the sequence declares `sync: 'epoch'`; hosts pass the shared
+ * clock's elapsed ms (idlescreens.com: `Date.now() − scene.epoch`) so every
+ * viewer of that sequence resolves the same segment.
+ */
+export interface SequenceMountContext extends SpecMountContext {
+  /** ms already elapsed on the shared sequence clock. Ignored unless `sync: 'epoch'`. */
+  sequenceBaseT?: number;
+  /**
+   * See `SpecMountContext.capabilityTier`. A `fade` transition keeps two
+   * segments live for `dur`, which `basic` (canvas2d only) and `minimal`
+   * cannot afford: on those tiers fade renders as `cut`. The tier is also
+   * handed to every child and the bed (a `field` background's raster steps
+   * down with it). Absent ⇒ fade enabled, full resolution.
+   */
+  capabilityTier?: CapabilityTier;
+}
+
+/** A segment child on a canvas of its own, composited onto the shared surface during a `fade`. */
+interface OffscreenChild {
+  index: number;
+  child: SpecInstance;
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+}
+
+/** `bed.<path>` routes a steer to the sequence's bed when one exists. */
+const BED_PREFIX = 'bed.';
+
+/**
+ * What `compileSequence().mount()` returns: a `SaverInstance` that can also
+ * take a republished sequence in place. Hosts feature-detect it with
+ * `hasHotSwapSequence` (an older engine's instance simply lacks the method)
+ * and fall through to a remount when it returns `false`.
+ */
+export interface SequenceSaverInstance extends SaverInstance {
+  renderFrame(t: number, seed: number): void;
+  applyTrack(track: ControlTrack): void;
+  /**
+   * Swap `next` in for the running sequence without remounting, when the
+   * two are `sequenceSwapCompatible`: every live segment child (and the bed)
+   * hot-swaps to its new scene, the clock, the active segment, every
+   * released hold and the retained track stay exactly where they were, and
+   * the next frame resolves to the same `(segment, localT)` as if nothing
+   * had happened — a mid-show caption fix that does not send the room back
+   * to segment 0. Returns `false` and changes nothing when the sequences are
+   * not compatible (a structural or timing edit); the host remounts then.
+   */
+  hotSwapSequence(next: IdleSequence): boolean;
+}
+
+/** `compileSequence`'s plugin: `mount` is typed to the sequence instance and `spec` to the validated sequence. */
+export interface SequenceSaverPlugin extends SaverPlugin {
+  mount(ctx: SequenceMountContext): SequenceSaverInstance;
+  spec: IdleSequence;
+}
+
+/** Feature-detect `hotSwapSequence` on any mounted instance (false for a plain scene, or a sequence from an older engine). */
+export function hasHotSwapSequence(inst: SaverInstance): inst is SequenceSaverInstance {
+  return typeof (inst as { hotSwapSequence?: unknown }).hotSwapSequence === 'function';
+}
+
+class SequenceInstance implements SequenceSaverInstance {
+  /** Replaced wholesale by `hotSwapSequence`; every per-segment lookup (`segmentStart`, `canMorph`, `childScene`) reads it live, so there are no derived tables to refresh. */
+  private seq: IdleSequence;
   private readonly childCtx: SaverContext;
   private readonly canvas: HTMLCanvasElement | null;
   private readonly children: (SpecInstance | null)[];
@@ -701,9 +1469,97 @@ class SequenceInstance implements SaverInstance {
   private startT = 0;
   private baseT = 0;
   private lastT = 0;
+  /** The T most recently passed to renderFrame — the clock a steer displaces. */
+  private renderedT = 0;
+  /**
+   * The clicker's two pieces of state. `clockOffset` is added to every T so
+   * a `sequence.segment` steer lands the timeline at the target segment's
+   * start and STAYS there as the wall clock keeps ticking — the steer moves
+   * the clock instead of fighting it. `releasedBelow` records that the steer
+   * counts as the presenter clicking past every `advance: 'input'` hold
+   * before the target (see `resolveSegment`).
+   */
+  private clockOffset = 0;
+  private releasedBelow = 0;
+  /**
+   * Set by a `sequence.segment` steer that targets segment 0 under `loop:
+   * true`: the steer resets the clock to segment 0's own start (localT 0),
+   * so `renderFrame`'s wrap check (which compares the raw, ever-increasing
+   * clock against `timedTotal()`) can no longer recognize the jump as a
+   * wrap. This flag lets the clicker's jump to 0 still count as one, so the
+   * last segment's fade plays instead of a hard cut. Cleared once the wrap
+   * window (if any) has passed.
+   */
+  private pendingWrapFade = false;
+  /** The morph in progress: its ends, and the override sets each end resolves with (see `morphEndpoint`). */
+  private morphEnds: { from: number; to: number; outT: number; out: Map<string, TimelineOverride> | null; seenOut: Map<string, string>; in: Map<string, TimelineOverride> | null } | null = null;
+  /**
+   * Every non-`sequence.segment` delta this instance has been handed, last
+   * wins per path, merged across `applyTrack` calls. Children are created
+   * lazily and disposed on every segment switch, so a steer forwarded only
+   * to the active child would evaporate at the next boundary — and a steer
+   * to a path only a *later* segment owns (`bars.sprite.values` while the title
+   * slide is up) would land nowhere. Re-applied to every child on creation
+   * and folded into the morph endpoints; each child keeps the deltas that
+   * resolve on it (see `applyRetainedDeltas`).
+   */
+  private readonly retainedDeltas = new Map<string, SteerDelta>();
+  /**
+   * Every `bed.<path>` delta (prefix stripped, last wins per path). The bed
+   * is never re-created, so these are applied to it once on arrival — the
+   * map exists only so `hotSwapSequence` can put a steered bed colour back
+   * after the bed takes its republished scene. Absent a swap it is never read.
+   */
+  private readonly retainedBedDeltas = new Map<string, SteerDelta>();
+  /** The outgoing segment while a `fade` runs; null otherwise. */
+  private fading: OffscreenChild | null = null;
+  /**
+   * The incoming segment while a `fade` runs over a `bed`. Children over a
+   * bed are transparent, so a cross-fade needs both of them on canvases of
+   * their own — the incoming composited at k, the outgoing at 1 − k. Without
+   * a bed the incoming paints its own opaque ground on the shared surface and
+   * this stays null.
+   */
+  private fadingIn: OffscreenChild | null = null;
+  /** False on the `basic`/`minimal` capability tiers — fade renders as cut. */
+  private readonly fadeEnabled: boolean;
+  /** The mount's tier, handed to every child and the bed. */
+  private readonly capabilityTier: CapabilityTier | undefined;
+  /**
+   * The sequence's presentation pass when it — or any segment — declares a
+   * `finish`: children and the bed draw into an offscreen scene canvas
+   * (`childCtx.surface`), and every frame ends by copying it to the visible
+   * surface with the finish screened over the copy — once per composed
+   * frame, bed + segment + fade together. Null when no finish is declared
+   * anywhere: children draw straight onto the visible surface, as before.
+   */
+  private readonly finishPass: FinishPass | null = null;
+  /** False on the `basic`/`minimal` tiers — `finish.animate` renders as a static tile. */
+  private readonly animateFinish: boolean;
+  /**
+   * The sequence's `bed`: one scene on the shared surface, drawn first every
+   * frame at the sequence clock — WITHOUT `clockOffset`, so a
+   * `sequence.segment` steer rewinds the segment and never the bed — and never
+   * re-created. Segments render over it transparently. Null when absent.
+   */
+  private readonly bed: SpecInstance | null;
 
-  constructor(seq: IdleSequence, ctx: SaverContext) {
+  constructor(seq: IdleSequence, ctx: SequenceMountContext) {
     this.seq = seq;
+    const { sequenceBaseT, capabilityTier, ...plainCtx } = ctx;
+    this.capabilityTier = capabilityTier;
+    this.fadeEnabled = capabilityTier !== 'basic' && capabilityTier !== 'minimal';
+    // `sync: 'epoch'`: seed the clock from the host's shared time, the same
+    // way `baseT` carries SpecInstance's clock across pause/resume — the first
+    // frame renders at `baseT`, not 0. Absent/`mount` ignores the hint and T
+    // starts at 0 exactly as before the field existed. Holds are untouched:
+    // `releasedBelow` stays 0, so a late joiner whose clock is past an
+    // unreleased `advance: 'input'` hold lands ON the held segment.
+    if (seq.sync === 'epoch' && typeof sequenceBaseT === 'number' && Number.isFinite(sequenceBaseT)) {
+      this.baseT = Math.max(0, sequenceBaseT);
+      this.lastT = this.baseT;
+      this.renderedT = this.baseT;
+    }
 
     let surface = ctx.surface ?? null;
     let canvas: HTMLCanvasElement | null = null;
@@ -719,17 +1575,48 @@ class SequenceInstance implements SaverInstance {
     // Prefer the sequence's own seed (same precedence SpecInstance uses for
     // scene.seed ?? ctx.seed). Children still resolve per-segment via childSeed.
     this.seed = ((seq.seed ?? ctx.seed ?? 0) >>> 0) || 1;
+    this.animateFinish = capabilityTier !== 'basic' && capabilityTier !== 'minimal';
+    // A finish anywhere in the sequence moves the children onto an offscreen
+    // scene canvas for the sequence's lifetime; which finish applies is
+    // decided per frame (see `frameFinish`).
+    if (sequenceWantsFinish(seq) && surface) {
+      const pass = createFinishPass(surface, this.seed);
+      if (pass) {
+        this.finishPass = pass;
+        surface = createSceneCanvas(ctx.width, ctx.height);
+      }
+    }
     // Children are always parent-driven: reducedMotion:true keeps SpecInstance
     // from starting its own rAF. SequenceInstance.loop is the only clock.
-    this.childCtx = { ...ctx, surface: surface!, reducedMotion: true };
+    // `hostPresents`: a child's own `finish` is this instance's to apply.
+    this.childCtx = { ...plainCtx, surface: surface!, reducedMotion: true };
+    this.sizeVisible();
     this.children = new Array(seq.segments.length).fill(null) as (SpecInstance | null)[];
+    if (seq.bed) {
+      this.bed = new SpecInstance(this.bedScene(seq.bed), this.childCtx, { capabilityTier, hostPresents: true });
+      this.bed.setPaused(true);
+    } else {
+      this.bed = null;
+    }
     this.paused = ctx.reducedMotion;
-    if (this.paused) this.renderFrame(0, this.seed);
+    if (this.paused) this.renderFrame(this.baseT, this.seed);
     else this.start();
   }
 
   private childSeed(index: number, fallback: number): number {
     return this.seq.segments[index]!.scene.seed ?? this.seq.seed ?? fallback;
+  }
+
+  /**
+   * The bed's seed follows the segment rule (own seed, else the sequence seed)
+   * but offset by `maxSegments`, past every segment's `seed + index`, so a bed
+   * and segment 0 never share an entity stream and adding a segment does not
+   * re-seat the bed.
+   */
+  private bedScene(bed: SaverSpec): SaverSpec {
+    if (bed.seed != null) return bed;
+    if (this.seq.seed != null) return { ...bed, seed: this.seq.seed + LIMITS.maxSegments };
+    return bed;
   }
 
   private childScene(index: number): SaverSpec {
@@ -741,18 +1628,12 @@ class SequenceInstance implements SaverInstance {
 
   /** Whether the boundary from `from` to `from+1` should morph. */
   private canMorph(from: number): boolean {
-    const seg = this.seq.segments[from];
-    if (!seg || seg.transition?.type !== 'morph') return false;
-    const next = this.seq.segments[from + 1];
-    if (!next) return false;
-    return structuralSignature(seg.scene) === structuralSignature(next.scene);
+    return canMorph(this.seq, from);
   }
 
   /** Walk back through consecutive morph boundaries to find the chain origin. */
   private morphChainRoot(index: number): number {
-    let i = index;
-    while (i > 0 && this.canMorph(i - 1)) i--;
-    return i;
+    return morphChainRoot(this.seq, index);
   }
 
   private morphDur(from: number): number {
@@ -760,15 +1641,192 @@ class SequenceInstance implements SaverInstance {
     return tr?.type === 'morph' ? tr.dur : 0;
   }
 
-  private ensureChild(index: number): SpecInstance {
+  /** Whether the morph out of `from` paints its text in two passes — `crossfade` or `dip` (default `step`: strings switch at k > 0). */
+  private morphTextCrossfades(from: number): boolean {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'morph' && (tr.text === 'crossfade' || tr.text === 'dip');
+  }
+
+  /** The morph out of `from`'s two-pass text mode, for `crossfadeOverrides`. */
+  private morphTextMode(from: number): 'crossfade' | 'dip' {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'morph' && tr.text === 'dip' ? 'dip' : 'crossfade';
+  }
+
+  /**
+   * The paint overrides for one crossfade frame: every text layer whose
+   * words differ between the outgoing and incoming specs, painting the
+   * outgoing words (in the lerped frame's paint — colour and alpha glide as
+   * usual) at `1 − k` under the incoming at `k`. Null when nothing differs,
+   * so a crossfade between same-worded twins is a plain morph frame.
+   */
+  private crossfadeOverrides(specA: SaverSpec, specB: SaverSpec, lerped: SaverSpec, k: number, mode: 'crossfade' | 'dip' = 'crossfade'): Map<number, LayerPaintOverride> | null {
+    let map: Map<number, LayerPaintOverride> | null = null;
+    for (let i = 0; i < lerped.layers.length; i++) {
+      if (!textStringsDiffer(specA, specB, i)) continue;
+      const from = specA.layers[i]!.sprite;
+      const now = lerped.layers[i]!.sprite;
+      const outgoing: SpriteSpec = from.kind === 'text' && now.kind === 'text'
+        ? { ...now, strings: from.strings }
+        : from.kind === 'textBlock' && now.kind === 'textBlock'
+          ? { ...now, text: from.text }
+          : now;
+      if (outgoing === now) continue;
+      // `mode` is only written for `dip`, so a crossfade override is the
+      // exact object it has always been.
+      (map ??= new Map()).set(i, mode === 'dip' ? { outgoing, k, mode } : { outgoing, k });
+    }
+    return map;
+  }
+
+  /** Length of the fade out of segment `from`, or 0 (no fade, or a tier that plays it as cut). */
+  private fadeDur(from: number): number {
+    const tr = this.seq.segments[from]?.transition;
+    return this.fadeEnabled && tr?.type === 'fade' ? tr.dur : 0;
+  }
+
+  /** Sum of every timed segment — the lap length under `loop: true`. */
+  private timedTotal(): number {
+    const last = this.seq.segments.length - 1;
+    return segmentStart(this.seq, last) + (this.seq.segments[last]!.duration ?? 0);
+  }
+
+  private releaseFading(): void {
+    if (this.fading) {
+      this.fading.child.dispose();
+      this.fading = null;
+    }
+    if (this.fadingIn) {
+      this.fadingIn.child.dispose();
+      this.fadingIn = null;
+    }
+  }
+
+  /**
+   * A segment child on a canvas of its own. Like a morph it mounts on its
+   * chain root's scene and seed (so its entities are the ones the viewer was
+   * watching) and hot-swaps to the segment's spec; the retained track is
+   * applied last. Transparent over a bed, opaque otherwise.
+   */
+  private offscreenChild(index: number, root: number): OffscreenChild {
+    const canvas: HTMLCanvasElement | OffscreenCanvas = typeof document !== 'undefined'
+      ? document.createElement('canvas')
+      : new OffscreenCanvas(Math.max(1, this.childCtx.width), Math.max(1, this.childCtx.height));
+    const child = new SpecInstance(this.childScene(root), { ...this.childCtx, surface: canvas }, { transparent: this.bed !== null, capabilityTier: this.capabilityTier, hostPresents: true });
+    child.setPaused(true);
+    if (root !== index) child.hotSwapSpec(this.childScene(index));
+    if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
+    return { index, child, canvas };
+  }
+
+  /** Render an offscreen child; a transparent one never clears, so its owner does here. */
+  private renderOffscreen(oc: OffscreenChild, t: number, seed: number): void {
+    if (this.bed) {
+      const c = oc.canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      c?.clearRect(0, 0, this.childCtx.width, this.childCtx.height);
+    }
+    oc.child.renderFrame(t, seed);
+  }
+
+  /** Draw an offscreen canvas onto the shared surface at `alpha`. */
+  private composite(canvas: HTMLCanvasElement | OffscreenCanvas, alpha: number): void {
+    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+    if (!main) return;
+    main.save();
+    main.globalAlpha = alpha;
+    main.globalCompositeOperation = 'source-over';
+    main.drawImage(canvas, 0, 0, this.childCtx.width, this.childCtx.height);
+    main.restore();
+  }
+
+  /**
+   * Render the outgoing segment `from` of a live fade onto its own canvas. It
+   * keeps animating at `duration(from) + localT` (it does not freeze — and if
+   * it was an `advance: 'input'` hold it resumes from its duration, not from
+   * wherever the hold had reached). Two live segments for `dur` only; the
+   * outgoing one is disposed when the fade ends.
+   */
+  private renderOutgoing(from: number, localT: number, seed: number): OffscreenChild {
+    if (this.fading && this.fading.index !== from) {
+      this.fading.child.dispose();
+      this.fading = null;
+    }
+    if (!this.fading) this.fading = this.offscreenChild(from, this.morphChainRoot(from));
+    const outDur = this.seq.segments[from]!.duration ?? 0;
+    this.renderOffscreen(this.fading, outDur + localT, this.childSeed(this.morphChainRoot(from), seed));
+    return this.fading;
+  }
+
+  /**
+   * One end of a morph at segment time `t`. A scene without a timeline is its
+   * steered scene, as always. With a timeline, the retained track follows the
+   * same rule a child applies (held until the path's next key, sticky
+   * otherwise): the outgoing end uses its child's live overrides when the
+   * morph began from one, and otherwise — like the incoming end, whose child
+   * does not exist yet — arms the retained steers at segment time 0, as a
+   * freshly mounted child would.
+   */
+  private morphEndpoint(index: number, t: number, side: 'out' | 'in'): SaverSpec {
+    const scene = this.childScene(index);
+    if (!scene.timeline) return this.steeredScene(scene);
+    const ends = this.morphEnds;
+    if (ends && side === 'out') ends.outT = t;
+    let ov = side === 'out' ? ends?.out ?? null : ends?.in ?? null;
+    if (!ov) {
+      ov = this.armRetained(scene, side === 'out' ? ends?.seenOut : undefined);
+      if (ends) { if (side === 'out') ends.out = ov; else ends.in = ov; }
+    }
+    return applyOverridesAt(resolveTimelineAt(scene, t), ov, t);
+  }
+
+  /** The retained steers that resolve (and validate) on a timeline scene, armed at segment time 0. */
+  private armRetained(scene: SaverSpec, seen?: Map<string, string>): Map<string, TimelineOverride> {
+    const out = new Map<string, TimelineOverride>();
+    if (this.retainedDeltas.size === 0) return out;
+    const at0 = resolveTimelineAt(scene, 0);
+    for (const d of this.retainedDeltas.values()) {
+      const path = canonicalSpecPath(at0, d.path);
+      if (!path) continue;
+      const trial = new Map(out).set(path, armOverride(scene, path, d.value, d.value, 0, 0));
+      if (overridesStayValid(scene, trial, 0)) {
+        out.set(path, trial.get(path)!);
+        seen?.set(path, steerId(d));
+      }
+    }
+    return out;
+  }
+
+  /** A segment's scene with the retained track applied — `scene` itself when nothing resolves on it. */
+  private steeredScene(scene: SaverSpec): SaverSpec {
+    return this.retainedDeltas.size === 0 ? scene : applyRetainedDeltas(scene, this.retainedDeltas.values());
+  }
+
+  /**
+   * The child for segment `index`, created paused on the shared surface if
+   * the slot is empty. `rootScene` (a morph chain's root) mounts the child
+   * with the root's scene so its seed and entity placement are continuous
+   * with the chain, then hot-swaps to the segment's own spec. Either way the
+   * retained track is applied last, so a steer made while another segment
+   * was up is already in effect on this child's first frame. `skipInitialPaint`
+   * is for a caller (the morph branch) that is about to render a real frame,
+   * paint overrides included, in this same call — see `SpecInstanceOptions`.
+   */
+  private ensureChild(index: number, rootScene?: SaverSpec, skipInitialPaint?: boolean): SpecInstance {
     if (index < 0 || index >= this.seq.segments.length) index = 0;
     let child = this.children[index];
     if (!child) {
-      child = new SpecInstance(this.childScene(index), this.childCtx);
+      // Over a bed the child is transparent ink on the shared surface, and
+      // every caller renders the real frame right after this — so its
+      // constructor paint (t = 0) would only leave a stray frame of ink under
+      // it. Transparent children ignore ghosting, so skipping it changes no
+      // warm-up. Without a bed the opaque child repaints its ground over it.
+      child = new SpecInstance(rootScene ?? this.childScene(index), this.childCtx, { transparent: this.bed !== null, skipInitialPaint: skipInitialPaint || this.bed !== null, capabilityTier: this.capabilityTier, hostPresents: true });
       this.children[index] = child;
       // Belt-and-suspenders: never let a child self-drive, even if childCtx
       // reducedMotion is ever relaxed.
       child.setPaused(true);
+      if (rootScene) child.hotSwapSpec(this.childScene(index));
+      if (this.retainedDeltas.size > 0) child.applyDeltasNow(this.retainedDeltas.values());
     }
     return child;
   }
@@ -802,21 +1860,111 @@ class SequenceInstance implements SaverInstance {
     this.renderFrame(this.lastT, this.seed);
   }
 
+  /**
+   * With a presentation pass, size the visible surface like a child sizes
+   * the scene canvas (children never touch the visible surface then).
+   */
+  private sizeVisible(): void {
+    const fp = this.finishPass;
+    if (!fp) return;
+    const dpr = Math.min(this.childCtx.dpr, 2);
+    fp.canvas.width = Math.max(1, Math.round(this.childCtx.width * dpr));
+    fp.canvas.height = Math.max(1, Math.round(this.childCtx.height * dpr));
+    fp.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /**
+   * The finish this frame applies: the sequence's own overrides; else the
+   * active segment's (the incoming one during a fade) — read through
+   * `steeredScene` so a retained steer to `finish.grain`/`finish.dither`
+   * takes effect immediately instead of the authored value; a bed's is
+   * ignored.
+   */
+  private frameFinish(): SaverSpec['finish'] {
+    if (this.seq.finish !== undefined) return this.seq.finish;
+    if (this.activeIndex < 0) return undefined;
+    const scene = this.childScene(this.activeIndex);
+    if (scene.timeline) {
+      // A timeline may key `finish.*`: read what the rendering child painted
+      // (its chain-root slot mid-morph), not the authored base.
+      const live = (this.fadingIn?.index === this.activeIndex ? this.fadingIn.child : null)
+        ?? this.children[this.activeIndex] ?? this.children[this.morphChainRoot(this.activeIndex)];
+      if (live) return live.presentedSpec().finish;
+    }
+    return this.steeredScene(scene).finish;
+  }
+
+  /**
+   * The seed `frameFinish()`'s grain resolves against — the sequence's own
+   * for a sequence-level finish, else the active segment's actual render
+   * seed (`segmentRenderSeed`: chain-root-aware and normalized exactly like
+   * `SpecInstance`, so it agrees with what that segment's entities render
+   * with, morph or not).
+   */
+  private frameFinishSeed(): number {
+    if (this.seq.finish !== undefined) return this.seed;
+    if (this.activeIndex < 0) return this.seed;
+    return segmentRenderSeed(this.seq, this.activeIndex) ?? this.seed;
+  }
+
   renderFrame(T: number, seed: number): void {
-    const resolved = resolveSegment(this.seq, T);
+    this.renderScene(T, seed);
+    // Once per composed frame, after bed, segment and any fade composite.
+    if (this.finishPass) {
+      presentWithFinish(this.finishPass, this.childCtx.surface!, this.childCtx.width, this.childCtx.height, T, this.frameFinish(), this.animateFinish, this.frameFinishSeed());
+    }
+  }
+
+  private renderScene(T: number, seed: number): void {
+    this.renderedT = T;
+    const resolved = resolveSegment(this.seq, T + this.clockOffset, { releasedBelow: this.releasedBelow });
     const { index, localT } = resolved;
 
-    // Check if the *previous* segment has a morph into this one
+    // The bed is the ground: painted first, on the global clock. `T` here is
+    // the sequence clock before `clockOffset`, so the clicker never rewinds it.
+    this.bed?.renderFrame(T, this.seq.bed?.seed ?? this.seq.seed ?? seed);
+
+    // A fade comes from the previous segment in the list — or, under
+    // `loop: true`, from the last segment when the lap wraps to 0, so the
+    // last segment's `fade` is the wrap's transition. Cut and morph paths
+    // are untouched: fadeDur is 0 for them.
+    const lastIdx = this.seq.segments.length - 1;
+    const wrapped = this.seq.loop && index === 0 && lastIdx > 0
+      && (T + this.clockOffset >= this.timedTotal() || this.pendingWrapFade);
+
+    // Check if the *previous* segment has a morph into this one — or, with
+    // `wrapMorph` on a loop that is one morph chain, whether the last
+    // segment morphs into segment 0 at the wrap (`canWrapMorph`). Without
+    // `wrapMorph` the wrap stays the hard cut it has always been.
+    // Only on a natural lap wrap: a clicker jump to segment 0 (`pendingWrapFade`)
+    // arrives from wherever the presenter was, not from the last segment, so
+    // it cuts — morphing from the last segment would flash a frame of it.
+    const naturalWrap = this.seq.loop && index === 0 && lastIdx > 0 && T + this.clockOffset >= this.timedTotal();
     const prevIdx = index > 0 ? index - 1 : -1;
-    const morphActive = prevIdx >= 0
-      && this.canMorph(prevIdx)
-      && localT < this.morphDur(prevIdx);
+    const morphFrom = prevIdx >= 0 ? prevIdx : naturalWrap && canWrapMorph(this.seq) ? lastIdx : -1;
+    const morphActive = morphFrom >= 0
+      && (morphFrom === prevIdx ? this.canMorph(prevIdx) : true)
+      && localT < this.morphDur(morphFrom);
+    const fadeFrom = prevIdx >= 0 ? prevIdx : wrapped ? lastIdx : -1;
+    const fadeActive = fadeFrom >= 0 && localT < this.fadeDur(fadeFrom);
+    if (!fadeActive && this.fading) this.releaseFading();
+    // The flag only needs to survive the frames still inside the wrap fade
+    // window; once that ends (or the clock moves off segment 0) it has done
+    // its job.
+    if (this.pendingWrapFade && (index !== 0 || !fadeActive)) this.pendingWrapFade = false;
 
     if (morphActive) {
       // Morph in progress: keep the child keyed to the chain root
       // (preserves its seed/entity placement through chained morphs).
       const chainRoot = this.morphChainRoot(index);
-      this.morphFromIndex = prevIdx;
+      if (this.morphFromIndex !== morphFrom || this.morphEnds?.to !== index) {
+        // A new morph: carry the outgoing segment's live steers (held/expired
+        // per the timeline rule, on its own clock) into the lerp, before its
+        // child is released or hot-swapped to the lerped frame.
+        const outChild = this.children[morphFrom];
+        this.morphEnds = { from: morphFrom, to: index, outT: 0, out: outChild?.timelineOverrides() ?? null, seenOut: outChild?.timelineSeen() ?? new Map(), in: null };
+      }
+      this.morphFromIndex = morphFrom;
       this.activeIndex = index;
 
       // Release all children except the chain root's slot
@@ -824,12 +1972,39 @@ class SequenceInstance implements SaverInstance {
         if (i !== chainRoot) this.releaseChild(i);
       }
 
-      const child = this.ensureChild(chainRoot);
-      const dur = this.morphDur(prevIdx);
+      // A fresh mount here is about to be repainted for real a few lines
+      // down (hotSwapPaint + overrides + renderFrame) within this same call.
+      // Only `text: 'crossfade'` needs the constructor's own paint skipped —
+      // its partial-alpha passes would otherwise composite over a stray
+      // full-opacity frame underneath; `step` (the common case) is left to
+      // paint at construction as it always has, so a fresh mount's ghosting
+      // contiguity (`lastRenderT`) is unaffected.
+      const child = this.ensureChild(chainRoot, undefined, this.morphTextCrossfades(morphFrom));
+      const dur = this.morphDur(morphFrom);
       const k = easeSmooth(localT / dur);
-      const specA = this.childScene(prevIdx);
-      const specB = this.childScene(index);
-      child.hotSwapPaint(lerpSpec(specA, specB, k));
+      // The lerp endpoints carry the retained track, so without this a
+      // steered colour would vanish for `dur` and snap back when the morph
+      // finalises. `canMorph` only guarantees specA/specB share structure
+      // BEFORE the retained set is applied — a structural delta (`layers.0.
+      // count`, a motion change) could validate on one endpoint and not the
+      // other, or change both identically but differ from what this child
+      // was last built with. hotSwapSpec (not hotSwapPaint) re-checks the
+      // signature every frame and rebuilds when it moved, so a structural
+      // steer actually takes effect instead of leaving stale entities.
+      //
+      // A segment with a `timeline` is resolved on its own clock first — the
+      // outgoing one at its end (its duration + localT, so a looping
+      // timeline keeps cycling through the morph), the incoming at localT —
+      // and the timeline-free results are lerped. Without timelines
+      // resolveTimelineAt returns its argument, so this is the old frame.
+      const outDur = this.seq.segments[morphFrom]!.duration ?? 0;
+      const specA = this.morphEndpoint(morphFrom, outDur + localT, 'out');
+      const specB = this.morphEndpoint(index, localT, 'in');
+      const lerped = lerpSpec(specA, specB, k);
+      child.hotSwapSpec(lerped);
+      // Default (`step`): no overrides, the frame is what it always was —
+      // strings already switched inside `lerped` at k > 0.
+      child.setLayerPaintOverrides(this.morphTextCrossfades(morphFrom) ? this.crossfadeOverrides(specA, specB, lerped, k, this.morphTextMode(morphFrom)) : null);
       child.renderFrame(localT, this.childSeed(chainRoot, seed));
     } else {
       // No morph (or morph complete). If we were morphing, finalize.
@@ -839,6 +2014,7 @@ class SequenceInstance implements SaverInstance {
         this.releaseChild(oldRoot);
         if (oldRoot !== this.morphFromIndex) this.releaseChild(this.morphFromIndex);
         this.morphFromIndex = -1;
+        this.morphEnds = null;
       }
 
       if (index !== this.activeIndex) {
@@ -855,20 +2031,33 @@ class SequenceInstance implements SaverInstance {
       const useMorphSeed = chainRoot < index;
       const effSeed = useMorphSeed ? this.childSeed(chainRoot, seed) : this.childSeed(index, seed);
 
+      if (fadeActive && this.bed) {
+        // Over a bed both segments are transparent ink, so both go to canvases
+        // of their own: incoming at k, outgoing over it at 1 − k. The incoming
+        // moves to the shared surface (via ensureChild) once the fade ends.
+        const k = easeSmooth(localT / this.fadeDur(fadeFrom));
+        if (this.fadingIn && this.fadingIn.index !== index) {
+          this.fadingIn.child.dispose();
+          this.fadingIn = null;
+        }
+        if (!this.fadingIn) this.fadingIn = this.offscreenChild(index, useMorphSeed ? chainRoot : index);
+        this.renderOffscreen(this.fadingIn, localT, effSeed);
+        const out = this.renderOutgoing(fadeFrom, localT, seed);
+        this.composite(this.fadingIn.canvas, k);
+        this.composite(out.canvas, 1 - k);
+        return;
+      }
+
       // If using morph seed, mount the child with the chain root's scene+seed
       // but immediately hot-swap to the current segment's spec.
-      let child: SpecInstance;
-      if (useMorphSeed && !this.children[index]) {
-        const rootScene = this.childScene(chainRoot);
-        child = new SpecInstance(rootScene, this.childCtx);
-        this.children[index] = child;
-        child.setPaused(true);
-        child.hotSwapSpec(this.childScene(index));
-      } else {
-        child = this.ensureChild(index);
-        if (useMorphSeed) child.hotSwapSpec(this.childScene(index));
-      }
+      const child = useMorphSeed ? this.ensureChild(index, this.childScene(chainRoot)) : this.ensureChild(index);
       child.renderFrame(localT, effSeed);
+      if (fadeActive) {
+        // The outgoing segment on its own canvas over the incoming frame at
+        // 1 − easeSmooth(k): the incoming's opaque ground fades in beneath it.
+        const out = this.renderOutgoing(fadeFrom, localT, seed);
+        this.composite(out.canvas, 1 - easeSmooth(localT / this.fadeDur(fadeFrom)));
+      }
     }
   }
 
@@ -882,6 +2071,9 @@ class SequenceInstance implements SaverInstance {
     for (const child of this.children) {
       child?.setPaused(true);
     }
+    this.fading?.child.setPaused(true);
+    this.fadingIn?.child.setPaused(true);
+    this.bed?.setPaused(true);
   }
 
   resize(width: number, height: number, dpr?: number): void {
@@ -894,47 +2086,160 @@ class SequenceInstance implements SaverInstance {
     this.childCtx.width = width;
     this.childCtx.height = height;
     if (dpr !== undefined) this.childCtx.dpr = dpr;
+    this.sizeVisible();
     for (const child of this.children) {
       child?.resize(width, height, dpr);
     }
+    this.fading?.child.resize(width, height, dpr);
+    this.fadingIn?.child.resize(width, height, dpr);
+    this.bed?.resize(width, height, dpr);
   }
 
   applyTrack(track: ControlTrack): void {
-    const deltas = (track?.deltas ?? []) as unknown as SteerDelta[];
+    const all = (track?.deltas ?? []) as unknown as SteerDelta[];
+    // `bed.<path>` goes to the bed with the prefix stripped — only when a bed
+    // exists; otherwise the path reaches the segments as today (a layer keyed
+    // `bed` keeps working).
+    const isBedPath = (d: SteerDelta): boolean => this.bed !== null && typeof d.path === 'string' && d.path.startsWith(BED_PREFIX);
+    const bedDeltas = all.filter(isBedPath).map((d) => ({ ...d, path: d.path.slice(BED_PREFIX.length) }));
+    if (bedDeltas.length > 0) {
+      for (const d of bedDeltas) this.retainedBedDeltas.set(d.path, d);
+      this.bed!.applyTrack({ ...track, deltas: bedDeltas as unknown as ParamDelta[] });
+    }
+    const deltas = all.filter((d) => !isBedPath(d));
+    // Retain first: a `sequence.segment` steer in the same track creates the
+    // target child inside renderFrame below, and it must see these deltas.
+    for (const d of deltas) {
+      if (d.path !== 'sequence.segment' && typeof d.path === 'string') this.retainedDeltas.set(d.path, d);
+    }
     const segDelta = deltas.find((d) => d.path === 'sequence.segment');
+    let switchedSegment = false;
     if (segDelta !== undefined && typeof segDelta.value === 'number') {
       const idx = Math.max(0, Math.min(this.seq.segments.length - 1, Math.round(segDelta.value as number)));
-      if (idx !== this.activeIndex) {
-        for (let i = 0; i < this.children.length; i++) {
-          if (i !== idx) this.releaseChild(i);
-        }
-        this.activeIndex = idx;
-        const child = this.ensureChild(idx);
-        child.renderFrame(0, this.seq.segments[idx]!.scene.seed ?? this.seq.seed ?? 0);
-      }
+      // A steer to segment 0 under loop is the clicker doing the same jump
+      // the wall clock does on a natural lap wrap — it should trigger the
+      // last segment's fade the same way (see `pendingWrapFade`).
+      this.pendingWrapFade = this.seq.loop && idx === 0 && this.seq.segments.length > 1;
+      // Displace the clock so T + offset == the target segment's start: the
+      // segment begins at localT 0 (its `life.enter` build replays) and the
+      // next animation frame resolves to the same segment instead of snapping
+      // back to whatever the wall clock said. The steer also releases every
+      // `advance: 'input'` hold before the target; holds at and after it stay
+      // armed, so steering backwards re-arms the ones in between.
+      this.clockOffset = segmentStart(this.seq, idx) - this.renderedT;
+      this.releasedBelow = idx;
+      this.renderFrame(this.renderedT, this.seed);
+      switchedSegment = true;
     }
 
     const childDeltas = deltas.filter((d) => d.path !== 'sequence.segment');
-    if (childDeltas.length > 0 && this.activeIndex >= 0) {
-      const child = this.children[this.activeIndex];
-      child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+    if (childDeltas.length > 0) {
+      if (this.morphFromIndex >= 0) {
+        // Mid-morph, the rendered child lives at the chain-root slot, not
+        // `children[activeIndex]` — forwarding a child.applyTrack() there
+        // would silently no-op AND get overwritten by the morph's own
+        // hotSwapSpec on the very next frame regardless, so a transition
+        // glide on this path can't coexist with the morph's own cross-fade.
+        // The delta is already retained above, so a re-render is all that's
+        // needed to reach it via steeredScene: it takes effect this frame,
+        // immediately rather than gliding over its own `dur`. Skip only when
+        // the segDelta branch above already re-rendered with these deltas
+        // retained.
+        // Timeline ends resolve through `morphEnds`: arm the new steer on the
+        // outgoing set at its current time, and re-arm the incoming side.
+        const ends = this.morphEnds;
+        if (ends) {
+          const outScene = this.childScene(ends.from);
+          if (ends.out && outScene.timeline) SpecInstance.armInto(outScene, ends.out, ends.seenOut, childDeltas, ends.outT);
+          ends.in = null;
+        }
+        if (!switchedSegment) this.renderFrame(this.renderedT, this.seed);
+      } else if (this.activeIndex >= 0) {
+        // Not mid-morph: the active child still gets the track directly, as
+        // before retention — a steer to a path it owns glides on this call
+        // rather than snapping at the next boundary.
+        const child = this.children[this.activeIndex];
+        child?.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      }
+      // The outgoing segment during a fade — and, over a bed, the incoming
+      // one too, since both are standalone offscreen SpecInstances, not
+      // `this.children` — would otherwise freeze at whatever they last
+      // rendered instead of picking up a mid-fade steer like the active
+      // child does. Independent of the morph/active branching above: fade
+      // and morph are mutually exclusive per-frame states.
+      this.fading?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
+      this.fadingIn?.child.applyTrack({ ...track, deltas: childDeltas as unknown as ParamDelta[] });
     }
+  }
+
+  /**
+   * See `SequenceSaverInstance.hotSwapSequence`. Nothing that positions the
+   * show is touched: `clockOffset`, `releasedBelow`, `activeIndex`,
+   * `morphFromIndex`, `pendingWrapFade`, `renderedT` and the retained deltas
+   * all keep their values, and the timing terms `sequenceSwapCompatible`
+   * pins (durations, advance, transitions, loop) are the same on both sides,
+   * so `resolveSegment` at the next frame lands where it would have anyway.
+   * Each live child takes its new scene with the retained track re-applied
+   * (`steeredScene` — the same routing a fresh child gets), so steered paint
+   * survives the swap; `hotSwapSpec` keeps the entities (the signatures
+   * match) and does not reset ghosting contiguity, so a drifting entity is
+   * where it was 1 ms ago. Children are always paused, so none of them has a
+   * glide in flight for the swap to interrupt (`SpecInstance.applyTrack`
+   * snaps when paused). A morph in progress is untouched here: its chain-root
+   * child is re-lerped from the new endpoints on the very next frame.
+   */
+  hotSwapSequence(next: IdleSequence): boolean {
+    if (!sequenceSwapCompatible(this.seq, next)) return false;
+    this.seq = next;
+    // Routed like a child's retained set (`applyRetainedDeltas`, not
+    // `applyDeltasNow`): the latter resets ghosting contiguity, and the bed's
+    // trails must not restart on a swap.
+    if (this.bed && next.bed) this.bed.hotSwapSpec(applyRetainedDeltas(this.bedScene(next.bed), this.retainedBedDeltas.values()));
+    const swap = (child: SpecInstance | null | undefined, index: number): void => {
+      if (!child) return;
+      const scene = this.childScene(index);
+      if (!scene.timeline) { child.hotSwapSpec(this.steeredScene(scene)); return; }
+      // A timeline child keeps its live steers across the swap (the steering
+      // rule), rather than having them baked into its base (which would make
+      // a steer on an animated path sticky) or re-armed from scratch (which
+      // would bring back one the timeline already took back).
+      child.hotSwapKeepingSteers(scene, this.retainedDeltas.values());
+    };
+    for (let i = 0; i < this.children.length; i++) swap(this.children[i], i);
+    if (this.fading) swap(this.fading.child, this.fading.index);
+    if (this.fadingIn) swap(this.fadingIn.child, this.fadingIn.index);
+    this.morphEnds = null;
+    // A paused instance (reducedMotion, or a sleeping host) has no next frame
+    // to paint the new words with; a running one repaints on its own tick.
+    if (this.paused) this.renderFrame(this.renderedT, this.seed);
+    return true;
   }
 
   dispose(): void {
     this.stop();
+    this.releaseFading();
     for (let i = 0; i < this.children.length; i++) {
       this.releaseChild(i);
+    }
+    this.bed?.dispose();
+    if (this.finishPass) {
+      // The scene canvas was never attached; the pass's visible canvas is
+      // `this.canvas` (removed below) or the host's surface.
+      this.finishPass.grain = null;
+      this.finishPass.dither = null;
     }
     if (this.canvas) this.canvas.remove();
   }
 }
 
 function sequenceManifest(seq: IdleSequence): SaverManifest {
-  const maxTotal = seq.segments.reduce((max, s) => {
+  const maxSegment = seq.segments.reduce((max, s) => {
     const t = s.scene.layers.reduce((n, l) => n + l.count, 0);
     return Math.max(max, t);
   }, 0);
+  // A bed is live alongside whichever segment is up, so it costs on top of the largest.
+  const bedTotal = seq.bed ? seq.bed.layers.reduce((n, l) => n + l.count, 0) : 0;
+  const maxTotal = bedTotal + maxSegment;
   const costTier = maxTotal < 30 ? 'idle' : maxTotal < 150 ? 'low' : maxTotal < 400 ? 'medium' : 'high';
   return {
     id: seq.id,
@@ -950,11 +2255,11 @@ function sequenceManifest(seq: IdleSequence): SaverManifest {
   };
 }
 
-export function compileSequence(spec: unknown): SaverPlugin {
+export function compileSequence(spec: unknown): SequenceSaverPlugin {
   const valid = assertValidSequence(spec);
   return {
     manifest: sequenceManifest(valid),
-    mount: (ctx: SaverContext) => new SequenceInstance(valid, ctx),
+    mount: (ctx: SequenceMountContext) => new SequenceInstance(valid, ctx),
     spec: valid,
   };
 }

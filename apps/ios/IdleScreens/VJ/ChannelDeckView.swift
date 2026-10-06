@@ -137,6 +137,7 @@ struct ChannelDeckView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.appBackground)
+        .refreshable { state = try? await app.fetchState(for: credential.channelId) }
         .navigationTitle(credential.label)
         .navigationBarTitleDisplayMode(.inline)
         .alert("Action failed", isPresented: Binding(

@@ -37,8 +37,16 @@ xcodebuild -project IdleScreens.xcodeproj -scheme IdleScreens \
 
 The same project builds an Apple TV app: a 10-foot channel gallery that renders
 scenes **natively** (no WebView) through a capability ladder — SwiftUI Canvas at
-60fps on A12+, a SpriteKit sprite renderer at 30fps down to the pre-4K boxes,
-then the thumbnail stream, then an analytic perception view.
+60fps on A12+ (`t3`), a SpriteKit sprite renderer at 30fps down to the pre-4K
+boxes (`t2`), then the thumbnail stream (`t1`), then an analytic perception
+view (`t0`).
+
+Which renderer a box gets and how much work it may be asked to do are separate
+decisions (`IdleScreens/Render/CapabilityTier.swift`). `CapabilityTier` picks
+the renderer from `hw.machine`; `RenderClass` (`legacy` A8/A10X, `standard`
+A12–A15, `high` A17+) sizes the budgets that decide when a scene is too heavy
+for the Canvas tier. Left fused, the ceilings tuned on A12 silicon would kick a
+rich scene down to sprites on hardware that could drive it comfortably.
 
 ```bash
 xcodebuild -project IdleScreens.xcodeproj -scheme IdleScreensTV \
@@ -61,8 +69,24 @@ xcrun simctl io "$UDID" screenshot /tmp/shot.png    # output is in pixels, not p
 ```
 
 Debug launch arguments jump straight to one surface instead of walking there
-with the remote: `-channel <id>`, `-classic <warp|rainstorm>`, `-poster <id>`,
-`-pair`, `-settings`, `-fallback`.
+with the remote: `-channel <id>` (add `-past <n>` to step n scenes into its history),
+`-classic <warp|rainstorm|metaquarium>`, `-poster <id>`, `-pair`, `-settings`,
+`-search [-q <query>]`, `-fallback`.
+
+**In the player the remote is a dial.** Up/Down surf channels in the iPhone
+feed's order (most recently steered first, sleeping channels skipped);
+Left/Right step through the channel's own past scenes and back to live — the
+phone's two feed axes. Settings → Ambient adds an auto-rotate interval and
+"start where I left off".
+
+**What guards the TV build.** `RenderSmokeTests` draws real frames headlessly
+through every renderer (Canvas, SpriteKit, the classic ports) and asserts ink
+landed, so a crash or a blank frame in paint code fails the suite instead of
+being found on a television. `.github/workflows/apple-ci.yml` builds and tests
+both targets on every `apps/ios/**` change — the targets share `API/`,
+`Render/` and `Theme/` wholesale, so an iPhone-only file dropped in one of them
+breaks the TV; list such files under the TV target's `excludes:` in
+`project.yml`. `make app tvos ship` runs the suite as a gate before archiving.
 
 ## Architecture
 
@@ -72,10 +96,12 @@ with the remote: `-channel <id>`, `-classic <warp|rainstorm>`, `-poster <id>`,
   Feature slices live in `AppState+Gallery.swift` (Watch) and `AppState+VJ.swift` (VJ).
 - Networking actors over URLSession async/await, all behind an `HTTPTransport`
   protocol so tests can mock:
-  - `GalleryClient` — `GET /api/channels`, `GET /c/:id/state`, `POST /c/:id/verify`,
-    thumb/viewer URLs.
+  - `GalleryClient` — `GET /api/channels`, `GET /api/categories`, `GET /c/:id/state`,
+    `POST /c/:id/verify`, thumb/viewer URLs. Channel and category lists cache to
+    disk per host.
   - `MCPClient` — stateless JSON-RPC `POST /mcp` (`tools/call`) for `createChannel`,
-    `listSavers`, `publishScene`, `setSeed`, `sleep`, `wake`, `overlay`.
+    `remixChannel`, `listSavers`, `publishScene` / `publishSpec`, `setSeed`,
+    `sleep`, `wake`, `recall`, `savePreset`, `overlay`.
 - Channel credentials: metadata (`channelId`, `label`, `createdAt`) as JSON in
   UserDefaults; capability tokens (`isk_…`) in the Keychain, keyed by channelId.
 - Backend base URL defaults to `https://idlescreens.com`; override via the

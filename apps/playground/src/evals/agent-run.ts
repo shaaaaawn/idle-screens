@@ -7,10 +7,10 @@
  * localStorage store and leave as JSONL training data.
  */
 import { hashStyleDna, SCHEMA_PKG_VERSION } from './provenance';
-import { runAgentScreen, type AgentEvent, type ChatTransport } from './agent-loop';
+import { ALL_AGENT_TOOLS, resolveAgentTools, runAgentScreen, type AgentEvent, type ChatTransport } from './agent-loop';
 import type { AgentScreenArtifact } from './agent-artifact';
 import type { EvalId } from './eval-registry';
-import type { ArtistStyleProfile, BenchmarkIntent, EvalScreen } from './types';
+import type { AgentToolName, ArtistStyleProfile, BenchmarkIntent, EvalScreen, SchemaMode } from './types';
 
 export interface AgentRunTarget {
   screen: EvalScreen;
@@ -27,6 +27,12 @@ export interface AgentRun {
   maxToolCalls: number;
   /** Repeats per target. >1 is what makes a published number meaningful. */
   trials: number;
+  /**
+   * Experiment switches (TR1/TR2). Optional so stored runs from before the
+   * switches still load; absent = all four tools + full FORMAT.md.
+   */
+  tools?: AgentToolName[];
+  schemaMode?: SchemaMode;
   operator?: string;
   styleDnaHash: string;
   artifacts: AgentScreenArtifact[];
@@ -52,6 +58,10 @@ export interface RunAgentBatchOptions {
    * one draw says almost nothing. Anything intended for publication wants >= 3.
    */
   trials?: number;
+  /** See `RunAgentScreenOptions.tools` — default all four. */
+  tools?: ReadonlyArray<AgentToolName>;
+  /** See `RunAgentScreenOptions.schemaMode` — default `full`. */
+  schemaMode?: SchemaMode;
   operator?: string;
   targets: AgentRunTarget[];
   profiles: ArtistStyleProfile[];
@@ -70,6 +80,10 @@ export interface RunAgentBatchOptions {
  */
 export async function runAgentBatch(opts: RunAgentBatchOptions): Promise<AgentRun> {
   const trials = Math.max(1, opts.trials ?? 1);
+  // Validate once up front: a bad tool list should fail before the first
+  // screen spends an API call, not inside it.
+  const tools = resolveAgentTools(opts.tools);
+  const schemaMode: SchemaMode = opts.schemaMode ?? 'full';
   const run: AgentRun = {
     runId: opts.runId,
     createdAt: new Date().toISOString(),
@@ -77,6 +91,8 @@ export async function runAgentBatch(opts: RunAgentBatchOptions): Promise<AgentRu
     model: opts.model,
     maxToolCalls: opts.maxToolCalls,
     trials,
+    tools,
+    schemaMode,
     ...(opts.operator ? { operator: opts.operator } : {}),
     styleDnaHash: hashStyleDna(opts.profiles),
     artifacts: [],
@@ -96,6 +112,8 @@ export async function runAgentBatch(opts: RunAgentBatchOptions): Promise<AgentRu
         benchmark: t.benchmark,
         model: opts.model,
         maxToolCalls: opts.maxToolCalls,
+        tools,
+        schemaMode,
         trial,
         chat: opts.chat,
         signal: opts.signal,
@@ -225,6 +243,12 @@ export function trainingJsonl(run: AgentRun): string {
           styleDnaHash: run.styleDnaHash,
           schemaPackage: SCHEMA_PKG_VERSION,
           trials: run.trials,
+          // Which switches were on. Rows from before the switches existed
+          // ran with the defaults, so the fallback here is the truth, not a
+          // guess — which is why this is additive and the record version
+          // does not bump.
+          tools: a.tools ?? run.tools ?? [...ALL_AGENT_TOOLS],
+          schemaMode: a.schemaMode ?? run.schemaMode ?? 'full',
         },
       }),
     )

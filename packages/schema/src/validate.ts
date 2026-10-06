@@ -1,5 +1,7 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
-import { structuralSignature } from './steer';
+import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
+import { canWrapMorph, morphChainRoot } from './sequence';
+import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -9,37 +11,98 @@ const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
 // Known properties at each level — used to detect unknown/misplaced fields
-const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'units', 'referenceViewport', 'background', 'layers', 'ghosting']);
+const KNOWN_TOP = new Set(['schemaVersion', 'id', 'label', 'seed', 'motionIntensity', 'density', 'units', 'referenceViewport', 'background', 'layers', 'ghosting', 'finish', 'timeline', 'groups']);
+const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life',
+  'layout', 'life', 'emit', 'clock', 'rotate', 'opacity', 'transform', 'group',
 ]);
+const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate', 'origin']);
+const KNOWN_GROUP = new Set(['transform', 'opacity']);
+const GROUP_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+const KNOWN_POSITION = new Set(['x', 'y', 'dx', 'dy']);
+const KNOWN_TIMELINE = new Set(['loop', 'duration', 'keys']);
+const KNOWN_TIMELINE_KEY = new Set(['t', 'path', 'value', 'ease', 'dur']);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
-const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'colors', 'colorWeights']);
+const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
+const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'soft', 'colors', 'colorWeights']);
+const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
-const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal']);
+const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
+const TEXT_ROLES = new Set(['read', 'atmosphere']);
+const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
+/**
+ * A CSS length inside a textBlock `font` — size belongs to `fontSize`. No
+ * trailing boundary check: a `\b`-based (or lookahead-based) version misses
+ * "50% monospace" (`%` isn't a word character, so there is no boundary after
+ * it when the next char is whitespace) and "14pxmonospace" (glued straight
+ * onto the family name, so the word boundary between two word characters
+ * passes it through). The leading `\d` immediately before the unit is enough
+ * to identify an embedded size regardless of what follows it.
+ */
+const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
-const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob']);
-const KNOWN_RISE = new Set(['type', 'speed', 'sway']);
+const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
+const KNOWN_RISE = new Set(['type', 'speed', 'sway', 'ease']);
 const KNOWN_BOUNCE = new Set(['type', 'speed']);
 const KNOWN_STATIC = new Set(['type']);
 const KNOWN_ORBIT = new Set(['type', 'speed', 'radius', 'center']);
-const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence']);
+const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence', 'ease']);
 const KNOWN_WARP = new Set(['type', 'speed', 'center']);
 const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
+const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 'bands', 'drift', 'seed']);
+const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
+}
+
+/**
+ * The unit a spec's dimensional values are written in, for error messages.
+ * Mirrors the compiler: anything but an explicit `units: 'px'` is viewport
+ * units (fractions of min(width, height)), so a message must not say "px"
+ * to an author who never opted into px.
+ */
+function dimUnit(spec: unknown): string {
+  return isObj(spec) && spec.units === 'px' ? 'px' : 'fractions of min(width, height)';
+}
+
+/**
+ * Bound and unit for a layer offset (`transform.x`/`y`, `position.dx`/`dy`):
+ * ±2 in min(w, h) units, or px under `units: 'px'` — where the renderer reads
+ * the same numbers as pixels.
+ */
+function offsetBound(spec: unknown): [number, string] {
+  return isObj(spec) && spec.units === 'px'
+    ? [LIMITS.maxLayerTransformOffsetPx, 'px']
+    : [LIMITS.maxLayerTransformOffset, 'min(w, h) units'];
+}
+
+/** "must be a [min,max] range of positive <unit>" — unit-aware (see dimUnit). */
+function rangeMsg(spec: unknown, note?: string): string {
+  return `must be a [min,max] range of positive ${dimUnit(spec)}${note ? ` (${note})` : ''}`;
+}
+
+/**
+ * A scalar-only positive number (ring/streak/stroke `width`, bar `length`,
+ * links `maxDist`, …). A [min,max] range here is the common slip — most size
+ * fields ARE ranges — and reporting "must be > 0" for `[0.003, 0.006]`
+ * (whose values are all > 0) sends the author hunting for the wrong bug.
+ */
+function positiveScalar(v: unknown, path: string, err: (p: string, m: string) => void, msg = 'must be > 0'): void {
+  if (Array.isArray(v)) err(path, 'must be a single number > 0, not a [min,max] range');
+  else if (!isNum(v) || v <= 0) err(path, msg);
 }
 
 /**
@@ -70,6 +133,76 @@ function normalizeColors(spec: unknown): void {
 
 export function validateSpec(spec: unknown): ValidationResult {
   normalizeColors(spec);
+  return validateSpecCore(spec);
+}
+
+/**
+ * Dot-paths (numeric layer indices, as `steerablePaths` spells them) of every
+ * property the validator flags as unknown or misplaced — i.e. fields the
+ * renderer never reads, so steering them does nothing. Pure: unlike
+ * `validateSpec` it never normalises colours into the caller's spec.
+ */
+export function ignoredPropertyPaths(spec: unknown): string[] {
+  if (!isObj(spec)) return [];
+  return (validateSpecCore(spec).warnings ?? [])
+    .filter((w) => w.code === 'unknown-property' || w.code === 'misplaced-property')
+    .map((w) => w.path.replace(/\[(\d+)\]/g, '.$1'));
+}
+
+/**
+ * Validity of only the parts of a spec that `paths` (index-form dot-paths,
+ * as `canonicalSpecPath` spells them) live in: each touched layer, the
+ * background, the finish — plus the cross-layer entity cap. A layer's rules
+ * (the `clock`/`pulse`/`grow` flash floors, `emit`, orbit parents) are all
+ * judged inside that layer, so a change confined to layer N can only break
+ * layer N or the total. Any other top-level path falls back to the full
+ * `validateSpec`. For the timeline's composed-state checks, which run at every
+ * key boundary and on every live steer: the whole-spec check costs a
+ * full validation per sample, this one a layer or two.
+ */
+export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boolean {
+  const layers = new Set<number>();
+  let background = false;
+  let finish = false;
+  let groups = false;
+  for (const p of paths) {
+    // A layer's `key`, `count` or `motion` is what another layer's orbit
+    // parent refers to — a change there can break a layer it doesn't live in.
+    if (/^layers\.\d+(\.(key|count|motion)(\.|$)|$)/.test(p)) return validateSpec(spec).valid;
+    // Replacing `groups` whole can drop a name a member still references.
+    if (p === 'groups') return validateSpec(spec).valid;
+    const [head, idx] = p.split('.');
+    if (head === 'layers' && idx !== undefined && /^\d+$/.test(idx)) layers.add(Number(idx));
+    else if (head === 'background') background = true;
+    else if (head === 'finish') finish = true;
+    else if (head === 'groups') groups = true;
+    else return validateSpec(spec).valid;
+  }
+  let ok = true;
+  const err = (): void => { ok = false; };
+  const warn: WarnFn = () => undefined;
+  if (!Array.isArray(spec.layers)) return false;
+  for (const i of layers) {
+    const layer = spec.layers[i];
+    if (layer === undefined) return false;
+    validateLayer(layer, `layers[${i}]`, err, warn, spec);
+    // The one spec-level rule a layer change can break: textBlock sizes are
+    // viewport fractions, so `units: 'px'` rejects a textBlock layer (see
+    // validateSpecCore).
+    if (spec.units === 'px' && isObj(layer) && isObj(layer.sprite) && layer.sprite.kind === 'textBlock') ok = false;
+  }
+  if (background && spec.background !== undefined) validateBackground(spec.background, err, warn);
+  if (finish && spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  // A group's paint cannot break a member layer's rules — only the group itself.
+  if (groups && spec.groups !== undefined) validateGroups(spec.groups, err, warn, spec);
+  if (layers.size > 0) {
+    const total = spec.layers.reduce((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0);
+    if (total > LIMITS.maxTotal) ok = false;
+  }
+  return ok;
+}
+
+function validateSpecCore(spec: unknown): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -83,6 +216,9 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (spec.seed !== undefined && !isNum(spec.seed)) err('seed', 'must be a number');
   if (spec.motionIntensity !== undefined && !['calm', 'moderate', 'energetic'].includes(spec.motionIntensity as string)) {
     err('motionIntensity', 'must be calm | moderate | energetic');
+  }
+  if (spec.density !== undefined && !['sparse', 'normal', 'dense'].includes(spec.density as string)) {
+    err('density', 'must be sparse | normal | dense');
   }
   if (spec.units !== undefined && spec.units !== 'px' && spec.units !== 'viewport') {
     err('units', "must be 'px' | 'viewport'");
@@ -109,6 +245,8 @@ export function validateSpec(spec: unknown): ValidationResult {
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
+  if (spec.finish !== undefined) validateFinish(spec.finish, 'finish', err, warn);
+  if (spec.groups !== undefined) validateGroups(spec.groups, err, warn, spec);
 
   if (!Array.isArray(spec.layers) || spec.layers.length === 0) {
     err('layers', 'must be a non-empty array');
@@ -122,7 +260,161 @@ export function validateSpec(spec: unknown): ValidationResult {
     if (total > LIMITS.maxTotal) err('layers', `total entities ${total} exceeds cap ${LIMITS.maxTotal}`);
   }
 
+  // Keys are checked against the base spec, so only once the base is valid.
+  if (spec.timeline !== undefined && errors.length === 0) validateTimeline(spec as unknown as SaverSpec, err, warn);
+
   return { valid: errors.length === 0, errors, warnings };
+}
+
+/** A paint `transform` (a layer's, or a group's — `anchorOk: false` forbids `origin: 'anchor'`). */
+function validateTransform(tf: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown, anchorOk: boolean): void {
+  if (!isObj(tf)) return err(path, 'must be an object {x?, y?, scale?, scaleX?, rotate?, origin?}');
+  for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
+  const [off, unit] = offsetBound(spec);
+  const sc = LIMITS.maxLayerTransformScale;
+  for (const axis of ['x', 'y'] as const) {
+    if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.${axis}`, `must be a number within ±${off} (${unit})`);
+  }
+  if (tf.scale !== undefined && (!isNum(tf.scale) || tf.scale < 0 || tf.scale > sc)) err(`${path}.scale`, `must be a number 0..${sc}`);
+  if (tf.scaleX !== undefined && (!isNum(tf.scaleX) || Math.abs(tf.scaleX) > sc)) err(`${path}.scaleX`, `must be a number within ±${sc} (negative mirrors)`);
+  if (tf.rotate !== undefined && (!isNum(tf.rotate) || Math.abs(tf.rotate) > LIMITS.maxLayerTransformRotate)) {
+    err(`${path}.rotate`, `must be a number of degrees within ±${LIMITS.maxLayerTransformRotate}`);
+  }
+  if (tf.origin !== undefined) {
+    if (tf.origin !== 'viewport' && tf.origin !== 'anchor') err(`${path}.origin`, "must be 'viewport' | 'anchor'");
+    else if (tf.origin === 'anchor' && !anchorOk) err(`${path}.origin`, "a group transform always turns about the viewport centre — 'anchor' is for a layer's own transform");
+  }
+}
+
+/** `groups`: named paint sets — see `LayerGroup`. */
+function validateGroups(groups: unknown, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown): void {
+  if (!isObj(groups)) return err('groups', 'must be an object of named groups {name: {transform?, opacity?}}');
+  const names = Object.keys(groups);
+  if (names.length > LIMITS.maxGroups) err('groups', `at most ${LIMITS.maxGroups} groups`);
+  for (const name of names) {
+    const p = `groups.${name}`;
+    if (!GROUP_NAME.test(name)) err(p, 'group names are 1–32 letters, digits, - or _, starting with a letter');
+    const g = groups[name];
+    if (!isObj(g)) { err(p, 'must be an object {transform?, opacity?}'); continue; }
+    for (const k of unknownKeys(g, KNOWN_GROUP)) warn(`${p}.${k}`, 'unknown-property', `unknown group property '${k}' — will be ignored`);
+    if (g.opacity !== undefined && (!isNum(g.opacity) || g.opacity < 0 || g.opacity > 1)) err(`${p}.opacity`, 'must be a number 0..1');
+    if (g.transform !== undefined) validateTransform(g.transform, `${p}.transform`, err, warn, spec, false);
+  }
+}
+
+/**
+ * `timeline`: each key's path must already exist on the spec (as for
+ * `setParam`) and the spec must still validate with the key's value applied.
+ * Distinct key times on one path sit at least `minTimelineKeyInterval` apart
+ * (across the wrap too, under `loop`) — the flash-safety floor that replaces a
+ * sequence's 1 s segment minimum for change inside a scene.
+ */
+function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn): void {
+  let failed = false;
+  const err = (p: string, m: string): void => { failed = true; errOuter(p, m); };
+  const tl = spec.timeline as unknown;
+  if (!isObj(tl)) return err('timeline', 'must be an object {loop?, duration?, keys}');
+  for (const k of unknownKeys(tl, KNOWN_TIMELINE)) warn(`timeline.${k}`, 'unknown-property', `unknown timeline property '${k}' — will be ignored`);
+  if (tl.loop !== undefined && typeof tl.loop !== 'boolean') err('timeline.loop', 'must be a boolean');
+  if (tl.duration !== undefined && (!isNum(tl.duration) || tl.duration <= 0 || tl.duration > LIMITS.maxTimelineDuration)) {
+    err('timeline.duration', `must be a number of ms, 0 < duration <= ${LIMITS.maxTimelineDuration}`);
+  }
+  if (tl.loop === true && tl.duration === undefined) err('timeline.duration', 'loop: true needs a duration (the lap length in ms)');
+  if (!Array.isArray(tl.keys) || tl.keys.length === 0) return err('timeline.keys', 'must be a non-empty array');
+  if (tl.keys.length > LIMITS.maxTimelineKeys) return err('timeline.keys', `at most ${LIMITS.maxTimelineKeys} keys`);
+
+  const base = withoutTimeline(spec);
+  const baseSig = structuralSignature(base);
+  const times = new Map<string, number[]>();
+  let latest = 0;
+  tl.keys.forEach((key, i) => {
+    const p = `timeline.keys[${i}]`;
+    if (!isObj(key)) return err(p, 'must be an object {t, path, value, ease?, dur?}');
+    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', `unknown key property '${k}' — will be ignored`);
+    let ok = true;
+    if (!isNum(key.t) || key.t < 0) { err(`${p}.t`, 'must be a number of ms >= 0'); ok = false; }
+    if (key.ease !== undefined && key.ease !== 'step' && key.ease !== 'linear' && key.ease !== 'smooth') err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth'");
+    if (key.dur !== undefined && (!isNum(key.dur) || key.dur < 0 || key.dur > LIMITS.maxTimelineKeyDur)) {
+      err(`${p}.dur`, `must be a number of ms, 0..${LIMITS.maxTimelineKeyDur}`);
+    }
+    if (!('value' in key)) { err(`${p}.value`, 'is required'); ok = false; }
+    const cp = isStr(key.path) ? canonicalSpecPath(base, key.path) : null;
+    if (!isStr(key.path) || key.path.trim() === '') { err(`${p}.path`, 'must be a non-empty dot-path'); ok = false; }
+    else if (/\.group$/.test(key.path) || /\.transform\.origin$/.test(key.path)) {
+      err(`${p}.path`, `'${key.path}' is an enum that can only step — group membership and a transform's origin are fixed per scene`);
+      ok = false;
+    }
+    else if (!cp) { err(`${p}.path`, `'${key.path}' does not resolve on the spec — a key can only animate a field the spec already has`); ok = false; }
+    else if (cp === 'timeline' || cp.startsWith('timeline.') || cp === 'schemaVersion' || cp === 'id' || cp === 'label' || cp === 'seed') {
+      err(`${p}.path`, `'${key.path}' is not animatable`);
+      ok = false;
+    }
+    if (!ok || !cp) return;
+    const t = key.t as number;
+    latest = Math.max(latest, t);
+    const applied = applyDeltasToSpec(base, [{ t: 0, path: cp, value: key.value }]);
+    // The base is valid, so only the part the key changes can break; the full
+    // validation runs just to name the failure.
+    const r = validateSpecPaths(applied, [cp]) ? { valid: true, errors: [] as SpecError[] } : validateSpec(applied);
+    if (!r.valid) {
+      for (const e of r.errors) err(`${p}.value`, `applied at '${key.path}' → ${e.path || '<root>'}: ${e.message}`);
+      return;
+    }
+    // `origin` is an enum: a whole-`transform` key that changes it switches
+    // the pivot on the key's first frame — a jump, not a glide.
+    if (isObj(key.value) && cp.endsWith('transform')) {
+      const before = readSpecPath(base, cp);
+      const o0 = isObj(before) ? before.origin ?? 'viewport' : 'viewport';
+      const o1 = (key.value as Record<string, unknown>).origin ?? 'viewport';
+      if (o0 !== o1) warn(`${p}.value`, 'timeline-origin-steps', `this key changes the transform's origin (${String(o0)} → ${String(o1)}): the pivot switches on the key's first frame, so the layer jumps — keep one origin per layer`);
+    }
+    if (structuralSignature(applied) !== baseSig) {
+      warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
+    }
+    const list = times.get(cp) ?? [];
+    list.push(t);
+    times.set(cp, list);
+    const dur = isNum(key.dur) ? key.dur : DEFAULT_KEY_DUR;
+    if (tl.loop === true && isNum(tl.duration) && t + dur > tl.duration) {
+      warn(`${p}.dur`, 'timeline-glide-overruns-lap', `this key's glide ends at ${t + dur} ms, after the ${tl.duration} ms lap — the wrap cuts it short`);
+    }
+  });
+  if (tl.loop === true && isNum(tl.duration) && latest >= tl.duration) {
+    err('timeline.duration', `must be greater than the latest key's t (${latest} ms) under loop`);
+  }
+  const minGap = LIMITS.minTimelineKeyInterval;
+  for (const [path, list] of times) {
+    const distinct = [...new Set(list)].sort((a, b) => a - b);
+    for (let i = 1; i < distinct.length; i++) {
+      if (distinct[i]! - distinct[i - 1]! < minGap) {
+        err('timeline.keys', `keys on '${path}' at ${distinct[i - 1]} and ${distinct[i]} ms are closer than ${minGap} ms (flash safety)`);
+      }
+    }
+    if (tl.loop === true && isNum(tl.duration) && distinct.length > 1) {
+      const wrapGap = tl.duration - distinct[distinct.length - 1]! + distinct[0]!;
+      if (wrapGap < minGap) err('timeline.keys', `keys on '${path}' at ${distinct[distinct.length - 1]} ms and ${distinct[0]} ms (next lap) are closer than ${minGap} ms across the loop wrap (flash safety)`);
+    }
+  }
+  // Each key was checked applied alone; keys that are each valid can still
+  // combine into an invalid scene (a `clock.rate` and a `pulse.period` share
+  // one flash-safety floor). Check the composed scene where it can change:
+  // every key's start, end and glide quarter-points.
+  if (failed) return;
+  // Every key boundary, plus up to 120 in-glide points: this runs at every
+  // mount, so the glide sampling is budgeted — the settled states are not.
+  const keyed = [...timelineTracks(spec).keys()];
+  const seen = new Set<string>();
+  for (const t of timelineSampleTimes(spec, true, 120)) {
+    const r = resolveTimelineAt(spec, t);
+    // Only the keyed values change between samples: skip a state already judged.
+    const state = JSON.stringify(keyed.map((p) => readSpecPath(r, p)));
+    if (seen.has(state)) continue;
+    seen.add(state);
+    if (validateSpecPaths(r, keyed)) continue;
+    const e = validateSpec(r).errors[0];
+    err('timeline', `at t = ${Math.round(t)} ms the keys combine into an invalid scene — ${e ? `${e.path || '<root>'}: ${e.message}` : 'invalid'}`);
+    return;
+  }
 }
 
 function color(v: unknown, path: string, err: (p: string, m: string) => void): void {
@@ -130,6 +422,24 @@ function color(v: unknown, path: string, err: (p: string, m: string) => void): v
 }
 
 type WarnFn = (path: string, code: string, message: string) => void;
+
+/**
+ * A `finish` block (spec- or sequence-level). `grain` / `dither` are bounded
+ * to 0..1: at 1 they composite at their fixed maximum alphas (35 % / 25 %),
+ * which is as strong as a zero-mean screen can be before it reads as the
+ * subject; both stay mean-luminance-neutral at every value, so nothing here
+ * is a flash bound — the finish cannot flash at any setting.
+ */
+function validateFinish(f: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isObj(f)) return err(path, 'must be an object');
+  for (const k of ['grain', 'dither'] as const) {
+    if (f[k] !== undefined && (!isNum(f[k]) || (f[k] as number) < 0 || (f[k] as number) > 1)) err(`${path}.${k}`, 'must be a number 0..1');
+  }
+  if (f.animate !== undefined && typeof f.animate !== 'boolean') err(`${path}.animate`, 'must be a boolean');
+  for (const k of unknownKeys(f, KNOWN_FINISH)) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown finish property '${k}' — will be ignored`);
+  }
+}
 
 function validateBackground(bg: unknown, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(bg)) return err('background', 'must be an object');
@@ -162,14 +472,67 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       if (!isObj(bg.band)) err('background.band', 'must be an object');
       else {
         color(bg.band.color, 'background.band.color', err);
-        if (!isNum(bg.band.height) || bg.band.height <= 0) err('background.band.height', 'must be > 0');
+        positiveScalar(bg.band.height, 'background.band.height', err);
       }
     }
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
       warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
     }
+  } else if (bg.type === 'field') {
+    validateFieldBackground(bg, err, warn);
   } else {
-    err('background.type', 'must be solid | gradient');
+    err('background.type', 'must be solid | gradient | field');
+  }
+}
+
+/**
+ * A `field` background. Every bound here is a rendering or safety limit:
+ * `scale` is capped so a raster cell never spans more than a feature (the
+ * upscaled raster would alias), `octaves` so a 96×54 raster stays cheap to
+ * recompute ten times a second, and `drift.period` is floored at
+ * LIMITS.minDriftPeriod — the same 10 s guard the gradient's drift carries —
+ * because the drift is the ONLY way a field changes over time: with the
+ * domain travelling a bounded circle once per period, no point of the field
+ * can change faster than that, so a field can never strobe.
+ */
+function validateFieldBackground(bg: Record<string, unknown>, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isNum(bg.scale) || bg.scale < LIMITS.minFieldScale || bg.scale > LIMITS.maxFieldScale) {
+    err('background.scale', `must be a number ${LIMITS.minFieldScale}..${LIMITS.maxFieldScale} (features across the short side)`);
+  }
+  if (bg.octaves !== undefined && (!isNum(bg.octaves) || !Number.isInteger(bg.octaves) || bg.octaves < 1 || bg.octaves > LIMITS.maxFieldOctaves)) {
+    err('background.octaves', `must be an integer 1..${LIMITS.maxFieldOctaves}`);
+  }
+  if (bg.warp !== undefined && (!isNum(bg.warp) || bg.warp < 0 || bg.warp > 1)) {
+    err('background.warp', 'must be a number 0..1');
+  }
+  if (bg.quantize !== undefined && (!isNum(bg.quantize) || !Number.isInteger(bg.quantize) || bg.quantize < 0 || bg.quantize === 1 || bg.quantize > LIMITS.maxFieldQuantize)) {
+    err('background.quantize', `must be 0 (smooth) or an integer 2..${LIMITS.maxFieldQuantize}`);
+  }
+  if (!Array.isArray(bg.bands) || bg.bands.length < LIMITS.minFieldBands || bg.bands.length > LIMITS.maxFieldBands) {
+    err('background.bands', `must be ${LIMITS.minFieldBands}..${LIMITS.maxFieldBands} hex colours`);
+  } else {
+    // Indexed, not forEach: forEach skips holes in a sparse array, which
+    // would let a hole through validation and crash the renderer later on
+    // an undefined colour.
+    for (let i = 0; i < bg.bands.length; i++) color(bg.bands[i], `background.bands[${i}]`, err);
+  }
+  if (bg.drift !== undefined) {
+    if (!isObj(bg.drift)) err('background.drift', 'must be an object');
+    else {
+      if (!isNum(bg.drift.period) || bg.drift.period < LIMITS.minDriftPeriod) {
+        err('background.drift.period', `must be >= ${LIMITS.minDriftPeriod} ms`);
+      }
+      if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount < 0 || bg.drift.amount > LIMITS.maxFieldDriftAmount)) {
+        err('background.drift.amount', `must be a number 0..${LIMITS.maxFieldDriftAmount}`);
+      }
+      for (const k of unknownKeys(bg.drift, KNOWN_FIELD_DRIFT)) {
+        warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (bg.seed !== undefined && !isNum(bg.seed)) err('background.seed', 'must be a number');
+  for (const k of unknownKeys(bg, KNOWN_BG_FIELD)) {
+    warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
   }
 }
 
@@ -191,7 +554,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     err(`${path}.count`, `at most ${LIMITS.maxPerLayer} per layer`);
   }
   if (layer.size !== undefined && (!isRange(layer.size) || layer.size[0] <= 0)) {
-    err(`${path}.size`, 'must be a [min,max] range of positive px');
+    err(`${path}.size`, rangeMsg(spec));
   }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
@@ -205,13 +568,33 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.key !== undefined && (!isStr(layer.key) || layer.key.trim() === '')) {
     err(`${path}.key`, 'must be a non-empty string');
   }
+  if (layer.opacity !== undefined && (!isNum(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) {
+    err(`${path}.opacity`, 'must be a number 0..1');
+  }
+  if (layer.transform !== undefined) validateTransform(layer.transform, `${path}.transform`, err, warn, spec, true);
+  if (layer.group !== undefined) {
+    const groups = isObj(spec) && isObj(spec.groups) ? spec.groups : undefined;
+    if (!isStr(layer.group)) err(`${path}.group`, 'must be the name of a `groups` entry');
+    else if (!groups || !Object.prototype.hasOwnProperty.call(groups, layer.group) || !isObj(groups[layer.group])) err(`${path}.group`, `'${layer.group}' is not in \`groups\` — declare it there first`);
+  }
   if (layer.position !== undefined) {
     if (!isObj(layer.position) || !isNum(layer.position.x) || !isNum(layer.position.y)) {
       err(`${path}.position`, 'must be {x, y} with numbers 0..1');
     } else {
       if (layer.position.x < 0 || layer.position.x > 1) err(`${path}.position.x`, 'must be 0..1');
       if (layer.position.y < 0 || layer.position.y > 1) err(`${path}.position.y`, 'must be 0..1');
-      if (isNum(layer.count) && layer.count !== 1) err(`${path}.position`, 'position requires count: 1');
+      const [off, unit] = offsetBound(spec);
+      for (const axis of ['dx', 'dy'] as const) {
+        const v = layer.position[axis];
+        if (v !== undefined && (!isNum(v) || Math.abs(v) > off)) {
+          err(`${path}.position.${axis}`, `must be a number within ±${off} (${unit})`);
+        }
+      }
+      for (const k of unknownKeys(layer.position, KNOWN_POSITION)) warn(`${path}.position.${k}`, 'unknown-property', `unknown position property '${k}' — will be ignored`);
+      const dataLayout = isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table');
+      if (isNum(layer.count) && layer.count !== 1 && !dataLayout) {
+        err(`${path}.position`, "position requires count: 1 — or a layout of type 'list' / 'table', where it anchors the whole block");
+      }
     }
   }
   if (layer.region !== undefined) {
@@ -258,6 +641,17 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       err(`${path}.spin`, `must be within ±${LIMITS.maxSpin} deg/sec`);
     }
   }
+  if (layer.rotate !== undefined) {
+    if (isRange(layer.rotate)) {
+      if (Math.abs(layer.rotate[0]) > LIMITS.maxRotate || Math.abs(layer.rotate[1]) > LIMITS.maxRotate) {
+        err(`${path}.rotate`, `each end of the range must be within ±${LIMITS.maxRotate} degrees`);
+      }
+    } else if (!isNum(layer.rotate)) {
+      err(`${path}.rotate`, 'must be a number or a [min,max] range (degrees)');
+    } else if (Math.abs(layer.rotate) > LIMITS.maxRotate) {
+      err(`${path}.rotate`, `must be within ±${LIMITS.maxRotate} degrees`);
+    }
+  }
   if (layer.grow !== undefined) {
     if (!isObj(layer.grow)) err(`${path}.grow`, 'must be an object');
     else {
@@ -276,16 +670,12 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (!isNum(layer.links.k) || !Number.isInteger(layer.links.k) || layer.links.k < 1 || layer.links.k > LIMITS.maxLinksK) {
         err(`${path}.links.k`, `must be an integer 1..${LIMITS.maxLinksK}`);
       }
-      if (!isNum(layer.links.maxDist) || layer.links.maxDist <= 0) {
-        err(`${path}.links.maxDist`, 'must be > 0');
-      }
+      positiveScalar(layer.links.maxDist, `${path}.links.maxDist`, err);
       if (layer.links.color !== undefined) color(layer.links.color, `${path}.links.color`, err);
       if (layer.links.alpha !== undefined && (!isNum(layer.links.alpha) || layer.links.alpha < 0 || layer.links.alpha > 1)) {
         err(`${path}.links.alpha`, 'must be 0..1');
       }
-      if (layer.links.width !== undefined && (!isNum(layer.links.width) || layer.links.width <= 0)) {
-        err(`${path}.links.width`, 'must be > 0');
-      }
+      if (layer.links.width !== undefined) positiveScalar(layer.links.width, `${path}.links.width`, err);
       if (layer.links.mode !== undefined && !['nearest', 'chain', 'random'].includes(layer.links.mode as string)) {
         err(`${path}.links.mode`, "must be 'nearest' | 'chain' | 'random'");
       }
@@ -302,8 +692,40 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   }
 
   if (layer.layout !== undefined) {
-    if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
-      err(`${path}.layout`, "must be an object with type: 'grid'");
+    if (isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table')) {
+      const lay = layer.layout;
+      if (lay.type === 'table' && (!isNum(lay.columns) || !Number.isInteger(lay.columns) || lay.columns < 1 || lay.columns > LIMITS.maxGridColumns)) {
+        err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
+      }
+      const gapOk = (v: unknown): boolean => isNum(v) && v > 0;
+      if (lay.gap !== undefined) {
+        if (isNum(lay.gap)) {
+          if (!gapOk(lay.gap)) err(`${path}.layout.gap`, 'must be > 0 (viewport units of min(w,h), or px)');
+        } else if (lay.type === 'table' && isObj(lay.gap)) {
+          if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
+          if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
+          for (const k of unknownKeys(lay.gap, new Set(['x', 'y']))) {
+            warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored`);
+          }
+        } else {
+          err(`${path}.layout.gap`, lay.type === 'table' ? 'must be a number > 0 or { x?, y? }' : 'must be a number > 0');
+        }
+      }
+      for (const k of unknownKeys(lay, new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']))) {
+        warn(`${path}.layout.${k}`, 'unknown-property', `unknown layout property '${k}' — will be ignored`);
+      }
+      // A data layout reads variants in order: N labels want N strings.
+      const sp = layer.sprite;
+      if (isObj(sp) && isNum(layer.count)) {
+        const variants = sp.kind === 'text' && Array.isArray(sp.strings) ? sp.strings.length
+          : sp.kind === 'emoji' && Array.isArray(sp.glyphs) ? sp.glyphs.length
+            : sp.kind === 'bar' && Array.isArray(sp.values) ? sp.values.length : null;
+        if (variants !== null && variants !== layer.count) {
+          warn(`${path}.count`, 'list-length-mismatch', `count is ${layer.count} but the sprite carries ${variants} ${sp.kind === 'bar' ? 'values' : 'variants'} — a ${lay.type} layout reads them in order, so they cycle or go unused`);
+        }
+      }
+    } else if (!isObj(layer.layout) || layer.layout.type !== 'grid') {
+      err(`${path}.layout`, "must be an object with type: 'grid' | 'list' | 'table'");
     } else {
       if (layer.layout.columns !== undefined && (!isNum(layer.layout.columns) || !Number.isInteger(layer.layout.columns) || layer.layout.columns < 1 || layer.layout.columns > LIMITS.maxGridColumns)) {
         err(`${path}.layout.columns`, `must be an integer 1..${LIMITS.maxGridColumns}`);
@@ -356,11 +778,73 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     }
   }
 
-  validateSprite(layer.sprite, `${path}.sprite`, err, warn);
+  if (layer.emit !== undefined) {
+    if (!isObj(layer.emit)) err(`${path}.emit`, 'must be an object { every, life, jitter?, grow? }');
+    else {
+      const em = layer.emit;
+      if (!isNum(em.every) || em.every < LIMITS.minEmitEvery || em.every > LIMITS.maxEmitEvery) {
+        err(`${path}.emit.every`, `must be ${LIMITS.minEmitEvery}..${LIMITS.maxEmitEvery} ms (at most one event per second per entity)`);
+      }
+      if (!isNum(em.life) || em.life < LIMITS.minEmitLife) {
+        err(`${path}.emit.life`, `must be >= ${LIMITS.minEmitLife} ms (an event is a smooth envelope, never a cut)`);
+      } else if (isNum(em.every) && em.life > em.every) {
+        err(`${path}.emit.life`, 'must be <= emit.every (the visible window cannot outlast its period)');
+      }
+      if (em.jitter !== undefined && (!isNum(em.jitter) || em.jitter < 0 || em.jitter > 1)) {
+        err(`${path}.emit.jitter`, 'must be 0..1 (0 = evenly staggered, 1 = scattered by a fixed sequence)');
+      }
+      if (em.grow !== undefined) {
+        if (!Array.isArray(em.grow) || em.grow.length !== 2 || !isNum(em.grow[0]) || !isNum(em.grow[1])) {
+          err(`${path}.emit.grow`, 'must be [from, to] size multipliers');
+        } else if (em.grow[0] < 0 || em.grow[1] < 0 || em.grow[0] > LIMITS.maxEmitGrow || em.grow[1] > LIMITS.maxEmitGrow) {
+          err(`${path}.emit.grow`, `each multiplier must be 0..${LIMITS.maxEmitGrow}`);
+        }
+      }
+      // jitter 0 promises one event at a time; that only holds while a window
+      // is shorter than the stagger between entities.
+      if (em.jitter === 0 && isNum(em.every) && isNum(em.life) && isNum(layer.count) && layer.count > 1 && em.life > em.every / layer.count) {
+        warn(`${path}.emit.life`, 'emit-overlap', `jitter 0 staggers ${layer.count} entities ${(em.every / layer.count).toFixed(0)} ms apart but each stays lit ${em.life} ms — windows overlap, so more than one event is visible at a time. Shorten life or lengthen every`);
+      }
+      for (const k of unknownKeys(em, new Set(['every', 'life', 'jitter', 'grow']))) {
+        warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored`);
+      }
+    }
+  }
+  if (layer.clock !== undefined) {
+    if (!isObj(layer.clock)) err(`${path}.clock`, 'must be an object { phase?, rate? }');
+    else {
+      const ck = layer.clock;
+      if (ck.phase !== undefined && (!isNum(ck.phase) || ck.phase < 0 || ck.phase > 1)) {
+        err(`${path}.clock.phase`, 'must be 0..1 (turns)');
+      }
+      const rate = ck.rate === undefined ? 1 : ck.rate;
+      if (!isNum(rate) || rate < LIMITS.minClockRate || rate > LIMITS.maxClockRate) {
+        err(`${path}.clock.rate`, `must be ${LIMITS.minClockRate}..${LIMITS.maxClockRate}`);
+      } else {
+        // A clocked layer pulses in unison — every entity at once — so the
+        // per-entity-phase defence is gone and the period floor doubles.
+        const floor = LIMITS.minClockedPeriod * rate;
+        if (isObj(layer.pulse) && isNum(layer.pulse.period) && layer.pulse.period < floor) {
+          err(`${path}.pulse.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod} — the whole layer breathes in unison)`);
+        }
+        if (isObj(layer.grow) && isNum(layer.grow.period) && layer.grow.period < floor) {
+          err(`${path}.grow.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+        const sp = layer.sprite;
+        if (isObj(sp) && isObj(sp.cycle) && isNum(sp.cycle.period) && sp.cycle.period < floor) {
+          err(`${path}.sprite.cycle.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+      }
+      for (const k of unknownKeys(ck, new Set(['phase', 'rate']))) {
+        warn(`${path}.clock.${k}`, 'unknown-property', `unknown clock property '${k}' — will be ignored`);
+      }
+    }
+  }
+  validateSprite(layer.sprite, `${path}.sprite`, err, warn, spec);
   validateMotion(layer.motion, `${path}.motion`, err, warn, spec);
 }
 
-function validateSprite(sprite: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+function validateSprite(sprite: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec?: unknown): void {
   if (!isObj(sprite)) return err(path, 'must be an object');
 
   let knownSet: Set<string>;
@@ -376,40 +860,81 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.strings`, 'must be a non-empty array of strings');
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.font !== undefined && !isStr(sprite.font)) {
+      err(`${path}.font`, 'must be a string');
+    }
     if (sprite.align !== undefined && !['left', 'center', 'right'].includes(sprite.align as string)) {
       err(`${path}.align`, 'must be left | center | right');
     }
     if (sprite.baseline !== undefined && !['top', 'middle', 'bottom'].includes(sprite.baseline as string)) {
       err(`${path}.baseline`, 'must be top | middle | bottom');
     }
-    if (sprite.maxWidth !== undefined && (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0)) {
-      err(`${path}.maxWidth`, 'must be a positive number');
-    }
+    if (sprite.maxWidth !== undefined) positiveScalar(sprite.maxWidth, `${path}.maxWidth`, err, 'must be a positive number');
+    validateTextRole(sprite, path, err);
     validateCycle(sprite, path, err);
   } else if (sprite.kind === 'circle') {
     knownSet = KNOWN_CIRCLE;
-    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'ring') {
     knownSet = KNOWN_RING;
-    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
-    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'streak') {
     knownSet = KNOWN_STREAK;
-    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, rangeMsg(spec));
     color(sprite.color, `${path}.color`, err);
-    if (sprite.width !== undefined && (!isNum(sprite.width) || sprite.width <= 0)) err(`${path}.width`, 'must be > 0');
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'rect') {
     knownSet = KNOWN_RECT;
-    if (!isRange(sprite.width) || sprite.width[0] <= 0) err(`${path}.width`, 'must be a [min,max] range of positive px');
+    if (!isRange(sprite.width) || sprite.width[0] <= 0) err(`${path}.width`, rangeMsg(spec));
     if (sprite.aspect !== undefined && (!isRange(sprite.aspect) || sprite.aspect[0] <= 0)) {
       err(`${path}.aspect`, 'must be a [min,max] range of positive height/width ratios');
     }
+    if (sprite.feather !== undefined && (!isNum(sprite.feather) || sprite.feather < 0 || sprite.feather > 1)) {
+      err(`${path}.feather`, 'must be 0..1 (fraction of the half-size that fades out)');
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'bar') {
+    knownSet = KNOWN_BAR;
+    if (!Array.isArray(sprite.values) || sprite.values.length === 0 || sprite.values.length > LIMITS.maxPerLayer || !sprite.values.every((v) => isNum(v) && v >= 0)) {
+      err(`${path}.values`, `must be 1..${LIMITS.maxPerLayer} numbers >= 0`);
+    }
+    positiveScalar(sprite.length, `${path}.length`, err, 'must be > 0 (full-scale bar length)');
+    positiveScalar(sprite.thickness, `${path}.thickness`, err);
+    if (sprite.max !== undefined) positiveScalar(sprite.max, `${path}.max`, err);
+    if (sprite.direction !== undefined && !['right', 'left', 'up', 'down'].includes(sprite.direction as string)) {
+      err(`${path}.direction`, "must be 'right' | 'left' | 'up' | 'down'");
+    }
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'polygon') {
+    knownSet = KNOWN_POLYGON;
+    if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec, 'circumradius'));
+    if (sprite.sides !== undefined && sprite.points !== undefined) {
+      err(`${path}.sides`, 'use sides (a regular polygon) or points (a custom one), not both');
+    }
+    if (sprite.sides !== undefined && (!isNum(sprite.sides) || !Number.isInteger(sprite.sides) || sprite.sides < LIMITS.minPolygonSides || sprite.sides > LIMITS.maxPolygonSides)) {
+      err(`${path}.sides`, `must be an integer ${LIMITS.minPolygonSides}..${LIMITS.maxPolygonSides}`);
+    }
+    if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
+    if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
+    color(sprite.color, `${path}.color`, err);
+    validatePalette(sprite, path, err);
+  } else if (sprite.kind === 'stroke') {
+    knownSet = KNOWN_STROKE;
+    if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, rangeMsg(spec, "the mark's bounding size"));
+    validateShapePoints(sprite.points, `${path}.points`, 2, err);
+    if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
+    if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
+    if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
+    if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -419,10 +944,14 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     } else if (sprite.text.length > LIMITS.maxTextBlockLength) {
       err(`${path}.text`, `must be at most ${LIMITS.maxTextBlockLength} characters`);
     }
-    if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
+    if (Array.isArray(sprite.maxWidth)) {
+      err(`${path}.maxWidth`, 'must be a single number (viewport fraction), not a [min,max] range');
+    } else if (!isNum(sprite.maxWidth) || sprite.maxWidth <= 0 || sprite.maxWidth > LIMITS.maxTextBlockMaxWidth) {
       err(`${path}.maxWidth`, `must be a positive number up to ${LIMITS.maxTextBlockMaxWidth} (viewport fraction)`);
     }
-    if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
+    if (Array.isArray(sprite.fontSize)) {
+      err(`${path}.fontSize`, 'must be a single number (viewport fraction), not a [min,max] range');
+    } else if (!isNum(sprite.fontSize) || sprite.fontSize < LIMITS.minTextBlockFontSize || sprite.fontSize > LIMITS.maxTextBlockFontSize) {
       err(`${path}.fontSize`, `must be between ${LIMITS.minTextBlockFontSize} and ${LIMITS.maxTextBlockFontSize} (viewport fraction)`);
     }
     if (sprite.lineHeight !== undefined && (!isNum(sprite.lineHeight) || sprite.lineHeight < 0.5 || sprite.lineHeight > 4)) {
@@ -432,6 +961,20 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.align`, "must be 'left' | 'center' | 'right'");
     }
     if (sprite.color !== undefined) color(sprite.color, `${path}.color`, err);
+    if (sprite.anchor !== undefined && !TEXT_BLOCK_ANCHORS.has(sprite.anchor as string)) {
+      err(`${path}.anchor`, "must be 'top-left' | 'top' | 'top-right' | 'left' | 'center' | 'right' | 'bottom-left' | 'bottom' | 'bottom-right'");
+    }
+    if (sprite.font !== undefined) {
+      if (!isStr(sprite.font) || sprite.font.trim() === '') {
+        err(`${path}.font`, 'must be a non-empty string (family and/or weight)');
+      } else if (FONT_SIZE_RE.test(sprite.font)) {
+        err(`${path}.font`, 'must name a family and/or weight only — fontSize owns the size');
+      }
+    }
+    if (sprite.opacity !== undefined && (!isNum(sprite.opacity) || sprite.opacity < 0 || sprite.opacity > 1)) {
+      err(`${path}.opacity`, 'must be a number between 0 and 1');
+    }
+    validateTextRole(sprite, path, err);
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
@@ -469,7 +1012,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       }
     }
   } else {
-    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | textBlock');
+    err(`${path}.kind`, 'must be emoji | text | circle | ring | streak | rect | bar | polygon | stroke | textBlock');
     return;
   }
 
@@ -502,6 +1045,13 @@ function validatePalette(sprite: Record<string, unknown>, path: string, err: (p:
   }
 }
 
+/** `role` on `text` / `textBlock`: a declaration of intent, one of two words. */
+function validateTextRole(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (sprite.role !== undefined && !TEXT_ROLES.has(sprite.role as string)) {
+    err(`${path}.role`, "must be 'read' | 'atmosphere'");
+  }
+}
+
 function validateCycle(sprite: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
   if (sprite.cycle === undefined) return;
   if (!isObj(sprite.cycle)) return err(`${path}.cycle`, 'must be an object');
@@ -528,6 +1078,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     if (motion.bidirectional !== undefined && typeof motion.bidirectional !== 'boolean') err(`${path}.bidirectional`, 'must be a boolean');
     if (motion.bob !== undefined && !isNum(motion.bob)) err(`${path}.bob`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 10–200 px/sec`);
     }
@@ -535,6 +1086,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     knownSet = KNOWN_RISE;
     speedOk(motion.speed, `${path}.speed`);
     if (motion.sway !== undefined && !isNum(motion.sway)) err(`${path}.sway`, 'must be a number');
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 5–80 px/sec`);
     }
@@ -555,7 +1107,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
         warn(`${path}.speed`, 'near-zero-speed', `orbit speed is near zero — entities will appear frozen. Typical range: 5–60 deg/sec`);
       }
     }
-    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, 'must be a [min,max] range of positive px');
+    if (!isRange(motion.radius) || motion.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
     if (motion.center !== undefined) {
       if (!isObj(motion.center)) {
         err(`${path}.center`, 'must be {x, y} (0..1) or { layer: key }');
@@ -586,6 +1138,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     }
   } else if (motion.type === 'wander') {
     knownSet = KNOWN_WANDER;
+    validateEase(motion.ease, `${path}.ease`, err, warn);
     speedOk(motion.speed, `${path}.speed`);
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     const meanderCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
@@ -639,6 +1192,31 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   }
 }
 
+/** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
+function validateShapePoints(points: unknown, path: string, min: number, err: (p: string, m: string) => void): void {
+  if (!Array.isArray(points) || points.length < min || points.length > LIMITS.maxShapePoints) {
+    return err(path, `must be ${min}..${LIMITS.maxShapePoints} [x, y] pairs in unit coordinates (-1..1)`);
+  }
+  for (let i = 0; i < points.length; i++) {
+    const pt: unknown = points[i]; // by index, so a sparse array's holes are rejected too
+    if (!Array.isArray(pt) || pt.length !== 2 || !isNum(pt[0]) || !isNum(pt[1]) || Math.abs(pt[0]) > 1 || Math.abs(pt[1]) > 1) {
+      err(`${path}[${i}]`, 'must be an [x, y] pair with each coordinate in -1..1');
+    }
+  }
+}
+
+function validateEase(ease: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (ease === undefined) return;
+  if (!isObj(ease)) return err(path, "must be an object { type: 'settle' | 'buoyant', tau }");
+  if (ease.type !== 'settle' && ease.type !== 'buoyant') err(`${path}.type`, "must be 'settle' | 'buoyant'");
+  if (!isNum(ease.tau) || ease.tau < LIMITS.minEaseTau || ease.tau > LIMITS.maxEaseTau) {
+    err(`${path}.tau`, `must be ${LIMITS.minEaseTau}..${LIMITS.maxEaseTau} ms`);
+  }
+  for (const k of unknownKeys(ease, new Set(['type', 'tau']))) {
+    warn(`${path}.${k}`, 'unknown-property', `unknown ease property '${k}' — will be ignored`);
+  }
+}
+
 /** Narrowing helper: validate + cast. Throws with a joined message when invalid. */
 export function assertValidSpec(spec: unknown): SaverSpec {
   const r = validateSpec(spec);
@@ -662,6 +1240,7 @@ export function validateSequence(seq: unknown): ValidationResult {
       }
     }
   }
+  if (isObj(seq) && isObj(seq.bed)) normalizeColors(seq.bed);
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -674,6 +1253,9 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (!isStr(seq.label) || seq.label.trim() === '') err('label', 'must be a non-empty string');
   if (seq.seed !== undefined && !isNum(seq.seed)) err('seed', 'must be a number');
   if (typeof seq.loop !== 'boolean') err('loop', 'must be a boolean');
+  if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
+  if (seq.wrapMorph !== undefined && typeof seq.wrapMorph !== 'boolean') err('wrapMorph', 'must be a boolean');
+  if (seq.finish !== undefined) validateFinish(seq.finish, 'finish', err, (p, code, message) => void warnings.push({ path: p, code, message }));
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');
@@ -721,12 +1303,19 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
-      } else if (s.transition.type === 'morph') {
+      } else if (s.transition.type === 'morph' || s.transition.type === 'fade') {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut' or 'morph'");
+        err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
+      }
+      if (isObj(s.transition) && s.transition.text !== undefined) {
+        if (s.transition.type !== 'morph') {
+          err(`${p}.transition.text`, 'is a morph option (fade already cross-fades whole frames; cut has no window)');
+        } else if (s.transition.text !== 'step' && s.transition.text !== 'crossfade' && s.transition.text !== 'dip') {
+          err(`${p}.transition.text`, "must be 'step' | 'crossfade' | 'dip'");
+        }
       }
     }
 
@@ -745,6 +1334,38 @@ export function validateSequence(seq: unknown): ValidationResult {
     err('loop', 'loop: true requires all segments to have a duration');
   }
 
+  // The bed: a full SaverSpec, live alongside whichever segment is up.
+  if (seq.bed !== undefined) {
+    if (!isObj(seq.bed)) {
+      err('bed', 'must be a SaverSpec object');
+    } else {
+      const bedResult = validateSpec(seq.bed);
+      for (const e of bedResult.errors) errors.push({ path: `bed.${e.path}`, message: e.message });
+      for (const w of bedResult.warnings ?? []) warnings.push({ path: `bed.${w.path}`, code: w.code, message: w.message });
+      if (bedResult.valid) {
+        const entityTotal = (spec: unknown): number =>
+          isObj(spec) && Array.isArray(spec.layers)
+            ? spec.layers.reduce<number>((n, l) => n + (isObj(l) && isNum(l.count) ? l.count : 0), 0)
+            : 0;
+        const bedTotal = entityTotal(seq.bed);
+        const largest = seq.segments.reduce<number>((m, s) => Math.max(m, isObj(s) ? entityTotal(s.scene) : 0), 0);
+        if (bedTotal + largest > LIMITS.maxTotal) {
+          err('bed', `bed entities ${bedTotal} + largest segment ${largest} = ${bedTotal + largest} exceeds cap ${LIMITS.maxTotal} (the two are live at once)`);
+        }
+        // The bed owns the ground: a segment background is never painted over it.
+        seq.segments.forEach((s, i) => {
+          if (isObj(s) && isObj(s.scene) && s.scene.background !== undefined) {
+            warnings.push({
+              path: `segments[${i}].scene.background`,
+              code: 'bed-hides-segment-background',
+              message: `segment ${i} declares a background but the sequence has a bed — segments render transparently over the bed, so this background is never painted`,
+            });
+          }
+        });
+      }
+    }
+  }
+
   // Warn when morph is requested but signatures differ (will fall back to cut)
   if (errors.length === 0 && Array.isArray(seq.segments)) {
     for (let i = 0; i < seq.segments.length; i++) {
@@ -760,7 +1381,34 @@ export function validateSequence(seq: unknown): ValidationResult {
           code: 'morph-structural-mismatch',
           message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
         });
+      } else if (s.scene.timeline === undefined && (next as Record<string, unknown> & { scene: Record<string, unknown> }).scene.timeline === undefined
+        && morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec, { textCrossfade: s.transition.text === 'crossfade' || s.transition.text === 'dip' })) {
+        // Structural twins whose only differences are values lerpSpec steps
+        // (strings — textBlock.text above all). The morph runs, but every
+        // frame of it shows segment i+1: it reads as a cut. A warning, never
+        // an error, so every stored sequence stays valid.
+        warnings.push({
+          path: `segments[${i}].transition`,
+          code: 'morph-nothing-morphable',
+          message: `segments ${i}→${i + 1} differ only in values morph cannot interpolate (strings such as textBlock.text step on the first frame): the morph will look like a cut — fade text via colour or reveal.progress`,
+        });
       }
+    }
+  }
+
+  // `wrapMorph`: say why the wrap will still be a cut, when it will.
+  if (errors.length === 0 && seq.wrapMorph === true) {
+    const sq = seq as unknown as IdleSequence;
+    const last = sq.segments.length - 1;
+    const lastTr = sq.segments[last]?.transition;
+    let why: string | null = null;
+    if (sq.loop !== true) why = 'the sequence does not loop';
+    else if (last < 1) why = 'there is only one segment';
+    else if (lastTr?.type !== 'morph') why = 'the last segment declares no morph transition';
+    else if (structuralSignature(sq.segments[last]!.scene) !== structuralSignature(sq.segments[0]!.scene)) why = `segment ${last} and segment 0 differ structurally`;
+    else if (morphChainRoot(sq, last) !== 0) why = `the lap is not one morph chain (segment ${morphChainRoot(sq, last)} starts a new chain), so the wrap would jump seeds`;
+    if (why || !canWrapMorph(sq)) {
+      warnings.push({ path: 'wrapMorph', code: 'wrap-morph-inactive', message: `wrapMorph has no effect: ${why ?? 'the wrap cannot morph'} — the wrap stays a cut` });
     }
   }
 

@@ -221,8 +221,130 @@ final class CompiledSpriteScene: SKScene {
             node.anchorPoint = CGPoint(x: 0, y: 1)
             return node
 
+        case .polygon(_, _, _, let sides, let points, let soft):
+            let r = entity.size * dim
+            guard r > 0.25 else { return nil }
+            let node = SKSpriteNode(texture: polygonTexture(
+                color: entity.color, sides: sides, points: points, soft: soft))
+            node.size = CGSize(width: r * 2, height: r * 2)
+            return node
+
+        case .stroke(_, let points, _, _, let width, let smooth, let taper, let orient):
+            let length = entity.size * dim
+            guard length > 0.5 else { return nil }
+            // The mark is baked into a square texture spanning its own unit
+            // box, so one texture serves every entity of the layer.
+            let node = SKSpriteNode(texture: strokeTexture(
+                color: entity.color, points: points, smooth: smooth, taper: taper,
+                widthRatio: min(1, max(0.004, ((width ?? defaultWidth) * dim) / length))))
+            node.size = CGSize(width: length, height: length)
+            if orient, entity.vx != 0 || entity.vy != 0 {
+                node.zRotation = atan2(-entity.vy, entity.vx)
+            }
+            return node
+
+        case .bar(let values, _, _, _, _, let maxValue, let direction):
+            let len = entity.size * dim
+                * NativeSceneView.barFraction(values: values, max: maxValue, index: entity.barIndex)
+            guard len > 0.25 else { return nil }
+            let thick = entity.thickness > 0 ? entity.thickness * dim : entity.size * dim * 0.2
+            let horizontal = direction != "up" && direction != "down"
+            let node = SKSpriteNode(color: UIColor(hexString: entity.color), size:
+                CGSize(width: horizontal ? len : thick, height: horizontal ? thick : len))
+            // Bars grow FROM their position, so the anchor sits at the root.
+            switch direction {
+            case "left":  node.anchorPoint = CGPoint(x: 1, y: 0.5)
+            case "up":    node.anchorPoint = CGPoint(x: 0.5, y: 0)   // SpriteKit y is up
+            case "down":  node.anchorPoint = CGPoint(x: 0.5, y: 1)
+            default:      node.anchorPoint = CGPoint(x: 0, y: 0.5)
+            }
+            return node
+
         case .unknown:
             return nil
+        }
+    }
+
+    /// A polygon facet baked once per (colour, shape) — the fill is constant,
+    /// only the node's size and rotation vary per entity.
+    private func polygonTexture(color: String, sides: Int?, points: [[Double]]?,
+                                soft: Bool) -> SKTexture {
+        let shape = points?.map { $0.map { String(format: "%.3f", $0) }.joined(separator: ",") }
+            .joined(separator: ";") ?? "n\(sides ?? 6)"
+        return texture(key: "p|\(color)|\(shape)|\(soft)") {
+            let d: CGFloat = 128
+            return UIGraphicsImageRenderer(size: CGSize(width: d, height: d)).image { ctx in
+                let cg = ctx.cgContext
+                let ui = UIColor(hexString: color)
+                let verts = NativeSceneView.polygonPoints(sides: sides, points: points,
+                                                          radius: Double(d / 2))
+                guard verts.count >= 3 else { return }
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: verts[0].x + d / 2, y: verts[0].y + d / 2))
+                for v in verts.dropFirst() {
+                    path.addLine(to: CGPoint(x: v.x + d / 2, y: v.y + d / 2))
+                }
+                path.close()
+                if soft {
+                    cg.saveGState()
+                    cg.addPath(path.cgPath)
+                    cg.clip()
+                    let colors = [ui.cgColor, ui.withAlphaComponent(0.75).cgColor,
+                                  ui.withAlphaComponent(0).cgColor] as CFArray
+                    if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                          colors: colors, locations: [0, 0.35, 1]) {
+                        cg.drawRadialGradient(g, startCenter: CGPoint(x: d / 2, y: d / 2),
+                                              startRadius: 0,
+                                              endCenter: CGPoint(x: d / 2, y: d / 2),
+                                              endRadius: d / 2, options: [])
+                    }
+                    cg.restoreGState()
+                } else {
+                    ui.setFill()
+                    path.fill()
+                }
+            }
+        }
+    }
+
+    /// A brush mark baked once per (colour, path, width) into its unit box.
+    private func strokeTexture(color: String, points: [[Double]], smooth: Bool,
+                               taper: Bool, widthRatio: CGFloat) -> SKTexture {
+        let shape = points.map { $0.map { String(format: "%.3f", $0) }.joined(separator: ",") }
+            .joined(separator: ";")
+        let q = (widthRatio * 64).rounded() / 64
+        return texture(key: "s|\(color)|\(shape)|\(smooth)|\(taper)|\(q)") {
+            let d: CGFloat = 128
+            return UIGraphicsImageRenderer(size: CGSize(width: d, height: d)).image { ctx in
+                let cg = ctx.cgContext
+                cg.setStrokeColor(UIColor(hexString: color).cgColor)
+                cg.setLineCap(.round)
+                cg.setLineJoin(.round)
+                let samples = NativeSceneView.strokeSamples(points: points,
+                                                            halfSize: Double(d / 2),
+                                                            smooth: smooth)
+                guard samples.count >= 2 else { return }
+                let lw = max(0.5, q * d)
+                func p(_ i: Int) -> CGPoint {
+                    CGPoint(x: samples[i].x + d / 2, y: samples[i].y + d / 2)
+                }
+                if taper {
+                    for i in 1..<samples.count {
+                        let u = (Double(i) - 0.5) / Double(samples.count - 1)
+                        cg.setLineWidth(max(0.5, lw * NativeSceneView.strokeTaper(u)))
+                        cg.beginPath()
+                        cg.move(to: p(i - 1))
+                        cg.addLine(to: p(i))
+                        cg.strokePath()
+                    }
+                } else {
+                    cg.setLineWidth(lw)
+                    cg.beginPath()
+                    cg.move(to: p(0))
+                    for i in 1..<samples.count { cg.addLine(to: p(i)) }
+                    cg.strokePath()
+                }
+            }
         }
     }
 
@@ -340,11 +462,17 @@ final class CompiledSpriteScene: SKScene {
         for (node, entity, li) in driven {
             let layer = layersData[li]
             let dim = layer.units == .px ? 1 : min(size.width, size.height)
+            let parentEntity = layer.orbitParentKey.flatMap { key in
+                layersData.first { $0.key == key }?.entities.first
+            }
             let p = SceneMotion.position(of: entity, at: t, in: size,
-                                         dim: dim, wrap: layer.wrap)
+                                         dim: dim, wrap: layer.wrap, parent: parentEntity)
             // Compile space is top-left y-down; SpriteKit is bottom-left y-up.
             node.position = CGPoint(x: p.x, y: size.height - p.y)
+            // The layer's own lifecycle envelope multiplies every entity's
+            // alpha, so a layer enters and leaves as one thing.
             node.alpha = SceneMotion.pulsedAlpha(of: entity, layer: layer, at: t)
+                * (layer.life?.alpha(at: t * 1000) ?? 1)
             let grow = SceneMotion.growScale(of: entity, at: t)
             if grow != 1 { node.setScale(grow) }
             let deg = SceneMotion.rotationDegrees(of: entity, at: t)

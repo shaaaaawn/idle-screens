@@ -27,10 +27,9 @@ cp target/release/idle-screens-wayland "$root/"
 cp -r webroot "$root/web"
 cp -r packaging "$root/"
 cp ../../LICENSE "$root/LICENSE" 2>/dev/null || true
-cp scripts/install.sh "$root/"
 # install.sh sources distro.sh from beside itself in the extracted bundle.
-cp scripts/distro.sh "$root/"
-chmod +x "$root/install.sh" "$root/distro.sh" \
+cp scripts/install.sh scripts/uninstall.sh scripts/distro.sh "$root/"
+chmod +x "$root/install.sh" "$root/uninstall.sh" "$root/distro.sh" \
   "$root/packaging/omarchy/"*.sh "$root/packaging/swayidle/"*.sh 2>/dev/null || true
 
 tar -czf "$out" -C "$staging" "$bundle"

@@ -16,9 +16,18 @@ export type EvalId =
   | 'style-authoring-holdout-v1'
   | 'preset-recipe-v1';
 
+/**
+ * The medium/format family a suite belongs to. Suites of one kind share a
+ * deliverable shape and a scorer vocabulary; a page groups by it. The mono's
+ * greenroom/evals/registry.json declares the same kinds for the suites that
+ * live there (lighting, pattern, typography, programme, behaviour, data).
+ */
+export type EvalKind = 'style' | 'comprehension' | 'contract' | 'lighting' | 'pattern' | 'typography' | 'programme' | 'behaviour' | 'data';
+
 export interface EvalDefinition {
   id: EvalId;
   title: string;
+  kind: EvalKind;
   /** One sentence a non-expert can read. */
   measures: string;
   harness: EvalHarness;
@@ -60,6 +69,7 @@ export interface EvalDefinition {
 export const EVALS: readonly EvalDefinition[] = [
   {
     id: 'style-authoring-v1',
+    kind: 'style',
     title: 'Artistic style authoring',
     measures:
       'Given a style profile and a composition brief, can a model author a valid SaverSpec that reads as that style?',
@@ -83,6 +93,7 @@ export const EVALS: readonly EvalDefinition[] = [
   },
   {
     id: 'style-authoring-holdout-v1',
+    kind: 'style',
     title: 'House style authoring (held out)',
     measures:
       'The same task on original house styles no model can have priors for — so only DNA-following can score well.',
@@ -107,6 +118,7 @@ export const EVALS: readonly EvalDefinition[] = [
   },
   {
     id: 'mcp-comprehension-v1',
+    kind: 'comprehension',
     title: 'MCP scene comprehension',
     measures:
       'Can a non-vision agent understand and steer a scene through the MCP perception surface?',
@@ -122,6 +134,7 @@ export const EVALS: readonly EvalDefinition[] = [
   },
   {
     id: 'preset-recipe-v1',
+    kind: 'contract',
     title: 'Preset recipes for steerable savers',
     measures:
       'Given only a saver’s paramSpace, can a model author a wardrobe of named presets that are valid, diverse, and use the space?',

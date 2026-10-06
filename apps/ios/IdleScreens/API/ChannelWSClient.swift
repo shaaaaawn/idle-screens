@@ -166,7 +166,7 @@ actor ChannelWSClient {
                         // Actor state is only ever touched through an isolated
                         // method; this closure itself is @Sendable and cannot
                         // assign to `self.session` directly.
-                        await adopt(session: session)
+                        adopt(session: session)
                         backoff = 1
                         for try await text in session.incoming {
                             if let event = Self.parse(text) {
@@ -184,7 +184,7 @@ actor ChannelWSClient {
                 }
                 continuation.finish()
             }
-            Task { await self.adopt(task: task) }
+            Task { self.adopt(task: task) }
             // `onTermination` is a property, not a method — a trailing closure
             // here does not compile.
             continuation.onTermination = { _ in

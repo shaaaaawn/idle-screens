@@ -1,5 +1,339 @@
 # @idle-screens/schema
 
+## 3.11.1
+
+### Patch Changes
+
+- 9ad212f: `luminanceGrid` (and so `perceiveScene`, `previewScene`) now weights `rect` and `bar` sprites by the area of each grid cell they cover, as the canvas `fillRect` does. A thin rect used to paint its whole grid row at full alpha: 270 scan lines at alpha 0.35 over mid grey read mean 0.035 where the canvas paints 0.41, which crushed contrast, vignette and coverage for any scene with scan lines, rules or hairline bars. Rect edges that fall mid-cell are now fractional too, so perception of rect-built scenes moves slightly closer to the canvas.
+  
+  `adviseSequence` no longer raises `boundary-luminance-jump` at a boundary whose outgoing segment declares a `fade` transition, the remedy FORMAT.md names. The advisory message now names that remedy.
+
+## 3.11.0
+
+### Minor Changes
+
+- eaf84f7: Layer groups, `transform.origin`, and advisories that honour paint opacity. All three are opt-in, and a spec without them renders exactly as before.
+  
+  - `groups: {name: {transform?, opacity?}}` on a SaverSpec, joined by a layer's `group`. A member paints through its group: the group's transform, about the viewport centre, wraps the layer's own, and the group's opacity multiplies the layer's. It's paint, so `setParam("groups.moon.opacity", …)`, a timeline key or a morph moves a multi-layer subject as one thing.
+  - `transform.origin: 'anchor'` scales and rotates a layer about its own `position` point instead of the viewport centre, so a word punches in place on every aspect.
+  - `adviseSpec` skips layers whose paint opacity is 0 across the whole scene (checked at every timeline key boundary). Their entities no longer count toward `dense-scene`, and coverage is weighed by paint opacity.
+  - `steerablePaths` no longer advertises `timeline.*`, which `setParam` can't reach, or the `group`/`origin` enums. It does list `groups.*`.
+  
+  Native clients ignore groups and origin (identity).
+
+## 3.10.0
+
+### Minor Changes
+
+- 9f38cfd: Perception now sees polygons by their real outline. `luminanceGrid` (and everything built on it — `perceiveScene`, coverage, centroid, the row/column profiles, `diffScenes`, `perceiveSequenceFrame`) used to splat every `polygon` as the disc of its circumradius, weighted by its fill ratio. A large, non-round `points` polygon was materially wrong: a full-width flat band read as a circle, and a ridge silhouette along the bottom edge read as a dome covering ~85% of the frame.
+  
+  A polygon spanning three or more grid cells is now scanline-rasterized by its outline, the same path the renderer fills: rotated by `rotate`/`spin`, filled with the canvas `nonzero` rule, each cell weighted by the fraction it covers. `soft` is the renderer's centred radial gradient clipped to that outline, and a soft `lighter`/`screen` polygon's halo spreads past the outline by a band sized from the glyph's thickness (2·area/perimeter) instead of its circumradius, so a glowing band doesn't re-inflate into a dome. Polygons smaller than three cells keep the cheap disc splat.
+  
+  `adviseSpec`'s alpha-weighted coverage and `describeScene`'s layer coverage now count a polygon by its outline area instead of its bounding square, so a thin band no longer trips `density-mismatch` under `density: 'sparse'`.
+  
+  Expect coverage and mean luminance to drop for scenes with large non-round polygons. That is the fix. Small polygons and regular `sides` glyphs under the threshold are unchanged.
+- 9f38cfd: Timed scenes: one spec for ambient loops and keyframed pieces. Every field is opt-in, and a spec without them renders exactly as before. The existing baselines are unchanged. More than 1,200 stored scenes, on disk and in prod, rendered identical frames before and after. The only exceptions are the first frames after a cut over a `bed`, which the fix below corrects.
+  
+  - `timeline` on a SaverSpec holds authored keys on the scene's own clock: `{loop?, duration?, keys: [{t, path, value, ease?, dur?}]}`. A key glides a steering path over `dur`. Under `loop` the lap is one closed cycle. Distinct key times on one path must be at least 200 ms apart. `resolveTimelineAt(spec, t)` returns the plain spec at `t`, and perception resolves it at its sample time.
+  - The steering rule needs no mode flag. A live steer on a path no key touches is sticky, as today. A steer on an animated path holds until that path's next key, then glides back to the timeline.
+  - Layer `opacity` and `transform {x, y, scale, scaleX, rotate}` are paint, outside the structural signature. They glide under `setParam`, a key or a morph instead of re-seeding the layer.
+  - `position.dx` / `dy` offset a placement in `min(w, h)` units, so a compound form registers on every aspect.
+  - `wrapMorph: true` on a looping sequence honours a last-segment morph at the wrap when the lap is one morph chain.
+  - `text: 'dip'` on a morph fades the outgoing words out, then the incoming words in, so the two never overlap.
+  
+  Fixes found in QA:
+  - A cut over a sequence `bed` no longer flashes a black frame. This bug predates the branch: a segment mounting on the shared surface resized it, which wiped the bed. Only the first frame after a cut changes, and only in sequences with a bed.
+  - Under `units: 'px'`, `transform` x/y and `position.dx`/`dy` are bounded in px, not ±2.
+  - Keys are validated together, not just one at a time. The validator resolves the composed scene at every key's start, end and glide points, so two keys that are each valid can't combine past a flash-safety floor. A live steer is validated the same way, now and at every key still ahead. The new `validateSpecPaths(spec, paths)` export keeps these checks cheap: it validates only the parts of a spec those paths live in.
+  - Steers stay correct across sequence morphs, hot swaps and re-sent tracks. A steer the timeline has taken back stays taken back.
+  
+  Native clients ignore every new field. tvOS shows a timeline's base spec, identity transforms, opacity 1 and a cut or dissolve at the wrap.
+
+## 3.9.1
+
+### Patch Changes
+
+- 58c0414: Validator and steering papercuts found by cold-start agents:
+  
+  - Size-range errors are unit-aware. `radius`, `length`, rect `width`, layer `size` and orbit `radius` now say "must be a [min,max] range of positive fractions of min(width, height)" under the default viewport units, and "positive px" only when the spec declares `units: "px"`.
+  - A [min,max] range on a scalar-only field (ring/streak/stroke `width`, bar `length`/`thickness`/`max`, text `maxWidth`, textBlock `maxWidth`/`fontSize`, links `maxDist`/`width`, gradient `band.height`) now reports "must be a single number > 0, not a [min,max] range" instead of the misleading "must be > 0".
+  - `steerablePaths` no longer advertises properties the validator flags as unknown or misplaced (e.g. `background.angle` on a gradient, `blend` inside a sprite), since the renderer ignores them. The new `ignoredPropertyPaths(spec)` export returns those paths without mutating the spec.
+
+## 3.9.0
+
+### Minor Changes
+
+- afbb530: Examples go comprehensive: five specs and the first bundled sequence.
+  
+  Every feature that had **no example** now has one:
+  
+  - **`signal-board`** — `layout: { type: 'table' }`: nine bars and nine labels
+    as two layers instead of eighteen positioned blocks. `values` are paint, so
+    one `setParam` glides the whole readout.
+  - **`phase-duet`** — `clock`: three layers (a `pulse.wave` dot field, swelling
+    rings, a breathing heart) sharing one clock so they stay in step instead of
+    drifting on seeded phases.
+  - **`web-work`** — `links.mode: 'random'` + `links.falloff`: a web that crosses
+    itself with edges that fade toward the cutoff, plus `stroke.orient` marks
+    that turn along their heading.
+  - **`shard-fall`** — `rotate` (static per-entity tilt, which `spin: [0, 0]`
+    cannot express) over `blend: 'multiply'` shadows on a pale plate.
+  - **`murmur`** — `density: 'dense'` doing real work: 620 entities, past the
+    500-entity line where `adviseSpec` raises `dense-scene`, so the declaration
+    is the thing withholding it.
+  - **`three-movements`** — the first sequence example anywhere: a `bed` that
+    survives every boundary, a `morph` with `text: 'crossfade'` between
+    structural twins, a `fade` between unlike segments, and a sequence-level
+    `finish`.
+  
+  New exports `EXAMPLE_SEQUENCES` and `SequenceExample`. A sequence is a
+  different top-level format, so it gets its own catalog rather than widening
+  `SCHEMA_EXAMPLES`'s `SaverSpec[]` contract — existing consumers are untouched.
+  
+  Tests pin the properties the examples teach rather than the prose: every
+  example validates with zero warnings and zero (non-informational) advisories,
+  the `three-movements` morph pair is structurally identical so the morph is
+  real, and `murmur` stays above the threshold its declaration describes.
+  
+  `three-movements` carries one **deliberate** informational advisory —
+  `fade-degrades-on-low-tier` — because a fade is the honest transition between
+  segments with nothing structurally in common, and the lowest capability tier
+  degrading it to a cut is a fact the piece accepts.
+
+### Patch Changes
+
+- 451308c: Two worked examples for features that had none, plus one units clarification.
+  
+  - **`sparse-night`** — the `density: 'sparse'` declaration in use: a star-grain
+    field under the advisory's coverage threshold, one chain-linked figure, one
+    satellite that flares every eighteen seconds. Shows the declaration
+    withholding `sparse-scene` while opting into `density-mismatch` honesty.
+  - **`typed-cue`** — `textBlock.reveal` in both moods: a typewriter block with a
+    caret (`speed` makes it self-type on the scene clock) and a `glyphFade` block
+    that arrives as a wave of overlapping alphas. Both declare `opacity` so the
+    path is steerable. The one non-text layer (a soft scan band) keeps the scene
+    off the `text-heavy` advisory.
+  - **FORMAT.md** — `perceiveScene`'s `t` is milliseconds (the MCP `previewScene`
+    tool's `t` is seconds and converts). Passing seconds to the library makes a
+    self-typing block read as one that never finishes, which wasted a debugging
+    pass on the `typed-cue` example.
+  
+  Determinism baselines for both new examples are pinned in the snapshot suite.
+
+## 3.8.0
+
+### Minor Changes
+
+- 8a989d4: Four additive schema features, all opt-in — a spec that omits them renders exactly as before.
+  
+  **Field background.** A seeded value-noise sampler as a background type, rendered
+  once into a cached low-res raster and stretched, so a full-frame texture costs a
+  blit per frame rather than per-pixel work. Perceivable and steerable like any
+  other background; `inkOverBed` advises against the bed's own seed.
+  
+  **Finish.** A grain-and-dither screen over the finished scene — the print-finish
+  pass. It presents on its own canvas so it never feeds ghosting's persistence
+  buffer, and its paths are steerable, so the grain is paint rather than a fixed
+  post-effect. Its grain seed resolves the same way the scene's does, which is what
+  keeps `renderFrame(t, seed)` frame-addressable with a finish attached.
+  
+  **`rotate`.** Static per-entity rotation. `spin: [0, 0]` zeroes the angular
+  velocity but does not hold the seeded angle, so there was no way to ask for
+  "tilted, not spinning" — `rotate` is that.
+  
+  **`SequenceInstance.hotSwapSequence`.** Publish a new sequence into a running
+  instance without remounting: the swap happens in place and the retained control
+  track survives it. Structural edits are refused rather than silently accepted,
+  since those genuinely need a remount.
+  
+  Also ships the `thermal-field` example — six riso bands, warped and drifting,
+  wearing the grain-and-dither finish — as the worked demonstration of both new
+  background and finish paths.
+  
+  **metaquarium (patch).** `LogicalClock` now tracks paused state explicitly. A
+  sample taken before the first `resume()`, or while paused, advanced the clock
+  because `origin === null` cannot distinguish "just resumed" from "still paused" —
+  both leave it null. Frozen until resumed now.
+
+## 3.7.0
+
+### Minor Changes
+
+- 02b8f60: Presentation stack: sequence bed, fade between unlike segments, `sync`
+  mount/epoch, textBlock anchor/font/opacity, `role: 'read'` advisories,
+  morph `text: 'crossfade'`, and the phase-0 pins (`morph-nothing-morphable`).
+
+## 3.6.1
+
+### Patch Changes
+
+- acd6078: FORMAT.md: a measured scale section. `radius`, text/emoji size, `speed` and
+  `links.maxDist` each get a ladder of landmarks at 1920×1080 — px figures,
+  `perceiveScene` coverage, and how long a given speed takes to cross the frame —
+  plus four named recipes (parallax depth, glow stacking, graph web, focal pin).
+  Scale intuition was the biggest blind spot for agents authoring against this
+  format; every number is measured rather than estimated. Docs only, no
+  behaviour change.
+
+## 3.6.0
+
+### Minor Changes
+
+- cb1c4fd: Data layout — the dashboard genre stops needing one layer per number
+  (idle-mono registry #49):
+  
+  - **`layout: { type: 'list', gap? }`** and **`{ type: 'table', columns, gap? }`**
+    place a layer's entities in reading order — one column, or `columns`
+    row-major — `gap` apart (viewport units of `min(w,h)`, default 0.06), from
+    `position` as the block's top-left anchor (now allowed with any `count`
+    under these layouts) or centred in `region`. Text and emoji sprites take
+    `strings[i]` / `glyphs[i]` in order instead of a seeded pick, and palette
+    `colors[i]` likewise, so N labels are one layer. The layouts burn the two
+    scatter draws, so toggling one on or off leaves the rest of the layer's
+    stream intact.
+  - **`bar`** sprite — `{ values, length, thickness, color, max?, direction? }`.
+    Entity i draws `length × values[i] / max` toward `direction` (`right`
+    default, `left`, `up`, `down`). `values` are paint, read at draw time, so
+    `setParam("bars.values", [...])` glides every bar; `max` defaults to the
+    largest value. Perception measures each bar at its current value.
+  - New advisory warning `list-length-mismatch` when a data layout's `count`
+    disagrees with the number of strings / glyphs / values it will read.
+  
+  New shipped example `relay-board`: a six-row status chart in five layers —
+  labels, bars, readouts, a title and a dust field — where the benchmark
+  dashboards averaged twenty-five hand-positioned `count: 1` blocks. Existing
+  entity streams are byte-identical.
+- 01a6e80: `density: 'sparse' | 'normal' | 'dense'` — a declared density intent on the spec, the way `motionIntensity` declares tempo. `sparse` says the emptiness is the point: `adviseSpec` withholds `sparse-scene`, and coverage-gated scorers can read the declaration before scoring a faithful one-mark scene as broken (the holdout house style built on restraint sat at the suite floor for exactly this reason). `dense` withholds `dense-scene`. The declaration is checked against measured coverage and a new `density-mismatch` advisory fires when the scene contradicts it. Additive: specs without `density` render and advise exactly as before.
+- 3142a7d: Layer cohesion — the perception channel that answers "does this read as one form, or as a pile of sprites?"
+  
+  Every other channel measures ink, not edges. A layer whose circles merged into a silhouette and one whose circles stayed legible as circles have the same coverage, the same luminance, the same dominance share and the same braille map, so an agent drawing a *shape* out of sprites could not tell success from failure without publishing and looking at real pixels.
+  
+  `layerCohesion(spec, opts)` (also `perceiveScene().form`) reports two independent facts per layer:
+  
+  - **`overlap`** — geometry. The mean fraction of an entity's outline buried inside a same-layer sibling, traced with 24 outline samples against every sibling. `null` for kinds where a merged silhouette is not a meaningful idea (ring, streak, stroke, bar, emoji, text, textBlock) and for single-entity layers.
+  - **`seamless` / `seamCause`** — paint. Whether those overlaps vanish or draw a visible internal edge, and which field is responsible: `soft`, `rect.feather`, any `blend`, `alpha` below 1, `pulse`, or a multi-colour palette. Opacity is judged over the whole timeline, not the sampled instant, so a pulsing layer is correctly called out.
+  
+  `reads` combines them into `mass`, `seamed` or `marks`.
+  
+  A new `overlap-seams` advisory fires on the trap: a layer packed tightly enough to have been drawn as one shape, whose paint settings defeat it. It is gated to stay off deliberate washes — at least 6 entities, mean base alpha at or above 0.45, and never under `blend: lighter` / `screen`. **No shipped example trips it**, and a test pins that.
+  
+  Calibration is measured, not guessed: across all 42 fillable layers in `src/examples/`, particle fields top out at 0.154 while a packed silhouette measures 0.79 to 0.85, with nothing in between. `aurora`'s wander curtains are the one shipped layer in the upper band, at 0.892, correctly reported as `seamed` and correctly left un-warned.
+  
+  FORMAT.md also gains the positive rule this exposes: overlapping sprites merge only at one flat colour, alpha 1, no blend, no pulse and hard edges, with depth coming from layer order instead of alpha.
+- 25cf7d8: Shape glyphs — the path-based sprite family nine of the fifteen style
+  profiles asked for (idle-mono registry #46):
+  
+  - **`polygon`** — `{ radius, color, sides? | points?, soft? }`. A regular
+    n-gon (3..12 sides, default 6, point up) of the seeded circumradius, or any
+    facet from 3..24 unit-coordinate `points` scaled by the radius. `soft`
+    feathers the fill from the centre. Rotates with `spin`; `points` are paint,
+    so two polygons with the same point count `morph`.
+  - **`stroke`** — `{ length, points, color, width?, curve?, taper?, orient? }`.
+    A freehand mark: a Catmull-Rom spline (or polyline) through 2..24
+    unit-coordinate points, scaled so the unit box spans the seeded `length`,
+    stroked with round joins; `taper` thins it to almost nothing at both ends
+    (a brush stroke, not a line); `orient` turns it along the heading like
+    `streak`.
+  - **`rect.feather`** (0..1) — a soft-edged rectangle: that fraction of the
+    half-size fades out toward the border, drawn as nested fills whose
+    composited alpha ramps linearly (exact under source-over, summed under
+    additive blends).
+  
+  Both new kinds take `colors[]` / `colorWeights` like every shaped sprite,
+  and every geometric fact lives in one module (`shapes.ts`) shared by the
+  renderer and the perception model: polygons splat as their disc weighted by
+  fill ratio, strokes stamp along their sampled path, feathered rects weigh
+  their soft band at half. New shipped example `facets`. Existing entity
+  streams are byte-identical (no new draws for existing kinds).
+- 423b40f: Time structure — three additive, closed-form primitives the style evals kept
+  asking for (idle-mono registry #47):
+  
+  - `layer.emit: { every, life, jitter?, grow? }` — **sparse events**. Each
+    entity is dark except for a `life`-ms window every `every` ms at a
+    per-entity offset (`jitter` 0 staggers entities evenly, one event at a
+    time; 1, the default, seeds the offsets). Inside a window the entity fades
+    in over the first quarter and out over the rest, and `grow: [from, to]`
+    scales its size across the window — expansion rather than travel, the "one
+    ping" primitive a house style could not author before. Flash safety:
+    `every` ≥ 1000 ms, `life` ≥ 500 ms, smooth envelope always.
+  - `layer.clock: { phase?, rate? }` — **phase-lock**. Replaces the seeded
+    per-entity phases of `pulse`, `grow` and `cycle` with one shared phase
+    (turns) and a time multiplier, so two layers can breathe in step or at a
+    fixed offset. Because a clocked layer moves in unison, its periods must
+    satisfy `period / rate ≥ 1000 ms`. A `pulse.wave` keeps its position-derived
+    phase on top of the clock's.
+  - `motion.ease: { type: 'settle' | 'buoyant', tau }` on `drift`, `rise` and
+    `wander` — closed-form velocity easing: `settle` decelerates from speed to
+    rest (travelling `speed × tau`), `buoyant` accelerates from rest. With
+    `emit`, the eased travel restarts on every event.
+  
+  All three are pure functions of `t`; `perceiveScene`, `adviseSpec` (whose
+  coverage now weighs an emit layer by its duty cycle) and `motionStats` see
+  them through the same `alphaAt` / `sizeAt` / `positionAt` the renderer uses.
+  Entity streams of existing specs are unchanged, and so are those of a spec
+  you add these to: `emit` offsets come from a fixed low-discrepancy sequence
+  (not the seeded stream), and `clock` and `ease` draw nothing, so declaring
+  any of the three disturbs no other layer. New exports `emitWindow` /
+  `emitEnvelope`; new shipped example `pings`. A validator warning
+  `emit-overlap` fires when `jitter: 0` cannot keep one event at a time.
+
+## 3.5.0
+
+### Minor Changes
+
+- ec9c568: The sequence clicker. `advance: 'input'` now does what FORMAT.md always said:
+  a timed segment holds at the end of its `duration` until a `sequence.segment`
+  steer releases it, and the held scene keeps animating rather than freezing.
+  `auto` and `either` advance on the timer as before.
+  
+  The `sequence.segment` steer is now sticky. `applyTrack` used to switch the
+  active segment and lose it on the next animation frame, because `renderFrame`
+  re-derived the segment from the wall clock alone. The steer now displaces the
+  sequence's clock so the target segment starts at its own `localT` 0 and then
+  runs on the timer — the next frame resolves to the same segment. A steer to
+  segment `n` releases every `advance: 'input'` hold before `n` and leaves the
+  rest armed, so steering backwards re-arms the holds in between; in `loop`
+  mode an unreleased hold blocks the wrap and a fresh lap re-arms every hold.
+  
+  `resolveSegment` gains an optional `{ releasedBelow }` argument and reports
+  `held: true` on a waiting segment; `segmentStart(seq, index)` is exported.
+  Sequences without `advance: 'input'` resolve exactly as before.
+- 31f9d13: Spatial text advisories. `adviseSpec` (and so `perceiveScene().advisories`)
+  gains the two checks every text-bearing scene was missing: `text-off-screen`
+  when a static `text` / `textBlock` box crosses the viewport edge by more than
+  1% of that dimension, and `text-overlap` when two static text layers share
+  more than 10% of the smaller box (reported once per layer pair). Boxes mirror
+  the renderer — `position` semantics, `align` / `baseline`, `maxWidth` as a
+  hard cap for `text`, `breakTextBlock` line-breaking for `textBlock` — using
+  the character-class width table the line-breaker already uses, so an author
+  without eyes now hears about the most common layout bug it makes. Moving text
+  is not judged. All shipped examples still produce zero advisories.
+- c2d6757: `glyphFade`, the fourth `textBlock.reveal` mode — the caption look, where each glyph fades up over a staggered alpha ramp instead of appearing whole. Additive: a spec without `reveal` renders exactly as before, and the three existing modes are untouched.
+  
+  `mode: 'glyphFade'` gains one companion field, `fade` (each glyph's fade window as a fraction of `progress`, 0 exclusive to 1, default 0.15 — small reads as a soft typewriter, large as a wave of overlapping fades). The alpha law: glyph `g` of `total` starts at `(g/total)·(1−fade)` and ramps linearly to opaque over a `fade`-wide window, so `progress` 0 paints nothing and 1 paints everything, and the whole animation stays one steerable numeric glide rather than a burst of per-keystroke cues.
+  
+  The mode holds the format's load-bearing invariant — layout is computed from the full text, always, and reveal only masks paint. Per-glyph x-positions come from `measureText` prefix advances (the trick the caret already established: paint-only, never an input to layout), so a glyph's position depends only on its fixed prefix and cannot shift as its alpha ramps; a mocked-ctx test pins the same glyph to the same x at two different progress values, and a playground pixel e2e asserts ink grows monotonically with progress on a real canvas.
+  
+  `perceive` reports `revealed` as the **mean glyph alpha** rather than the frontier fraction — partial-alpha ink is not the same quantity as a hard frontier — and luminance/coverage scale with it, so a non-vision agent steering the mode still sees what it painted. `validate` accepts the new mode and bounds `fade`. Native clients (iOS/tvOS) route unknown modes into the typewriter arm, so a `glyphFade` spec degrades to typewriter on t3 and baked full text on t2; this is documented in FORMAT.md.
+  
+  Note for the release cutter: this code has been on `main` since 2026-08-22 (PR #94) with no changeset, so npm has been a release behind the source. This changeset is the version bump it never got.
+
+### Patch Changes
+
+- 5b194c6: FORMAT.md: the `trail` row now states that `length` is **milliseconds** (max
+  5000) and `fade` is a **number 0..1** — not a boolean. `links.falloff` two rows
+  down *is* a boolean, so `{"length": 1600, "fade": true}` was the natural guess
+  and the validator's `must be 0..1` was the only place that said otherwise
+  (mcp_feedback F16, and F9 for the millisecond half). Documentation only — the
+  JSON Schema and the runtime validator already carried the type.
+- a729243: glyphFade draws the fully-opaque leading run as a single fillText: long
+  reveal blocks stop paying an O(n²) per-frame prefix re-measure, and a fully
+  revealed block now forms ligatures and pair kerning identically to the same
+  block without `reveal`. Only the still-fading tail draws glyph-by-glyph, at
+  the same prefix advances as before. (#97)
+- Updated dependencies [f43fb23]
+  - @idle-screens/core@0.4.7
+
 ## 3.4.5
 
 ### Patch Changes

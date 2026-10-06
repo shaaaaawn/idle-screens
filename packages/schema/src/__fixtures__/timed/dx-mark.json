@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "id": "dx-mark",
+  "label": "Mark \u00b7 registered on every aspect",
+  "seed": 3,
+  "background": {
+    "type": "solid",
+    "color": "#0c0c10"
+  },
+  "layers": [
+    {
+      "key": "bar-h",
+      "count": 1,
+      "sprite": {
+        "kind": "rect",
+        "width": [
+          0.46,
+          0.46
+        ],
+        "aspect": [
+          0.7826,
+          0.7826
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "bar-v",
+      "count": 1,
+      "sprite": {
+        "kind": "rect",
+        "width": [
+          0.36,
+          0.36
+        ],
+        "aspect": [
+          1.2778,
+          1.2778
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "corner0",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.05,
+          0.05
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dx": -0.18,
+        "dy": -0.18
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "corner1",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.05,
+          0.05
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dx": 0.18,
+        "dy": -0.18
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "corner2",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.05,
+          0.05
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dx": -0.18,
+        "dy": 0.18
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "corner3",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.05,
+          0.05
+        ],
+        "color": "#f2f2f2"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dx": 0.18,
+        "dy": 0.18
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "dot",
+      "count": 1,
+      "sprite": {
+        "kind": "circle",
+        "radius": [
+          0.07,
+          0.07
+        ],
+        "color": "#ff5a36"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dx": 0.07,
+        "dy": -0.02
+      },
+      "alpha": [
+        1,
+        1
+      ]
+    },
+    {
+      "key": "word",
+      "count": 1,
+      "sprite": {
+        "kind": "textBlock",
+        "text": "idle",
+        "fontSize": 0.08,
+        "maxWidth": 1,
+        "anchor": "center",
+        "color": "#f2f2f2",
+        "font": "600 sans-serif"
+      },
+      "motion": {
+        "type": "static"
+      },
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "dy": 0.36
+      }
+    }
+  ]
+}

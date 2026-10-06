@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+toml_edit = "0.22"   # comment-preserving writes for tray config edits
 sha2 = "0.10"
 percent-encoding = "2"
 # `json` feature is required for Response::into_json — it is #[cfg(feature = "json")]

@@ -1,4 +1,10 @@
+> Deprecated: imported into the canonical [Saver Idea Registry](./saver-ideas.md). Keep this file as source history; update lifecycle state in the registry.
+
 # Saver Art Ideas — 10 High-Level Briefs
+
+Fine-art briefs. Consumer aesthetics — the design languages of malls, software
+and packaging — live in [aesthetic-brief-seeds.md](aesthetic-brief-seeds.md),
+which continues this file's numbering from 11.
 
 In the spirit of `triadisches-ballett` (ballet channel): a single strong artwork/concept per scene, every layer traceable back to it, a restricted palette (3–5 colors), and motion that serves the mood rather than showing off. Each brief below is self-contained and can be fed to an agent to expand into a full SaverSpec.
 

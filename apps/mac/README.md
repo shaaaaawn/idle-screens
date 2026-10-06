@@ -23,13 +23,30 @@ sandboxed `legacyScreenSaver` substrate.
 apps/mac/
   Package.swift              SPM executable (macOS 13+)
   Info.plist                 LSUIElement app metadata
-  Sources/IdleScreens/
+  Sources/IdleScreens/       (`ls` is the truth; the load-bearing ones:)
     main.swift               entry point
     AppDelegate.swift        menu bar UI + settings + conflict warnings
     IdleMonitor.swift        CGEventSource idle poll
-    SaverController.swift     overlay windows, fade, cycling, channel mode
-    SystemInfo.swift          battery + display-sleep introspection
-    SaverCatalog.swift        GENERATED from web/src/savers.ts
+    SaverController.swift    overlay windows, fade, cycling, channel mode
+    SaverSelection.swift     favorites, hidden, pinned — what the cycle draws from
+    Trigger.swift            global hotkey (⌃⌥⌘S) to start the saver on demand
+    BundleManager.swift      which web bundle to load — cached update vs shipped
+                             (offline-first: the shipped one always works)
+    ChannelClient.swift      "Cast this Mac" — one stateless JSON-RPC POST to /mcp
+    ChannelCatalog.swift     /api/channels, cached in defaults so the menu opens full
+    ChannelToken.swift       capability tokens in the Keychain
+    PairDevice.swift         this Mac's identity for phone pairing; mints codes
+    PairLink.swift           keeps the Mac reachable for phone pushes when idle
+    AccessWindow.swift       Pairing & Access window
+    QRCode.swift             pairing QR rendering
+    Onboarding.swift         first-run welcome window
+    Diagnostics.swift        the Diagnostics… report (why the saver didn't start)
+    SystemActivity.swift     containers / MCP servers / dev servers snapshot
+    SystemInfo.swift         battery + display-sleep introspection
+    ThumbnailRenderer.swift  offscreen WKWebView previews, PNG-cached on the saver set
+    ServerEndpoint.swift     where the app talks to (prod, or the `serverBaseURL` default)
+    BuildInfo.swift          build provenance — local dev build or deployed release
+    SaverCatalog.swift       GENERATED from web/src/savers.ts
   web/                       host page bundling @idle-screens/* savers
     src/savers.ts            single source of truth for the saver list
     build.mjs / gen-catalog.mjs

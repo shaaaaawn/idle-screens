@@ -35,12 +35,16 @@ export type WorkerInbound =
   | { type: 'pause'; paused: boolean }
   | { type: 'track'; track: ControlTrack }
   | { type: 'sample' }
+  | { type: 'capture'; id: number }
+  | { type: 'inspect'; id: number }
   | { type: 'dispose' };
 
 /** Worker → main thread messages. */
 export type WorkerOutbound =
   | { type: 'mounted' }
   | { type: 'sampled'; hasContent: boolean }
+  | { type: 'captured'; id: number; bitmap: ImageBitmap | null }
+  | { type: 'inspected'; id: number; state: Record<string, unknown> | null }
   | { type: 'error'; message: string };
 
 /** Options for {@link runIdleWorker}. */
@@ -214,6 +218,46 @@ export function runIdleWorker(
           }
         }
         post({ type: 'sampled', hasContent });
+        break;
+      }
+      case 'inspect': {
+        // State dump for perception (the worker owns the instance, so this
+        // is the only read path). Synchronous by contract; a throwing saver
+        // answers null rather than killing the worker.
+        let state: Record<string, unknown> | null = null;
+        try {
+          state = instance?.inspect?.() ?? null;
+        } catch {
+          state = null;
+        }
+        post({ type: 'inspected', id: msg.id, state });
+        break;
+      }
+      case 'capture': {
+        // On-demand frame snapshot (the transferred canvas is unreadable from
+        // the main thread, so this is the ONLY read path for worker savers).
+        // Prefer the instance's own capture — it can render a fresh frame in
+        // the same task, which matters for WebGL where the presented buffer
+        // reads black. Plain-2d savers fall back to a direct bitmap of the
+        // OffscreenCanvas, whose buffer persists between frames.
+        const id = msg.id;
+        const reply = (bitmap: ImageBitmap | null): void => {
+          if (bitmap) {
+            // Options form: valid on both the Window typing tsc sees here and
+            // the DedicatedWorkerGlobalScope this actually runs in.
+            self.postMessage({ type: 'captured', id, bitmap } satisfies WorkerOutbound, { transfer: [bitmap] });
+          } else {
+            post({ type: 'captured', id, bitmap: null });
+          }
+        };
+        const own = instance?.capture?.();
+        if (own) {
+          own.then(reply, () => reply(null));
+        } else if (activeCanvas) {
+          createImageBitmap(activeCanvas).then(reply, () => reply(null));
+        } else {
+          reply(null);
+        }
         break;
       }
       case 'dispose':

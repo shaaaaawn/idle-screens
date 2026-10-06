@@ -2,6 +2,7 @@ mod about;
 mod bundle;
 mod cli;
 mod config;
+mod config_write;
 mod idle;
 mod pair;
 mod platform;
@@ -24,7 +25,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("{}", about::summary());
 
     if let Some(cli::Command::Tray) = cli.command {
-        return tray::run(cli.kiosk, cli.forwardable_args());
+        return tray::run(&cli);
     }
 
     let settings = Settings::load(&cli)?;
@@ -94,7 +95,7 @@ fn main() -> anyhow::Result<()> {
         if state.settings.windowed {
             log::info!("windowed dev mode: idle input watcher disabled (close via window manager or Ctrl+C)");
         } else if state.settings.kiosk {
-            log::info!("kiosk mode: idle input watcher disabled (exit via pkill/SIGTERM or hyprland binding)");
+            log::info!("kiosk mode: idle input watcher disabled (exit with Escape, SIGTERM, or pkill -TERM -f '[i]dle-screens-wayland')");
         } else {
             idle::spawn_watcher();
         }

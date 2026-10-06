@@ -1,0 +1,432 @@
+{
+  "format": "idle-sequence",
+  "schemaVersion": 1,
+  "id": "snow-white",
+  "label": "Snow White — a triptych",
+  "seed": 7,
+  "loop": true,
+  "segments": [
+    {
+      "key": "act-1",
+      "duration": 240000,
+      "transition": {
+        "type": "morph",
+        "dur": 5000
+      },
+      "scene": {
+        "schemaVersion": 1,
+        "id": "sw-act-1",
+        "label": "Act I — The Cottage",
+        "seed": 71,
+        "background": {
+          "type": "solid",
+          "color": "#241a12"
+        },
+        "layers": [
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0336,
+                0.0336
+              ],
+              "color": "#f2ede4",
+              "soft": true
+            },
+            "motion": {
+              "type": "path",
+              "points": [
+                {
+                  "x": 0.15,
+                  "y": 0.6
+                },
+                {
+                  "x": 0.45,
+                  "y": 0.45
+                },
+                {
+                  "x": 0.75,
+                  "y": 0.58
+                }
+              ],
+              "duration": 24000,
+              "curve": "smooth",
+              "closed": true
+            }
+          },
+          {
+            "count": 7,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0156,
+                0.0234
+              ],
+              "color": "#c9a36a",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.008,
+                0.02
+              ]
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.06,
+                0.06
+              ],
+              "color": "#7a6a86",
+              "width": 0.002
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.85,
+              "y": 0.2
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.02,
+                0.02
+              ],
+              "color": "#2a1d14",
+              "soft": true
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.7,
+              "y": 0.8
+            }
+          },
+          {
+            "count": 30,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0018,
+                0.0048
+              ],
+              "color": "#5c4a38",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.002,
+                0.006
+              ],
+              "angle": 270
+            }
+          }
+        ]
+      }
+    },
+    {
+      "key": "act-2",
+      "duration": 360000,
+      "transition": {
+        "type": "morph",
+        "dur": 5000
+      },
+      "scene": {
+        "schemaVersion": 1,
+        "id": "sw-act-2",
+        "label": "Act II — The Forest & the Apple",
+        "seed": 72,
+        "background": {
+          "type": "solid",
+          "color": "#0c1410"
+        },
+        "layers": [
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0336,
+                0.0336
+              ],
+              "color": "#e8f0ea",
+              "soft": true
+            },
+            "motion": {
+              "type": "path",
+              "points": [
+                {
+                  "x": 0.15,
+                  "y": 0.6
+                },
+                {
+                  "x": 0.45,
+                  "y": 0.45
+                },
+                {
+                  "x": 0.75,
+                  "y": 0.58
+                }
+              ],
+              "duration": 24000,
+              "curve": "smooth",
+              "closed": true
+            }
+          },
+          {
+            "count": 7,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0156,
+                0.0234
+              ],
+              "color": "#4a6a52",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.008,
+                0.02
+              ]
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.06,
+                0.06
+              ],
+              "color": "#3a4a3e",
+              "width": 0.002
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.85,
+              "y": 0.2
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.02,
+                0.02
+              ],
+              "color": "#c42a3a",
+              "soft": true
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.7,
+              "y": 0.8
+            }
+          },
+          {
+            "count": 30,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0018,
+                0.0048
+              ],
+              "color": "#2a3c30",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.002,
+                0.006
+              ],
+              "angle": 270
+            }
+          }
+        ]
+      }
+    },
+    {
+      "key": "act-3",
+      "duration": 300000,
+      "transition": {
+        "type": "cut"
+      },
+      "scene": {
+        "schemaVersion": 1,
+        "id": "sw-act-3",
+        "label": "Act III — The Waking",
+        "seed": 73,
+        "background": {
+          "type": "solid",
+          "color": "#2a2436"
+        },
+        "layers": [
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0336,
+                0.0336
+              ],
+              "color": "#ffffff",
+              "soft": true
+            },
+            "motion": {
+              "type": "path",
+              "points": [
+                {
+                  "x": 0.15,
+                  "y": 0.6
+                },
+                {
+                  "x": 0.45,
+                  "y": 0.45
+                },
+                {
+                  "x": 0.75,
+                  "y": 0.58
+                }
+              ],
+              "duration": 24000,
+              "curve": "smooth",
+              "closed": true
+            }
+          },
+          {
+            "count": 7,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0156,
+                0.0234
+              ],
+              "color": "#d4b878",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.008,
+                0.02
+              ]
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "ring",
+              "radius": [
+                0.06,
+                0.06
+              ],
+              "color": "#c8b4d8",
+              "width": 0.002
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.85,
+              "y": 0.2
+            }
+          },
+          {
+            "count": 1,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.02,
+                0.02
+              ],
+              "color": "#3a2f42",
+              "soft": true
+            },
+            "motion": {
+              "type": "static"
+            },
+            "position": {
+              "x": 0.7,
+              "y": 0.8
+            }
+          },
+          {
+            "count": 30,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.0018,
+                0.0048
+              ],
+              "color": "#8a7a9c",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.002,
+                0.006
+              ],
+              "angle": 270
+            }
+          }
+        ]
+      }
+    },
+    {
+      "key": "curtain",
+      "scene": {
+        "schemaVersion": 1,
+        "id": "sw-curtain",
+        "label": "Curtain",
+        "seed": 79,
+        "background": {
+          "type": "solid",
+          "color": "#050408"
+        },
+        "layers": [
+          {
+            "count": 30,
+            "sprite": {
+              "kind": "circle",
+              "radius": [
+                0.00112,
+                0.0028
+              ],
+              "color": "#1a1626",
+              "soft": true
+            },
+            "motion": {
+              "type": "drift",
+              "speed": [
+                0.001,
+                0.003
+              ],
+              "angle": 270
+            }
+          }
+        ]
+      },
+      "duration": 20000
+    }
+  ]
+}

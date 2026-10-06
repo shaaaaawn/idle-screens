@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG } from './ipfs';
+import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG, expandFishMixSlots } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
   it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
@@ -47,21 +47,85 @@ describe('DEFAULT_FISH', () => {
 });
 
 describe('parseFishMix', () => {
-  it('parses ids, breed aliases, and counts', () => {
+  it('parses ids, breed aliases, and counts — counts cast DISTINCT fish', () => {
+    // The uniqueness rule: a minted fish is an individual. `257:2` is two
+    // different angelfish (257 and its nearest unused neighbour), silently.
     const r = parseFishMix('257:2, betafish, seaturtle:1');
     expect(r.problems).toEqual([]);
-    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[257, 2], [100, 1], [497, 1]]);
+    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[257, 1], [258, 1], [1, 1], [497, 1]]);
     expect(r.entries[0]!.url).toContain('fish_257');
+  });
+
+  it('no minted fish appears twice, whatever the author writes', () => {
+    for (const mix of ['257,257', '257:3,258:3', 'angelfish:8,300:4', 'seaturtle:16,497:4']) {
+      const ids = parseFishMix(mix).entries.map((e) => e.id);
+      expect(new Set(ids).size, mix).toBe(ids.length);
+    }
+  });
+
+  it('a named id already cast gets a swims-instead advisory; school extras do not', () => {
+    const dup = parseFishMix('257,257');
+    expect(dup.entries.map((e) => e.id)).toEqual([257, 258]);
+    expect(dup.problems).toEqual(['fish 257 already cast — fish 258 swims instead']);
+    const school = parseFishMix('300:6');
+    expect(school.entries).toHaveLength(6);
+    expect(school.problems).toEqual([]); // reassignment IS the count's meaning
+  });
+
+  it('breed exhaustion clamps with a problem instead of duplicating', () => {
+    // Sea turtles are 497-512: sixteen individuals exist, so a 16 + 4 ask
+    // runs dry at 16 total.
+    const r = parseFishMix('seaturtle:16, 497:4');
+    expect(r.entries).toHaveLength(16);
+    expect(r.problems.some((p) => p.includes('distinct seaturtle left'))).toBe(true);
   });
   it('degrades on bad tokens instead of failing the mix', () => {
     const r = parseFishMix('257:2, nope:1, 100:0, 258:x, 259:1:9');
-    expect(r.entries.map((e) => e.id)).toEqual([257]);
+    expect(r.entries.map((e) => e.id)).toEqual([257, 258]);
     expect(r.problems).toHaveLength(4);
   });
   it('clamps oversized counts to 24 instead of dropping the token', () => {
     const r = parseFishMix('seahorse:30');
-    expect(r.entries.map((e) => [e.id, e.count])).toEqual([[457, 24]]);
+    expect(r.entries).toHaveLength(24);
+    expect(new Set(r.entries.map((e) => e.id)).size).toBe(24); // 24 distinct seahorses
     expect(r.problems).toEqual(['"seahorse:30": count clamped to 24']);
+  });
+  it('parses a per-token @style and keeps untagged tokens style-less', () => {
+    const r = parseFishMix('457:2@hover, 257:1@School, 100:1');
+    expect(r.problems).toEqual([]);
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([
+      [457, 'hover'], [458, 'hover'], [257, 'school'], [100, null],
+    ]);
+    const slots = expandFishMixSlots(r.entries, 24);
+    expect(slots.map((sl) => sl.style ?? null)).toEqual(['hover', 'hover', 'school', null]);
+    expect(slots[0]!.url).toContain('fish_457');
+  });
+  it('degrades an unknown @style to a problem without dropping the fish', () => {
+    const r = parseFishMix('257:1@zoom');
+    expect(r.entries.map((e) => [e.id, e.style ?? null])).toEqual([[257, null]]);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain('unknown style "zoom"');
+  });
+  it('preserves @ inside custom aliases and parses only a trailing style suffix', () => {
+    const catalog = [
+      { id: 9, name: 'Night reef', breed: 'reef@night', ipfs3d: '/reef.glb', localGlb: '' },
+      { id: 10, name: 'Hover reef', breed: 'reef@hover', ipfs3d: '/hover.glb', localGlb: '' },
+    ];
+    const unstyled = parseFishMix('reef@night:2', catalog);
+    expect(unstyled.problems).toEqual([]);
+    expect(unstyled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
+
+    const styled = parseFishMix('reef@night:2@hover', catalog);
+    expect(styled.problems).toEqual([]);
+    expect(styled.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2, style: 'hover' }]);
+
+    const typo = parseFishMix('reef@night:2@zoom', catalog);
+    expect(typo.entries).toEqual([{ id: 9, breed: 'reef@night', url: '/reef.glb', count: 2 }]);
+    expect(typo.problems[0]).toContain('unknown style "zoom"');
+
+    const collidingAlias = parseFishMix('reef@hover', catalog);
+    expect(collidingAlias.problems).toEqual([]);
+    expect(collidingAlias.entries).toEqual([{ id: 10, breed: 'reef@hover', url: '/hover.glb', count: 1 }]);
   });
   it('empty string parses to an empty mix', () => {
     expect(parseFishMix('')).toEqual({ entries: [], problems: [] });
@@ -80,8 +144,9 @@ describe('parseFishMix', () => {
 
 describe('expandFishMix', () => {
   it('expands in DSL order and clamps to the cap', () => {
+    // Distinct ids now, still DSL-ordered; the cap trims the tail.
     const { entries } = parseFishMix('257:2,100:2');
-    expect(expandFishMix(entries, 3).map((u) => /fish_(\d+)/.exec(u)![1])).toEqual(['257', '257', '100']);
+    expect(expandFishMix(entries, 3).map((u) => /fish_(\d+)/.exec(u)![1])).toEqual(['257', '258', '100']);
   });
 });
 
@@ -100,29 +165,59 @@ describe('resolveIpfsUrls', () => {
   });
 });
 
-describe('NPC breeds (unminted set)', () => {
-  it('covers all eight designed breeds with synthetic ids above the supply', () => {
+describe('NPC breeds (unminted set, bundled)', () => {
+  it('covers the seven bundled breeds, the starfish and the octopus with synthetic ids above the supply', () => {
     expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(
-      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'jellyfish', 'shark'],
+      ['babyfish', 'blowfish', 'crab', 'dori', 'glowfish', 'hackerfish', 'octopus', 'shark', 'starfish'],
     );
     for (const f of NPC_CATALOG) {
       expect(f.id).toBeGreaterThan(512); // never collides with a minted token
-      expect(f.localGlb).toMatch(/^\/assets\/metaquarium\//);
-      expect(f.ipfs3d).toBe(''); // no pin yet — hosts map localGlb in
+      expect(f.ipfs3d).toBe(`mq-breed:${f.breed}`); // in the package: nothing to host
     }
   });
-  it('a mapped catalog resolves NPC breeds; an unmapped one says not hosted', () => {
-    const mapped = NPC_CATALOG.map((f) => ({ ...f, ipfs3d: `http://x${f.localGlb}` }));
-    const ok = parseFishMix('shark:2,jellyfish:1', mapped);
+  it('the DEFAULT catalog casts them by breed or id, as species (counts, not individuals)', () => {
+    const ok = parseFishMix('shark:2,glowfish:1,606@bottom');
     expect(ok.problems).toEqual([]);
-    expect(ok.entries.map((e) => e.count)).toEqual([2, 1]);
-    const un = parseFishMix('shark:1', NPC_CATALOG);
-    expect(un.entries).toEqual([]);
-    expect(un.problems[0]).toContain('not hosted here');
+    expect(ok.entries.map((e) => [e.breed, e.count, e.url])).toEqual([
+      ['shark', 2, 'mq-breed:shark'], ['glowfish', 1, 'mq-breed:glowfish'], ['crab', 1, 'mq-breed:crab'],
+    ]);
+    expect(ok.entries[2]!.style).toBe('bottom');
+    // Minted fish in the same mix keep their uniqueness rules.
+    expect(parseFishMix('257:2,dori:3').entries.map((e) => e.id)).toEqual([257, 258, 608]);
+  });
+  it('the default catalog names every breed it offers when one is misspelt', () => {
+    const r = parseFishMix('sharkk:1');
+    expect(r.problems[0]).toContain('shark');
+    expect(r.problems[0]).toContain('angelfish');
   });
   it('the breed error names what the ACTIVE catalog offers', () => {
     const r = parseFishMix('unicorn:1', NPC_CATALOG.map((f) => ({ ...f, ipfs3d: 'x' })));
     expect(r.problems[0]).toContain('shark');
-    expect(r.problems[0]).toContain('jellyfish');
+    expect(r.problems[0]).toContain('glowfish');
+  });
+  it('the draft jellyfish is gone: 607 and its name are unknown, the other ids keep their numbers', () => {
+    expect(parseFishMix('jellyfish:1').problems).toHaveLength(1);
+    expect(parseFishMix('607:1').problems).toHaveLength(1);
+    expect(parseFishMix('dori:1').entries[0]!.id).toBe(608);
+  });
+});
+
+describe('fishMix *size', () => {
+  it('scales one token, rides after @style, and reaches the slots', () => {
+    const r = parseFishMix('257:2@school*1.5,100:1*0.6');
+    expect(r.problems).toEqual([]);
+    expect(r.entries.map((e) => [e.id, e.style, e.size])).toEqual([[257, 'school', 1.5], [258, 'school', 1.5], [100, undefined, 0.6]]);
+    const slots = expandFishMixSlots(r.entries, 24);
+    expect(slots.map((s) => s.size)).toEqual([1.5, 1.5, 0.6]);
+    expect(parseFishMix('100:1').entries[0]!.size).toBeUndefined();
+  });
+  it('clamps to 0.25–4 and degrades a bad size to the breed size, never dropping the fish', () => {
+    const big = parseFishMix('100*9');
+    expect(big.entries[0]!.size).toBe(4);
+    expect(big.problems[0]).toContain('clamped');
+    const bad = parseFishMix('100*huge');
+    expect(bad.entries).toHaveLength(1);
+    expect(bad.entries[0]!.size).toBeUndefined();
+    expect(bad.problems[0]).toContain('size must be');
   });
 });

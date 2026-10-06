@@ -32,23 +32,41 @@ sprites, `colorWeights`, `pulse.wave`, `layout` (grid), `life`,
 `links.mode/falloff/closed`, `blend: screen|multiply`, orbit layer-parents
 (2026-07-21 — "the v1 ceiling");
 `textBlock` sprite — deterministic multi-line text with viewport-unit sizing;
-`textBlock.reveal` — animated typing/deleting via one steerable paint param.
+`textBlock.reveal` — animated typing/deleting via one steerable paint param;
+`emit` (sparse events), `clock` (phase-lock), `motion.ease` (settle / buoyant)
+(2026-09-05 — time structure); `polygon` / `stroke` sprites and `rect.feather`
+(2026-09-05 — shape glyphs); `layout: list | table` and the `bar` sprite
+(2026-09-05 — data layout); `textBlock.anchor` / `font` / `opacity`, the
+`maxWidth` cap lifted to 2.0, `sync` and `bed` on the sequence envelope,
+the `fade` transition, `role` on text sprites, and `text: 'crossfade'` on
+`morph` (2026-09-08 — ambient presentations); `background: { type: 'field' }`
+(seeded, warped noise quantised into bands), the static per-entity
+`rotate`, and the print `finish` (grain + dither screen, spec- and
+sequence-level) (2026-09-10 — the print look); `timeline` (keyframes on the
+scene's own clock), paint-level layer `opacity` and `transform`,
+`position.dx` / `dy`, `wrapMorph` on the sequence envelope and
+`text: 'dip'` on `morph` (2026-09-25 — timed scenes); layer `groups` and
+`transform.origin` (2026-09-26 — groups and origin).
 
 ## Safety invariants
 
 These hold **by construction** — no spec can violate them:
 
-1. **No flash primitive.** The background is static (drift is floored at 10 s)
-   and entities are bounded sprites, so a compiled spec cannot strobe the full
-   field. Provable by sampling any compiled spec through
-   `@idle-screens/validator`.
+1. **No flash primitive.** The background is static (drift is floored at 10 s
+   — for a gradient's stop positions and for a `field`'s domain travel alike,
+   the only way either changes over time) and entities are bounded sprites,
+   so a compiled spec cannot strobe the full field. Provable by sampling any
+   compiled spec through `@idle-screens/validator`.
 2. **Pulse/grow/cycle are bounded.** Breathing amplitude is capped and periods
    floored at 500 ms (2 Hz — under the WCAG 3 Hz flash threshold). Every entity
    gets its own seeded phase — and with `pulse.wave`, a position-derived phase —
    so a layer will generally not pulse in unison (edge case: if spawn positions
    alias the wavelength, phases may coincide). `ghosting` only *smooths* luminance
    changes (it composites frames over a faded copy of the last), never sharpens
-   them.
+   them. `clock` deliberately removes the per-entity phase, so the validator
+   floors a clocked layer's periods at 1000 ms (1 Hz) instead — a layer in
+   unison breathes, it never flashes. `emit` events are floored at one per
+   second per entity and always ride a smooth envelope, never a cut.
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
    depth-units/sec; orbit at 180 deg/sec; path laps at ≥ 2 s).
 4. **Work is bounded.** ≤ 36 layers, ≤ 400 entities per layer, ≤ 800 total,
@@ -72,7 +90,10 @@ Author against the JSON Schema; ship through the runtime validator.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
-`min ≤ max`; `colorWeights` length must match `colors`; orbit layer-parents
+`min ≤ max`; `colorWeights` length must match `colors`; `emit.life ≤
+emit.every`; a `clock`ed layer's `pulse`/`grow`/`cycle` period must satisfy
+`period / rate ≥ 1000`; a `polygon` takes `sides` or `points`, not both (the
+JSON Schema enforces this one too); orbit layer-parents
 must exist, have `count: 1`, and not themselves orbit a layer.
 
 ## Structure
@@ -84,23 +105,39 @@ must exist, have `count: 1`, and not themselves orbit a layer.
   "label": "Snowfall",
   "seed": 42,                    // optional; falls back to the host's seed
   "motionIntensity": "calm",     // optional: calm | moderate | energetic
+  "density": "normal",           // optional: sparse | normal | dense — declared intent, see below
   "units": "viewport",           // optional: viewport (default) | px
   "referenceViewport": 1080,     // optional; design resolution for density scaling
   "ghosting": 0.9,               // optional 0..0.95; frame-persistence smear
+  "finish": { "grain": 0.5, "dither": 0.3 },  // optional; print screen over the finished frame
   "background": { ... },         // optional; defaults to black
-  "layers": [ { ... }, ... ]     // 1..36, rendered back-to-front
+  "layers": [ { ... }, ... ],    // 1..36, rendered back-to-front
+  "timeline": { ... },           // optional; authored keyframes — see **Timeline**
+  "groups": { "moon": { ... } }  // optional; named paint groups — see **Groups**
 }
 ```
 
 With `units: "viewport"` (the default) every dimensional value — sizes, radii,
 speeds, distances, wavelengths, stroke widths — is a fraction of
-`min(width, height)`, so specs scale to any display. Exception: text sprites
-with an explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`)
-use that CSS font verbatim and do not scale with the viewport.
+`min(width, height)`, so specs scale to any display. Text sprites with an
+explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`) are no
+exception: the compiler rescales that number by
+`min(width, height) / referenceViewport` so the text holds its apparent size,
+and only `units: "px"` specs get it verbatim. See **Scale** below.
 
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
 trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is off.
+
+`density` declares what the emptiness or the crowding means. `sparse` says
+the scene is *meant* to be almost empty — one faint mark on a dark ground,
+long silences — so `adviseSpec` withholds `sparse-scene` and a scorer that
+gates on coverage should read the declaration before calling a faithful
+scene broken. `dense` withholds `dense-scene` the same way. The declaration
+is checked, not trusted: a `sparse` scene whose alpha-weighted coverage
+exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
+`density-mismatch` advisory instead. Omitted means `normal`. Like
+`motionIntensity`, it is a hint — it changes no pixel.
 
 ### `background`
 
@@ -110,6 +147,123 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
   bottom (e.g. an aquarium seafloor); optional `drift` slowly oscillates the
   stop positions (period ≥ 10 s) so the background breathes. All colours are
   hex (`#rgb` / `#rrggbb`).
+- `{ "type": "field", "scale": 2.2, "octaves": 3, "warp": 0.4, "quantize": 6, "bands": ["#1b1a3a", "#0078bf", "#00a99d", "#ffe800", "#ff6c2f", "#ff48b0"], "drift": { "period": 40000, "amount": 0.3 } }`
+  — a **scalar field**: seeded value noise, optionally domain-warped, read
+  through a colour ramp. Thermal maps, contour terrain, sonar landmasses,
+  riso washes; the ground under ten of the playgrnd looks. Knobs:
+
+  | Knob | Range | Default | Meaning |
+  |---|---|---|---|
+  | `scale` | 0.5..8 | — | noise features across the **short side** of the viewport (so a 16:9 frame shows more of the same field than a square one) |
+  | `octaves` | int 1..4 | 2 | layers of detail; each halves in amplitude and doubles in frequency |
+  | `warp` | 0..1 | 0 | domain warp: 0 round blobs, 1 the folded, smeared contours of a weather chart |
+  | `quantize` | 0 or int 2..8 | `bands.length` | posterise into that many levels, one read off the `bands` ramp per level — hard, crisp contours (Terrain, Sonar). `bands.length` is exactly one band per level; more levels step through the ramp. `0` interpolates the ramp smoothly (Aura, Mist) |
+  | `bands` | 2..8 hex | — | the ramp, low end of the field to high |
+  | `drift` | `{ period ≥ 10000, amount 0..1 }` | none | the field's slow **animate**: the sample domain travels a circle of radius `amount` feature units once per `period` ms, so the contours crawl and the field loops exactly. `amount` defaults to 0.3 |
+  | `seed` | number | the spec seed | the field's own seed — change it to get a different field without re-seating an entity |
+
+  **Analytic guarantee.** The field is a pure function of `(x, y, t, seed)`
+  with its own hash — it never draws from the entity RNG, so adding, steering
+  or reseeding a field leaves every entity exactly where it was, and
+  `luminanceGrid` samples the same function the renderer paints (per cell,
+  at the same bucketed time), so perception and paint agree by construction.
+  A field's own contours are *ground*, not ink: the grid's `coverage`,
+  centroid and profiles deviate from the field's per-cell value
+  (`backgroundCells`), so a bright field scores no coverage and the
+  `sparse-scene` / `low-contrast-layer` advisories judge entities against the
+  field's mean band exactly as they judge them against a gradient's stops.
+
+  **Raster and cache.** The renderer samples the field into a low-res raster
+  — 96 px on the short side, the long side by aspect; 48 px on the `basic` /
+  `minimal` capability tiers (`capabilityTier` on the mount context) — and
+  draws it scaled to the canvas, nearest-neighbour for quantised bands so the
+  contours stay crisp and smoothed for `quantize: 0`. A static field is
+  sampled **once per mount**; a drifting one is resampled only when `t`
+  crosses a 100 ms bucket, so ten times a second at most, however high the
+  frame rate. Steering any knob recomputes on the next frame.
+
+  **Flash safety.** `drift` is the only way a field changes over time, and
+  its `period` is floored at 10 s like the gradient's: the domain moves at
+  most 2π·`amount` feature units per period, so no region's mean luminance
+  can oscillate anywhere near the 3 Hz WCAG threshold (`field.test.ts` pins
+  the extreme — `scale: 0.5`, `amount: 1` at the floor — under one opposing
+  10 % transition per second). Taste, not safety: at `scale` below 1 the
+  whole frame breathes as one; keep `amount` ≤ 0.5 there, or the wall pulses.
+
+  **Steering.** Every numeric knob and every band is a paint path —
+  `background.scale`, `background.warp`, `background.quantize`,
+  `background.bands.2`, `background.drift.amount` — and glides (a fractional
+  `quantize` or `octaves` mid-glide rounds). `background.seed` is not
+  steerable. The background is paint, not structure, so a `morph` between
+  two field segments glides the field; a gradient → field morph steps
+  (different shape).
+
+  **Native:** tvOS ignores the field and paints a **vertical gradient through
+  `bands` in order** (first band at the top, last at the bottom), so a field
+  scene still carries its palette on the Apple TV until the native player
+  rasters the same sampler.
+
+### `finish`
+
+`{ "grain": 0.5, "dither": 0.3, "animate": false }` — the print pass, composited
+over the **finished** frame as the last step of every render, after every
+layer and after `ghosting` has done its work. It is what turns flat inks
+into paper: riso speckle, gold-leaf tooth, an impasto's grain. Every knob is
+optional; an absent `finish` presents the frame exactly as drawn.
+
+| Knob | Range | Meaning |
+|---|---|---|
+| `grain` | 0..1 | a **seeded, zero-mean noise tile** (256², generated once per mount from the spec seed) screened over the frame at `grain × 0.35` alpha |
+| `dither` | 0..1 | an **8×8 ordered Bayer tile** screened at `dither × 0.25` alpha. A *stylistic screen* — the dot pattern of a halftone print — not true per-pixel dithering of the image (nothing is thresholded; the tile is simply composited) |
+| `animate` | boolean | steps the grain tile's offset once per 1/12 s from the frame's **time bucket**, seeded — never `Math.random` — so two viewers at the same `t` show the same grain and a seek is exact. Default false: the tile sits still. The `basic` / `minimal` capability tiers ignore it (static tile) |
+
+**Seeding rule.** The grain tile is a pure function of the spec seed (the
+same lattice hash the `field` background uses); the offset is a pure
+function of `(t, seed)`. Same spec + seed ⇒ the same grain on every
+display, every time.
+
+**Flash safety and perception.** Both tiles are centred on mid grey and
+composited with `overlay` — what every shipping canvas2d implements — so
+the frame's **mean luminance is unchanged** at every strength: `overlay`'s
+split at the backdrop's midpoint is exactly what makes a zero-mean,
+symmetric source average back to the backdrop. A finish can neither
+brighten nor darken a wall, and `animate`'s 12 Hz step moves a zero-mean
+texture whose regional mean is constant. The context-rejects-`overlay`
+fallback chain (`soft-light`, then `multiply` as the last resort) is not
+mean-preserving the same way — for the odd context that takes it, the
+luminance-neutral guarantee narrows to "no worse than a very small, bounded
+shift at `finish`'s already-small alpha," not exact invariance. The
+analytic tools treat it as luminance-neutral:
+`luminanceGrid` ignores it entirely (`finish.test.ts` pins the mean
+identical with and without), `adviseSpec` says nothing about it, and
+`describeScene` lists it under `spec.finish` so an agent knows the screen is
+there.
+
+**Never fed back into persistence.** With a `finish`, the scene — every
+layer, and the frame `ghosting` decays into — is drawn on an offscreen
+scene canvas; each frame ends by copying it to the visible canvas and
+screening the finish over the *copy*. Screened into the persistence loop
+instead, a static tile would reinforce itself every frame into mud;
+`finish.test.ts` runs `ghosting: 0.9` with `grain: 1` for 120 frames and
+asserts the scene canvas never sees a screen op and the visible one gets
+exactly one copy and one screen per frame.
+
+**Sequences.** A sequence applies the finish **once per composed frame** —
+bed, segment and any `fade` composite together — on its own presentation
+canvas; children never apply their own (a transparent child over a bed has
+nothing to screen). Which finish: the sequence-level `finish` (a new field
+on the envelope) when set; else the **active segment's** (the incoming one
+during a fade) when it declares one; a bed's `finish` is ignored — the bed
+is ground, finish the sequence. Absent everywhere ⇒ children draw straight
+onto the visible surface as they always have.
+
+**Steering.** `finish.grain` and `finish.dither` are numeric paint paths and
+glide (`setParam("finish.grain", 0.8, { dur: 2000 })`); `finish.animate`
+steps. Declare the block (`"finish": { "grain": 0 }`) to make the paths
+exist — a steer cannot add a `finish` to a spec without one. A sequence's
+own `finish` is not steerable; steer a segment's, or republish.
+
+**Native:** tvOS **ignores `finish`** — the frame is presented as drawn.
 
 ### `layers[]`
 
@@ -125,14 +279,20 @@ trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is of
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
 | `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing; `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
-| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris) |
+| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
+| `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** tvOS reads `spin` only ⇒ 0 |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail (ms of history) |
+| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` | scatter | grid placement; `jitter` scalar or `{x?, y?}` 0..1 per axis |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06); text/emoji take `strings[i]` / `glyphs[i]` and palettes `colors[i]` **in order**, so N labels are one layer |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
-| `key` | string | none | addressable name → `setParam("key.field", …)` |
-| `position` | `{x, y}` 0..1 | none | exact placement; **requires `count: 1`**; overrides `region`/`layout` |
+| `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
+| `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
+| `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
+| `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
+| `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
+| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
+| `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** ignored |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -145,9 +305,12 @@ with distance, removing pop-in at the cutoff.
 
 - `{ "kind": "emoji", "glyphs": ["🐟", "🐠"], "cycle": { "period": 800 } }` —
   glyph picked per entity (seeded); optional `cycle` rotates variants over time
-- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ... }`
-  — a `font` **with** a px size is used verbatim; a family/weight only
-  (`"bold monospace"`) composes with the seeded per-entity `size`
+- `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
+  — a `font` **with** a px size keeps that shorthand, its number rescaled to the
+  viewport (verbatim only under `units: "px"`); a family/weight only
+  (`"bold monospace"`) composes with the seeded per-entity `size`; `role` is
+  the legibility opt-in described under `textBlock` below (same field, same
+  meaning on both text sprites)
 - `{ "kind": "circle", "radius": [0.001, 0.003], "color": "#ffffff", "soft": true }` —
   `soft` renders a radial-falloff glow orb instead of a hard disc
 - `{ "kind": "ring", "radius": [0.002, 0.005], "color": "#d8f6ff", "width": 0.001 }` —
@@ -155,20 +318,104 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "streak", "length": [0.01, 0.03], "color": "#cfd8ff", "width": 0.002 }` —
   a line oriented along the entity's analytic heading with a faded tail
   (rain that reads as rain, shooting stars, warp stars)
-- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347" }` —
-  rectangle; `aspect` is the height/width ratio range (rotates with `spin`)
-- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef" }` —
+- `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347", "feather": 0.6 }` —
+  rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
+  `feather` 0..1 softens the edges — that fraction of the half-size fades out
+  toward the border (Rothko's block at 0.5–0.8)
+- `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
+  a data bar: entity *i* draws `length × values[i] / max` (viewport units),
+  `thickness` thick, growing from its position toward `direction` (`right`
+  default, `left`, `up`, `down`). `values` are **paint**: `setParam("bars.sprite.values", […])`
+  glides every bar (the field lives under `sprite`, so the path does too —
+  `bars.values` resolves nothing). With `layout: { type: "list" }` a chart is one layer and
+  its labels another — the dashboard genre stops needing one layer per number
+- `{ "kind": "polygon", "radius": [0.02, 0.05], "sides": 3, "color": "#f2e8c9", "soft": false }` —
+  regular n-gon of the seeded circumradius, point up (`sides` 3..12, default
+  6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
+  coordinates in −1..1 scaled by the radius — for any facet (a Picasso shard,
+  a Kandinsky triangle, a Mondrian plane). `soft` feathers the fill from the
+  centre. Rotates with `spin`. `points` are paint, so two polygons with the
+  same point count `morph` into each other
+- `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
+  a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
+  unit box spans the seeded `length`, stroked `width` wide with round joins.
+  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
+  `taper` thins the mark to almost nothing at both ends (a brush stroke rather
+  than a line); `orient: true` turns the path's +x along the entity's heading,
+  like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
+  O'Keeffe's petal, Basquiat's scrawl
+- `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef", "anchor": "top-left", "font": "system-ui, sans-serif", "opacity": 1 }` —
   multi-line text block with deterministic line-breaking. All dimensions are
   viewport fractions (of `min(w,h)`), not px — `units: "px"` specs reject
-  textBlock sprites at validation time. `position` is always the block's
-  **top-left corner** regardless of `align` (align moves text within the box,
-  not the box itself — different from the `text` sprite where `align`/`baseline`
-  shift the meaning of `position`). Line breaks are computed from a fixed
-  character-class metrics table so wrapping is identical across platforms; note
-  that the table is approximate — a painted line may slightly exceed `maxWidth`
-  when the real font is wider than the table estimates, so `maxWidth` is a
-  layout target, not a hard clip.
+  textBlock sprites at validation time. Without `anchor`, `position` is the
+  **top-left corner of the `maxWidth` layout box** regardless of `align`
+  (align moves text within the box, not the box itself — different from the
+  `text` sprite where `align`/`baseline` shift the meaning of `position`).
+  `maxWidth` may reach `2.0` — wider than the frame is legal (a wide caption
+  on a portrait screen); the `text-off-screen` advisory reports what runs
+  out. Line breaks are computed from a fixed character-class metrics table so
+  wrapping is identical across platforms; note that the table is approximate
+  — a painted line may slightly exceed `maxWidth` when the real font is wider
+  than the table estimates, so `maxWidth` is a layout target, not a hard clip.
   Use with `count: 1`, `motion: { type: "static" }`, and `position`.
+
+  `anchor` (one of nine compass points: `top-left`, `top`, `top-right`,
+  `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`) says
+  which point of the **rendered text** `position` names — the widest line
+  wide, as `align` lays it inside `maxWidth`, and `lines × lineHeight` tall,
+  measured after line-breaking. With `anchor: "center"` and
+  `position: { "x": 0.5, "y": 0.5 }` the block is centred on **every** aspect
+  ratio — `position` is in viewport fractions while `maxWidth` is in
+  `min(w,h)`, so hand-computing a centred `x` for one screen misses on the
+  next; the anchor removes the arithmetic. Under an anchor `align` only
+  shapes the ragged edge (shorter lines sit left/centre/right of the widest);
+  it no longer moves the ink. Anchor is placement, so it is part of the
+  structural signature (a change rebuilds); rotation stays about the anchor
+  point. The perception boxes (`text-overlap`, `text-off-screen`) follow the
+  same rule. Absent ⇒ exactly the pre-anchor behaviour above. **Native
+  clients that do not read `anchor` render as absent (layout-box top-left).**
+
+  `font` is a CSS family and/or weight/style — `"bold monospace"`,
+  `"300 'Inter', sans-serif"` — composed with the scaled `fontSize` the way
+  the `text` sprite composes a size-less font; a **size inside it is
+  rejected** (`fontSize` owns size, so the block keeps scaling with the
+  viewport). A monospace family (`monospace`, `ui-monospace`, Menlo, Courier,
+  SF Mono, Fira Code, …) switches the line-breaker to a uniform 0.6 em
+  advance so mono wraps land where the real face puts them; every other
+  family uses the proportional table. Default `system-ui, sans-serif`.
+  **Native clients fall back to the system face** until a face table exists.
+
+  `opacity` (0–1, default 1) multiplies the block's paint alpha — the whole
+  block, on top of the layer's per-entity `alpha`. It is **paint**, not
+  carpentry: excluded from the structural signature, so
+  `setParam("h.sprite.opacity", 0, { dur: 1500 })` glides the block out
+  without a rebuild (and back in with `1`). Declare `"opacity": 1` on the
+  block to make the path steerable (a `setParam` cannot create a field that
+  is not there). Scales perceived ink in the luminance grid. **Native clients
+  without `opacity` render at 1.**
+
+  `role` (`"read"` | `"atmosphere"`, on `textBlock` **and** `text`) declares
+  what the words are *for*, and is the only thing that turns legibility
+  checking on. Absent, or `"atmosphere"`, the layer is texture — a haiku
+  fading in a corner, dim labels on a wall board, the `dev-dashboard`'s
+  2.6:1 telemetry — and `adviseSpec` says nothing about how readable it is,
+  exactly as before the field existed; keep atmospheric text undeclared, the
+  advisories would only nag. `"read"` says the words must be read from
+  across the room, and opts that layer into two advisories:
+  `text-legibility` fires when the text colour's WCAG ratio falls below
+  **4.5:1** against the background sampled at the box centre (gradient stops
+  interpolated at rest, `band` honoured) **or** against the brightest
+  additive layer (`blend: lighter` / `screen`) whose entities can reach the
+  box and are at least a glyph tall, taken at its peak alpha (base + pulse)
+  composited over that background — a glow parked under a caption is
+  measured, dust is not; both ratios appear in the message when an additive layer is beneath — a plate-less read reports only the background ratio. `text-safe-area`
+  fires when the box (a `list`'s whole extent) lies within **5 %** of any
+  viewport edge, where bezels and overscan hide it. Each is judged at the
+  viewport passed to `adviseSpec` — check the portrait one too. `role` is a
+  declaration only: it changes **no pixel anywhere, on any client**, is not
+  in the structural signature, and native players ignore it with nothing to
+  fall back to. The shipped `lobby-talk` example declares it on every text
+  layer and produces zero advisories, landscape and portrait.
 
   textBlock also accepts `reveal` — animated typing/deleting:
   `{ "reveal": { "progress": 1, "mode": "typewriter", "speed": 0, "caret": true } }`.
@@ -192,13 +439,28 @@ with distance, removing pop-in at the cutoff.
   blink is in full cycles/sec, capped at 3 for flash safety, and is a square
   wave of `t` like every other animation). With `align: "center"`/`"right"`
   the revealing line stays anchored to its alignment as it types — only
-  left-aligned text reads as a classic typewriter. To "edit" text live:
-  glide `reveal.progress` to 0, swap `text` while nothing is visible, glide
-  back to 1.
+  left-aligned text reads as a classic typewriter. `text` itself is paint
+  that **steps**: a `setParam` swap or a sequence `morph` switches the string
+  whole on the first frame — nothing interpolates a string — so to "edit"
+  text live: glide `reveal.progress` to 0, swap `text` while nothing is
+  visible, glide back to 1 (or fade the block via its `color`). Inside a
+  sequence, a morph declared `text: 'crossfade'` cross-fades the old words
+  under the new ones instead (see **Transitions** below).
 
-`circle`, `ring`, `streak`, and `rect` all accept `colors: [...]` (seeded
-per-entity palette pick) and `colorWeights: [...]` (relative weights, same
-length — "mostly cool tones, occasional ember").
+`circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
+`colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
+(relative weights, same length — "mostly cool tones, occasional ember").
+
+**Drawing a shape out of sprites.** Overlapping sprites merge into one seamless
+silhouette under exactly one set of conditions: a single flat colour, `alpha`
+of `[1, 1]`, no `blend`, no `pulse`, and hard edges (no `soft`, no
+`rect.feather`). Anything else leaves every overlap visible as an internal edge,
+so the layer reads as a pile of sprites rather than a form — `soft` in
+particular reads as smoke, not mass. Depth then comes from *layer order* and a
+different flat colour per layer, painting back to front, and a later layer can
+be used to cut a clean edge across an earlier one. `layerCohesion` measures
+which of the two you got; `overlap-seams` warns when you asked for the first
+and configured the second.
 
 ### `motion` (one of)
 
@@ -228,6 +490,154 @@ length — "mostly cool tones, occasional ember").
 
 All speeds are ranges; each entity draws its own value (seeded).
 
+`drift`, `rise` and `wander` also accept **`ease`** — closed-form velocity
+shaping, no integration state:
+`{ "ease": { "type": "settle", "tau": 2500 } }` starts at the entity's speed
+and decelerates to rest with time constant `tau` ms (it travels `speed × tau`
+and stops — a mark flung and coming to rest); `"buoyant"` starts at rest and
+approaches the speed over `tau` (a bubble reaching terminal velocity). With
+`emit`, the eased travel restarts from the spawn point on every event. For
+`wander` only the base velocity eases — the harmonic meander keeps breathing,
+so a settled wanderer hovers rather than freezes.
+
+**Time structure, composed.** `emit` is how a scene does *almost nothing,
+almost never*: one ring every twelve seconds that expands and fades
+(`emit: { every: 12000, life: 5000, jitter: 0, grow: [0.15, 2.4] }`) reads as
+an event, where the same ring pulsing forever reads as wallpaper. Long
+`every`, low `count`, `jitter: 0` for a metronome, `1` for weather; pair with
+`ease: settle` so a mark is flung and comes to rest before it fades ("expand,
+drift a little, settle, fade" is one layer). `clock` is the other half: two
+layers on the same clock are a duet, not a coincidence. The shipped `pings`
+example is the whole idea in two layers.
+## Scale — what the numbers actually look like
+
+Every dimensional value is a fraction of `min(width, height)`. On a 1920×1080
+display that divisor is **1080**, so `0.01` is 10.8 px there and the same
+fraction of the short side on a phone or a 4K wall. Nothing below is a rule —
+they are measured landmarks, because the most common authoring failure is not
+a bad idea, it is an idea rendered two orders of magnitude too small or too
+large to see. The px conversions and coverage figures are measured
+(`perceiveScene` at 1920×1080, 40 opaque white entities on black, unless a row
+says otherwise); the "reads as" readings and the recipe advice are judgment.
+
+### `circle.radius` (a **radius**, so a dot is twice this wide)
+
+| radius | px radius @1080p | px across | coverage (40) | reads as |
+|---|---|---|---|---|
+| `0.0005` | 0.5 | 1 | 0.9 % | star grain — texture, never the subject |
+| `0.002` | 2.2 | 4 | 1.0 % | dust, embers, distant snow |
+| `0.005` | 5.4 | 11 | 1.6 % | a distinct dot; graph node, firefly |
+| `0.02` | 21.6 | 43 | 6.2 % | a clear disc — bokeh, a planet |
+| `0.05` | 54 | 108 | 21 % | a focal object, or a soft glow field |
+| `0.1` | 108 | 216 | 52 % | dominant form — sun, moon, one per scene |
+| `0.2` | 216 | 432 | 88 % | 40 % of the short side; only as a soft glow plate |
+
+**Read the coverage column with its floor in mind.** `perceiveScene` samples an
+80 × 48 grid, so a cell is ~24 × 22 px at 1080p and anything smaller registers as
+one cell per entity. That is why the top two rungs both land near 1 % despite a
+16 × difference in area — below `radius ≈ 0.01` the column counts entities, not
+pixels. It becomes an area measurement from `0.02` up.
+
+The shipped examples put entity *fields* almost entirely in `0.0003 – 0.007`
+and large forms in `0.03 – 0.185` (the biggest is a `ring` gauge in
+`dev-dashboard`). The gap between is thinly populated
+but not empty, and the exception is instructive: `aurora` runs 60–100-entity
+layers at `radius [0.045, 0.11]`, because a soft additive orb that large is
+atmosphere rather than an object. Within one scene, `lanterns`' three parallax
+layers step by ~2.2 × and ~2.4 × per layer; steps much smaller than that read
+as one layer with a wide size range rather than as depth.
+
+The bottom two rungs are texture, not content, and `adviseSpec` says so: a
+`0.002` field stops raising `sparse-scene` at ~70 entities, while a `0.0005`
+field would need over a thousand — far past `LIMITS.maxPerLayer` (400) — so it
+raises `sparse-scene` at every legal count and always needs a brighter layer
+above it.
+
+### `size` (emoji), `fontSize` (textBlock), `size` (text sprites)
+
+`0.02` ≈ 22 px, `0.035` ≈ 38 px, `0.05` ≈ 54 px, `0.1` ≈ 108 px at 1080p.
+Emoji fields in the examples sit at `0.011 – 0.078`; `haiku`, the one textBlock
+example, sets `fontSize: 0.05`.
+
+An explicit px size inside a `font` string (`"bold 14px monospace"`) is **not**
+absolute: under the default `viewport` units the compiler rescales it by
+`min(w, h) / referenceViewport`, so it holds its apparent size across displays
+(14 px at 1080p becomes 28 px at 4K and 5 px on a phone). Only `units: "px"`
+specs get the number verbatim. Two consequences: a font pinned for a 4K wall
+becomes illegibly small on a phone-sized viewport, and a spec that genuinely
+wants fixed pixels must say `units: "px"`.
+
+### `speed` (viewport fractions per second)
+
+| speed | px/s @1080p | crosses the short side | crosses a 16:9 width |
+|---|---|---|---|
+| `0.001` | 1.1 | 17 min | 30 min |
+| `0.005` | 5.4 | 3.3 min | 5.9 min |
+| `0.02` | 21.6 | 50 s | 89 s |
+| `0.06` | 65 | 17 s | 30 s |
+| `0.15` | 162 | 7 s | 12 s |
+
+An ambient scene meant to live on a wall for hours wants its background layers
+under `0.005` — anything faster resolves as traffic rather than atmosphere.
+Above `0.06` a layer reads as an event (rain, warp, a passing comet). Speeds
+are ranges and each entity draws its own, so a `[0.002, 0.008]` layer already
+carries internal parallax.
+
+### `links.maxDist`
+
+Link density is governed by `maxDist` relative to the mean spacing between
+entities, `sqrt(w·h / count) / min(w, h)` — for 40 entities at 1920×1080 that
+is `0.21` (228 px), for 100 it is `0.13` (144 px). Measured at `k: 3`, count 40,
+averaged over 15 seeds:
+
+| `maxDist` | edges drawn (of `k·count`) | graph |
+|---|---|---|
+| 0.5 × spacing | ~12 % | scattered pairs; ~45 % of nodes isolated |
+| 1.0 × spacing | ~45 % | a constellation with a few loners |
+| 1.5 × spacing | ~60 % | usually one connected component, rarely an isolate |
+| 2.0 × spacing | ~62 % | saturated — `k` is now the binding cap |
+
+Past ~2 × spacing, raising `maxDist` costs distance tests and buys nothing;
+raise `k` instead. `describeScene` reports `linksDrawn` / `linksExpected` and
+`isolatedNodes`, so connectivity is checkable per spec rather than guessed —
+worth doing, since the seed moves these by several points either way.
+
+### Recipes
+
+**Parallax depth.** Three or four layers where size and speed rise together —
+scaling size alone reads as a size distribution, not as distance. `lanterns`'
+ladder, which the numbers above are drawn from: `radius [0.0005, 0.0013]` /
+`speed [0.0005, 0.002]` / `alpha [0.35, 1]` far, `radius [0.0014, 0.0028]` /
+`speed [0.006, 0.013]` / `alpha [0.5, 0.9]` mid, `radius [0.0032, 0.006]` /
+`speed [0.015, 0.026]` / `alpha [0.6, 1]` near. Note that alpha *narrows*
+toward the front rather than simply rising — the far layer spans the whole
+range because distance is what varies it; the near layer is uniformly present.
+
+**Glow stacking.** `soft: true` + `blend: "lighter"` + `alpha` around 0.5–0.9,
+with `pulse: { amp: 0.2, period: 3000 }` for breathing. Glow reads only against
+a dark plate — over a pale background use `"screen"`. Do not assume a soft orb
+covers what a hard disc of the same radius would: `perceiveScene` models the
+halo as reaching 2.4 × the radius, so a large soft additive layer measures far
+*more* coverage than its hard equivalent — ~2.5 × at `radius 0.05` — while a
+small one measures *less*, ~0.5 × at `radius 0.005`, because the faint outer
+halo falls under the per-cell visibility threshold. The crossover sits near
+`radius 0.01`. Re-measure after switching `soft` or `blend` rather than
+compensating by a rule of thumb.
+
+**Graph web.** `count 40–100`, `radius [0.002, 0.005]`, a slow `drift`
+(`speed [0.002, 0.007]`) so the topology keeps re-forming, and `links` with
+`k: 3`, `maxDist` at 1.5 × mean spacing (`0.3` for 40 entities, `0.2` for 100),
+`alpha: 0.15`, `width: 0.0005`. Link alpha wants to be much lower than the
+nodes' — at 0.15 the web is a suggestion, at 0.5 it is a diagram. Add
+`falloff: true` to fade edges toward the cutoff instead of popping them.
+
+**Focal pin.** One `count: 1` layer with `motion: { type: "static" }` and an
+explicit `position`, `radius` in the `0.05 – 0.15` band, over a field of
+`0.002`-scale entities. The size ratio between the two is what makes it read as
+a subject rather than the largest member of the crowd — an order of magnitude
+or more, which is the gap the ladder above shows between the field rungs and
+the focal ones.
+
 ## Determinism contract
 
 Entity construction consumes the seeded RNG in a **fixed draw order** per layer.
@@ -253,11 +663,127 @@ fixed-step warm-up (≤ 120 frames) from a full clear on any non-contiguous seek
 ## Steering
 
 Compiled specs accept live parameter changes via dot-paths —
-`layers.0.count`, `background.stops.0.color`, or `key`-based paths like
-`cpu-gauge.color` when layers declare `key`. Changes interpolate over a
+`layers.0.count`, `layers.0.sprite.color`, `background.stops.0.color`,
+`background.bands.2` (a field's band), or
+`key`-based paths like `cpu-gauge.count` / `cpu-gauge.sprite.color` when
+layers declare `key` (the key replaces `layers.N`; everything after it
+mirrors the JSON, so a sprite field keeps its `sprite.` segment). Changes interpolate over a
 control-track (`step` | `linear` | `smooth`). Placement/motion changes trigger
 a deterministic rebuild (same seed → same stream). See `@idle-screens/core`
 for `ControlTrack` and the idlescreens.com MCP `setParam` tool.
+
+Paths that are **paint** (colours, `alpha` inside a sprite's paint, layer
+`opacity` / `transform`, `textBlock.opacity`, `reveal.progress`, polygon
+`points`) glide; paths that are **structure** (`count`, `position`, `motion`,
+`size`, `layer.alpha`, …) rebuild — a deterministic re-seed, which reads as a
+pop. Prefer `opacity` over `alpha` and `transform` over `position` for
+anything that should move smoothly.
+
+## Timeline — keyframes on the scene's clock
+
+A SaverSpec can carry authored change on its **own** clock — the same clock
+its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
+
+```jsonc
+"timeline": {
+  "loop": true,             // optional; repeat every `duration` ms
+  "duration": 16000,        // required with loop; > the latest key's t
+  "keys": [                 // 1..256
+    { "t": 400,  "path": "sun.transform.y", "value": 0, "dur": 5200 },
+    { "t": 6000, "path": "title.opacity",   "value": 1, "dur": 1400, "ease": "linear" },
+    { "t": 11000, "path": "title.opacity",  "value": 0, "dur": 1200 }
+  ]
+}
+```
+
+- A key glides `path` from wherever it is at `t` to `value` over `dur` ms
+  (default 1000, the live-steer default; `0` is a cut), eased `smooth`
+  (default), `linear` or `step` (holds, then switches at the glide's end).
+  Keys address the same dot-paths as `setParam` — index or `key` form — and a
+  path must already exist on the spec (a key cannot add a field). The spec must
+  still validate with each key's value applied.
+- Overlapping keys on one path chain: the later glide starts from the earlier
+  one's in-flight value.
+- Without `loop`, a path holds the base spec's value before its first key and
+  its last key's value after it. With `loop`, the value depends only on
+  `t mod duration`, and **before a path's first key it has its last key's
+  value** — each lap is one closed cycle, lap 7 looks exactly like lap 1.
+- **Flash safety:** distinct key times on one path sit ≥ 200 ms apart
+  (across the loop wrap too). Keys on different paths may share a beat.
+  Keys are also checked **together**: two keys that are each valid can
+  combine past a floor (a `clock.rate` and a `pulse.period` share one), so
+  the validator resolves the scene at every key's start, end and glide
+  quarter-points and rejects it there.
+- A key on a **structural** path rebuilds the scene at that key — a pop, and
+  the validator warns `timeline-structural-key`. Animate paint: colours,
+  `opacity`, `transform`, polygon `points` (a whole equal-length array
+  lerps point by point), `reveal.progress`. A glide that runs past a loop's
+  lap warns `timeline-glide-overruns-lap`.
+- A timeline is **frame-addressable**: the scene at `t` is a pure function of
+  `(spec, t)`, so seeks, ghosting warm-ups and perception all resolve it at
+  their own time. `resolveTimelineAt(spec, t)` returns the plain spec at `t`
+  (the same object when there is no timeline).
+
+**Steering a scene with a timeline** — live steering layers on top, and the
+rule falls out of the scene itself, no mode flag:
+
+- a steer on a path **no key touches** is a sticky override — exactly today's
+  behaviour on an ambient scene;
+- a steer on a path the **timeline animates** holds until that path's next
+  key, then glides back to the timeline over that key's `dur` — from
+  wherever the steer's own glide had reached, if the key arrives mid-glide.
+
+A steer is rejected, as on any scene, when the scene it makes is invalid —
+judged with every live steer applied, now and at each key still ahead (a
+sticky steer outlives the keys).
+
+A channel's control track is not a timeline: its `t` is a wall-clock stamp the
+server writes, so it is never read as a schedule. Authored time lives here.
+
+Each steer is applied once per server stamp, so a host re-sending the whole
+track (idle-server does, on every steer) never re-arms a hold the timeline has
+taken back. A viewer that mounts later replays the stored track at its own
+mount: a steer on an animated path shows there until that path's next key
+after the mount, while screens that saw it live have already moved on. Until
+viewers share a clock (`sync: 'epoch'`, still unwired on the site), screens
+mounted at different times can briefly disagree on such a path.
+
+**One format for both use cases.** An ambient scene is a SaverSpec without a
+timeline — nothing about it changes. A timed piece (an ident, a film, a
+pre-roll) is a scene whose evolution is a timeline, and a sequence only where
+it genuinely cuts to a different set of layers.
+
+**Native:** tvOS ignores `timeline` and shows the base spec — so **author the
+base as the piece's rest state** (its end card), and a timed piece degrades
+to a valid ambient scene.
+
+## Groups — one handle for a multi-layer subject
+
+A subject drawn from several layers (a character's body, eyes and mouth; a
+record's grooves and label) can be moved, scaled and faded as one thing:
+
+```jsonc
+"groups": { "moon": { "transform": { "scale": 1, "y": 0 }, "opacity": 1 } },
+"layers": [ { "key": "face", "group": "moon", ... }, { "key": "eyes", "group": "moon", ... } ]
+```
+
+- A member paints through its group: the group's `transform` wraps the
+  layer's own (a point lands at *group(layer(p))*), and the group's `opacity`
+  multiplies the layer's. A group's transform always turns about the viewport
+  centre — it is a camera; `origin: "anchor"` is for a layer's own transform.
+- Up to 16 groups; names are 1–32 letters, digits, `-` or `_`, starting with a
+  letter. A layer's `group` must name one of them.
+- **Paint**, outside the structural signature: `setParam("groups.moon.opacity", 0)`,
+  a `timeline` key on `groups.moon.transform.scale`, or a sequence `morph`
+  glides the whole subject — one path instead of one per layer. A group present
+  on only one end of a morph glides from the identity (no transform, opacity 1).
+- Membership is fixed per scene: `layers.N.group` is not a steer or `timeline`
+  target. A sequence `morph` where a layer joins or leaves a group glides (the
+  end without the group paints it at the identity); moving a layer from one
+  group to another steps on the morph's first frame.
+
+**Native:** ignored ⇒ identity transform, opacity 1 — author the base so the
+subject reads without the group's paint.
 
 ## Seeing without eyes — the perception API
 
@@ -273,7 +799,22 @@ simplified (`screen` ≈ `lighter`), wrapped link segments use straight
 interpolation, and background drift is sampled at rest. These are documented
 trade-offs for a zero-dependency, renderer-free analysis tool.
 
+A `timeline` is resolved at the sample time `t` before anything is measured,
+so every output below describes the scene as it is at that moment of the
+piece. Layer `opacity` scales a layer's ink and weight; a layer `transform`
+moves and scales its positions and sizes (sprite rotation is not modelled).
+
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
+  **`t` is in milliseconds** (the MCP `previewScene` tool takes seconds and
+  converts; passing seconds here reads a self-typing block as one that never
+  finishes typing).
+- `perceiveSequenceFrame(seq, T, {viewport?, seed?, releasedBelow?})` — the
+  same bundle for one frame of a **sequence** at global time `T`: resolves the
+  segment (reported as `segment: {index, key, localT, held?}`) and, when the
+  sequence has a `bed`, composes the bed at `T` under the segment's ink at
+  `localT` with the segment's background dropped, as the renderer stacks
+  them — the grids add, dominance ranks both by raw weight with bed layers
+  keyed `bed:<key|index>`, and text/motion/form list bed layers first.
 - `luminanceGrid(spec, opts)` — an 80×48 luminance image of the composed frame
   (background gradient + entities + link lines, blend-aware), with coverage,
   visual-mass centroid, and **row/column deviation profiles** (1D transects of
@@ -293,10 +834,48 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
   line-salience boost so they aren't crushed by filled discs.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
+- `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
+  The luminance maps measure ink, not edges, so a layer whose sprites merged
+  into a silhouette and one that stayed a pile of discs are identical in every
+  other channel. Two independent facts, both reported (also on
+  `perceiveScene().form`): `overlap` is geometry — the mean fraction of an
+  entity's outline buried inside a sibling (shipped particle fields measure
+  ≤ 0.154; a packed silhouette measures 0.79–0.85; `null` for lines, glyphs and
+  text, where a merged silhouette is not a meaningful idea). `seamless` is
+  paint — whether those overlaps vanish or draw an internal edge, with
+  `seamCause` naming the field to change. `reads` combines them into `mass`,
+  `seamed` or `marks`.
 - `textSprites(spec, opts)` — the literal strings and rendered sizes of every
   text layer. Glyphs are invisible in the luminance maps, so this is the only
   way to confirm *what words* are on screen and how big. (Also on
   `perceiveScene().text`.)
+- `adviseSpec(spec)` — non-blocking advisories (a layer whose paint opacity —
+  its own × its group's — is 0 in the base scene and at every key boundary of
+  its `timeline` never shows, so it is not judged and its entities do not count
+  toward `dense-scene`; coverage is weighed by paint opacity) (also on
+  `perceiveScene().advisories`). Two of them are **spatial**, for static text:
+  `text-off-screen` (a text/textBlock box crosses the viewport edge by more
+  than 1%) and `text-overlap` (two static text layers share more than 10% of
+  the smaller box; it carries both boxes as `boxes: [{x, y, w, h}]` in
+  viewport fractions so the fix needs no re-derivation). Boxes come from the
+  same character-class width table the textBlock line-breaker uses, so they
+  are estimates of the renderer's own layout — a caption that fails these
+  will look wrong on the wall; one that passes may still sit a few px off.
+  Two more are **opt-in** through the text sprite's `role: "read"` (see the
+  `textBlock` sprite): `text-legibility` (WCAG ratio below 4.5:1 against the
+  background at the box centre or under the brightest additive layer that can
+  sit beneath the line) and `text-safe-area` (the box within 5 % of an edge,
+  with its box in `boxes`). Undeclared text is never measured for either.
+  `overlap-seams` catches the trap the other channels are blind to: a layer
+  whose entities bury each other (so it was drawn as one shape) but whose paint
+  settings make every overlap visible. It is gated to stay off deliberate
+  washes — it needs at least 6 entities and a mean base alpha of 0.45, and
+  never fires under `blend: lighter` / `screen`. No shipped example trips it.
+  The two density advisories read the spec's declared `density` first:
+  `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
+  under `"dense"`, and `density-mismatch` fires instead when the measured
+  coverage contradicts the declaration (a "sparse" scene covering more than
+  2 % of the frame, a "dense" one that would have read as empty).
 - `diffScenes(a, b, opts)` — **relative sight**: coverage/luminance deltas,
   visual-balance shift, 3×3 region deltas, dominance-rank movement, and
   advisory codes added/removed. Agents judge "is B better than A" far more
@@ -325,6 +904,9 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
   "label": "My Sequence",
   "seed": 42,           // optional; forwarded to children without their own seed
   "loop": false,
+  "sync": "mount",      // optional; 'mount' (default) or 'epoch' — see **Sync**
+  "bed": { /* SaverSpec */ },  // optional; the ground under every segment — see **Bed**
+  "finish": { "grain": 0.4 },  // optional; one print pass over the composed frame — see `finish` above
   "segments": [
     { "key": "intro",  "scene": { /* SaverSpec */ }, "duration": 5000 },
     { "key": "main",   "scene": { /* SaverSpec */ }, "duration": 10000, "advance": "auto" },
@@ -337,35 +919,237 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
 be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
 the final segment may omit duration (holds indefinitely).
 
-**Advance mode:** `auto` (default), `input`, or `either`. Validated but not
-wired to runtime behavior — timer/input drivers are planned for a follow-up.
+**Advance mode:** `auto` (default) and `either` advance on the timer. `input`
+makes a timed segment **hold** at the end of its `duration` until a
+`sequence.segment` steer releases it — the clicker (see Steering below). The
+held scene keeps animating (its `localT` keeps growing), so a slide waiting for
+the presenter never freezes. A durationless final segment holds regardless of
+`advance`.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
-`{ type: 'morph', dur: number }` smoothly interpolates paint properties
-(colors, opacity values) over `dur` ms when crossing into the next segment.
-Morph requires structurally identical adjacent segments (same
-`structuralSignature`); if they differ, the engine falls back to cut and the
-validator emits a `morph-structural-mismatch` warning. During a morph, entity
-placement inherits the outgoing segment's seed — the incoming segment's own
-seed is unused. `dur` must be between 200 and 5000 ms.
+`{ type: 'morph', dur: number, text?: 'step' | 'crossfade' | 'dip' }` interpolates
+**numbers and hex colours** (colour, alpha, pulse, `reveal.progress`, …) over
+`dur` ms when crossing into the next segment; **every other value — strings,
+and `textBlock.text` above all — switches on the first morph frame** under
+the default `text: 'step'`. A caption change therefore does not cross-fade
+under a plain morph: fade text via its colour (glide it into the background
+and back), via `reveal.progress` — or declare **`text: 'crossfade'`**, which
+draws each `text` / `textBlock` layer whose string(s) differ between the two
+segments **twice** for the window: the outgoing words at alpha `1 − k` under
+the incoming at `k`, where `k` is the morph's eased progress, both in the
+lerped frame's paint (colour, `opacity` and layer alpha glide as usual). Only
+the differing text layers cost a second draw, and only for `dur`; layers
+whose words match, and every non-text layer, are untouched. It is an
+internal paint pass, not a spec field — no `opacity` appears on the `text`
+sprite. **`text: 'dip'`** draws the same two passes one after the other
+instead: the outgoing words fade out over the first half of the morph
+(alpha `1 − 2k`) and the incoming fade in over the second (`2k − 1`), so two
+captions never overlap — the right choice when the words sit in the same
+place. `text` is a morph option only (a `fade` already cross-fades whole
+frames; a `cut` has no window) and the validator rejects it elsewhere.
+**Default `step` is today's behaviour byte for byte** — the sequence
+baseline pins it — and a flip to `crossfade` by default would be a major
+change, with the baseline regenerated. **Native:** tvOS **steps** the words (it
+ignores `text`) but already cross-fades whole frames on every segment
+change using the transition's `dur`, so the result on the Apple TV is
+close to the web's. Morph requires structurally
+identical adjacent segments (same `structuralSignature`); if they differ, the
+engine falls back to cut and the validator emits a `morph-structural-mismatch`
+warning. When the segments are structural twins whose only differences are
+values morph steps (a text-only change), the morph runs but every frame of it
+shows the incoming segment — it reads as a cut — and the validator emits a
+`morph-nothing-morphable` warning (never an error; stored sequences stay
+valid) — unless the transition declared `text: 'crossfade'` or `'dip'` and the words
+differ, in which case the words are the thing that morphs and the warning is
+withheld. During a morph, entity placement inherits the outgoing segment's
+seed — the incoming segment's own seed is unused. `dur` must be between 200
+and 5000 ms.
+
+`{ type: 'fade', dur: number }` is the general cross-fade, for segments that
+have nothing in common: the outgoing segment stays alive on a canvas of its
+own for `dur` ms and is composited over the incoming one at
+`1 − easeSmooth(localT / dur)`, so both keep animating through the window. The
+outgoing segment renders at `duration + localT` — it continues rather than
+freezing (and if it was an `advance: 'input'` hold, it resumes from its
+`duration`, not from wherever the hold had reached). A fade is always from the
+previous segment in the list; under `loop: true` the **last** segment's `fade`
+is the wrap's transition into segment 0. It works through the clicker too — a
+`sequence.segment` steer lands at `localT` 0 of the fade. Same `dur` bounds
+as morph, no structural requirement, and a fade only smooths luminance, so the
+flash gate is untouched; it is the remedy for a `boundary-luminance-jump`
+advisory. **Tier gate:** two live segments for `dur` is over the budget of the
+lowest tiers, so a host on the `basic` (canvas2d only) or `minimal` capability
+tier — passed as `capabilityTier` on the `SequenceMountContext`, the tier
+`computeTier` from `@idle-screens/capabilities` reports — renders `fade` as
+`cut`; absent ⇒ fade enabled. `adviseSequence` says so once per sequence with
+the informational `fade-degrades-on-low-tier`. **Native:** tvOS already
+cross-fades on every segment change using the transition's `dur`, so `fade`
+matches the native player rather than diverging from it; native reads
+`fade.dur` where it reads the morph `dur` today.
+
+**Wrap morph:** under `loop: true` a morph declared on the **last** segment
+is ignored at the wrap — the lap cuts back to segment 0, and every stored
+sequence expects that. `wrapMorph: true` on the envelope honours it: the lap
+morphs back into segment 0 (from the second lap on; the first mount at
+`T = 0` is not a wrap). It takes effect only when the whole lap is **one
+morph chain** — every segment morphs into the next and the last is a
+structural twin of the first — so every lap keeps the chain root's seed and
+entity placement; otherwise it is still a cut and the validator warns
+`wrap-morph-inactive` with the reason. With it, a looping ident is a closed
+cycle of poses. A clicker jump to segment 0 (a `sequence.segment` steer)
+still cuts — it arrives from wherever the presenter was, not from the last
+segment. **Native:** tvOS cross-fades the wrap like any segment change.
+
+**Timelines in segments:** a segment's scene may carry a `timeline`; it runs
+on the segment's `localT`. A morph resolves each side on its own clock — the
+outgoing segment at `duration + localT`, the incoming at `localT` — and lerps
+the results, so a looping timeline keeps cycling through the morph. The
+retained steers follow the steering rule on both ends (a steer the outgoing
+timeline has already taken back stays taken back), and a layer `opacity` or
+`transform` present on only one end glides from its identity (opacity 1,
+no transform) instead of stepping.
 
 **Time mapping:** global clock `T` maps to `(segmentIndex, localT)` via prefix
 sums of durations. Half-open segments: `[start, start+duration)`. With
 `loop: true`, `T` wraps at the sum of all durations (loop is incompatible with
-a durationless final segment).
+a durationless final segment). An unreleased `advance: 'input'` hold blocks the
+wrap; after a wrap every hold is armed again.
+
+**Sync:** `sync` names what the sequence clock is anchored to. `mount`
+(the default, and today's behaviour for every stored sequence) starts `T` at
+0 when the viewer mounts — every joiner sees segment 0, which is what makes a
+pre-roll a pre-roll. `epoch` lets the host seed the clock: the viewer passes
+`sequenceBaseT` (ms already elapsed on the shared clock — idlescreens.com
+passes `Date.now() − scene.epoch`) on the mount context
+(`SequenceMountContext`, a `SaverContext` plus that one field), and the
+instance starts at that `T` instead of 0, so every screen in a room resolves
+the same segment. The trade-off: a viewer joining an `epoch` sequence lands
+**mid-loop**, wherever the room is; `mount` keeps pre-roll semantics. Holds
+are the same under both — `advance: 'input'` is armed for every viewer, so a
+late joiner whose seeded clock is already past an unreleased hold lands **on**
+the held segment (still animating), not past it, and the clicker releases it
+from there. `epoch` without a `sequenceBaseT` starts at 0 (a host that does
+not pass the hint loses nothing). **Native clients that anchor at their own
+mount behave as `mount`** until they read the field and seed from the channel
+epoch. The default is never flipped: pre-roll depends on `mount`.
+
+**Bed:** `bed` is one SaverSpec drawn **under every segment on the
+sequence's global clock** — the ground that does not reset. Every segment still
+starts at its own `localT` 0 (builds replay, `emit` phases and `reveal.speed`
+key off segment time exactly as before), but the bed's `T` runs from mount (or
+from `sequenceBaseT` under `sync: 'epoch'`) straight through every boundary,
+and a `sequence.segment` steer displaces the *segments'* clock only — the
+clicker rewinds a slide, never the bed. That is the fix for the boundary
+rewind every ambient reviewer flagged: put the motion that must be continuous
+(the drifting field, the runner-orb, the slow gradient) in the bed and the
+slide content in the segments. Rules:
+
+- **The bed owns the ground.** Segments render over it *transparently*: a
+  segment's `background` is never painted while a bed exists (the validator
+  warns `bed-hides-segment-background` on each segment that declares one), and
+  a segment's `ghosting` is ignored (a smear needs an opaque ground to decay
+  into; the bed may declare its own `ghosting`, and it works as usual). A
+  segment's ink composites over the bed with its own `blend`/`alpha`.
+- **Clock:** bed at `T`, segment at `localT`, in the same frame. Under
+  `loop: true` the bed does not wrap with the segments — it keeps counting.
+- **Steering:** `bed.<path>` routes to the bed with the prefix stripped
+  (`setParam("bed.field.sprite.color", …)`, `bed.ghosting`, …);
+  `sequenceSteerablePaths(seq)` lists them. Without a bed, `bed.*` reaches the
+  segments unchanged, so a layer keyed `bed` keeps working. Bed steers are
+  not part of the retained segment track — the bed is never re-created.
+- **Seed:** the bed uses its own `seed`, else `seq.seed + 24` (past every
+  segment's `seq.seed + index`, so it never shares a stream with segment 0 and
+  adding a segment does not re-seat it).
+- **Perf accounting:** the bed is live alongside whichever segment is up, so
+  its entities count **together with the largest segment's** toward the 800
+  cap (`validateSequence` errors on `bed` when the sum is over) and toward the
+  manifest's `costTier`. A `fade` over a bed puts both segments on canvases of
+  their own for `dur` (incoming at k, outgoing at 1 − k, both over the bed):
+  three live instances on the lowest tier, which is why fade is tier-gated.
+- **Perception:** `perceiveSequenceFrame(seq, T)` composes bed + segment (see
+  the perception API above). Bed and segments are assumed to share `units` /
+  `referenceViewport`.
+- **Native:** tvOS **ignores `bed` initially** and renders segments with their
+  own backgrounds, exactly as it does today — so a sequence authored with a bed
+  should still carry sensible segment backgrounds until the native player
+  draws the bed (a second compiled scene drawn first, which its layer model
+  already supports). Web viewers hide those backgrounds; native shows them.
+- **Not a default.** The "cheap form" — rendering a morph chain's root child at
+  `T − segmentStart(chainRoot)` so twins keep one continuous clock — is **not**
+  implemented and never will be as a default: stored morph-chained sequences
+  pin their per-segment `t = 0` frames (`sequence-baseline.test.ts`). A bed is
+  the supported way to keep motion continuous across segments; if a per-segment
+  `timebase: 'sequence'` is ever wanted it will be opt-in, after this.
+
+Absent `bed` ⇒ the code path is byte for byte what it was (the sequence
+baseline proves it): every segment paints its own ground.
 
 **Compilation:** `compileSequence()` returns an ordinary `SaverPlugin` — the
-viewer needs zero changes. All children share a single canvas; only the active
-segment's `SpecInstance` is alive at any time. `workerReady` is `false` (the
-worker compile-hook does not dispatch sequences).
+viewer needs zero changes (a host that wants `sync: 'epoch'` passes a
+`SequenceMountContext`; a plain `SaverContext` still mounts). All children
+share a single canvas; only the active segment's `SpecInstance` is alive at
+any time — plus the `bed`'s, when one is declared, and for the `dur` of a
+`fade` the outgoing segment on an offscreen canvas of its own. `workerReady`
+is `false` (the worker compile-hook does not dispatch sequences).
 
 **Steering:** segment switching uses the `sequence.segment` delta path via
-`applyTrack`. The `SequenceInstance` intercepts this path before delegation.
-Remaining deltas are forwarded to the active child's `applyTrack`.
+`applyTrack` (`setParam("sequence.segment", n)` over MCP). The
+`SequenceInstance` intercepts this path before delegation, and `bed.<path>`
+deltas go to the bed (see **Bed**); every other delta
+is forwarded to the active segment's `applyTrack` **and retained** (last wins
+per path, merged across calls). Segment instances are created lazily and
+disposed at each boundary, so the retained set is re-applied to every segment
+as it comes up: **a steer persists across segment changes and lands on the
+segment that owns the path.** `bars.sprite.values` steered while the title
+slide is up takes effect the moment the chart slide appears (by timer or by
+clicker), and stays if the show leaves and returns; on segments without a
+`bars` key the delta is simply a no-op, as is any delta whose value does not
+validate on that particular segment (the rest of the set still applies). A
+morph's two lerp endpoints carry the retained set too, so a steered colour
+rides through the glide instead of vanishing for `dur` — but a steer that
+lands while the morph itself is in progress takes effect immediately rather
+than gliding over its own `dur`, since the morph's cross-fade is already the
+active transition on that child. Pinned by `sequence.test.ts` →
+"SequenceInstance — retained track".
+
+The steer **moves the clock, not the frame**: it displaces the timeline so the
+target segment starts at its own `localT` 0 (its `life.enter` build replays)
+and then runs on the timer from there — the next animation frame resolves to
+the same segment instead of snapping back to the wall clock. A steer to
+segment `n` also counts as the presenter clicking past every `advance: 'input'`
+hold before `n`; holds at and after `n` stay armed, so steering backwards
+re-arms the ones in between. This is the whole clicker: a deck is a sequence
+whose slides carry `advance: 'input'`, and "next" is one `setParam`. Pinned by
+`sequence.test.ts` → "sequence.segment steering is sticky" and
+"advance: 'input' holds until released".
 
 **Seed:** `seq.seed` is forwarded to children that lack a scene-level seed
 (offset by segment index for independence). Children with their own seed are
 unaffected.
+
+**Hot-swapping a republished sequence:** the instance `compileSequence().mount()`
+returns is a `SequenceSaverInstance` with `hotSwapSequence(next): boolean`
+(feature-detect with `hasHotSwapSequence(inst)`; an older engine's instance
+has no such method). When the republished sequence is
+`sequenceSwapCompatible` with the running one — the same number of
+segments, every segment's scene a structural twin (`structuralSignature`) of
+its counterpart with the same render seed, a `bed` on both sides or neither
+(twins, same seed), the same `loop` and `sync`, and the same `duration`,
+`advance` and `transition` on every segment — the swap happens in place:
+every live segment child and the bed take their new scene, the clock, the
+active segment, every released hold and the retained track stay exactly
+where they were (steered paint is re-applied on top of the republished
+scene), and the next frame resolves to the same `(segment, localT)` with
+every entity where it was a frame ago. Paint is free: words, colours,
+`background`, ids, labels, segment keys. A structural edit (a layer added,
+a count or motion changed, a layer's `alpha` range — baked per entity at
+build time, like `size`), a timing edit (a duration — it would move every
+later boundary under a clock that keeps running — an `advance`, a
+transition's type or `dur`), a seed, `loop` or `sync` change, or a bed added
+or removed returns `false` and changes nothing; the host remounts then, as
+it always has. idle-server's viewer wires this so a mid-talk caption fix does
+not send every screen in the room back to segment 0. Pinned by
+`sequence.test.ts` → "SequenceInstance — hotSwapSequence".
 
 ## Examples
 
@@ -375,6 +1159,13 @@ Shipped working specs (also exposed as `EXAMPLE_SPECS` /
 showcases — `aurora` (wander + coherence + ghosting + pulse.wave),
 `warp-tunnel` (warp + streaks), `polygons` (chain links + heavy ghosting),
 `matrix-rain` (grid layout + glyph cycle + ghosting), and `procession`
-(path + layer-parented orbit + life staging + ring/rect sprites). See
-[`src/examples/`](./src/examples/). The dashboard exercises the static/HUD
-subset at scale (34 layers of keyed, positioned text).
+(path + layer-parented orbit + life staging + ring/rect sprites);
+`nostalghia-candle` and `haiku` (restraint and text); and the 2026-09 trio —
+`pings` (emit + grow + ease: one event at a time), `facets` (polygon, stroke
+and feathered rect) and `relay-board` (list layout + bar: a chart in five
+layers); and `lobby-talk` (one screen of a quarter-in-review, every text
+layer `role: "read"`, zero advisories — readable copy over additive
+atmosphere); and `thermal-field` (a `field` background in six riso inks,
+`quantize: 6`, warped and drifting, under a handful of screened motes, with
+a grain-and-dither `finish` — the ground is the piece and the paper shows). See [`src/examples/`](./src/examples/). The dashboard exercises the
+static/HUD subset at scale (34 layers of keyed, positioned text).

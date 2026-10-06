@@ -35,6 +35,9 @@ actor GalleryClient {
             throw GalleryError.invalidResponse
         }
         try? data.write(to: cacheFileURL(), options: .atomic)
+        // Opportunistic cleanup of the pre-`v2` blob this version supersedes —
+        // a missing file or a failed removal doesn't affect the refresh.
+        try? FileManager.default.removeItem(at: legacyCacheFileURL())
         return channels
     }
 
@@ -77,7 +80,24 @@ actor GalleryClient {
     }
 
     /// Cache file is keyed by host so localhost dev and prod don't mix.
+    ///
+    /// The `v2` bump is deliberate: `PublicChannel` gained `isProtected` and
+    /// `access`, and a cache blob written before that ships them as nil —
+    /// which the Remixable filter and the private-channel gate both read as
+    /// "safe to show". Versioning the filename makes a pre-upgrade cache a
+    /// clean miss instead of a silent, wrongly-permissive decode. Bump this
+    /// again if `PublicChannel` ever gains another field whose absence must
+    /// not be read as a default.
     private func cacheFileURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("channels-v2-\(host).json")
+    }
+
+    /// The pre-`v2` cache blob this version supersedes. Existing installs
+    /// wrote this filename before the bump above and it is now a dead file —
+    /// removed opportunistically once a fresh `v2` write succeeds.
+    private func legacyCacheFileURL() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"
         return dir.appendingPathComponent("channels-\(host).json")
