@@ -43,6 +43,29 @@ fn read_device_tree(node: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The best backend this box can realistically *drive*, when that is lower than
+/// what the browser will truthfully report it *supports*.
+///
+/// The host page cannot work this out for itself: Mesa V3D advertises WebGL2 on
+/// a Raspberry Pi and is not lying — it simply cannot drive three.js at
+/// fullscreen. So the native side, which knows what hardware it is on, declares
+/// a ceiling and the page clamps its capability tier to it (`?maxBackend=`).
+///
+/// None means "no ceiling, trust what the browser reports".
+pub fn backend_ceiling() -> Option<&'static str> {
+    ceiling_for(&read_device_tree("model"), &read_device_tree("compatible"))
+}
+
+/// Pure half of [`backend_ceiling`], so the policy is testable without a Pi.
+fn ceiling_for(model: &str, compatible: &str) -> Option<&'static str> {
+    if is_broadcom_v3d(model, compatible) {
+        // Canvas2D is comfortable on a Pi 4/5; WebGL savers are not.
+        Some("canvas2d")
+    } else {
+        None
+    }
+}
+
 /// Pure, so it unit-tests without a Pi. `compatible` is the reliable signal
 /// ("raspberrypi,5-model-b brcm,bcm2712"); matching the SoC prefix `brcm,bcm2`
 /// covers Pi 4 / CM4 / Pi 5. `model` is the fallback for boards that omit the
@@ -103,6 +126,27 @@ mod tests {
     fn other_arm_boards_are_not_pis() {
         assert!(!is_broadcom_v3d("Rockchip RK3588 EVB", "rockchip,rk3588"));
         assert!(!is_broadcom_v3d("NVIDIA Jetson Orin", "nvidia,p3737-0000"));
+    }
+
+    #[test]
+    fn a_pi_gets_a_canvas2d_ceiling() {
+        // V3D advertises WebGL2 honestly; support is not capability, so the
+        // native side has to tell the page what it can really drive.
+        assert_eq!(
+            ceiling_for(
+                "Raspberry Pi 5 Model B Rev 1.0",
+                "raspberrypi,5-model-b brcm,bcm2712"
+            ),
+            Some("canvas2d")
+        );
+    }
+
+    #[test]
+    fn everything_else_gets_no_ceiling() {
+        // Absent /proc/device-tree (x86) and on other arm boards, trust the
+        // browser — a ceiling we cannot justify would cost savers for nothing.
+        assert_eq!(ceiling_for("", ""), None);
+        assert_eq!(ceiling_for("Rockchip RK3588 EVB", "rockchip,rk3588"), None);
     }
 
     #[test]

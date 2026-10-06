@@ -133,6 +133,12 @@ pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -
         // Overlay uses KeyboardMode::None — keys never reach the webview.
         url.push_str("&browse=0");
     }
+    if let Some(ceiling) = crate::platform::backend_ceiling() {
+        // Tell the page what this box can actually drive. Without it a Pi is
+        // offered WebGL savers it renders at a crawl, because the browser
+        // reports WebGL2 support honestly and support is not capability.
+        url.push_str(&format!("&maxBackend={ceiling}"));
+    }
     url
 }
 
