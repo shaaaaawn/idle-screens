@@ -94,6 +94,7 @@ mod tests {
             web_root_override: None,
             seed: None,
             dmabuf,
+            backend_ceiling: None,
             update_on_launch: false,
             update_base_url: String::new(),
             app_id: crate::config::DEFAULT_APP_ID.to_string(),

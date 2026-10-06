@@ -163,10 +163,18 @@ const watchdog = createFrameWatchdog({
   onLevel: (level, reason) => {
     console.warn(`frame watchdog: ${reason}`);
     const here = costRank(controller.currentId());
-    // Cheapest first, and strictly cheaper than what is on screen now.
-    const cheaper = [...ALL_SAVERS]
-      .sort((a, b) => costRank(a.manifest.id) - costRank(b.manifest.id))
-      .find((sv) => costRank(sv.manifest.id) < here);
+    // One rung down, not straight to the floor. Sorting ascending and taking the
+    // first cheaper saver always picked the absolute cheapest, which collapsed
+    // the three levels into two — observed as sakura -> bouncing-ball in a
+    // single step. Descending gives the *next* cheaper saver; only the floor
+    // level goes all the way down.
+    const byCostDesc = [...ALL_SAVERS].sort(
+      (a, b) => costRank(b.manifest.id) - costRank(a.manifest.id),
+    );
+    const cheaper =
+      level === 'cheapest'
+        ? byCostDesc[byCostDesc.length - 1]
+        : byCostDesc.find((sv) => costRank(sv.manifest.id) < here);
 
     if (level === 'cheapest' && cycleTimer) {
       clearInterval(cycleTimer);
@@ -179,6 +187,16 @@ const watchdog = createFrameWatchdog({
 });
 attachFrameWatchdog(watchdog);
 
+if (pinned && saverIndex(pinned, ALL_SAVERS) < 0) {
+  // Without this the -1 became index 0 and a different saver appeared with no
+  // explanation — which reads as the pin being ignored rather than refused.
+  const why = gate.blocked.find((b) => b.id === pinned);
+  console.warn(
+    why
+      ? `pinned saver "${pinned}" is not playable here (${why.reasons.join('; ')}); using another`
+      : `pinned saver "${pinned}" is not in this build; using another`,
+  );
+}
 const start = pinned ? Math.max(0, saverIndex(pinned, ALL_SAVERS)) : Math.floor(Math.random() * ALL_SAVERS.length);
 void controller
   .mountSaver(start, true, { skipOnFail: !pinned })

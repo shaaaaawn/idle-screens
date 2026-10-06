@@ -133,10 +133,11 @@ pub fn bundled_url_for(root: &std::path::Path, seed: u32, settings: &Settings) -
         // Overlay uses KeyboardMode::None — keys never reach the webview.
         url.push_str("&browse=0");
     }
-    if let Some(ceiling) = crate::platform::backend_ceiling() {
-        // Tell the page what this box can actually drive. Without it a Pi is
-        // offered WebGL savers it renders at a crawl, because the browser
-        // reports WebGL2 support honestly and support is not capability.
+    if let Some(ceiling) = &settings.backend_ceiling {
+        // Tell the page what this box can actually drive: the browser reports
+        // WebGL2 support honestly on a Pi, and support is not capability.
+        // Decided in Settings::load, so this function stays pure and its
+        // exact-URL tests mean the same thing on every machine.
         url.push_str(&format!("&maxBackend={ceiling}"));
     }
     url
@@ -189,10 +190,26 @@ mod tests {
             web_root_override: None,
             seed: None,
             dmabuf: DmabufPolicy::Auto,
+            backend_ceiling: None,
             update_on_launch: false,
             update_base_url: String::new(),
             app_id: crate::config::DEFAULT_APP_ID.to_string(),
         }
+    }
+
+    #[test]
+    fn bundled_url_carries_the_backend_ceiling_when_set() {
+        // The ceiling must come from Settings, not from probing hardware in
+        // here: when this function read /proc/device-tree directly, the
+        // exact-URL tests below passed on an ACPI arm64 CI runner and would
+        // have failed on an actual Raspberry Pi.
+        let mut s = settings();
+        s.backend_ceiling = Some("canvas2d".to_string());
+        let url = bundled_url_for(std::path::Path::new("/opt/web"), 42, &s);
+        assert_eq!(
+            url,
+            "file:///opt/web/index.html?seed=42&browse=0&maxBackend=canvas2d"
+        );
     }
 
     #[test]
