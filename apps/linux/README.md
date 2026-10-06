@@ -357,9 +357,21 @@ the NVIDIA proprietary driver gets. If your Pi actually renders more smoothly
 with it on, set `[webkit] disable_dmabuf = "never"`; the launch log names which
 branch fired.
 
-**Content note:** the Pi reports WebGL2, so it is offered savers it cannot really
-run — a metaquarium channel will crawl or fall back to a CSS placeholder. Point a
-Pi at schema-scene channels, which render on 2D canvas.
+**Saver gating.** This is handled for you in bundled mode. Mesa V3D advertises
+WebGL2 on a Pi and is not lying — it just cannot drive three.js at fullscreen —
+so the app detects Broadcom V3D and tells the host page
+`?maxBackend=canvas2d`. The page then drops savers it cannot afford (on a Pi:
+metaquarium plus the `medium`-cost scenes) and logs each exclusion with a reason.
+A frame watchdog also steps down to a cheaper saver if frames stay worse than
+30fps, so a heavy *channel* scene degrades instead of becoming a slideshow.
+
+Override with `IDLE_SCREENS_WEB`-style URL params if you are driving the page
+directly; there is no config key, because the detection is not a preference.
+
+**Channel mode still lacks this.** The hosted viewer at idlescreens.com is
+idle-server's, not ours, so a metaquarium *channel* on a Pi will still crawl or
+fall back to a CSS placeholder. Point a Pi at schema-scene channels, which render
+on 2D canvas.
 
 ## Configuration
 

@@ -157,6 +157,20 @@ app isn't running — relaunch with `open dist/IdleScreens.app`.
   (Only on Power / Pause During Fullscreen / Active Hours). See **Diagnostics…**.
 - **See what's going on**: `log stream --predicate 'process == "IdleScreens"'`.
 
+**If a saver runs badly.** A frame watchdog watches real frame times and steps
+down to a cheaper saver when they stay worse than 30fps, rather than leaving a
+slideshow on screen; it logs what it did and why. No Mac hardware is penalised
+up front — every Mac running macOS 13 drives Canvas2D comfortably — but if you
+have a machine that struggles, you can cap what the page will attempt:
+
+```bash
+defaults write com.idlescreens.mac web.maxBackend canvas2d   # or css
+defaults delete com.idlescreens.mac web.maxBackend           # back to automatic
+```
+
+The same mechanism is what keeps a Raspberry Pi from being offered WebGL savers
+in the Linux app; there it is detected rather than configured.
+
 **Saver updates.** "Check for Saver Updates" pulls a newer bundle from
 `idlescreens.com/mac/` (served by idle-server — see below) and caches it under
 Application Support; the shipped bundle is the offline fallback.
