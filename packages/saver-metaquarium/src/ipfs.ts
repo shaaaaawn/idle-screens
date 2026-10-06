@@ -1,12 +1,17 @@
-/** Ordered gateway candidates. dweb.link stays primary (flaky but usually
- *  fast); our own node at hermosaai.com is second — flip it to the front
- *  once the tunnel is verified serving /ipfs/ (it timed out on the
- *  2026-08-15 check); ipfs.io is the last resort. Each is tried in order
- *  with a per-gateway timeout by the tank's template loader (MQ21). */
+/** Ordered gateway candidates, each tried in turn with its own timeout by the
+ *  tank's template loader (MQ21) and the lo-fi tank's icon loader.
+ *
+ *  Our own mirror comes first: every minted fish's model and icon, byte for
+ *  byte, in R2 at the same `ipfs/<cid>/<file>` path a gateway serves, so an
+ *  `ipfs://` URL resolves to it with no lookup. The public gateways the tank
+ *  used to lean on — dweb.link and ipfs.io — retired on 2026-09-21 (they
+ *  answer 403/429 now), and every minted fish became a placeholder blob. The
+ *  two that still serve stay behind the mirror as a fallback for any CID it
+ *  does not hold; both rate-limit under load, so neither can be first. */
 export const IPFS_GATEWAYS = [
-  'https://dweb.link/ipfs/',
-  'https://hermosaai.com/ipfs/',
-  'https://ipfs.io/ipfs/',
+  'https://assets.idlescreens.com/ipfs/',
+  'https://gateway.pinata.cloud/ipfs/',
+  'https://ipfs.filebase.io/ipfs/',
 ];
 
 export function resolveIpfsUrl(url: string): string {
