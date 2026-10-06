@@ -7,6 +7,7 @@
     "build": "node build.mjs"
   },
   "dependencies": {
+    "@idle-screens/capabilities": "workspace:*",
     "@idle-screens/core": "workspace:*",
     "@idle-screens/saver-metaquarium": "workspace:*",
     "@idle-screens/savers-classic": "workspace:*",

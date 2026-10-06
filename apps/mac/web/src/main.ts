@@ -4,15 +4,48 @@
  * saver is pinned via ?saver=<id>. The Swift shell can also steer it through
  * window.__idleScreensMac (setSaver / next / setPaused).
  */
-import { SAVERS as ALL_SAVERS } from './savers';
+import { SAVERS as REGISTERED_SAVERS } from './savers';
 import { createMacHostController, saverIndex } from './host-controller';
 import { renderActivity } from './activity';
+import {
+  clampCapabilities,
+  gateSavers,
+  isBackendName,
+  probeCapabilitiesSync,
+} from './capability-ladder';
+import { attachFrameWatchdog, createFrameWatchdog } from './frame-watchdog';
 
 const params = new URLSearchParams(location.search);
 const pinned = params.get('saver');
 const cycleMinutes = Number(params.get('cycle') ?? '10');
 const baseSeed = Number(params.get('seed') ?? Date.now()) >>> 0;
 const brightness = Math.max(0.1, Math.min(1, Number(params.get('brightness') ?? '1')));
+
+// Capability ladder. `?maxBackend=` is the native host telling us what this box
+// can really drive — feature detection cannot see a *weak* GPU, only a missing
+// one, and a Raspberry Pi answers "yes" to WebGL2 while rendering three.js at a
+// crawl. Linux derives it from /proc/device-tree (Broadcom V3D), macOS from
+// hw.model. Absent the parameter, nothing is clamped and behaviour is unchanged.
+const ceilingParam = params.get('maxBackend');
+const ceiling = ceilingParam && isBackendName(ceilingParam) ? ceilingParam : null;
+if (ceilingParam && !ceiling) console.warn(`ignoring unknown ?maxBackend=${ceilingParam}`);
+
+const gate = gateSavers(REGISTERED_SAVERS, clampCapabilities(probeCapabilitiesSync(), ceiling));
+const ALL_SAVERS = gate.playable;
+if (gate.blocked.length > 0) {
+  console.info(
+    `capability tier ${gate.tier} (budget ${gate.budget}` +
+      `${ceiling ? `, host ceiling ${ceiling}` : ''}): ` +
+      `${ALL_SAVERS.length}/${REGISTERED_SAVERS.length} savers playable`,
+  );
+  for (const b of gate.blocked) console.info(`  skipping ${b.id}: ${b.reasons.join('; ')}`);
+}
+if (gate.fallback) {
+  // Gating would have left an empty list. Rendering something badly beats
+  // rendering nothing, so the cheapest saver is kept and the watchdog below is
+  // what stops it from being a slideshow.
+  console.warn('no saver fits this device; keeping the cheapest and relying on step-down');
+}
 
 const host = document.getElementById('host')!;
 if (brightness < 1) host.style.filter = `brightness(${brightness})`;
@@ -116,6 +149,39 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// Runtime step-down. Preflight gating works from what the device claims; this
+// works from what it actually delivers — a channel can publish an arbitrarily
+// heavy scene, and a Pi reports WebGL2 truthfully while rendering it at 4fps.
+// On sustained overrun, move to a cheaper saver; at the floor, stop cycling so
+// we cannot rotate back into something heavy.
+const costRank = (id: string): number =>
+  ['idle', 'low', 'medium', 'high'].indexOf(
+    ALL_SAVERS.find((sv) => sv.manifest.id === id)?.manifest.costTier ?? 'idle',
+  );
+
+const watchdog = createFrameWatchdog({
+  onLevel: (level, reason) => {
+    console.warn(`frame watchdog: ${reason}`);
+    const here = costRank(controller.currentId());
+    // Cheapest first, and strictly cheaper than what is on screen now.
+    const cheaper = [...ALL_SAVERS]
+      .sort((a, b) => costRank(a.manifest.id) - costRank(b.manifest.id))
+      .find((sv) => costRank(sv.manifest.id) < here);
+
+    if (level === 'cheapest' && cycleTimer) {
+      clearInterval(cycleTimer);
+      cycleTimer = null;
+    }
+    if (!cheaper) return; // already the cheapest thing we have
+    const i = saverIndex(cheaper.manifest.id, ALL_SAVERS);
+    if (i >= 0) void controller.mountSaver(i, true, { skipOnFail: true }).catch(() => {});
+  },
+});
+attachFrameWatchdog(watchdog);
+
 const start = pinned ? Math.max(0, saverIndex(pinned, ALL_SAVERS)) : Math.floor(Math.random() * ALL_SAVERS.length);
-void controller.mountSaver(start, true, { skipOnFail: !pinned }).catch(() => {});
+void controller
+  .mountSaver(start, true, { skipOnFail: !pinned })
+  .then(() => watchdog.reset())
+  .catch(() => {});
 startCycle();
