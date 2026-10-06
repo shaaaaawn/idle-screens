@@ -4,6 +4,32 @@ A zero-dependency Swift menu-bar app that shows the idle-screens web engine as a
 screensaver. Not a `.saver` bundle — a standalone app that avoids the abandoned,
 sandboxed `legacyScreenSaver` substrate.
 
+## Requirements
+
+**macOS 13+**, on **Apple silicon or Intel** — release builds are universal
+(`arm64` + `x86_64`) in one DMG. There is nothing else to install: the app is a
+self-contained bundle that carries its own web engine.
+
+## Install
+
+> **Nothing is published yet.** No `mac-v*` tag has ever been cut, so the DMG
+> and the Homebrew cask below have nothing to download. Until then, build it
+> yourself — see [Build & run (dev)](#build--run-dev), which produces a working
+> `.app` in one command.
+
+Once a release exists, either of:
+
+```bash
+# Homebrew cask (needs the tap)
+brew install --cask shaaaaawn/tap/idle-screens
+
+# or the notarized DMG from GitHub Releases (tag mac-v*), then drag to /Applications
+```
+
+The DMG is signed and notarized, so it opens without the Gatekeeper prompt that
+a locally-built (ad-hoc signed) app triggers — see
+[Launch & troubleshooting](#launch--troubleshooting).
+
 ## How it works
 
 - **Menu-bar only** (`LSUIElement`) — no Dock icon.
@@ -75,7 +101,14 @@ pnpm install && pnpm build          # build the @idle-screens/* packages
 cd apps/mac
 ./scripts/build-app.sh              # web bundle + swift build + assemble .app
 open dist/IdleScreens.app           # menu-bar icon appears
+
+swift test                          # 40 unit tests; also run in CI on every change
 ```
+
+Dev builds are **host-architecture only** — the second slice doubles compile
+time and buys nothing locally. `--release` builds **universal** (arm64 +
+x86_64), which is what the DMG ships; the script prints the architectures it
+produced. Force either way with `UNIVERSAL=1` / `UNIVERSAL=0`.
 
 Debug flags on the binary: `--show` (start the saver immediately), `--hold`
 (don't dismiss on input, for inspection), `--diagnostics` (print the diagnostics
@@ -198,6 +231,11 @@ GitHub needs these repo secrets ( `./scripts/setup-gh-secrets.sh` sets all six):
 | `APPLE_ID` | Apple ID email for notarytool |
 | `APPLE_TEAM_ID` | 10-char team id |
 | `APPLE_APP_PASSWORD` | app-specific password for notarytool |
+
+The release workflow validates the `mac-v*` tag against
+`Info.plist`'s `CFBundleShortVersionString` and refuses to publish a DMG whose
+version disagrees with its tag, then verifies the DMG's binary really is
+universal before uploading.
 
 After a release, update `version` + `sha256` in `packaging/idle-screens.rb`
 (the notarize script prints the DMG SHA-256) and push it to the Homebrew tap.

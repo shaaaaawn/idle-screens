@@ -1,0 +1,68 @@
+name: Mac CI
+
+# apps/mac had no CI at all: 40 Swift tests existed and nothing ran them until a
+# release tag was pushed, by which point a break is discovered at the worst
+# moment. This mirrors linux-ci.yml — compile and test on every change.
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/mac/**'
+      - '.github/workflows/mac-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/mac/**'
+      - '.github/workflows/mac-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & test (macOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The web bundle is part of the app, so a break here is a break in the
+      # product even though it never reaches the Swift compiler.
+      - name: Build workspace packages
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build mac web bundle
+        working-directory: apps/mac/web
+        run: node build.mjs
+
+      - name: swift build
+        working-directory: apps/mac
+        run: swift build
+
+      - name: swift test
+        working-directory: apps/mac
+        run: swift test
+
+      # Guard the release path from CI, not from a tag. A universal build is
+      # what mac-release.yml ships, and it fails differently from a host build
+      # (different output path, different link step) — so exercise it here
+      # rather than discovering it during a release.
+      - name: Universal release build (what the DMG ships)
+        working-directory: apps/mac
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          BIN=.build/apple/Products/Release/IdleScreens
+          archs=$(lipo -archs "$BIN")
+          echo "architectures: $archs"
+          for want in arm64 x86_64; do
+            case " $archs " in *" $want "*) ;;
+              *) echo "::error::universal binary is missing $want (got: $archs)"; exit 1 ;;
+            esac
+          done
