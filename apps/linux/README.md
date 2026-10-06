@@ -365,8 +365,9 @@ metaquarium plus the `medium`-cost scenes) and logs each exclusion with a reason
 A frame watchdog also steps down to a cheaper saver if frames stay worse than
 30fps, so a heavy *channel* scene degrades instead of becoming a slideshow.
 
-Override with `IDLE_SCREENS_WEB`-style URL params if you are driving the page
-directly; there is no config key, because the detection is not a preference.
+Override it if a medium-cost scene runs fine on your box:
+`[webkit] max_backend = "never"` trusts the browser, or pin a backend name.
+See `packaging/config.toml.example`.
 
 **Channel mode still lacks this.** The hosted viewer at idlescreens.com is
 idle-server's, not ours, so a metaquarium *channel* on a Pi will still crawl or

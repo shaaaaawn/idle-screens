@@ -47,6 +47,13 @@ channel = "ballet"
 # which branch fired.
 disable_dmabuf = "auto"
 
+# Ceiling on what the host page may attempt to render, handed to it as
+# ?maxBackend=. "auto" detects Broadcom V3D (Raspberry Pi) and caps it at
+# canvas2d, because V3D advertises WebGL2 honestly and still cannot drive
+# three.js at fullscreen — support is not capability. "never" trusts the browser;
+# a backend name pins it. Raise it if a medium-cost scene runs fine on your box.
+#max_backend = "auto"
+
 [update]
 # Check for a newer web bundle at launch: "launch" | "never"
 check = "launch"
