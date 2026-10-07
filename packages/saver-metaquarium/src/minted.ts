@@ -123,22 +123,33 @@ export function prepareMintedBase(scene: Object3D, animations: AnimationClip[]):
   }
   // Element by element: GLTFLoader hands interleaved attributes back as views
   // of one shared stream, so `.array` is not this attribute's values alone.
+  // Regions need not agree on a type: after a rigged intake a coat region's
+  // skin weights are normalized bytes and an eye region's are floats. Copied
+  // raw into the first region's type, the eyes' weights fell to ~0 and the
+  // turtle's eyes collapsed into its head. Where they disagree, the merge
+  // holds real (denormalized) floats instead.
   const attributes: Record<string, BufferAttribute> = {};
   for (const name of names) {
-    const first = regions[0]!.mesh.geometry.attributes[name] as BufferAttribute;
-    const Ctor = first.array.constructor as new (n: number) => Float32Array;
+    const all = regions.map(({ mesh }) => mesh.geometry.attributes[name] as BufferAttribute | undefined);
+    const first = all[0]!;
     const size = first.itemSize;
+    if (all.some((a) => !a || a.itemSize !== size)) throw new Error(`minted model: region missing ${name}`);
+    const uniform = all.every((a) => a!.array.constructor === first.array.constructor && a!.normalized === first.normalized);
+    const Ctor = (uniform ? first.array.constructor : Float32Array) as new (n: number) => Float32Array;
     const arr = new Ctor(vertices * size);
     let o = 0;
-    for (const { mesh } of regions) {
-      const a = mesh.geometry.attributes[name] as BufferAttribute | undefined;
-      if (!a || a.itemSize !== size) throw new Error(`minted model: region missing ${name}`);
-      // Raw values (getComponent would denormalize a normalized integer attribute).
+    for (const a of all) {
+      if (!uniform) {
+        // getComponent denormalizes a normalized integer: the value the shader sees.
+        for (let i = 0; i < a!.count; i++) for (let k = 0; k < size; k++) arr[o++] = a!.getComponent(i, k);
+        continue;
+      }
+      // Raw values (getComponent would denormalize into a normalized integer array).
       const il = (a as unknown as InterleavedBufferAttribute).isInterleavedBufferAttribute ? (a as unknown as InterleavedBufferAttribute) : null;
-      const src = il ? il.data.array : a.array, stride = il ? il.data.stride : size, offset = il ? il.offset : 0;
-      for (let i = 0; i < a.count; i++) for (let k = 0; k < size; k++) arr[o++] = src[i * stride + offset + k]!;
+      const src = il ? il.data.array : a!.array, stride = il ? il.data.stride : size, offset = il ? il.offset : 0;
+      for (let i = 0; i < a!.count; i++) for (let k = 0; k < size; k++) arr[o++] = src[i * stride + offset + k]!;
     }
-    attributes[name] = new BufferAttribute(arr, size, first.normalized);
+    attributes[name] = new BufferAttribute(arr, size, uniform ? first.normalized : false);
   }
   const index = new Uint32Array(indices);
   const ranges: Array<[number, number]> = Array.from({ length: R }, () => [0, 0]);
