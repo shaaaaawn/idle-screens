@@ -113,6 +113,12 @@ describe('bundled breeds (breeds/README.md)', () => {
       clips: ['barrel', 'breathe', 'burst', 'flap', 'glide', 'lookPitch', 'lookYaw', 'lookback', 'nod', 'paddle', 'reach', 'somersault', 'steer', 'stretch', 'swim', 'tuck', 'wave', 'wipe'],
       head: 'head', soft: true,
     },
+    seahorse: {
+      joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
+      layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
+      head: 'head', soft: true,
+    },
   };
   for (const [breed, want] of Object.entries(MINTED_RIGS)) {
     it(`${breed}: the minted rig survives the intake — its bones and clips, ${want.soft ? 'a blended spine' : 'each vertex rigid on one part'}, the eyes rigid on the ${want.head}`, async () => {
@@ -142,7 +148,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       const layer = new Set(want.layers);
       for (const a of root.listAnimations()) {
         const hits = a.listChannels().map((c) => c.getTargetNode()!.getName()).filter((n) => layer.has(n));
-        if (/^(bend|steer|lookYaw|lookPitch|reach)$/.test(a.getName())) expect(a.listChannels().length, a.getName()).toBe(hits.length);
+        if (/^(bend|steer|lookYaw|lookPitch|reach|curl|lean)$/.test(a.getName())) expect(a.listChannels().length, a.getName()).toBe(hits.length);
       }
     });
   }
@@ -173,14 +179,14 @@ describe('bundled breeds (breeds/README.md)', () => {
       return n;
     };
     // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
-    for (const breed of ['angelfish', 'seaturtle']) {
+    for (const breed of ['angelfish', 'seaturtle', 'seahorse']) {
       expect(await tjunctions(`../breeds/${breed}.glb`), breed).toBeLessThanOrEqual(await tjunctions(`../breeds/source/${breed}.glb`));
     }
   }, 120_000);
 
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.
-  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p };
+  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!] };
   for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
     const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
     const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {

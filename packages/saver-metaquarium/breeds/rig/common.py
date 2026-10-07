@@ -500,3 +500,40 @@ def eyes_pure(meshes, weights_at, bone):
 def turn_about(p, bone, axis, angle):
     """Like Pose.turn, about any world axis (a Vector)."""
     p.rot[bone] = Quaternion(axis, angle) @ p.rot.get(bone, Quaternion())
+
+
+def hat(x, centres, names):
+    """Linear hand-over between neighbouring centres (eased): two bones at most."""
+    if x <= centres[0]:
+        return {names[0]: 1.0}
+    for i in range(len(centres) - 1):
+        a, b = centres[i], centres[i + 1]
+        if x <= b:
+            u = ease((x - a) / (b - a))
+            return {names[i]: 1 - u, names[i + 1]: u}
+    return {names[-1]: 1.0}
+
+
+def along(poly, a, b):
+    """How far along a polyline [(a, b), ...] (in two of the axes) a point
+    lies, by its nearest point on it."""
+    best, run, at = 1e9, 0.0, 0.0
+    for (a0, b0), (a1, b1) in zip(poly, poly[1:]):
+        da, db = a1 - a0, b1 - b0
+        L2 = da * da + db * db
+        u = max(0.0, min(1.0, ((a - a0) * da + (b - b0) * db) / L2))
+        d = (a - (a0 + u * da)) ** 2 + (b - (b0 + u * db)) ** 2
+        if d < best:
+            best, at = d, run + u * math.sqrt(L2)
+        run += math.sqrt(L2)
+    return at
+
+
+def arc_centres(poly):
+    """Each segment's middle, by arc length: where its bone's weight peaks."""
+    out, run = [], 0.0
+    for (a0, b0), (a1, b1) in zip(poly, poly[1:]):
+        L = math.hypot(a1 - a0, b1 - b0)
+        out.append(run + L / 2)
+        run += L
+    return out
