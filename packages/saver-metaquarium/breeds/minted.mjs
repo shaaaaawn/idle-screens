@@ -47,6 +47,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC_OUT = path.join(HERE, '..', 'src', 'minted');
 const BREEDS = { betafish: [1, 256], angelfish: [257, 456], seahorse: [457, 496], seaturtle: [497, 512] };
 const ATLAS = [256, 512];
+/** Breeds rigged in Blender (breeds.json `rig`): their rig's clips replace the authored one. */
+const RIGGED = new Set(Object.entries(JSON.parse(fs.readFileSync(path.join(HERE, 'breeds.json'), 'utf8')).breeds)
+  .filter(([, spec]) => spec.rig).map(([name]) => name));
 
 const from = process.argv[2];
 const ATLAS_OUT = from ? path.join(path.resolve(from), '..', 'atlas') : '';
@@ -185,6 +188,19 @@ for (const [breed, [lo, hi]] of Object.entries(BREEDS)) {
   for (const name of ['KHR_materials_unlit', 'KHR_materials_emissive_strength', 'KHR_materials_ior', 'KHR_materials_specular']) {
     root.listExtensionsUsed().find((e) => e.extensionName === name)?.dispose();
   }
+  // The mesh as authored: a rotation on its node goes (every turtle's node
+  // carries a -30° yaw over perfectly axis-aligned voxels). Baked in, it
+  // knocks the voxels off every axis — the lattice a rig is cut on — and
+  // Blender's glTF export drops a turn that undoes it. The tank orients a
+  // fish by its own rule either way. A skinned breed's nodes are its rig.
+  for (const node of root.listNodes()) {
+    if (node.getMesh() && !node.getSkin() && node.getRotation().some((v, i) => Math.abs(v - (i === 3 ? 1 : 0)) > 1e-9)) node.setRotation([0, 0, 0, 1]);
+  }
+  // A breed rigged in Blender loses the authored whole-body clip: the rig's
+  // clips replace it, and Blender would import the model posed at the clip's
+  // first frame (a turtle's turned -30°) and bake that into the rig. A breed
+  // still on the generic path keeps it — it is that fish's default motion.
+  if (RIGGED.has(breed) && !root.listSkins().length) for (const anim of root.listAnimations()) anim.dispose();
   // keepAttributes: the region materials are untextured, and a plain prune
   // would take the UVs a betafish's atlas needs.
   await base.transform(prune({ keepAttributes: true }));

@@ -77,6 +77,7 @@ import {
 } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
 import { angelFrame, rigAngel, type AngelRig } from './angel';
+import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
@@ -660,7 +661,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -2234,6 +2235,7 @@ class TankInstance implements SaverInstance {
     let starfish: StarfishRig | null = null;
     let angler: AnglerRig | null = null;
     let angel: AngelRig | null = null;
+    let turtle: TurtleRig | null = null;
     let hacker: HackerRig | null = null;
     let shark: SharkRig | null = null;
     let baby: BabyRig | null = null;
@@ -2253,6 +2255,7 @@ class TankInstance implements SaverInstance {
       if (rigged === 'starfish') starfish = rigStarfish(body, tpl.clips, tpl.norm);
       if (rigged === 'glowfish') angler = rigAngler(body, tpl.clips);
       if (rigged === 'angelfish') angel = rigAngel(body, tpl.clips);
+      if (rigged === 'seaturtle') turtle = rigTurtle(body, tpl.clips);
       if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (rigged === 'shark') shark = rigShark(body, tpl.clips);
       if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
@@ -2291,8 +2294,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || angel || hacker || shark || baby || tang || puffer) {
-        mixer = (angler ?? angel ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
+      } else if (angler || angel || turtle || hacker || shark || baby || tang || puffer) {
+        mixer = (angler ?? angel ?? turtle ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2341,8 +2344,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || angel || hacker || shark || baby || tang || puffer || octopus
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
+      rig: crab || starfish || angler || angel || turtle || hacker || shark || baby || tang || puffer || octopus
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -3120,6 +3123,8 @@ class TankInstance implements SaverInstance {
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
       // An angelfish (a minted breed, rig/angelfish.py): its module sets its clips.
       const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat) : null;
+      // A sea turtle (minted, rig/seaturtle.py): its strokes, glides, looks and paddles.
+      const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
       const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;
       if (hacker) {
@@ -3339,7 +3344,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

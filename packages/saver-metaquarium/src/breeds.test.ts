@@ -96,46 +96,59 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
   });
 
-  it('angelfish: the rig survives the intake — a disc, its back, the tail, two fins and their streamers; each region on one part, the eyes on the head', async () => {
-    const doc = await new NodeIO().read(here('../breeds/angelfish.glb').pathname);
-    const root = doc.getRoot();
-    expect(root.listSkins()).toHaveLength(1);
-    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
-    expect([...joints].sort()).toEqual(['anal1', 'anal2', 'body', 'dorsal1', 'dorsal2', 'mid', 'tail']);
-    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['burst', 'display', 'glide', 'swim']);
-    const used = new Set<string>();
-    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
-      const name = p.getMaterial()!.getName();
-      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
-      for (let i = 0; i < j.getCount(); i++) {
-        const [j0] = j.getElement(i, []) as number[];
-        const [w0, ...rest] = w.getElement(i, []) as number[];
-        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
-        // Eye cells ride the head, rigid, where rigEyes reads their grid.
-        if (/EYE/.test(name)) expect(joints[j0!]).toBe('body');
-        used.add(joints[j0!]!);
+  const MINTED_RIGS: Record<string, { joints: string[]; clips: string[]; head: string }> = {
+    angelfish: { joints: ['anal1', 'anal2', 'body', 'dorsal1', 'dorsal2', 'mid', 'tail'], clips: ['burst', 'display', 'glide', 'swim'], head: 'body' },
+    seaturtle: { joints: ['front.L', 'front.R', 'head', 'rear.L', 'rear.R', 'shell'], clips: ['glide', 'look', 'paddle', 'swim'], head: 'head' },
+  };
+  for (const [breed, want] of Object.entries(MINTED_RIGS)) {
+    it(`${breed}: the minted rig survives the intake — its bones and clips, each vertex rigid on one part, the eyes on the ${want.head}`, async () => {
+      const doc = await new NodeIO().read(here(`../breeds/${breed}.glb`).pathname);
+      const root = doc.getRoot();
+      expect(root.listSkins()).toHaveLength(1);
+      const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+      expect([...joints].sort()).toEqual(want.joints);
+      expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(want.clips);
+      const used = new Set<string>();
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+        const name = p.getMaterial()!.getName();
+        const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+        for (let i = 0; i < j.getCount(); i++) {
+          const [j0] = j.getElement(i, []) as number[];
+          const [w0, ...rest] = w.getElement(i, []) as number[];
+          expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+          // Eye cells ride the head, rigid, where rigEyes reads their grid.
+          if (/EYE/.test(name)) expect(joints[j0!]).toBe(want.head);
+          used.add(joints[j0!]!);
+        }
       }
-    }
-    expect(used.size).toBe(joints.length);
-  });
+      expect(used.size).toBe(joints.length);
+    });
+  }
 
-  it('angelfish: the rig never edits the model — at bind, every triangle is the source\'s, turned to face +Z, in its own region', async () => {
+  // How each minted rig faces the convention: the angelfish swims along +X and
+  // is turned a quarter; the turtle's source is already square, facing +Z.
+  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p };
+  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
     const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
-    const turn = ([x, y, z]: number[]): number[] => [-z!, y!, x!]; // nose +X -> +Z
     const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {
       const out = new Map<string, string[]>();
-      for (const mesh of (await draco.read(here(file).pathname)).getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+      // Where each mesh sits: the source's node may carry a translation (the
+      // turtle's), which Blender bakes in; a rig's mesh node is identity.
+      const root = (await draco.read(here(file).pathname)).getRoot();
+      const at = new Map(root.listNodes().filter((n) => n.getMesh() && !n.getSkin()).map((n) => [n.getMesh()!, n.getWorldMatrix()]));
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
         const name = p.getMaterial()!.getName(), pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        const W = at.get(mesh), place = (q: number[]): number[] => (W ? [0, 1, 2].map((r) => W[r]! * q[0]! + W[4 + r]! * q[1]! + W[8 + r]! * q[2]! + W[12 + r]!) : q);
         const list = out.get(name) ?? [];
         for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
-          list.push([0, 1, 2].map((k) => f(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]).map((v) => v.toFixed(2)).join(',')).sort().join('|'));
+          list.push([0, 1, 2].map((k) => f(place(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[])).map((v) => v.toFixed(2)).join(',')).sort().join('|'));
         }
         out.set(name, list);
       }
       for (const l of out.values()) l.sort();
       return out;
     };
-    const src = await tris('../breeds/source/angelfish.glb', turn), rig = await tris('../breeds/rig/angelfish.glb');
+    const src = await tris(`../breeds/source/${breed}.glb`, turn), rig = await tris(`../breeds/rig/${breed}.glb`);
     expect([...rig.keys()].sort()).toEqual([...src.keys()].sort());
     for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
   });
