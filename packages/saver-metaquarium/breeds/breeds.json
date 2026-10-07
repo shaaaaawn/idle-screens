@@ -7,9 +7,9 @@
       "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Skinned (four bones; the authored Swim clip passes through). Each token's own texture atlas paints it (breeds/minted/atlas), so its UVs are kept and no face is merged."
     },
     "angelfish": {
-      "source": "source/angelfish.glb", "minted": true, "keepNodes": true,
-      "kind": "voxel", "size": 1, "motion": "wiggle", "roles": {},
-      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Flat authored colours. Its node keeps the authored Swim clip (a slow bob and sway, the same on every token)."
+      "source": "rig/angelfish.glb", "delivered": "source/angelfish.glb", "rig": "rig/angelfish.py", "minted": true,
+      "kind": "voxel", "size": 1, "motion": "angel", "roles": {},
+      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Flat authored colours. Rigged in Blender by rig/angelfish.py (the delivered model turned rigidly to face the rig convention, never edited): the disc, the back of it, the caudal fin, the dorsal and anal fins each with their trailing streamers; clips swim, glide, burst, display. src/angel.ts drives them."
     },
     "seahorse": {
       "source": "source/seahorse.glb", "minted": true, "keepNodes": true,

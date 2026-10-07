@@ -1,4 +1,6 @@
 import { NodeIO, type Document } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import draco3d from 'draco3dgltf';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
@@ -91,6 +93,50 @@ describe('bundled breeds (breeds/README.md)', () => {
       }
       for (const bone of used) expect(bone).toMatch(parts[name]!);
     }
+  });
+
+  it('angelfish: the rig survives the intake — a disc, its back, the tail, two fins and their streamers; each region on one part, the eyes on the head', async () => {
+    const doc = await new NodeIO().read(here('../breeds/angelfish.glb').pathname);
+    const root = doc.getRoot();
+    expect(root.listSkins()).toHaveLength(1);
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['anal1', 'anal2', 'body', 'dorsal1', 'dorsal2', 'mid', 'tail']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['burst', 'display', 'glide', 'swim']);
+    const used = new Set<string>();
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) {
+        const [j0] = j.getElement(i, []) as number[];
+        const [w0, ...rest] = w.getElement(i, []) as number[];
+        expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+        // Eye cells ride the head, rigid, where rigEyes reads their grid.
+        if (/EYE/.test(name)) expect(joints[j0!]).toBe('body');
+        used.add(joints[j0!]!);
+      }
+    }
+    expect(used.size).toBe(joints.length);
+  });
+
+  it('angelfish: the rig never edits the model — at bind, every triangle is the source\'s, turned to face +Z, in its own region', async () => {
+    const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
+    const turn = ([x, y, z]: number[]): number[] => [-z!, y!, x!]; // nose +X -> +Z
+    const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {
+      const out = new Map<string, string[]>();
+      for (const mesh of (await draco.read(here(file).pathname)).getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+        const name = p.getMaterial()!.getName(), pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        const list = out.get(name) ?? [];
+        for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
+          list.push([0, 1, 2].map((k) => f(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]).map((v) => v.toFixed(2)).join(',')).sort().join('|'));
+        }
+        out.set(name, list);
+      }
+      for (const l of out.values()) l.sort();
+      return out;
+    };
+    const src = await tris('../breeds/source/angelfish.glb', turn), rig = await tris('../breeds/rig/angelfish.glb');
+    expect([...rig.keys()].sort()).toEqual([...src.keys()].sort());
+    for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
   });
 
   it('glowfish: the angler rig survives the intake — eight bones, four clips, each part on its own', async () => {

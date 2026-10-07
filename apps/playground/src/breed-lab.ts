@@ -23,9 +23,12 @@
  *                                bundled model and its paint (src/minted.ts) — the two
  *                                rows must match; &atlas=512 paints a betafish with the
  *                                host's 512² atlas instead of the bundled 256²
+ *   &clips=swim,glide&times=0,0.25,0.5,0.75   a rigged minted breed's motion: per
+ *                                token, a row per clip, side-on at those FRACTIONS of
+ *                                the clip (&view=top from above, &view=nose head-on)
  */
 import {
-  AmbientLight, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
+  AmbientLight, AnimationMixer, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
   type Object3D, PerspectiveCamera, Scene, Vector3, WebGLRenderer,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -43,7 +46,8 @@ const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
-const rows: { label: string; url?: string; load?: () => Promise<Object3D> }[] = [];
+const rows: { label: string; url?: string; load?: () => Promise<Object3D>; clip?: string }[] = [];
+const clipNames = q.get('clips')?.split(',').filter(Boolean) ?? [];
 const names = [...new Set([...Object.keys(BUNDLED_BREEDS), ...Object.keys(SRC).map(nameOf)])].sort()
   .filter((n) => !only || only.includes(n));
 for (const u of q.get('url')?.split(',').filter(Boolean) ?? []) rows.push({ label: u.split('/').pop()!, url: u });
@@ -78,9 +82,16 @@ for (const id of q.get('minted')?.split(',').map(Number).filter(Number.isInteger
         }
         atlas ??= await atlasTexture(b64((await MINTED_ATLAS[id]!()).default));
       }
-      return paintMinted(prepareMintedBase(gltf.scene, gltf.animations), paint, atlas);
+      const fish = paintMinted(prepareMintedBase(gltf.scene, gltf.animations), paint, atlas);
+      fish.animations = gltf.animations;
+      return fish;
     },
   });
+}
+if (clipNames.length) {
+  // Motion review: only the rebuilt (rigged) fish, a row per clip.
+  const minted = rows.splice(0).filter((r) => r.label.endsWith('· minted'));
+  for (const r of minted) for (const clip of clipNames) rows.push({ ...r, label: `${r.label.replace(' · minted', '')} · ${clip}`, clip });
 }
 const rigName = q.get('rig');
 const times = (q.get('times') ?? '0,0.25,0.5,0.75,1,1.25').split(',').map(Number);
@@ -95,7 +106,7 @@ for (const n of q.get('url') ? [] : names) {
 const FALSE = ['#ff5a5a', '#5ad1ff', '#ffd23a', '#7dff6a', '#c77dff', '#ff9a3a', '#3affc8', '#ff6ad5', '#9aa4ff', '#f0f0f0'];
 const role = (m: string): string => /eye/i.test(m) ? (/black|pupil/i.test(m) ? 'eye·pupil' : /white|sclera/i.test(m) ? 'eye·sclera' : 'eye·?') : /glow/i.test(m) ? 'glow' : /^KEEP-/.test(m) ? 'kept' : /primary/i.test(m) ? 'coat A' : /secondary/i.test(m) ? 'coat B' : 'RANDOM coat';
 
-const CELL = 260, COLS = rigName ? times.length : 6;
+const CELL = 260, COLS = rigName || clipNames.length ? times.length : 6;
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
@@ -135,6 +146,31 @@ const views: Array<[string, (d: number) => Vector3]> = [
       tris += t;
       for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mats.set(mat.name || '(unnamed)', (mats.get(mat.name || '(unnamed)') ?? 0) + t);
     });
+    if (r.clip) {
+      // The rig's frame: nose +z, up +y. Side-on from +x (its left), the clip
+      // sampled at each fraction of its length.
+      const clip = root.animations.find((c) => c.name === r.clip);
+      const mixer = new AnimationMixer(root);
+      if (clip) mixer.clipAction(clip).play();
+      const scene = stage(root);
+      const cam = new PerspectiveCamera(30, 1, span * 0.05, span * 20);
+      times.forEach((f, c) => {
+        mixer.setTime((clip?.duration ?? 0) * f);
+        if (q.get('view') === 'top') cam.position.set(0, span * 2.4, span * 0.01);
+        else if (q.get('view') === 'nose') cam.position.set(0, 0, span * 2.4);
+        else cam.position.set(span * 2.4, 0, 0);
+        cam.lookAt(0, 0, 0);
+        const x = c * CELL, y = (rows.length - 1 - row) * CELL;
+        renderer.setViewport(x, y, CELL, CELL); renderer.setScissor(x, y, CELL, CELL);
+        renderer.render(scene, cam);
+        const lab = document.createElement('div'); lab.className = 'label';
+        lab.style.left = `${x + 4}px`; lab.style.top = `${row * CELL + 4}px`;
+        lab.textContent = c === 0 ? `${r.label}${clip ? '' : ' (no clip!)'}  ${f}` : `${f}`;
+        sheet.append(lab);
+      });
+      row += 1;
+      continue;
+    }
     if (rigName === 'seahorse') {
       // The tank's frame: nose +z (the tank yaws the model so), up +y.
       const group = new Group(); const body = root;
