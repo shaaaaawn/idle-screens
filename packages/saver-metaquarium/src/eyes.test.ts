@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, ShaderLib, type Material, type WebGLRenderer } from 'three';
 import { describe, expect, it } from 'vitest';
-import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState, EYE_GLYPHS, EYE_GLYPH_NAMES, glyphBits, eyeMoment } from './eyes';
+import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState, mintedLook } from './eyes';
 
 // A one-voxel-deep eye slab on the +x (or -x) side of a fish: `rows` top to
 // bottom, `#` black `.` white — the same construction as eye-grid.test.ts,
@@ -203,38 +203,44 @@ describe('eye rig', () => {
   });
 });
 
-describe('eye glyphs: expressions on the eye\'s own pixels', () => {
-  it('every glyph draws within its grid, and a wink and a sleepy lid are a line', () => {
-    for (const name of EYE_GLYPH_NAMES) {
-      for (const [size, art] of Object.entries(EYE_GLYPHS[name] as Record<string, readonly string[]>)) {
-        const [cols, rows] = size.split('x').map(Number) as [number, number];
-        expect(art, `${name} ${size}`).toHaveLength(rows);
-        for (const line of art) expect(line).toMatch(new RegExp(`^[.#]{${cols}}$`));
-        const bits = glyphBits(name, cols, rows)!;
-        expect(bits).toBeGreaterThan(0);
-        expect(bits).toBeLessThan(1 << (cols * rows));
-      }
+describe('mintedLook: the dori\'s way of looking, for the minted breeds', () => {
+  const cue = { camera: { fwd: -0.4, up: 0.2 }, turn: 0, cruise: 0 };
+  it('glides: between darts the gaze holds still, and a dart lasts a few frames — never a one-frame jump', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    let prev = { fwd: 0, up: 0 }, still = 0, frames = 0;
+    for (let i = 0; i < 30 * 120; i++) {
+      mintedLook(3, i / 30, cue, out);
+      const step = Math.hypot(out[0]!.fwd - prev.fwd, out[0]!.up - prev.up);
+      if (i > 0) { expect(step).toBeLessThan(0.75); frames++; if (step < 1e-6) still++; }
+      prev = { ...out[0]! };
+      for (const g of out) { expect(Math.abs(g.fwd)).toBeLessThanOrEqual(1); expect(Math.abs(g.up)).toBeLessThanOrEqual(1); }
     }
-    // Row 0 is the bottom: a sleepy 3x3 lid is the bottom row, a wink the middle.
-    expect(glyphBits('sleepy', 3, 3)).toBe(0b000000111);
-    expect(glyphBits('wink', 3, 3)).toBe(0b000111000);
-    expect(glyphBits('heart', 2, 2)).toBeNull();
+    // Mostly holding a look, as an eye does.
+    expect(still / frames).toBeGreaterThan(0.6);
   });
 
-  it('personality moments: deterministic, brief, a few a minute — never a flicker', () => {
-    const palette = ['happy', 'wink', 'sparkle'] as const;
-    let changes = 0, shown = 0, prev = '';
-    for (let t = 0; t < 600; t += 1 / 30) {
-      const m = eyeMoment(7, t, palette);
-      expect(eyeMoment(7, t, palette)).toEqual(m);
-      const key = `${m.glyph}:${m.wink}`;
-      if (key !== prev) { changes++; prev = key; }
-      if (m.glyph) { shown += 1 / 30; expect(palette).toContain(m.glyph); expect(m.wink).toBe(m.glyph === 'wink'); }
+  it('holds the viewer\'s eye now and then — the second eye a beat behind the first (a double take)', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    let viewer = 0, apart = 0;
+    for (let i = 0; i < 30 * 120; i++) {
+      if (mintedLook(5, i / 30, cue, out) === 'viewer') viewer++;
+      if (Math.hypot(out[0]!.fwd - out[1]!.fwd, out[0]!.up - out[1]!.up) > 0.2) apart++;
     }
-    // 600 s: a moment every 9–17 s, each on and off again.
-    expect(changes).toBeGreaterThan(60);
-    expect(changes).toBeLessThan(140);
-    expect(shown / 600).toBeLessThan(0.2);
-    expect(eyeMoment(7, 3, [])).toEqual({ glyph: null, wink: false });
+    expect(viewer / 3600).toBeGreaterThan(0.1);
+    expect(viewer / 3600).toBeLessThan(0.45);
+    expect(apart).toBeGreaterThan(0);
+    expect(apart / 3600).toBeLessThan(0.05);
+  });
+
+  it('swimming, it looks where it is going — and into the turn', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    const mean = (turn: number): number => {
+      // Away from the viewer bouts (it holds their eye even swimming, as the dori does).
+      let s = 0, n = 0;
+      for (let i = 0; i < 1800; i++) if (mintedLook(2, 200 + i / 30, { ...cue, cruise: 1, turn }, out) !== 'viewer') { s += out[0]!.fwd; n++; }
+      return s / n;
+    };
+    expect(mean(0)).toBeGreaterThan(0.2);
+    expect(mean(0.4)).toBeGreaterThan(mean(0));
   });
 });

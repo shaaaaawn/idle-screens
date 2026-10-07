@@ -1,63 +1,114 @@
-import { AnimationClip, Bone, Group, NumberKeyframeTrack } from 'three';
+import { AnimationClip, Bone, Group, NumberKeyframeTrack, Quaternion, type Object3D } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
-import { ANGEL_CLIPS, angelAct, angelCycle, angelFrame, angelMoment, rigAngel } from './angel';
+import { ANGEL_CLIPS, angelCycle, angelDisplay, angelDisplays, angelFrame, rigAngel, type AngelInput } from './angel';
+import { BUNDLED_BREEDS } from './breeds';
 
-const DUR: Record<string, number> = { swim: 1, glide: 4, burst: 0.9, display: 3 };
+const DUR: Record<string, number> = { swim: 1.6, hover: 4, burst: 0.9, display: 3, bend: 2 };
 const puppet = (): Group => { const g = new Group(); const b = new Bone(); b.name = 'body'; g.add(b); return g; };
 const clips = (names: readonly string[] = ANGEL_CLIPS): AnimationClip[] =>
   names.map((n) => new AnimationClip(n, DUR[n]!, [new NumberKeyframeTrack('body.position[x]', [0, DUR[n]!], [0, 1])]));
+const cruising: AngelInput = { pace: 1, flurry: 0, turn: 0 };
 
 describe('angelfish: the angel', () => {
-  it('rigs only a model that carries its four clips', () => {
+  it('rigs only a model that carries all its clips, the bend dial included', () => {
     expect(rigAngel(puppet(), clips())).not.toBeNull();
-    expect(rigAngel(puppet(), clips(['swim', 'glide']))).toBeNull();
+    expect(rigAngel(puppet(), clips(['swim', 'hover', 'burst', 'display']))).toBeNull();
   });
 
-  it('glides once a cycle, and some cycles show off or dart — not every one', () => {
-    for (let i = 0; i < 6; i++) {
-      const c = angelCycle(i);
-      let glided = 0;
-      for (let t = 0; t < c.period; t += 0.05) if (angelMoment(i, t).doing === 'glide') glided += 0.05;
-      expect(glided).toBeGreaterThan(3);
-      expect(glided).toBeLessThan(5.1);
+  it('swims cruising and hovers idling, crossfaded by pace; bursts only when the tank makes it dart', () => {
+    const r = rigAngel(puppet(), clips())!;
+    const quiet = (t: number): boolean => angelDisplay(0, t).weight === 0;
+    const t = [...Array(400).keys()].map((i) => i * 0.25).find(quiet)!;
+    expect(angelFrame(r, t, 0, 0, { pace: 1.2, flurry: 0, turn: 0 }).doing).toBe('swim');
+    expect(angelFrame(r, t, 0, 0, { pace: 0.05, flurry: 0, turn: 0 }).doing).toBe('hover');
+    const s = angelFrame(r, t, 0, 0, { pace: 1, flurry: 1, turn: 0 });
+    expect(s.doing).toBe('burst');
+    expect(s.weights.swim + s.weights.hover).toBeCloseTo(0, 9);
+    // Never a burst without a dart, whatever the time.
+    for (let u = 0; u < 120; u += 0.1) expect(angelFrame(r, u, 3, u * 5, cruising).weights.burst).toBe(0);
+  });
+
+  it('the body clips share one whole; the bend dial rides on its own bones', () => {
+    const r = rigAngel(puppet(), clips())!;
+    for (let t = 0; t < 120; t += 0.07) {
+      const w = angelFrame(r, t, 2, t * 7, { pace: 0.5 + 0.5 * Math.sin(t), flurry: Math.max(0, Math.sin(t * 0.3)), turn: 0 }).weights;
+      expect(w.swim + w.hover + w.burst + w.display).toBeCloseTo(1, 9);
+      expect(w.bend).toBe(1);
     }
-    const acts = Array.from({ length: 60 }, (_, k) => angelAct(5, k));
-    expect(acts).toContain('display');
-    expect(acts).toContain('burst');
-    expect(acts).toContain(null);
   });
 
-  it('the clips share one whole', () => {
-    for (let t = 0; t < 90; t += 0.07) {
-      const w = angelMoment(3, t).weights;
-      expect(w.swim + w.glide + w.burst + w.display).toBeCloseTo(1, 9);
-      for (const n of ANGEL_CLIPS) expect(w[n]).toBeGreaterThanOrEqual(0);
+  it('bends into a turn — to its left for +, its right for − — and the dial never wraps', () => {
+    const r = rigAngel(puppet(), clips())!;
+    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: 0 }).bend).toBe(0);
+    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: 0.1 }).bend).toBeGreaterThan(0.2);
+    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: -0.1 }).bend).toBeLessThan(-0.2);
+    for (const turn of [-5, -1, 1, 5]) {
+      angelFrame(r, 1, 0, 0, { ...cruising, turn });
+      expect(r.actions.bend.time).toBeGreaterThanOrEqual(0);
+      expect(r.actions.bend.time).toBeLessThan(DUR.bend!);
     }
   });
 
-  it('is pure in (index, t), and the tail beats with the distance swum', () => {
+  it('shows off rarely: a display in about a third of its long cycles', () => {
+    for (let i = 0; i < 6; i++) expect(angelCycle(i).period).toBeGreaterThanOrEqual(22);
+    const shows = Array.from({ length: 300 }, (_, k) => angelDisplays(4, k)).filter(Boolean).length;
+    expect(shows / 300).toBeGreaterThan(0.25);
+    expect(shows / 300).toBeLessThan(0.45);
+  });
+
+  it('is pure in (index, t), and the stroke runs on time as well as distance — it beats while it holds station', () => {
     const a = rigAngel(puppet(), clips())!, b = rigAngel(puppet(), clips())!;
     for (const t of [0.4, 8.1, 21.7]) {
-      const sa = angelFrame(a, t, 4, 88.8);
-      angelFrame(a, t + 3, 4, 200);
-      expect(angelFrame(a, t, 4, 88.8)).toEqual(sa);
-      expect(angelFrame(b, t, 4, 88.8)).toEqual(sa);
-      for (const n of ANGEL_CLIPS) expect(a.actions[n].getEffectiveWeight()).toBe(sa.weights[n]);
+      const sa = angelFrame(a, t, 4, 88.8, cruising);
+      angelFrame(a, t + 3, 4, 200, cruising);
+      expect(angelFrame(a, t, 4, 88.8, cruising)).toEqual(sa);
+      expect(angelFrame(b, t, 4, 88.8, cruising)).toEqual(sa);
     }
-    angelFrame(a, 1, 0, 10);
+    angelFrame(a, 1, 0, 50, cruising);
     const t0 = a.actions.swim.time;
-    angelFrame(a, 1, 0, 10 + 1 / 0.045 / 4);
-    expect((a.actions.swim.time - t0 + 1) % 1).toBeCloseTo(0.25, 9);
+    angelFrame(a, 1.4, 0, 50, cruising); // no distance swum, yet the stroke moved on
+    expect((a.actions.swim.time - t0 + DUR.swim!) % DUR.swim!).toBeCloseTo(0.4, 9);
   });
+});
 
-  it('its eyes make the faces of what it does: proud or smitten showing off, wide at a dart', () => {
-    const seen = new Set<string>();
-    for (let i = 0; i < 8; i++) for (let t = 0; t < 400; t += 0.1) {
-      const m = angelMoment(i, t);
-      if (m.eyes.glyph) seen.add(`${m.doing}:${m.eyes.glyph}`);
-      if (m.doing === 'burst' && m.eyes.glyph) expect(m.eyes.glyph).toBe('surprised');
-      if (m.doing === 'display' && m.eyes.glyph) expect(['happy', 'heart']).toContain(m.eyes.glyph);
+describe('angelfish: the real rig, swum for a minute', () => {
+  it('moves smoothly: no bone jumps between frames, whatever the pace, the darts and the turns', async () => {
+    const b = Buffer.from((await BUNDLED_BREEDS.angelfish!()).default, 'base64');
+    const gltf = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+    const rig = rigAngel(gltf.scene, gltf.animations)!;
+    expect(rig).not.toBeNull();
+    const bones: Object3D[] = [];
+    gltf.scene.traverse((o) => { if ((o as Bone).isBone) bones.push(o); });
+    expect(bones.map((o) => o.name)).toEqual(expect.arrayContaining(['body', 'mid', 'tail', 'dorsal', 'anal']));
+    const prev = bones.map(() => new Quaternion()), q = new Quaternion();
+    let beat = 0, worst = 0, worstAt = '';
+    const steps: number[] = [];
+    for (let i = 0; i <= 60 * 30; i++) {
+      const t = i / 30;
+      // Idle to cruising and back, a dart now and then, weaving turns.
+      const pace = 0.6 + 0.6 * Math.sin(t * 0.21);
+      const flurry = Math.max(0, Math.sin(t * 0.37) - 0.85) * 6;
+      const turn = 0.25 * Math.sin(t * 0.5) + 0.1 * Math.sin(t * 1.3);
+      beat += pace * 12 / 30;
+      angelFrame(rig, t, 6, beat, { pace, flurry, turn });
+      gltf.scene.updateMatrixWorld(true);
+      bones.forEach((bone, k) => {
+        bone.getWorldQuaternion(q);
+        if (i > 0) {
+          const step = q.angleTo(prev[k]!);
+          if (flurry === 0) steps.push(step);
+          if (step > worst) { worst = step; worstAt = `${bone.name} at ${t.toFixed(2)} s`; }
+        }
+        prev[k]!.copy(q);
+      });
     }
-    for (const want of ['display:happy', 'display:heart', 'burst:surprised', 'glide:sleepy']) expect([...seen]).toContain(want);
+    steps.sort((x, y) => x - y);
+    // Mid-dart the caudal fin strokes fast (~0.15 rad a frame); a snap (a
+    // wrapped dial, a phase jump) would be a whole swing at once.
+    expect(worst, worstAt).toBeLessThan(0.35);
+    // Cruising, hovering and turning, no bone turns more than a degree or two a
+    // frame (measured: p99 0.024 rad, the streamers): it glides, it never ticks.
+    expect(steps[Math.floor(steps.length * 0.99)]!).toBeLessThan(0.04);
   });
 });

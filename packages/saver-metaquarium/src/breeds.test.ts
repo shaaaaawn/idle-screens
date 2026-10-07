@@ -96,12 +96,14 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
   });
 
-  const MINTED_RIGS: Record<string, { joints: string[]; clips: string[]; head: string }> = {
-    angelfish: { joints: ['anal1', 'anal2', 'body', 'dorsal1', 'dorsal2', 'mid', 'tail'], clips: ['burst', 'display', 'glide', 'swim'], head: 'body' },
+  // `soft`: a spine whose vertices blend between neighbouring bones (weights
+  // sum to 1); otherwise every vertex rides one part. Eyes are rigid either way.
+  const MINTED_RIGS: Record<string, { joints: string[]; clips: string[]; head: string; soft?: boolean }> = {
+    angelfish: { joints: ['anal', 'body', 'dorsal', 'mid', 'tail'], clips: ['bend', 'burst', 'display', 'hover', 'swim'], head: 'body', soft: true },
     seaturtle: { joints: ['front.L', 'front.R', 'head', 'rear.L', 'rear.R', 'shell'], clips: ['glide', 'look', 'paddle', 'swim'], head: 'head' },
   };
   for (const [breed, want] of Object.entries(MINTED_RIGS)) {
-    it(`${breed}: the minted rig survives the intake — its bones and clips, each vertex rigid on one part, the eyes on the ${want.head}`, async () => {
+    it(`${breed}: the minted rig survives the intake — its bones and clips, ${want.soft ? 'a blended spine' : 'each vertex rigid on one part'}, the eyes rigid on the ${want.head}`, async () => {
       const doc = await new NodeIO().read(here(`../breeds/${breed}.glb`).pathname);
       const root = doc.getRoot();
       expect(root.listSkins()).toHaveLength(1);
@@ -114,11 +116,13 @@ describe('bundled breeds (breeds/README.md)', () => {
         const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
         for (let i = 0; i < j.getCount(); i++) {
           const [j0] = j.getElement(i, []) as number[];
-          const [w0, ...rest] = w.getElement(i, []) as number[];
-          expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+          const ws = w.getElement(i, []) as number[], js = j.getElement(i, []) as number[];
+          const [w0, ...rest] = ws;
+          if (want.soft) expect(ws.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 2);
+          else expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
           // Eye cells ride the head, rigid, where rigEyes reads their grid.
-          if (/EYE/.test(name)) expect(joints[j0!]).toBe(want.head);
-          used.add(joints[j0!]!);
+          if (/EYE/.test(name)) { expect(joints[j0!]).toBe(want.head); expect(w0).toBeCloseTo(1, 2); }
+          ws.forEach((x, k) => { if (x > 0.01) used.add(joints[js[k]!]!); });
         }
       }
       expect(used.size).toBe(joints.length);

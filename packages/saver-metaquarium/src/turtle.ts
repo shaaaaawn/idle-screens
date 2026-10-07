@@ -16,7 +16,6 @@
  *   paddle   some cycles: hanging in place, sculling
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
-import { eyeMoment, NO_GLYPH, type GlyphCue } from './eyes';
 import { fishHash } from './swim';
 
 export const TURTLE_CLIPS = ['swim', 'glide', 'look', 'paddle'] as const;
@@ -78,8 +77,6 @@ const posMod = (v: number, m: number): number => ((v % m) + m) % m;
 
 export interface TurtleState {
   doing: TurtleDoing;
-  /** What its eyes draw (eyes.ts EYE_GLYPHS): a pleased squint after a look, contentment sculling, a doze in a glide. */
-  eyes: GlyphCue;
   /** Clip weights, for inspect and tests. */
   weights: Record<TurtleClip, number>;
 }
@@ -96,15 +93,8 @@ export function turtleMoment(index: number, t: number): TurtleState & { times: R
   const lookW = act === 'look' ? env(au, 0, 0.2, LOOK - 0.2, LOOK) : 0;
   const paddleW = act === 'paddle' ? env(au, 0, 0.6, PADDLE - 0.6, PADDLE) : 0;
   const doing: TurtleDoing = lookW > 0.5 ? 'look' : paddleW > 0.5 ? 'paddle' : glideW > 0.5 ? 'glide' : 'swim';
-  const gu = u - c.glideAt;
-  const eyes: GlyphCue = act === 'look' && au > 2.0 && au < LOOK + 0.6 ? { glyph: 'happy', wink: false }
-    : doing === 'paddle' && au > 0.8 && au < PADDLE - 0.6 && fishHash(index * 41 + k, 933) < 0.5 ? { glyph: 'sleepy', wink: false }
-    : doing === 'glide' && gu > 2 && gu < GLIDE - 1.5 && fishHash(index * 43 + k, 935) < 0.35 ? { glyph: 'sleepy', wink: false }
-    : doing === 'swim' ? eyeMoment(index, t, ['happy', 'wink', 'surprised', 'happy'])
-    : NO_GLYPH;
   return {
     doing,
-    eyes,
     weights: { swim: Math.max(0, 1 - glideW - lookW - paddleW), glide: glideW, look: lookW, paddle: paddleW },
     times: {
       swim: 0, // set from distance by turtleFrame

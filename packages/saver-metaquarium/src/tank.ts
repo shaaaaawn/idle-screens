@@ -68,7 +68,7 @@ import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
-import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
@@ -843,6 +843,8 @@ class TankInstance implements SaverInstance {
   /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
   private waterInstalled = false;
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+  /** Each eye's gaze for a rigged minted breed (eyes.ts mintedLook), reused frame to frame. */
+  private readonly mintedGaze: Array<{ fwd: number; up: number }> = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }, { fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
   private spotKey = '\u0000';
@@ -3122,7 +3124,18 @@ class TankInstance implements SaverInstance {
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
       // An angelfish (a minted breed, rig/angelfish.py): its module sets its clips.
-      const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat) : null;
+      // Its turn: the heading's change over a body length of its route, as the
+      // swim wave measures it (+ to its left). A rigged breed bends into it.
+      let rigTurn = 0;
+      if ((f.rig?.angel || f.rig?.turtle) && turnPlan && !act) {
+        const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
+        rigTurn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
+        rigTurn -= Math.round(rigTurn / (Math.PI * 2)) * Math.PI * 2;
+      }
+      const rigPace = speed * styleSpeed * style.travel;
+      const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn,
+      }) : null;
       // A sea turtle (minted, rig/seaturtle.py): its strokes, glides, looks and paddles.
       const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
@@ -3251,10 +3264,11 @@ class TankInstance implements SaverInstance {
       // glance at the lens. Rigged on the first frame that asks for it, so
       // `eyeLife: 0` compiles the stock eye program and costs nothing.
       // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
-      // A minted breed's rig drives its eyes itself (angel.ts, turtle.ts): its
-      // eyes are alive whatever `eyeLife` says, and make the faces its driver asks for.
-      const glyph = angel?.eyes ?? turtle?.eyes ?? null;
-      if ((eyeLife > 0 || glyph) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
+      // A rigged minted breed's eyes are alive whatever `eyeLife` says — the
+      // dori's way (eyes.ts mintedLook): the token's own pattern glides, each
+      // eye on its own gaze, and never blinks.
+      const minted = !!(angel || turtle);
+      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
@@ -3269,9 +3283,13 @@ class TankInstance implements SaverInstance {
             target: look ? toward(look.x, look.y, look.z) : null,
             camera: toward(cam.x, cam.y, cam.z),
             climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
-          }, glyph ? Math.max(eyeLife, 1) : eyeLife, this.eyeState);
-          this.eyeState.glyph = glyph?.glyph ?? null;
-          this.eyeState.wink = glyph?.wink ?? false;
+          }, eyeLife, this.eyeState);
+          this.eyeState.smooth = minted;
+          if (minted) {
+            mintedLook(f.index, tSec, { camera: toward(cam.x, cam.y, cam.z), turn: rigTurn, cruise: Math.min(1, Math.max(0, (rigPace - 0.1) / 0.5)) }, this.mintedGaze);
+            this.eyeState.blink = 0; this.eyeState.expr = 0;
+            this.eyeState.eyes = this.mintedGaze;
+          } else this.eyeState.eyes = undefined;
           f.eyes.set(this.eyeState);
         }
       } else if (f.eyes) {
@@ -3349,7 +3367,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, ...(angel.eyes.glyph ? { face: angel.eyes.wink ? 'wink' : angel.eyes.glyph } : {}) } : turtle ? { doing: turtle.doing, ...(turtle.eyes.glyph ? { face: turtle.eyes.wink ? 'wink' : turtle.eyes.glyph } : {}) } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

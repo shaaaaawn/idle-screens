@@ -50,14 +50,4 @@ describe('seaturtle: the turtle', () => {
     // A stroke is 2.4 s of clip: a quarter of a second of it per 1/0.045/4 units swum.
     expect((a.actions.swim.time - t0 + 2.4) % 2.4).toBeCloseTo(0.25, 9);
   });
-
-  it('its eyes: pleased after a look, content sculling, sometimes dozing on a glide', () => {
-    const seen = new Set<string>();
-    for (let i = 0; i < 8; i++) for (let t = 0; t < 600; t += 0.1) {
-      const m = turtleMoment(i, t);
-      if (m.eyes.glyph) seen.add(`${m.doing}:${m.eyes.glyph}`);
-    }
-    for (const want of ['paddle:sleepy', 'glide:sleepy', 'swim:happy']) expect([...seen]).toContain(want);
-    expect([...seen].some((s) => s.endsWith(':happy') && (s.startsWith('look') || s.startsWith('swim')))).toBe(true);
-  });
 });
