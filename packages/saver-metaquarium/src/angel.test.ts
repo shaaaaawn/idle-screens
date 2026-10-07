@@ -73,42 +73,52 @@ describe('angelfish: the angel', () => {
 });
 
 describe('angelfish: the real rig, swum for a minute', () => {
-  it('moves smoothly: no bone jumps between frames, whatever the pace, the darts and the turns', async () => {
+  it('moves fluidly: a steady swim never ticks or snaps, and a dart never jumps', async () => {
     const b = Buffer.from((await BUNDLED_BREEDS.angelfish!()).default, 'base64');
     const gltf = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
     const rig = rigAngel(gltf.scene, gltf.animations)!;
     expect(rig).not.toBeNull();
     const bones: Object3D[] = [];
     gltf.scene.traverse((o) => { if ((o as Bone).isBone) bones.push(o); });
-    expect(bones.map((o) => o.name)).toEqual(expect.arrayContaining(['body', 'mid', 'tail', 'dorsal', 'anal']));
-    const prev = bones.map(() => new Quaternion()), q = new Quaternion();
-    let beat = 0, worst = 0, worstAt = '';
-    const steps: number[] = [];
+    expect(bones.map((o) => o.name)).toEqual(expect.arrayContaining(['head', 's1', 's4', 'd1', 'a3', 'dstream', 'astream']));
+    const q1 = bones.map(() => new Quaternion()), q2 = bones.map(() => new Quaternion());
+    const q = new Quaternion(), v1 = new Quaternion(), v2 = new Quaternion();
+    let beat = 0, worstStep = 0, worstAcc = 0, worstAt = '';
+    const steady: number[] = [];
     for (let i = 0; i <= 60 * 30; i++) {
       const t = i / 30;
       // Idle to cruising and back, a dart now and then, weaving turns.
       const pace = 0.6 + 0.6 * Math.sin(t * 0.21);
       const flurry = Math.max(0, Math.sin(t * 0.37) - 0.85) * 6;
       const turn = 0.25 * Math.sin(t * 0.5) + 0.1 * Math.sin(t * 1.3);
-      beat += pace * 12 / 30;
+      beat += (pace * 12) / 30;
       angelFrame(rig, t, 6, beat, { pace, flurry, turn });
       gltf.scene.updateMatrixWorld(true);
       bones.forEach((bone, k) => {
         bone.getWorldQuaternion(q);
-        if (i > 0) {
-          const step = q.angleTo(prev[k]!);
-          if (flurry === 0) steps.push(step);
-          if (step > worst) { worst = step; worstAt = `${bone.name} at ${t.toFixed(2)} s`; }
+        if (i > 1) {
+          const step = q.angleTo(q1[k]!);
+          worstStep = Math.max(worstStep, step);
+          if (flurry === 0) {
+            steady.push(step);
+            // The change in its turning, frame to frame: a snap is a spike here.
+            v1.copy(q).multiply(q1[k]!.clone().invert());
+            v2.copy(q1[k]!).multiply(q2[k]!.clone().invert());
+            const acc = v1.angleTo(v2);
+            if (acc > worstAcc) { worstAcc = acc; worstAt = `${bone.name} at ${t.toFixed(2)} s`; }
+          }
         }
-        prev[k]!.copy(q);
+        q2[k]!.copy(q1[k]!);
+        q1[k]!.copy(q);
       });
     }
-    steps.sort((x, y) => x - y);
-    // Mid-dart the caudal fin strokes fast (~0.15 rad a frame); a snap (a
-    // wrapped dial, a phase jump) would be a whole swing at once.
-    expect(worst, worstAt).toBeLessThan(0.35);
-    // Cruising, hovering and turning, no bone turns more than a degree or two a
-    // frame (measured: p99 0.024 rad, the streamers): it glides, it never ticks.
-    expect(steps[Math.floor(steps.length * 0.99)]!).toBeLessThan(0.04);
+    steady.sort((x, y) => x - y);
+    // Measured: swimming, hovering and turning, the streamers move up to ~0.05
+    // rad a frame and their turning changes by at most ~0.017 — a snap (a
+    // wrapped dial, a phase jump) would be a whole swing in one frame.
+    expect(steady[Math.floor(steady.length * 0.99)]!).toBeLessThan(0.07);
+    expect(worstAcc, worstAt).toBeLessThan(0.03);
+    // Mid-dart the caudal fin strokes fast, but never a whole swing at once.
+    expect(worstStep).toBeLessThan(0.35);
   });
 });

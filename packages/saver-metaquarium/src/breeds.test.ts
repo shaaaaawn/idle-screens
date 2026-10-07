@@ -99,7 +99,7 @@ describe('bundled breeds (breeds/README.md)', () => {
   // `soft`: a spine whose vertices blend between neighbouring bones (weights
   // sum to 1); otherwise every vertex rides one part. Eyes are rigid either way.
   const MINTED_RIGS: Record<string, { joints: string[]; clips: string[]; head: string; soft?: boolean }> = {
-    angelfish: { joints: ['anal', 'body', 'dorsal', 'mid', 'tail'], clips: ['bend', 'burst', 'display', 'hover', 'swim'], head: 'body', soft: true },
+    angelfish: { joints: ['a1', 'a2', 'a3', 'astream', 'd1', 'd2', 'd3', 'dstream', 'head', 's1', 's2', 's3', 's4'], clips: ['bend', 'burst', 'display', 'hover', 'swim'], head: 'head', soft: true },
     seaturtle: { joints: ['front.L', 'front.R', 'head', 'rear.L', 'rear.R', 'shell'], clips: ['glide', 'look', 'paddle', 'swim'], head: 'head' },
   };
   for (const [breed, want] of Object.entries(MINTED_RIGS)) {
