@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { resolveIpfsUrl, resolveIpfsUrls, IPFS_GATEWAYS, FISH_CATALOG, DEFAULT_FISH, parseFishMix, expandFishMix , NPC_CATALOG, expandFishMixSlots } from './ipfs';
 
 describe('resolveIpfsUrl', () => {
-  it('rewrites ipfs:// URLs to the dweb.link gateway', () => {
+  it('rewrites ipfs:// URLs to our own mirror first', () => {
     expect(resolveIpfsUrl('ipfs://QmABC123/file.glb')).toBe(
-      'https://dweb.link/ipfs/QmABC123/file.glb',
+      'https://assets.idlescreens.com/ipfs/QmABC123/file.glb',
     );
   });
 
@@ -42,7 +42,7 @@ describe('DEFAULT_FISH', () => {
 
   it('has a resolvable ipfs3d URL', () => {
     const url = resolveIpfsUrl(DEFAULT_FISH.ipfs3d);
-    expect(url).toMatch(/^https:\/\/dweb\.link\/ipfs\//);
+    expect(url).toMatch(/^https:\/\/assets\.idlescreens\.com\/ipfs\//);
   });
 });
 
@@ -159,6 +159,10 @@ describe('resolveIpfsUrls', () => {
   });
   it('passes non-ipfs urls through as a single candidate', () => {
     expect(resolveIpfsUrls('/assets/fish.glb')).toEqual(['/assets/fish.glb']);
+  });
+  it('never names a retired public gateway (dweb.link, ipfs.io: gone 2026-09-21)', () => {
+    for (const g of IPFS_GATEWAYS) expect(g).not.toMatch(/dweb\.link|\/\/ipfs\.io\//);
+    expect(IPFS_GATEWAYS[0]).toBe('https://assets.idlescreens.com/ipfs/');
   });
   it('resolveIpfsUrl stays the first candidate (compat)', () => {
     expect(resolveIpfsUrl('ipfs://QmX/f.glb')).toBe(resolveIpfsUrls('ipfs://QmX/f.glb')[0]);
