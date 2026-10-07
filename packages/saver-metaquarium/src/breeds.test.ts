@@ -1,5 +1,6 @@
 import { NodeIO, type Document } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+// @ts-expect-error -- draco3dgltf ships no types (the intake uses it from .mjs)
 import draco3d from 'draco3dgltf';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
