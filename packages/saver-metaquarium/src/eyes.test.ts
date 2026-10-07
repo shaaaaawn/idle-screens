@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, ShaderLib, type Material, type WebGLRenderer } from 'three';
 import { describe, expect, it } from 'vitest';
-import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState } from './eyes';
+import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState, EYE_GLYPHS, EYE_GLYPH_NAMES, glyphBits, eyeMoment } from './eyes';
 
 // A one-voxel-deep eye slab on the +x (or -x) side of a fish: `rows` top to
 // bottom, `#` black `.` white — the same construction as eye-grid.test.ts,
@@ -124,7 +124,7 @@ describe('eye rig', () => {
     body.add(new Mesh(slabGeometry(['...', '.#.', '...'], 1, 'black')!, plain));
     const group = new Group(); group.add(body);
     expect(rigEyes(group, body)).toBeNull();
-    expect(plain.customProgramCacheKey?.()).not.toBe('mq-eye-display-v4');
+    expect(plain.customProgramCacheKey?.()).not.toBe('mq-eye-display-v5');
   });
 
   it('rigs both eyes of a betafish body and patches only their materials', () => {
@@ -136,7 +136,7 @@ describe('eye rig', () => {
     for (const node of body.children) {
       const mat = (node as Mesh).material as MeshBasicMaterial;
       expect(typeof mat.onBeforeCompile).toBe('function');
-      expect(mat.customProgramCacheKey?.()).toBe('mq-eye-display-v4');
+      expect(mat.customProgramCacheKey?.()).toBe('mq-eye-display-v5');
     }
   });
 
@@ -200,5 +200,41 @@ describe('eye rig', () => {
     for (const shader of shaders.slice(1)) {
       expect((shader.uniforms.uEyeS as { value: unknown[] }).value).toBe(first); // same shared uniform object
     }
+  });
+});
+
+describe('eye glyphs: expressions on the eye\'s own pixels', () => {
+  it('every glyph draws within its grid, and a wink and a sleepy lid are a line', () => {
+    for (const name of EYE_GLYPH_NAMES) {
+      for (const [size, art] of Object.entries(EYE_GLYPHS[name] as Record<string, readonly string[]>)) {
+        const [cols, rows] = size.split('x').map(Number) as [number, number];
+        expect(art, `${name} ${size}`).toHaveLength(rows);
+        for (const line of art) expect(line).toMatch(new RegExp(`^[.#]{${cols}}$`));
+        const bits = glyphBits(name, cols, rows)!;
+        expect(bits).toBeGreaterThan(0);
+        expect(bits).toBeLessThan(1 << (cols * rows));
+      }
+    }
+    // Row 0 is the bottom: a sleepy 3x3 lid is the bottom row, a wink the middle.
+    expect(glyphBits('sleepy', 3, 3)).toBe(0b000000111);
+    expect(glyphBits('wink', 3, 3)).toBe(0b000111000);
+    expect(glyphBits('heart', 2, 2)).toBeNull();
+  });
+
+  it('personality moments: deterministic, brief, a few a minute — never a flicker', () => {
+    const palette = ['happy', 'wink', 'sparkle'] as const;
+    let changes = 0, shown = 0, prev = '';
+    for (let t = 0; t < 600; t += 1 / 30) {
+      const m = eyeMoment(7, t, palette);
+      expect(eyeMoment(7, t, palette)).toEqual(m);
+      const key = `${m.glyph}:${m.wink}`;
+      if (key !== prev) { changes++; prev = key; }
+      if (m.glyph) { shown += 1 / 30; expect(palette).toContain(m.glyph); expect(m.wink).toBe(m.glyph === 'wink'); }
+    }
+    // 600 s: a moment every 9–17 s, each on and off again.
+    expect(changes).toBeGreaterThan(60);
+    expect(changes).toBeLessThan(140);
+    expect(shown / 600).toBeLessThan(0.2);
+    expect(eyeMoment(7, 3, [])).toEqual({ glyph: null, wink: false });
   });
 });

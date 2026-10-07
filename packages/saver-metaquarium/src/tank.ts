@@ -3251,7 +3251,10 @@ class TankInstance implements SaverInstance {
       // glance at the lens. Rigged on the first frame that asks for it, so
       // `eyeLife: 0` compiles the stock eye program and costs nothing.
       // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
-      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
+      // A minted breed's rig drives its eyes itself (angel.ts, turtle.ts): its
+      // eyes are alive whatever `eyeLife` says, and make the faces its driver asks for.
+      const glyph = angel?.eyes ?? turtle?.eyes ?? null;
+      if ((eyeLife > 0 || glyph) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
@@ -3266,7 +3269,9 @@ class TankInstance implements SaverInstance {
             target: look ? toward(look.x, look.y, look.z) : null,
             camera: toward(cam.x, cam.y, cam.z),
             climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
-          }, eyeLife, this.eyeState);
+          }, glyph ? Math.max(eyeLife, 1) : eyeLife, this.eyeState);
+          this.eyeState.glyph = glyph?.glyph ?? null;
+          this.eyeState.wink = glyph?.wink ?? false;
           f.eyes.set(this.eyeState);
         }
       } else if (f.eyes) {
@@ -3344,7 +3349,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, ...(angel.eyes.glyph ? { face: angel.eyes.wink ? 'wink' : angel.eyes.glyph } : {}) } : turtle ? { doing: turtle.doing, ...(turtle.eyes.glyph ? { face: turtle.eyes.wink ? 'wink' : turtle.eyes.glyph } : {}) } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

@@ -17,6 +17,7 @@
  *   burst    some cycles: fins folded back, two hard beats
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
+import { eyeMoment, NO_GLYPH, type GlyphCue } from './eyes';
 import { fishHash } from './swim';
 
 export const ANGEL_CLIPS = ['swim', 'glide', 'burst', 'display'] as const;
@@ -78,6 +79,8 @@ const posMod = (v: number, m: number): number => ((v % m) + m) % m;
 
 export interface AngelState {
   doing: AngelDoing;
+  /** What its eyes draw (eyes.ts EYE_GLYPHS): proud or smitten showing off, wide at a dart, drowsy in a long glide. */
+  eyes: GlyphCue;
   /** Clip weights, for inspect and tests. */
   weights: Record<AngelClip, number>;
 }
@@ -94,8 +97,15 @@ export function angelMoment(index: number, t: number): AngelState & { times: Rec
   const displayW = act === 'display' ? env(au, 0, 0.1, DISPLAY - 0.1, DISPLAY) : 0;
   const burstW = act === 'burst' ? env(au, 0, 0.06, BURST - 0.12, BURST) : 0;
   const doing: AngelDoing = burstW > 0 ? 'burst' : displayW > 0 ? 'display' : glideW > 0.5 ? 'glide' : 'swim';
+  const gu = u - c.glideAt;
+  const eyes: GlyphCue = doing === 'burst' && au < 0.7 ? { glyph: 'surprised', wink: false }
+    : doing === 'display' && au > 0.4 && au < DISPLAY - 0.3 ? { glyph: fishHash(index * 31 + k, 915) < 0.3 ? 'heart' : 'happy', wink: false }
+    : doing === 'glide' && gu > 1.6 && gu < GLIDE - 1.2 && fishHash(index * 37 + k, 917) < 0.45 ? { glyph: 'sleepy', wink: false }
+    : doing === 'swim' ? eyeMoment(index, t, ['happy', 'wink', 'sparkle', 'happy', 'dizzy'])
+    : NO_GLYPH;
   return {
     doing,
+    eyes,
     weights: { swim: Math.max(0, 1 - glideW - displayW - burstW), glide: glideW, burst: burstW, display: displayW },
     times: {
       swim: 0, // set from distance by angelFrame

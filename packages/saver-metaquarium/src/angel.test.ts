@@ -49,4 +49,15 @@ describe('angelfish: the angel', () => {
     angelFrame(a, 1, 0, 10 + 1 / 0.045 / 4);
     expect((a.actions.swim.time - t0 + 1) % 1).toBeCloseTo(0.25, 9);
   });
+
+  it('its eyes make the faces of what it does: proud or smitten showing off, wide at a dart', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 8; i++) for (let t = 0; t < 400; t += 0.1) {
+      const m = angelMoment(i, t);
+      if (m.eyes.glyph) seen.add(`${m.doing}:${m.eyes.glyph}`);
+      if (m.doing === 'burst' && m.eyes.glyph) expect(m.eyes.glyph).toBe('surprised');
+      if (m.doing === 'display' && m.eyes.glyph) expect(['happy', 'heart']).toContain(m.eyes.glyph);
+    }
+    for (const want of ['display:happy', 'display:heart', 'burst:surprised', 'glide:sleepy']) expect([...seen]).toContain(want);
+  });
 });

@@ -11,6 +11,11 @@
  *            eye's own black and white, never any other colour
  *   wide     the pupil a ring bigger
  *   happy    a little ^ where the eye was
+ *   glyphs   an expression drawn on the eye's own pixels, the hackerfish's
+ *            face in miniature (EYE_GLYPHS): ^ ^, O O, a heart, a wink, a
+ *            sleepy lid, a stern slant, dizzy X X, a sparkle — per grid size,
+ *            in the eye's ink on its own majority colour, so it is still
+ *            this fish's eye making the face
  *
  * Nothing moves: no vertex is touched, so the flush voxel faces cannot fight
  * (the first rig slid and scaled them, and they flashed). It costs no
@@ -25,6 +30,37 @@ import { analyseEyes, type EyeGrid, type Vec3 } from './eye-grid';
 
 export const MAX_EYES = 4;
 
+/**
+ * Expressions, per eye grid (cols x rows), top row first; `#` is the eye's ink
+ * (black on a light eye, white on a dark one). Columns run from the back of
+ * the eye toward the nose on BOTH eyes (the grid's u axis), so a slant that
+ * reads stern on one side reads stern on the other.
+ */
+export const EYE_GLYPHS = {
+  happy: { '3x3': ['.#.', '#.#', '...'], '3x2': ['.#.', '#.#'], '2x2': ['..', '##'] },
+  surprised: { '3x3': ['###', '#.#', '###'], '3x2': ['###', '#.#'], '2x2': ['##', '##'] },
+  heart: { '3x3': ['#.#', '###', '.#.'], '3x2': ['#.#', '.#.'] },
+  wink: { '3x3': ['...', '###', '...'], '3x2': ['...', '###'], '2x2': ['..', '##'] },
+  sleepy: { '3x3': ['...', '...', '###'], '3x2': ['...', '###'], '2x2': ['..', '##'] },
+  stern: { '3x3': ['#..', '.#.', '..#'], '3x2': ['##.', '..#'], '2x2': ['#.', '.#'] },
+  dizzy: { '3x3': ['#.#', '.#.', '#.#'], '3x2': ['#.#', '.#.'], '2x2': ['#.', '.#'] },
+  sparkle: { '3x3': ['.#.', '###', '.#.'], '3x2': ['.#.', '###'] },
+} as const satisfies Record<string, Partial<Record<string, readonly string[]>>>;
+export type EyeGlyph = keyof typeof EYE_GLYPHS;
+export const EYE_GLYPH_NAMES = Object.keys(EYE_GLYPHS) as EyeGlyph[];
+
+/** A glyph as the grid's bitmask (bit `row * cols + col`, row 0 the BOTTOM), or null when it has no drawing at that size. */
+export function glyphBits(glyph: EyeGlyph, cols: number, rows: number): number | null {
+  const art = (EYE_GLYPHS[glyph] as Partial<Record<string, readonly string[]>>)[`${cols}x${rows}`];
+  if (!art) return null;
+  let bits = 0;
+  art.forEach((line, top) => {
+    const row = rows - 1 - top;
+    for (let col = 0; col < cols; col++) if (line[col] === '#') bits |= 1 << (row * cols + col);
+  });
+  return bits;
+}
+
 export interface EyeRig {
   set(state: EyeState): void;
   /** One signature per eye found (`3x3 ###/#../#..`), for inspect(). */
@@ -33,7 +69,7 @@ export interface EyeRig {
 
 const EYE_PARS = /* glsl */ `
   uniform vec4 uEyeO[${4}]; uniform vec3 uEyeU[${4}]; uniform vec3 uEyeV[${4}];
-  uniform vec4 uEyeG[${4}]; uniform vec4 uEyeS[${4}]; uniform vec4 uEyeLid;
+  uniform vec4 uEyeG[${4}]; uniform vec4 uEyeS[${4}]; uniform vec4 uEyeLid; uniform vec4 uEyeX[${4}];
   varying vec3 vEyeP;
   bool mqEyeBit(float bits, int cols, int rows, int x, int y, bool outside) {
     if (x < 0 || y < 0 || x >= cols || y >= rows) return outside;
@@ -61,6 +97,8 @@ const EYE_PARS = /* glsl */ `
     vec3 lidC = dark ? vec3(0.0) : vec3(1.0), lineC = dark ? vec3(1.0) : vec3(0.0);
     int lineRow = (rows - 1) / 2;
     int far = max(lineRow, top - lineRow);
+    // A glyph: an expression in the eye's ink on its own majority colour.
+    if (uEyeX[e].y > 0.5) return mqEyeBit(uEyeX[e].x, cols, rows, cx, cy, false) ? lineC : lidC;
     if (mode == 2 && cols >= 3 && rows >= 2) {
       int mid = cols / 2;
       bool arc = (cx == mid && cy == top) || ((cx == mid - 1 || cx == mid + 1) && cy == top - 1);
@@ -139,6 +177,8 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
     uEyeG: { value: pad((g) => new Vector4(g.cols, g.rows, g.black, g.darkEye ? 1 : 0), new Vector4(1, 1, 0, 0)) },
     uEyeS: { value: pad(() => new Vector4(), new Vector4()) },
     uEyeLid: { value: new Vector4(0, 0, 0, grids.length) },
+    // Per eye: x the glyph's bits, y 1 while a glyph shows.
+    uEyeX: { value: pad(() => new Vector4(), new Vector4()) },
   };
   for (const part of parts) {
     const uEyeM = { value: part.toGroup };
@@ -149,7 +189,7 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
       shader.fragmentShader = EYE_PARS
         + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqEyeColor(diffuseColor.rgb);');
     };
-    part.mat.customProgramCacheKey = () => 'mq-eye-display-v4';
+    part.mat.customProgramCacheKey = () => 'mq-eye-display-v5';
     part.mat.needsUpdate = true;
   }
   const clampInt = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, Math.round(v)));
@@ -170,6 +210,11 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
         // redrawing it would make it someone else's eye.
         const pupil = g.shiftX[0] !== g.shiftX[1] || g.shiftY[0] !== g.shiftY[1];
         s.w = mono || (state.expr === 1 && !pupil) ? 0 : state.expr;
+        // A glyph on this eye: both of them, or the first alone for a wink.
+        const x = shared.uEyeX.value[i]!;
+        const glyph = state.glyph && (!state.wink || i === 0) ? glyphBits(state.glyph, g.cols, g.rows) : null;
+        x.x = glyph ?? 0;
+        x.y = glyph === null ? 0 : 1;
       });
     },
   };
@@ -190,8 +235,9 @@ export interface EyeCue {
   climb: number;
 }
 
-/** `expr`: 0 open · 1 wide · 2 happy. `dilate`/`widen` are kept for callers that want the analogue values. */
-export interface EyeState { blink: number; gazeFwd: number; gazeUp: number; dilate: number; widen: number; expr: 0 | 1 | 2 }
+/** `expr`: 0 open · 1 wide · 2 happy. `dilate`/`widen` are kept for callers that want the analogue values.
+ *  `glyph`: an expression drawn over the eye (EYE_GLYPHS), on both eyes — or, with `wink`, on the first alone. */
+export interface EyeState { blink: number; gazeFwd: number; gazeUp: number; dilate: number; widen: number; expr: 0 | 1 | 2; glyph?: EyeGlyph | null; wink?: boolean }
 
 const hash = (n: number): number => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 const bell = (u: number): number => (u <= 0 || u >= 1 ? 0 : Math.sin(u * Math.PI));
@@ -244,4 +290,24 @@ export function eyeMood(tSec: number, slot: number, cue: EyeCue, amount: number,
   out.dilate = 1 + (dilate - 1) * amount; out.widen = widen * amount;
   out.expr = amount > 0.5 ? expr : 0;
   return out;
+}
+
+/** What a driver asks the eyes to draw this frame (EYE_GLYPHS), or nothing. */
+export interface GlyphCue { glyph: EyeGlyph | null; wink: boolean }
+export const NO_GLYPH: GlyphCue = { glyph: null, wink: false };
+
+/**
+ * A fish's personality, in its eyes: every 9–17 s an expression from
+ * `palette` for 1.2–1.8 s — a wink is one eye. Pure in (slot, t). Flash-safe:
+ * a face changes a handful of times a minute.
+ */
+export function eyeMoment(slot: number, t: number, palette: readonly EyeGlyph[]): GlyphCue {
+  if (!palette.length) return NO_GLYPH;
+  const every = 9 + hash(slot * 2.17) * 8;
+  const tau = t / every + hash(slot * 5.31);
+  const n = Math.floor(tau), into = (tau - n) * every;
+  const lasts = 1.2 + hash(n * 1.7 + slot) * 0.6;
+  if (into > lasts) return NO_GLYPH;
+  const glyph = palette[Math.floor(hash(n * 3.9 + slot * 0.7) * palette.length) % palette.length]!;
+  return glyph === 'wink' ? { glyph, wink: true } : { glyph, wink: false };
 }
