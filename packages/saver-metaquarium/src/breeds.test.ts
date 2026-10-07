@@ -129,6 +129,35 @@ describe('bundled breeds (breeds/README.md)', () => {
     });
   }
 
+  it('a soft rig keeps its faces whole: no T-junction the delivered model did not have (they crack, a flickering line, as the skin bends)', async () => {
+    // A vertex strictly inside another triangle's edge. The intake's merging
+    // makes them wherever a merged face meets unmerged ones (round the eyes,
+    // the angelfish's 'line'); `kind: asis` keeps every voxel face whole.
+    const tjunctions = async (file: string): Promise<number> => {
+      const tris: number[][][] = [], verts = new Map<string, number[]>();
+      for (const mesh of (await new NodeIO().read(here(file).pathname)).getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+        const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
+          const c = [0, 1, 2].map((k) => pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]);
+          tris.push(c);
+          for (const v of c) verts.set(v.map((x) => x.toFixed(3)).join(','), v);
+        }
+      }
+      let n = 0;
+      for (const c of tris) for (let e = 0; e < 3; e++) {
+        const a = c[e]!, b = c[(e + 1) % 3]!, ab = a.map((x, i) => b[i]! - x), L2 = ab.reduce((s, x) => s + x * x, 0);
+        for (const v of verts.values()) {
+          const av = v.map((x, i) => x - a[i]!), u = av.reduce((s, x, i) => s + x * ab[i]!, 0) / L2;
+          if (u <= 1e-4 || u >= 1 - 1e-4) continue;
+          if (av.reduce((s, x, i) => s + (x - u * ab[i]!) ** 2, 0) < 1e-6) n++;
+        }
+      }
+      return n;
+    };
+    // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
+    expect(await tjunctions('../breeds/angelfish.glb')).toBeLessThanOrEqual(await tjunctions('../breeds/source/angelfish.glb'));
+  }, 60_000);
+
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.
   const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p };
