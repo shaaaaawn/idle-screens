@@ -213,6 +213,8 @@ describe('prepareMintedBase', () => {
     for (const p of parts) { p.geometry.computeBoundingBox(); p.geometry.computeBoundingSphere(); }
     expect(parts.map((p) => p.geometry.boundingBox!.min.x)).toEqual([0, 10]);
     expect(parts.map((p) => p.geometry.boundingBox!.max.x)).toEqual([1, 11]);
+    expect(parts.map((p) => p.geometry.boundingSphere!.center.x)).toEqual([0.5, 10.5]);
+    for (const p of parts) expect(p.geometry.boundingSphere!.radius).toBeCloseTo(Math.SQRT1_2, 6);
   });
 
   it('refuses a model that is not a cut minted model', () => {
