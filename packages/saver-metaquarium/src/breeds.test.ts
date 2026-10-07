@@ -186,7 +186,7 @@ describe('bundled breeds (breeds/README.md)', () => {
 
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.
-  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!] };
+  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!], betafish: ([x, y, z]) => [-z!, y!, x!] };
   for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
     const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
     const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {

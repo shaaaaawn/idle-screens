@@ -2,9 +2,9 @@
   "$comment": "Breed intake manifest — see README.md. roles: source material name → role name the tank reads (materials.ts). size: nominal body length relative to a minted fish (1 = FISH_LENGTH). motion: how the breed should move (wiggle = the tank's body wave).",
   "breeds": {
     "betafish": {
-      "source": "source/betafish.glb", "delivered": "source/betafish.glb", "minted": true,
-      "kind": "asis", "keepUv": true, "size": 1, "motion": "wiggle", "roles": {},
-      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Skinned (four bones; the authored Swim clip passes through). Each token's own texture atlas paints it (breeds/minted/atlas), so its UVs are kept and no face is merged."
+      "source": "rig/betafish.glb", "delivered": "source/betafish.glb", "rig": "rig/betafish.py", "minted": true,
+      "kind": "asis", "keepUv": true, "size": 1, "motion": "beta", "roles": {},
+      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Rigged in Blender by rig/betafish.py (the delivered model turned a quarter, rigidly; its authored four-bone skin and Swim clip and the icosphere hidden in its body dropped; never otherwise edited), soft throughout: a four-bone spine; the caudal fan as three rays (upper, middle, lower) of two bones each, weighted by angle and distance about the peduncle, so it fans, folds, billows and whips; a two-bone dorsal; a pectoral and a two-bone ventral on each flank; gill covers that flare. Non-deforming bones for the dials (bend, look, spread) and whole-body moments (roll). UVs kept for the atlas. Each token's own texture atlas paints it (breeds/minted/atlas), so its UVs are kept and no face is merged."
     },
     "angelfish": {
       "source": "rig/angelfish.glb", "delivered": "source/angelfish.glb", "rig": "rig/angelfish.py", "minted": true,

@@ -323,7 +323,7 @@ def fcurves(act):
     return out
 
 
-def export(rig, path, extras, layered=False):
+def export(rig, path, extras, layered=False, uv=False):
     """The rig GLB: skin, clips as sampled named animations, facts the tank
     needs as extras on the armature node. Draco at its finest position
     precision (30 bits, ~5e-8 units): the delivered vertices come back as
@@ -333,7 +333,9 @@ def export(rig, path, extras, layered=False):
     the exporter drops them and bakes their motion into the deforming bones
     below — so a dial on its own bone (look, bend, steer) lands on the SAME
     channel as the swim, and the mixer, which averages actions that share a
-    channel, halves both. Kept, each dial turns its own node and they layer."""
+    channel, halves both. Kept, each dial turns its own node and they layer.
+
+    `uv`: keep the texture coordinates (a breed painted by an atlas, the betafish)."""
     rig['mqRig'] = 1
     for k, v in extras.items():
         rig[k] = v
@@ -355,7 +357,7 @@ def export(rig, path, extras, layered=False):
         export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=7,
         export_draco_position_quantization=30, export_draco_normal_quantization=10,
         export_draco_generic_quantization=16,
-        export_normals=True, export_texcoords=False, export_attributes=False,
+        export_normals=True, export_texcoords=uv, export_attributes=False,
         export_materials='EXPORT', export_rest_position_armature=True,
     )
     return path

@@ -414,11 +414,13 @@ def stretch(t, T=2.6):
 
 
 def bend(t, T=2.0):
-    """The dial: time 0 curved hard to its right, 1 straight, 2 hard to its left."""
+    """The dial: time 0 curved hard to its right, 1 straight, 2 hard to its left.
+    Curved to its left is a C round the turn's centre: the tail swings to its
+    LEFT (+X), following the arc it came along (about Z, - does that)."""
     p = Pose()
     b = t - 1.0
     for name in ('flex2', 'flex3', 'flex4'):
-        p.turn(name, 'z', 0.13 * b)
+        p.turn(name, 'z', -0.13 * b)
     return p
 
 

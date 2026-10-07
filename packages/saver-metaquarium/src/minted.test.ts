@@ -122,10 +122,10 @@ describe('paintMinted', () => {
     expect(n).toBe((await paintOf('angelfish')).tokens[257]![0].length);
   });
 
-  it('a betafish keeps its skeleton and clip: every mesh skinned to the clone\'s own bones', async () => {
+  it('a betafish keeps its skeleton and clips: every mesh skinned to the clone\'s own bones', async () => {
     const gltf = await parse('betafish');
     const base = prepareMintedBase(gltf.scene, gltf.animations as never[]);
-    expect(base.skin?.bones).toHaveLength(4);
+    expect(base.skin?.bones).toHaveLength(31); // its rig (rig/betafish.py): 20 deforming, 11 for dials and moments
     expect(base.attributes.uv).toBeDefined();
     const fish = paintMinted(base, (await paintOf('betafish')).tokens[100]!, null);
     const skinned: SkinnedMesh[] = [];

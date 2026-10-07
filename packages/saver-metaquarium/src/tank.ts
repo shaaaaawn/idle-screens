@@ -91,6 +91,7 @@ import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from '
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
+import { betaFrame, rigBeta, type BetaRig } from './beta';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -661,7 +662,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -2239,6 +2240,7 @@ class TankInstance implements SaverInstance {
     let angel: AngelRig | null = null;
     let turtle: TurtleRig | null = null;
     let seahorse: SeahorseRig | null = null;
+    let beta: BetaRig | null = null;
     let hacker: HackerRig | null = null;
     let shark: SharkRig | null = null;
     let baby: BabyRig | null = null;
@@ -2260,6 +2262,7 @@ class TankInstance implements SaverInstance {
       if (rigged === 'angelfish') angel = rigAngel(body, tpl.clips);
       if (rigged === 'seaturtle') turtle = rigTurtle(body, tpl.clips);
       if (rigged === 'seahorse') seahorse = rigSeahorse(body, tpl.clips);
+      if (rigged === 'betafish') beta = rigBeta(body, tpl.clips);
       if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (rigged === 'shark') shark = rigShark(body, tpl.clips);
       if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
@@ -2298,8 +2301,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || angel || turtle || seahorse || hacker || shark || baby || tang || puffer) {
-        mixer = (angler ?? angel ?? turtle ?? seahorse ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
+      } else if (angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer) {
+        mixer = (angler ?? angel ?? turtle ?? seahorse ?? beta ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2348,8 +2351,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || angel || turtle || seahorse || hacker || shark || baby || tang || puffer || octopus
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
+      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -3129,7 +3132,7 @@ class TankInstance implements SaverInstance {
       // Its turn: the heading's change over a body length of its route, as the
       // swim wave measures it (+ to its left). A rigged breed bends into it.
       let rigTurn = 0;
-      if ((f.rig?.angel || f.rig?.turtle || f.rig?.seahorse) && turnPlan && !act) {
+      if ((f.rig?.angel || f.rig?.turtle || f.rig?.seahorse || f.rig?.beta) && turnPlan && !act) {
         const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
         rigTurn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
         rigTurn -= Math.round(rigTurn / (Math.PI * 2)) * Math.PI * 2;
@@ -3138,7 +3141,7 @@ class TankInstance implements SaverInstance {
       // Where the viewer is from its head, in its own frame: + to its left
       // (its left is the heading turned a quarter, (hz, -hx)), + up.
       let rigViewer: { yaw: number; pitch: number } | null = null;
-      if (f.rig?.angel || f.rig?.turtle || f.rig?.seahorse) {
+      if (f.rig?.angel || f.rig?.turtle || f.rig?.seahorse || f.rig?.beta) {
         const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
         const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz;
         rigViewer = { yaw: Math.atan2((dx * hz - dz * hx) / hl, (dx * hx + dz * hz) / hl), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
@@ -3153,6 +3156,10 @@ class TankInstance implements SaverInstance {
       }) : null;
       // A seahorse (minted, rig/seahorse.py): its fin, its tail's curl, its lean and its moments.
       const seahorse = f.rig?.seahorse ? seahorseFrame(f.rig.seahorse, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
+      // A betafish (minted, rig/betafish.py): its silk fins, their spread, its displays.
+      const beta = f.rig?.beta ? betaFrame(f.rig.beta, tSec, f.index, beat, {
         pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
       }) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
@@ -3382,7 +3389,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100 } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });
