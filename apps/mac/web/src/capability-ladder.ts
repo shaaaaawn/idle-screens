@@ -66,8 +66,9 @@ export function clampCapabilities(caps: Capabilities, ceiling: BackendName | nul
 
 export interface GateResult<T> {
   /**
-   * Savers to offer, in the original order. Empty only when every saver is
-   * blocked by a hard requirement (missing backend, reduced-motion hide).
+   * Savers to offer, in the original order. Empty only when there were no
+   * savers to begin with, or every one is blocked by a hard requirement
+   * (missing backend, reduced-motion hide).
    */
   playable: readonly T[];
   /** Dropped savers with the reason, for the log. */

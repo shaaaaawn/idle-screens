@@ -67,6 +67,12 @@ check_not "resume hook gone"     "pkill"                        "$got"
 check_not "blanking gone"        "wlopm"                        "$got"
 check_not "no normal saver left" "timeout 150 'idle-screens-wayland &'" "$got"
 
+echo "an unrelated --kiosk elsewhere does not block the kiosk upgrade"
+setup "# other-app --kiosk
+$STOCK"; run >/dev/null; KIOSK=1 run >/dev/null; got="$(result)"
+check "converted to kiosk" "idle-screens-wayland --kiosk" "$got"
+check_not "no normal saver left" "timeout 150 'idle-screens-wayland &'" "$got"
+
 echo "a commented swayidle example is not the splice target"
 setup "# swayidle -w timeout 1 'x'
 swayidle -w timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"

@@ -84,7 +84,14 @@ esac
 
 restrip=''
 if grep -q 'idle-screens-wayland' "$launch_file"; then
-  if grep -q -- '--kiosk' "$launch_file"; then installed_kiosk=1; else installed_kiosk=''; fi
+  # Only our own clause counts — an unrelated `--kiosk` elsewhere in the file
+  # (another app's flag, a comment) must not decide the mode.
+  if grep -Eq "timeout[[:space:]]+[0-9]+[[:space:]]+'[^']*idle-screens-wa[^']*" "$launch_file" \
+     && grep -Eq "'[^']*(idle-screens-wayland --kiosk)[^']*'" "$launch_file"; then
+    installed_kiosk=1
+  else
+    installed_kiosk=''
+  fi
   if [ -n "$KIOSK" ] && [ -z "$installed_kiosk" ]; then
     # The documented upgrade path (normal install, then kiosk = true): drop our
     # saver clause and fall through so the kiosk args and blank-strip apply.
