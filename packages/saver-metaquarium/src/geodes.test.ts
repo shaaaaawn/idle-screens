@@ -143,6 +143,12 @@ describe('wild geodes', () => {
     expect(parseGeodeMix('cathedral:2, geode, cluster, geode:0.5')).toEqual({ mix: { cathedral: 2, geode: 1.5, cluster: 1 }, problems: [] });
     expect(parseGeodeMix('cathedral, nodule').problems).toHaveLength(1);
     expect(parseGeodeMix(`geode:1${'0'.repeat(400)}`).problems).toHaveLength(1); // overflows to Infinity
+    // geodeMix is a live-steerable param; the old weight pattern backtracked
+    // quadratically on a long zero run that never matched (30 000 ≈ 2 s).
+    const t0 = performance.now();
+    expect(parseGeodeMix(`geode:${'0'.repeat(30_000)}x`).problems).toHaveLength(1);
+    expect(performance.now() - t0).toBeLessThan(250);
+    expect(parseGeodeMix('geode:.5').mix).toEqual({ geode: 0.5 });
     expect(parseGeodeMineral('')).toEqual({ minerals: undefined, problems: [] });
     const w = parseGeodeMineral('world', 0.42).minerals!;
     expect(w).toHaveLength(2);

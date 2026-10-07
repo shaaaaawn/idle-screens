@@ -17,7 +17,10 @@ export function parseGeodeMix(src: string): { mix: Partial<Record<GeodeKind, num
   for (const raw of src.split(',')) {
     const part = raw.trim();
     if (!part) continue;
-    const m = /^([a-z]+)\s*(?::\s*([0-9]*\.?[0-9]+))?$/i.exec(part);
+    // One way to read each weight: `[0-9]*\.?[0-9]+` let both runs split the same
+    // digits, so `a:000…x` backtracked quadratically (50 000 zeros ≈ 6 s) — and
+    // this string is a live-steerable param. Same accepted set, linear time.
+    const m = /^([a-z]+)\s*(?::\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/i.exec(part);
     const name = m?.[1]?.toLowerCase() as GeodeKind | undefined;
     if (!m || !name || !(GEODE_KINDS as readonly string[]).includes(name)) {
       problems.push(`"${part}": expected kind[:weight] with kind one of ${GEODE_KINDS.join(', ')}`);
