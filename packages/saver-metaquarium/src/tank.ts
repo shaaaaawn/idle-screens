@@ -3136,7 +3136,7 @@ class TankInstance implements SaverInstance {
       // Where the viewer is from its head, in its own frame: + to its left
       // (its left is the heading turned a quarter, (hz, -hx)), + up.
       let rigViewer: { yaw: number; pitch: number } | null = null;
-      if (f.rig?.angel) {
+      if (f.rig?.angel || f.rig?.turtle) {
         const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
         const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz;
         rigViewer = { yaw: Math.atan2((dx * hz - dz * hx) / hl, (dx * hx + dz * hz) / hl), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
@@ -3144,8 +3144,11 @@ class TankInstance implements SaverInstance {
       const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat, {
         pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
       }) : null;
-      // A sea turtle (minted, rig/seaturtle.py): its strokes, glides, looks and paddles.
-      const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat) : null;
+      // A sea turtle (minted, rig/seaturtle.py): the same inputs — it flies,
+      // glides, sculls, steers with its wings and meets the viewer by its nature.
+      const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
       const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;
       if (hacker) {
@@ -3375,7 +3378,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

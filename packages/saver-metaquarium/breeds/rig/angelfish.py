@@ -462,7 +462,7 @@ def main():
         rig = build_armature('Angelfish', meshes, bone_table(), nondeform=nondeform)
         keyed = {pb.name: ['rotation_quaternion'] for pb in rig.pose.bones if pb.name != 'root'}
         clips = bake(rig, BREED, CLIPS, apply_pose, ('swim', 'hover'), keyed)
-        out = export(rig, out_path(BREED), {})
+        out = export(rig, out_path(BREED), {}, layered=True)
         return {'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 

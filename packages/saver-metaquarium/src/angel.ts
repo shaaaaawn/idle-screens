@@ -163,12 +163,17 @@ export function angelFrame(rig: AngelRig, t: number, index: number, beat: number
   const D = rig.durations;
   const p = angelPersonality(index);
   const phase = (t + beat * ANGEL_STROKE) * p.tempo;
-  const burst = clamp(inp.flurry * 1.4, 0, 1);
   const cruise = smooth((inp.pace - 0.1) / 0.5);
-  // No moment mid-dart: a fish fleeing does not curtsy.
+  // A moment, once begun, is finished before a dart takes the body: cut
+  // short, a pirouette or a somersault would unwind half a turn in a frame
+  // or two. (The tank still darts it along; only the stroke waits.)
   const m = angelMoment(index, t, (n) => D[n]);
-  const mw = m.weight * (1 - burst);
-  const stroke = (1 - burst) * (1 - m.weight);
+  const mw = m.weight;
+  // Eased in and out: the tank's flurry starts and stops with a corner,
+  // and a weight that follows it straight jerks the fins at each end.
+  const dart = smooth(inp.flurry * 1.4);
+  const burst = dart * (1 - m.weight);
+  const stroke = (1 - m.weight) * (1 - dart);
   const bend = clamp(inp.turn * ANGEL_BEND, -1, 1);
 
   // The head: a slow wander about the water, a lead into the turn, and —

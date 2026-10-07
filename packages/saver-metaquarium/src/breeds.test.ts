@@ -98,13 +98,21 @@ describe('bundled breeds (breeds/README.md)', () => {
 
   // `soft`: a spine whose vertices blend between neighbouring bones (weights
   // sum to 1); otherwise every vertex rides one part. Eyes are rigid either way.
-  const MINTED_RIGS: Record<string, { joints: string[]; clips: string[]; head: string; soft?: boolean }> = {
+  // `layers`: the non-deforming bones kept as joints of their own (the dials'
+  // and whole-body moments'), so they layer over the swim and never average with it.
+  const MINTED_RIGS: Record<string, { joints: string[]; layers: string[]; clips: string[]; head: string; soft?: boolean }> = {
     angelfish: {
       joints: ['a1', 'a2', 'a3', 'body', 'd1', 'd2', 'd3', 'head', 's2', 's3', 'snout', 'tail'],
+      layers: ['flex2', 'flex3', 'flex4', 'lookP', 'lookY', 'roll', 'root'],
       clips: ['bend', 'bow', 'burst', 'curious', 'display', 'flutter', 'hover', 'kiss', 'lookPitch', 'lookYaw', 'nibble', 'pirouette', 'soar', 'stretch', 'sway', 'swim'],
       head: 'head', soft: true,
     },
-    seaturtle: { joints: ['front.L', 'front.R', 'head', 'rear.L', 'rear.R', 'shell'], clips: ['glide', 'look', 'paddle', 'swim'], head: 'head' },
+    seaturtle: {
+      joints: ['fL1', 'fL2', 'fL3', 'fR1', 'fR2', 'fR3', 'head', 'neck', 'rL', 'rR', 'shell', 'tail'],
+      layers: ['bank', 'lookP', 'lookY', 'reach', 'root', 'steerL', 'steerR', 'withdraw'],
+      clips: ['barrel', 'breathe', 'burst', 'flap', 'glide', 'lookPitch', 'lookYaw', 'lookback', 'nod', 'paddle', 'reach', 'somersault', 'steer', 'stretch', 'swim', 'tuck', 'wave', 'wipe'],
+      head: 'head', soft: true,
+    },
   };
   for (const [breed, want] of Object.entries(MINTED_RIGS)) {
     it(`${breed}: the minted rig survives the intake — its bones and clips, ${want.soft ? 'a blended spine' : 'each vertex rigid on one part'}, the eyes rigid on the ${want.head}`, async () => {
@@ -112,7 +120,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       const root = doc.getRoot();
       expect(root.listSkins()).toHaveLength(1);
       const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
-      expect([...joints].sort()).toEqual(want.joints);
+      expect([...joints].sort()).toEqual([...want.joints, ...want.layers].sort());
       expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(want.clips);
       const used = new Set<string>();
       for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
@@ -129,7 +137,13 @@ describe('bundled breeds (breeds/README.md)', () => {
           ws.forEach((x, k) => { if (x > 0.01) used.add(joints[js[k]!]!); });
         }
       }
-      expect(used.size).toBe(joints.length);
+      expect([...used].sort()).toEqual(want.joints);
+      // No dial or moment bone shares a channel with another clip's.
+      const layer = new Set(want.layers);
+      for (const a of root.listAnimations()) {
+        const hits = a.listChannels().map((c) => c.getTargetNode()!.getName()).filter((n) => layer.has(n));
+        if (/^(bend|steer|lookYaw|lookPitch|reach)$/.test(a.getName())) expect(a.listChannels().length, a.getName()).toBe(hits.length);
+      }
     });
   }
 
@@ -159,8 +173,10 @@ describe('bundled breeds (breeds/README.md)', () => {
       return n;
     };
     // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
-    expect(await tjunctions('../breeds/angelfish.glb')).toBeLessThanOrEqual(await tjunctions('../breeds/source/angelfish.glb'));
-  }, 60_000);
+    for (const breed of ['angelfish', 'seaturtle']) {
+      expect(await tjunctions(`../breeds/${breed}.glb`), breed).toBeLessThanOrEqual(await tjunctions(`../breeds/source/${breed}.glb`));
+    }
+  }, 120_000);
 
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.

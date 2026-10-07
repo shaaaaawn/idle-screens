@@ -18,8 +18,8 @@
     },
     "seaturtle": {
       "source": "rig/seaturtle.glb", "delivered": "source/seaturtle.glb", "rig": "rig/seaturtle.py", "minted": true,
-      "kind": "voxel", "size": 1, "motion": "turtle", "roles": {},
-      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Flat authored colours. Rigged in Blender by rig/seaturtle.py (the delivered -30° rest yaw undone, rigidly; the model never edited): the shell, the head, two fore-flippers and two hind; clips swim, glide, look, paddle. src/turtle.ts drives them."
+      "kind": "asis", "size": 1, "motion": "turtle", "roles": {},
+      "notes": "Minted: one model for every token of the breed (breeds/minted.mjs cut it from the 512 IPFS originals into paint regions, MINT-R<n>; MINT-EYE-R<n> where every token paints an eye cell). A token is this model plus its paint (breeds/minted/<breed>.json): the tank gives the shared geometry a per-token index and the token's own materials. Flat authored colours. Rigged in Blender by rig/seaturtle.py (the delivered -30° rest yaw undone, rigidly; the model never edited), soft throughout: every vertex's weights come from where it lies, so the skin bends and never cracks. A rigid shell; a neck blending it into the head (the eyes rigid on it); each fore-flipper a chain of three (shoulder, wrist, tip) so a stroke runs out along the wing; hind flippers and tail blended in at their roots; non-deforming bones for the dials (steer, look, reach) and the whole-body moments (bank, withdraw). Kind asis: every face a whole voxel cell, so no T-junction cracks as the skin bends. Clips swim, glide, paddle, burst, ten moments and four dials. src/turtle.ts drives them."
     },
     "babyfish": {
       "source": "rig/babyfish.glb", "delivered": "source/babyfish.glb", "rig": "rig/babyfish.py",
