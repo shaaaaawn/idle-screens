@@ -16,26 +16,23 @@ rig faces -Y (glTF +Z, which the tank assumes of a rig). So the baked meshes
 are turned a quarter turn about Z first — rigid, the whole model.
 
 An angelfish is fluid: its body curves in a travelling wave that grows toward
-the tail, its tall dorsal and anal fins ripple — a wave running back along
-them — and its streamers follow through on a lag. So nothing here is a rigid
-part. Every vertex's weights come from where it lies (the shark's way), so two
-faces that meet always move together:
+the tail, and its long dorsal and anal fins — arcs that sweep up (down) off
+the body and run back over the tail as streamers — ripple, a wave running
+back along them. So nothing here is a rigid part. Every vertex's weights
+come from where it lies (the shark's way), so two faces that meet always
+move together. Rigged by eye in Blender against the side view:
 
-    spine    five bones nose to tail — the head (rigid, with both eyes: the
-             eye cells sit in its pure zone, y <= -1), then four along the
-             body; each vertex blends between the two nearest by y, so the
-             body bends as one smooth curve, never at a joint
-    fins     three bones up the dorsal arm and three down the anal arm, each
-             on the spine bone beside it; a vertex is fin by how far above
-             (below) the body's core it is, blended along the fin by y
-    streamers  one bone each, riding the last fin bone, for the filaments
-             that trail back over the tail (blended in over their first voxel)
+    spine    the head (rigid, with both eyes: they sit in its pure zone,
+             y <= -1), three bones along the body, and the tail through the
+             caudal bar; each vertex blends between the two nearest by y, so
+             the body bends as one smooth curve, never at a joint
+    fins     three bones laid ALONG each arc (DORSAL_ARC, ANAL_ARC); a vertex
+             is fin by how far it stands off the body, and blends along its
+             arc by arc length. Each segment rides the spine bone beside it,
+             so an arc curves and waves with the body, then ripples on top —
+             sideways about its own axis, the streamers widest
     flex1..4 non-deforming, each the parent of a spine bone. Only the `bend`
-             dial moves them: a turn curves the whole body, under any stroke.
-
-Rig space (after the turn): nose -Y, up +Z, its left +X. Read off the side
-occupancy: the eyes at y -7.3..-1.3, the peduncle at y ~12.5, the caudal fin
-y 15..18, the body's core within |z| < 6, the streamers at |z| > 15.
+             dial moves them: a turn curves the whole fish, under any stroke.
 
 Clips (30 fps; the tank sets their times and weights, never update(dt)):
 
@@ -53,7 +50,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Quaternion, Vector
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -64,52 +61,82 @@ from common import (  # noqa: E402
 BREED = 'angelfish'
 PITCH = 2.0
 
-# The spine: each bone's weight peaks at its centre (rig-space y) and hands
-# over linearly to the next. The head is pure up to y = -1: the eyes are rigid.
-SPINE = ('head', 's1', 's2', 's3', 's4')
-SPINE_AT = (-1.0, 1.5, 6.25, 10.5, 15.0)
-# The fins: weight peaks along the fin, and how far off the body's core a
-# vertex must be to be fin (eased in from CORE to CORE + FIN_IN).
+# Read off the side occupancy in rig space (nose -Y, up +Z; one cell is 2):
+# a long diamond body from the nose (y -15) to the peduncle (y ~15), the eyes
+# at y -7..-1 just under the midline; the caudal fin a bar at y 17..19,
+# z -14..10; the DORSAL arc rising off the diamond's top at y ~1 to z ~16,
+# then running back along z 18..20 to y 23, over the tail; the ANAL arc
+# dropping off its bottom the same way to y ~15.
+SPINE = ('head', 's1', 's2', 's3', 'tail')
+SPINE_AT = (-1.0, 2.0, 6.5, 11.0, 15.5)  # each bone's weight peaks here (y)
+MID_Z = -1.0
 DORSAL = ('d1', 'd2', 'd3')
 ANAL = ('a1', 'a2', 'a3')
-FIN_AT = (1.0, 7.0, 13.0)
-CORE, FIN_IN, FIN_FROM_Y = 5.0, 6.0, -4.0
-# The streamers stand on the planes z = 15.05 (dorsal) and -14.95 (anal).
-DORSAL_ROOT, ANAL_ROOT, STREAMER_IN = 15.05, -14.95, 3.0
+DORSAL_ARC = ((1.0, 9.0), (5.0, 15.0), (11.0, 19.0), (23.0, 20.0))
+ANAL_ARC = ((1.0, -10.0), (5.0, -15.0), (10.0, -18.0), (15.5, -20.0))
+# A vertex is fin by how far it stands off the body: eased in over these z.
+DORSAL_IN, ANAL_IN = (9.0, 13.0), (-10.0, -14.0)
+TAIL_FROM = 15.5  # the caudal bar: never fin, however tall
 
 
-def hat(y, centres, names):
+def hat(x, centres, names):
     """Linear hand-over between neighbouring centres: two bones at most."""
-    if y <= centres[0]:
+    if x <= centres[0]:
         return {names[0]: 1.0}
     for i in range(len(centres) - 1):
         a, b = centres[i], centres[i + 1]
-        if y <= b:
-            u = ease((y - a) / (b - a))
+        if x <= b:
+            u = ease((x - a) / (b - a))
             return {names[i]: 1 - u, names[i + 1]: u}
     return {names[-1]: 1.0}
+
+
+def along(arc, y, z):
+    """How far along an arc (polyline in y, z) a point lies, by its nearest point."""
+    best, run, at = 1e9, 0.0, 0.0
+    for (y0, z0), (y1, z1) in zip(arc, arc[1:]):
+        dy, dz = y1 - y0, z1 - z0
+        L2 = dy * dy + dz * dz
+        u = max(0.0, min(1.0, ((y - y0) * dy + (z - z0) * dz) / L2))
+        d = (y - (y0 + u * dy)) ** 2 + (z - (z0 + u * dz)) ** 2
+        if d < best:
+            best, at = d, run + u * math.sqrt(L2)
+        run += math.sqrt(L2)
+    return at
+
+
+def arc_centres(arc):
+    """Each fin bone's weight peaks at its segment's middle, by arc length."""
+    out, run = [], 0.0
+    for (y0, z0), (y1, z1) in zip(arc, arc[1:]):
+        L = math.hypot(y1 - y0, z1 - z0)
+        out.append(run + L / 2)
+        run += L
+    return out
 
 
 def weights_at(co, eye):
     if eye:
         return {'head': 1.0}
     spine = hat(co.y, SPINE_AT, SPINE)
-    side = 1 if co.z >= 0 else -1
-    off = abs(co.z) - CORE
-    f = ease(off / FIN_IN) if co.y > FIN_FROM_Y else 0.0
+    if co.y >= TAIL_FROM:
+        return spine
+    if co.z > 0:
+        lo, hi = DORSAL_IN
+        f = ease((co.z - lo) / (hi - lo))
+        arc, names = DORSAL_ARC, DORSAL
+    else:
+        lo, hi = ANAL_IN
+        f = ease((lo - co.z) / (lo - hi))
+        arc, names = ANAL_ARC, ANAL
     if f <= 0:
         return spine
-    fin = hat(co.y, FIN_AT, DORSAL if side > 0 else ANAL)
-    root = DORSAL_ROOT if side > 0 else ANAL_ROOT
-    s = ease((co.z - root) / STREAMER_IN) if side > 0 else ease((root - co.z) / STREAMER_IN)
+    fin = hat(along(arc, co.y, co.z), arc_centres(arc), names)
     out = {}
     for k, v in spine.items():
         out[k] = out.get(k, 0) + v * (1 - f)
     for k, v in fin.items():
-        out[k] = out.get(k, 0) + v * f * (1 - s)
-    if s > 0:
-        stream = 'dstream' if side > 0 else 'astream'
-        out[stream] = out.get(stream, 0) + f * s
+        out[k] = out.get(k, 0) + v * f
     return {k: v for k, v in out.items() if v > 1e-4}
 
 
@@ -146,24 +173,35 @@ def soften(meshes):
 
 def bone_table():
     t = {'root': ((0, 0, -26), (0, 0, -23), None)}
-    # The spine, nose to tail, each bone from its centre to the next; a flex
-    # bone above each body bone for the bend dial.
-    t['head'] = ((0, SPINE_AT[0], -1), (0, -12, -1), 'root')
+    # The spine on the body's midline, nose to caudal bar; a flex bone above
+    # each body bone for the bend dial.
+    t['head'] = ((0, SPINE_AT[0], MID_Z), (0, -14, MID_Z), 'root')
     parent = 'head'
     for i, name in enumerate(SPINE[1:], start=1):
         head = SPINE_AT[i - 1]
         tail = SPINE_AT[i + 1] if i + 1 < len(SPINE_AT) else 20.0
-        t[f'flex{i}'] = ((0, head, -1), (0, head + 0.5, -1), parent)
-        t[name] = ((0, head, -1), (0, tail, -1), f'flex{i}')
+        t[f'flex{i}'] = ((0, head, MID_Z), (0, head + 0.5, MID_Z), parent)
+        t[name] = ((0, head, MID_Z), (0, tail, MID_Z), f'flex{i}')
         parent = name
-    # The fins: each on the spine bone beside it, standing off the core.
-    spine_at = lambda y: SPINE[1:][min(range(4), key=lambda k: abs(SPINE_AT[k + 1] - y))]
-    for names, sign in ((DORSAL, 1), (ANAL, -1)):
-        for name, y in zip(names, FIN_AT):
-            t[name] = ((0, y, sign * CORE), (0, y + 3, sign * (CORE + 8)), spine_at(y))
-    t['dstream'] = ((0, 9, DORSAL_ROOT), (0, 21, 20), 'd3')
-    t['astream'] = ((0, 7, ANAL_ROOT), (0, 14, -20), 'a3')
+    # The fin segments along their arcs, each riding the spine bone beside
+    # it: the arcs run back alongside the body (the dorsal's streamers over the
+    # tail), so they must curve and wave with it, then ripple on top.
+    for names, arc in ((DORSAL, DORSAL_ARC), (ANAL, ANAL_ARC)):
+        for name, ride, (y0, z0), (y1, z1) in zip(names, ('s1', 's2', 's3'), arc, arc[1:]):
+            t[name] = ((0, y0, z0), (0, y1, z1), ride)
     return t
+
+
+def sway_axis(arc, i):
+    """The axis a fin segment swings its tip sideways about: in the body's
+    plane, square to the segment (rotating about it carries the tip to ±X)."""
+    (y0, z0), (y1, z1) = arc[i], arc[i + 1]
+    L = math.hypot(y1 - y0, z1 - z0)
+    return Vector((0.0, -(z1 - z0) / L, (y1 - y0) / L))
+
+
+def turn_about(p, bone, axis, angle):
+    p.rot[bone] = Quaternion(axis, angle) @ p.rot.get(bone, Quaternion())
 
 
 def wave(p, w, amps, lag=0.7):
@@ -173,19 +211,14 @@ def wave(p, w, amps, lag=0.7):
         p.turn(name, 'z', a * math.sin(w - lag * i))
 
 
-def ripple(p, w, amp, lag=0.75, stream=0.0, spread=0.0, fold=0.0):
-    """The fins ripple sideways — a wave running back along each — the
-    streamers whip after; spread raises them, fold lays them back."""
-    for names, sign in ((DORSAL, 1), (ANAL, -1)):
-        for i, name in enumerate(names):
-            p.turn(name, 'y', sign * amp * math.sin(w - 0.9 - lag * i))
-            # About X, + carries an up-pointing tip forward: spread tips them
-            # forward (open), fold back (shut).
-            p.turn(name, 'x', sign * (0.06 * spread - 0.12 * fold))
-    p.turn('dstream', 'z', stream * math.sin(w - 3.0))
-    p.turn('astream', 'z', stream * math.sin(w - 3.2))
-    p.turn('dstream', 'x', 0.05 * math.sin(w - 2.4))
-    p.turn('astream', 'x', -0.05 * math.sin(w - 2.6))
+def ripple(p, w, amps, lag=0.8, spread=0.0, fold=0.0):
+    """The fins ripple sideways — a wave running back along each arc, the
+    tips (the streamers) swinging widest; spread opens the arcs away from the
+    body, fold lays them back toward it (about X: + carries a tip forward)."""
+    for names, arc, sign in ((DORSAL, DORSAL_ARC, 1), (ANAL, ANAL_ARC, -1)):
+        for i, (name, a) in enumerate(zip(names, amps)):
+            turn_about(p, name, sway_axis(arc, i), a * math.sin(w - 0.9 - lag * i))
+            p.turn(name, 'x', sign * (0.05 * spread - 0.08 * fold))
 
 
 def swim(t, T=1.6):
@@ -193,7 +226,7 @@ def swim(t, T=1.6):
     w = 2 * math.pi * t / T
     p.turn('head', 'z', -0.025 * math.sin(w + 0.6))  # the head barely counters
     wave(p, w, (0.04, 0.06, 0.09, 0.2))
-    ripple(p, w, 0.12, stream=0.22)
+    ripple(p, w, (0.05, 0.08, 0.16))
     return p
 
 
@@ -201,8 +234,8 @@ def hover(t, T=3.2):
     p = Pose()
     w = 2 * math.pi * t / T
     wave(p, w, (0.01, 0.015, 0.02, 0.05))
-    # The fins carry it: two ripples a loop, a fuller wave than when it swims.
-    ripple(p, 2 * w, 0.16, lag=0.9, stream=0.18, spread=0.4)
+    # The fins carry it: two ripples a loop, fuller than when it swims.
+    ripple(p, 2 * w, (0.08, 0.12, 0.18), lag=0.9, spread=0.5)
     return p
 
 
@@ -211,7 +244,7 @@ def burst(t, T=0.9):
     strokes = env(t, 0.04, 0.12, 0.6, 0.85)
     w = 2 * math.pi * t / 0.3
     wave(p, w, tuple(a * strokes for a in (0.08, 0.12, 0.16, 0.32)), lag=0.8)
-    ripple(p, w, 0.06 * strokes, stream=0.2 * strokes, fold=env(t, 0.0, 0.1, 0.65, T))
+    ripple(p, w, tuple(a * strokes for a in (0.03, 0.06, 0.14)), fold=env(t, 0.0, 0.1, 0.65, T))
     return p
 
 
@@ -221,7 +254,7 @@ def display(t, T=3.0):
     w = 2 * math.pi * t / 1.0
     p.turn('head', 'y', 0.1 * on)  # leans to show its side
     wave(p, w, tuple(a * on for a in (0.015, 0.02, 0.03, 0.06)))
-    ripple(p, w, 0.14 * on, stream=0.2 * on, spread=on)
+    ripple(p, w, tuple(a * on for a in (0.06, 0.1, 0.16)), spread=on)
     return p
 
 

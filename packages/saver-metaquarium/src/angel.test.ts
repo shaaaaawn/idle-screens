@@ -80,7 +80,7 @@ describe('angelfish: the real rig, swum for a minute', () => {
     expect(rig).not.toBeNull();
     const bones: Object3D[] = [];
     gltf.scene.traverse((o) => { if ((o as Bone).isBone) bones.push(o); });
-    expect(bones.map((o) => o.name)).toEqual(expect.arrayContaining(['head', 's1', 's4', 'd1', 'a3', 'dstream', 'astream']));
+    expect(bones.map((o) => o.name)).toEqual(expect.arrayContaining(['head', 's1', 'tail', 'd1', 'd3', 'a1', 'a3']));
     const q1 = bones.map(() => new Quaternion()), q2 = bones.map(() => new Quaternion());
     const q = new Quaternion(), v1 = new Quaternion(), v2 = new Quaternion();
     let beat = 0, worstStep = 0, worstAcc = 0, worstAt = '';
