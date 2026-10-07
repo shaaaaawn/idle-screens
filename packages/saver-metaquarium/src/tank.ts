@@ -233,6 +233,8 @@ async function mintedFish(id: number): Promise<{ scene: Object3D; animations: An
   const paint = table.default.tokens[id];
   if (!paint) throw new Error(`no paint for #${id}`);
   const atlas = paint[0].some((m) => m.atlas) ? await mintedAtlas(id) : null;
+  // No atlas (no createImageBitmap): reject, so the caller falls back to the textured original.
+  if (!atlas && paint[0].some((m) => m.atlas)) throw new Error(`no atlas for #${id}`);
   return { scene: paintMinted(base, paint, atlas), animations: base.animations };
 }
 

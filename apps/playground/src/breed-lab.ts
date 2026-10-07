@@ -35,6 +35,7 @@ import { BUNDLED_BREEDS } from '../../../packages/saver-metaquarium/src/breeds';
 import { MINTED_ATLAS, MINTED_PAINT } from '../../../packages/saver-metaquarium/src/minted/index';
 import { atlasTexture, MINTED_ATLAS_URL, paintMinted, prepareMintedBase } from '../../../packages/saver-metaquarium/src/minted';
 import { breedOf, fishAsset } from '../../../packages/saver-metaquarium/src/farm';
+import { resolveIpfsUrls } from '../../../packages/saver-metaquarium/src/ipfs';
 
 const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -52,7 +53,17 @@ for (const id of q.get('minted')?.split(',').map(Number).filter(Number.isInteger
   const breed = breedOf(id);
   const original = fishAsset(id, '3d');
   if (!breed || !original) continue;
-  rows.push({ label: `#${id} ${breed} · original`, url: original.replace('ipfs://', 'https://assets.idlescreens.com/ipfs/') });
+  rows.push({
+    label: `#${id} ${breed} · original`,
+    load: async () => {
+      // Down the gateway ladder: the first that serves it.
+      let err: unknown;
+      for (const url of resolveIpfsUrls(original)) {
+        try { return (await loader.loadAsync(url)).scene; } catch (e) { err = e; }
+      }
+      throw err;
+    },
+  });
   rows.push({
     label: `#${id} ${breed} · minted`,
     load: async () => {
@@ -60,9 +71,13 @@ for (const id of q.get('minted')?.split(',').map(Number).filter(Number.isInteger
       const paint = (await MINTED_PAINT[breed]!()).default.tokens[id]!;
       let atlas = null;
       if (paint[0].some((m) => m.atlas)) {
-        atlas = q.get('atlas') === '512'
-          ? await atlasTexture(await (await fetch(`${MINTED_ATLAS_URL}${id}.webp`)).arrayBuffer())
-          : await atlasTexture(b64((await MINTED_ATLAS[id]!()).default));
+        // &atlas=512 falls back to the bundled 256², as the tank does.
+        if (q.get('atlas') === '512') {
+          atlas = await fetch(`${MINTED_ATLAS_URL}${id}.webp`)
+            .then(async (res) => (res.ok ? atlasTexture(await res.arrayBuffer()) : null))
+            .catch(() => null);
+        }
+        atlas ??= await atlasTexture(b64((await MINTED_ATLAS[id]!()).default));
       }
       return paintMinted(prepareMintedBase(gltf.scene, gltf.animations), paint, atlas);
     },

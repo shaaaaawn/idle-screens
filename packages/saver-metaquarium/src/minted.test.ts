@@ -18,7 +18,7 @@ const bundled = async (breed: string): Promise<ArrayBuffer> => {
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 };
 
-/** Every triangle a document draws, by material name: sorted vertex positions (and UVs). */
+/** Every triangle a document draws, by material name: vertex positions (and UVs) in winding order, from the smallest corner. */
 function trianglesByMaterial(doc: Document, rename: (name: string) => string = (n) => n): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const mesh of doc.getRoot().listMeshes()) for (const prim of mesh.listPrimitives()) {
@@ -27,10 +27,13 @@ function trianglesByMaterial(doc: Document, rename: (name: string) => string = (
     const n = idx ? idx.getCount() : pos.getCount();
     const list = out.get(name) ?? [];
     for (let t = 0; t < n; t += 3) {
-      list.push([0, 1, 2].map((k) => {
+      const corners = [0, 1, 2].map((k) => {
         const i = idx ? idx.getScalar(t + k) : t + k;
         return pos.getElement(i, [] as number[]).map((v) => v.toFixed(3)).join(',') + (uv ? '/' + uv.getElement(i, [] as number[]).map((v) => v.toFixed(3)).join(',') : '');
-      }).sort().join('|'));
+      });
+      // Rotate to the smallest corner first: the same triangle however it starts, but a reversed one differs.
+      const at = corners.indexOf([...corners].sort()[0]!);
+      list.push([...corners.slice(at), ...corners.slice(0, at)].join('|'));
     }
     out.set(name, list);
   }
