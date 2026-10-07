@@ -18,6 +18,11 @@
  *                                side-on at each moment (seconds) — one row
  *                                per model, one column per moment;
  *                                &view=34 from behind, &view=top from above, &effort=1.9 working
+ *   ?minted=1,300,470            minted tokens: the ORIGINAL (its IPFS GLB, from the
+ *                                asset host) above the token rebuilt from its breed's
+ *                                bundled model and its paint (src/minted.ts) — the two
+ *                                rows must match; &atlas=512 paints a betafish with the
+ *                                host's 512² atlas instead of the bundled 256²
  */
 import {
   AmbientLight, Box3, Color, DirectionalLight, Group, HemisphereLight, Mesh, MeshLambertMaterial, type Material,
@@ -26,6 +31,11 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { rigSeahorse } from '../../../packages/saver-metaquarium/src/seahorse';
+import { BUNDLED_BREEDS } from '../../../packages/saver-metaquarium/src/breeds';
+import { MINTED_ATLAS, MINTED_PAINT } from '../../../packages/saver-metaquarium/src/minted/index';
+import { atlasTexture, MINTED_ATLAS_URL, paintMinted, prepareMintedBase } from '../../../packages/saver-metaquarium/src/minted';
+import { breedOf, fishAsset } from '../../../packages/saver-metaquarium/src/farm';
+import { resolveIpfsUrls } from '../../../packages/saver-metaquarium/src/ipfs';
 
 const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -34,10 +44,45 @@ const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
-const rows: { label: string; url: string }[] = [];
+const rows: { label: string; url?: string; load?: () => Promise<Object3D> }[] = [];
 const names = [...new Set([...Object.keys(OUT), ...Object.keys(SRC)].map(nameOf))].sort()
   .filter((n) => !only || only.includes(n));
 for (const u of q.get('url')?.split(',').filter(Boolean) ?? []) rows.push({ label: u.split('/').pop()!, url: u });
+const b64 = (s: string): ArrayBuffer => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
+for (const id of q.get('minted')?.split(',').map(Number).filter(Number.isInteger) ?? []) {
+  const breed = breedOf(id);
+  const original = fishAsset(id, '3d');
+  if (!breed || !original) continue;
+  rows.push({
+    label: `#${id} ${breed} · original`,
+    load: async () => {
+      // Down the gateway ladder: the first that serves it.
+      let err: unknown;
+      for (const url of resolveIpfsUrls(original)) {
+        try { return (await loader.loadAsync(url)).scene; } catch (e) { err = e; }
+      }
+      throw err;
+    },
+  });
+  rows.push({
+    label: `#${id} ${breed} · minted`,
+    load: async () => {
+      const gltf = await loader.parseAsync(b64((await BUNDLED_BREEDS[breed]!()).default), '');
+      const paint = (await MINTED_PAINT[breed]!()).default.tokens[id]!;
+      let atlas = null;
+      if (paint[0].some((m) => m.atlas)) {
+        // &atlas=512 falls back to the bundled 256², as the tank does.
+        if (q.get('atlas') === '512') {
+          atlas = await fetch(`${MINTED_ATLAS_URL}${id}.webp`)
+            .then(async (res) => (res.ok ? atlasTexture(await res.arrayBuffer()) : null))
+            .catch(() => null);
+        }
+        atlas ??= await atlasTexture(b64((await MINTED_ATLAS[id]!()).default));
+      }
+      return paintMinted(prepareMintedBase(gltf.scene, gltf.animations), paint, atlas);
+    },
+  });
+}
 const rigName = q.get('rig');
 const times = (q.get('times') ?? '0,0.25,0.5,0.75,1,1.25').split(',').map(Number);
 for (const n of q.get('url') ? [] : names) {
@@ -77,8 +122,7 @@ const views: Array<[string, (d: number) => Vector3]> = [
   const sheet = document.getElementById('sheet')!;
   let row = 0;
   for (const r of rows) {
-    const gltf = await loader.loadAsync(r.url);
-    const root = gltf.scene;
+    const root = r.load ? await r.load() : (await loader.loadAsync(r.url!)).scene;
     const box = new Box3().setFromObject(root), size = box.getSize(new Vector3()), centre = box.getCenter(new Vector3());
     root.position.sub(centre);
     // Nose-on means along the swim axis — the tank's rule, the longer horizontal extent.

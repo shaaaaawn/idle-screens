@@ -50,6 +50,7 @@ import {
   type Material,
   type Object3D,
   type SkinnedMesh,
+  type Texture,
 } from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -102,6 +103,9 @@ import {
 } from './crystal-mesh';
 import { BUNDLED_BREED_SCHEME, expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { BUNDLED_BREEDS } from './breeds';
+import { MINTED_ATLAS, MINTED_PAINT } from './minted/index';
+import { breedOf, fishAsset } from './farm';
+import { atlasTexture, MINTED_ATLAS_URL, MINTED_SCHEME, mintedIdOf, paintMinted, prepareMintedBase, type MintedBase } from './minted';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
@@ -166,6 +170,72 @@ function bundledGlb(b64: string): ArrayBuffer {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
+}
+
+/** Each minted breed's shared model, parsed and cut into regions once per page. */
+const MINTED_BASES = new Map<string, Promise<MintedBase>>();
+function mintedBase(breed: string): Promise<MintedBase> {
+  let p = MINTED_BASES.get(breed);
+  if (!p) {
+    p = (async () => {
+      const load = BUNDLED_BREEDS[breed];
+      if (!load) throw new Error(`no bundled model for ${breed}`);
+      const gltf = await new GLTFLoader().parseAsync(bundledGlb((await load()).default), '');
+      return prepareMintedBase(gltf.scene, gltf.animations);
+    })();
+    p.catch(() => MINTED_BASES.delete(breed));
+    MINTED_BASES.set(breed, p);
+  }
+  return p;
+}
+
+/** Each betafish's atlas, once per page: the bundled 256² now, and the 512²
+ *  from the asset host swapped into the SAME texture when it arrives, so every
+ *  material already wearing it (template and clones alike) sharpens at once. */
+const MINTED_ATLASES = new Map<number, Promise<Texture | null>>();
+function mintedAtlas(id: number): Promise<Texture | null> {
+  let p = MINTED_ATLASES.get(id);
+  if (!p) {
+    p = (async () => {
+      const load = MINTED_ATLAS[id];
+      if (!load) return null;
+      const tex = await atlasTexture(bundledGlb((await load()).default));
+      if (tex && typeof fetch !== 'undefined') {
+        void (async () => {
+          try {
+            const res = await fetch(`${MINTED_ATLAS_URL}${id}.webp`);
+            if (!res.ok) return;
+            const sharp = await atlasTexture(await res.arrayBuffer());
+            if (!sharp) return;
+            const old = tex.image as ImageBitmap | undefined;
+            tex.image = sharp.image;
+            tex.needsUpdate = true;
+            old?.close?.();
+          } catch {
+            // The bundled atlas stays: it is the floor, not a placeholder.
+          }
+        })();
+      }
+      return tex;
+    })();
+    p.catch(() => MINTED_ATLASES.delete(id));
+    MINTED_ATLASES.set(id, p);
+  }
+  return p;
+}
+
+/** A minted token's fish from its breed's bundled model and its paint: no fetch. */
+async function mintedFish(id: number): Promise<{ scene: Object3D; animations: AnimationClip[] }> {
+  const breed = breedOf(id);
+  const loadPaint = breed ? MINTED_PAINT[breed] : undefined;
+  if (!breed || !loadPaint) throw new Error(`no paint for #${id}`);
+  const [base, table] = await Promise.all([mintedBase(breed), loadPaint()]);
+  const paint = table.default.tokens[id];
+  if (!paint) throw new Error(`no paint for #${id}`);
+  const atlas = paint[0].some((m) => m.atlas) ? await mintedAtlas(id) : null;
+  // No atlas (no createImageBitmap): reject, so the caller falls back to the textured original.
+  if (!atlas && paint[0].some((m) => m.atlas)) throw new Error(`no atlas for #${id}`);
+  return { scene: paintMinted(base, paint, atlas), animations: base.animations };
 }
 
 /** One decoder per decoder path, created on first use and kept for the page.
@@ -2074,7 +2144,12 @@ class TankInstance implements SaverInstance {
           // Gateway ladder (MQ21): try each candidate with its own timeout so
           // one flaky gateway degrades to the next instead of to a fallback
           // blob. Non-ipfs URLs have a single candidate.
-          const buf = await (async (): Promise<ArrayBuffer> => {
+          // A minted token: its breed's bundled model in its own paint — no
+          // fetch, no gateway, no decoder. Anything amiss falls through to
+          // its original GLB on the ladder below.
+          const mintedId = mintedIdOf(url);
+          const minted = mintedId === null ? null : await mintedFish(mintedId).catch(() => null);
+          const buf = minted ? null : await (async (): Promise<ArrayBuffer> => {
             // A bundled breed: its own lazy chunk, decoded in place — no fetch.
             if (url.startsWith(BUNDLED_BREED_SCHEME)) {
               const load = BUNDLED_BREEDS[url.slice(BUNDLED_BREED_SCHEME.length)];
@@ -2082,7 +2157,8 @@ class TankInstance implements SaverInstance {
               return bundledGlb((await load()).default);
             }
             let lastErr: unknown = new Error('no gateway candidates');
-            for (const candidate of resolveIpfsUrls(url)) {
+            const original = mintedId !== null && url.startsWith(MINTED_SCHEME) ? fishAsset(mintedId, '3d') ?? url : url;
+            for (const candidate of resolveIpfsUrls(original)) {
               const ctl = new AbortController();
               const timer = setTimeout(() => ctl.abort(), 12_000);
               try {
@@ -2098,13 +2174,13 @@ class TankInstance implements SaverInstance {
             throw lastErr;
           })();
           const loader = new GLTFLoader();
-          const draco = needsDraco(buf);
-          const gltf = draco
+          const draco = buf ? needsDraco(buf) : false;
+          const gltf = minted ?? (draco
             ? await withDracoLoader(dracoPath, async (decoder) => {
                 loader.setDRACOLoader(decoder);
-                return loader.parseAsync(buf, '');
+                return loader.parseAsync(buf!, '');
               })
-            : await loader.parseAsync(buf, '');
+            : await loader.parseAsync(buf!, ''));
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());

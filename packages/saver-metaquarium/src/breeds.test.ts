@@ -6,7 +6,7 @@ import { NPC_CATALOG } from './ipfs';
 import { ACT_LENGTH } from './puffer';
 
 const here = (p: string): URL => new URL(p, import.meta.url);
-const manifest = JSON.parse(readFileSync(here('../breeds/breeds.json'), 'utf8')) as { breeds: Record<string, { kind: string }> };
+const manifest = JSON.parse(readFileSync(here('../breeds/breeds.json'), 'utf8')) as { breeds: Record<string, { kind: string; minted?: boolean }> };
 
 /** The JSON chunk of a GLB. */
 function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: { name?: string }[]; meshes: { primitives: { indices?: number; attributes: { POSITION: number } }[] }[]; accessors: { count: number }[] } {
@@ -16,6 +16,8 @@ function gltfJson(bytes: Uint8Array): { extensionsUsed?: string[]; materials?: {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + len)));
 }
 const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
+/** A minted breed's parts are paint regions: each token says what it wears there (src/minted.ts). */
+const MINT_REGION = /^MINT-(EYE-)?R\d{3}$/;
 
 /** Triangles in each eye's white and in its pupils: a clean eye is one box (12 each) and one quad (2 each) — no seams for a sliding pupil to show. */
 function cleanEyes(root: ReturnType<Document['getRoot']>, joints: string[], white: string, black: string): { white: number; pupil: number } {
@@ -39,7 +41,8 @@ describe('bundled breeds (breeds/README.md)', () => {
 
   it('every intake breed is bundled, catalogued, and nothing else is', () => {
     expect(Object.keys(BUNDLED_BREEDS).sort()).toEqual([...names].sort());
-    expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual([...names].sort());
+    // The minted breeds are catalogued by token (farm.ts), not as NPCs.
+    expect(NPC_CATALOG.map((f) => f.breed).sort()).toEqual(names.filter((n) => !manifest.breeds[n]!.minted).sort());
   });
 
   for (const name of names) {
@@ -51,7 +54,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       const json = gltfJson(bytes);
       expect(json.extensionsUsed ?? []).not.toContain('KHR_draco_mesh_compression');
       // A material with no role is painted a random coat at runtime.
-      for (const m of json.materials ?? []) expect(m.name ?? '').toMatch(ROLE);
+      for (const m of json.materials ?? []) expect(m.name ?? '').toMatch(manifest.breeds[name]!.minted ? MINT_REGION : ROLE);
       let tris = 0;
       for (const mesh of json.meshes) for (const p of mesh.primitives) tris += json.accessors[p.indices ?? p.attributes.POSITION]!.count / 3;
       // About twice a minted fish (~2.7k) at most: the intake's job.

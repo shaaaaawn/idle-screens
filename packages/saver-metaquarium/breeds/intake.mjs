@@ -58,7 +58,7 @@ const io = new NodeIO().setLogger(quiet).registerExtensions(ALL_EXTENSIONS)
 
 const isEye = (name) => /eye/i.test(name);
 const roleOf = (name) => isEye(name) ? (/black|pupil/i.test(name) ? 'eye·pupil' : /white|sclera/i.test(name) ? 'eye·sclera' : 'eye (by luminance)')
-  : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /^VIVID-\d{1,3}$/.test(name) ? `vivid ${name.slice(6)}%` : /^PAINT-#[0-9a-f]{6}$/i.test(name) ? `paint ${name.slice(6)}` : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
+  : /^MINT-/.test(name) ? 'minted paint' : /glow/i.test(name) ? 'glow' : /^KEEP-/.test(name) ? 'kept' : /^METAL-/.test(name) ? 'metal' : /^SCREEN-/.test(name) ? 'screen' : /^VIVID-\d{1,3}$/.test(name) ? `vivid ${name.slice(6)}%` : /^PAINT-#[0-9a-f]{6}$/i.test(name) ? `paint ${name.slice(6)}` : /primary/i.test(name) ? 'coat A' : /secondary/i.test(name) ? 'coat B' : 'RANDOM coat';
 
 function stats(doc) {
   let tris = 0; const mats = new Map(); const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -292,9 +292,9 @@ function dropRestChannels(doc) {
 
 /** Flat normals from the (unindexed) triangles; every other vertex attribute but UVs on textured
  *  materials and a rig's joints/weights goes. */
-function flatNormals(doc) {
+function flatNormals(doc, keepUv = false) {
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
-    const textured = !!p.getMaterial()?.getBaseColorTexture();
+    const textured = keepUv || !!p.getMaterial()?.getBaseColorTexture();
     const keep = (sem) => sem === 'POSITION' || (textured && sem === 'TEXCOORD_0') || sem === 'JOINTS_0' || sem === 'WEIGHTS_0';
     for (const sem of p.listSemantics()) if (!keep(sem)) p.setAttribute(sem, null);
     const pos = p.getAttribute('POSITION').getArray(); const nrm = new Float32Array(pos.length);
@@ -364,13 +364,13 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     for (const m of doc.getRoot().listMaterials()) if (!authored.has(m.getName())) m.setName(m.getName().replace(/\.\d{3}$/, ''));
     for (const m of [...doc.getRoot().listMeshes(), ...doc.getRoot().listNodes()]) m.setName(m.getName().replace(/\.\d{3}$/, ''));
     for (const scene of doc.getRoot().listScenes()) scene.setName('Scene');
-  } else await doc.transform(uninstance(), flatten());
+  } else if (!spec.keepNodes) await doc.transform(uninstance(), flatten());
   // Uninstancing leaves many nodes sharing one mesh; baking a node's transform
   // into a SHARED mesh moves it for every node (dori came out 602 units tall).
   // Each node gets its own copy first — ALL copies before ANY bake, or a copy
   // inherits the transform an earlier node already baked into the original.
   const seen = new Set();
-  const meshed = rigged ? [] : doc.getRoot().listNodes().filter((node) => node.getMesh());
+  const meshed = rigged || spec.keepNodes ? [] : doc.getRoot().listNodes().filter((node) => node.getMesh());
   for (const node of meshed) {
     const mesh = node.getMesh();
     if (seen.has(mesh)) node.setMesh(mesh.clone()); else seen.add(mesh);
@@ -393,10 +393,14 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     // The swim-axis rule protects the body wave, which never bends a skinned
     // mesh (swimwave.ts): a rig's parts are rigid, so they merge every way.
     greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim, spec.mergeBends !== false);
+  } else if (spec.kind === 'asis') {
+    // Geometry exactly as the source has it (a texture atlas's UVs would not
+    // survive a merge or a simplify): only the clean-up below.
+    await doc.transform(unweld());
   } else {
     await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, spec.triBudget / before.tris), error: spec.error ?? 0.002, lockBorder: false }), unweld());
   }
-  flatNormals(doc);
+  flatNormals(doc, spec.keepUv);
   if (rigged && spec.splitByBone) splitByBone(doc, spec.splitByBone);
   if (rigged) {
     dropRestChannels(doc);
@@ -405,7 +409,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
       node.setExtras(Object.fromEntries(Object.entries(node.getExtras()).filter(([k]) => k.startsWith('mq'))));
     }
   }
-  await doc.transform(weld(), dedup(), ...(rigged ? [resample({ tolerance: 1e-4 })] : []), prune());
+  await doc.transform(weld(), dedup(), ...(rigged ? [resample({ tolerance: 1e-4 })] : []), prune({ keepAttributes: !!spec.keepUv }));
   const after = stats(doc);
   const clips = doc.getRoot().listAnimations().map((a) => a.getName());
   const bytes = await io.writeBinary(doc);

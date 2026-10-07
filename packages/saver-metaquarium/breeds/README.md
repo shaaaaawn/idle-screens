@@ -198,6 +198,56 @@ it picks which clip plays and when, and sets every action's time and weight
 each frame, so the tank stays a pure function of t. `breeds.test.ts` holds
 each rig's skin, clips and joint assignment.
 
+## Minted breeds
+
+The four minted breeds (betafish, angelfish, seahorse, seaturtle) are not 512
+models. Every token of a breed is the same model: one triangle set and one set
+of UVs, measured over all 512 with zero outliers. A token differs only in its
+**paint**: which material each triangle wears, what those materials are, and,
+on a betafish, its own texture atlas. So they ship like the other breeds,
+with no IPFS on the render path:
+
+- **`breeds/minted.mjs <mirror dir>`** reads every token's original GLB (the
+  IPFS bytes; a mirror with SHA256SUMS lives in the mono, and
+  `assets.idlescreens.com/ipfs/<cid>/<file>` serves the same bytes). For each
+  breed it writes:
+  - `source/<breed>.glb`: the model cut into **paint regions**, the coarsest
+    split of its triangles that every token's materials respect. Each region is
+    material `MINT-R<n>`, or `MINT-EYE-R<n>` where every token paints an eye
+    cell. Betafish: 107 regions; angelfish 11; seahorse 15; seaturtle 13.
+  - `src/minted/<breed>.ts`: the paint table, a lazy chunk. For each token it
+    holds its materials as authored (names, linear colours, emissive, metal,
+    roughness, unlit, double-sided) and one base-36 digit per region naming
+    which of them the region wears.
+  - `src/minted/atlas/<id>.ts`: a betafish's atlas at 256² WebP, a lazy chunk
+    (the originals are 2048² JPEGs; 256² is ~15 KB).
+  - `<mirror>/../atlas/512/<id>.webp`: the same at 512², uploaded to
+    `assets.idlescreens.com/mq/minted/atlas/512/v1/`. Bump `v1` (and
+    `MINTED_ATLAS_URL`) when you regenerate.
+- **The intake** then bundles each `source/<breed>.glb` like any breed
+  (`breeds.json` marks them `minted`).
+  - The flat breeds are `voxel` and `keepNodes`, so the authored Swim clip
+    keeps its node.
+  - Betafish is `asis` + `keepUv`: its skin and clip pass through, and no
+    face is merged under an atlas.
+- **The tank** (`src/minted.ts`) turns any URL naming a minted token
+  (`ipfs://<its cid>/fish_<id>_…_3d.glb`, the same path on any gateway, or
+  `mq-minted:<id>`) into the breed's model in that token's paint.
+  - It rebuilds the token as GLTFLoader built the original: one mesh per
+    material, with the original names and colours, so coats, glow, eyes and
+    metal behave exactly as before.
+  - Every token's meshes share the breed's vertex attributes and differ only
+    in their index.
+  - A betafish gets its bundled atlas, and the 512² swaps into the same
+    texture when the asset host answers.
+  - If anything in that path fails, the tank falls back to the original GLB
+    on the gateway ladder.
+
+`minted.test.ts` holds a token's rebuild to its original, triangle for
+triangle and material for material. Two originals ship in the playground.
+The lab's `?minted=<ids>` mode draws each original above its rebuild for a
+visual check.
+
 ## Budgets
 
 A minted fish is about 2.7k triangles and 4–5 draws. Aim for the same;
