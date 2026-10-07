@@ -1,0 +1,300 @@
+# Which Linux distros to plan for, and how to smoke test them
+
+Research date: 2026-08-31. The version numbers below are **measured**, not
+looked up: each was read out of that distro's own package manager in a container
+on this date. Re-run the probe in §6 to refresh them.
+
+---
+
+## 1. There are two gates, and they fail differently
+
+A distro is only viable if it clears both. They are independent, and conflating
+them is how "which distros do we support?" gets answered wrongly.
+
+**Gate 1 — the three native libraries.** From `[package.metadata.system-deps]`
+in the sys crates. These pkg-config module names are identical everywhere, which
+is why `scripts/check-deps.sh` probes for modules rather than packages:
+
+| module | minimum | why |
+| --- | --- | --- |
+| `gtk4` | 4.12 | the crate enables the `v4_12` feature |
+| `webkitgtk-6.0` | 2.40 | webkit6 0.6 |
+| `gtk4-layer-shell-0` | 1.0 | gtk4-layer-shell-sys 0.6 |
+
+**Gate 2 — a compositor implementing `zwlr_layer_shell_v1`.** wlroots-family
+(sway, Hyprland, river, labwc, wayfire) and KDE Plasma Wayland do. **GNOME/Mutter
+and every X11 session do not**, and that is upstream's deliberate position.
+
+Gate 1 is a packaging question and is fully testable in a container. Gate 2 is a
+*desktop* question, is not testable in a container at all, and is the one that
+actually decides whether a user sees a screensaver. **A distro can pass Gate 1
+and still be useless to us** — Ubuntu Desktop and Fedora Workstation both ship
+GNOME by default.
+
+---
+
+## 2. Measured availability (Gate 1)
+
+| Distro | `gtk4` | `webkitgtk-6.0` | `gtk4-layer-shell-0` | Verdict |
+| --- | --- | --- | --- | --- |
+| **Debian trixie** | 4.18.6 | 2.52.6 | 1.0.4 | ✅ built in CI, both arches |
+| **Arch** | current | current | current | ✅ built in CI |
+| **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
+| **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
+| **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ **builds + tests (L2)** |
+| **Alpine edge** (musl) | 4.22.4 | 2.48.1 | 1.3.0 | ✅ **builds** (cargo tests not run), needs `bash` |
+| **Ubuntu 24.04 LTS** | 4.14.5 | 2.52.6 | **ABSENT** | ⚠️ one package short |
+| **Debian bookworm** | **4.8.3** | 2.50.6 | **ABSENT** | ❌ two blockers |
+
+openSUSE names the GTK4 WebKit port `webkitgtk4-devel`, which reads ambiguously
+against the GTK3 `webkit2gtk3-devel`. Confirmed by installing it and asking
+pkg-config directly: it provides `webkitgtk-6.0` 2.52.5. Package name ≠ module
+name is exactly the trap that had `check-deps.sh` probing `gtk4-layer-shell`
+instead of `gtk4-layer-shell-0`.
+
+Two results worth pulling out:
+
+- **Debian bookworm fails on `gtk4` too, not just layer-shell.** 4.8.3 is below
+  our 4.12 floor. Our README currently gives only the layer-shell reason; the
+  gtk4 one is more fundamental and rules out backporting a single package.
+- **Ubuntu 24.04 LTS is short exactly one package.** gtk4 and webkitgtk both
+  clear the bar; only `libgtk4-layer-shell-dev` is missing. That makes it the
+  one distro where a small action (a PPA, or vendoring the library, which is
+  ~2k lines of C) converts a "no" into a "yes" — and 24.04 is the LTS most
+  people are actually on until 26.04 settles.
+
+---
+
+## 3. Gate 2 in practice: distro ≠ desktop
+
+The useful unit is **distro + session**, not distro:
+
+| Target | Session | Layer shell? | Notes |
+| --- | --- | --- | --- |
+| Omarchy | Hyprland | ✅ | our reference desktop; hardware-tested |
+| Raspberry Pi OS Trixie | labwc | ✅ | CI-built on arm64, not yet hardware-tested |
+| Arch + sway/Hyprland/river | wlroots | ✅ | |
+| Fedora Sway / Hyprland spins | wlroots | ✅ | Fedora's answer to Gate 2 |
+| openSUSE + sway | wlroots | ✅ | |
+| Any distro + KDE Plasma Wayland | KWin | ✅ untested | biggest untested surface; Plasma implements layer-shell |
+| SteamOS / Bazzite | Plasma Wayland | ✅ untested | interesting: an appliance-shaped audience |
+| Ubuntu Desktop, Fedora Workstation | GNOME | ❌ | build succeeds, overlay cannot. `--windowed` only |
+| Anything on X11 | — | ❌ | out of scope, deliberately |
+
+The GNOME row is why the app now checks `gtk4_layer_shell::is_supported()` and
+exits with an explanation. Packaging effort spent on Ubuntu Desktop buys nothing
+unless the user also switches session.
+
+---
+
+## 4. Proposed tiers
+
+**Tier 1 — supported, gated in CI.** Arch (x86_64) and Debian trixie (x86_64 +
+aarch64). Already true. Anything that breaks these blocks a PR.
+
+**Tier 2 — smoke test before claiming support.** Nothing is left here: all four
+have now been built (§5.1–5.4).
+
+**Fedora, openSUSE Tumbleweed and Ubuntu 26.04 have all now been built** — each
+compiles, passes all 26 unit tests, and passes the swayidle installer suite
+23/23 (§5.1–5.3). All three are Tier 1 candidates on Gate 1. Fedora also
+exercised the previously untested `fedora` arm of `distro.sh`, confirming its
+package names. None has an L3 run yet; for Fedora and Ubuntu that means a
+Sway/Hyprland session rather than the GNOME default they ship.
+
+**Tier 3 — known-blocked, documented.** Debian bookworm and Ubuntu 24.04 LTS.
+Both deserve a one-line README entry saying *why*, since "it doesn't work" plus
+a reason stops a bug report.
+
+**Not a tier — GNOME and X11.** Not "unsupported pending work"; structurally
+impossible without a second, non-layer-shell window backend. Say so once and
+stop revisiting it.
+
+Deliberately excluded for now: NixOS (packaging model differs enough to deserve
+its own study), Void, postmarketOS. None is hard; none has a known user.
+
+---
+
+## 5. What "smoke test" should mean
+
+Three levels, increasing cost and increasing truth:
+
+**L1 — deps resolve** (container, seconds). Do the three modules exist at the
+required versions? This is §6's probe, and it is all we have run so far.
+
+**L2 — it builds and tests** (container, ~2 min each). `check-deps.sh`, then
+`cargo build --release --locked && cargo test --locked`. Catches
+distro-specific header/soname breakage that L1 cannot see. On an Apple-silicon
+Mac the container is arm64, so this doubles as Pi-target coverage.
+
+**L3 — it runs** (VM or hardware, manual). Launch the overlay in a real session
+and confirm a surface appears on the right layer, dismisses on input, and that
+the compositor advertises `zwlr_layer_shell_v1` / `ext_idle_notifier_v1`
+(`wayland-info | grep -iE 'layer_shell|idle'`). **Only L3 tests Gate 2**, and no
+amount of container work substitutes for it.
+
+Honest current state: **L1 for the table in §2, L2 for Debian trixie, Arch,
+Fedora, openSUSE Tumbleweed and Ubuntu 26.04, L3 for Omarchy only.** The Pi is L2, not L3, and the README now says so.
+
+### 5.1 Fedora L2 result (2026-08-31)
+
+Run against `feat/linux-multi-distro-aarch64` in a `fedora:latest` container
+(arm64, on Apple silicon):
+
+```
+check-deps:     All native build dependencies present (fedora).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 1m 58s
+cargo test:     26 passed; 0 failed
+```
+
+Three things this proves beyond "Fedora compiles":
+
+- `distro.sh`'s `fedora` package list — previously a guess, marked `# untested`
+  — is correct, and `idle_distro_family` classifies Fedora properly.
+- The pkg-config-probe design holds on a distro nothing was written for:
+  `check-deps.sh` needed no Fedora-specific change.
+- The swayidle installer passes on a **third** package manager and a third awk,
+  after Debian (mawk) and Arch (gawk).
+
+### 5.2 openSUSE Tumbleweed L2 result (2026-08-31)
+
+```
+check-deps:     All native build dependencies present (suse).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 59.99s
+cargo test:     26 passed; 0 failed
+```
+
+The interesting part is the `(suse)` label. `distro.sh` has **no** openSUSE
+package list — `idle_install_hint` falls through to the generic arm that just
+prints the pkg-config module names. The build still worked, because detection
+never depended on the distro map. That is the seam's central claim
+("detection is distro-independent; only the remediation hint is distro-mapped")
+holding on a distro nothing was written for, and it is the second time it has
+held — Fedora was the first, with a hint that existed but was guesswork.
+
+Worth adding a real `suse` hint now that we know the package names
+(`gtk4-devel`, `webkitgtk4-devel`, `gtk4-layer-shell-devel`), but note that it
+is a convenience, not a requirement.
+
+Cheapest real win: extend L2 to Tier 2 as a manually-triggered CI job
+(`workflow_dispatch`), so it does not slow every PR but can be run before a
+release. Fedora, openSUSE, Ubuntu and Alpine all publish official images.
+
+---
+
+### 5.3 Ubuntu 26.04 L2 result (2026-08-31)
+
+```
+check-deps:     All native build dependencies present (debian).
+swayidle tests: 23 passed, 0 failed
+cargo build:    Finished `release` profile [optimized] in 1m 04s
+cargo test:     26 passed; 0 failed
+```
+
+Detected as the `debian` family via `ID_LIKE`, which is the intended behaviour —
+Ubuntu needs no arm of its own. Note this says nothing about Ubuntu *Desktop*,
+which is GNOME and cannot show the overlay; it means Ubuntu 26.04 running a
+wlroots or Plasma session works.
+
+### 5.4 Alpine edge / musl L2 result (2026-08-31)
+
+The surprise of the sweep, in both directions.
+
+```
+rustc:       1.97.0 (Alpine Linux Rust 1.97.0-r0)   # from apk, above our 1.92 floor
+pkg-config:  gtk4 4.22.4 · webkitgtk-6.0 2.48.1 · gtk4-layer-shell-0 1.3.0
+cargo build: Finished `release` profile [optimized] in 2m 42s
+swayidle:    23 passed, 0 failed          (after `apk add bash`)
+```
+
+**musl is not a blocker.** The crate compiles against musl with Alpine's own
+`rust` package — no cross-toolchain, no vendoring, no patches. That was not the
+expected result and it makes Alpine a real option rather than a curiosity.
+
+**Our shell scripts are the blocker instead, and only just.** Alpine ships no
+`bash`, and every script we have starts `#!/usr/bin/env bash`, so the first run
+produced:
+
+```
+env: can't execute 'bash': No such file or directory
+```
+
+That is one `apk add bash` away, and everything passes afterwards. Worth
+recording as a general note rather than an Alpine one: **we depend on bash**,
+which is fine on every desktop distro and a real assumption on minimal or
+container images.
+
+Two smaller notes: `idle_distro_family` correctly returns `alpine`, and
+`idle_install_hint` has no `alpine` arm so it falls to the generic
+module-name fallback — which works, and is exactly the degradation the seam was
+designed for. Adding a real arm (`gtk4.0-dev webkit2gtk-6.0-dev
+gtk4-layer-shell-dev bash`) is a nicety.
+
+The open question for Alpine is therefore **not** "can it build" — it can — but
+whether we publish a musl *release artifact* alongside the two glibc ones.
+Source builds already work today.
+
+---
+
+## 6. The probe, so this table can be refreshed
+
+Run from anywhere with Docker. Each line prints the candidate version or
+`ABSENT`; no build, no install.
+
+```bash
+for img in debian:trixie debian:bookworm ubuntu:24.04 ubuntu:rolling; do
+  echo "### $img"
+  docker run --rm "$img" sh -c '
+    apt-get update -qq >/dev/null 2>&1
+    for p in libgtk-4-dev libwebkitgtk-6.0-dev libgtk4-layer-shell-dev; do
+      v=$(apt-cache policy $p 2>/dev/null | sed -n "s/ *Candidate: //p")
+      echo "  $p = ${v:-ABSENT}"; done'
+done
+
+echo "### fedora"
+# repoquery prints one row per repo, and the format string has no newline —
+# hence the explicit \n and sort -V | tail -1 to pick the highest.
+docker run --rm fedora:latest sh -c '
+  for p in gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel; do
+    v=$(dnf -q --refresh repoquery --qf "%{version}\n" "$p" 2>/dev/null | sort -V | tail -1)
+    echo "  $p = ${v:-ABSENT}"
+  done'
+
+echo "### opensuse tumbleweed"
+docker run --rm opensuse/tumbleweed sh -c '
+  zypper -nq --no-refresh se -s gtk4-devel webkitgtk gtk4-layer-shell 2>/dev/null \
+    | grep -iE "gtk4-devel|webkitgtk4-devel|gtk4-layer-shell-devel"'
+
+echo "### alpine edge"
+docker run --rm alpine:edge sh -c '
+  apk update -q >/dev/null 2>&1
+  apk search -qx gtk4.0-dev webkit2gtk-6.0-dev gtk4-layer-shell'
+```
+
+Two traps this probe already hit, kept so the next person does not:
+
+- **macOS has no `timeout`** (GNU coreutils). A `timeout 600 docker run …`
+  wrapper fails with `command not found` and every probe silently reports
+  nothing useful.
+- **`archlinux` publishes no arm64 image.** On Apple silicon it must be run with
+  `--platform linux/amd64`, and that is the same reason `linux-ci.yml` pairs
+  runner and container in an explicit `include:` list instead of a matrix
+  cross-product.
+
+---
+
+## 7. Recommendation
+
+1. Extend L2 to Fedora, openSUSE, Ubuntu 26.04 and Alpine as a
+   `workflow_dispatch` CI job. Cheap, and it is the difference between listing a
+   distro and supporting one.
+2. Add the Tier 3 rows to the README with reasons: bookworm's gtk4 4.8.3 as well
+   as its missing layer-shell, and 24.04's single missing package.
+3. Decide on Ubuntu 24.04 LTS deliberately. It is one package from working, on
+   the LTS with the largest install base. A PPA or a vendored gtk4-layer-shell
+   is a real option; doing nothing is also fine, but it should be a choice.
+4. Prioritise a **KDE Plasma Wayland** L3 test above any further packaging work.
+   It is the largest audience that should already work and that nobody has ever
+   verified — and unlike GNOME, a failure there would be a bug we could fix.

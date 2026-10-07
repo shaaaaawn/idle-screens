@@ -21,6 +21,27 @@ as_root() {
   fi
 }
 
+# shellcheck source=scripts/distro.sh
+. ./distro.sh
+
+# Verify the shared libraries before touching anything — a far better error than
+# a dynamic-linker failure on first launch.
+# `|| true`: ldd exits non-zero on a non-dynamic binary, and under `set -e` a
+# failing command substitution in an assignment aborts with no output at all.
+if command -v ldd >/dev/null 2>&1; then
+  missing="$(ldd ./idle-screens-wayland 2>/dev/null | awk '/not found/{print $1}' || true)"
+  if [ -n "$missing" ]; then
+    echo "This binary needs shared libraries this system doesn't have:" >&2
+    printf '  - %s\n' $missing >&2
+    echo >&2
+    echo "Detected distro family: $(idle_distro_family)" >&2
+    # Runtime hint, not the build one: this is a prebuilt binary, so there is no
+    # reason to send someone installing it after a compiler and -dev headers.
+    idle_runtime_hint >&2
+    exit 1
+  fi
+fi
+
 echo "Installing to $prefix ..."
 as_root install -Dm755 idle-screens-wayland "$prefix/bin/idle-screens-wayland"
 as_root install -Dm755 packaging/omarchy/omarchy-idle-screens "$prefix/bin/omarchy-idle-screens"
@@ -60,7 +81,22 @@ if [ -n "$shadow" ] && [ "$shadow" != "$prefix/bin/idle-screens-wayland" ]; then
   echo "         Remove the other install first: ./uninstall.sh --all"
 fi
 
-echo "Done. Optional next steps:"
-echo "  • Omarchy (either version): ./packaging/omarchy/install-omarchy.sh"
-echo "  • Tray (if not autostarted): idle-screens-wayland tray"
-echo "  • Test overlay: idle-screens-wayland"
+echo
+echo "Done. Next: wire idle-triggered launch for your session."
+mechanisms="$(idle_detect_idle_mechanism)"
+for m in $mechanisms; do
+  case "$m" in
+    quickshell) echo "  • Omarchy 4.x detected:   ./packaging/omarchy/install-omarchy.sh" ;;
+    hypridle)   echo "  • hypridle detected:      ./packaging/omarchy/install-hypridle.sh" ;;
+    swayidle)   echo "  • swayidle detected:      ./packaging/swayidle/install-swayidle.sh" ;;
+  esac
+done
+if [ -z "$mechanisms" ]; then
+  echo "  • no idle daemon detected — launch it from your own idle hook, and"
+  echo "    dismiss with: pkill -TERM -f '[i]dle-screens-wayland'"
+  echo "    See the 'Idle integration' section of the README."
+fi
+echo
+echo "  • test now:  idle-screens-wayland --windowed --saver warp"
+echo "  • kiosk:     idle-screens-wayland --kiosk    (Escape, or pkill -TERM -f '[i]dle-screens-wayland')"
+echo "  • tray:      idle-screens-wayland tray"

@@ -35,6 +35,8 @@ export interface MacHostOptions {
   baseSeed: number;
   reduceMotion: boolean;
   showHint?: (label: string) => void;
+  /** Called after every successful mount (cycle, browse, pin, step-down). */
+  onMounted?: (id: string) => void;
   dpr?: number;
   viewport?: { width: number; height: number };
   fadeMs?: number;
@@ -48,6 +50,7 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
     baseSeed,
     reduceMotion,
     showHint = () => {},
+    onMounted = () => {},
     dpr = 1,
     fadeMs = 220,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -118,6 +121,7 @@ export function createMacHostController(opts: MacHostOptions): MacHostController
     inst.setPaused(reduceMotion);
     host.style.opacity = '1';
     showHint(plugin.manifest.label);
+    onMounted(plugin.manifest.id);
   };
 
   return {

@@ -11,6 +11,27 @@ use crate::state::AppState;
 
 /// Create a window for every current monitor and keep the set in sync on hotplug.
 pub fn create_all(state: &Rc<AppState>) {
+    // The overlay is a wlr-layer-shell surface, and not every Wayland compositor
+    // implements that protocol — GNOME/Mutter deliberately does not, and X11 has
+    // no equivalent. Checking up front turns the most likely first-run failure on
+    // a non-wlroots desktop into an instruction instead of an abort inside GTK.
+    // Windowed mode is a plain GTK window and needs none of this.
+    if !state.settings.windowed && !gtk4_layer_shell::is_supported() {
+        log::error!(
+            "this compositor does not implement wlr-layer-shell, so the fullscreen \
+             overlay cannot be created.\n  \
+             Supported: wlroots compositors (sway, Hyprland, river, labwc, wayfire) \
+             and KDE Plasma Wayland.\n  \
+             Not supported: GNOME/Mutter, any X11 session.\n  \
+             Try: idle-screens-wayland --windowed"
+        );
+        // A hard exit, not app.quit(): quit() returns 0 and lets the rest of
+        // `activate` run on to log "showing (0 window(s))", which reads like
+        // success to both a human and anything checking the status. Nothing is
+        // constructed yet at this point, so there is nothing to tear down.
+        std::process::exit(1);
+    }
+
     let display = gdk::Display::default().expect("no display");
     let monitors = display.monitors();
 

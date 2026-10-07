@@ -21,6 +21,8 @@ export default defineConfig({
         'packages/core/src/**/*.ts',
         'packages/savers-classic/src/**/*.ts',
         'apps/mac/web/src/host-controller.ts',
+        'apps/mac/web/src/capability-ladder.ts',
+        'apps/mac/web/src/frame-watchdog.ts',
         'packages/schema/src/**/*.ts',
         'packages/validator/src/**/*.ts',
         'packages/capabilities/src/**/*.ts',

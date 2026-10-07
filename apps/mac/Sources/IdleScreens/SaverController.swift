@@ -354,6 +354,26 @@ final class SaverController: NSObject, WKNavigationDelegate {
     return webView
   }
 
+  /// A ceiling on what the host page may attempt, when this machine cannot drive
+  /// what the browser truthfully reports it supports (`?maxBackend=`).
+  ///
+  /// Deliberately **not** a hardware allowlist. The Linux app ships one because
+  /// a specific, testable case exists there — Mesa V3D on a Raspberry Pi
+  /// advertises WebGL2 and renders three.js at a crawl. No equivalent Mac
+  /// hardware table has been measured, and inventing one would mean guessing
+  /// which Macs to penalise; every Mac that runs macOS 13 drives Canvas2D
+  /// comfortably. Sustained performance problems are the frame watchdog's job,
+  /// and it needs no hardware knowledge at all.
+  ///
+  /// So this is a documented escape hatch rather than a policy:
+  ///   defaults write com.idlescreens.mac web.maxBackend canvas2d
+  static var backendCeiling: String? {
+    guard let value = UserDefaults.standard.string(forKey: "web.maxBackend"),
+      ["css", "canvas2d", "webgl2", "webgpu"].contains(value)
+    else { return nil }
+    return value
+  }
+
   private func loadBundled(into webView: WKWebView, saverId: String?) {
     // Cached site update if present, else the shipped bundle. A file URL is
     // required (loadFileURL throws on a relative/non-file URL).
@@ -366,6 +386,9 @@ final class SaverController: NSObject, WKNavigationDelegate {
     }
     if brightness < 1.0 {
       query.append(URLQueryItem(name: "brightness", value: String(format: "%.2f", brightness)))
+    }
+    if let ceiling = Self.backendCeiling {
+      query.append(URLQueryItem(name: "maxBackend", value: ceiling))
     }
     components.queryItems = query
     webView.loadFileURL(components.url!, allowingReadAccessTo: webRoot)

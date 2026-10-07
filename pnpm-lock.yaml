@@ -56,6 +56,9 @@ importers:
 
   apps/mac/web:
     dependencies:
+      '@idle-screens/capabilities':
+        specifier: workspace:*
+        version: link:../../../packages/capabilities
       '@idle-screens/core':
         specifier: workspace:*
         version: link:../../../packages/core
