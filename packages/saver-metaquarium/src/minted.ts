@@ -21,7 +21,7 @@
  */
 import {
   Bone, Box3, BufferAttribute, BufferGeometry, Color, DoubleSide, LinearSRGBColorSpace, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, RepeatWrapping, Skeleton, SkinnedMesh, Sphere, SRGBColorSpace, Texture, Vector3,
+  MeshPhysicalMaterial, MeshStandardMaterial, RepeatWrapping, Skeleton, SkinnedMesh, Sphere, SRGBColorSpace, Texture, Vector3,
   type AnimationClip, type InterleavedBufferAttribute, type Material, type Matrix4, type Object3D,
 } from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -41,6 +41,10 @@ export interface MintedMaterial {
   rough: number;
   emissive?: [number, number, number];
   emissiveStrength?: number;
+  /** KHR_materials_ior / _specular: GLTFLoader built these as MeshPhysicalMaterial. */
+  ior?: number;
+  specular?: number;
+  specularColor?: [number, number, number];
   unlit?: boolean;
   double?: boolean;
   /** Painted by the token's texture atlas. */
@@ -198,7 +202,15 @@ export function mintedMaterial(d: MintedMaterial, atlas: Texture | null): Materi
   if (d.unlit) {
     mat = new MeshBasicMaterial({ color, map, ...(side ? { side } : {}) });
   } else {
-    const std = new MeshStandardMaterial({ color, map, metalness: d.metal, roughness: d.rough, ...(side ? { side } : {}) });
+    const physical = d.ior !== undefined || d.specular !== undefined;
+    const params = { color, map, metalness: d.metal, roughness: d.rough, ...(side ? { side } : {}) };
+    const std = physical ? new MeshPhysicalMaterial(params) : new MeshStandardMaterial(params);
+    if (physical) {
+      const phys = std as MeshPhysicalMaterial;
+      if (d.ior !== undefined) phys.ior = d.ior === 0 ? 1000 : d.ior; // GLTFLoader's own reading of 0 (three #26167)
+      if (d.specular !== undefined) phys.specularIntensity = d.specular;
+      if (d.specularColor) phys.specularColor.setRGB(d.specularColor[0], d.specularColor[1], d.specularColor[2], LinearSRGBColorSpace);
+    }
     if (d.emissive) {
       std.emissive.setRGB(d.emissive[0], d.emissive[1], d.emissive[2], LinearSRGBColorSpace);
       std.emissiveIntensity = d.emissiveStrength ?? 1;

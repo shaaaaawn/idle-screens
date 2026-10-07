@@ -89,6 +89,11 @@ function describe(mat) {
   };
   const em = mat.getEmissiveFactor();
   if (em.some((v) => v > 0)) { d.emissive = em.map(r4); if (strength !== 1) d.emissiveStrength = r4(strength); }
+  // IOR and specular make GLTFLoader build a MeshPhysicalMaterial: keep them.
+  const ior = ext('KHR_materials_ior');
+  if (ior) d.ior = r4(ior.getIOR());
+  const spec = ext('KHR_materials_specular');
+  if (spec) { d.specular = r4(spec.getSpecularFactor()); d.specularColor = spec.getSpecularColorFactor().map(r4); }
   if (ext('KHR_materials_unlit')) d.unlit = true;
   if (mat.getDoubleSided()) d.double = true;
   if (mat.getBaseColorTexture()) d.atlas = true;

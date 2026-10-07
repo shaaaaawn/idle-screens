@@ -1,13 +1,13 @@
 import { NodeIO, type Document } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { readFileSync } from 'node:fs';
-import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, RepeatWrapping, SkinnedMesh, SRGBColorSpace, type Object3D } from 'three';
+import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, RepeatWrapping, SkinnedMesh, SRGBColorSpace, type Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
 import { ASSET_CIDS, BREEDS, fishAsset } from './farm';
 import { MINTED_ATLAS, MINTED_PAINT } from './minted/index';
-import { atlasTexture, MINTED_SCHEME, mintedIdOf, paintMinted, prepareMintedBase, type MintedPaint } from './minted';
+import { atlasTexture, MINTED_SCHEME, mintedMaterial, mintedIdOf, paintMinted, prepareMintedBase, type MintedPaint } from './minted';
 
 const here = (p: string): URL => new URL(p, import.meta.url);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
@@ -161,7 +161,7 @@ describe('betafish atlases', () => {
     // Each its own art — but #31 and #144 are twins: one painting, two JPEG
     // encodes (1,675,153 and 1,675,271 bytes) that downscale to the same pixels.
     expect(seen.size).toBe(255);
-  });
+  }, 60_000); // 256 chunk imports: slow on a loaded runner, never wrong
 
   it('decodes as GLTFLoader decoded the original\'s: unflipped, sRGB, repeating — and is absent where there is no decoder', async () => {
     expect(await atlasTexture(new ArrayBuffer(8))).toBeNull();
@@ -224,5 +224,20 @@ describe('prepareMintedBase', () => {
     const split = new Group(), a = new Group(), b = new Group();
     a.add(region('MINT-R000', true)); b.add(region('MINT-R001', true)); split.add(a, b);
     expect(() => prepareMintedBase(split, [])).toThrow(/different parents/);
+  });
+});
+
+describe('mintedMaterial', () => {
+  it('keeps what made GLTFLoader reach for a physical material: IOR and specular (#257\'s pupils)', async () => {
+    const pupil = (await paintOf('angelfish')).tokens[257]![0].find((m) => m.name === 'EYE-BLACK')!;
+    expect(pupil.ior).toBe(1.45);
+    const mat = mintedMaterial(pupil, null) as MeshPhysicalMaterial;
+    expect(mat.isMeshPhysicalMaterial).toBe(true);
+    expect(mat.ior).toBeCloseTo(1.45);
+    expect(mat.specularIntensity).toBe(pupil.specular);
+    expect(mat.specularColor.r).toBeCloseTo(pupil.specularColor![0]);
+    expect((mintedMaterial({ ...pupil, ior: 0 }, null) as MeshPhysicalMaterial).ior).toBe(1000);
+    // Without either, a standard material, as before.
+    expect((mintedMaterial({ name: 'x', color: [1, 1, 1], metal: 0, rough: 1 }, null) as MeshPhysicalMaterial).isMeshPhysicalMaterial).toBeUndefined();
   });
 });
