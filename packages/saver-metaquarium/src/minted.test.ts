@@ -198,6 +198,23 @@ describe('prepareMintedBase', () => {
     expect(() => paintMinted(base, [[], '0'], null)).toThrow(/regions/);
   });
 
+  it('measures each part by its own triangles, not the breed\'s whole position attribute', () => {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0]), 3));
+    const g2 = g.clone();
+    g.setIndex([0, 1, 2]); g2.setIndex([3, 4, 5]);
+    const m = new MeshBasicMaterial(); m.name = 'MINT-R000';
+    const m2 = new MeshBasicMaterial(); m2.name = 'MINT-R001';
+    const a = new Mesh(g, m), b = new Mesh(g2, m2);
+    const scene = new Group(); scene.add(a, b);
+    const base = prepareMintedBase(scene, []);
+    const fish = paintMinted(base, [[{ name: 'NEAR', color: [1, 1, 1], metal: 0, rough: 1 }, { name: 'FAR', color: [1, 1, 1], metal: 0, rough: 1 }], '01'], null);
+    const parts: Mesh[] = []; fish.traverse((o) => { if ((o as Mesh).isMesh) parts.push(o as Mesh); });
+    for (const p of parts) { p.geometry.computeBoundingBox(); p.geometry.computeBoundingSphere(); }
+    expect(parts.map((p) => p.geometry.boundingBox!.min.x)).toEqual([0, 10]);
+    expect(parts.map((p) => p.geometry.boundingBox!.max.x)).toEqual([1, 11]);
+  });
+
   it('refuses a model that is not a cut minted model', () => {
     expect(() => prepareMintedBase(new Group(), [])).toThrow(/no regions/);
     const odd = new Group(); odd.add(region('PrimaryColor', true));

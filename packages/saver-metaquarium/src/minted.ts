@@ -20,8 +20,8 @@
  * share the breed's vertex attributes and differ only in their index.
  */
 import {
-  Bone, BufferAttribute, BufferGeometry, Color, DoubleSide, LinearSRGBColorSpace, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, RepeatWrapping, Skeleton, SkinnedMesh, SRGBColorSpace, Texture,
+  Bone, Box3, BufferAttribute, BufferGeometry, Color, DoubleSide, LinearSRGBColorSpace, Mesh, MeshBasicMaterial,
+  MeshStandardMaterial, RepeatWrapping, Skeleton, SkinnedMesh, Sphere, SRGBColorSpace, Texture, Vector3,
   type AnimationClip, type InterleavedBufferAttribute, type Material, type Matrix4, type Object3D,
 } from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -159,6 +159,36 @@ export function prepareMintedBase(scene: Object3D, animations: AnimationClip[]):
   return { scene, animations, ranges, index, attributes, skin };
 }
 
+/**
+ * A token mesh's geometry. It shares the breed's whole position attribute, but
+ * three measures bounds over every vertex of that attribute, not the indexed
+ * ones — so each part would report the whole fish. The tank reads part
+ * bounds (nose side, glow size and centre), so measure the indexed vertices.
+ */
+class MintedGeometry extends BufferGeometry {
+  override computeBoundingBox(): void {
+    const box = (this.boundingBox ??= new Box3()).makeEmpty();
+    const pos = this.attributes.position, index = this.index;
+    if (!pos || !index) return super.computeBoundingBox();
+    const v = new Vector3();
+    for (let i = 0; i < index.count; i++) box.expandByPoint(v.fromBufferAttribute(pos as BufferAttribute, index.getX(i)));
+  }
+
+  override computeBoundingSphere(): void {
+    const sphere = (this.boundingSphere ??= new Sphere());
+    const pos = this.attributes.position, index = this.index;
+    if (!pos || !index) return super.computeBoundingSphere();
+    this.computeBoundingBox();
+    const box = this.boundingBox!;
+    if (box.isEmpty()) { sphere.makeEmpty(); return; }
+    box.getCenter(sphere.center);
+    const v = new Vector3();
+    let r2 = 0;
+    for (let i = 0; i < index.count; i++) r2 = Math.max(r2, sphere.center.distanceToSquared(v.fromBufferAttribute(pos as BufferAttribute, index.getX(i))));
+    sphere.radius = Math.sqrt(r2);
+  }
+}
+
 /** A token's material, built the way GLTFLoader built the original. */
 export function mintedMaterial(d: MintedMaterial, atlas: Texture | null): Material {
   const color = new Color().setRGB(d.color[0], d.color[1], d.color[2], LinearSRGBColorSpace);
@@ -210,7 +240,7 @@ export function paintMinted(base: MintedBase, paint: [MintedMaterial[], string],
       index.set(base.index.subarray(start, start + n), o);
       o += n;
     }
-    const geometry = new BufferGeometry();
+    const geometry = new MintedGeometry();
     for (const [name, attr] of Object.entries(base.attributes)) geometry.setAttribute(name, attr);
     geometry.setIndex(new BufferAttribute(index, 1));
     const material = mintedMaterial(mats[m]!, atlas);
