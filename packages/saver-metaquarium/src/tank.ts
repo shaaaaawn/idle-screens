@@ -3133,8 +3133,16 @@ class TankInstance implements SaverInstance {
         rigTurn -= Math.round(rigTurn / (Math.PI * 2)) * Math.PI * 2;
       }
       const rigPace = speed * styleSpeed * style.travel;
+      // Where the viewer is from its head, in its own frame: + to its left
+      // (its left is the heading turned a quarter, (hz, -hx)), + up.
+      let rigViewer: { yaw: number; pitch: number } | null = null;
+      if (f.rig?.angel) {
+        const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
+        const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz;
+        rigViewer = { yaw: Math.atan2((dx * hz - dz * hx) / hl, (dx * hx + dz * hz) / hl), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+      }
       const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat, {
-        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn,
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
       }) : null;
       // A sea turtle (minted, rig/seaturtle.py): its strokes, glides, looks and paddles.
       const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat) : null;
@@ -3367,7 +3375,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

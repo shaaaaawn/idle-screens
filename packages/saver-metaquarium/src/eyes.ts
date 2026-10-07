@@ -298,18 +298,26 @@ export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Arr
   const lead = Math.min(1, cue.cruise);
   wx += (0.55 + 0.35 * Math.max(-1, Math.min(1, cue.turn * 2.5)) - wx) * 0.6 * lead;
   wy *= 1 - 0.5 * lead;
-  // The viewer: every 7–14 s, 1.6–3 s of holding their eye; the second eye
-  // arrives 0.18 s after the first and leaves 0.18 s after it.
-  const vp = 7 + hash(slot * 3.7) * 7;
-  const vt = t / vp + hash(slot * 9.2);
-  const vi = Math.floor(vt), into = (vt - vi) * vp, lasts = 1.6 + hash(vi * 1.9 + slot) * 1.4;
+  // The viewer: the second eye arrives 0.18 s after the first and leaves
+  // 0.18 s after it — a double take.
   let viewing = false;
   for (let i = 0; i < out.length; i++) {
-    const u = into - (i === 1 ? 0.18 : 0);
-    const w = ease(u / 0.15) * (1 - ease((u - lasts) / 0.15));
+    const w = mintedViewer(slot, t - (i === 1 ? 0.18 : 0));
     if (w > 0.5) viewing = true;
     const c = (v: number): number => Math.min(1, Math.max(-1, v));
     out[i] = { fwd: c(wx + (cue.camera.fwd - wx) * w), up: c(wy + (cue.camera.up - wy) * w) };
   }
   return viewing ? 'viewer' : lead > 0.5 ? 'ahead' : 'wander';
+}
+
+/**
+ * When a minted fish holds the viewer's eye: every 7–14 s, for 1.6–3 s, eased
+ * in and out over 0.15 s. 0..1, pure in (slot, t). The eyes (mintedLook) and
+ * a rig's head (angel.ts) both answer to it, so the head turns with the look.
+ */
+export function mintedViewer(slot: number, t: number, ramp = 0.15): number {
+  const vp = 7 + hash(slot * 3.7) * 7;
+  const vt = t / vp + hash(slot * 9.2);
+  const vi = Math.floor(vt), into = (vt - vi) * vp, lasts = 1.6 + hash(vi * 1.9 + slot) * 1.4;
+  return ease(into / ramp) * (1 - ease((into - lasts) / ramp));
 }
