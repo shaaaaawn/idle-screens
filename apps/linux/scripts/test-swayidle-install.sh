@@ -56,6 +56,17 @@ setup "swayidle -w timeout 60 'swaylock -f' timeout 120 'wlopm --off \\*' resume
 check "lock timeout untouched" "timeout 60 'swaylock -f'" "$got"
 check "blank timeout raised"   "timeout 900 'wlopm --off" "$got"
 
+echo "a wayfire-style key before = is not the splice target"
+setup "swayidle = swayidle -w timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"
+check     "args land after the command" "swayidle = swayidle -w timeout 150 'idle-screens-wayland &'" "$got"
+
+echo "normal install, then KIOSK=1, converts to kiosk"
+setup "$STOCK"; run >/dev/null; KIOSK=1 run >/dev/null; got="$(result)"
+check     "kiosk saver present"  "idle-screens-wayland --kiosk" "$got"
+check_not "resume hook gone"     "pkill"                        "$got"
+check_not "blanking gone"        "wlopm"                        "$got"
+check_not "no normal saver left" "timeout 150 'idle-screens-wayland &'" "$got"
+
 echo "a commented swayidle example is not the splice target"
 setup "# swayidle -w timeout 1 'x'
 swayidle -w timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"

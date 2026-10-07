@@ -90,6 +90,17 @@ describe('createFrameWatchdog', () => {
     expect(wd.level()).toBe('full');
   });
 
+  it('rearm() leaves the floor so a later heavy pick is judged again', () => {
+    const wd = createFrameWatchdog(opts);
+    let t = feed(wd, 11, 50);
+    t = feed(wd, 11, 50, t);
+    expect(wd.level()).toBe('cheapest');
+    wd.rearm();
+    expect(wd.level()).toBe('full');
+    feed(wd, 11, 50, t);
+    expect(wd.level()).toBe('reduced');
+  });
+
   it('respects a 30fps budget', () => {
     const wd = createFrameWatchdog({ ...opts, budgetMs: 1000 / 30 });
     feed(wd, 30, 25); // 25ms = 40fps: fine for 30fps, would fail at 60

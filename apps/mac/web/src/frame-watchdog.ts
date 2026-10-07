@@ -50,6 +50,12 @@ export interface FrameWatchdog {
   frame(nowMs: number): LadderLevel;
   /** Call after mounting a saver: clears history and re-arms the grace period. */
   reset(): void;
+  /**
+   * Back to 'full' with fresh history. For an explicit user selection after the
+   * watchdog bottomed out: the pick is theirs to make, but it must be judged
+   * afresh rather than inheriting a floor it never earned.
+   */
+  rearm(): void;
   level(): LadderLevel;
   /** Observed mean frame time over the current window, or null before 2 frames. */
   meanFrameMs(): number | null;
@@ -123,6 +129,10 @@ export function createFrameWatchdog(opts: WatchdogOptions = {}): FrameWatchdog {
       return current;
     },
     reset,
+    rearm() {
+      current = 'full';
+      reset();
+    },
     level: () => current,
     meanFrameMs: () =>
       deltas.length >= 1 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : null,

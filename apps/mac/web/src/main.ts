@@ -92,7 +92,12 @@ const controller = createMacHostController({
   showHint,
   // Every mount, not just the first: the previous saver's slow frames must not
   // demote the one that just arrived, and it deserves the same mount grace.
-  onMounted: () => watchdog.reset(),
+  onMounted: (id) => {
+    // The watchdog's own step-down already reset itself; anything else (browse,
+    // cycle, menu pick) is a fresh choice and re-arms the whole ladder.
+    if (id === stepDownTarget) stepDownTarget = null;
+    else watchdog.rearm();
+  },
   dpr: window.devicePixelRatio || 1,
   viewport: { width: window.innerWidth, height: window.innerHeight },
 });
@@ -162,6 +167,7 @@ const costRank = (id: string): number =>
     ALL_SAVERS.find((sv) => sv.manifest.id === id)?.manifest.costTier ?? 'idle',
   );
 
+let stepDownTarget: string | null = null;
 const watchdog = createFrameWatchdog({
   onLevel: (level, reason) => {
     console.warn(`frame watchdog: ${reason}`);
@@ -185,6 +191,7 @@ const watchdog = createFrameWatchdog({
     }
     if (!cheaper) return; // already the cheapest thing we have
     const i = saverIndex(cheaper.manifest.id, ALL_SAVERS);
+    stepDownTarget = cheaper.manifest.id;
     if (i >= 0) void controller.mountSaver(i, true, { skipOnFail: true }).catch(() => {});
   },
 });

@@ -82,13 +82,35 @@ case "$launch_file" in
     ;;
 esac
 
+restrip=''
 if grep -q 'idle-screens-wayland' "$launch_file"; then
-  echo "$launch_file already points at idle-screens — nothing to do."
-  exit 0
+  if grep -q -- '--kiosk' "$launch_file"; then installed_kiosk=1; else installed_kiosk=''; fi
+  if [ -n "$KIOSK" ] && [ -z "$installed_kiosk" ]; then
+    # The documented upgrade path (normal install, then kiosk = true): drop our
+    # saver clause and fall through so the kiosk args and blank-strip apply.
+    echo "$launch_file has a normal install; switching it to kiosk."
+    restrip=1
+  elif [ -z "$KIOSK" ] && [ -n "$installed_kiosk" ]; then
+    echo "$launch_file is a kiosk install. Kiosk removed the display-blank clause, so" >&2
+    echo "going back needs it re-added by hand — see packaging/swayidle/swayidle.snippet." >&2
+    exit 1
+  else
+    echo "$launch_file already points at idle-screens — nothing to do."
+    exit 0
+  fi
 fi
 
 backup="${launch_file}.bak.$(date +%s)"
 cp "$launch_file" "$backup"
+
+if [ -n "$restrip" ]; then
+  # Remove the clause a previous run inserted (saver timeout + its resume hook).
+  tmp_strip="$(mktemp)"
+  sed -E "s/[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+'idle-screens-wayland[^']*'([[:space:]]*resume[[:space:]]+'pkill[^']*')?//" \
+    "$launch_file" > "$tmp_strip"
+  cat "$tmp_strip" > "$launch_file"
+  rm -f "$tmp_strip"
+fi
 
 # Match the kernel's 15-char process name, not the command line. swayidle's own
 # command line contains the saver command (`timeout 150 'idle-screens-wayland'`),
@@ -165,9 +187,21 @@ else
       }
       $0 = out $0
     }
-    !spliced && $0 !~ /^[ \t]*#/ && match($0, /swayidle([ \t]+-[A-Za-z-]+)*/) {
-      $0 = substr($0, 1, RSTART + RLENGTH - 1) " " args substr($0, RSTART + RLENGTH)
-      spliced = 1
+    !spliced && $0 !~ /^[ \t]*#/ {
+      # Find `swayidle` used as a command, not as a key (`swayidle = swayidle -w`
+      # in wayfire.ini): skip any occurrence that is followed by `=`.
+      rest = $0; off = 0
+      while (match(rest, /swayidle([ \t]+-[A-Za-z-]+)*/)) {
+        after = substr(rest, RSTART + RLENGTH)
+        if (after !~ /^[ \t]*=/) {
+          pos = off + RSTART + RLENGTH
+          $0 = substr($0, 1, pos - 1) " " args substr($0, pos)
+          spliced = 1
+          break
+        }
+        off += RSTART + RLENGTH - 1
+        rest = substr(rest, RSTART + RLENGTH)
+      }
     }
     { print }
   ' "$launch_file" > "$tmp"
