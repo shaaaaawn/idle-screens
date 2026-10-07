@@ -42,7 +42,7 @@ GNOME by default.
 | **Fedora latest** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **openSUSE Tumbleweed** | 4.22.4 | 2.52.5 | 1.3.0 | ✅ **builds + tests (L2)** |
 | **Ubuntu 26.04 (rolling)** | 4.22.4 | 2.52.6 | 1.3.0 | ✅ **builds + tests (L2)** |
-| **Alpine edge** (musl) | 4.22.4 | 2.48.1 | 1.3.0 | ✅ **builds (L2)**, needs `bash` |
+| **Alpine edge** (musl) | 4.22.4 | 2.48.1 | 1.3.0 | ✅ **builds** (cargo tests not run), needs `bash` |
 | **Ubuntu 24.04 LTS** | 4.14.5 | 2.52.6 | **ABSENT** | ⚠️ one package short |
 | **Debian bookworm** | **4.8.3** | 2.50.6 | **ABSENT** | ❌ two blockers |
 
@@ -97,10 +97,9 @@ have now been built (§5.1–5.4).
 
 **Fedora, openSUSE Tumbleweed and Ubuntu 26.04 have all now been built** — each
 compiles, passes all 26 unit tests, and passes the swayidle installer suite
-23/23 (§5.1–5.3). On Gate 1 they are Tier 1 candidates and is a Tier 1 candidate on Gate 1: it
-compiles, its tests pass, and — usefully — it exercised the `fedora` arm of
-`distro.sh`, which until then was guesswork marked `# untested`. The package
-names in that hint are correct. What all three still lack is an L3 run — which for Fedora and Ubuntu means a
+23/23 (§5.1–5.3). All three are Tier 1 candidates on Gate 1. Fedora also
+exercised the previously untested `fedora` arm of `distro.sh`, confirming its
+package names. None has an L3 run yet; for Fedora and Ubuntu that means a
 Sway/Hyprland session rather than the GNOME default they ship.
 
 **Tier 3 — known-blocked, documented.** Debian bookworm and Ubuntu 24.04 LTS.
@@ -134,8 +133,8 @@ the compositor advertises `zwlr_layer_shell_v1` / `ext_idle_notifier_v1`
 (`wayland-info | grep -iE 'layer_shell|idle'`). **Only L3 tests Gate 2**, and no
 amount of container work substitutes for it.
 
-Honest current state: **L1 for the table in §2, L2 for Debian trixie, Arch and
-Fedora, L3 for Omarchy only.** The Pi is L2, not L3, and the README now says so.
+Honest current state: **L1 for the table in §2, L2 for Debian trixie, Arch,
+Fedora, openSUSE Tumbleweed and Ubuntu 26.04, L3 for Omarchy only.** The Pi is L2, not L3, and the README now says so.
 
 ### 5.1 Fedora L2 result (2026-08-31)
 

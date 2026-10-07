@@ -65,16 +65,19 @@ export function clampCapabilities(caps: Capabilities, ceiling: BackendName | nul
 }
 
 export interface GateResult<T> {
-  /** Savers to offer, in the original order. Never empty — see `fallback`. */
+  /**
+   * Savers to offer, in the original order. Empty only when every saver is
+   * blocked by a hard requirement (missing backend, reduced-motion hide).
+   */
   playable: readonly T[];
   /** Dropped savers with the reason, for the log. */
   blocked: readonly { id: string; reasons: readonly string[] }[];
   tier: ReturnType<typeof computeTier>;
   budget: ReturnType<typeof costBudget>;
   /**
-   * True when gating would have left nothing and we kept the cheapest saver
-   * anyway. A screensaver that renders nothing is worse than one that renders
-   * badly, so the ladder has a floor rather than an empty list.
+   * True when the cost budget alone would have left nothing and we kept the
+   * cheapest saver anyway. A screensaver that renders nothing is worse than one
+   * that renders badly, so the ladder has a floor — but only for cost.
    */
   fallback: boolean;
 }
@@ -105,8 +108,25 @@ export function gateSavers<T extends { manifest: SaverInfo }>(
   }
 
   if (playable.length === 0 && savers.length > 0) {
-    const cheapest = cheapestSaver(savers);
-    return { playable: [cheapest], blocked, tier, budget, fallback: true };
+    // Only a saver blocked purely on the cost budget may be kept anyway: that is
+    // a judgement about speed, and the watchdog covers it. A missing backend
+    // cannot mount at all, and a reduced-motion `hide` is an accessibility
+    // choice — overriding either would trade a slow screen for a broken one.
+    const costOnly = savers.filter((s) => {
+      const b = blocked.find((x) => x.id === s.manifest.id);
+      return b !== undefined && b.reasons.every((r) => r.startsWith('cost '));
+    });
+    if (costOnly.length > 0) {
+      const cheapest = cheapestSaver(costOnly);
+      return {
+        playable: [cheapest],
+        // The kept saver is playable, so it is not reported as skipped.
+        blocked: blocked.filter((b) => b.id !== cheapest.manifest.id),
+        tier,
+        budget,
+        fallback: true,
+      };
+    }
   }
   return { playable, blocked, tier, budget, fallback: false };
 }

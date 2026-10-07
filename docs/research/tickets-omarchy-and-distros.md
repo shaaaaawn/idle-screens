@@ -23,7 +23,7 @@ Two directions, hence two sections:
 ## §A Omarchy — first-class support
 
 ### A1. Publish `omarchy-plugin-idle-screens` to the plugin marketplace
-**Priority: high. Effort: S. Blocked by: nothing.**
+**Priority: high. Effort: S. Blocked by: validating the idle-service integration (A2 or clone wiring).**
 
 Today the only install path is "download a tarball, run `install.sh`, then run a
 second script that forks a first-party plugin." Omarchy users expect

@@ -19,16 +19,14 @@ UNIVERSAL="${UNIVERSAL:-$([[ "$CONFIG" == release ]] && echo 1 || echo 0)}"
 
 label="$CONFIG"; [[ "$UNIVERSAL" == "1" ]] && label="$label, universal"
 echo "==> Building Swift ($label)"
-if [[ "$CONFIG" == "release" && "$UNIVERSAL" == "1" ]]; then
-  swift build -c release --arch arm64 --arch x86_64
-  # A multi-arch build lands somewhere else entirely, not .build/release/.
-  BIN=".build/apple/Products/Release/IdleScreens"
-elif [[ "$CONFIG" == "release" ]]; then
-  swift build -c release
-  BIN=".build/release/IdleScreens"
+if [[ "$CONFIG" == "release" ]]; then SWIFT_CFG=release; DIR=Release; else SWIFT_CFG=debug; DIR=Debug; fi
+if [[ "$UNIVERSAL" == "1" ]]; then
+  swift build -c "$SWIFT_CFG" --arch arm64 --arch x86_64
+  # A multi-arch build lands somewhere else entirely, not .build/<config>/.
+  BIN=".build/apple/Products/$DIR/IdleScreens"
 else
-  swift build
-  BIN=".build/debug/IdleScreens"
+  swift build -c "$SWIFT_CFG"
+  BIN=".build/$SWIFT_CFG/IdleScreens"
 fi
 
 [[ -f "$BIN" ]] || { echo "swift build produced no binary at $BIN" >&2; exit 1; }

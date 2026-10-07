@@ -81,9 +81,12 @@ describe('createFrameWatchdog', () => {
 
   it('reset() re-arms grace, so a fresh mount is not judged on the old scene', () => {
     const wd = createFrameWatchdog({ ...opts, graceFrames: 5 });
-    let t = feed(wd, 6, 16);
+    const t = feed(wd, 6, 16);
     wd.reset();
-    t = feed(wd, 5, 50, t); // consumed by grace
+    // 11 slow timestamps = 10 deltas: 5 swallowed by grace leaves 5 judged,
+    // under the 10-frame window. Without re-armed grace all 10 would be judged
+    // and the watchdog would step down.
+    feed(wd, 11, 50, t);
     expect(wd.level()).toBe('full');
   });
 

@@ -78,8 +78,9 @@ idle_install_hint() {
       echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
       ;;
     fedora)
-      echo "  sudo dnf install -y gcc pkgconf-pkg-config git rsync \\"
-      echo "    gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel   # untested"
+      echo "  sudo dnf install -y gcc pkgconf-pkg-config git rsync curl ca-certificates \\"
+      echo "    gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel"
+      echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal"
       ;;
     *)
       echo "  (no package list for this distro yet — install the development"

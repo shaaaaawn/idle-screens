@@ -28,7 +28,7 @@ surface, and not every compositor implements that protocol:
 | wlroots-family — sway, Hyprland, river, **labwc**, wayfire | ✅ | ✅ |
 | KDE Plasma (Wayland) | ✅ (untested) | ✅ |
 | GNOME (Wayland) | ❌ Mutter does not implement layer-shell | ✅ plain window |
-| Anything on X11 | ❌ | ❌ |
+| Anything on X11 | ❌ | ✅ plain window |
 
 GNOME's position on layer-shell is long-standing and deliberate, so this is not
 a bug we can fix from here. Starting the overlay without it exits immediately
@@ -46,9 +46,9 @@ manager and idle installer elsewhere — the shape is the same on every distro.
 
 > **No binary release exists yet.** No `linux-v*` tag has been cut, so step 2
 > has nothing to fetch until one is. Until then use
-> [Building from source](#building-from-source) — on the Pi that is this same
-> flow with steps 1–2 replaced by a clone plus
-> `cargo build --release --locked -j2`, and steps 3–4 unchanged.
+> [Building from source](#building-from-source) instead; its build and install
+> steps differ from this release-tarball flow (on a Pi, build with
+> `cargo build --release --locked -j2`).
 
 ```bash
 # 1. runtime libraries (no compiler needed — this is a prebuilt binary)
@@ -174,7 +174,9 @@ depends on your desktop:
 > characters (`idle-screens-wa`), so the `-x` form silently never matches and
 > the saver is never dismissed. The `[i]` bracket keeps `pkill`'s own shell
 > from matching itself. `pidof idle-screens-wayland` is fine — it resolves
-> through the executable path.
+> through the executable path. **Exception — swayidle:** its own command line
+> contains the saver command, so `-f` would match and kill swayidle itself; the
+> swayidle snippet uses `pkill -x idle-screens-wa` (the truncated name) instead.
 
 ### swayidle (sway / labwc / wayfire / Raspberry Pi OS)
 
@@ -323,7 +325,7 @@ behind a saver that nothing will dismiss:
 
 ```sh
 swayidle -w \
-  timeout 150 'pgrep -f "[i]dle-screens-wayland" || idle-screens-wayland --kiosk' &
+  timeout 150 'pgrep -x idle-screens-wa || idle-screens-wayland --kiosk &' &
 ```
 
 Exit manually when needed:
@@ -363,7 +365,7 @@ so the app detects Broadcom V3D and tells the host page
 `?maxBackend=canvas2d`. The page then drops savers it cannot afford (on a Pi:
 metaquarium plus the `medium`-cost scenes) and logs each exclusion with a reason.
 A frame watchdog also steps down to a cheaper saver if frames stay worse than
-30fps, so a heavy *channel* scene degrades instead of becoming a slideshow.
+30fps, so a heavy bundled scene degrades instead of becoming a slideshow.
 
 Override it if a medium-cost scene runs fine on your box:
 `[webkit] max_backend = "never"` trusts the browser, or pin a backend name.

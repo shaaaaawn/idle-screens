@@ -66,12 +66,23 @@ describe('gateSavers', () => {
     expect(r.playable.map((s) => s.manifest.id)).toEqual(['toasters', 'warp']);
   });
 
-  it('keeps the cheapest saver rather than returning nothing', () => {
-    // A screensaver rendering badly beats one rendering nothing.
-    const r = gateSavers([METAQUARIUM, FLUID_GPU], clampCapabilities(caps(), 'css'));
+  it('keeps the cheapest saver blocked only on cost rather than returning nothing', () => {
+    // A screensaver rendering badly beats one rendering nothing. Both savers
+    // run on css; only the budget (basic tier) rules them out.
+    const HEAVY = saver('heavy', { minBackend: 'css', costTier: 'high' });
+    const MEDIUM = saver('medium', { minBackend: 'css', costTier: 'medium' });
+    const r = gateSavers([HEAVY, MEDIUM], clampCapabilities(caps(), 'css'));
     expect(r.fallback).toBe(true);
-    expect(r.playable).toHaveLength(1);
-    expect(r.playable[0]?.manifest.id).toBe('metaquarium'); // medium < high
+    expect(r.playable.map((s) => s.manifest.id)).toEqual(['medium']);
+    // The kept saver is playable, so it must not be logged as skipped.
+    expect(r.blocked.map((b) => b.id)).toEqual(['heavy']);
+  });
+
+  it('never revives a saver whose backend is missing', () => {
+    // metaquarium needs webgl2; keeping it would be a saver that cannot mount.
+    const r = gateSavers([METAQUARIUM, FLUID_GPU], clampCapabilities(caps(), 'css'));
+    expect(r.fallback).toBe(false);
+    expect(r.playable).toEqual([]);
     expect(r.blocked.map((b) => b.id)).toEqual(['metaquarium', 'fluid-gpu']);
   });
 

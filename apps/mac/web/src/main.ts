@@ -41,7 +41,7 @@ if (gate.blocked.length > 0) {
   for (const b of gate.blocked) console.info(`  skipping ${b.id}: ${b.reasons.join('; ')}`);
 }
 if (gate.fallback) {
-  // Gating would have left an empty list. Rendering something badly beats
+  // Cost gating alone would have left an empty list. Rendering something badly beats
   // rendering nothing, so the cheapest saver is kept and the watchdog below is
   // what stops it from being a slideshow.
   console.warn('no saver fits this device; keeping the cheapest and relying on step-down');
@@ -90,6 +90,9 @@ const controller = createMacHostController({
   baseSeed,
   reduceMotion,
   showHint,
+  // Every mount, not just the first: the previous saver's slow frames must not
+  // demote the one that just arrived, and it deserves the same mount grace.
+  onMounted: () => watchdog.reset(),
   dpr: window.devicePixelRatio || 1,
   viewport: { width: window.innerWidth, height: window.innerHeight },
 });
@@ -198,8 +201,9 @@ if (pinned && saverIndex(pinned, ALL_SAVERS) < 0) {
   );
 }
 const start = pinned ? Math.max(0, saverIndex(pinned, ALL_SAVERS)) : Math.floor(Math.random() * ALL_SAVERS.length);
-void controller
-  .mountSaver(start, true, { skipOnFail: !pinned })
-  .then(() => watchdog.reset())
-  .catch(() => {});
-startCycle();
+if (ALL_SAVERS.length > 0) {
+  void controller.mountSaver(start, true, { skipOnFail: !pinned }).catch(() => {});
+  startCycle();
+} else {
+  console.error('no saver can run on this device (every one needs a missing backend or hides under reduced motion)');
+}

@@ -8,10 +8,26 @@ on:
     branches: [main, develop]
     paths:
       - 'apps/mac/**'
+      # The web bundle imports these workspace packages, so a change to any of
+      # them can break the bundle or the Swift app that embeds it.
+      - 'packages/core/**'
+      - 'packages/capabilities/**'
+      - 'packages/saver-metaquarium/**'
+      - 'packages/savers-classic/**'
+      - 'packages/schema/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/mac-ci.yml'
   pull_request:
     paths:
       - 'apps/mac/**'
+      - 'packages/core/**'
+      - 'packages/capabilities/**'
+      - 'packages/saver-metaquarium/**'
+      - 'packages/savers-classic/**'
+      - 'packages/schema/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/mac-ci.yml'
 
 permissions:

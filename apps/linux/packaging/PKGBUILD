@@ -50,6 +50,10 @@ package() {
   install -Dm644 packaging/omarchy/hypridle.listener.snippet \
     -t "$pkgdir/usr/share/idle-screens/omarchy/"
 
+  # swayidle wiring (sway / labwc / wayfire / Raspberry Pi OS), same idea.
+  install -Dm755 packaging/swayidle/install-swayidle.sh \
+    -t "$pkgdir/usr/share/idle-screens/swayidle/"
+
   install -Dm644 packaging/config.toml.example \
     packaging/hypridle.conf.example packaging/hypridle-kiosk.conf.example \
     packaging/hypridle.lua.example packaging/swayidle/swayidle.snippet \

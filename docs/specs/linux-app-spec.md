@@ -6,8 +6,8 @@ packaging, aarch64), and this document has NOT been kept in step: the dependency
 table, the file tree, and the "no tray/menu UI" scope line are all now wrong.
 **`apps/linux/README.md` is the source of truth**; read this only for the
 original design rationale. Companion to
-[linux-app-plan.md](linux-app-plan.md) (research + options analysis). This doc is
-the buildable spec for Option B at the agreed scope.
+[linux-app-plan.md](linux-app-plan.md) (research + options analysis). This doc was
+the spec for Option B at the agreed scope.
 
 Scope decision: **full parity with the Mac app, minus what the Linux environment
 already provides** — no idle scheduling (hypridle owns it), no lock (hyprlock), no

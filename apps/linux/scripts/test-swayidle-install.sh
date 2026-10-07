@@ -35,15 +35,31 @@ echo "stock Raspberry Pi OS line (-w present)"
 setup "$STOCK"; run >/dev/null; got="$(result)"
 check "saver added at the default timeout"      "timeout 150 'idle-screens-wayland &'" "$got"
 check "backgrounded because swayidle uses -w"   "idle-screens-wayland &'"              "$got"
-check "resume hook uses the -f kill pattern"    "pkill -TERM -f \"[i]dle-screens-wayland\"" "$got"
+check "resume hook matches the process name"    "pkill -TERM -x idle-screens-wa"        "$got"
+check_not "resume hook cannot match swayidle"   "pkill -TERM -f"                        "$got"
 check "existing blank timeout left alone"       "timeout 600 'wlopm --off"              "$got"
 check "still a single swayidle process"         "swayidle -w timeout 150"               "$got"
 [ "$(grep -c swayidle <<<"$got")" = 1 ] && { pass=$((pass+1)); echo "  ok   exactly one swayidle line"; } \
   || { fail=$((fail+1)); echo "  FAIL more than one swayidle line"; }
 
 echo "no -w: launch stays in the foreground"
-setup "swayidle timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null
-check_not "not backgrounded" "idle-screens-wayland &'" "$(result)"
+setup "swayidle timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"
+check     "saver was added"  "timeout 150 'idle-screens-wayland'" "$got"
+check_not "not backgrounded" "idle-screens-wayland &'" "$got"
+
+echo "-w after another flag is still detected"
+setup "swayidle -d -w timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null
+check "backgrounded" "idle-screens-wayland &'" "$(result)"
+
+echo "only the blanking timeout is raised, not a lock timeout"
+setup "swayidle -w timeout 60 'swaylock -f' timeout 120 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"
+check "lock timeout untouched" "timeout 60 'swaylock -f'" "$got"
+check "blank timeout raised"   "timeout 900 'wlopm --off" "$got"
+
+echo "a commented swayidle example is not the splice target"
+setup "# swayidle -w timeout 1 'x'
+swayidle -w timeout 600 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"
+check "live line got the saver" "swayidle -w timeout 150 'idle-screens-wayland &'" "$got"
 
 echo "blank timeout below the saver timeout gets raised"
 setup "swayidle -w timeout 120 'wlopm --off \\*' resume 'wlopm --on \\*' &"; run >/dev/null; got="$(result)"

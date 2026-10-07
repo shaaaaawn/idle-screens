@@ -88,6 +88,7 @@ jobs:
       - name: Verify the shipped binary is universal
         working-directory: apps/mac
         run: |
+          mkdir -p /tmp/dmg
           hdiutil attach dist/IdleScreens.dmg -mountpoint /tmp/dmg -nobrowse -quiet
           archs=$(lipo -archs /tmp/dmg/IdleScreens.app/Contents/MacOS/IdleScreens)
           hdiutil detach /tmp/dmg -quiet

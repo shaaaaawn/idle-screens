@@ -90,7 +90,12 @@ fi
 backup="${launch_file}.bak.$(date +%s)"
 cp "$launch_file" "$backup"
 
-kill_cmd='pkill -TERM -f "[i]dle-screens-wayland"'
+# Match the kernel's 15-char process name, not the command line. swayidle's own
+# command line contains the saver command (`timeout 150 'idle-screens-wayland'`),
+# so `pkill -f` would match swayidle too and the first resume would kill the idle
+# daemon along with the saver. `-x idle-screens-wa` can only match the saver.
+proc='idle-screens-wa'
+kill_cmd="pkill -TERM -x ${proc}"
 
 # swayidle's -w waits for a timeout command to finish before continuing. Our
 # saver runs until it is dismissed, so under -w swayidle may never process the
@@ -100,12 +105,12 @@ kill_cmd='pkill -TERM -f "[i]dle-screens-wayland"'
 # work on a backgrounded process. Raspberry Pi OS's stock line uses -w, so this
 # is the common case, not the exotic one.
 bg=''
-if [ -n "${fresh:-}" ] || grep -q 'swayidle[[:space:]]\+-w' "$launch_file"; then
+if [ -n "${fresh:-}" ] || grep -Eq 'swayidle([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-w([[:space:]]|$)' "$launch_file"; then
   bg=' &'
 fi
 
 if [ -n "$KIOSK" ]; then
-  saver_args="timeout ${SAVER_TIMEOUT} 'pgrep -f \"[i]dle-screens-wayland\" || idle-screens-wayland --kiosk${bg}'"
+  saver_args="timeout ${SAVER_TIMEOUT} 'pgrep -x ${proc} || idle-screens-wayland --kiosk${bg}'"
 else
   saver_args="timeout ${SAVER_TIMEOUT} 'idle-screens-wayland${bg}' resume '${kill_cmd}'"
 fi
@@ -131,8 +136,10 @@ else
   #
   #  1. kiosk only — drop display-blank clauses. Nothing dismisses a kiosk saver,
   #     so blanking would leave the panel dark in front of it.
-  #  2. raise any timeout that would fire at or before the saver, so the display
-  #     cannot blank out from under the overlay.
+  #  2. raise any display-blanking timeout that would fire at or before the
+  #     saver, so the display cannot blank out from under the overlay. Other
+  #     clauses (a swaylock timeout, say) are the user's policy and are left
+  #     alone.
   #  3. splice our arguments in after the swayidle command word and its flags.
   #     Position is cosmetic — swayidle evaluates each timeout independently —
   #     so only the numbers from (2) actually order the events.
@@ -150,13 +157,15 @@ else
       while (match($0, /timeout[ \t]+[0-9]+/)) {
         clause = substr($0, RSTART, RLENGTH)
         n = clause; sub(/timeout[ \t]+/, "", n)
-        if (n + 0 <= saver + 0) sub(/[0-9]+$/, blank, clause)
+        rest = substr($0, RSTART + RLENGTH)
+        isblank = (rest ~ ("^[ \t]*" q "[^" q "]*(wlopm|dpms|wlr-randr)[^" q "]*" q))
+        if (isblank && n + 0 <= saver + 0) sub(/[0-9]+$/, blank, clause)
         out = out substr($0, 1, RSTART - 1) clause
         $0 = substr($0, RSTART + RLENGTH)
       }
       $0 = out $0
     }
-    !spliced && match($0, /swayidle([ \t]+-[A-Za-z-]+)*/) {
+    !spliced && $0 !~ /^[ \t]*#/ && match($0, /swayidle([ \t]+-[A-Za-z-]+)*/) {
       $0 = substr($0, 1, RSTART + RLENGTH - 1) " " args substr($0, RSTART + RLENGTH)
       spliced = 1
     }
@@ -192,7 +201,7 @@ echo
 grep -n -A3 'swayidle' "$launch_file" | sed 's/^/  /'
 echo
 
-if [ -n "${backgrounded:-}" ]; then
+if [ -n "$bg" ]; then
   echo "Note: swayidle here runs with -w, which waits for a timeout command to"
   echo "finish, so the saver is launched in the background ('...wayland &'). It is"
   echo "dismissed by the resume hook either way."

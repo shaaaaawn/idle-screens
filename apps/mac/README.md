@@ -8,7 +8,7 @@ sandboxed `legacyScreenSaver` substrate.
 
 **macOS 13+**, on **Apple silicon or Intel** — release builds are universal
 (`arm64` + `x86_64`) in one DMG. There is nothing else to install: the app is a
-self-contained bundle that carries its own web engine.
+self-contained bundle with its web app, rendered by macOS's built-in WebKit.
 
 ## Install
 
