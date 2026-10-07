@@ -44,8 +44,8 @@ describe('angelfish: the angel', () => {
   it('bends into a turn — to its left for +, its right for − — and no dial ever wraps', () => {
     const r = rigAngel(puppet(), clips())!;
     expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: 0 }).bend).toBe(0);
-    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: 0.1 }).bend).toBeGreaterThan(0.2);
-    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: -0.1 }).bend).toBeLessThan(-0.2);
+    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: 0.6 }).bend).toBeGreaterThan(0.2);
+    expect(angelFrame(r, 1, 0, 0, { ...cruising, turn: -0.6 }).bend).toBeLessThan(-0.2);
     for (const turn of [-5, -1, 1, 5]) for (const yaw of [-9, 9]) {
       angelFrame(r, 1, 0, 0, { ...cruising, turn, viewer: { yaw, pitch: yaw } });
       for (const n of ['bend', 'lookYaw', 'lookPitch'] as const) {

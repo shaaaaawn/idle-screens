@@ -57,8 +57,8 @@ describe('seaturtle: the turtle', () => {
   it('steers into a turn — to its left for +, its right for − — and no dial ever wraps', () => {
     const r = rigTurtle(puppet(), clips())!;
     expect(turtleFrame(r, 1, 0, 0, { ...cruising, turn: 0 }).steer).toBe(0);
-    expect(turtleFrame(r, 1, 0, 0, { ...cruising, turn: 0.1 }).steer).toBeGreaterThan(0.2);
-    expect(turtleFrame(r, 1, 0, 0, { ...cruising, turn: -0.1 }).steer).toBeLessThan(-0.2);
+    expect(turtleFrame(r, 1, 0, 0, { ...cruising, turn: 0.6 }).steer).toBeGreaterThan(0.2);
+    expect(turtleFrame(r, 1, 0, 0, { ...cruising, turn: -0.6 }).steer).toBeLessThan(-0.2);
     for (const turn of [-5, 5]) for (const v of [-9, 9]) for (const flurry of [0, 9]) {
       turtleFrame(r, 1, 0, 0, { ...cruising, turn, flurry, viewer: { yaw: v, pitch: v } });
       for (const n of ['steer', 'lookYaw', 'lookPitch', 'reach'] as const) {

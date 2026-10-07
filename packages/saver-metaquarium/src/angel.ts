@@ -30,6 +30,7 @@
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { mintedViewer } from './eyes';
+import { inFront, turnDial } from './heading';
 import { fishHash } from './swim';
 
 export const ANGEL_MOMENTS = ['display', 'nibble', 'curious', 'kiss', 'soar', 'pirouette', 'bow', 'flutter', 'sway', 'stretch'] as const;
@@ -64,8 +65,9 @@ export function rigAngel(body: Object3D, clips: readonly AnimationClip[]): Angel
 
 /** Stroke seconds per unit swum, on top of one a second: the beat quickens with speed. */
 export const ANGEL_STROKE = 0.01;
-/** Bend-dial units per radian of turn per body length (the swim wave's measure of a turn). */
-export const ANGEL_BEND = 3.2;
+/** The dial's gain on its turn (heading.ts chordTurn, radians a body length): through tanh, the
+ *  routes' 90th-percentile turn (~1.7, measured live) leans it ~0.7 — never pinned hard over. */
+export const ANGEL_BEND = 0.5;
 /** How far the head turns, radians, at a look dial's end (the rig's own reach). */
 export const ANGEL_LOOK = { yaw: 0.5, pitch: 0.32 } as const;
 
@@ -174,14 +176,14 @@ export function angelFrame(rig: AngelRig, t: number, index: number, beat: number
   const dart = smooth(inp.flurry * 1.4);
   const burst = dart * (1 - m.weight);
   const stroke = (1 - m.weight) * (1 - dart);
-  const bend = clamp(inp.turn * ANGEL_BEND, -1, 1);
+  const bend = turnDial(inp.turn, ANGEL_BEND);
 
   // The head: a slow wander about the water, a lead into the turn, and —
   // when its eyes hold the viewer's — turned to them (eased in more slowly
   // than the eyes: the eyes arrive first, the head follows).
   const wanderYaw = 0.25 * Math.sin(t * 0.37 + index * 1.7) + 0.15 * Math.sin(t * 0.91 + index * 0.3);
   const wanderPitch = 0.2 * Math.sin(t * 0.29 + index * 2.3);
-  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45) * p.curiosity : 0;
+  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / ANGEL_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / ANGEL_LOOK.pitch, -1, 1) : 0;
   const yaw = clamp((wanderYaw * (1 - cruise * 0.5) + bend * 0.35) * (1 - toViewer) + vYaw * toViewer, -1, 1);

@@ -31,6 +31,7 @@
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { mintedViewer } from './eyes';
+import { inFront, turnDial } from './heading';
 import { fishHash } from './swim';
 
 export const SEAHORSE_MOMENTS = ['coil', 'twirl', 'dance', 'snick', 'bow', 'bob', 'lookabout', 'stretch', 'wag', 'tilt'] as const;
@@ -170,10 +171,10 @@ export function seahorseFrame(rig: SeahorseRig, t: number, index: number, beat: 
   // The tail: coiled at rest (by its nature), let out as it swims, streaming in a dart, breathing slowly.
   const curl = clamp(p.coil + 0.5 * (1 - cruise) - 0.3 * cruise - 0.6 * dart + 0.15 * Math.sin(t * 0.27 + index * 1.9), -1, 1);
   const lean = clamp(-0.1 + 0.6 * cruise + 0.3 * dart, -1, 1);
-  const turnLead = clamp(inp.turn * 3, -1, 1) * 0.4;
+  const turnLead = turnDial(inp.turn, 0.5) * 0.4;
   const wanderYaw = 0.3 * Math.sin(t * 0.33 + index * 1.1) + 0.12 * Math.sin(t * 0.9 + index * 0.4);
   const wanderPitch = 0.25 * Math.sin(t * 0.25 + index * 2.7) - 0.3 * lean;  // it keeps its eyes level as it leans
-  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.5) * p.curiosity : 0;
+  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.5) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / SEAHORSE_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / SEAHORSE_LOOK.pitch, -1, 1) : 0;
   const yaw = clamp((wanderYaw + turnLead) * (1 - toViewer) + vYaw * toViewer, -1, 1);

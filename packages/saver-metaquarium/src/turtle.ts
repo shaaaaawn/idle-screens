@@ -32,6 +32,7 @@
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { mintedViewer } from './eyes';
+import { inFront, turnDial } from './heading';
 import { fishHash } from './swim';
 
 export const TURTLE_MOMENTS = ['breathe', 'lookback', 'barrel', 'somersault', 'wave', 'wipe', 'stretch', 'tuck', 'nod', 'flap'] as const;
@@ -66,8 +67,9 @@ export function rigTurtle(body: Object3D, clips: readonly AnimationClip[]): Turt
 
 /** Stroke seconds per unit swum, on top of 0.8 a second: the beat quickens with speed. */
 export const TURTLE_STROKE = 0.02;
-/** Steer-dial units per radian of turn per body length. */
-export const TURTLE_STEER = 3.0;
+/** The dial's gain on its turn (heading.ts chordTurn, radians a body length): through tanh, the
+ *  routes' 90th-percentile turn (~1.7, measured live) leans it ~0.7 — never pinned hard over. */
+export const TURTLE_STEER = 0.5;
 /** How far the neck turns, radians, at a look dial's end (the rig's own reach). */
 export const TURTLE_LOOK = { yaw: 0.5, pitch: 0.3 } as const;
 
@@ -185,13 +187,13 @@ export function turtleFrame(rig: TurtleRig, t: number, index: number, beat: numb
   const burst = dart * (1 - m.weight);
   const stroke = (1 - m.weight) * (1 - dart);
   const g = turtleGlide(index, t);
-  const steer = clamp(inp.turn * TURTLE_STEER, -1, 1);
+  const steer = turnDial(inp.turn, TURTLE_STEER);
 
   // The neck: a slow wander, a lead into the turn, and — when its eyes hold
   // the viewer's — turned to them, stretched out or drawn in by its nature.
   const wanderYaw = 0.3 * Math.sin(t * 0.31 + index * 1.3) + 0.15 * Math.sin(t * 0.83 + index * 0.7);
   const wanderPitch = 0.25 * Math.sin(t * 0.23 + index * 2.1);
-  const toViewer = inp.viewer ? mintedViewer(index, t - 0.2, 0.6) * p.curiosity : 0;
+  const toViewer = inp.viewer ? mintedViewer(index, t - 0.2, 0.6) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / TURTLE_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / TURTLE_LOOK.pitch, -1, 1) : 0;
   const yaw = clamp((wanderYaw * (1 - cruise * 0.4) + steer * 0.4) * (1 - toViewer) + vYaw * toViewer, -1, 1);

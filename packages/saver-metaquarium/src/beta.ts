@@ -30,6 +30,7 @@
  */
 import { AnimationMixer, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { mintedViewer } from './eyes';
+import { inFront, turnDial } from './heading';
 import { fishHash } from './swim';
 
 export const BETA_MOMENTS = ['flare', 'spin', 'gulp', 'shimmy', 'rest', 'dance', 'flick', 'bow', 'billow', 'curl'] as const;
@@ -64,8 +65,9 @@ export function rigBeta(body: Object3D, clips: readonly AnimationClip[]): BetaRi
 
 /** Stroke seconds per unit swum, on top of one a second: the beat quickens with speed. */
 export const BETA_STROKE = 0.01;
-/** Bend-dial units per radian of turn per body length. */
-export const BETA_BEND = 3.0;
+/** The dial's gain on its turn (heading.ts chordTurn, radians a body length): through tanh, the
+ *  routes' 90th-percentile turn (~1.7, measured live) leans it ~0.7 — never pinned hard over. */
+export const BETA_BEND = 0.5;
 /** How far the head turns, radians, at a look dial's end (the rig's own reach). */
 export const BETA_LOOK = { yaw: 0.4, pitch: 0.25 } as const;
 
@@ -168,11 +170,11 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   const dart = smooth(inp.flurry * 1.4);
   const burst = dart * (1 - m.weight);
   const stroke = (1 - m.weight) * (1 - dart);
-  const bend = clamp(inp.turn * BETA_BEND, -1, 1);
+  const bend = turnDial(inp.turn, BETA_BEND);
 
   const wanderYaw = 0.25 * Math.sin(t * 0.41 + index * 1.3) + 0.12 * Math.sin(t * 0.97 + index * 0.6);
   const wanderPitch = 0.2 * Math.sin(t * 0.27 + index * 2.2);
-  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45) * p.curiosity : 0;
+  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / BETA_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / BETA_LOOK.pitch, -1, 1) : 0;
   const yaw = clamp((wanderYaw * (1 - cruise * 0.5) + bend * 0.35) * (1 - toViewer) + vYaw * toViewer, -1, 1);

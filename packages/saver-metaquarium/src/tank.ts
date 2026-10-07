@@ -90,6 +90,7 @@ import { InkLayer } from './ink';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
+import { chordPose, chordTurn, dodgeClimb, dodgeTurn } from './heading';
 import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
 import { betaFrame, rigBeta, type BetaRig } from './beta';
 
@@ -2847,7 +2848,7 @@ class TankInstance implements SaverInstance {
             lag = Math.max(L, rel.len) * (1.3 + 1.6 * c);
             flurryExtra = (1 - c) * 0.8;
           }
-          pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          pose = chordPose(rel.plan, rel.d - lag, L);
           if (f.index === followSlot) {
             const tr = swimPoseAtDistance(rel.plan, rel.d - lag - L * 2);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
@@ -2875,7 +2876,7 @@ class TankInstance implements SaverInstance {
           }
           pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
         } else {
-          pose = swimPoseAtDistance(f.plan, d);
+          pose = chordPose(f.plan, d, L);
           if (f.index === followSlot) {
             // Where this fish was `followBack` along its own path: the camera
             // rides the path it swam, which smooths turns and threads the gaps
@@ -3068,20 +3069,17 @@ class TankInstance implements SaverInstance {
         }
         // Nose into the dodge: the route's velocity plus how fast the dodge
         // is moving it, the turn held to a third of a right angle either way.
+        // Only the dodge's sideways share turns it, eased in (heading.ts):
+        // the angle of route + dodge velocity flipped as a dodge against the
+        // swim swung that sum through zero.
         const rx = offRate[k * 3]!, ry = offRate[k * 3 + 1]!, rz = offRate[k * 3 + 2]!;
-        if (rx * rx + ry * ry + rz * rz > 1e-4) {
-          const hl = Math.hypot(body.vx, body.vz);
-          const yaw0 = Math.atan2(body.vx, body.vz);
-          let turn = Math.atan2(body.vx + rx, body.vz + rz) - yaw0;
-          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
-          // A fish hardly moving turns less: a sideways shuffle is not a heading.
-          turn = Math.max(-0.5, Math.min(0.5, turn)) * Math.min(1, hl / 4);
-          const c = Math.cos(turn), sn = Math.sin(turn);
-          const fx0 = lfx, fz0 = lfz;
-          lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
-          const fl = Math.hypot(lfx, lfz) || 1;
-          lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? (ry / Math.max(hl, 4)) * fl : 0)));
-        }
+        const turn = dodgeTurn(body.vx, body.vz, rx, rz);
+        const hl = Math.hypot(body.vx, body.vz);
+        const c = Math.cos(turn), sn = Math.sin(turn);
+        const fx0 = lfx, fz0 = lfz;
+        lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
+        const fl = Math.hypot(lfx, lfz) || 1;
+        lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? dodgeClimb(ry, hl) * fl : 0)));
       }
       // A crab walks the floor on its own legs (crab.ts) and takes over its
       // place and facing; a script's actor or a seated one just idles.
@@ -3133,9 +3131,7 @@ class TankInstance implements SaverInstance {
       // swim wave measures it (+ to its left). A rigged breed bends into it.
       let rigTurn = 0;
       if ((f.rig?.angel || f.rig?.turtle || f.rig?.seahorse || f.rig?.beta) && turnPlan && !act) {
-        const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
-        rigTurn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
-        rigTurn -= Math.round(rigTurn / (Math.PI * 2)) * Math.PI * 2;
+        rigTurn = chordTurn(turnPlan, turnD, FISH_LENGTH);
       }
       const rigPace = speed * styleSpeed * style.travel;
       // Where the viewer is from its head, in its own frame: + to its left
@@ -3340,9 +3336,7 @@ class TankInstance implements SaverInstance {
         f.wave.ensure();
         let turn = 0;
         if (waving && turnPlan && !act) {
-          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
-          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
-          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          turn = chordTurn(turnPlan, turnD, FISH_LENGTH);
         }
         const flurry = mnv.flurry + flurryBoost;
         const ws = waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch);

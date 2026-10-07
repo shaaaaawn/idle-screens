@@ -45,8 +45,8 @@ describe('betafish: the betta', () => {
 
   it('bends into a turn — to its left for +, its right for − — and no dial ever wraps', () => {
     const r = rigBeta(puppet(), clips())!;
-    expect(betaFrame(r, 1, 0, 0, { ...cruising, turn: 0.1 }).bend).toBeGreaterThan(0.2);
-    expect(betaFrame(r, 1, 0, 0, { ...cruising, turn: -0.1 }).bend).toBeLessThan(-0.2);
+    expect(betaFrame(r, 1, 0, 0, { ...cruising, turn: 0.6 }).bend).toBeGreaterThan(0.2);
+    expect(betaFrame(r, 1, 0, 0, { ...cruising, turn: -0.6 }).bend).toBeLessThan(-0.2);
     for (const turn of [-5, 5]) for (const v of [-9, 9]) for (const flurry of [0, 9]) for (const pace of [0, 2]) {
       betaFrame(r, 1, 0, 0, { pace, turn, flurry, viewer: { yaw: v, pitch: v } });
       for (const n of ['bend', 'lookYaw', 'lookPitch', 'spread'] as const) {

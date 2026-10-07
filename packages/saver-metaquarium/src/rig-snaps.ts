@@ -78,8 +78,8 @@ export interface SwimMotion {
 
 /**
  * A minute (by default) of each fish in `cast` through its driver `frame`:
- * idling to cruising and back, a dart now and then, weaving turns, the
- * viewer drifting about.
+ * idling to cruising and back, a dart now and then, hairpin turns, the
+ * viewer circling it.
  */
 export function swimMotion(scene: Object3D, cast: readonly number[], frame: (t: number, fish: number, beat: number, inp: SwimInput) => void, seconds = 60): SwimMotion {
   const bones = bonesOf(scene), steady: number[] = [];
@@ -91,9 +91,13 @@ export function swimMotion(scene: Object3D, cast: readonly number[], frame: (t: 
       const t = i / 30;
       const pace = 0.6 + 0.6 * Math.sin(t * 0.21);
       const flurry = Math.max(0, Math.sin(t * 0.37) - 0.85) * 6;
-      const turn = 0.25 * Math.sin(t * 0.5) + 0.1 * Math.sin(t * 1.3);
+      // The ranges measured live in the tank (2026-10-07): routes hairpin,
+      // so the turn swings ±3 rad a body length and back; the viewer
+      // circles right round behind the fish (its yaw wraps through ±π).
+      const turn = 1.8 * Math.sin(t * 0.5) + 1.2 * Math.sin(t * 1.3);
+      const around = t * 0.45;
       beat += (pace * 12) / 30;
-      frame(t, fish, beat, { pace, flurry, turn, viewer: { yaw: 0.4 * Math.sin(t * 0.2), pitch: 0.1 } });
+      frame(t, fish, beat, { pace, flurry, turn, viewer: { yaw: Math.atan2(Math.sin(around), Math.cos(around)), pitch: 0.2 * Math.sin(t * 0.3) } });
       scene.updateMatrixWorld(true);
       w.step((bone, step, acc) => {
         worstStep = Math.max(worstStep, step);
