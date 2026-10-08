@@ -50,6 +50,7 @@ import {
   type Material,
   type Object3D,
   type SkinnedMesh,
+  type Texture,
 } from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -67,7 +68,7 @@ import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
 import { buildStudio, type Studio } from './studio';
-import { eyeMood, rigEyes, type EyeRig, type EyeState } from './eyes';
+import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
@@ -75,6 +76,8 @@ import {
   type DuetRole, type StarfishDanceMode, type StarfishOutput, type StarfishRig,
 } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
+import { angelFrame, rigAngel, type AngelRig } from './angel';
+import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
@@ -87,7 +90,10 @@ import { InkLayer } from './ink';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
-import { rigSeahorse } from './seahorse';
+import { chordPose, chordTurn, dodgeClimb, dodgeTurn } from './heading';
+import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
+import { BETA_LOOK_STYLE, betaFrame, rigBeta, type BetaRig } from './beta';
+import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -102,6 +108,9 @@ import {
 } from './crystal-mesh';
 import { BUNDLED_BREED_SCHEME, expandFishMixSlots, FISH_CATALOG, parseFishMix, resolveIpfsUrls, type FishEntry } from './ipfs';
 import { BUNDLED_BREEDS } from './breeds';
+import { MINTED_ATLAS, MINTED_PAINT } from './minted/index';
+import { breedOf, fishAsset } from './farm';
+import { atlasTexture, MINTED_ATLAS_URL, MINTED_SCHEME, mintedIdOf, paintMinted, prepareMintedBase, type MintedBase } from './minted';
 import { coerceNum, METAQUARIUM_PARAMS, withDefaults } from './manifest';
 import {
   addGlowHalos,
@@ -166,6 +175,72 @@ function bundledGlb(b64: string): ArrayBuffer {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
+}
+
+/** Each minted breed's shared model, parsed and cut into regions once per page. */
+const MINTED_BASES = new Map<string, Promise<MintedBase>>();
+function mintedBase(breed: string): Promise<MintedBase> {
+  let p = MINTED_BASES.get(breed);
+  if (!p) {
+    p = (async () => {
+      const load = BUNDLED_BREEDS[breed];
+      if (!load) throw new Error(`no bundled model for ${breed}`);
+      const gltf = await new GLTFLoader().parseAsync(bundledGlb((await load()).default), '');
+      return prepareMintedBase(gltf.scene, gltf.animations);
+    })();
+    p.catch(() => MINTED_BASES.delete(breed));
+    MINTED_BASES.set(breed, p);
+  }
+  return p;
+}
+
+/** Each betafish's atlas, once per page: the bundled 256² now, and the 512²
+ *  from the asset host swapped into the SAME texture when it arrives, so every
+ *  material already wearing it (template and clones alike) sharpens at once. */
+const MINTED_ATLASES = new Map<number, Promise<Texture | null>>();
+function mintedAtlas(id: number): Promise<Texture | null> {
+  let p = MINTED_ATLASES.get(id);
+  if (!p) {
+    p = (async () => {
+      const load = MINTED_ATLAS[id];
+      if (!load) return null;
+      const tex = await atlasTexture(bundledGlb((await load()).default));
+      if (tex && typeof fetch !== 'undefined') {
+        void (async () => {
+          try {
+            const res = await fetch(`${MINTED_ATLAS_URL}${id}.webp`);
+            if (!res.ok) return;
+            const sharp = await atlasTexture(await res.arrayBuffer());
+            if (!sharp) return;
+            const old = tex.image as ImageBitmap | undefined;
+            tex.image = sharp.image;
+            tex.needsUpdate = true;
+            old?.close?.();
+          } catch {
+            // The bundled atlas stays: it is the floor, not a placeholder.
+          }
+        })();
+      }
+      return tex;
+    })();
+    p.catch(() => MINTED_ATLASES.delete(id));
+    MINTED_ATLASES.set(id, p);
+  }
+  return p;
+}
+
+/** A minted token's fish from its breed's bundled model and its paint: no fetch. */
+async function mintedFish(id: number): Promise<{ scene: Object3D; animations: AnimationClip[] }> {
+  const breed = breedOf(id);
+  const loadPaint = breed ? MINTED_PAINT[breed] : undefined;
+  if (!breed || !loadPaint) throw new Error(`no paint for #${id}`);
+  const [base, table] = await Promise.all([mintedBase(breed), loadPaint()]);
+  const paint = table.default.tokens[id];
+  if (!paint) throw new Error(`no paint for #${id}`);
+  const atlas = paint[0].some((m) => m.atlas) ? await mintedAtlas(id) : null;
+  // No atlas (no createImageBitmap): reject, so the caller falls back to the textured original.
+  if (!atlas && paint[0].some((m) => m.atlas)) throw new Error(`no atlas for #${id}`);
+  return { scene: paintMinted(base, paint, atlas), animations: base.animations };
 }
 
 /** One decoder per decoder path, created on first use and kept for the page.
@@ -580,6 +655,8 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** A betta's painted eyes as displays (beta-eyes.ts), rigged on its first frame. */
+  betaEyes?: BetaEyeRig | null;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
   /** A breed rigged in Blender, driven by its own module: it, not the generic
@@ -589,7 +666,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -771,6 +848,8 @@ class TankInstance implements SaverInstance {
   /** Water fog has been installed on this tank's materials (it stays; `water: 0` then renders as plain fog). */
   private waterInstalled = false;
   private readonly eyeState: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
+  /** Each eye's gaze for a rigged minted breed (eyes.ts mintedLook), reused frame to frame. */
+  private readonly mintedGaze: Array<{ fwd: number; up: number }> = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }, { fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
   private spotRig: SpotSpec[] = [];
   private spotSheet: SpotSheet | null = null;
   private spotKey = '\u0000';
@@ -2074,7 +2153,12 @@ class TankInstance implements SaverInstance {
           // Gateway ladder (MQ21): try each candidate with its own timeout so
           // one flaky gateway degrades to the next instead of to a fallback
           // blob. Non-ipfs URLs have a single candidate.
-          const buf = await (async (): Promise<ArrayBuffer> => {
+          // A minted token: its breed's bundled model in its own paint — no
+          // fetch, no gateway, no decoder. Anything amiss falls through to
+          // its original GLB on the ladder below.
+          const mintedId = mintedIdOf(url);
+          const minted = mintedId === null ? null : await mintedFish(mintedId).catch(() => null);
+          const buf = minted ? null : await (async (): Promise<ArrayBuffer> => {
             // A bundled breed: its own lazy chunk, decoded in place — no fetch.
             if (url.startsWith(BUNDLED_BREED_SCHEME)) {
               const load = BUNDLED_BREEDS[url.slice(BUNDLED_BREED_SCHEME.length)];
@@ -2082,7 +2166,8 @@ class TankInstance implements SaverInstance {
               return bundledGlb((await load()).default);
             }
             let lastErr: unknown = new Error('no gateway candidates');
-            for (const candidate of resolveIpfsUrls(url)) {
+            const original = mintedId !== null && url.startsWith(MINTED_SCHEME) ? fishAsset(mintedId, '3d') ?? url : url;
+            for (const candidate of resolveIpfsUrls(original)) {
               const ctl = new AbortController();
               const timer = setTimeout(() => ctl.abort(), 12_000);
               try {
@@ -2098,13 +2183,13 @@ class TankInstance implements SaverInstance {
             throw lastErr;
           })();
           const loader = new GLTFLoader();
-          const draco = needsDraco(buf);
-          const gltf = draco
+          const draco = buf ? needsDraco(buf) : false;
+          const gltf = minted ?? (draco
             ? await withDracoLoader(dracoPath, async (decoder) => {
                 loader.setDRACOLoader(decoder);
-                return loader.parseAsync(buf, '');
+                return loader.parseAsync(buf!, '');
               })
-            : await loader.parseAsync(buf, '');
+            : await loader.parseAsync(buf!, ''));
           const scene = gltf.scene;
           forceOpaque(scene);
           const size = new Box3().setFromObject(scene).getSize(new Vector3());
@@ -2156,6 +2241,10 @@ class TankInstance implements SaverInstance {
     let crab: CrabRig | null = null;
     let starfish: StarfishRig | null = null;
     let angler: AnglerRig | null = null;
+    let angel: AngelRig | null = null;
+    let turtle: TurtleRig | null = null;
+    let seahorse: SeahorseRig | null = null;
+    let beta: BetaRig | null = null;
     let hacker: HackerRig | null = null;
     let shark: SharkRig | null = null;
     let baby: BabyRig | null = null;
@@ -2174,6 +2263,10 @@ class TankInstance implements SaverInstance {
       if (rigged === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
       if (rigged === 'starfish') starfish = rigStarfish(body, tpl.clips, tpl.norm);
       if (rigged === 'glowfish') angler = rigAngler(body, tpl.clips);
+      if (rigged === 'angelfish') angel = rigAngel(body, tpl.clips);
+      if (rigged === 'seaturtle') turtle = rigTurtle(body, tpl.clips);
+      if (rigged === 'seahorse') seahorse = rigSeahorse(body, tpl.clips);
+      if (rigged === 'betafish') beta = rigBeta(body, tpl.clips);
       if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (rigged === 'shark') shark = rigShark(body, tpl.clips);
       if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
@@ -2212,8 +2305,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || hacker || shark || baby || tang || puffer) {
-        mixer = (angler ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
+      } else if (angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer) {
+        mixer = (angler ?? angel ?? turtle ?? seahorse ?? beta ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2262,8 +2355,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || hacker || shark || baby || tang || puffer || octopus
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
+      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2758,7 +2851,7 @@ class TankInstance implements SaverInstance {
             lag = Math.max(L, rel.len) * (1.3 + 1.6 * c);
             flurryExtra = (1 - c) * 0.8;
           }
-          pose = swimPoseAtDistance(rel.plan, rel.d - lag);
+          pose = chordPose(rel.plan, rel.d - lag, L);
           if (f.index === followSlot) {
             const tr = swimPoseAtDistance(rel.plan, rel.d - lag - L * 2);
             this.followTrail.set(tr.x, tr.y, tr.z); this.followHasTrail = true;
@@ -2786,7 +2879,7 @@ class TankInstance implements SaverInstance {
           }
           pose = { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
         } else {
-          pose = swimPoseAtDistance(f.plan, d);
+          pose = chordPose(f.plan, d, L);
           if (f.index === followSlot) {
             // Where this fish was `followBack` along its own path: the camera
             // rides the path it swam, which smooths turns and threads the gaps
@@ -2979,20 +3072,17 @@ class TankInstance implements SaverInstance {
         }
         // Nose into the dodge: the route's velocity plus how fast the dodge
         // is moving it, the turn held to a third of a right angle either way.
+        // Only the dodge's sideways share turns it, eased in (heading.ts):
+        // the angle of route + dodge velocity flipped as a dodge against the
+        // swim swung that sum through zero.
         const rx = offRate[k * 3]!, ry = offRate[k * 3 + 1]!, rz = offRate[k * 3 + 2]!;
-        if (rx * rx + ry * ry + rz * rz > 1e-4) {
-          const hl = Math.hypot(body.vx, body.vz);
-          const yaw0 = Math.atan2(body.vx, body.vz);
-          let turn = Math.atan2(body.vx + rx, body.vz + rz) - yaw0;
-          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
-          // A fish hardly moving turns less: a sideways shuffle is not a heading.
-          turn = Math.max(-0.5, Math.min(0.5, turn)) * Math.min(1, hl / 4);
-          const c = Math.cos(turn), sn = Math.sin(turn);
-          const fx0 = lfx, fz0 = lfz;
-          lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
-          const fl = Math.hypot(lfx, lfz) || 1;
-          lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? (ry / Math.max(hl, 4)) * fl : 0)));
-        }
+        const turn = dodgeTurn(body.vx, body.vz, rx, rz);
+        const hl = Math.hypot(body.vx, body.vz);
+        const c = Math.cos(turn), sn = Math.sin(turn);
+        const fx0 = lfx, fz0 = lfz;
+        lfx = fx0 * c + fz0 * sn; lfz = -fx0 * sn + fz0 * c;
+        const fl = Math.hypot(lfx, lfz) || 1;
+        lfy = Math.max(-0.6, Math.min(0.6, lfy + (hl > 1e-3 ? dodgeClimb(ry, hl) * fl : 0)));
       }
       // A crab walks the floor on its own legs (crab.ts) and takes over its
       // place and facing; a script's actor or a seated one just idles.
@@ -3039,6 +3129,38 @@ class TankInstance implements SaverInstance {
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
+      // An angelfish (a minted breed, rig/angelfish.py): its module sets its clips.
+      // Its turn: the heading's change over a body length of its route, as the
+      // swim wave measures it (+ to its left). A rigged breed bends into it.
+      let rigTurn = 0;
+      if ((f.rig?.angel || f.rig?.turtle || f.rig?.seahorse || f.rig?.beta) && turnPlan && !act) {
+        rigTurn = chordTurn(turnPlan, turnD, FISH_LENGTH);
+      }
+      const rigPace = speed * styleSpeed * style.travel;
+      // Where the viewer is from its head, in its own frame: + to its left
+      // (its left is the heading turned a quarter, (hz, -hx)), + up.
+      let rigViewer: { yaw: number; pitch: number } | null = null;
+      if (f.rig?.angel || f.rig?.turtle || f.rig?.seahorse || f.rig?.beta) {
+        const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
+        const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz;
+        rigViewer = { yaw: Math.atan2((dx * hz - dz * hx) / hl, (dx * hx + dz * hz) / hl), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+      }
+      const angel = f.rig?.angel ? angelFrame(f.rig.angel, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
+      // A sea turtle (minted, rig/seaturtle.py): the same inputs — it flies,
+      // glides, sculls, steers with its wings and meets the viewer by its nature.
+      const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
+      // A seahorse (minted, rig/seahorse.py): its fin, its tail's curl, its lean and its moments.
+      const seahorse = f.rig?.seahorse ? seahorseFrame(f.rig.seahorse, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
+      // A betafish (minted, rig/betafish.py): its silk fins, their spread, its displays.
+      const beta = f.rig?.beta ? betaFrame(f.rig.beta, tSec, f.index, beat, {
+        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+      }) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
       const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;
       if (hacker) {
@@ -3165,7 +3287,12 @@ class TankInstance implements SaverInstance {
       // glance at the lens. Rigged on the first frame that asks for it, so
       // `eyeLife: 0` compiles the stock eye program and costs nothing.
       // A dori aims its own eyes (tang.ts): the shared eye display would draw a second pupil.
-      if (eyeLife > 0 && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
+      // A rigged minted breed's eyes are alive whatever `eyeLife` says — the
+      // dori's way (eyes.ts mintedLook): the token's own pattern glides, each
+      // eye on its own gaze, and never blinks.
+      const minted = !!(angel || turtle || seahorse);
+      // A betafish's eyes are painted into its atlas and live below (beta-eyes.ts), not here.
+      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
@@ -3181,10 +3308,31 @@ class TankInstance implements SaverInstance {
             camera: toward(cam.x, cam.y, cam.z),
             climb: Math.max(-1, Math.min(1, (act ? act.fy : fy) * 2.5)),
           }, eyeLife, this.eyeState);
+          this.eyeState.smooth = minted;
+          if (minted) {
+            mintedLook(f.index, tSec, { camera: toward(cam.x, cam.y, cam.z), turn: rigTurn, cruise: Math.min(1, Math.max(0, (rigPace - 0.1) / 0.5)) }, this.mintedGaze);
+            this.eyeState.blink = 0; this.eyeState.expr = 0;
+            this.eyeState.eyes = this.mintedGaze;
+          } else this.eyeState.eyes = undefined;
           f.eyes.set(this.eyeState);
         }
       } else if (f.eyes) {
         f.eyes.set(EYES_AT_REST);
+      }
+      // A betta's eyes are painted into its atlas (beta-eyes.ts): its pupils
+      // glide there, looking the way its temperament looks (beta.ts
+      // BETA_LOOK_STYLE) — and lock on the viewer while it displays.
+      if (beta && f.body) {
+        if (f.betaEyes === undefined) f.betaEyes = rigBetaEyes(f.body);
+        if (f.betaEyes) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
+          const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz, dl = Math.hypot(dx, dy, dz) || 1;
+          mintedLook(f.index, tSec, {
+            camera: { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl },
+            turn: rigTurn, cruise: Math.min(1, Math.max(0, (rigPace - 0.1) / 0.5)),
+          }, this.mintedGaze, { ...BETA_LOOK_STYLE[beta.temper], lock: beta.lock });
+          f.betaEyes.set(this.mintedGaze);
+        }
       }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
@@ -3199,19 +3347,15 @@ class TankInstance implements SaverInstance {
         f.body.rotation.y = f.baseYaw;
         if (f.mixer && !f.rig) f.mixer.setTime(0);
         const breed = this.wantBreeds[f.index] ?? null;
-        // A seahorse does not wave: it flutters its fin, coils its tail and nods.
-        // A rigged breed's skeleton is its motion (crab.ts, angler.ts).
-        f.wave = f.rig ? null : breed === 'seahorse' ? rigSeahorse(f.group, f.body, fishHash(f.index, 67) * Math.PI * 2)
-          : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
+        // A rigged breed's skeleton is its motion (crab.ts, angler.ts, seahorse.ts).
+        f.wave = f.rig ? null : waveProfile(breed, f.body) ? rigSwimWave(f.group, f.body) : null;
       }
       const waving = swimWave > 0 && !!f.wave;
       if (f.wave) {
         f.wave.ensure();
         let turn = 0;
         if (waving && turnPlan && !act) {
-          const a = swimPoseAtDistance(turnPlan, turnD), b = swimPoseAtDistance(turnPlan, turnD - FISH_LENGTH);
-          turn = Math.atan2(a.fx, a.fz) - Math.atan2(b.fx, b.fz);
-          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          turn = chordTurn(turnPlan, turnD, FISH_LENGTH);
         }
         const flurry = mnv.flurry + flurryBoost;
         const ws = waveState(beat, FISH_LENGTH, flurry, turn, waving ? swimWave : 0, this.waveScratch);
@@ -3258,7 +3402,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100 } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

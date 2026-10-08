@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { defineConfig } from 'tsup';
@@ -29,6 +29,24 @@ function copyDraco(): void {
   // the host sets the dracoPath param).
 }
 
+/**
+ * Drop the source maps of the pure-data chunks: a bundled breed's model and a
+ * betafish's atlas are one base64 string each (src/breeds/*, src/minted/atlas/*,
+ * generated), and a map of that string repeats it in full while mapping
+ * nothing anyone debugs — half the package's bytes, before this.
+ */
+function dropDataMaps(): void {
+  const data = /(^|\/)src\/(breeds\/(?!index)[\w-]+|minted\/atlas\/\d+)\.ts$/;
+  for (const f of readdirSync('dist')) {
+    if (!f.endsWith('.js.map')) continue;
+    const map = JSON.parse(readFileSync(join('dist', f), 'utf8')) as { sources: string[] };
+    if (!map.sources.length || !map.sources.every((s) => data.test(s))) continue;
+    const js = join('dist', f.slice(0, -'.map'.length));
+    writeFileSync(js, readFileSync(js, 'utf8').replace(/\n\/\/# sourceMappingURL=\S+\s*$/, '\n'));
+    rmSync(join('dist', f));
+  }
+}
+
 export default defineConfig({
   entry: ['src/index.ts', 'src/manifest.ts'],
   format: ['esm'],
@@ -40,5 +58,5 @@ export default defineConfig({
   sourcemap: true,
   target: 'es2022',
   external: ['@idle-screens/core', 'three'],
-  onSuccess: async () => { copyDraco(); },
+  onSuccess: async () => { copyDraco(); dropDataMaps(); },
 });

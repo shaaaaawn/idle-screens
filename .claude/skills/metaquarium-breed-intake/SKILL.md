@@ -49,8 +49,9 @@ this skill is the running order and the judgement calls, not a second copy.**
 8. **Record** `size` (nominal length against a minted fish) and `motion`
    (`wiggle` / `pulse` / `scuttle`) in `breeds.json`, with a `notes` line
    saying what the audit found.
-9. **Gate.** Run the metaquarium vitest (the `breeds.test.ts` drift guard
-   included), then preflight through a fake mono pointed at the worktree.
+9. **Gate.** Run the metaquarium vitest (`breeds.test.ts` decodes every
+   bundled chunk: no Draco, every declared material has a role, within budget),
+   then preflight through a fake mono pointed at the worktree.
    Open a PR to `develop` with the `REPORT.md` table and a lab screenshot.
 
 ## Judgement calls that cost time to learn

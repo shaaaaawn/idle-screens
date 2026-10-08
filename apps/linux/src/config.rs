@@ -33,6 +33,7 @@ struct FileConfig {
 #[serde(deny_unknown_fields)]
 struct WebkitConfig {
     disable_dmabuf: Option<String>,
+    max_backend: Option<String>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -73,6 +74,8 @@ pub struct Settings {
     pub web_root_override: Option<PathBuf>,
     pub seed: Option<u32>,
     pub dmabuf: DmabufPolicy,
+    /// Ceiling handed to the host page as `?maxBackend=`; None trusts the browser.
+    pub backend_ceiling: Option<String>,
     pub update_on_launch: bool,
     pub update_base_url: String,
     pub app_id: String,
@@ -124,6 +127,22 @@ impl Settings {
             None => Mode::Savers,
         };
 
+        // Ceiling on what the host page may attempt. Resolved HERE, once, rather
+        // than inside the URL builder: probing /proc/device-tree from there made
+        // bundled_url_for() hardware-dependent, so its exact-URL tests passed on
+        // an ACPI arm64 CI runner and would have failed on an actual Pi.
+        let backend_ceiling = match file.webkit.max_backend.as_deref() {
+            Some("never") => None,
+            Some("auto") | None => crate::platform::backend_ceiling().map(str::to_string),
+            Some(v @ ("css" | "canvas2d" | "webgl2" | "webgpu")) => Some(v.to_string()),
+            Some(v) => {
+                log::warn!(
+                    "config: unrecognized webkit.max_backend {v:?} (expected \"auto\" | \"never\" | a backend name); defaulting to \"auto\""
+                );
+                crate::platform::backend_ceiling().map(str::to_string)
+            }
+        };
+
         let dmabuf = match file.webkit.disable_dmabuf.as_deref() {
             Some("always") => DmabufPolicy::Always,
             Some("never") => DmabufPolicy::Never,
@@ -169,6 +188,7 @@ impl Settings {
             web_root_override: cli.web_root.clone(),
             seed: cli.seed,
             dmabuf,
+            backend_ceiling,
             update_on_launch: !cli.no_update_check && check_enabled,
             app_id: cli
                 .app_id

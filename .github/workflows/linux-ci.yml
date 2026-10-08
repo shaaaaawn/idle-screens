@@ -16,24 +16,74 @@ permissions:
 
 jobs:
   build:
-    name: Build (Arch container)
-    runs-on: ubuntu-latest
-    container: archlinux:latest
-    timeout-minutes: 25
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      # Explicit include, never a cross-product: archlinux publishes no arm64
+      # image, so runner and container are paired by hand.
+      matrix:
+        include:
+          # Arch is where the app grew up — keep it for compile coverage.
+          - name: arch-x86_64
+            runs-on: ubuntu-latest
+            container: archlinux:latest
+            pm: pacman
+          # Debian x86_64 gates the apt dependency list on every PR, so the
+          # Debian path can't rot between Pi tests.
+          - name: debian-trixie-x86_64
+            runs-on: ubuntu-latest
+            container: debian:trixie
+            pm: apt
+          # The Raspberry Pi target. Native arm runner, not QEMU: a webkit6 +
+          # gtk4 build under emulation blows past any sane timeout.
+          - name: debian-trixie-aarch64
+            runs-on: ubuntu-24.04-arm
+            container: debian:trixie
+            pm: apt
     steps:
+      # Must precede actions/checkout: neither base image ships git, and the
+      # bare debian image has no curl or CA certificates either.
       - name: Install toolchain + native deps
         run: |
-          pacman -Syu --noconfirm --needed \
-            base-devel rustup git pkgconf \
-            gtk4 webkitgtk-6.0 gtk4-layer-shell libadwaita
-          rustup default stable
-          rustup component add clippy rustfmt
+          if [ "${{ matrix.pm }}" = pacman ]; then
+            pacman -Syu --noconfirm --needed \
+              base-devel rustup git pkgconf \
+              gtk4 webkitgtk-6.0 gtk4-layer-shell
+            rustup default stable
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential pkg-config git curl ca-certificates \
+              libgtk-4-dev libwebkitgtk-6.0-dev libgtk4-layer-shell-dev
+            # trixie's apt rustc is below Cargo.toml's rust-version.
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
 
       - uses: actions/checkout@v7
+
+      # After the PATH export above, so rustup's cargo is the one that's found.
+      - name: Add clippy + rustfmt
+        run: rustup component add clippy rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/linux
+          key: ${{ matrix.name }}
+
+      - name: Verify the dependency probe agrees with what we installed
+        working-directory: apps/linux
+        run: ./scripts/check-deps.sh
+
+      # install-swayidle.sh rewrites a user's session config, so it is tested
+      # like code. Needs only bash/perl/coreutils — no swayidle, no display.
+      - name: Test the swayidle installer
+        working-directory: apps/linux
+        run: ./scripts/test-swayidle-install.sh
 
       - name: fmt / clippy / build / test
         working-directory: apps/linux

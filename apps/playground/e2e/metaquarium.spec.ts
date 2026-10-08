@@ -160,6 +160,30 @@ test('MQ4: fishMix spawns the expanded population from mixed templates', async (
 });
 
 /**
+ * Minted fish build from their breed's bundled model and their own paint
+ * (src/minted.ts): an angelfish pair, a seahorse and a turtle — all named by
+ * their IPFS URLs in the catalog — populate the tank without one request to
+ * any gateway. (The bundled path's only fallback IS the gateway ladder, so a
+ * full tank with no /ipfs/ request is the bundled path working.)
+ */
+test('MQ15: minted fish come from the bundle, not IPFS', async ({ page }) => {
+  const pageErrors: string[] = [];
+  const ipfs: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  page.on('request', (r) => { if (r.url().includes('/ipfs/')) ipfs.push(r.url()); });
+
+  await page.goto('/?saver=metaquarium&mq.fishMix=258:1,259:1,457:1,497:1');
+  await page.waitForFunction(() => !!window.__idleScreens);
+  await page.evaluate(() => window.__idleScreens!.sleep());
+
+  await expect
+    .poll(async () => (await surfaceDataset(page)).fish, { timeout: 20_000 })
+    .toBe(4);
+  expect(ipfs).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Atmosphere variant: motes active (dataset-verified), fog depth + floor
  * steered — the Phase 2 params live at non-defaults.
  */

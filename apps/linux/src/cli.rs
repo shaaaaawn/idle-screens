@@ -2,10 +2,11 @@ use std::ffi::OsString;
 
 use clap::{Parser, Subcommand};
 
-/// idle-screens screensaver overlay for Wayland/Hyprland.
+/// idle-screens screensaver overlay for wlr-layer-shell Wayland compositors
+/// (sway, Hyprland, river, labwc, wayfire, KDE Plasma).
 ///
-/// Running the binary shows the saver immediately (hypridle execs it on idle);
-/// it exits on user input or SIGTERM.
+/// Running the binary shows the saver immediately — your idle daemon execs it
+/// on idle; it exits on user input or SIGTERM.
 #[derive(Parser, Debug)]
 #[command(name = "idle-screens-wayland", version, about)]
 pub struct Cli {
@@ -37,8 +38,9 @@ pub struct Cli {
     pub windowed: bool,
 
     /// Fullscreen overlay that ignores mouse movement for exit (kiosk / demo);
-    /// press Escape to dismiss it. Pair with a hypridle listener that omits
-    /// on-resume — see packaging/hypridle-kiosk.conf.example.
+    /// press Escape to dismiss it. Pair with an idle listener that omits the
+    /// resume hook — see packaging/hypridle-kiosk.conf.example or
+    /// packaging/swayidle/swayidle.snippet.
     #[arg(long)]
     pub kiosk: bool,
 

@@ -256,6 +256,16 @@ describe('flora', () => {
     expect(bad.problems[0]).toMatch(/rose/);
   });
 
+  it('rejects a hostile floraMix in linear time', () => {
+    // floraMix is a live-steerable param. The old weight pattern backtracked
+    // quadratically on a long zero run that never matched: 30 000 ≈ 2 s.
+    const t0 = performance.now();
+    expect(parseFloraMix(`kelp:${'0'.repeat(30_000)}x`).problems).toHaveLength(1);
+    expect(performance.now() - t0).toBeLessThan(250);
+    expect(parseFloraMix('kelp:.5').mix).toEqual({ kelp: 0.5 });
+    expect(parseFloraMix('kelp:3.').problems).toHaveLength(1);
+  });
+
   it('never roots inside something solid, and nothing grows with no light to feed on', () => {
     const blocked = (x: number, z: number): boolean => Math.hypot(x, z) < 60;
     const f = buildFlora([anchors[0]!], flat, createRng(3), { ...opts, blocked });
