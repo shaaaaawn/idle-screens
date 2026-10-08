@@ -22,8 +22,9 @@ describe('betafish: the painted eyes', () => {
     expect(cells).not.toBeNull();
     expect(cells.map((e) => e.filter(Boolean).length)).toEqual([9, 9]);
     for (const eye of cells) for (const c of eye) {
-      // A cell is a small square of the 512² atlas (~12 texels), inside it.
-      for (const [u, v] of [c!.o, [c!.o[0] + c!.dz[0] + c!.dy[0], c!.o[1] + c!.dz[1] + c!.dy[1]]]) {
+      // A cell is a small square of the 512² atlas (~12 texels), inside it — all four corners.
+      const at = (a: number, b: number): [number, number] => [c!.o[0] + c!.dz[0] * a + c!.dy[0] * b, c!.o[1] + c!.dz[1] * a + c!.dy[1] * b];
+      for (const [u, v] of [at(0, 0), at(1, 0), at(0, 1), at(1, 1)]) {
         expect(u).toBeGreaterThanOrEqual(-1e-6); expect(u).toBeLessThanOrEqual(1 + 1e-6);
         expect(v).toBeGreaterThanOrEqual(-1e-6); expect(v).toBeLessThanOrEqual(1 + 1e-6);
       }
@@ -34,6 +35,24 @@ describe('betafish: the painted eyes', () => {
     // No two cells share a square.
     const keys = cells.flat().map((c) => c!.o.map((x) => x.toFixed(3)).join(','));
     expect(new Set(keys).size).toBe(18);
+  });
+
+  it('reads every mesh of a token: eye cells split across its materials\' meshes are all found', async () => {
+    const geometry = firstGeometry((await load()).scene);
+    const idx = geometry.index!, n = idx.count, pos = geometry.getAttribute('position');
+    // Two meshes over one buffer, each indexing the triangles on one side of
+    // z 3.3 (mid-eye) — as a token's materials split its cells between them.
+    const half = (k: number): typeof geometry => {
+      const g = geometry.clone(); const ids: number[] = [];
+      for (let t = 0; t < n; t += 3) {
+        const z = (pos.getZ(idx.getX(t)) + pos.getZ(idx.getX(t + 1)) + pos.getZ(idx.getX(t + 2))) / 3;
+        if ((z < 3.3 ? 0 : 1) === k) ids.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+      }
+      g.setIndex(ids); return g;
+    };
+    const one = betaEyeCells(half(0));
+    expect(one === null || one.flat().some((c) => !c)).toBe(true); // neither half alone has every cell
+    expect(betaEyeCells([half(0), half(1)])!.map((e) => e.filter(Boolean).length)).toEqual([9, 9]);
   });
 
   it('a model without the blocks is left alone', () => {

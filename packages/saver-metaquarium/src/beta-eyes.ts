@@ -44,10 +44,18 @@ export interface BetaEyeRig {
  * corner, and the UV steps along +z and +y across it — learned from the
  * model's own triangles. Null when the model has no such block.
  */
-export function betaEyeCells(geometry: BufferGeometry): Array<Array<{ o: [number, number]; dz: [number, number]; dy: [number, number] } | null>> | null {
-  const pos = geometry.getAttribute('position'), uv = geometry.getAttribute('uv'), idx = geometry.index;
-  if (!pos || !uv) return null;
+export function betaEyeCells(geometries: BufferGeometry | readonly BufferGeometry[]): Array<Array<{ o: [number, number]; dz: [number, number]; dy: [number, number] } | null>> | null {
+  // A token is several meshes, one per material, each indexing only its own
+  // regions' triangles out of one shared buffer: an eye's cells can lie in
+  // more than one, so every mesh is read before the blocks are judged.
   const out = BETA_EYE_BLOCKS.map(() => Array.from({ length: N * N }, () => null as { o: [number, number]; dz: [number, number]; dy: [number, number] } | null));
+  for (const geometry of Array.isArray(geometries) ? geometries : [geometries]) readCells(geometry as BufferGeometry, out);
+  return out.some((cells) => cells.every(Boolean)) ? out : null;
+}
+
+function readCells(geometry: BufferGeometry, out: Array<Array<{ o: [number, number]; dz: [number, number]; dy: [number, number] } | null>>): void {
+  const pos = geometry.getAttribute('position'), uv = geometry.getAttribute('uv'), idx = geometry.index;
+  if (!pos || !uv) return;
   const n = idx ? idx.count : pos.count;
   for (let t = 0; t + 2 < n; t += 3) {
     const v = [0, 1, 2].map((k) => (idx ? idx.getX(t + k) : t + k));
@@ -74,7 +82,6 @@ export function betaEyeCells(geometry: BufferGeometry): Array<Array<{ o: [number
       out[e]![cy * N + cx] = { o: [ou, ov], dz: [dzu, dzv], dy: [dyu, dyv] };
     });
   }
-  return out.some((cells) => cells.every(Boolean)) ? out : null;
 }
 
 const PARS = /* glsl */ `
@@ -125,17 +132,16 @@ const PARS = /* glsl */ `
  * a model without the eye blocks returns null and is left as it was.
  */
 export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
-  let cells: ReturnType<typeof betaEyeCells> = null;
-  const mats: Material[] = [];
+  const mats: Material[] = [], geometries: BufferGeometry[] = [];
   body.traverse((o) => {
     const mesh = o as Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
-    cells ??= betaEyeCells(mesh.geometry);
+    if (!geometries.includes(mesh.geometry)) geometries.push(mesh.geometry);
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       if ((m as Material & { map?: unknown }).map && !mats.includes(m)) mats.push(m);
     }
   });
-  const found = cells as ReturnType<typeof betaEyeCells>;
+  const found = betaEyeCells(geometries);
   if (!found || !mats.length) return null;
   const cell = (e: number, k: number) => found[e]?.[k] ?? null;
   const uniforms = {

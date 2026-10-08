@@ -89,7 +89,8 @@ if (clipNames.length) {
   for (const r of minted) for (const clip of clipNames) rows.push({ ...r, label: `${r.label.replace(' · minted', '')} · ${clip}`, clip });
 }
 const times = (q.get('times') ?? '0,0.25,0.5,0.75,1,1.25').split(',').map(Number);
-for (const n of q.get('url') ? [] : names) {
+// A clip sheet is the minted fish's motion only: the breed rows' six views would overrun its columns.
+for (const n of q.get('url') || clipNames.length ? [] : names) {
   const s = Object.entries(SRC).find(([k]) => nameOf(k) === n)?.[1];
   const o = BUNDLED_BREEDS[n];
   if ((set === 'source' || set === 'both') && s) rows.push({ label: `${n} · source`, url: s });

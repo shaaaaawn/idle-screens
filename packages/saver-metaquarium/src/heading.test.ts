@@ -48,6 +48,21 @@ describe('heading: a fish faces along its route without snapping', () => {
     }
   });
 
+  it('banks INTO a turn, the same way the route itself does (the tank rolls the fish by it)', () => {
+    const plan = compileSwimPlan(createRng(4).fork(3), BOUNDS, 'orbit');
+    // Where the turn is clear (both well off level): a short chord and a long
+    // one can disagree on the gentle wiggles in between.
+    let agree = 0, n = 0, dot = 0;
+    for (let d = 0; d < plan.totalLength; d += 3.1) {
+      const route = swimPoseAtDistance(plan, d).roll, chord = chordPose(plan, d, 18).roll;
+      dot += route * chord;
+      if (Math.abs(route) > 0.15 && Math.abs(chord) > 0.15) { n++; if (Math.sign(route) === Math.sign(chord)) agree++; }
+    }
+    expect(dot).toBeGreaterThan(0);
+    expect(n).toBeGreaterThan(5);
+    expect(agree / n).toBeGreaterThan(0.9);
+  });
+
   it('chordTurn is the bearing\'s change over a body length, + to its left', () => {
     const plan = compileSwimPlan(createRng(4).fork(3), BOUNDS, 'orbit');
     for (let d = 50; d < 400; d += 17) {

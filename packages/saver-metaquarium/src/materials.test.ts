@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Bone, Box3, BoxGeometry, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
+import { Bone, Box3, BoxGeometry, Color, DoubleSide, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
@@ -611,6 +611,14 @@ describe('METAL <Colour> parts (the minted designs\' own metal)', () => {
     applyNpcMaterials(off.root, createRng(1), false, true);
     expect(off.part.material).toBeInstanceOf(MeshLambertMaterial);
     expect((off.part.material as MeshLambertMaterial).color.getHex()).toBe(new Color(0x030303).getHex());
+  });
+  it('keeps a double-sided part double-sided, lit, flat or matte — a fin is one sheet', () => {
+    for (const [reflective, lit] of [[true, true], [true, false], [false, true]] as const) {
+      const f = fishWith('METAL Blue.003', 0x0006ff);
+      (f.part.material as MeshStandardMaterial).side = DoubleSide;
+      applyNpcMaterials(f.root, createRng(1), reflective, lit);
+      expect((f.part.material as MeshStandardMaterial).side, `${reflective}/${lit}`).toBe(DoubleSide);
+    }
   });
   it('the intake\'s METAL- steel is untouched by it', () => {
     const { root, part } = fishWith('METAL-Teeth', 0x1a0030, 1);

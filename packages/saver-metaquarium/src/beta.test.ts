@@ -129,7 +129,7 @@ describe('betafish: the real rig', () => {
     expect(rigBeta(gltf.scene, gltf.animations)).not.toBeNull();
     expect(bonesOf(gltf.scene).map((o) => o.name)).toEqual(expect.arrayContaining([
       'head', 'body', 'rear', 'ped', 'cU1', 'cU2', 'cM1', 'cM2', 'cL1', 'cL2', 'd1', 'd2',
-      'pecR', 'pecL', 'ven1R', 'ven2R', 'ven1L', 'ven2L', 'gillR', 'gillL', 'roll', 'flexR', 'flexP', 'sU', 'sL', 'sD', 'gR', 'gL']));
+      'pecR', 'pecL', 'ven1R', 'ven2R', 'ven1L', 'ven2L', 'gillR', 'gillL', 'root', 'roll', 'lookY', 'lookP', 'flexR', 'flexP', 'sU', 'sL', 'sD', 'gR', 'gL']));
   });
 
   it('plays every moment alone without a snap', async () => {

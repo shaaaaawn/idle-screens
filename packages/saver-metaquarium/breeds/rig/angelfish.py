@@ -63,12 +63,13 @@ import os
 import sys
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Matrix, Vector
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, apply_pose, bake, begin, in_scene, build_armature, ease, env, export, lattice, load_source, out_path, segment,
+    Pose, along, apply_pose, arc_centres, bake, begin, build_armature, ease, env, export, hat, in_scene, knots,
+    lattice, load_source, out_path, segment, soften, turn_about,
 )
 
 BREED = 'angelfish'
@@ -96,53 +97,12 @@ DORSAL_IN, ANAL_IN = (9.0, 13.0), (-10.0, -14.0)
 TAIL_FROM = 15.5  # the caudal bar: never fin, however tall
 
 
-def hat(x, centres, names):
-    """Linear hand-over between neighbouring centres: two bones at most."""
-    if x <= centres[0]:
-        return {names[0]: 1.0}
-    for i in range(len(centres) - 1):
-        a, b = centres[i], centres[i + 1]
-        if x <= b:
-            u = ease((x - a) / (b - a))
-            return {names[i]: 1 - u, names[i + 1]: u}
-    return {names[-1]: 1.0}
 
 
-def knots(y, ks):
-    """Weights along a list of (position, bone) knots, eased between neighbours."""
-    if y <= ks[0][0]:
-        return {ks[0][1]: 1.0}
-    for (a, na), (b, nb) in zip(ks, ks[1:]):
-        if y <= b:
-            if na == nb:
-                return {na: 1.0}
-            u = ease((y - a) / (b - a))
-            return {na: 1 - u, nb: u}
-    return {ks[-1][1]: 1.0}
 
 
-def along(arc, y, z):
-    """How far along an arc (polyline in y, z) a point lies, by its nearest point."""
-    best, run, at = 1e9, 0.0, 0.0
-    for (y0, z0), (y1, z1) in zip(arc, arc[1:]):
-        dy, dz = y1 - y0, z1 - z0
-        L2 = dy * dy + dz * dz
-        u = max(0.0, min(1.0, ((y - y0) * dy + (z - z0) * dz) / L2))
-        d = (y - (y0 + u * dy)) ** 2 + (z - (z0 + u * dz)) ** 2
-        if d < best:
-            best, at = d, run + u * math.sqrt(L2)
-        run += math.sqrt(L2)
-    return at
 
 
-def arc_centres(arc):
-    """Each fin bone's weight peaks at its segment's middle, by arc length."""
-    out, run = [], 0.0
-    for (y0, z0), (y1, z1) in zip(arc, arc[1:]):
-        L = math.hypot(y1 - y0, z1 - z0)
-        out.append(run + L / 2)
-        run += L
-    return out
 
 
 def weights_at(co, eye):
@@ -175,31 +135,6 @@ def bone_of(x, y, z, mat):
     return '_eye' if 'EYE' in mat else '_part'
 
 
-def soften(meshes):
-    blended, most = 0, 0
-    for o in meshes:
-        groups = {g.name: g for g in o.vertex_groups}
-        idx = {g.index: g.name for g in o.vertex_groups}
-        for v in o.data.vertices:
-            names = [idx[g.group] for g in v.groups]
-            if not names:
-                continue
-            w = weights_at(v.co, names[0] == '_eye')
-            total = sum(w.values())
-            for g in list(groups.values()):
-                g.remove([v.index])
-            for n, x in w.items():
-                if n not in groups:
-                    groups[n] = o.vertex_groups.new(name=n)
-                groups[n].add([v.index], x / total, 'REPLACE')
-            blended += len(w) > 1
-            most = max(most, len(w))
-        # The placeholders only (a real bone is named 'body': it must keep its group).
-        for stale in ('_eye', '_part'):
-            if stale in groups:
-                o.vertex_groups.remove(groups[stale])
-    assert most <= 4, most  # glTF skins carry four influences a vertex
-    return blended
 
 
 def bone_table():
@@ -234,8 +169,6 @@ def sway_axis(arc, i):
     return Vector((0.0, -(z1 - z0) / L, (y1 - y0) / L))
 
 
-def turn_about(p, bone, axis, angle):
-    p.rot[bone] = Quaternion(axis, angle) @ p.rot.get(bone, Quaternion())
 
 
 BACK = ('body', 's2', 's3', 'tail')
@@ -315,7 +248,7 @@ def nibble(t, T=2.4):
     peck = math.sin(math.pi * (t - 0.4) / 0.65) ** 2 * env(t, 0.35, 0.7, T - 0.9, T - 0.3)
     nose(p, nod=0.18 * on + 0.2 * peck, sniff=0.18 * peck)
     p.turn('body', 'x', 0.08 * on)  # tips nose-down to it
-    ripple(p, 2 * math.pi * t / 0.8, (0.06, 0.08, 0.12), spread=0.6 * on)
+    ripple(p, 2 * math.pi * t / 0.8, tuple(a * on for a in (0.06, 0.08, 0.12)), spread=0.6 * on)
     return p
 
 
@@ -326,8 +259,9 @@ def curious(t, T=3.0):
     twitch = 0.08 * math.sin(2 * math.pi * t / 0.6) * env(t, 0.6, 0.9, T - 1.0, T - 0.6)
     nose(p, nod=-0.05 * look, yaw=0.35 * look, sniff=twitch)
     p.turn('body', 'z', 0.08 * look)
-    wave(p, 2 * math.pi * t / 2.0, (0.0, 0.02, 0.03, 0.06))
-    ripple(p, 2 * math.pi * t / 1.2, (0.05, 0.08, 0.12), spread=0.8 * look)
+    # Gated by the look, so the one-shot starts and ends at rest.
+    wave(p, 2 * math.pi * t / 2.0, tuple(a * look for a in (0.0, 0.02, 0.03, 0.06)))
+    ripple(p, 2 * math.pi * t / 1.2, tuple(a * look for a in (0.05, 0.08, 0.12)), spread=0.8 * look)
     return p
 
 
@@ -459,7 +393,7 @@ def main():
         pitch, phase = lattice(meshes)
         assert pitch == PITCH, (pitch, phase)
         segment(meshes, bone_of, pitch, phase, by_point=True)
-        blended = soften(meshes)
+        blended = soften(meshes, weights_at)
         nondeform = ('root', 'roll', 'lookY', 'lookP', 'flex2', 'flex3', 'flex4')
         rig = build_armature('Angelfish', meshes, bone_table(), nondeform=nondeform)
         keyed = {pb.name: ['rotation_quaternion'] for pb in rig.pose.bones if pb.name != 'root'}

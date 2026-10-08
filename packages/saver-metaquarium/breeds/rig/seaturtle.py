@@ -338,7 +338,7 @@ def stretch(t, T=4.4):
     look(p, nod=-0.3 * a, neck_share=0.6)
     wings(p, lift=(0.15 * a, 0.0, 0.15 * a + shiver), sweep=(-0.25 * a, 0.05 * a, 0.0))
     hinds(p, spread=0.3 * a, trim=-0.1 * a)
-    p.turn('tail', 'x', -0.25 * a)
+    p.turn('tail', 'x', 0.25 * a)  # + about X lifts a bone that points back (+Y)
     p.turn('shell', 'x', -0.05 * a)
     return p
 

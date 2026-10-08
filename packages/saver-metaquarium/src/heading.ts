@@ -16,7 +16,7 @@
  * three body lengths, its climb over one — and the dodge turns it by the
  * dodge's SIDEWAYS share only, eased in from nothing and compressed.
  */
-import { swimPoseAtDistance, type SwimPlan, type SwimPose } from './plan';
+import { swimPointAtDistance, swimPoseAtDistance, type SwimPlan, type SwimPose } from './plan';
 
 /**
  * The route's direction at `d`, unit (fx fy fz). Its compass bearing (yaw)
@@ -27,21 +27,21 @@ import { swimPoseAtDistance, type SwimPlan, type SwimPose } from './plan';
  * from where the climb began to where it ends.
  */
 export function chordHeading(plan: SwimPlan, d: number, half: number): { fx: number; fy: number; fz: number } {
-  const a = swimPoseAtDistance(plan, d - half), b = swimPoseAtDistance(plan, d + half);
-  let hx = b.x - a.x, hz = b.z - a.z;
+  const [ax, , az] = swimPointAtDistance(plan, d - half), [bx, , bz] = swimPointAtDistance(plan, d + half);
+  let hx = bx - ax, hz = bz - az;
   const hm = Math.hypot(hx, hz);
   // A route that loops back within the window (a tight circle, a vertical
   // loop) leaves the wide chord short and turning fast: hand over to the
   // bearing of a chord a third as wide, smoothly by how short the wide one
   // is (a hard switch toggled frame to frame — measured).
   const near = smooth(1 - hm / (half * 0.6));
-  const m = swimPoseAtDistance(plan, d - half / 3), n = swimPoseAtDistance(plan, d + half / 3);
-  const sx = n.x - m.x, sz = n.z - m.z, sm = Math.hypot(sx, sz) || 1;
+  const [mx, my, mz] = swimPointAtDistance(plan, d - half / 3), [nx, ny, nz] = swimPointAtDistance(plan, d + half / 3);
+  const sx = nx - mx, sz = nz - mz, sm = Math.hypot(sx, sz) || 1;
   hx = (hm > 1e-9 ? hx / hm : 0) * (1 - near) + (sx / sm) * near;
   hz = (hm > 1e-9 ? hz / hm : 0) * (1 - near) + (sz / sm) * near;
   const hl = Math.hypot(hx, hz) || 1;
   hx /= hl; hz /= hl;
-  const run = Math.hypot(n.x - m.x, n.z - m.z), rise = n.y - m.y;
+  const run = Math.hypot(sx, sz), rise = ny - my;
   const fy = Math.max(-0.7, Math.min(0.7, rise / (Math.hypot(run, rise) || 1)));
   const k = Math.sqrt(1 - fy * fy);
   return { fx: hx * k, fy, fz: hz * k };
@@ -53,10 +53,12 @@ export function chordPose(plan: SwimPlan, d: number, length: number): SwimPose {
   const h = chordHeading(plan, d, length * 1.5);
   // Its bank into the turn, from the same chords across a body length (the
   // route's own roll comes off a short chord and flipped ±0.35 on a hairpin).
+  // The route's roll is signed by atan2(z, x) — the opposite way round from
+  // a bearing atan2(x, z) — so the turn is negated: it leans INTO the turn.
   const a = chordHeading(plan, d - length * 0.5, length * 1.5), b = chordHeading(plan, d + length * 0.5, length * 1.5);
   let turn = Math.atan2(b.fx, b.fz) - Math.atan2(a.fx, a.fz);
   turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
-  return { ...p, fx: h.fx, fy: h.fy, fz: h.fz, roll: 0.35 * Math.tanh(turn * 1.2) };
+  return { ...p, fx: h.fx, fy: h.fy, fz: h.fz, roll: -0.35 * Math.tanh(turn * 1.2) };
 }
 
 /** How far a dodge's climb tips the nose (added to the heading's y), compressed like its turn. */

@@ -402,6 +402,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
           ? new MeshStandardMaterial({ color: own, metalness: 0.85, roughness: rough, envMapIntensity: 1.4, emissive: own.clone().multiplyScalar(0.12) })
           : new MeshMatcapMaterial({ color: own.clone().lerp(new Color('#ffffff'), 0.12), matcap: chromeMatcap() });
         metal.name = m.name;
+        metal.side = m.side; // a minted fin is a single sheet, seen from both sides
         metal.userData.mqOwned = true;
         return metal;
       }
@@ -412,6 +413,7 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
         const kept = lit ? new MeshLambertMaterial({ color: own }) : new MeshBasicMaterial({ color: own });
         kept.name = m.name;
+        kept.side = m.side;
         kept.userData.mqOwned = true;
         decal(kept, 1);
         return kept;

@@ -3291,7 +3291,8 @@ class TankInstance implements SaverInstance {
       // dori's way (eyes.ts mintedLook): the token's own pattern glides, each
       // eye on its own gaze, and never blinks.
       const minted = !!(angel || turtle || seahorse);
-      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus) {
+      // A betafish's eyes are painted into its atlas and live below (beta-eyes.ts), not here.
+      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;

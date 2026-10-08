@@ -296,6 +296,13 @@ export function swimPoseAt(plan: SwimPlan, tSec: number, speed = 1): SwimPose {
   return swimPoseAtDistance(plan, distanceAt(plan, tSec, speed));
 }
 
+/** Where the route is at arc distance `dist` — position only, none of the
+ *  tangent or bank `swimPoseAtDistance` also works out (heading.ts samples
+ *  many points a frame and reads nothing else). */
+export function swimPointAtDistance(plan: SwimPlan, dist: number): [number, number, number] {
+  return splineAt(plan.points, paramForDistance(plan, dist));
+}
+
 /** Pose at an explicit arc distance — the seam for behavior-modulated speed.
  *  When the track steers swimSpeed, the tank feeds this the closed-form
  *  integral of the speed curve (core's `integrateParam`) so speed changes

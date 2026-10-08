@@ -100,22 +100,32 @@ describe('bundled breeds (breeds/README.md)', () => {
   // sum to 1); otherwise every vertex rides one part. Eyes are rigid either way.
   // `layers`: the non-deforming bones kept as joints of their own (the dials'
   // and whole-body moments'), so they layer over the swim and never average with it.
-  const MINTED_RIGS: Record<string, { joints: string[]; layers: string[]; clips: string[]; head: string; soft?: boolean }> = {
+  const MINTED_RIGS: Record<string, { joints: string[]; layers: string[]; dials: string[]; clips: string[]; head: string; soft?: boolean }> = {
     angelfish: {
       joints: ['a1', 'a2', 'a3', 'body', 'd1', 'd2', 'd3', 'head', 's2', 's3', 'snout', 'tail'],
       layers: ['flex2', 'flex3', 'flex4', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['bend', 'lookPitch', 'lookYaw'],
       clips: ['bend', 'bow', 'burst', 'curious', 'display', 'flutter', 'hover', 'kiss', 'lookPitch', 'lookYaw', 'nibble', 'pirouette', 'soar', 'stretch', 'sway', 'swim'],
       head: 'head', soft: true,
     },
     seaturtle: {
       joints: ['fL1', 'fL2', 'fL3', 'fR1', 'fR2', 'fR3', 'head', 'neck', 'rL', 'rR', 'shell', 'tail'],
       layers: ['bank', 'lookP', 'lookY', 'reach', 'root', 'steerL', 'steerR', 'withdraw'],
+      dials: ['lookPitch', 'lookYaw', 'reach', 'steer'],
       clips: ['barrel', 'breathe', 'burst', 'flap', 'glide', 'lookPitch', 'lookYaw', 'lookback', 'nod', 'paddle', 'reach', 'somersault', 'steer', 'stretch', 'swim', 'tuck', 'wave', 'wipe'],
+      head: 'head', soft: true,
+    },
+    betafish: {
+      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'pecL', 'pecR', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
+      layers: ['flexP', 'flexR', 'gL', 'gR', 'lookP', 'lookY', 'roll', 'root', 'sD', 'sL', 'sU'],
+      dials: ['bend', 'lookPitch', 'lookYaw', 'spread'],
+      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'flare', 'flick', 'gulp', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim'],
       head: 'head', soft: true,
     },
     seahorse: {
       joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
       layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['curl', 'lean', 'lookPitch', 'lookYaw'],
       clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
       head: 'head', soft: true,
     },
@@ -139,16 +149,28 @@ describe('bundled breeds (breeds/README.md)', () => {
           if (want.soft) expect(ws.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 2);
           else expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
           // Eye cells ride the head, rigid, where rigEyes reads their grid.
-          if (/EYE/.test(name)) { expect(joints[j0!]).toBe(want.head); expect(w0).toBeCloseTo(1, 2); }
+          if (/EYE/.test(name)) { expect(joints[j0!]).toBe(want.head); expect(w0).toBeCloseTo(1, 2); for (const x of rest) expect(x).toBeCloseTo(0, 2); }
           ws.forEach((x, k) => { if (x > 0.01) used.add(joints[js[k]!]!); });
         }
       }
       expect([...used].sort()).toEqual(want.joints);
-      // No dial or moment bone shares a channel with another clip's.
+      // A dial keys only bones of its own, and no other clip keys them: the
+      // mixer averages actions that share a channel, so a shared one would
+      // halve both. (A whole-body moment's bone — roll, bank, withdraw — is
+      // shared only among moments, whose weights never overlap a dial's.)
       const layer = new Set(want.layers);
+      const owners = new Map<string, Set<string>>();
+      for (const a of root.listAnimations()) for (const c of a.listChannels()) {
+        const key = `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`;
+        owners.set(key, (owners.get(key) ?? new Set()).add(a.getName()));
+      }
       for (const a of root.listAnimations()) {
-        const hits = a.listChannels().map((c) => c.getTargetNode()!.getName()).filter((n) => layer.has(n));
-        if (/^(bend|steer|lookYaw|lookPitch|reach|curl|lean)$/.test(a.getName())) expect(a.listChannels().length, a.getName()).toBe(hits.length);
+        if (!want.dials.includes(a.getName())) continue;
+        for (const c of a.listChannels()) {
+          const key = `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`;
+          expect(layer.has(c.getTargetNode()!.getName()), `${a.getName()} keys ${key}`).toBe(true);
+          expect([...owners.get(key)!], key).toEqual([a.getName()]);
+        }
       }
     });
   }
@@ -179,7 +201,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       return n;
     };
     // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
-    for (const breed of ['angelfish', 'seaturtle', 'seahorse']) {
+    for (const breed of ['angelfish', 'seaturtle', 'seahorse', 'betafish']) {
       expect(tjunctions(await bundledDoc(breed)), breed).toBeLessThanOrEqual(tjunctions(await new NodeIO().read(here(`../breeds/source/${breed}.glb`).pathname)));
     }
   }, 120_000);
@@ -200,7 +222,10 @@ describe('bundled breeds (breeds/README.md)', () => {
         const W = at.get(mesh), place = (q: number[]): number[] => (W ? [0, 1, 2].map((r) => W[r]! * q[0]! + W[4 + r]! * q[1]! + W[8 + r]! * q[2]! + W[12 + r]!) : q);
         const list = out.get(name) ?? [];
         for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
-          list.push([0, 1, 2].map((k) => f(place(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[])).map((v) => v.toFixed(2)).join(',')).sort().join('|'));
+          // Rotated to start at its least corner, never re-ordered: a face turned to face inward fails.
+          const c = [0, 1, 2].map((k) => f(place(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[])).map((v) => v.toFixed(2)).join(','));
+          const s0 = c.indexOf([...c].sort()[0]!);
+          list.push([c[s0], c[(s0 + 1) % 3], c[(s0 + 2) % 3]].join('|'));
         }
         out.set(name, list);
       }
