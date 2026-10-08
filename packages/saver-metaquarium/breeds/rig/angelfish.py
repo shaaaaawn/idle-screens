@@ -94,7 +94,7 @@ DORSAL_ARC = ((1.0, 9.0), (5.0, 15.0), (11.0, 19.0), (23.0, 20.0))
 ANAL_ARC = ((1.0, -10.0), (5.0, -15.0), (10.0, -18.0), (15.5, -20.0))
 # A vertex is fin by how far it stands off the body: eased in over these z.
 DORSAL_IN, ANAL_IN = (9.0, 13.0), (-10.0, -14.0)
-TAIL_FROM = 15.5  # the caudal bar: never fin, however tall
+TAIL_FROM = 15.5  # the caudal bar (below the streamer): never fin
 
 
 
@@ -109,7 +109,9 @@ def weights_at(co, eye):
     if eye:
         return {'head': 1.0}
     spine = knots(co.y, SPINE_KNOTS)
-    if co.y >= TAIL_FROM:
+    # The caudal bar is spine; the dorsal's streamer runs on above it, over
+    # the tail (z 18..20), and stays fin.
+    if co.y >= TAIL_FROM and co.z < 12.0:
         return spine
     if co.z > 0:
         lo, hi = DORSAL_IN

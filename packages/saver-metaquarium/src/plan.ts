@@ -233,8 +233,9 @@ function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds, opts: Pl
 
 /**
  * Compile a seeded itinerary through the tank volume. The default `wander`
- * waypoints alternate around the ring (angle jitter, radius breathing, depth
- * changes) so the loop reads as purposeful wandering, never a circle; other
+ * sweeps in toward the middle and out to the glass twice round the ring (a
+ * little off-true at each waypoint, depth eased between them), so the loop
+ * reads as purposeful wandering, never a circle and never a hairpin; other
  * shapes swap the waypoints and keep everything else.
  */
 export function compileSwimPlan(rng: Rng, bounds: TankBounds, shape: PathShape = 'wander', opts: PlanOpts = {}): SwimPlan {

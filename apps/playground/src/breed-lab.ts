@@ -150,7 +150,8 @@ const views: Array<[string, (d: number) => Vector3]> = [
       const scene = stage(root);
       const cam = new PerspectiveCamera(30, 1, span * 0.05, span * 20);
       times.forEach((f, c) => {
-        mixer.setTime((clip?.duration ?? 0) * f);
+        // Just inside the end: a looping action AT its duration wraps to its first frame.
+        mixer.setTime((clip?.duration ?? 0) * Math.min(f, 0.9999));
         if (q.get('view') === 'top') cam.position.set(0, span * 2.4, span * 0.01);
         else if (q.get('view') === 'nose') cam.position.set(0, 0, span * 2.4);
         else cam.position.set(span * 2.4, 0, 0);

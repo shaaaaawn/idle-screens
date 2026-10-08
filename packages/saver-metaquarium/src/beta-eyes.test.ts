@@ -32,9 +32,17 @@ describe('betafish: the painted eyes', () => {
       expect(side * 512).toBeGreaterThan(10);
       expect(side * 512).toBeLessThan(40);
     }
-    // No two cells share a square.
-    const keys = cells.flat().map((c) => c!.o.map((x) => x.toFixed(3)).join(','));
-    expect(new Set(keys).size).toBe(18);
+    // No two cells' squares overlap anywhere in the atlas (a shared texel would bleed one into the other).
+    const boxes = cells.flat().map((c) => {
+      const us = [0, 1].flatMap((a) => [0, 1].map((b) => c!.o[0] + c!.dz[0] * a + c!.dy[0] * b));
+      const vs = [0, 1].flatMap((a) => [0, 1].map((b) => c!.o[1] + c!.dz[1] * a + c!.dy[1] * b));
+      return [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)] as const;
+    });
+    const eps = 0.5 / 512;
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const [a0, a1, a2, a3] = boxes[i]!, [b0, b1, b2, b3] = boxes[j]!;
+      expect(a1 - eps <= b0 || b1 - eps <= a0 || a3 - eps <= b2 || b3 - eps <= a2, `cells ${i} and ${j}`).toBe(true);
+    }
   });
 
   it('reads every mesh of a token: eye cells split across its materials\' meshes are all found', async () => {

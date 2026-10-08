@@ -100,8 +100,9 @@ def weights_at(co, eye):
         seg = hat(r, [RAY_LEN * 0.6, RAY_LEN * 1.4], ['1', '2'])
         fan = {f'{rn}{sn}': rv * sv for rn, rv in ray.items() for sn, sv in seg.items() if rv * sv > 1e-4}
         w = blend(w, fan, ease((y - FAN_FROM) / 2))
-    # The dorsal: what stands above the body, two bones up its height.
-    if z > DORSAL_BASE:
+    # The dorsal: what stands above the body, two bones up its height — and
+    # only over the body (the fan's upper ray rises as high, behind it).
+    if z > DORSAL_BASE and y < FAN_FROM - 3:
         w = blend(w, knots(z, ((7.0, 'd1'), (9.0, 'd2'))), ease((z - DORSAL_BASE) / 2))
     # The gill covers: the outer walls at the front, pivoting at the face.
     off = abs(x - CX)
