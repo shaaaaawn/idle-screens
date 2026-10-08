@@ -122,7 +122,7 @@ describe('bundled breeds (breeds/README.md)', () => {
   };
   for (const [breed, want] of Object.entries(MINTED_RIGS)) {
     it(`${breed}: the minted rig survives the intake — its bones and clips, ${want.soft ? 'a blended spine' : 'each vertex rigid on one part'}, the eyes rigid on the ${want.head}`, async () => {
-      const doc = await new NodeIO().read(here(`../breeds/${breed}.glb`).pathname);
+      const doc = await bundledDoc(breed);
       const root = doc.getRoot();
       expect(root.listSkins()).toHaveLength(1);
       const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
@@ -157,9 +157,9 @@ describe('bundled breeds (breeds/README.md)', () => {
     // A vertex strictly inside another triangle's edge. The intake's merging
     // makes them wherever a merged face meets unmerged ones (round the eyes,
     // the angelfish's 'line'); `kind: asis` keeps every voxel face whole.
-    const tjunctions = async (file: string): Promise<number> => {
+    const tjunctions = (doc: Document): number => {
       const tris: number[][][] = [], verts = new Map<string, number[]>();
-      for (const mesh of (await new NodeIO().read(here(file).pathname)).getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+      for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
         const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
         for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
           const c = [0, 1, 2].map((k) => pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]);
@@ -180,7 +180,7 @@ describe('bundled breeds (breeds/README.md)', () => {
     };
     // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
     for (const breed of ['angelfish', 'seaturtle', 'seahorse']) {
-      expect(await tjunctions(`../breeds/${breed}.glb`), breed).toBeLessThanOrEqual(await tjunctions(`../breeds/source/${breed}.glb`));
+      expect(tjunctions(await bundledDoc(breed)), breed).toBeLessThanOrEqual(tjunctions(await new NodeIO().read(here(`../breeds/source/${breed}.glb`).pathname)));
     }
   }, 120_000);
 
