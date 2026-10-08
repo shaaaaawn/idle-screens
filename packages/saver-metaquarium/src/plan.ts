@@ -80,7 +80,7 @@ function splineAt(points: SwimPlan['points'], g: number): [number, number, numbe
  * effort, and every downstream consumer work unchanged — a shape is a
  * different itinerary, not a different engine.
  *
- * - `wander` — the original: alternating inner/outer ring, purposeful roaming
+ * - `wander` — the original: in toward the middle and out to the glass, purposeful roaming
  * - `orbit`  — steady carousel laps at a seeded radius and depth
  * - `eight`  — a lissajous figure-eight crossing the tank's middle
  * - `helix`  — climbing-then-diving spiral column, the water-column tour
@@ -206,18 +206,28 @@ function shapeWaypoints(shape: PathShape, rng: Rng, bounds: TankBounds, opts: Pl
     }
     return points;
   }
-  // wander — the original body, verbatim.
+  // wander: in toward the middle and out to the glass, twice round the ring,
+  // a little off-true at every waypoint. It used to flip inner/outer at EVERY
+  // waypoint — a hairpin each time, so a fish swinging round it spun up to 3
+  // rad in a frame (measured: 2774 steps of 0.3 units turned it over 0.05
+  // rad, across 16 seeds). The same draws in the same order, eased: 29.
   const n = 16 + rng.int(0, 4);
+  const draws: Array<[number, number, number]> = [];
+  for (let i = 0; i < n; i++) draws.push([rng.range(-0.25, 0.25), rng.range(0, 1), rng.range(0.2, 0.8)]);
+  const phase = draws[0]![1] * Math.PI * 2;
   for (let i = 0; i < n; i++) {
+    const [jitter, reach, depth] = draws[i]!;
     const baseAngle = (i / n) * Math.PI * 2;
-    const angle = baseAngle + rng.range(-0.25, 0.25);
-    const inner = i % 2 === 0;
-    const radius = inner
-      ? bounds.radius * rng.range(0.15, 0.45)
-      : bounds.radius * rng.range(0.55, 0.85);
-    const y = bounds.yMin + ySpan * rng.range(0.2, 0.8);
-    points.push([Math.cos(angle) * radius, y, Math.sin(angle) * radius]);
+    const angle = baseAngle + jitter * 0.15;
+    const radius = bounds.radius * (0.55 + 0.27 * Math.sin(2 * baseAngle + phase) + 0.08 * (reach - 0.5));
+    points.push([Math.cos(angle) * radius, bounds.yMin + ySpan * depth, Math.sin(angle) * radius]);
   }
+  // Depth eased between neighbours (Taubin: smooths without sinking the loop).
+  for (let pass = 0; pass < 4; pass++) for (const f of [0.5, -0.53]) {
+    const y = points.map((p) => p[1]);
+    for (let i = 0; i < n; i++) points[i]![1] = y[i]! + f * ((y[(i - 1 + n) % n]! + y[(i + 1) % n]!) / 2 - y[i]!);
+  }
+  for (const p of points) p[1] = Math.min(bounds.yMin + ySpan * 0.9, Math.max(bounds.yMin + ySpan * 0.1, p[1]));
   return points;
 }
 
