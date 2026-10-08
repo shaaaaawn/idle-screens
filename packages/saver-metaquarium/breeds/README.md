@@ -18,10 +18,14 @@ breeds/
   rig/build.py         every rig into one .blend (a scene per breed); rig/export.py ships a hand edit from it
   breeds.json          the intake manifest: roles, kind, size, motion, notes
   intake.mjs           the pipeline (pnpm --filter @idle-screens/saver-metaquarium breeds [names…])
-  <breed>.glb          the optimised result: what the lab reviews and the tests pin
   REPORT.md            the numbers the last intake produced
-src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loader map)
+src/breeds/            generated: <breed>.ts (the optimised GLB, base64) + index.ts (the lazy loader map)
 ```
+
+The optimised model exists once, as its chunk in `src/breeds/`. The lab and
+the tests decode that chunk too, so what you review is byte for byte what the
+tank swims. `source/` and `rig/` are earlier stages, not copies: `rig/<breed>.glb`
+is Blender's output, committed so the intake and CI run without Blender.
 
 ## The steps
 
@@ -89,10 +93,10 @@ src/breeds/            generated: <breed>.ts (base64) + index.ts (the lazy loade
      build; `scuttle` is the crab's, rigged in Blender (see **Rigged
      breeds** below).
 8. **Tests** (`src/breeds.test.ts`) run on their own. They check that the
-   chunk equals the reviewed GLB, that there's no Draco, that every material
-   has a role, and that the breed stays under 6,000 triangles. Then commit
-   `source/` (and `rig/` for a rigged breed), the optimised GLB,
-   `src/breeds/`, `breeds.json` and `REPORT.md`, plus a changeset.
+   chunk decodes with no Draco, that every material has a role, and that the
+   breed stays under 6,000 triangles. Then commit `source/` (and `rig/` for a
+   rigged breed), `src/breeds/`, `breeds.json` and `REPORT.md`, plus a
+   changeset.
 
 ## Rigged breeds
 

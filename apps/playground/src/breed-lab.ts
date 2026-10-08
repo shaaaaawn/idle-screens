@@ -9,7 +9,7 @@
  * did greedy meshing leave holes, which part is which material, is the eye
  * where the tank will look for it.
  *
- *   /breeds.html                 every optimised breed (breeds/*.glb)
+ *   /breeds.html                 every optimised breed (its bundled chunk, src/breeds/<breed>.ts)
  *   /breeds.html?set=source      the untouched sources (breeds/source/*.glb)
  *   /breeds.html?set=both        source above optimised, per breed
  *   &only=shark,crab             a subset
@@ -37,7 +37,6 @@ import { atlasTexture, MINTED_ATLAS_URL, paintMinted, prepareMintedBase } from '
 import { breedOf, fishAsset } from '../../../packages/saver-metaquarium/src/farm';
 import { resolveIpfsUrls } from '../../../packages/saver-metaquarium/src/ipfs';
 
-const OUT = import.meta.glob('../../../packages/saver-metaquarium/breeds/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const SRC = import.meta.glob('../../../packages/saver-metaquarium/breeds/source/*.glb', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const nameOf = (p: string): string => p.split('/').pop()!.replace(/\.glb$/, '');
 
@@ -45,7 +44,7 @@ const q = new URLSearchParams(location.search);
 const set = q.get('set') ?? 'out';
 const only = q.get('only')?.split(',').filter(Boolean);
 const rows: { label: string; url?: string; load?: () => Promise<Object3D> }[] = [];
-const names = [...new Set([...Object.keys(OUT), ...Object.keys(SRC)].map(nameOf))].sort()
+const names = [...new Set([...Object.keys(BUNDLED_BREEDS), ...Object.keys(SRC).map(nameOf)])].sort()
   .filter((n) => !only || only.includes(n));
 for (const u of q.get('url')?.split(',').filter(Boolean) ?? []) rows.push({ label: u.split('/').pop()!, url: u });
 const b64 = (s: string): ArrayBuffer => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
@@ -87,9 +86,10 @@ const rigName = q.get('rig');
 const times = (q.get('times') ?? '0,0.25,0.5,0.75,1,1.25').split(',').map(Number);
 for (const n of q.get('url') ? [] : names) {
   const s = Object.entries(SRC).find(([k]) => nameOf(k) === n)?.[1];
-  const o = Object.entries(OUT).find(([k]) => nameOf(k) === n)?.[1];
+  const o = BUNDLED_BREEDS[n];
   if ((set === 'source' || set === 'both') && s) rows.push({ label: `${n} · source`, url: s });
-  if ((set === 'out' || set === 'both') && o) rows.push({ label: `${n} · optimised`, url: o });
+  // The optimised model is the chunk the tank swims, decoded: there is no other copy.
+  if ((set === 'out' || set === 'both') && o) rows.push({ label: `${n} · optimised`, load: async () => (await loader.parseAsync(b64((await o()).default), '')).scene });
 }
 
 const FALSE = ['#ff5a5a', '#5ad1ff', '#ffd23a', '#7dff6a', '#c77dff', '#ff9a3a', '#3affc8', '#ff6ad5', '#9aa4ff', '#f0f0f0'];

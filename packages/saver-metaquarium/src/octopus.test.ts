@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { BoxGeometry, Color, Group, Mesh, MeshLambertMaterial, Quaternion, Scene, Vector3, type AnimationClip, type Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
+import { BUNDLED_BREEDS } from './breeds';
 import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
 import {
   newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusIdle,
@@ -12,8 +12,8 @@ import { compileSwimPlan } from './plan';
 
 /** The real octopus, as the tank loads it. */
 async function load(): Promise<{ scene: Object3D; clips: AnimationClip[] }> {
-  const buf = readFileSync(new URL('../breeds/octopus.glb', import.meta.url));
-  const gltf = await new GLTFLoader().parseAsync(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), '');
+  const buf = Uint8Array.from(Buffer.from((await BUNDLED_BREEDS.octopus!()).default, 'base64')).buffer;
+  const gltf = await new GLTFLoader().parseAsync(buf, '');
   return { scene: gltf.scene, clips: gltf.animations };
 }
 async function rigged(): Promise<{ g: Group; rig: OctopusRig; body: Object3D }> {
