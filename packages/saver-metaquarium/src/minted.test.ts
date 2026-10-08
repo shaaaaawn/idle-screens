@@ -1,7 +1,6 @@
 import { NodeIO, type Document } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { readFileSync } from 'node:fs';
-import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, RepeatWrapping, SkinnedMesh, SRGBColorSpace, type Object3D } from 'three';
+import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, RepeatWrapping, SkinnedMesh, SRGBColorSpace, Vector3, type Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
@@ -123,10 +122,10 @@ describe('paintMinted', () => {
     expect(n).toBe((await paintOf('angelfish')).tokens[257]![0].length);
   });
 
-  it('a betafish keeps its skeleton and clip: every mesh skinned to the clone\'s own bones', async () => {
+  it('a betafish keeps its skeleton and clips: every mesh skinned to the clone\'s own bones', async () => {
     const gltf = await parse('betafish');
     const base = prepareMintedBase(gltf.scene, gltf.animations as never[]);
-    expect(base.skin?.bones).toHaveLength(4);
+    expect(base.skin?.bones).toHaveLength(31); // its rig (rig/betafish.py): 20 deforming, 11 for dials and moments
     expect(base.attributes.uv).toBeDefined();
     const fish = paintMinted(base, (await paintOf('betafish')).tokens[100]!, null);
     const skinned: SkinnedMesh[] = [];
@@ -240,4 +239,34 @@ describe('mintedMaterial', () => {
     // Without either, a standard material, as before.
     expect((mintedMaterial({ name: 'x', color: [1, 1, 1], metal: 0, rough: 1 }, null) as MeshPhysicalMaterial).isMeshPhysicalMaterial).toBeUndefined();
   });
+});
+
+describe('a rigged minted rebuild at bind', () => {
+  // Skinned at rest, every vertex must sit where its geometry says. A merge
+  // that mixed up the regions' weight types collapsed the turtle's eyes into
+  // its head and blew the angelfish's coat up 255 times.
+  for (const [breed, id] of [['angelfish', 258], ['seaturtle', 497], ['betafish', 100]] as const) {
+    it(`${breed} #${id}: every part where its geometry is — eyes included`, async () => {
+      const b = await bundled(breed);
+      const gltf = await new GLTFLoader().parseAsync(b, '');
+      const fish = paintMinted(prepareMintedBase(gltf.scene, gltf.animations), (await paintOf(breed)).tokens[id]!, null);
+      fish.updateMatrixWorld(true);
+      let parts = 0;
+      fish.traverse((o) => {
+        const m = o as SkinnedMesh;
+        if (!m.isSkinnedMesh) return;
+        parts++;
+        const v = new Vector3(), w = new Vector3(), idx = m.geometry.index!, pos = m.geometry.attributes.position!;
+        let worst = 0;
+        for (let i = 0; i < idx.count; i++) {
+          const k = idx.getX(i);
+          m.getVertexPosition(k, v);
+          w.fromBufferAttribute(pos as BufferAttribute, k);
+          worst = Math.max(worst, v.distanceTo(w));
+        }
+        expect(worst, `${breed} ${m.name}`).toBeLessThan(1e-3);
+      });
+      expect(parts).toBeGreaterThan(1);
+    });
+  }
 });

@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial, ShaderLib, type Material, type WebGLRenderer } from 'three';
 import { describe, expect, it } from 'vitest';
-import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState } from './eyes';
+import { eyeMood, MAX_EYES, rigEyes, type EyeCue, type EyeState, mintedLook } from './eyes';
 
 // A one-voxel-deep eye slab on the +x (or -x) side of a fish: `rows` top to
 // bottom, `#` black `.` white — the same construction as eye-grid.test.ts,
@@ -124,7 +124,7 @@ describe('eye rig', () => {
     body.add(new Mesh(slabGeometry(['...', '.#.', '...'], 1, 'black')!, plain));
     const group = new Group(); group.add(body);
     expect(rigEyes(group, body)).toBeNull();
-    expect(plain.customProgramCacheKey?.()).not.toBe('mq-eye-display-v4');
+    expect(plain.customProgramCacheKey?.()).not.toBe('mq-eye-display-v5');
   });
 
   it('rigs both eyes of a betafish body and patches only their materials', () => {
@@ -136,7 +136,7 @@ describe('eye rig', () => {
     for (const node of body.children) {
       const mat = (node as Mesh).material as MeshBasicMaterial;
       expect(typeof mat.onBeforeCompile).toBe('function');
-      expect(mat.customProgramCacheKey?.()).toBe('mq-eye-display-v4');
+      expect(mat.customProgramCacheKey?.()).toBe('mq-eye-display-v5');
     }
   });
 
@@ -200,5 +200,47 @@ describe('eye rig', () => {
     for (const shader of shaders.slice(1)) {
       expect((shader.uniforms.uEyeS as { value: unknown[] }).value).toBe(first); // same shared uniform object
     }
+  });
+});
+
+describe('mintedLook: the dori\'s way of looking, for the minted breeds', () => {
+  const cue = { camera: { fwd: -0.4, up: 0.2 }, turn: 0, cruise: 0 };
+  it('glides: between darts the gaze holds still, and a dart lasts a few frames — never a one-frame jump', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    let prev = { fwd: 0, up: 0 }, still = 0, frames = 0;
+    for (let i = 0; i < 30 * 120; i++) {
+      mintedLook(3, i / 30, cue, out);
+      const step = Math.hypot(out[0]!.fwd - prev.fwd, out[0]!.up - prev.up);
+      if (i > 0) { expect(step).toBeLessThan(0.75); frames++; if (step < 1e-6) still++; }
+      prev = { ...out[0]! };
+      for (const g of out) { expect(Math.abs(g.fwd)).toBeLessThanOrEqual(1); expect(Math.abs(g.up)).toBeLessThanOrEqual(1); }
+    }
+    // Mostly holding a look, as an eye does.
+    expect(still / frames).toBeGreaterThan(0.6);
+  });
+
+  it('holds the viewer\'s eye now and then — the second eye a beat behind the first (a double take)', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    let viewer = 0, apart = 0;
+    for (let i = 0; i < 30 * 120; i++) {
+      if (mintedLook(5, i / 30, cue, out) === 'viewer') viewer++;
+      if (Math.hypot(out[0]!.fwd - out[1]!.fwd, out[0]!.up - out[1]!.up) > 0.2) apart++;
+    }
+    expect(viewer / 3600).toBeGreaterThan(0.1);
+    expect(viewer / 3600).toBeLessThan(0.45);
+    expect(apart).toBeGreaterThan(0);
+    expect(apart / 3600).toBeLessThan(0.05);
+  });
+
+  it('swimming, it looks where it is going — and into the turn', () => {
+    const out = [{ fwd: 0, up: 0 }, { fwd: 0, up: 0 }];
+    const mean = (turn: number): number => {
+      // Away from the viewer bouts (it holds their eye even swimming, as the dori does).
+      let s = 0, n = 0;
+      for (let i = 0; i < 1800; i++) if (mintedLook(2, 200 + i / 30, { ...cue, cruise: 1, turn }, out) !== 'viewer') { s += out[0]!.fwd; n++; }
+      return s / n;
+    };
+    expect(mean(0)).toBeGreaterThan(0.2);
+    expect(mean(0.4)).toBeGreaterThan(mean(0));
   });
 });

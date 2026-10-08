@@ -284,8 +284,16 @@ function dropRestChannels(doc) {
       const rest = path === 'rotation' ? node.getRotation() : path === 'translation' ? node.getTranslation() : path === 'scale' ? node.getScale() : null;
       if (!rest) continue;
       const out = ch.getSampler().getOutput().getArray();
+      // A rotation is still if each key is the rest quaternion OR its
+      // negation (the same turn): Blender writes either sign. Missed, a
+      // still channel binds — and the mixer, averaging actions that share a
+      // channel, halves every clip that really moves that bone.
+      const n = rest.length;
       let still = true;
-      for (let i = 0; i < out.length && still; i++) still = Math.abs(out[i] - rest[i % rest.length]) < 1e-5;
+      for (let k = 0; k < out.length && still; k += n) {
+        const same = (s) => rest.every((r, i) => Math.abs(out[k + i] - s * r) < 1e-5);
+        still = same(1) || (path === 'rotation' && same(-1));
+      }
       if (still) { const smp = ch.getSampler(); ch.dispose(); if (!smp.listParents().some((p) => p !== doc.getRoot() && p !== anim)) smp.dispose(); }
     }
   }

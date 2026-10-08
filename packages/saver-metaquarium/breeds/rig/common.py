@@ -323,11 +323,19 @@ def fcurves(act):
     return out
 
 
-def export(rig, path, extras):
+def export(rig, path, extras, layered=False, uv=False):
     """The rig GLB: skin, clips as sampled named animations, facts the tank
     needs as extras on the armature node. Draco at its finest position
     precision (30 bits, ~5e-8 units): the delivered vertices come back as
-    authored, and the committed file stays small."""
+    authored, and the committed file stays small.
+
+    `layered`: keep the non-deforming bones as nodes of their own. By default
+    the exporter drops them and bakes their motion into the deforming bones
+    below — so a dial on its own bone (look, bend, steer) lands on the SAME
+    channel as the swim, and the mixer, which averages actions that share a
+    channel, halves both. Kept, each dial turns its own node and they layer.
+
+    `uv`: keep the texture coordinates (a breed painted by an atlas, the betafish)."""
     rig['mqRig'] = 1
     for k, v in extras.items():
         rig[k] = v
@@ -344,12 +352,12 @@ def export(rig, path, extras):
         # tracks. ACTIONS would add every action in the file whose bones match.
         export_animations=True, export_animation_mode='NLA_TRACKS',
         export_force_sampling=True, export_frame_step=1,
-        export_optimize_animation_size=True, export_def_bones=True,
+        export_optimize_animation_size=True, export_def_bones=not layered,
         export_extras=True,
         export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=7,
         export_draco_position_quantization=30, export_draco_normal_quantization=10,
         export_draco_generic_quantization=16,
-        export_normals=True, export_texcoords=False, export_attributes=False,
+        export_normals=True, export_texcoords=uv, export_attributes=False,
         export_materials='EXPORT', export_rest_position_armature=True,
     )
     return path
@@ -414,3 +422,120 @@ def _replace(obj, drop, quads):
             f.normal_flip()
     bm.to_mesh(obj.data)
     bm.free()
+
+
+# --------------------------------------------------------------------------
+# Soft rigs (the minted breeds): every vertex's weights are a function of its
+# POSITION alone, so two faces that share a corner always move together — no
+# crack ever opens between them, however far the skin bends. A breed script
+# supplies `weights_at(co, eye) -> {bone: weight}`; these build it.
+# --------------------------------------------------------------------------
+
+def knots(v, ks):
+    """Weights along a list of (position, bone) knots, eased between
+    neighbours; two knots of one bone make a plateau."""
+    if v <= ks[0][0]:
+        return {ks[0][1]: 1.0}
+    for (a, na), (b, nb) in zip(ks, ks[1:]):
+        if v <= b:
+            if na == nb:
+                return {na: 1.0}
+            u = ease((v - a) / (b - a))
+            return {na: 1 - u, nb: u}
+    return {ks[-1][1]: 1.0}
+
+
+def blend(base, part, f):
+    """`base` weights handed over to `part` by f (0..1)."""
+    if f <= 0:
+        return dict(base)
+    out = {}
+    for k, v in base.items():
+        out[k] = out.get(k, 0) + v * (1 - f)
+    for k, v in part.items():
+        out[k] = out.get(k, 0) + v * f
+    return {k: v for k, v in out.items() if v > 1e-4}
+
+
+def soften(meshes, weights_at):
+    """Replace segment()'s groups with `weights_at` — which must start the
+    groups as '_eye' / '_part' (placeholders: a real bone may be called
+    'body' or 'shell', and must keep its group). Returns blended vertices."""
+    blended, most = 0, 0
+    for o in meshes:
+        groups = {g.name: g for g in o.vertex_groups}
+        idx = {g.index: g.name for g in o.vertex_groups}
+        for v in o.data.vertices:
+            names = [idx[g.group] for g in v.groups]
+            if not names:
+                continue
+            w = weights_at(v.co, names[0] == '_eye')
+            total = sum(w.values())
+            for g in list(groups.values()):
+                g.remove([v.index])
+            for n, x in w.items():
+                if n not in groups:
+                    groups[n] = o.vertex_groups.new(name=n)
+                groups[n].add([v.index], x / total, 'REPLACE')
+            blended += len(w) > 1
+            most = max(most, len(w))
+        for stale in ('_eye', '_part'):
+            if stale in groups:
+                o.vertex_groups.remove(groups[stale])
+    assert most <= 4, most  # glTF skins carry four influences a vertex
+    return blended
+
+
+def eyes_pure(meshes, weights_at, bone):
+    """Every eye vertex, weighed by position alone (not its eye flag), rides
+    `bone` purely: so the eye's rim and the face round it can never part."""
+    for o in meshes:
+        mats = list(o['rigMaterials'])
+        for f in o.data.polygons:
+            if 'EYE' not in mats[f.material_index]:
+                continue
+            for i in f.vertices:
+                w = weights_at(o.data.vertices[i].co, False)
+                assert set(w) == {bone}, (tuple(o.data.vertices[i].co), w)
+
+
+def turn_about(p, bone, axis, angle):
+    """Like Pose.turn, about any world axis (a Vector)."""
+    p.rot[bone] = Quaternion(axis, angle) @ p.rot.get(bone, Quaternion())
+
+
+def hat(x, centres, names):
+    """Linear hand-over between neighbouring centres (eased): two bones at most."""
+    if x <= centres[0]:
+        return {names[0]: 1.0}
+    for i in range(len(centres) - 1):
+        a, b = centres[i], centres[i + 1]
+        if x <= b:
+            u = ease((x - a) / (b - a))
+            return {names[i]: 1 - u, names[i + 1]: u}
+    return {names[-1]: 1.0}
+
+
+def along(poly, a, b):
+    """How far along a polyline [(a, b), ...] (in two of the axes) a point
+    lies, by its nearest point on it."""
+    best, run, at = 1e9, 0.0, 0.0
+    for (a0, b0), (a1, b1) in zip(poly, poly[1:]):
+        da, db = a1 - a0, b1 - b0
+        L2 = da * da + db * db
+        u = max(0.0, min(1.0, ((a - a0) * da + (b - b0) * db) / L2))
+        d = (a - (a0 + u * da)) ** 2 + (b - (b0 + u * db)) ** 2
+        if d < best:
+            best, at = d, run + u * math.sqrt(L2)
+        run += math.sqrt(L2)
+    return at
+
+
+def arc_centres(poly):
+    """Each segment's middle, by arc length: where its bone's weight peaks."""
+    out, run = [], 0.0
+    for (a0, b0), (a1, b1) in zip(poly, poly[1:]):
+        L = math.hypot(a1 - a0, b1 - b0)
+        out.append(run + L / 2)
+        run += L
+    return out

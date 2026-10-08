@@ -232,6 +232,8 @@ function colorLuminance(m: Material): number {
  *   patchwork of independent picks.
  * - KEEP-<part> → the authored colour, kept (the breed intake names these).
  * - SCREEN-<part> → a display (screen.ts): a hackerfish's face, in a phosphor of its own.
+ * - METAL <Colour> (the minted designs) → polished metal in that colour: the
+ *   design's own blue or black chrome.
  * - METAL-<part> → polished metal (a glowfish's teeth): a reflective plate
  *   that takes the studio environment when lit, chrome matcap when flat;
  *   `reflective` off (fishMetal: 'off') keeps it the authored colour, matte.
@@ -387,12 +389,31 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         decal(metal, 1);
         return metal;
       }
+      // `METAL <Colour>` (the minted designs' own naming, a space where the
+      // intake's roles have a hyphen): metal IN that colour — the design's blue
+      // chrome, its black chrome — not steel with a tint. Polished: it takes
+      // the studio environment when lit (its authored roughness, kept satin
+      // so a flat voxel face never flips sky-white to black), chrome when flat.
+      if (/^METAL\s/.test(m.name) && reflective) {
+        const src = m as Partial<MeshStandardMaterial>;
+        const own = src.color?.clone() ?? new Color(0x888888);
+        const rough = Math.min(0.45, Math.max(0.2, src.roughness ?? 0.3));
+        const metal = lit
+          ? new MeshStandardMaterial({ color: own, metalness: 0.85, roughness: rough, envMapIntensity: 1.4, emissive: own.clone().multiplyScalar(0.12) })
+          : new MeshMatcapMaterial({ color: own.clone().lerp(new Color('#ffffff'), 0.12), matcap: chromeMatcap() });
+        metal.name = m.name;
+        metal.side = m.side; // a minted fin is a single sheet, seen from both sides
+        metal.userData.mqOwned = true;
+        return metal;
+      }
       // KEEP-: the intake (breeds/breeds.json) said this part's authored
       // colour IS the look — a hacker fish's black screen, a shark's teeth.
-      if (/^(KEEP|METAL)-/.test(m.name)) {
+      // A metal with `fishMetal: 'off'` is its authored colour, matte.
+      if (/^(KEEP|METAL)[-\s]/.test(m.name)) {
         const own = (m as Partial<MeshStandardMaterial>).color?.clone() ?? new Color(0x888888);
         const kept = lit ? new MeshLambertMaterial({ color: own }) : new MeshBasicMaterial({ color: own });
         kept.name = m.name;
+        kept.side = m.side;
         kept.userData.mqOwned = true;
         decal(kept, 1);
         return kept;

@@ -139,6 +139,25 @@ describe('path shapes', () => {
     expect(span('orbit')).toBeLessThan(18);      // one lane, gentle breathing
   });
 
+  it('wander roams from near the middle out to the glass without a hairpin: a fish on it never spins', () => {
+    const bounds = { radius: 120, yMin: 15, yMax: 72 };
+    const wrap = (a: number): number => a - Math.round(a / (Math.PI * 2)) * Math.PI * 2;
+    for (let seed = 1; seed <= 8; seed++) {
+      const plan = compileSwimPlan(createRng(seed).fork(3), bounds, 'wander');
+      let prev = 0, worst = 0, lo = Infinity, hi = 0;
+      for (let d = 0; d < plan.totalLength; d += 0.3) {
+        const p = swimPoseAtDistance(plan, d), yaw = Math.atan2(p.fx, p.fz);
+        if (d > 0) worst = Math.max(worst, Math.abs(wrap(yaw - prev)));
+        prev = yaw;
+        const r = Math.hypot(p.x, p.z); lo = Math.min(lo, r); hi = Math.max(hi, r);
+      }
+      // A frame's travel is ~0.3 units: the old in/out at every waypoint turned it up to 3 rad there.
+      expect(worst).toBeLessThan(0.1);
+      expect(lo).toBeLessThan(bounds.radius * 0.35);
+      expect(hi).toBeGreaterThan(bounds.radius * 0.75);
+    }
+  });
+
   it('default shape is wander and reproduces the pre-shape plan exactly', () => {
     const a = compileSwimPlan(createRng(5), BOUNDS);
     const b = compileSwimPlan(createRng(5), BOUNDS, 'wander');

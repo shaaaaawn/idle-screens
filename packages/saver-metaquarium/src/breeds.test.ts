@@ -1,4 +1,7 @@
 import { NodeIO, type Document } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+// @ts-expect-error -- draco3dgltf ships no types (the intake uses it from .mjs)
+import draco3d from 'draco3dgltf';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
@@ -91,6 +94,147 @@ describe('bundled breeds (breeds/README.md)', () => {
       }
       for (const bone of used) expect(bone).toMatch(parts[name]!);
     }
+  });
+
+  // `soft`: a spine whose vertices blend between neighbouring bones (weights
+  // sum to 1); otherwise every vertex rides one part. Eyes are rigid either way.
+  // `layers`: the non-deforming bones kept as joints of their own (the dials'
+  // and whole-body moments'), so they layer over the swim and never average with it.
+  const MINTED_RIGS: Record<string, { joints: string[]; layers: string[]; dials: string[]; clips: string[]; head: string; soft?: boolean }> = {
+    angelfish: {
+      joints: ['a1', 'a2', 'a3', 'body', 'd1', 'd2', 'd3', 'head', 's2', 's3', 'snout', 'tail'],
+      layers: ['flex2', 'flex3', 'flex4', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['bend', 'lookPitch', 'lookYaw'],
+      clips: ['bend', 'bow', 'burst', 'curious', 'display', 'flutter', 'hover', 'kiss', 'lookPitch', 'lookYaw', 'nibble', 'pirouette', 'soar', 'stretch', 'sway', 'swim'],
+      head: 'head', soft: true,
+    },
+    seaturtle: {
+      joints: ['fL1', 'fL2', 'fL3', 'fR1', 'fR2', 'fR3', 'head', 'neck', 'rL', 'rR', 'shell', 'tail'],
+      layers: ['bank', 'lookP', 'lookY', 'reach', 'root', 'steerL', 'steerR', 'withdraw'],
+      dials: ['lookPitch', 'lookYaw', 'reach', 'steer'],
+      clips: ['barrel', 'breathe', 'burst', 'flap', 'glide', 'lookPitch', 'lookYaw', 'lookback', 'nod', 'paddle', 'reach', 'somersault', 'steer', 'stretch', 'swim', 'tuck', 'wave', 'wipe'],
+      head: 'head', soft: true,
+    },
+    betafish: {
+      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'pecL', 'pecR', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
+      layers: ['flexP', 'flexR', 'gL', 'gR', 'lookP', 'lookY', 'roll', 'root', 'sD', 'sL', 'sU'],
+      dials: ['bend', 'lookPitch', 'lookYaw', 'spread'],
+      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'flare', 'flick', 'gulp', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim'],
+      head: 'head', soft: true,
+    },
+    seahorse: {
+      joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
+      layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['curl', 'lean', 'lookPitch', 'lookYaw'],
+      clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
+      head: 'head', soft: true,
+    },
+  };
+  for (const [breed, want] of Object.entries(MINTED_RIGS)) {
+    it(`${breed}: the minted rig survives the intake — its bones and clips, ${want.soft ? 'a blended spine' : 'each vertex rigid on one part'}, the eyes rigid on the ${want.head}`, async () => {
+      const doc = await bundledDoc(breed);
+      const root = doc.getRoot();
+      expect(root.listSkins()).toHaveLength(1);
+      const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+      expect([...joints].sort()).toEqual([...want.joints, ...want.layers].sort());
+      expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(want.clips);
+      const used = new Set<string>();
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+        const name = p.getMaterial()!.getName();
+        const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+        for (let i = 0; i < j.getCount(); i++) {
+          const [j0] = j.getElement(i, []) as number[];
+          const ws = w.getElement(i, []) as number[], js = j.getElement(i, []) as number[];
+          const [w0, ...rest] = ws;
+          if (want.soft) expect(ws.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 2);
+          else expect([w0, rest.reduce((a, b) => a + b, 0)]).toEqual([1, 0]);
+          // Eye cells ride the head, rigid, where rigEyes reads their grid.
+          if (/EYE/.test(name)) { expect(joints[j0!]).toBe(want.head); expect(w0).toBeCloseTo(1, 2); for (const x of rest) expect(x).toBeCloseTo(0, 2); }
+          ws.forEach((x, k) => { if (x > 0.01) used.add(joints[js[k]!]!); });
+        }
+      }
+      expect([...used].sort()).toEqual(want.joints);
+      // A dial keys only bones of its own, and no other clip keys them: the
+      // mixer averages actions that share a channel, so a shared one would
+      // halve both. (A whole-body moment's bone — roll, bank, withdraw — is
+      // shared only among moments, whose weights never overlap a dial's.)
+      const layer = new Set(want.layers);
+      const owners = new Map<string, Set<string>>();
+      for (const a of root.listAnimations()) for (const c of a.listChannels()) {
+        const key = `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`;
+        owners.set(key, (owners.get(key) ?? new Set()).add(a.getName()));
+      }
+      for (const a of root.listAnimations()) {
+        if (!want.dials.includes(a.getName())) continue;
+        for (const c of a.listChannels()) {
+          const key = `${c.getTargetNode()!.getName()}.${c.getTargetPath()}`;
+          expect(layer.has(c.getTargetNode()!.getName()), `${a.getName()} keys ${key}`).toBe(true);
+          expect([...owners.get(key)!], key).toEqual([a.getName()]);
+        }
+      }
+    });
+  }
+
+  it('a soft rig keeps its faces whole: no T-junction the delivered model did not have (they crack, a flickering line, as the skin bends)', async () => {
+    // A vertex strictly inside another triangle's edge. The intake's merging
+    // makes them wherever a merged face meets unmerged ones (round the eyes,
+    // the angelfish's 'line'); `kind: asis` keeps every voxel face whole.
+    const tjunctions = (doc: Document): number => {
+      const tris: number[][][] = [], verts = new Map<string, number[]>();
+      for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
+        const pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
+          const c = [0, 1, 2].map((k) => pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[]);
+          tris.push(c);
+          for (const v of c) verts.set(v.map((x) => x.toFixed(3)).join(','), v);
+        }
+      }
+      let n = 0;
+      for (const c of tris) for (let e = 0; e < 3; e++) {
+        const a = c[e]!, b = c[(e + 1) % 3]!, ab = a.map((x, i) => b[i]! - x), L2 = ab.reduce((s, x) => s + x * x, 0);
+        for (const v of verts.values()) {
+          const av = v.map((x, i) => x - a[i]!), u = av.reduce((s, x, i) => s + x * ab[i]!, 0) / L2;
+          if (u <= 1e-4 || u >= 1 - 1e-4) continue;
+          if (av.reduce((s, x, i) => s + (x - u * ab[i]!) ** 2, 0) < 1e-6) n++;
+        }
+      }
+      return n;
+    };
+    // The delivered angelfish has a few of its own (a cell 0.07 off the grid, mid-body): never more than that.
+    for (const breed of ['angelfish', 'seaturtle', 'seahorse', 'betafish']) {
+      expect(tjunctions(await bundledDoc(breed)), breed).toBeLessThanOrEqual(tjunctions(await new NodeIO().read(here(`../breeds/source/${breed}.glb`).pathname)));
+    }
+  }, 120_000);
+
+  // How each minted rig faces the convention: the angelfish swims along +X and
+  // is turned a quarter; the turtle's source is already square, facing +Z.
+  const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!], betafish: ([x, y, z]) => [-z!, y!, x!] };
+  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
+    const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
+    const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {
+      const out = new Map<string, string[]>();
+      // Where each mesh sits: the source's node may carry a translation (the
+      // turtle's), which Blender bakes in; a rig's mesh node is identity.
+      const root = (await draco.read(here(file).pathname)).getRoot();
+      const at = new Map(root.listNodes().filter((n) => n.getMesh() && !n.getSkin()).map((n) => [n.getMesh()!, n.getWorldMatrix()]));
+      for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+        const name = p.getMaterial()!.getName(), pos = p.getAttribute('POSITION')!, idx = p.getIndices();
+        const W = at.get(mesh), place = (q: number[]): number[] => (W ? [0, 1, 2].map((r) => W[r]! * q[0]! + W[4 + r]! * q[1]! + W[8 + r]! * q[2]! + W[12 + r]!) : q);
+        const list = out.get(name) ?? [];
+        for (let t = 0; t < (idx ? idx.getCount() : pos.getCount()); t += 3) {
+          // Rotated to start at its least corner, never re-ordered: a face turned to face inward fails.
+          const c = [0, 1, 2].map((k) => f(place(pos.getElement(idx ? idx.getScalar(t + k) : t + k, []) as number[])).map((v) => v.toFixed(2)).join(','));
+          const s0 = c.indexOf([...c].sort()[0]!);
+          list.push([c[s0], c[(s0 + 1) % 3], c[(s0 + 2) % 3]].join('|'));
+        }
+        out.set(name, list);
+      }
+      for (const l of out.values()) l.sort();
+      return out;
+    };
+    const src = await tris(`../breeds/source/${breed}.glb`, turn), rig = await tris(`../breeds/rig/${breed}.glb`);
+    expect([...rig.keys()].sort()).toEqual([...src.keys()].sort());
+    for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
   });
 
   it('glowfish: the angler rig survives the intake — eight bones, four clips, each part on its own', async () => {

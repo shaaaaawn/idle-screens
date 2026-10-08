@@ -11,6 +11,10 @@
  *            eye's own black and white, never any other colour
  *   wide     the pupil a ring bigger
  *   happy    a little ^ where the eye was
+ *   smooth   the dori's way, for the minted breeds: the token's own pattern
+ *            GLIDES under the eye's fixed outline, a fraction of a cell at a
+ *            time (a pupil sliding over an eyeball), each eye on its own
+ *            gaze — and no lids, no steps, no lines (fish have no eyelids)
  *
  * Nothing moves: no vertex is touched, so the flush voxel faces cannot fight
  * (the first rig slid and scaled them, and they flashed). It costs no
@@ -51,8 +55,10 @@ const EYE_PARS = /* glsl */ `
     int cols = int(uEyeG[e].x), rows = int(uEyeG[e].y);
     // The eye material sometimes paints other things (a crab's belly): leave those alone.
     if (near > cell * (0.75 * float(max(cols, rows)) + 1.0)) return base;
-    int cx = clamp(int(floor(dot(p, uEyeU[e]) / cell)), 0, cols - 1);
-    int cy = clamp(int(floor(dot(p, uEyeV[e]) / cell)), 0, rows - 1);
+    // Where on the grid, in cells, clamped to it (the slab's side faces sit on its edge).
+    float fu = clamp(dot(p, uEyeU[e]) / cell, 0.0, float(cols) - 0.001);
+    float fv = clamp(dot(p, uEyeV[e]) / cell, 0.0, float(rows) - 0.001);
+    int cx = int(floor(fu)), cy = int(floor(fv));
     vec4 s = uEyeS[e];
     int level = int(s.z), mode = int(s.w), top = rows - 1;
     bool dark = uEyeG[e].w > 0.5;
@@ -72,7 +78,9 @@ const EYE_PARS = /* glsl */ `
     // Rows close from the top AND the bottom toward the line, a row a step.
     int away = cy > lineRow ? cy - lineRow : lineRow - cy;
     if (away > far - level) return lidC;
-    int sx = cx - int(s.x), sy = cy - int(s.y);
+    // The pattern under this point, shifted by the gaze — a whole cell, or
+    // (smooth) any fraction of one: the detail glides under the eye's outline.
+    int sx = int(floor(fu - s.x)), sy = int(floor(fv - s.y));
     bool black = mqEyeBit(uEyeG[e].z, cols, rows, sx, sy, dark);
     if (mode == 1 && !black && !dark) {
       black = mqEyeBit(uEyeG[e].z, cols, rows, sx - 1, sy, false) || mqEyeBit(uEyeG[e].z, cols, rows, sx + 1, sy, false)
@@ -149,7 +157,7 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
       shader.fragmentShader = EYE_PARS
         + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqEyeColor(diffuseColor.rgb);');
     };
-    part.mat.customProgramCacheKey = () => 'mq-eye-display-v4';
+    part.mat.customProgramCacheKey = () => 'mq-eye-display-v5';
     part.mat.needsUpdate = true;
   }
   const clampInt = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, Math.round(v)));
@@ -160,8 +168,14 @@ export function rigEyes(group: Object3D, body: Object3D): EyeRig | null {
         const s = shared.uEyeS.value[i]!;
         // A catch-light moves AGAINST the look (the light stays put while the eye turns).
         const k = g.darkEye ? -1 : 1;
-        s.x = clampInt(state.gazeFwd * k, g.shiftX[0], g.shiftX[1]);
-        s.y = clampInt(state.gazeUp * k, g.shiftY[0], g.shiftY[1]);
+        // Smooth: this eye's own gaze, carried all the way to the edge of where
+        // the detail can go, at any fraction of a cell. Otherwise whole cells.
+        const own = state.smooth ? state.eyes?.[i] : undefined;
+        const gf = (own ? own.fwd : state.gazeFwd) * k, gu = (own ? own.up : state.gazeUp) * k;
+        const reach = (lo: number, hi: number, v: number): number =>
+          Math.min(hi, Math.max(lo, v * (v >= 0 ? hi : -lo)));
+        s.x = state.smooth ? reach(g.shiftX[0], g.shiftX[1], gf) : clampInt(gf, g.shiftX[0], g.shiftX[1]);
+        s.y = state.smooth ? reach(g.shiftY[0], g.shiftY[1], gu) : clampInt(gu, g.shiftY[0], g.shiftY[1]);
         // Closing steps: rows shut from both ends toward the line row, then the line.
         const lineRow = (g.rows - 1) >> 1, far = Math.max(lineRow, g.rows - 1 - lineRow);
         const mono = g.black === 0 || (g.black & g.present) === g.present;
@@ -190,8 +204,12 @@ export interface EyeCue {
   climb: number;
 }
 
-/** `expr`: 0 open · 1 wide · 2 happy. `dilate`/`widen` are kept for callers that want the analogue values. */
-export interface EyeState { blink: number; gazeFwd: number; gazeUp: number; dilate: number; widen: number; expr: 0 | 1 | 2 }
+/** `expr`: 0 open · 1 wide · 2 happy. `dilate`/`widen` are kept for callers that want the analogue values.
+ *  `smooth`: the detail glides by fractions of a cell (the minted breeds); `eyes` then gives each eye its own gaze. */
+export interface EyeState {
+  blink: number; gazeFwd: number; gazeUp: number; dilate: number; widen: number; expr: 0 | 1 | 2;
+  smooth?: boolean; eyes?: ReadonlyArray<{ fwd: number; up: number }>;
+}
 
 const hash = (n: number): number => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 const bell = (u: number): number => (u <= 0 || u >= 1 ? 0 : Math.sin(u * Math.PI));
@@ -244,4 +262,74 @@ export function eyeMood(tSec: number, slot: number, cue: EyeCue, amount: number,
   out.dilate = 1 + (dilate - 1) * amount; out.widen = widen * amount;
   out.expr = amount > 0.5 ? expr : 0;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Looking, the dori's way (tang.ts tangLook), for the minted breeds' eyes.
+// ---------------------------------------------------------------------------
+
+export type MintedLookAt = 'wander' | 'viewer' | 'ahead';
+
+export interface MintedLookCue {
+  /** Where the camera is, in the fish's frame (as EyeCue.camera). */
+  camera: { fwd: number; up: number };
+  /** Its turn (radians of heading per body length, + to its left): the eyes lead it. */
+  turn: number;
+  /** 0..1: how hard it is swimming — a cruising fish looks where it is going. */
+  cruise: number;
+}
+
+/**
+ * Where each eye looks at `t`: saccades about the water (a quick dart, then
+ * still), bouts of holding the viewer's eye — the second eye a beat behind
+ * the first, a double take — and, swimming, a lead into its turn. No blinks:
+ * a fish has no eyelids. Pure in (slot, t), and continuous: every change is a
+ * short eased glide, never a step.
+ */
+/**
+ * How a fish looks — its character (the betta's temperaments, beta.ts):
+ * saccade holds and how quick the dart, how far the eyes rove, how often it
+ * seeks the viewer (a multiple of the 7–14 s rhythm), and a lock (0..1) that
+ * holds both eyes on the viewer whatever else they would do (a display).
+ * The default is every other minted breed's look, unchanged.
+ */
+export interface MintedLookStyle { hold?: readonly [number, number]; dart?: number; amp?: number; viewerEvery?: number; lock?: number }
+
+export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Array<{ fwd: number; up: number }>, style: MintedLookStyle = {}): MintedLookAt {
+  // Saccades: hold 0.7–2.6 s, dart in 0.12 s to the next hashed point.
+  const [h0, h1] = style.hold ?? [0.7, 2.6];
+  const hold = h0 + hash(slot * 2.9) * (h1 - h0);
+  const st = t / hold + hash(slot * 6.1) * 10;
+  const si = Math.floor(st), k = ease(((st - si) * hold) / (style.dart ?? 0.12));
+  const amp = style.amp ?? 1;
+  const at = (n: number, salt: number): number => (hash(n * salt + slot * 1.3) - 0.5) * 2 * amp;
+  let wx = at(si - 1, 2.3) + (at(si, 2.3) - at(si - 1, 2.3)) * k;
+  let wy = 0.6 * (at(si - 1, 4.7) + (at(si, 4.7) - at(si - 1, 4.7)) * k);
+  // Swimming, the eyes lead the way: ahead, and into the turn.
+  const lead = Math.min(1, cue.cruise);
+  wx += (0.55 + 0.35 * Math.max(-1, Math.min(1, cue.turn * 2.5)) - wx) * 0.6 * lead;
+  wy *= 1 - 0.5 * lead;
+  // The viewer: the second eye arrives 0.18 s after the first and leaves
+  // 0.18 s after it — a double take.
+  let viewing = false;
+  const lock = Math.min(1, Math.max(0, style.lock ?? 0));
+  for (let i = 0; i < out.length; i++) {
+    const w = 1 - (1 - mintedViewer(slot, t - (i === 1 ? 0.18 : 0), 0.15, style.viewerEvery ?? 1)) * (1 - lock);
+    if (w > 0.5) viewing = true;
+    const c = (v: number): number => Math.min(1, Math.max(-1, v));
+    out[i] = { fwd: c(wx + (cue.camera.fwd - wx) * w), up: c(wy + (cue.camera.up - wy) * w) };
+  }
+  return viewing ? 'viewer' : lead > 0.5 ? 'ahead' : 'wander';
+}
+
+/**
+ * When a minted fish holds the viewer's eye: every 7–14 s (× `every`), for
+ * 1.6–3 s, eased in and out over `ramp`. 0..1, pure in (slot, t). The eyes (mintedLook) and
+ * a rig's head (angel.ts) both answer to it, so the head turns with the look.
+ */
+export function mintedViewer(slot: number, t: number, ramp = 0.15, every = 1): number {
+  const vp = (7 + hash(slot * 3.7) * 7) * every;
+  const vt = t / vp + hash(slot * 9.2);
+  const vi = Math.floor(vt), into = (vt - vi) * vp, lasts = 1.6 + hash(vi * 1.9 + slot) * 1.4;
+  return ease(into / ramp) * (1 - ease((into - lasts) / ramp));
 }

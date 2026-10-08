@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
-import { Bone, Box3, BoxGeometry, Color, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
+import { Bone, Box3, BoxGeometry, Color, DoubleSide, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshMatcapMaterial, MeshStandardMaterial, Skeleton, SkinnedMesh, SphereGeometry, Texture, Uint16BufferAttribute, Vector2, Vector3 } from 'three';
 import {
   addGlowHalos,
   applyNpcMaterials,
@@ -578,6 +578,53 @@ describe('METAL- parts (a glowfish\'s teeth)', () => {
     applyNpcMaterials(off.root, createRng(1), false, true);
     expect(off.part.material).toBeInstanceOf(MeshLambertMaterial);
     expect((off.part.material as MeshLambertMaterial).color.getHex()).toBe(new Color(0x1a0030).getHex());
+  });
+});
+
+describe('METAL <Colour> parts (the minted designs\' own metal)', () => {
+  const fishWith = (name: string, hex: number, rough = 0.1): { root: Group; part: Mesh } => {
+    const part = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial({ color: hex, metalness: 1, roughness: rough }));
+    part.material.name = name;
+    const root = new Group(); root.add(part);
+    return { root, part };
+  };
+  it('lit: polished metal IN its designed colour — an angelfish\'s blue chrome stays blue', () => {
+    const { root, part } = fishWith('METAL Blue.003', 0x0006ff);
+    applyNpcMaterials(root, createRng(1), true, true);
+    const m = part.material as MeshStandardMaterial;
+    expect(m).toBeInstanceOf(MeshStandardMaterial);
+    expect(m.name).toBe('METAL Blue.003');
+    expect(m.metalness).toBeGreaterThan(0.8);
+    expect(m.color.b).toBeGreaterThan(m.color.r + m.color.g); // blue, not steel
+    // Satin, not a mirror: a flat voxel face would flip sky-white to black.
+    expect(m.roughness).toBeGreaterThanOrEqual(0.2);
+    expect(m.roughness).toBeLessThanOrEqual(0.45);
+    expect(m.userData.mqOwned).toBe(true);
+  });
+  it('flat: chrome in its colour; fishMetal off: its colour, matte; never a random coat', () => {
+    const flat = fishWith('METAL Red.001', 0xff0202);
+    applyNpcMaterials(flat.root, createRng(1), true, false);
+    expect(flat.part.material).toBeInstanceOf(MeshMatcapMaterial);
+    const fc = (flat.part.material as MeshMatcapMaterial).color;
+    expect(fc.r).toBeGreaterThan(fc.g + fc.b);
+    const off = fishWith('METAL Ink.001', 0x030303);
+    applyNpcMaterials(off.root, createRng(1), false, true);
+    expect(off.part.material).toBeInstanceOf(MeshLambertMaterial);
+    expect((off.part.material as MeshLambertMaterial).color.getHex()).toBe(new Color(0x030303).getHex());
+  });
+  it('keeps a double-sided part double-sided, lit, flat or matte — a fin is one sheet', () => {
+    for (const [reflective, lit] of [[true, true], [true, false], [false, true]] as const) {
+      const f = fishWith('METAL Blue.003', 0x0006ff);
+      (f.part.material as MeshStandardMaterial).side = DoubleSide;
+      applyNpcMaterials(f.root, createRng(1), reflective, lit);
+      expect((f.part.material as MeshStandardMaterial).side, `${reflective}/${lit}`).toBe(DoubleSide);
+    }
+  });
+  it('the intake\'s METAL- steel is untouched by it', () => {
+    const { root, part } = fishWith('METAL-Teeth', 0x1a0030, 1);
+    applyNpcMaterials(root, createRng(1), true, true);
+    const m = part.material as MeshStandardMaterial;
+    expect(m.color.r + m.color.g + m.color.b).toBeGreaterThan(2);
   });
 });
 
