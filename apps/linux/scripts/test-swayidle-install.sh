@@ -89,6 +89,18 @@ check     "kiosk flag is passed"  "idle-screens-wayland --kiosk" "$got"
 check_not "wlopm removed"         "wlopm"                        "$got"
 check_not "no resume hook"        "pkill"                        "$got"
 
+echo "multiline snippet form: kiosk conversion takes each resume hook with its timeout"
+MULTI="swayidle -w \\
+  timeout 150 'idle-screens-wayland &' \\
+    resume 'pkill -TERM -x idle-screens-wa' \\
+  timeout 900 'wlopm --off \\*' \\
+    resume 'wlopm --on \\*' &"
+setup "$MULTI"; KIOSK=1 run >/dev/null; got="$(result)"
+check     "kiosk saver present"        "idle-screens-wayland --kiosk" "$got"
+check_not "old saver resume removed"   "pkill -TERM -x idle-screens-wa'" "$got"
+check_not "blank clause removed"       "wlopm"                        "$got"
+check_not "no stray resume hook"       "resume"                       "$got"
+
 echo "kiosk warns when it cannot recognise the blanker"
 setup "swayidle -w timeout 600 'my-blanker off' resume 'my-blanker on' &"; KIOSK=1 run >/dev/null
 check "warning printed" "still has timeout clauses we do not" "$(cat "$sandbox/out")"

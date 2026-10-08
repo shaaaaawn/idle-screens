@@ -133,10 +133,27 @@ const PARS = /* glsl */ `
  */
 export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
   const mats: Material[] = [], geometries: BufferGeometry[] = [];
+  const copies = new Map<Material, Material>();
   body.traverse((o) => {
     const mesh = o as Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
     if (!geometries.includes(mesh.geometry)) geometries.push(mesh.geometry);
+    // A material the fish does not own is the template's, shared by every clone
+    // (and every tank showing this token): patching it in place would stack a
+    // second eye patch on the first and give both fish one gaze. Patch a copy.
+    const own = (m: Material): Material => {
+      if (!(m as Material & { map?: unknown }).map || m.userData.mqOwned) return m;
+      let c = copies.get(m);
+      if (!c) {
+        c = m.clone();
+        c.onBeforeCompile = m.onBeforeCompile;
+        c.customProgramCacheKey = m.customProgramCacheKey;
+        c.userData.mqOwned = true;
+        copies.set(m, c);
+      }
+      return c;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(own) : own(mesh.material);
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       if ((m as Material & { map?: unknown }).map && !mats.includes(m)) mats.push(m);
     }

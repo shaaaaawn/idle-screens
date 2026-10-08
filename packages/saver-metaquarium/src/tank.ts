@@ -2259,7 +2259,10 @@ class TankInstance implements SaverInstance {
       // Rigged at identity, before the tank scales and turns the body. The
       // breed is the mix's, or — single-breed fishUrl mode — the bundled one the url names.
       const url = this.wantUrls[index] ?? '';
-      const rigged = this.wantBreeds[index] ?? (url.startsWith(BUNDLED_BREED_SCHEME) ? url.slice(BUNDLED_BREED_SCHEME.length) : null);
+      const mintedId = mintedIdOf(url);
+      const rigged = this.wantBreeds[index]
+        ?? (url.startsWith(BUNDLED_BREED_SCHEME) ? url.slice(BUNDLED_BREED_SCHEME.length) : null)
+        ?? (mintedId !== null ? breedOf(mintedId) : null);
       if (rigged === 'crab') crab = rigCrab(body, tpl.clips, tpl.norm);
       if (rigged === 'starfish') starfish = rigStarfish(body, tpl.clips, tpl.norm);
       if (rigged === 'glowfish') angler = rigAngler(body, tpl.clips);

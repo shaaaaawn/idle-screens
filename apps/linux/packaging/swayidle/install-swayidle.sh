@@ -107,14 +107,23 @@ if grep -q 'idle-screens-wayland' "$launch_file"; then
   fi
 fi
 
+# Fold backslash-continued lines into one logical line. The clause removals
+# below match `timeout N '...' resume '...'` as a unit, but swayidle.snippet
+# puts each resume hook on its own continuation line, so a per-physical-line
+# match would drop the timeout and strand its resume hook.
+join_continuations() {
+  sed -e ':a' -e '/\\[[:space:]]*$/{N;s/\\[[:space:]]*\n[[:space:]]*/ /;ba;}' "$1"
+}
+
 backup="${launch_file}.bak.$(date +%s)"
 cp "$launch_file" "$backup"
 
 if [ -n "$restrip" ]; then
   # Remove the clause a previous run inserted (saver timeout + its resume hook).
   tmp_strip="$(mktemp)"
-  sed -E "s/[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+'idle-screens-wayland[^']*'([[:space:]]*resume[[:space:]]+'pkill[^']*')?//" \
-    "$launch_file" > "$tmp_strip"
+  join_continuations "$launch_file" \
+    | sed -E "s/[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+'idle-screens-wayland[^']*'([[:space:]]*resume[[:space:]]+'pkill[^']*')?//" \
+    > "$tmp_strip"
   cat "$tmp_strip" > "$launch_file"
   rm -f "$tmp_strip"
 fi
@@ -173,6 +182,11 @@ else
   #     Position is cosmetic — swayidle evaluates each timeout independently —
   #     so only the numbers from (2) actually order the events.
   tmp="$(mktemp)"
+  awk_in="$launch_file"
+  if [ -n "$KIOSK" ]; then
+    awk_in="$(mktemp)"
+    join_continuations "$launch_file" > "$awk_in"
+  fi
   awk -v saver="$SAVER_TIMEOUT" -v blank="$BLANK_TIMEOUT" -v args="$saver_args" \
       -v kiosk="${KIOSK:-}" -v q="'" '
     BEGIN {
@@ -211,13 +225,14 @@ else
       }
     }
     { print }
-  ' "$launch_file" > "$tmp"
+  ' "$awk_in" > "$tmp"
   # Copy the contents back rather than mv'ing the temp file over the target:
   # mv would carry mktemp's 0600 onto it, and labwc silently ignores an
   # autostart that is not executable — which would disable the saver AND the
   # user's existing screen blanking, with no error anywhere.
   cat "$tmp" > "$launch_file"
   rm -f "$tmp"
+  [ "$awk_in" = "$launch_file" ] || rm -f "$awk_in"
 
   if [ -n "$KIOSK" ]; then
     if grep -qE 'wlopm|dpms|wlr-randr' "$backup"; then

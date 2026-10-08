@@ -78,6 +78,10 @@ describe('betafish: the painted eyes', () => {
     });
     const rig = rigBetaEyes(scene)!;
     expect(rig.cells).toEqual([9, 9]);
+    // The template's materials are left alone; the fish patches its own copies.
+    for (const m of mats) expect(m.customProgramCacheKey()).not.toContain('mq-beta-eyes-v1');
+    mats.length = 0;
+    scene.traverse((o) => { const m = o as Mesh; if (m.isMesh) mats.push(m.material as MeshBasicMaterial); });
     for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v1');
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <map_pars_fragment>\n#include <map_fragment>', uniforms: {} as Record<string, { value: unknown }> };
     mats[0]!.onBeforeCompile(shader as never, undefined as never);
