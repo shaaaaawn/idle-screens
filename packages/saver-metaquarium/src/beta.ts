@@ -79,6 +79,19 @@ const REPERTOIRE: Record<BetaTemper, ReadonlyArray<readonly [BetaMoment, number]
 };
 const TEMPERS: readonly BetaTemper[] = ['fighter', 'dreamer', 'showoff', 'curious'];
 
+/**
+ * How each temperament's eyes move (eyes.ts mintedLook): a fighter's dart and
+ * hold short, and come to you often — and lock on while it displays; a
+ * dreamer's drift long and slow; a showoff keeps glancing at the camera; a
+ * curious one's rove widest.
+ */
+export const BETA_LOOK_STYLE: Record<BetaTemper, { hold: readonly [number, number]; dart: number; amp: number; viewerEvery: number }> = {
+  fighter: { hold: [0.4, 1.2], dart: 0.09, amp: 0.8, viewerEvery: 0.6 },
+  dreamer: { hold: [2.5, 5], dart: 0.5, amp: 0.55, viewerEvery: 2 },
+  showoff: { hold: [0.8, 2], dart: 0.12, amp: 0.9, viewerEvery: 0.45 },
+  curious: { hold: [0.5, 1.5], dart: 0.1, amp: 1, viewerEvery: 0.8 },
+};
+
 export interface BetaPersonality {
   temper: BetaTemper;
   /** Its own move, reached for twice as often as its temperament would. */
@@ -156,6 +169,8 @@ export interface BetaState {
   /** The dials' settings, -1..1 each. */
   bend: number;
   spread: number;
+  /** 0..1: its eyes locked on the viewer (a fighter's or a showoff's display: flare, curl). */
+  lock: number;
   look: { yaw: number; pitch: number };
 }
 
@@ -174,7 +189,7 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
 
   const wanderYaw = 0.25 * Math.sin(t * 0.41 + index * 1.3) + 0.12 * Math.sin(t * 0.97 + index * 0.6);
   const wanderPitch = 0.2 * Math.sin(t * 0.27 + index * 2.2);
-  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45) * p.curiosity * inFront(inp.viewer.yaw) : 0;
+  const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.45, BETA_LOOK_STYLE[p.temper].viewerEvery) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / BETA_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / BETA_LOOK.pitch, -1, 1) : 0;
   const yaw = clamp((wanderYaw * (1 - cruise * 0.5) + bend * 0.35) * (1 - toViewer) + vYaw * toViewer, -1, 1);
@@ -207,5 +222,6 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   }
   rig.mixer.update(0);
   const doing: BetaDoing = burst > 0.3 ? 'burst' : m.moment && m.weight > 0.3 ? m.moment : cruise > 0.5 ? 'swim' : 'hover';
-  return { doing, temper: p.temper, weights, bend, spread, look: { yaw, pitch } };
+  const lock = p.display >= 0.5 ? Math.max(weights.flare, weights.curl) : 0;
+  return { doing, temper: p.temper, weights, bend, spread, lock, look: { yaw, pitch } };
 }

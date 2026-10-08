@@ -286,12 +286,23 @@ export interface MintedLookCue {
  * a fish has no eyelids. Pure in (slot, t), and continuous: every change is a
  * short eased glide, never a step.
  */
-export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Array<{ fwd: number; up: number }>): MintedLookAt {
+/**
+ * How a fish looks — its character (the betta's temperaments, beta.ts):
+ * saccade holds and how quick the dart, how far the eyes rove, how often it
+ * seeks the viewer (a multiple of the 7–14 s rhythm), and a lock (0..1) that
+ * holds both eyes on the viewer whatever else they would do (a display).
+ * The default is every other minted breed's look, unchanged.
+ */
+export interface MintedLookStyle { hold?: readonly [number, number]; dart?: number; amp?: number; viewerEvery?: number; lock?: number }
+
+export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Array<{ fwd: number; up: number }>, style: MintedLookStyle = {}): MintedLookAt {
   // Saccades: hold 0.7–2.6 s, dart in 0.12 s to the next hashed point.
-  const hold = 0.7 + hash(slot * 2.9) * 1.9;
+  const [h0, h1] = style.hold ?? [0.7, 2.6];
+  const hold = h0 + hash(slot * 2.9) * (h1 - h0);
   const st = t / hold + hash(slot * 6.1) * 10;
-  const si = Math.floor(st), k = ease(((st - si) * hold) / 0.12);
-  const at = (n: number, salt: number): number => (hash(n * salt + slot * 1.3) - 0.5) * 2;
+  const si = Math.floor(st), k = ease(((st - si) * hold) / (style.dart ?? 0.12));
+  const amp = style.amp ?? 1;
+  const at = (n: number, salt: number): number => (hash(n * salt + slot * 1.3) - 0.5) * 2 * amp;
   let wx = at(si - 1, 2.3) + (at(si, 2.3) - at(si - 1, 2.3)) * k;
   let wy = 0.6 * (at(si - 1, 4.7) + (at(si, 4.7) - at(si - 1, 4.7)) * k);
   // Swimming, the eyes lead the way: ahead, and into the turn.
@@ -301,8 +312,9 @@ export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Arr
   // The viewer: the second eye arrives 0.18 s after the first and leaves
   // 0.18 s after it — a double take.
   let viewing = false;
+  const lock = Math.min(1, Math.max(0, style.lock ?? 0));
   for (let i = 0; i < out.length; i++) {
-    const w = mintedViewer(slot, t - (i === 1 ? 0.18 : 0));
+    const w = 1 - (1 - mintedViewer(slot, t - (i === 1 ? 0.18 : 0), 0.15, style.viewerEvery ?? 1)) * (1 - lock);
     if (w > 0.5) viewing = true;
     const c = (v: number): number => Math.min(1, Math.max(-1, v));
     out[i] = { fwd: c(wx + (cue.camera.fwd - wx) * w), up: c(wy + (cue.camera.up - wy) * w) };
@@ -311,12 +323,12 @@ export function mintedLook(slot: number, t: number, cue: MintedLookCue, out: Arr
 }
 
 /**
- * When a minted fish holds the viewer's eye: every 7–14 s, for 1.6–3 s, eased
- * in and out over 0.15 s. 0..1, pure in (slot, t). The eyes (mintedLook) and
+ * When a minted fish holds the viewer's eye: every 7–14 s (× `every`), for
+ * 1.6–3 s, eased in and out over `ramp`. 0..1, pure in (slot, t). The eyes (mintedLook) and
  * a rig's head (angel.ts) both answer to it, so the head turns with the look.
  */
-export function mintedViewer(slot: number, t: number, ramp = 0.15): number {
-  const vp = 7 + hash(slot * 3.7) * 7;
+export function mintedViewer(slot: number, t: number, ramp = 0.15, every = 1): number {
+  const vp = (7 + hash(slot * 3.7) * 7) * every;
   const vt = t / vp + hash(slot * 9.2);
   const vi = Math.floor(vt), into = (vt - vi) * vp, lasts = 1.6 + hash(vi * 1.9 + slot) * 1.4;
   return ease(into / ramp) * (1 - ease((into - lasts) / ramp));

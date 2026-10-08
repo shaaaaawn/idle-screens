@@ -92,7 +92,8 @@ import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { chordPose, chordTurn, dodgeClimb, dodgeTurn } from './heading';
 import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
-import { betaFrame, rigBeta, type BetaRig } from './beta';
+import { BETA_LOOK_STYLE, betaFrame, rigBeta, type BetaRig } from './beta';
+import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
@@ -654,6 +655,8 @@ interface Fish {
   glow: FishGlow | null;
   /** Eye rig: undefined until first asked for, null when the model has no eyes. */
   eyes?: EyeRig | null;
+  /** A betta's painted eyes as displays (beta-eyes.ts), rigged on its first frame. */
+  betaEyes?: BetaEyeRig | null;
   /** Swim-wave rig: undefined until `swimWave` first goes above 0, null for a breed that does not wave. */
   wave?: WaveRig | null;
   /** A breed rigged in Blender, driven by its own module: it, not the generic
@@ -3314,6 +3317,21 @@ class TankInstance implements SaverInstance {
         }
       } else if (f.eyes) {
         f.eyes.set(EYES_AT_REST);
+      }
+      // A betta's eyes are painted into its atlas (beta-eyes.ts): its pupils
+      // glide there, looking the way its temperament looks (beta.ts
+      // BETA_LOOK_STYLE) — and lock on the viewer while it displays.
+      if (beta && f.body) {
+        if (f.betaEyes === undefined) f.betaEyes = rigBetaEyes(f.body);
+        if (f.betaEyes) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
+          const cam = this.camera.position, dx = cam.x - px, dy = cam.y - y, dz = cam.z - pz, dl = Math.hypot(dx, dy, dz) || 1;
+          mintedLook(f.index, tSec, {
+            camera: { fwd: (dx * hx + dz * hz) / hl / dl, up: dy / dl },
+            turn: rigTurn, cruise: Math.min(1, Math.max(0, (rigPace - 0.1) / 0.5)),
+          }, this.mintedGaze, { ...BETA_LOOK_STYLE[beta.temper], lock: beta.lock });
+          f.betaEyes.set(this.mintedGaze);
+        }
       }
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
