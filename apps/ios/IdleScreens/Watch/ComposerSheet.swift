@@ -230,7 +230,7 @@ struct ComposerSheet: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 5) {
                                 ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
-                                    .frame(width: 120, height: 68)
+                                    .frame(width: 96, height: 128)
                                     .clipShape(RoundedRectangle(cornerRadius: 9))
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 9)
@@ -240,7 +240,7 @@ struct ComposerSheet: View {
                                     .font(.caption2)
                                     .foregroundStyle(Color.textSecondary)
                                     .lineLimit(1)
-                                    .frame(width: 120, alignment: .leading)
+                                    .frame(width: 96, alignment: .leading)
                             }
                         }
                         .buttonStyle(.plain)
