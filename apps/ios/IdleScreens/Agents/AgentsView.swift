@@ -279,6 +279,29 @@ struct AgentsView: View {
 
     private var channelsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            NavigationLink { MCPExplorerView() } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(Color.appPrimary)
+                        .frame(width: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Inside the MCP").foregroundStyle(Color.textPrimary)
+                        Text("Every tool, what agents read, and the feedback board")
+                            .font(.caption)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .padding(16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             sectionTitle("your channels", "What your agents have built, and the keys to steer it. Start one here and hand it to an agent.")
             Button { showingChannels = true } label: {
                 HStack(spacing: 12) {
