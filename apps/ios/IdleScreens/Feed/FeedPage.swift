@@ -40,12 +40,16 @@ struct FeedPage: View {
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
     @State private var history: [ChannelEvent] = []
+    @State private var historyHasMore = false
+    @State private var loadingOlder = false
     @State private var liveTank = TankLoadState()
     @State private var liveTankLoading = false
-    /// The live tank's 2D stand-in: its fish ring while the 3D cast loads.
-    @State private var liveGather: AquariumField.Gather?
-    /// The 3D tank is in and the fish have scattered: show the real thing.
+    /// The 3D tank is in: show the real thing.
     @State private var liveTankRevealed = false
+    /// This web view (not merely the session) has painted. Coming back from a
+    /// history page reloads it, and the session is still "live" from before —
+    /// gating on that showed the site's bare black page for ~1 s.
+    @State private var liveWebPainted = false
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -74,9 +78,12 @@ struct FeedPage: View {
 
     var body: some View {
         ZStack {
-            // Behind the cards while they travel: black, so the rounded frames
-            // read as frames. The channel's own colour lives INSIDE each card.
-            Color.black.ignoresSafeArea()
+            // Behind the cards while they travel: the channel's own colour,
+            // darkened. Pure black here read as a black bar flicking past on
+            // every swipe (2026-10-09); a deep tint of the scene still frames
+            // the rounded cards without the flash.
+            Color(hex: backdropHex).ignoresSafeArea()
+            Color.black.opacity(0.55).ignoresSafeArea()
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -119,6 +126,7 @@ struct FeedPage: View {
             .onChange(of: moment) { _, _ in
                 captionExpanded = false
                 prefetchAroundCurrent()
+                Task { await loadOlderIfNeeded() }
                 replayCaptionEntrance()
             }
 
@@ -173,18 +181,37 @@ struct FeedPage: View {
     }
 
     /// Also the overview sheet's pull-to-refresh, and the feed's.
+    /// Near the end of the strip? Fetch the next older page so the swipe never
+    /// hits a wall while the channel has more to show — like the web's scrubber.
+    private func loadOlderIfNeeded() async {
+        guard historyHasMore, !loadingOlder,
+              let here = currentIndex, here >= stops.count - 4,
+              let oldest = history.map(\.id).min() else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        guard let page = try? await app.gallery.fetchHistoryPage(channelId: channelId, limit: 200,
+                                                                before: oldest) else { return }
+        historyHasMore = page.hasMore ?? false
+        guard !page.events.isEmpty else { return }
+        history += page.events
+        stops = ChannelFeed.stops(from: history, limit: nil)
+        prefetchAroundCurrent()
+    }
+
     private func loadHistory() async {
         do {
             // History is an enhancement. If it fails the channel still plays,
             // and the page simply has nothing to its right.
             // Deep enough to reach the first publish of scenes the curator
             // re-airs nightly — that is where the real credit lives.
-            let events = (try? await app.gallery.fetchHistory(channelId: channelId, limit: 200)) ?? []
+            let page = try? await app.gallery.fetchHistoryPage(channelId: channelId, limit: 200)
+            let events = page?.events ?? []
             // A failed refresh must not wipe a timeline that was already there.
             if events.isEmpty && !stops.isEmpty { return }
             history = events
+            historyHasMore = page?.hasMore ?? false
             liveEvent = events.filter { $0.sceneId != nil }.max { $0.at < $1.at }
-            stops = ChannelFeed.stops(from: events)
+            stops = ChannelFeed.stops(from: events, limit: nil)
             prefetchAroundCurrent()
         }
     }
@@ -240,12 +267,19 @@ struct FeedPage: View {
         ZStack {
             Color(hex: backdropHex).ignoresSafeArea()
             // A 3D tank mounts empty and fills over many seconds. Until its
-            // cast is in, the 2D tank swims here and its fish circle — the
-            // loading signal is the scene itself, not a card on top of it.
+            // cast is in, the 2D tank swims here — the loading scene is the
+            // lo-fi tank itself, with no message on top of it.
             if isActive && !historyHoldsTheEngine && isTank && !liveTankRevealed {
                 ClassicSaverView(kind: .metaquarium, seed: ClassicSaverKind.seed(forChannel: channelId),
-                                 params: tankParams, gather: liveGather)
+                                 params: tankParams)
                     .ignoresSafeArea()
+                    .transition(.opacity)
+            }
+            // Coming back to live reloads the web view (only one engine runs
+            // at a time). Until its first frame, show the scene's own still
+            // under it — not a bare backdrop, which flashed black for ~1 s.
+            if isActive && !historyHoldsTheEngine && !isTank && !liveWebPainted {
+                liveHoldingStill
                     .transition(.opacity)
             }
             if isActive && !historyHoldsTheEngine {
@@ -255,14 +289,25 @@ struct FeedPage: View {
                     baseURL: URL(string: Config.baseURL)!,
                     token: app.token(for: channelId),
                     reloadCount: reloadCount,
-                    onFrame: { session.ingest($0) },
+                    onFrame: { frame in
+                        session.ingest(frame)
+                        // The socket's first frame comes a beat before the canvas
+                        // has painted; reveal just after, never on the bare page.
+                        guard !liveWebPainted else { return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(0.35))
+                            liveWebPainted = true
+                        }
+                    },
                     onAssets: { liveTank.report($0) },
                     onFailure: { session.hostFailed() }
                 )
                 .ignoresSafeArea()
                 // Hidden until the first frame proves the page is live, so a
                 // slow load shows the channel's colour, not a blank sheet.
-                .opacity(session.phase == .live && !session.sleeping && (!isTank || liveTankRevealed) ? 1 : 0)
+                .onAppear { liveWebPainted = false }
+                .opacity(session.phase == .live && liveWebPainted && !session.sleeping && (!isTank || liveTankRevealed) ? 1 : 0)
+                .animation(.easeInOut(duration: 0.4), value: liveWebPainted)
                 .animation(.easeInOut(duration: 0.9), value: liveTankRevealed)
                 .animation(.easeInOut(duration: 0.5), value: session.phase)
                 .animation(.easeInOut(duration: 0.6), value: session.sleeping)
@@ -278,15 +323,26 @@ struct FeedPage: View {
             liveTank = TankLoadState()
             liveTankLoading = true
             liveTankRevealed = false
-            liveGather = AquariumField.Gather(startedAt: Date())
             await TankLoadState.watch(state: { liveTank }, settle: { liveTank.markSettled() }) { loading in
                 liveTankLoading = loading
             }
             // In: release the ring, and let the 3D tank fade up as the fish
             // scatter back to their lanes.
-            liveGather?.releasedAt = Date()
             try? await Task.sleep(for: .seconds(0.9))
             if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.9)) { liveTankRevealed = true } }
+        }
+    }
+
+    /// What sits under the live web view until it paints. A scene native can
+    /// draw faithfully shows its own still; one it can't (a sequence, a
+    /// timeline) shows its background colour — its native still is often black.
+    @ViewBuilder
+    private var liveHoldingStill: some View {
+        if let spec = channel.spec, NativeSupport.isFaithful(channel.rawSpec) {
+            ScenePreviewView(spec: spec, fallbackSeed: channelId, live: false)
+                .ignoresSafeArea()
+        } else {
+            Color(hex: backdropHex).ignoresSafeArea()
         }
     }
 
@@ -505,8 +561,11 @@ struct FeedPage: View {
     private var momentSegments: some View {
         let count = stops.count + 1
         let here = (currentIndex ?? -1) + 1
+        // History pages in as you swipe, so it can run to hundreds: show a
+        // window of segments that slides with you instead of slivers.
+        let window = ChannelFeed.segmentWindow(count: count, here: here, size: 20)
         return HStack(spacing: 3) {
-            ForEach(0..<count, id: \.self) { index in
+            ForEach(window, id: \.self) { index in
                 Capsule()
                     .fill(Color.primary.opacity(index == here ? 0.95 : 0.3))
                     .frame(height: 2.5)
@@ -840,6 +899,8 @@ struct FeedPage: View {
 /// there, because the page before it prefetched it — so it slides in as a
 /// picture, not as a blank. It only ANIMATES while it is the page on screen.
 private struct HistoryMomentPage: View {
+    /// One crossfade from placeholder to the real scene.
+    static let revealSeconds = 0.6
     let channelId: String
     let stop: ChannelFeed.Stop
     let isShowing: Bool
@@ -852,9 +913,10 @@ private struct HistoryMomentPage: View {
     @State private var webReady = false
     @State private var tank = TankLoadState()
     @State private var tankLoading = true
-    @State private var gather: AquariumField.Gather?
     /// Released and scattered: the 3D tank can take over.
     @State private var tankRevealed = false
+    /// True once the web view is fully faded in over the placeholder.
+    @State private var placeholderGone = false
     /// Booted AND filled: the moment the 3D tank is worth showing.
     private var tankIsIn: Bool { webReady && !tankLoading && tankRevealed }
 
@@ -872,14 +934,23 @@ private struct HistoryMomentPage: View {
                 // A tank's 2D stand-in is itself the loading scene: it swims,
                 // and its fish circle until the 3D cast is in. Any other scene's native
                 // frame may be the WRONG layout (that is why it is going to the
-                // web), so it holds still and dimmed rather than animating a
-                // version that is about to be replaced.
-                if !isShowing || !tankIsIn {
-                    RecordedSceneView(scene: scene, channelId: channelId,
-                                      animating: isShowing && scene.isTank,
-                                      gather: isShowing && scene.isTank ? gather : nil)
+                // web), so it holds still rather than animating a version that
+                // is about to be replaced.
+                //
+                // It stays UNDER the web view until the web view has finished
+                // fading in. Removing it the moment the scene was ready showed
+                // the bare background colour for a few frames between the two
+                // — the "flash before it plays" (seen at 30fps, 2026-10-09).
+                // It used to be dimmed to 0.55 too, which read as a grey slab.
+                //
+                // Only a tank gets a drawn placeholder (its 2D aquarium swims as
+                // the loading scene). Any other scene is going to the web BECAUSE
+                // native can't draw it, and its native still is often just black
+                // (a sequence's opening, a timeline's base) — so it holds on the
+                // scene's own background colour, which the real thing fades over.
+                if scene.isTank && (!isShowing || !placeholderGone) {
+                    RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
                         .ignoresSafeArea()
-                        .opacity(isShowing && !scene.isTank ? 0.55 : 1)
                 }
                 if isShowing && engineGranted {
                     WebSceneView(
@@ -896,7 +967,7 @@ private struct HistoryMomentPage: View {
                                 // socket's first frame; revealing sooner would
                                 // flash the channel's LIVE scene.
                                 try? await Task.sleep(for: .seconds(0.8))
-                                withAnimation(.easeInOut(duration: scene.isTank ? 0.6 : 0.35)) { webReady = true }
+                                webReady = true
                             }
                         },
                         onAssets: { tank.report($0) },
@@ -904,7 +975,14 @@ private struct HistoryMomentPage: View {
                     )
                     .ignoresSafeArea()
                     .opacity(tankIsIn ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.9), value: tankIsIn)
+                    .animation(.easeInOut(duration: Self.revealSeconds), value: tankIsIn)
+                    .onChange(of: tankIsIn) { _, isIn in
+                        guard isIn else { placeholderGone = false; return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(Self.revealSeconds + 0.1))
+                            if tankIsIn { placeholderGone = true }
+                        }
+                    }
                 }
             } else if let scene {
                 RecordedSceneView(scene: scene, channelId: channelId, animating: isShowing)
@@ -941,7 +1019,7 @@ private struct HistoryMomentPage: View {
             tank = TankLoadState()
             tankLoading = true
             tankRevealed = false
-            gather = AquariumField.Gather(startedAt: Date())
+            placeholderGone = false
             try? await Task.sleep(for: .seconds(0.45))
             if Task.isCancelled { return }
             engineGranted = true
@@ -955,7 +1033,6 @@ private struct HistoryMomentPage: View {
             await TankLoadState.watch(state: { tank }, settle: { tank.markSettled() }) { loading in
                 tankLoading = loading
             }
-            gather?.releasedAt = Date()
             try? await Task.sleep(for: .seconds(0.9))
             if !Task.isCancelled { tankRevealed = true }
         }

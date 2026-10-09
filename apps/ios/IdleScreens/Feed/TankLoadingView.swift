@@ -1,8 +1,8 @@
 import SwiftUI
 
-// The fish-ring card that used to sit over a loading tank lived here until
-// 2026-10-01; the loading signal is now the scene itself (AquariumField.Gather).
-// It is in git history (8d4e44c) if it is wanted back.
+// The loading card (8d4e44c) and the fish-ring gather (4431154) both lived
+// here once. A loading tank now just shows the lo-fi 2D aquarium swimming
+// until the 3D cast is in — no message, no special motion (2026-10-09).
 
 /// When a 3D tank counts as loaded.
 ///

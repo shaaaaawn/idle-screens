@@ -44,14 +44,26 @@ enum ChannelFeed {
     ///   airing, so the strip is a list of pictures rather than of log lines.
     /// - Ties on `at` (two events stamped the same millisecond) break on the
     ///   higher event id, so the order doesn't depend on the response order.
-    static func stops(from events: [ChannelEvent], limit: Int = 24) -> [Stop] {
+    /// Which segment indices to draw when there are more than `size`: a window
+    /// that keeps `here` a quarter of the way in, so more of what lies ahead
+    /// (older) shows than of what is behind.
+    static func segmentWindow(count: Int, here: Int, size: Int) -> [Int] {
+        guard count > size else { return Array(0..<count) }
+        let start = min(max(0, here - size / 4), count - size)
+        return Array(start..<(start + size))
+    }
+
+    /// `limit` nil = every distinct scene the events reach (paged history keeps
+    /// growing as you swipe; the cap was for a single fixed fetch).
+    static func stops(from events: [ChannelEvent], limit: Int? = 24) -> [Stop] {
         var seen = Set<Int>()
         var out: [Stop] = []
         for event in events.sorted(by: { a, b in a.at != b.at ? a.at > b.at : a.id > b.id }) {
             guard let sceneId = event.sceneId, seen.insert(sceneId).inserted else { continue }
             out.append(Stop(sceneId: sceneId, event: event))
         }
-        return Array(out.dropFirst().prefix(limit))
+        let past = out.dropFirst()
+        return Array(limit.map { past.prefix($0) } ?? past)
     }
 }
 

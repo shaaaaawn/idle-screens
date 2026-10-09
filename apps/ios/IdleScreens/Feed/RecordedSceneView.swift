@@ -16,8 +16,6 @@ struct RecordedSceneView: View {
     var animating: Bool = true
     /// Tiles in the zoomed-out timeline: fewer entities, never animated.
     var thumbnail: Bool = false
-    /// A 3D tank's stand-in while the real one loads (see AquariumField.Gather).
-    var gather: AquariumField.Gather? = nil
     @State private var layers: [CompiledLayer]?
 
     var body: some View {
@@ -42,8 +40,7 @@ struct RecordedSceneView: View {
                 ClassicSaverView(kind: kind,
                                  seed: scene.seed ?? ClassicSaverKind.seed(forChannel: channelId),
                                  tier: thumbnail ? .t2 : .t3,
-                                 live: animating && !thumbnail,
-                                 gather: gather)
+                                 live: animating && !thumbnail)
             } else {
                 // A classic saver with no native port. Say so rather than
                 // show a black page that looks like a failure.

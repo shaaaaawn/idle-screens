@@ -128,6 +128,9 @@ struct ChannelFeedView: View {
             }
         }
         .statusBarHidden(chromeHidden)
+        // Tap-to-hide is "just the scene": the tab bar goes with the rest of
+        // the chrome, on the same animation (the tap wraps it in withAnimation).
+        .toolbar(chromeHidden ? .hidden : .visible, for: .tabBar)
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
