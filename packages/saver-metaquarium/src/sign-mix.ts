@@ -48,15 +48,34 @@ function splitEntries(value: string): string[] {
 
 export function parseSignMix(value: string): SignMixResult {
   const entries: SignEntry[] = [], problems: string[] = [];
+  // The last sign's text, while a comma could still be part of it: unquoted, and room left.
+  let open: SignEntry | null = null;
   for (const raw of splitEntries(String(value ?? ''))) {
+    // A comma inside unquoted words ("TANGS, BLOWFISH, AND FRIENDS") is part of
+    // the words: a piece that is not a sign of its own carries the last one's text on.
+    // Shaped like a sign (`word:` `word@`…) is judged as a sign, so a mistyped
+    // kind is reported, not swallowed into the words before it.
+    const signShaped = /^[a-z]+[@>/*:]/i.test(raw);
+    const lead = /^([a-z]+)(?=$|[@>/*:])/i.exec(raw)?.[1]?.toLowerCase();
+    if (open && !signShaped && !(lead && (SIGN_KINDS as readonly string[]).includes(lead))) {
+      const max = SIGN_TEXT_MAX[open.kind], more = [...`${open.text}, ${raw}`];
+      if (more.length > max) problems.push(`a ${open.kind} has room for ${max} characters — "${more.join('')}" cut`);
+      open.text = more.slice(0, max).join('');
+      continue;
+    }
+    open = null;
     const colon = raw.indexOf(':');
     const head = (colon < 0 ? raw : raw.slice(0, colon)).trim();
     let text = colon < 0 ? '' : raw.slice(colon + 1).trim();
-    if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) text = text.slice(1, -1);
+    const quoted = text.startsWith('"') && text.endsWith('"') && text.length >= 2;
+    if (quoted) text = text.slice(1, -1);
     const m = /^([a-z]+)(?:@([a-z0-9]+))?(?:>([a-z0-9]+))?(?:\/(#[0-9a-f]{3}(?:[0-9a-f]{3})?))?(?:\*(\d+(?:\.\d+)?))?$/i.exec(head);
     if (!m) { problems.push(`"${raw}" is not kind[@place][>target][/#color][*size][:text]`); continue; }
     const kind = m[1]!.toLowerCase() as SignKind;
-    if (!SIGN_KINDS.includes(kind)) { problems.push(`"${m[1]}" is not a sign (${SIGN_KINDS.join(', ')})`); continue; }
+    if (!SIGN_KINDS.includes(kind)) {
+      problems.push(`"${m[1]}" is not a sign (${SIGN_KINDS.join(', ')})${entries.length ? ' — if it was part of the last sign\'s words, put them in "quotes"' : ''}`);
+      continue;
+    }
     if (entries.length >= MAX_SIGNS) { problems.push(`more than ${MAX_SIGNS} signs — "${raw}" dropped`); continue; }
     const place = m[2]?.toLowerCase() ?? null, target = m[3]?.toLowerCase() ?? null;
     if (place && !(SIGN_PLACES as readonly string[]).includes(place)) {
@@ -70,14 +89,16 @@ export function parseSignMix(value: string): SignMixResult {
     if ([...text].length > max) { problems.push(`a ${kind} has room for ${max} characters — "${text}" cut`); text = [...text].slice(0, max).join(''); }
     const odd = [...new Set([...text].filter((ch) => !drawable(ch)))];
     if (odd.length) problems.push(`${odd.map((c) => `"${c}"`).join(' ')} cannot be drawn on a sign — shown as ?`);
-    entries.push({
+    const entry: SignEntry = {
       kind,
       place: place && (SIGN_PLACES as readonly string[]).includes(place) ? place : null,
       target: target && kind === 'arrow' && (SIGN_PLACES as readonly string[]).includes(target) ? target : null,
       color: m[4]?.toLowerCase() ?? null,
       size,
       text,
-    });
+    };
+    entries.push(entry);
+    if (colon >= 0 && !quoted) open = entry;
   }
   return { entries, problems };
 }

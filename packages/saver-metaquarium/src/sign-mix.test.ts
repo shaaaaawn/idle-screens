@@ -18,6 +18,20 @@ describe('parseSignMix', () => {
     expect(parseSignMix('led@plaza:TIDE: 4.2M').entries[0]?.text).toBe('TIDE: 4.2M');
   });
 
+  it('keeps commas in unquoted words as part of the words', () => {
+    const { entries, problems } = parseSignMix('led@plaza:NOW SHOWING - TANGS, BLOWFISH, AN OCTOPUS AND FRIENDS, ring:Lifeguard, porthole');
+    expect(problems).toEqual([]);
+    expect(entries.map((e) => [e.kind, e.text])).toEqual([
+      ['led', 'NOW SHOWING - TANGS, BLOWFISH, AN OCTOPUS AND FRIENDS'], ['ring', 'Lifeguard'], ['porthole', ''],
+    ]);
+    // A sign with no words, or quoted words, is closed: what follows must be a sign.
+    expect(parseSignMix('porthole, plank:"A", billboard').problems[0]).toMatch(/"billboard" is not a sign/);
+    // A mistyped sign after words is reported, with the way to keep it as words.
+    const typo = parseSignMix('plank:Hi there, billboard:HI');
+    expect(typo.entries.map((e) => e.text)).toEqual(['Hi there']);
+    expect(typo.problems[0]).toMatch(/not a sign .*"quotes"/);
+  });
+
   it('says what it dropped or changed, and keeps going', () => {
     const { entries, problems } = parseSignMix('billboard:HI, plank@moon:Hello, ring>gate:Hi, neon*9:X, porthole:ABCDEFG, plank:日本');
     expect(entries.map((e) => e.kind)).toEqual(['plank', 'ring', 'neon', 'porthole', 'plank']);
