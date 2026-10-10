@@ -133,7 +133,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial']],
+    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial', 'signs']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'waterClarity', 'waterTint', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
   ],
@@ -150,6 +150,11 @@ const METAQUARIUM: PanelKnowledge = {
     floraMix: ['kelp:3, anemone, clam', 'whip, seapen, curl'],
     floraPalette: ['world', '#ff6ec7, #7dd7ff'],
     geodeMix: ['geode:3, cathedral, cluster', 'cavern'],
+    signs: [
+      'plank:"Welcome to the reef", neon/#ff4fa0:OPEN, porthole',
+      'arrow@hub>gate:Castle, plank@gate:"Mind the crabs", led@plaza:TIDE 4.2M - WATER 24°',
+      'ring:Lifeguard, led:SEE YOU AT THE REEF ★',
+    ],
     geodeMineral: ['world', 'amethyst, citrine'],
     vignette: ['tea', 'bedtime', 'seek', 'a =table, b =door | b >table @a | a @b talk, b @a nod | b @a talk, a @b wiggle | a b circle rug'],
     propMix: [

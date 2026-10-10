@@ -233,6 +233,25 @@ textures, downloads, shadow maps or additional lights. Flora, shards, snow and
 bubbles scale with the existing device prop budget. `inspect().props.scenery`
 reports actual populations; prop draw-call/triangle totals include the world.
 
+## Signs
+
+`signs` puts underwater signage in the world, one entry a sign: `kind[@place][>target][/#color][*size][:text]`, comma-separated, up to eight.
+
+| kind | what stands there |
+| --- | --- |
+| `plank` | weathered boards nailed to a post, the lettering painted on (≤ 24 characters) |
+| `arrow` | a board cut to a point, aimed at `>target` (≤ 16) |
+| `ring` | a striped life-ring hung on a post, a name plaque under it (≤ 10) |
+| `porthole` | a brass porthole set in a stone, its glass lit; a word (≤ 4) or, with none, a fish |
+| `neon` | glowing tube lettering on a dark board, a halo and light on the floor (≤ 14) |
+| `led` | a dot-matrix board in the hackerfish's pixels; a line longer than the board scrolls (≤ 64) |
+
+A sign stands beside its place — `gate`, `plaza`, `courtyard`, `hub`, `fountain`, `home1`–`home3`, or the open tank's `centre`, `left`, `right`, `front`, `back` — never on it, and faces the front. With no place it finds a clear spot across the front of the tank. Lettering is a 5×7 pixel font (capitals, digits, common punctuation, `° ♥ ★`); `/#color` colours the lettering, tubes, LEDs, glass or stripes. Signs stay outdoors (not in `interior: geode`), and fish swim round them.
+
+```ts
+signs: 'plank@gate:"Welcome to the reef", arrow@hub>gate:Castle, neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M - WATER 24°'
+```
+
 ## Reading a scene back
 
 A SaverSpec explains itself; a metaquarium scene is `{id: "metaquarium"}` plus a control track. `describeMetaquarium` reads that back as parts, using the tank's own parsers and room presets, for a viewer's scene card, a channel's state, or an agent with no eyes:

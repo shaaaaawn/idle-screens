@@ -21,6 +21,9 @@ import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
 import { stoneTop } from './ground';
+import { buildSigns } from './signs';
+import type { SignEntry } from './sign-mix';
+import { OPEN_MARKS } from './vignette';
 
 export interface SceneryOptions {
   rocks: number;
@@ -55,6 +58,8 @@ export interface SceneryOptions {
   fountain?: 'none' | 'vent' | 'geode';
   /** 0..1 — crystal streetlamps along the paths (needs paths). */
   lamps?: number;
+  /** Signs (the `signs` DSL, parsed): beside the world's marks, or in the open. */
+  signs?: readonly SignEntry[];
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -429,6 +434,26 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // Plants keep off the plaza; fish and plants go round the lamp posts.
   keepClear.push(...plaza);
   for (const l of lampSites) obstacles.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, r: 2.5 * s, h: 17 * s });
+  // Signs, once everything they stand beside has a place: off the paths, the
+  // doorsteps and the lamps, beside their mark. Fish go round them.
+  let signHalos: Array<{ x: number; y: number; z: number; color: string; size: number }> = [];
+  if (opts.signs?.length && !opts.interior) {
+    const built = buildSigns(opts.signs, {
+      rng: rng.fork(41), terrain, scale: s, clocks,
+      marks: { ...OPEN_MARKS, ...marks },
+      free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !doorsteps.some(dd => Math.hypot(x - dd.x, z - dd.z) < 10 * s + r)
+        && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < 4 * s + r)
+        && pathClearance(keepClear, x, z) > r * 0.4,
+    });
+    // Flat into the world's group: its draw and triangle counts see every sign mesh.
+    for (const m of [...built.group.children]) group.add(m);
+    obstacles.push(...built.obstacles);
+    homeLights.push(...built.lights);
+    signHalos = built.halos;
+    counts.signs = built.count;
+  }
   let fountainMouth: { x: number; y: number; z: number; color: string } | null = null;
   let lampLights: { x: number; y: number; z: number; color: string }[] = [];
   if (((opts.geodes ?? 0) > 0 || fountainAt || lampSites.length) && !opts.interior) {
@@ -645,7 +670,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   counts.flora = field.plants;
   // Halos: the lamps and the fountain wear the soft glow card a crystal does.
   let townCards: GlowCards | null = null;
-  const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s }))];
+  const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s })), ...signHalos];
   if (halos.length) {
     townCards = buildGlowCards(halos.length);
     const c = new Color();

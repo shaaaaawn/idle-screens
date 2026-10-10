@@ -341,6 +341,11 @@ export const METAQUARIUM_PARAMS = {
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Underwater signage: `kind[@place][>target][/#color][*size][:text]`, comma-separated
+   *  (plank arrow ring porthole neon led). Each stands beside its place (gate plaza hub
+   *  fountain home1…, or centre left right front back), facing the front; an LED board
+   *  scrolls a long line. Empty = none. */
+  signs: { type: 'string', default: '', ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

@@ -26,6 +26,7 @@ import { breedOf, isMintedId } from './farm';
 import { environmentOf } from './environments';
 import { validateMetaquariumParams, type ParamProblem } from './guide';
 import { expandFishMixSlots, parseFishMix } from './ipfs';
+import { parseSignMix } from './sign-mix';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { VIGNETTES } from './vignette';
@@ -182,6 +183,12 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
     const props = parsePropMix(str('propMix')).entries;
     const n = props.reduce((k, e) => k + e.count, 0);
     if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette === 'env' ? '' : `${e.palette} `}${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
+  }
+  if (has('signs') && str('interior') !== 'geode') {
+    const signs = parseSignMix(str('signs')).entries;
+    if (signs.length) {
+      world.push(`${signs.length} sign${signs.length === 1 ? '' : 's'}: ${signs.map((e) => `${e.kind}${e.text ? ` "${e.text}"` : ''}${e.place ? ` at ${e.place}` : ''}${e.target ? ` → ${e.target}` : ''}`).join(', ')}`);
+    }
   }
   if (num('skyLanterns') > 0) world.push('jellyfish lanterns overhead');
   if (num('horizon') > 0) world.push('a far horizon');

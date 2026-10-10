@@ -3,6 +3,7 @@ import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix } from './flora';
 import { parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
+import { parseSignMix } from './sign-mix';
 import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -1424,7 +1425,8 @@ class TankInstance implements SaverInstance {
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
+    const signs = this.str('signs').trim();
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signs}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     if (this.scenery) {
@@ -1438,10 +1440,10 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
-          fountain, lamps: streetLamps,
+          fountain, lamps: streetLamps, signs: signs ? parseSignMix(signs).entries : undefined,
           geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });

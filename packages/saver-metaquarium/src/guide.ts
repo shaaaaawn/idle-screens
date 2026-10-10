@@ -20,6 +20,7 @@ import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
+import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
@@ -103,6 +104,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
   fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
+  signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
   geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
@@ -144,6 +146,9 @@ geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian 
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
+signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
+          kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
+          an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
 vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
           [<sec>s:] actor =mark       start there           actor >mark       swim there
           actor @mark | @actor        face it               a b circle mark   circle it together
@@ -265,20 +270,43 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     if (!spots) out.push({ path: 'spotCues', message: 'a cue sheet needs a spotRig (or followSpot) to cue' });
     else push('spotCues', parseSpotCues(str('spotCues'), spots).problems);
   }
+  const world = worldMarks(params);
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
-    const homes = Math.round(Number(params.geodeHomes ?? 0));
-    const world: Record<string, { x: number; y: number; z: number }> = {};
-    const at = { x: 0, y: 0, z: 0 };
-    for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
-    if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
-    // Paths meet at a hub: the mark `paths` documents itself as adding.
-    if (Number(params.paths ?? 0) > 0) world.hub = at;
-    if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
+  }
+  if (str('signs')) {
+    const signs = parseSignMix(str('signs'));
+    push('signs', signs.problems);
+    if (params.interior === 'geode') out.push({ path: 'signs', also: ['interior'], message: 'signs stand outdoors — none are built inside a geode home' });
+    else {
+      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !(m in OPEN_MARKS) && !(m in world)))];
+      for (const m of missing) {
+        out.push({ path: 'signs', also: ['landmark', 'geodeHomes', 'paths', 'fountain'], message: `no "${m}" in this scene (${MARK_NEEDS[m] ?? 'its world part is off'}) — that sign stands in the open` });
+      }
+    }
   }
   out.push(...dependencyProblems(params));
   return out;
+}
+
+/** What turns each world mark on. */
+const MARK_NEEDS: Record<string, string> = {
+  gate: 'needs landmark castle or citadel', plaza: 'needs landmark castle or citadel', courtyard: 'needs landmark castle or citadel',
+  hub: 'needs paths > 0', fountain: 'needs a fountain', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
+};
+
+/** The marks this scene's world adds (positions are placeholders: only the names matter here). */
+function worldMarks(params: Readonly<Record<string, unknown>>): Record<string, { x: number; y: number; z: number }> {
+  const homes = Math.round(Number(params.geodeHomes ?? 0));
+  const world: Record<string, { x: number; y: number; z: number }> = {};
+  const at = { x: 0, y: 0, z: 0 };
+  for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
+  if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
+  // Paths meet at a hub: the mark `paths` documents itself as adding.
+  if (Number(params.paths ?? 0) > 0) world.hub = at;
+  if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
+  return world;
 }
 
 /** The tank's fish cap on the best devices; smaller ones swim fewer. */
