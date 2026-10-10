@@ -341,6 +341,11 @@ export const METAQUARIUM_PARAMS = {
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Voxel pyramids (0 = none): perfect, on the fish's own voxel grid — many far off in the haze, some in the middle
+   *  distance, a few small ones by the glass; standing, sunk, leaning, upturned, floating, one missing its capstone. */
+  pyramids: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Their shapes and stones, `shape|stone[:weight], …` (empty = the room's stone, every shape). */
+  pyramidMix: { type: 'string', default: '', ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
