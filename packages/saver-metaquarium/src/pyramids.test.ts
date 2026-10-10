@@ -1,9 +1,9 @@
 import { createRng } from '@idle-screens/core';
-import { Color, type Mesh } from 'three';
+import type { Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { validateMetaquariumParams } from './guide';
 import {
-  buildPyramids, parsePyramidMix, PYRAMID_SHAPES, PYRAMID_VOXEL, pyramidMaterial, pyramidProfile, PyramidWriter, writePyramid, type PyramidOptions,
+  buildPyramids, parsePyramidMix, PYRAMID_CUBES, PYRAMID_SHAPES, PYRAMID_VOXEL, pyramidMaterial, pyramidProfile, PyramidWriter, writePyramid, type PyramidOptions,
 } from './pyramids';
 import { buildScenery, type SceneryOptions } from './scenery';
 import { FISH_LENGTH } from './swim';
@@ -49,7 +49,7 @@ describe('pyramids: on the fish\'s own grid, perfectly symmetric', () => {
   });
 
   it('comes to a single cube, on an odd base; the tiered ones end on a platform', () => {
-    for (const shape of ['giza', 'step', 'bent', 'octa', 'frame'] as const) for (let half = 3; half < 60; half += 7) {
+    for (const shape of ['giza', 'step', 'bent', 'frame'] as const) for (let half = 3; half < 60; half += 7) {
       const p = pyramidProfile(shape, half);
       expect(p[p.length - 1], shape).toBe(0);
       expect(p[0], shape).toBe(half);
@@ -88,47 +88,86 @@ describe('pyramids: on the fish\'s own grid, perfectly symmetric', () => {
 });
 
 describe('pyramids: where they stand, and how', () => {
+  const hill = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
+
   it('is pure in its seed, and nothing at all at amount 0', () => {
     const a = buildPyramids(createRng(5), opts()), b = buildPyramids(createRng(5), opts());
-    expect(Array.from(a.far!.getAttribute('position').array)).toEqual(Array.from(b.far!.getAttribute('position').array));
+    expect(Array.from(a.geometry!.getAttribute('position').array)).toEqual(Array.from(b.geometry!.getAttribute('position').array));
     expect(a.sites).toEqual(b.sites);
     const none = buildPyramids(createRng(5), opts({ amount: 0 }));
-    expect([none.near, none.far, none.sites.length]).toEqual([null, null, 0]);
+    expect([none.geometry, none.sites.length]).toEqual([null, 0]);
   });
 
-  it('many far off, some middling, a few near; every pose; the far ones inside the horizon\'s bound', () => {
-    const poses = new Set<string>(), bands = { near: 0, mid: 0, far: 0 };
+  it('stands on the floor, every one: its base at or into the ground, its footprint on the floor, nothing floating', () => {
+    const poses = new Set<string>();
     for (let seed = 1; seed <= 12; seed++) {
-      const p = buildPyramids(createRng(seed), opts());
-      for (const s of p.sites) { poses.add(s.pose); bands[s.band]++; }
-      const pos = p.far!.getAttribute('position');
-      // Bobbing adds a few units at most; the horizon's own bound is 950.
-      for (let i = 0; i < pos.count; i++) expect(Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i))).toBeLessThan(950);
+      const p = buildPyramids(createRng(seed), opts({ terrain: hill }));
+      for (const site of p.sites) {
+        poses.add(site.pose);
+        expect(site.seat).toBeLessThanOrEqual(0);
+        expect(Math.hypot(site.x, site.z) + site.reach).toBeLessThanOrEqual(590 + 1e-6);
+      }
     }
-    expect(bands.far).toBeGreaterThan(bands.mid);
-    expect(bands.mid).toBeGreaterThan(bands.near);
-    expect([...poses].sort()).toEqual(['capless', 'float', 'inverted', 'lean', 'stand', 'sunk']);
+    expect([...poses].sort()).toEqual(['capless', 'lean', 'stand', 'sunk']);
   });
 
-  it('keeps off what is already there, and stands its ground: an obstacle for every one in the water but the floating', () => {
-    const blocked = buildPyramids(createRng(3), opts({ free: () => false }));
-    expect(blocked.sites.every((s) => s.band === 'far')).toBe(true);
+  it('is built of cubes a whole number of the fish\'s: one near the glass, bigger at the back', () => {
+    for (let seed = 1; seed <= 8; seed++) {
+      const p = buildPyramids(createRng(seed), opts());
+      for (const site of p.sites) {
+        expect(PYRAMID_CUBES).toContain(site.cube);
+        if (site.band === 'near') expect(site.cube).toBe(1);
+        if (site.band === 'far') expect(site.cube).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('stands in complexes, as Giza does: a great pyramid and its queens, one stone, one cube, the queens smaller', () => {
+    let queens = 0;
+    for (let seed = 1; seed <= 8; seed++) {
+      const p = buildPyramids(createRng(seed), opts());
+      const by = new Map<number, typeof p.sites>();
+      for (const site of p.sites) by.set(site.complex, [...(by.get(site.complex) ?? []), site]);
+      for (const members of by.values()) {
+        const [great, ...rest] = members;
+        queens += rest.length;
+        for (const q of rest) {
+          expect([q.material, q.cube]).toEqual([great!.material, great!.cube]);
+          expect(q.half).toBeLessThan(great!.half);
+        }
+      }
+    }
+    expect(queens).toBeGreaterThan(8);
+  });
+
+  it('keeps the camera\'s path clear: the near ones inside its orbit, the rest well outside it', () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      for (const site of buildPyramids(createRng(seed), opts()).sites) {
+        const r = Math.hypot(site.x, site.z);
+        if (site.band === 'near') expect(r + site.reach).toBeLessThanOrEqual(72 + 1e-6);
+        else expect(r - site.reach).toBeGreaterThanOrEqual(125 - 1e-6);
+      }
+    }
+  });
+
+  it('keeps off what is already there, and stands its ground: an obstacle for every one', () => {
+    expect(buildPyramids(createRng(3), opts({ free: () => false })).sites).toEqual([]);
     const p = buildPyramids(createRng(3), opts());
-    const grounded = p.sites.filter((s) => s.band !== 'far' && s.pose !== 'float');
-    expect(p.obstacles.length).toBeGreaterThanOrEqual(grounded.length);
+    expect(p.obstacles.length).toBeGreaterThanOrEqual(p.sites.length);
   });
 
   it('takes its stone from the room, or from the mix; shapes from the mix', () => {
-    const reef = buildPyramids(createRng(4), opts({ environment: 'ice' }));
-    expect(reef.sites.every((s) => ['crystal', 'nacre', 'limestone'].includes(s.material))).toBe(true);
+    const ice = buildPyramids(createRng(4), opts({ environment: 'ice' }));
+    expect(ice.sites.every((s) => ['crystal', 'nacre', 'limestone'].includes(s.material))).toBe(true);
     const gold = buildPyramids(createRng(4), opts({ mix: 'gold,mayan' }));
+    expect(gold.sites.length).toBeGreaterThan(0);
     expect(gold.sites.every((s) => s.material === 'gold' && s.shape === 'mayan')).toBe(true);
     expect(parsePyramidMix('giza:3, obsidian, mayan:0.5').problems).toEqual([]);
-    expect(parsePyramidMix('cone').problems).toHaveLength(1);
+    expect(parsePyramidMix('octa').problems).toHaveLength(1);
     expect(validateMetaquariumParams({ pyramidMix: 'giza,cone' }).map((p) => p.path)).toEqual(['pyramidMix']);
   });
 
-  it('a lit capstone throws a little light on the floor; the far ones none', () => {
+  it('a lit capstone throws a little light on the floor: three at most', () => {
     let lights = 0;
     for (let seed = 1; seed <= 8; seed++) {
       const p = buildPyramids(createRng(seed), opts({ mix: 'giza,gold' }));
@@ -138,18 +177,14 @@ describe('pyramids: where they stand, and how', () => {
     expect(lights).toBeGreaterThan(0);
   });
 
-  it('its two materials compile apart: the near one fogged, the far one hazed', () => {
-    const clock = { value: 0 }, fog = { value: new Color() };
-    const near = pyramidMaterial(false, clock, fog), far = pyramidMaterial(true, clock, fog);
-    expect(near.customProgramCacheKey()).not.toEqual(far.customProgramCacheKey());
-    expect([near.fog, far.fog]).toEqual([true, false]);
-    for (const [m, isFar] of [[near, false], [far, true]] as const) {
-      const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>', uniforms: {} as Record<string, unknown> };
-      m.onBeforeCompile(shader as never, undefined as never);
-      expect(shader.fragmentShader).toContain('mqPyrPaint()');
-      expect(shader.vertexShader).toContain('aPyrB.w * sin(uPyrTime');
-      expect(shader.fragmentShader.includes('uHorizonFog')).toBe(isFar);
-    }
+  it('draws its cubes as cubes: one material, a seam between every cube and the next', () => {
+    const m = pyramidMaterial();
+    expect(m.customProgramCacheKey()).toBe('mq-pyramids-v2');
+    const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>', uniforms: {} as Record<string, unknown> };
+    m.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.fragmentShader).toContain('mqPyrPaint()');
+    expect(shader.fragmentShader).toContain('seam');
+    expect(shader.vertexShader).toContain('vCell = aCell');
   });
 });
 
@@ -157,18 +192,17 @@ describe('pyramids: in the world', () => {
   const base: SceneryOptions = { rocks: 1, veins: 0.7, homes: 2, flora: 1, bubbles: 0, snow: 0, cap: 8, scale: 1 };
   const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
   const buffers = (o: SceneryOptions) => buildScenery([], createRng(9), terrain, o).group.children
-    .filter((c) => !c.name.startsWith('pyramids')).map((c) => [c.name, ...Array.from((c as Mesh).geometry.getAttribute('position').array)]);
+    .filter((c) => c.name !== 'pyramids').map((c) => [c.name, ...Array.from((c as Mesh).geometry.getAttribute('position').array)]);
 
-  it('adds two draws and moves nothing else: the rest of the world is the same with or without them', () => {
+  it('adds one draw and moves nothing else: the rest of the world is the same with or without them', () => {
     const w = buildScenery([], createRng(9), terrain, { ...base, pyramids: 1 });
-    expect(w.group.children.filter((c) => c.name.startsWith('pyramids')).map((c) => c.name).sort()).toEqual(['pyramids', 'pyramids-far']);
-    expect(w.counts.pyramids).toBeGreaterThan(10);
-    // Without: byte-identical to never having had the option.
+    expect(w.group.children.filter((c) => c.name === 'pyramids')).toHaveLength(1);
+    expect(w.counts.pyramids).toBeGreaterThan(6);
     expect(buffers({ ...base, pyramids: 0 })).toEqual(buffers(base));
   });
 
   it('never indoors', () => {
     const w = buildScenery([], createRng(9), terrain, { ...base, pyramids: 1, interior: true });
-    expect(w.group.children.some((c) => c.name.startsWith('pyramids'))).toBe(false);
+    expect(w.group.children.some((c) => c.name === 'pyramids')).toBe(false);
   });
 });

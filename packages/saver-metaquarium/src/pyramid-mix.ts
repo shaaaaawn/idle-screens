@@ -3,7 +3,7 @@
  * can validate `pyramidMix` (guide.ts) without pulling three.js in.
  */
 
-export const PYRAMID_SHAPES = ['giza', 'step', 'bent', 'djoser', 'mayan', 'frame', 'octa'] as const;
+export const PYRAMID_SHAPES = ['giza', 'step', 'bent', 'djoser', 'mayan', 'frame'] as const;
 export type PyramidShape = (typeof PYRAMID_SHAPES)[number];
 
 /** Materials: main, alt, accent (glyphs, speckle, veins) and the capstone's colour; and the motif. */
