@@ -16,4 +16,5 @@ export {
 } from './vignette';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { parseSignMix, SIGN_KINDS, SIGN_PLACES, SIGN_TEXT_MAX, MAX_SIGNS, type SignEntry, type SignKind } from './sign-mix';
 export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';

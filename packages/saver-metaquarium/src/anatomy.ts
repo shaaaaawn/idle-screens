@@ -26,6 +26,7 @@ import { breedOf, isMintedId } from './farm';
 import { environmentOf } from './environments';
 import { validateMetaquariumParams, type ParamProblem } from './guide';
 import { expandFishMixSlots, parseFishMix } from './ipfs';
+import { parseSignMix } from './sign-mix';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { VIGNETTES } from './vignette';
@@ -183,6 +184,12 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
     const n = props.reduce((k, e) => k + e.count, 0);
     if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette === 'env' ? '' : `${e.palette} `}${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
   }
+  if (has('signs') && str('interior') !== 'geode') {
+    const signs = parseSignMix(str('signs')).entries;
+    if (signs.length) {
+      world.push(`${signs.length} sign${signs.length === 1 ? '' : 's'}: ${signs.map((e) => `${e.kind}${e.text ? ` "${e.text}"` : ''}${e.place ? ` at ${e.place}` : ''}${e.target ? ` → ${e.target}` : ''}`).join(', ')}`);
+    }
+  }
   if (num('skyLanterns') > 0) world.push('jellyfish lanterns overhead');
   if (num('horizon') > 0) world.push('a far horizon');
   if (num('bubbleVents') > 0) world.push('bubble vents');
@@ -238,6 +245,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (has('fishGlow')) look.push(`glow ${pct('fishGlow')}`);
   if (num('fishAmbient') > 0) look.push(`fish ambient ${pct('fishAmbient')}`);
   if (str('dither') === 'on') look.push('dither');
+  if (has('signFlicker') && has('signs')) look.push(num('signFlicker') > 0 ? `sign flicker ${pct('signFlicker')}` : 'steady signs');
 
   const sections: AnatomySection[] = (
     [['Room', room], ['World', world], ['Stage', stage], ['Camera', camera], ['Motion', motion], ['Look', look]] as const
