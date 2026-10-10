@@ -124,9 +124,9 @@ describe('bundled breeds (breeds/README.md)', () => {
     },
     seahorse: {
       joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
-      layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
-      dials: ['curl', 'lean', 'lookPitch', 'lookYaw'],
-      clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
+      layers: ['a4', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'g4', 'g5', 'g6', 'grasp', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['aim', 'curl', 'grip', 'lean', 'lookPitch', 'lookYaw'],
+      clips: ['aim', 'bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'grip', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
       head: 'head', soft: true,
     },
   };
