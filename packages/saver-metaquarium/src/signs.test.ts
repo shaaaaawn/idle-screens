@@ -68,7 +68,30 @@ describe('buildSigns', () => {
     clocks[0]!.value = 12.5;
     expect(clocks[0]!.value).toBe(12.5);
     const face = built.group.children.find((m) => m.name === 'sign-led') as Mesh;
-    expect((face.material as MeshBasicMaterial).customProgramCacheKey()).toBe('mq-sign-led-v1');
+    expect((face.material as MeshBasicMaterial).customProgramCacheKey()).toBe('mq-sign-led-v2');
+  });
+});
+
+describe('live LED text', () => {
+  it('swaps a board\'s words in place: new texture, marquee restarted, nothing rebuilt', () => {
+    const clocks: { value: number }[] = [];
+    const built = buildSigns(parseSignMix('plank:Hi, led:SHORT, led:ANOTHER BOARD').entries, ctx({ clocks }));
+    const faces = built.group.children.filter((m) => m.name === 'sign-led') as Mesh[];
+    const uniformsOf = (m: Mesh) => {
+      const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>' };
+      (m.material as MeshBasicMaterial).onBeforeCompile(shader as never, undefined as never);
+      return shader.uniforms as Record<string, { value: { x: number; z: number; dispose?: () => void } }>;
+    };
+    const u0 = uniformsOf(faces[0]!), u1 = uniformsOf(faces[1]!);
+    const before = u0.uLedText!.value, other = u1.uLedText!.value;
+    clocks.forEach((c) => (c.value = 30));
+    built.setLedTexts(['NOW A LONG LINE THAT HAS TO SCROLL ACROSS', 'ANOTHER BOARD']);
+    expect(u0.uLedText!.value).not.toBe(before);
+    expect(u0.uLedInfo!.value.x).toBe(41 * 6 - 1);
+    expect(u0.uLedInfo!.value.z).toBe(1);   // longer than the board: a marquee
+    expect(u0.uLedSwap!.value.x).toBe(30);  // entering from the right edge now
+    expect(u1.uLedText!.value).toBe(other); // unchanged words: untouched
+    expect(built.group.children).toHaveLength(3); // the plank's draw and two faces, as built
   });
 });
 

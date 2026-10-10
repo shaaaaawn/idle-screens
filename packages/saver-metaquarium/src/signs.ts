@@ -45,6 +45,8 @@ export interface BuiltSigns {
   halos: { x: number; y: number; z: number; color: string; size: number }[];
   lights: Emitter[];
   count: number;
+  /** Swap the text of the LED boards, in order of the entries, in place. */
+  setLedTexts(texts: readonly string[]): void;
 }
 
 const WOOD = ['#7a4f2c', '#8a5a33', '#6c4527', '#94653b'];
@@ -114,16 +116,20 @@ const FISH_ICON: PixelText = (() => {
 const LED_GLSL = /* glsl */ `
 uniform sampler2D uLedText;
 uniform vec4 uLedInfo;   // text width px, time, scroll (1/0), level
+uniform vec4 uLedSwap;   // time the text last changed, -, -, -
 uniform vec3 uLedColor;
 varying vec2 vLedUv;
 vec3 mqLed() {
   vec2 cell = vLedUv * vec2(${LED_COLS}.0, ${LED_ROWS}.0);
   ivec2 c = ivec2(floor(cell));
   vec2 f = fract(cell) - 0.5;
-  float w = uLedInfo.x, gap = 8.0, span = w + gap;
-  // Columns of the text under this LED: scrolled right to left, or centred.
+  float w = uLedInfo.x;
+  // Columns of the text under this LED. A line longer than the board is a
+  // marquee: it enters at the right edge when it is set, crosses, and comes
+  // round again. A short one sits centred.
+  float k = floor(max(0.0, uLedInfo.y - uLedSwap.x) * 7.0);
   float col = uLedInfo.z > 0.5
-    ? mod(float(c.x) + floor(uLedInfo.y * 7.0), span) - 0.0
+    ? float(c.x) - ${LED_COLS}.0 + mod(k, w + ${LED_COLS}.0)
     : float(c.x) - floor((${LED_COLS}.0 - w) * 0.5);
   int row = ${LED_ROWS} - 2 - c.y;
   float on = 0.0;
@@ -134,20 +140,30 @@ vec3 mqLed() {
 }
 `;
 
-function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): MeshBasicMaterial {
+function textTexture(t: PixelText): DataTexture {
   const data = new Uint8Array(Math.max(1, t.w) * t.h);
   for (let i = 0; i < t.bits.length; i++) data[i] = t.bits[i] ? 255 : 0;
   const tex = new DataTexture(data, Math.max(1, t.w), t.h, RedFormat, UnsignedByteType);
   tex.magFilter = tex.minFilter = NearestFilter;
   tex.needsUpdate = true;
   tex.userData.mqOwned = true;
+  return tex;
+}
+
+/** What swaps an LED board's text without rebuilding the world: a new texture, the marquee restarted. */
+export type LedBoard = (text: string) => void;
+
+function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): { material: MeshBasicMaterial; swap: LedBoard } {
+  const tex = textTexture(t);
   const mat = new MeshBasicMaterial({ color, side: FrontSide });
   mat.userData.mqOwned = true;
   mat.userData.mqNoCaustic = true; // a display, not a surface
-  mat.userData.mqDispose = () => tex.dispose(); // the text texture lives in a uniform, not `map`
+  mat.userData.mqDispose = () => text.value.dispose(); // the text texture lives in a uniform, not `map` (and a swap replaces it)
   mat.userData.mqGlowColor = color.getHex();
   const info = { value: new Vector4(t.w, 0, t.w > LED_COLS ? 1 : 0, 1) };
-  const uniforms = { uLedText: { value: tex }, uLedInfo: info, uLedColor: { value: color.clone() } };
+  const swapAt = { value: new Vector4(0, 0, 0, 0) };
+  const text = { value: tex };
+  const uniforms = { uLedText: text, uLedInfo: info, uLedSwap: swapAt, uLedColor: { value: color.clone() } };
   // The scenery sets every clock to the scene time each frame: that is the scroll.
   clocks.push({ get value() { return info.value.y; }, set value(t: number) { info.value.y = t; } });
   mat.onBeforeCompile = (shader) => {
@@ -155,8 +171,16 @@ function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): M
     shader.vertexShader = 'varying vec2 vLedUv;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vLedUv = uv;');
     shader.fragmentShader = LED_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqLed();');
   };
-  mat.customProgramCacheKey = () => 'mq-sign-led-v1';
-  return mat;
+  mat.customProgramCacheKey = () => 'mq-sign-led-v2';
+  const swap: LedBoard = (next) => {
+    const r = rasterText(next);
+    text.value.dispose();
+    text.value = textTexture(r);
+    info.value.x = r.w;
+    info.value.z = r.w > LED_COLS ? 1 : 0;
+    swapAt.value.x = info.value.y; // the marquee starts again from the right edge, now
+  };
+  return { material: mat, swap };
 }
 
 /**
@@ -203,6 +227,9 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
   const wood = new CubeWriter(), glow = new CubeWriter();
   const obstacles: BuiltSigns['obstacles'] = [], halos: BuiltSigns['halos'] = [], lights: Emitter[] = [];
   const taken: Array<{ x: number; z: number; r: number }> = [];
+  // Each board knows which LED entry it is, so a skipped sign does not shift the others' words.
+  const boards: Array<{ swap: LedBoard; text: string; ordinal: number }> = [];
+  let ledOrdinal = 0;
   const s = ctx.scale;
   const c = new Color(), dark = new Color();
   entries.forEach((e, i) => {
@@ -216,6 +243,7 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
     // A porthole's glass grows to take its word (a 4-letter word is 23 px wide).
     const portR = Math.max(7, Math.ceil((t.w + 2) / 2)) * px;
     const width = e.kind === 'led' ? (LED_COLS + 2) * px : e.kind === 'porthole' ? 2 * portR + 4 * px : e.kind === 'ring' ? Math.max(22 * px, textW + 4 * px) : textW + 8 * px;
+    const ordinal = e.kind === 'led' ? ledOrdinal++ : -1;
     const site = siteOf(e, i, ctx, width, taken);
     if (!site) return;
     taken.push({ x: site.x, z: site.z, r: width / 2 + 6 * s });
@@ -299,7 +327,9 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
       c.set('#1b1d22'); W.box(0, cy, -0.8 * px, fw + 2 * px, fh + 2 * px, 1.6 * px, c);
       const quad = new PlaneGeometry(fw, fh);
       quad.userData.mqOwned = true;
-      const face = new Mesh(quad, ledMaterial(t, color, ctx.clocks));
+      const led = ledMaterial(t, color, ctx.clocks);
+      boards.push({ swap: led.swap, text: e.text, ordinal });
+      const face = new Mesh(quad, led.material);
       face.name = 'sign-led';
       face.position.set(site.x + Math.sin(yaw) * 0.05 * px, ground + cy, site.z + Math.cos(yaw) * 0.05 * px);
       face.rotation.y = yaw;
@@ -330,5 +360,15 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
   };
   add(wood, 'signs');
   add(glow, 'signs-lit');
-  return { group, obstacles, halos, lights, count: obstacles.length };
+  return {
+    group, obstacles, halos, lights, count: obstacles.length,
+    setLedTexts(texts) {
+      for (const b of boards) {
+        const next = texts[b.ordinal];
+        if (next === undefined || next === b.text) continue;
+        b.text = next;
+        b.swap(next);
+      }
+    },
+  };
 }

@@ -115,6 +115,8 @@ export interface Scenery {
   groundAt(x: number, z: number): number;
   /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
+  /** Swap the LED boards' text in place (in sign order), no rebuild: for live data. */
+  setLedTexts(texts: readonly string[]): void;
   /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
   setSurface(y: number | null): void;
 }
@@ -437,6 +439,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // Signs, once everything they stand beside has a place: off the paths, the
   // doorsteps and the lamps, beside their mark. Fish go round them.
   let signHalos: Array<{ x: number; y: number; z: number; color: string; size: number }> = [];
+  let setLedTexts: (texts: readonly string[]) => void = () => {};
   if (opts.signs?.length && !opts.interior) {
     const built = buildSigns(opts.signs, {
       rng: rng.fork(41), terrain, scale: s, clocks,
@@ -452,6 +455,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     obstacles.push(...built.obstacles);
     homeLights.push(...built.lights);
     signHalos = built.halos;
+    setLedTexts = built.setLedTexts;
     counts.signs = built.count;
   }
   let fountainMouth: { x: number; y: number; z: number; color: string } | null = null;
@@ -882,6 +886,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       return h;
     },
     groundAt: stoneGround ?? (() => -Infinity),
+    setLedTexts(texts) { setLedTexts(texts); },
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);
