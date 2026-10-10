@@ -197,6 +197,8 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
 | `fountain` | `none` \| `vent` \| `geode` | The town square's fountain: a hot-vent chimney or a geode basin, with a bubble column, a pebble plaza and its own light; adds a `fountain` vignette mark. |
 | `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs `paths`). |
+| `pyramids` | 0–1 | Voxel pyramids on the fish's own grid: far off in the haze, in the middle distance, a few small ones near. Standing, sunk, leaning, upturned, floating. |
+| `pyramidMix` | string | Their shapes and stones, `shape\|stone[:weight], …`: giza step bent djoser mayan frame octa · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt. |
 | `floraLayout` | `garden` \| `gallery` | Grow round the crystals, or one plot per species to see them all. |
 | `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
