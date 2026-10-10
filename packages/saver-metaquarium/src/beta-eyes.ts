@@ -19,17 +19,23 @@
  * lands only on the pixels of the eyes.
  *
  * Measured in the rig's frame (breeds/rig/betafish.py: nose +Z, up +Y; the
- * mesh's bind-space positions): the flanks stand at x = -7.38 and +6.62, the
- * blocks span z 0.3 .. 6.3 and y -2.1 .. 3.9, in cells of 2.
+ * mesh's bind-space positions): the eye blocks stand one voxel proud of the
+ * flanks, their outer faces at x = -9.38 and +8.62, spanning z 0.25 .. 6.25
+ * and y -2.07 .. 3.93, in cells of 2 — each cell a paint region of its own.
+ * (The flank walls behind them, at -7.38 and +6.62, belong to the model's
+ * hidden interior region; this module once read THOSE, so it animated faces
+ * nobody could see while the visible eye kept its painted pupil.)
  */
 import { ShaderChunk, Vector2, Vector4, type BufferGeometry, type Material, type Mesh, type Object3D } from 'three';
 
 /** The two eye blocks: the flank's plane (x), and the block's corner (z, y). */
 export const BETA_EYE_BLOCKS = [
-  { plane: -7.38, z0: 0.3, y0: -2.1 },
-  { plane: 6.62, z0: 0.3, y0: -2.1 },
+  { plane: -9.38, z0: 0.25, y0: -2.07 },
+  { plane: 8.62, z0: 0.25, y0: -2.07 },
 ] as const;
 const CELL = 2;
+/** The fish's centre line: the side of each block's face its depth runs to. */
+const MID_X = -0.38;
 const N = 3;
 
 export interface BetaEyeRig {
@@ -95,7 +101,11 @@ const PARS = /* glsl */ `
   vec2 mqBetaEyeUv(vec2 uv) {
     for (int e = 0; e < 2; e++) {
       vec4 b = uBetaEye[e];
-      if (b.w < 0.5 || abs(vBetaP.x - b.x) > 0.05) continue;
+      // The block's whole depth, not just its face: each cell is a voxel, and the
+      // buried side faces between cells meet the front at the seams — painted
+      // the cells' own colours there, they never show as hairlines.
+      float depth = (vBetaP.x - b.x) * sign(${MID_X.toFixed(2)} - b.x);
+      if (b.w < 0.5 || depth < -0.05 || depth > ${CELL.toFixed(1)} + 0.05) continue;
       vec2 g = vec2((vBetaP.z - b.y) / ${CELL.toFixed(1)}, (vBetaP.y - b.z) / ${CELL.toFixed(1)});
       if (g.x < 0.0 || g.y < 0.0 || g.x > ${N}.0 || g.y > ${N}.0) continue;
       // The pupil: the cells darker than the eye's white, or tinted. Its box
@@ -119,10 +129,37 @@ const PARS = /* glsl */ `
       vec2 s = vec2(gz.x >= 0.0 ? gz.x * lim1.x : -gz.x * lim0.x, gz.y >= 0.0 ? gz.y * lim1.y : -gz.y * lim0.y);
       // The block shows its own pattern shifted by s: what is at q, s back.
       vec2 q = clamp(g - s, vec2(0.0), vec2(${N}.0 - 0.0005));
-      vec2 cell = floor(q), f = clamp(q - cell, 0.03, 0.97);
-      return mqBetaCellUv(e * 9 + int(cell.y) * 3 + int(cell.x), f);
+      // Each cell is one flat colour: read it at its centre. Sampled near its
+      // edge, the atlas's filtering pulled in the neighbouring texel, and a
+      // dark pupil showed hairline seams of white between its cells.
+      vec2 cell = floor(q);
+      return mqBetaCellUv(e * 9 + int(cell.y) * 3 + int(cell.x), vec2(0.5));
     }
     return uv;
+  }
+`;
+
+/**
+ * Each eye cell is a whole voxel, so the side faces BETWEEN neighbouring cells
+ * are buried — but they reach the block's front exactly at the seams, where
+ * they z-fought the front faces: a dark pupil showed grey hairlines (its
+ * sheen on those side faces) across it, on every token, painted by atlas or by
+ * flat colour. At draw time their front edge sinks a hair toward the flank;
+ * the rim's side faces stay, so the block keeps its sides. Bind-space,
+ * before skinning: the model's data is untouched.
+ */
+const SEAMS = /* glsl */ `
+  for (int mqE = 0; mqE < 2; mqE++) {
+    float mqPlane = mqE == 0 ? ${BETA_EYE_BLOCKS[0].plane.toFixed(3)} : ${BETA_EYE_BLOCKS[1].plane.toFixed(3)};
+    float mqIn = sign(${MID_X.toFixed(2)} - mqPlane);
+    if (abs(normal.x) < 0.5 && (position.x - mqPlane) * mqIn < 0.02) {
+      float mqGz = (position.z - ${BETA_EYE_BLOCKS[0].z0.toFixed(3)}) / ${CELL.toFixed(1)};
+      float mqGy = (position.y - ${BETA_EYE_BLOCKS[0].y0.toFixed(3)}) / ${CELL.toFixed(1)};
+      if (mqGz > -0.01 && mqGz < ${N}.01 && mqGy > -0.01 && mqGy < ${N}.01) {
+        bool mqRim = abs(normal.z) > 0.5 ? (mqGz < 0.01 || mqGz > ${N - 1}.99) : (mqGy < 0.01 || mqGy > ${N - 1}.99);
+        if (!mqRim) transformed.x += mqIn * 0.08;
+      }
+    }
   }
 `;
 
@@ -132,17 +169,18 @@ const PARS = /* glsl */ `
  * a model without the eye blocks returns null and is left as it was.
  */
 export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
-  const mats: Material[] = [], geometries: BufferGeometry[] = [];
+  const mats: Material[] = [], all: Material[] = [], geometries: BufferGeometry[] = [];
   body.traverse((o) => {
     const mesh = o as Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
     if (!geometries.includes(mesh.geometry)) geometries.push(mesh.geometry);
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (!all.includes(m)) all.push(m);
       if ((m as Material & { map?: unknown }).map && !mats.includes(m)) mats.push(m);
     }
   });
   const found = betaEyeCells(geometries);
-  if (!found || !mats.length) return null;
+  if (!found) return null;
   const cell = (e: number, k: number) => found[e]?.[k] ?? null;
   const uniforms = {
     uBetaEye: { value: BETA_EYE_BLOCKS.map((b, e) => new Vector4(b.plane, b.z0, b.y0, found[e]!.every(Boolean) ? 1 : 0)) },
@@ -150,10 +188,14 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
     uBetaCellY: { value: Array.from({ length: 18 }, (_, i) => { const c = cell(i >= 9 ? 1 : 0, i % 9); return c ? new Vector2(c.dy[0], c.dy[1]) : new Vector2(); }) },
     uBetaGaze: { value: [new Vector2(), new Vector2()] },
   };
-  for (const m of mats) {
+  for (const m of all) {
+    const mapped = mats.includes(m);
     const prev = m.onBeforeCompile;
     m.onBeforeCompile = (shader, renderer) => {
       prev.call(m, shader, renderer);
+      // Every material: the eye blocks' buried side faces sink a hair behind the front (SEAMS).
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${SEAMS}`);
+      if (!mapped) return;
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader = 'varying vec3 vBetaP;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vBetaP = position;');
       // After the map's own declaration (the functions read it), and only where there is one.
@@ -161,7 +203,7 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
         ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, mqBetaEyeUv( vMapUv ) )'));
     };
     const key = m.customProgramCacheKey.bind(m);
-    m.customProgramCacheKey = () => `${key()}|mq-beta-eyes-v1`;
+    m.customProgramCacheKey = () => `${key()}|mq-beta-eyes-v3${mapped ? '' : '-seams'}`;
     m.needsUpdate = true;
   }
   const counts = found.map((c) => c.filter(Boolean).length);

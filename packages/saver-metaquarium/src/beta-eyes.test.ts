@@ -10,15 +10,16 @@ const load = async (): Promise<{ scene: Object3D; animations: AnimationClip[] }>
   const b = Buffer.from((await BUNDLED_BREEDS.betafish!()).default, 'base64');
   return new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
 };
-const firstGeometry = (o: Object3D): Mesh['geometry'] => {
-  let g: Mesh['geometry'] | null = null;
-  o.traverse((n) => { if (!g && (n as Mesh).isMesh) g = (n as Mesh).geometry; });
-  return g!;
+/** Every region mesh's geometry: a token is one mesh per paint region, and each eye cell is a region of its own. */
+const geometries = (o: Object3D): Mesh['geometry'][] => {
+  const out: Mesh['geometry'][] = [];
+  o.traverse((n) => { const m = n as Mesh; if (m.isMesh && !out.includes(m.geometry)) out.push(m.geometry); });
+  return out;
 };
 
 describe('betafish: the painted eyes', () => {
   it('finds both 3×3 eye blocks on the real model, each cell mapped onto its own square of the atlas', async () => {
-    const cells = betaEyeCells(firstGeometry((await load()).scene))!;
+    const cells = betaEyeCells(geometries((await load()).scene))!;
     expect(cells).not.toBeNull();
     expect(cells.map((e) => e.filter(Boolean).length)).toEqual([9, 9]);
     for (const eye of cells) for (const c of eye) {
@@ -45,22 +46,29 @@ describe('betafish: the painted eyes', () => {
     }
   });
 
-  it('reads every mesh of a token: eye cells split across its materials\' meshes are all found', async () => {
-    const geometry = firstGeometry((await load()).scene);
-    const idx = geometry.index!, n = idx.count, pos = geometry.getAttribute('position');
-    // Two meshes over one buffer, each indexing the triangles on one side of
-    // z 3.3 (mid-eye) — as a token's materials split its cells between them.
-    const half = (k: number): typeof geometry => {
-      const g = geometry.clone(); const ids: number[] = [];
-      for (let t = 0; t < n; t += 3) {
-        const z = (pos.getZ(idx.getX(t)) + pos.getZ(idx.getX(t + 1)) + pos.getZ(idx.getX(t + 2))) / 3;
-        if ((z < 3.3 ? 0 : 1) === k) ids.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+  it('reads every mesh of a token: eye cells split across its regions\' meshes are all found', async () => {
+    const all = geometries((await load()).scene);
+    // The visible cells, one voxel proud of the flank: no single mesh holds them all.
+    for (const g of all) { const one = betaEyeCells(g); expect(one === null || one.flat().some((c) => !c)).toBe(true); }
+    expect(betaEyeCells(all)!.map((e) => e.filter(Boolean).length)).toEqual([9, 9]);
+  });
+
+  it('reads the eye on the faces you SEE, not the flank wall hidden behind it', async () => {
+    // The wall behind the block (x -7.38 / 6.62) is the model's interior region;
+    // a shader there animated faces nobody could see.
+    expect(BETA_EYE_BLOCKS.map((b) => b.plane)).toEqual([-9.38, 8.62]);
+    const all = geometries((await load()).scene);
+    let outer = 0;
+    for (const g of all) {
+      const pos = g.getAttribute('position'), idx = g.index;
+      const n = idx ? idx.count : pos.count;
+      for (let t = 0; t + 2 < n; t += 3) {
+        const xs = [0, 1, 2].map((k) => pos.getX(idx ? idx.getX(t + k) : t + k));
+        const zs = [0, 1, 2].map((k) => pos.getZ(idx ? idx.getX(t + k) : t + k));
+        if (xs.every((x) => Math.abs(x + 9.38) < 0.02) && Math.min(...zs) > 0 && Math.max(...zs) < 6.5) outer++;
       }
-      g.setIndex(ids); return g;
-    };
-    const one = betaEyeCells(half(0));
-    expect(one === null || one.flat().some((c) => !c)).toBe(true); // neither half alone has every cell
-    expect(betaEyeCells([half(0), half(1)])!.map((e) => e.filter(Boolean).length)).toEqual([9, 9]);
+    }
+    expect(outer).toBe(18); // nine cells, two triangles each
   });
 
   it('a model without the blocks is left alone', () => {
@@ -78,7 +86,7 @@ describe('betafish: the painted eyes', () => {
     });
     const rig = rigBetaEyes(scene)!;
     expect(rig.cells).toEqual([9, 9]);
-    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v1');
+    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v3');
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <map_pars_fragment>\n#include <map_fragment>', uniforms: {} as Record<string, { value: unknown }> };
     mats[0]!.onBeforeCompile(shader as never, undefined as never);
     expect(shader.vertexShader).toContain('vBetaP = position');

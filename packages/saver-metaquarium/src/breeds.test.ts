@@ -116,10 +116,10 @@ describe('bundled breeds (breeds/README.md)', () => {
       head: 'head', soft: true,
     },
     betafish: {
-      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'pecL', 'pecR', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
+      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
       layers: ['flexP', 'flexR', 'gL', 'gR', 'lookP', 'lookY', 'roll', 'root', 'sD', 'sL', 'sU'],
       dials: ['bend', 'lookPitch', 'lookYaw', 'spread'],
-      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'flare', 'flick', 'gulp', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim'],
+      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'drop', 'flare', 'flick', 'footwork', 'freeze', 'gulp', 'headspin', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim', 'toprock', 'windmill'],
       head: 'head', soft: true,
     },
     seahorse: {

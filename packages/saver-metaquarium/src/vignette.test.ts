@@ -114,4 +114,16 @@ describe('vignettes', () => {
     expect(all).toContain(GESTURES[0]);
     expect(parseVignette('', OPEN_MARKS)).toMatchObject({ actors: 0, duration: 0, problems: [] });
   });
+
+  it('dances: reported to the fish that dances them itself, done with the whole body by any other', () => {
+    const v = parseVignette('4s: a =centre | 4s: a windmill | 4s: a headspin', OPEN_MARKS);
+    expect(v.problems).toEqual([]);
+    const plain = poseOf(v, 0, 6)!, own = poseOf(v, 0, 6, (g) => g === 'windmill')!;
+    expect(plain.doing).toBe('windmill');
+    expect(plain.gesture?.name).toBe('windmill');
+    expect(own.gesture).toEqual(plain.gesture);
+    expect(Math.abs(plain.roll - own.roll)).toBeGreaterThan(0.1); // the whole-body roll, left to the clip
+    expect(own.x).toBeCloseTo(plain.x, 6);
+    expect(poseOf(v, 0, 10)!.gesture?.name).toBe('headspin');
+  });
 });

@@ -1,7 +1,7 @@
-import { AnimationClip, Bone, Group, NumberKeyframeTrack, type Object3D } from 'three';
+import { AnimationClip, Bone, Group, NumberKeyframeTrack, type Object3D, type SkinnedMesh } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
-import { BETA_CLIPS, BETA_MOMENTS, betaFrame, betaMoment, betaMomentOf, betaPersonality, rigBeta, type BetaInput } from './beta';
+import { BETA_CLIPS, BETA_DANCES, BETA_MOMENTS, betaFrame, betaMoment, betaMomentOf, betaPersonality, rigBeta, type BetaInput } from './beta';
 import { BUNDLED_BREEDS } from './breeds';
 import { bonesOf, momentSnaps, swimMotion } from './rig-snaps';
 
@@ -129,7 +129,35 @@ describe('betafish: the real rig', () => {
     expect(rigBeta(gltf.scene, gltf.animations)).not.toBeNull();
     expect(bonesOf(gltf.scene).map((o) => o.name)).toEqual(expect.arrayContaining([
       'head', 'body', 'rear', 'ped', 'cU1', 'cU2', 'cM1', 'cM2', 'cL1', 'cL2', 'd1', 'd2',
-      'pecR', 'pecL', 'ven1R', 'ven2R', 'ven1L', 'ven2L', 'gillR', 'gillL', 'root', 'roll', 'lookY', 'lookP', 'flexR', 'flexP', 'sU', 'sL', 'sD', 'gR', 'gL']));
+      'ven1R', 'ven2R', 'ven1L', 'ven2L', 'gillR', 'gillL', 'root', 'roll', 'lookY', 'lookP', 'flexR', 'flexP', 'sU', 'sL', 'sD', 'gR', 'gL']));
+    // The eye blocks were once taken for pectoral fins and hinged like doors.
+    expect(bonesOf(gltf.scene).some((o) => /^pec/.test(o.name))).toBe(false);
+  });
+
+  it('keeps the eyes on the head: no gill cover or fin moves an eye cell', async () => {
+    const gltf = await load();
+    const meshes: SkinnedMesh[] = [];
+    gltf.scene.traverse((o) => { if ((o as SkinnedMesh).isSkinnedMesh) meshes.push(o as SkinnedMesh); });
+    expect(meshes.length).toBeGreaterThan(0);
+    let cells = 0;
+    for (const m of meshes) {
+      const names = m.skeleton.bones.map((b) => b.name);
+      const pos = m.geometry.getAttribute('position'), si = m.geometry.getAttribute('skinIndex'), sw = m.geometry.getAttribute('skinWeight');
+      const idx = m.geometry.index;
+      const used = new Set<number>();
+      if (idx) for (let k = 0; k < idx.count; k++) used.add(idx.getX(k)); else for (let k = 0; k < pos.count; k++) used.add(k);
+      for (const i of used) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (Math.abs(Math.abs(x + 0.38) - 9.0) > 0.05 || z < 0.2 || z > 6.3 || y < -2.1 || y > 4) continue; // the blocks' outer faces
+        cells++;
+        for (let k = 0; k < 4; k++) {
+          if (sw.getComponent(i, k) < 0.01) continue;
+          const bone = names[si.getComponent(i, k)]!;
+          expect(['head', 'body'], `eye vertex ${i} on ${bone}`).toContain(bone);
+        }
+      }
+    }
+    expect(cells).toBeGreaterThan(30);
   });
 
   it('plays every moment alone without a snap', async () => {
@@ -145,5 +173,26 @@ describe('betafish: the real rig', () => {
     expect(m.p99).toBeLessThan(0.1);
     expect(m.worstAcc, m.worstAt).toBeLessThan(0.03);
     expect(m.worstStep).toBeLessThan(0.35);
+  });
+
+  it('dances a vignette\'s moves with its own clips: the move takes the body, loops wrap, one-shots hold', async () => {
+    const gltf = await load();
+    const rig = rigBeta(gltf.scene, gltf.animations)!;
+    for (const move of BETA_DANCES) {
+      const s = betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move, at: 0.7, weight: 1 } });
+      expect(s.doing).toBe(move);
+      expect(s.weights[move]).toBe(1);
+      expect(s.weights.swim + s.weights.hover + s.weights.burst).toBe(0);
+      for (const m of BETA_MOMENTS) expect(s.weights[m]).toBe(0);
+    }
+    // A loop's time wraps on its bar; a one-shot's holds at its end.
+    betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'windmill', at: 4.5, weight: 1 } });
+    expect(rig.actions.windmill.time).toBeCloseTo(0.5, 5);
+    betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'freeze', at: 9, weight: 1 } });
+    expect(rig.actions.freeze.time).toBeLessThan(rig.durations.freeze);
+    // Half in: the swim gives way by half, nothing snaps.
+    const half = betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'toprock', at: 0.2, weight: 0.5 } });
+    expect(half.weights.toprock).toBe(0.5);
+    expect(half.weights.swim).toBeCloseTo(0.5 * betaFrame(rig, 30, 3, 10, cruising).weights.swim, 5);
   });
 });
