@@ -23,6 +23,7 @@ import type { Emitter } from './crystals';
 import { FONT_H, rasterText, type PixelText } from './pixel-font';
 import { CubeWriter } from './scenery-paint';
 import type { SignEntry } from './sign-mix';
+import { SUPPLY_GLSL } from './sign-supply';
 
 interface Rng { next(): number; range(a: number, b: number): number; fork(n: number): Rng }
 type Mark = { x: number; y: number; z: number };
@@ -37,12 +38,15 @@ export interface SignContext {
   free: (x: number, z: number, r: number) => boolean;
   /** Uniforms the scenery advances to the scene time every frame. */
   clocks: { value: number }[];
+  /** `signFlicker`, shared by every lit sign's shader and set each frame: how bad the wiring is. */
+  flicker?: { value: number };
 }
 
 export interface BuiltSigns {
   group: Group;
   obstacles: { x: number; y: number; z: number; r: number; h: number }[];
-  halos: { x: number; y: number; z: number; color: string; size: number }[];
+  /** `supply`: the lit sign's power-supply id, so its halo can sag and die with it. */
+  halos: { x: number; y: number; z: number; color: string; size: number; supply?: number }[];
   lights: Emitter[];
   count: number;
   /** Swap the text of the LED boards, in order of the entries, in place. */
@@ -172,6 +176,8 @@ uniform sampler2D uLedText;
 uniform vec4 uLedInfo;   // text width px, time, scroll (1/0), level
 uniform vec4 uLedSwap;   // time the text last changed, -, -, -
 uniform vec3 uLedColor;
+uniform float uLedId;    // its power supply
+uniform float uSignAmount;
 varying vec2 vLedUv;
 vec3 mqLed() {
   vec2 cell = vLedUv * vec2(${LED_COLS}.0, ${LED_ROWS}.0);
@@ -185,12 +191,26 @@ vec3 mqLed() {
   float col = uLedInfo.z > 0.5
     ? float(c.x) - ${LED_COLS}.0 + mod(k, w + ${LED_COLS}.0)
     : float(c.x) - floor((${LED_COLS}.0 - w) * 0.5);
+  // The supply: a tear slips a few rows sideways for a moment.
+  float t = uLedInfo.y;
+  vec3 ev = mqSupplyEvent(uLedId, t, uSignAmount);
+  float u = t - ev.y;
+  int r0 = 1 + int(ev.z * 5.0);
+  if (ev.x == 3.0 && u >= 0.0 && u < 0.15 && c.y >= r0 && c.y < r0 + 3) col -= 1.0 + floor(ev.z * 2.0 + 0.5);
   int row = ${LED_ROWS} - 2 - c.y;
   float on = 0.0;
   if (row >= 0 && row < ${FONT_H} && col >= 0.0 && col < w) on = texelFetch(uLedText, ivec2(int(col), row), 0).r;
+  // A row driver (or a run of columns) gone for a couple of seconds.
+  if (ev.x == 2.0 && u >= 0.0 && u < 2.0 + ev.z * 0.5) {
+    bool dead = ev.z < 0.5 ? c.y == 1 + int(ev.z * 12.0) : mod(float(c.x) + floor(ev.z * 97.0), 17.0) < 3.0;
+    if (dead) on = 0.0;
+  }
+  float level = mqSupplyHum(uLedId, t, uSignAmount, ev);
+  // A brown-out reboot: dark for a second, then the rows wake top to bottom.
+  if (ev.x == 4.0 && u >= 0.0 && u < 2.2) level *= u < 1.0 ? 0.0 : step(float(${LED_ROWS} - 1 - c.y) / ${LED_ROWS}.0, (u - 1.0) / 1.2);
   // A round LED in its socket; the dark ones just there.
   float dotr = 1.0 - smoothstep(0.30, 0.42, length(f));
-  return uLedColor * dotr * (on * uLedInfo.w + 0.06) + uLedColor * 0.01;
+  return (uLedColor * dotr * (on * uLedInfo.w + 0.06) + uLedColor * 0.01) * level;
 }
 `;
 
@@ -207,7 +227,7 @@ function textTexture(t: PixelText): DataTexture {
 /** What swaps an LED board's text without rebuilding the world: a new texture, the marquee restarted. */
 export type LedBoard = (text: string) => void;
 
-function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): { material: MeshBasicMaterial; swap: LedBoard } {
+function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[], supply: number, flicker: { value: number }): { material: MeshBasicMaterial; swap: LedBoard } {
   const tex = textTexture(t);
   const mat = new MeshBasicMaterial({ color, side: FrontSide });
   mat.userData.mqOwned = true;
@@ -217,15 +237,15 @@ function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): {
   const info = { value: new Vector4(t.w, 0, t.w > LED_COLS ? 1 : 0, 1) };
   const swapAt = { value: new Vector4(0, 0, 0, 0) };
   const text = { value: tex };
-  const uniforms = { uLedText: text, uLedInfo: info, uLedSwap: swapAt, uLedColor: { value: color.clone() } };
+  const uniforms = { uLedText: text, uLedInfo: info, uLedSwap: swapAt, uLedColor: { value: color.clone() }, uLedId: { value: supply }, uSignAmount: flicker };
   // The scenery sets every clock to the scene time each frame: that is the scroll.
   clocks.push({ get value() { return info.value.y; }, set value(t: number) { info.value.y = t; } });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = 'varying vec2 vLedUv;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vLedUv = uv;');
-    shader.fragmentShader = LED_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqLed();');
+    shader.fragmentShader = SUPPLY_GLSL + LED_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mqLed();');
   };
-  mat.customProgramCacheKey = () => 'mq-sign-led-v2';
+  mat.customProgramCacheKey = () => 'mq-sign-led-v3';
   const swap: LedBoard = (next) => {
     const r = rasterText(next);
     text.value.dispose();
@@ -289,14 +309,20 @@ function siteOf(e: SignEntry, i: number, ctx: SignContext, width: number, taken:
  *  under three changes a second, and a small part of the frame). */
 const SIGN_LIT_GLSL = /* glsl */ `
 uniform float uSignTime;
+uniform float uSignAmount;
 varying float vFlick;
-float mqSignHash(float n) { return fract(sin(n * 91.7) * 43758.5453); }
-float mqFlicker(float id, float t) {
-  if (id < 0.5) return 1.0;
-  float period = 7.0 + 9.0 * mqSignHash(id);
-  float ph = mod(t + mqSignHash(id + 3.1) * period, period);
-  float dip = (ph < 0.12 || (ph > 0.24 && ph < 0.32)) ? 0.5 : 1.0;
-  return dip * (0.93 + 0.07 * sin(t * 1.7 + id * 2.3));
+// A tag is supply·64 + what it is: 1+ a letter, 63 the rim tube; 0 is steady glass.
+float mqFlicker(float tag, float t) {
+  if (tag < 0.5) return 1.0;
+  float id = floor(tag / 64.0), letter = mod(tag, 64.0) - 1.0;
+  vec3 e = mqSupplyEvent(id, t, uSignAmount);
+  float u = t - e.y, level = mqSupplyHum(id, t, uSignAmount, e);
+  // A tube gone for a couple of seconds; a letter buzzing dim for a moment.
+  if (e.x == 2.0 && u >= 0.0 && u < 2.0 + e.z * 0.5 && letter == floor(e.z * 7.0)) level *= 0.08;
+  if (e.x == 3.0 && u >= 0.0 && u < 0.15 && letter == floor(e.z * 5.0)) level *= 0.6;
+  // A reboot: dark, then the tubes strike again left to right.
+  if (e.x == 4.0 && u >= 0.0 && u < 2.2) level *= u < 1.0 ? 0.0 : step(min(letter, 9.0) * 0.12, u - 1.0);
+  return level;
 }
 `;
 
@@ -309,11 +335,14 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
   const taken: Array<{ x: number; z: number; r: number }> = [];
   // Each board knows which LED entry it is, so a skipped sign does not shift the others' words.
   const boards: Array<{ swap: LedBoard; text: string; ordinal: number }> = [];
-  let ledOrdinal = 0, neonTag = 0, built = 0;
+  let ledOrdinal = 0, built = 0;
+  const flicker = ctx.flicker ?? { value: 0 };
   const s = ctx.scale;
   const c = new Color();
   entries.forEach((e, i) => {
     const rng = ctx.rng.fork(i + 1);
+    // Its own power supply, by its place in the list: the same sign keeps the same wiring.
+    const supply = i + 1;
     // LEDs and neon tubes read from further off: their pixels are bigger.
     const v = PX * s * e.size * (e.kind === 'led' ? 1.45 : e.kind === 'neon' ? 1.25 : 1);
     const t = rasterText(e.text);
@@ -468,11 +497,12 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
       B.box(0, 0, 0, bw, h, 1.2 * v, c.set('#11141c'));
       const rim = color.clone().multiplyScalar(0.55);
       for (const face of [new SignFrame(glow, site.x, ground + cy, site.z, yaw, swing, 0, 0, tags), new SignFrame(glow, site.x, ground + cy, site.z, yaw + Math.PI, -swing, 0, 0, tags)]) {
+        face.tag = supply * 64 + 63; // the rim tube: on the sign's supply, never one of its letters
         for (let x = -bw / 2 + v; x <= bw / 2 - v + 1e-6; x += v) for (const y of [h / 2 - v, -h / 2 + v]) face.box(x, y, 0.9 * v, 0.6 * v, 0.6 * v, 0.6 * v, rim, true);
         for (let y = -h / 2 + 2 * v; y <= h / 2 - 2 * v + 1e-6; y += v) for (const x of [-bw / 2 + v, bw / 2 - v]) face.box(x, y, 0.9 * v, 0.6 * v, 0.6 * v, 0.6 * v, rim, true);
-        if (t.w > 1) lettering(face, t, 0, 0, 1.0 * v, v, 0.8 * v, color, { flat: true, tagBase: neonTag });
+        face.tag = 0;
+        if (t.w > 1) lettering(face, t, 0, 0, 1.0 * v, v, 0.8 * v, color, { flat: true, tagBase: supply * 64 });
       }
-      neonTag += 40;
       obstacles.push({ x: site.x - Math.cos(yaw) * (bw / 2 + 3 * v), y: ground, z: site.z + Math.sin(yaw) * (bw / 2 + 3 * v), r: 3 * s, h: armY + 2 * v });
       lightAt = cy; top = cy + h / 2 + 5 * v;
     } else {
@@ -483,7 +513,7 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
       for (const [bx, by] of [[-1, -1], [-1, 1], [1, -1], [1, 1]] as const) {
         for (const side of [1, -1]) G.box(bx * (fw / 2 + 0.4 * v), cy + by * (fh / 2 + 0.4 * v), side * hd * 0.52, 0.45 * v, 0.45 * v, 0.2 * v, c.set('#6b6f78'), true);
       }
-      const led = ledMaterial(t, color, ctx.clocks);
+      const led = ledMaterial(t, color, ctx.clocks, supply, flicker);
       boards.push({ swap: led.swap, text: e.text, ordinal });
       for (const side of [1, -1]) {
         const quad = new PlaneGeometry(fw, fh);
@@ -501,7 +531,7 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
     obstacles.push({ x: site.x, y: ground, z: site.z, r: Math.max(3 * s, Math.min(width, 40 * s) / 2), h: top + 4 * s });
     if (lightAt) {
       const y = ground + lightAt;
-      halos.push({ x: site.x, y, z: site.z + 2 * s, color: `#${color.getHexString()}`, size: Math.min(60, width * 0.9) });
+      halos.push({ x: site.x, y, z: site.z + 2 * s, color: `#${color.getHexString()}`, size: Math.min(60, width * 0.9), ...(e.kind === 'neon' || e.kind === 'led' ? { supply } : {}) });
       lights.push({ x: site.x, y, z: site.z + 6 * s, r: color.r, g: color.g, b: color.b, reach: 30 * s, phase: i * 1.3 });
     }
   });
@@ -521,10 +551,11 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
       ctx.clocks.push(time);
       m.onBeforeCompile = (shader) => {
         shader.uniforms.uSignTime = time;
+        shader.uniforms.uSignAmount = flicker;
         shader.vertexShader = 'attribute float aFlick; varying float vFlick;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vFlick = aFlick;');
-        shader.fragmentShader = SIGN_LIT_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= mqFlicker(vFlick, uSignTime);');
+        shader.fragmentShader = SUPPLY_GLSL + SIGN_LIT_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= mqFlicker(vFlick, uSignTime);');
       };
-      m.customProgramCacheKey = () => 'mq-signs-lit-v1';
+      m.customProgramCacheKey = () => 'mq-signs-lit-v2';
     }
     const mesh = new Mesh(g, m);
     mesh.name = name;

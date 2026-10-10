@@ -246,7 +246,7 @@ reports actual populations; prop draw-call/triangle totals include the world.
 | `neon` | glowing tube lettering on a dark board, a halo and light on the floor (≤ 14) |
 | `led` | a dot-matrix board in the hackerfish's pixels; a line longer than the board scrolls (≤ 64) |
 
-A sign stands beside its place — `gate`, `plaza`, `courtyard`, `hub`, `fountain`, `home1`–`home3`, or the open tank's `centre`, `left`, `right`, `front`, `back` — never on it, and faces the front. With no place it finds a clear spot across the front of the tank. Lettering is a 5×7 pixel font (capitals, digits, common punctuation, `° ♥ ★`); `/#color` colours the lettering, tubes, LEDs, glass or stripes. Signs stay outdoors (not in `interior: geode`), and fish swim round them.
+A sign stands beside its place — `gate`, `plaza`, `courtyard`, `hub`, `fountain`, `home1`–`home3`, or the open tank's `centre`, `left`, `right`, `front`, `back` — never on it, and faces the front. With no place it finds a clear spot across the front of the tank. Lettering is a 5×7 pixel font (capitals, digits, common punctuation, `° ♥ ★`); `/#color` colours the lettering, tubes, LEDs, glass or stripes. Signs stay outdoors (not in `interior: geode`), and fish swim round them. Lit signs (neon, LED) run on old wiring: `signFlicker` (0–1, default 0.4) sets how unstable it is — a slow hum, two-dip stutters, a dead row or tube, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply (most steady, a few bad); events are one per four-second slot at most, so it stays under WCAG's three flashes a second at any setting.
 
 ```ts
 signs: 'plank@gate:"Welcome to the reef", arrow@hub>gate:Castle, neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M - WATER 24°'

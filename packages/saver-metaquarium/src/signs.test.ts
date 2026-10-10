@@ -78,7 +78,7 @@ describe('buildSigns', () => {
     clocks[0]!.value = 12.5;
     expect(clocks[0]!.value).toBe(12.5);
     const face = built.group.children.find((m) => m.name === 'sign-led') as Mesh;
-    expect((face.material as MeshBasicMaterial).customProgramCacheKey()).toBe('mq-sign-led-v2');
+    expect((face.material as MeshBasicMaterial).customProgramCacheKey()).toBe('mq-sign-led-v3');
   });
 });
 

@@ -245,6 +245,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (has('fishGlow')) look.push(`glow ${pct('fishGlow')}`);
   if (num('fishAmbient') > 0) look.push(`fish ambient ${pct('fishAmbient')}`);
   if (str('dither') === 'on') look.push('dither');
+  if (has('signFlicker') && has('signs')) look.push(num('signFlicker') > 0 ? `sign flicker ${pct('signFlicker')}` : 'steady signs');
 
   const sections: AnatomySection[] = (
     [['Room', room], ['World', world], ['Stage', stage], ['Camera', camera], ['Motion', motion], ['Look', look]] as const

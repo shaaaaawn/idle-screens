@@ -346,6 +346,10 @@ export const METAQUARIUM_PARAMS = {
    *  fountain home1…, or centre left right front back), facing the front; an LED board
    *  scrolls a long line. Empty = none. */
   signs: { type: 'string', default: '', ease: 'step' },
+  /** How unstable the lit signs' power is (neon and LED boards): 0 steady; higher, more
+   *  hum, stutters, a dead row or tube, a slipped row, now and then a reboot. Each sign
+   *  has its own supply — most steady, some dodgy. Flash-safe at any setting. */
+  signFlicker: { type: 'number', default: 0.4, min: 0, max: 1, ease: 'smooth' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

@@ -105,6 +105,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
   fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
   signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
+  signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
   geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
@@ -383,6 +384,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   } else if (rig.length && set('spotColor')) {
     out.push({ path: 'spotColor', also: ['spotRig'], message: 'colours the single followSpot; a spotRig gives each of its spots its own colour (slot/#rrggbb)' });
   }
+  if (set('signFlicker') && !str('signs')) out.push({ path: 'signFlicker', also: ['signs'], message: 'does nothing with no signs' });
   if (Math.round(num('shoal', 0) * CAST_CAP * 2.5) < 3) {  // the tank builds no school under 3 fish
     for (const k of ['shoalKind', 'shoalSpeed']) if (set(k)) out.push({ path: k, also: ['shoal'], message: 'does nothing while shoal is too low to make a school (under 3 fish; 0 is off)' });
   }

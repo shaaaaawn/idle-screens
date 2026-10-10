@@ -22,6 +22,7 @@ import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
 import { stoneTop } from './ground';
 import { buildSigns } from './signs';
+import { supplyLevel } from './sign-supply';
 import type { SignEntry } from './sign-mix';
 import { OPEN_MARKS } from './vignette';
 
@@ -117,6 +118,8 @@ export interface Scenery {
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
   /** Swap the LED boards' text in place (in sign order), no rebuild: for live data. */
   setLedTexts(texts: readonly string[]): void;
+  /** `signFlicker` 0..1: how unstable the lit signs' supply is. Live, no rebuild. */
+  setSignFlicker(amount: number): void;
   /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
   setSurface(y: number | null): void;
 }
@@ -440,9 +443,10 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // doorsteps and the lamps, beside their mark. Fish go round them.
   let signHalos: Array<{ x: number; y: number; z: number; color: string; size: number }> = [];
   let setLedTexts: (texts: readonly string[]) => void = () => {};
+  const signFlicker = { value: 0 };
   if (opts.signs?.length && !opts.interior) {
     const built = buildSigns(opts.signs, {
-      rng: rng.fork(41), terrain, scale: s, clocks,
+      rng: rng.fork(41), terrain, scale: s, clocks, flicker: signFlicker,
       marks: { ...OPEN_MARKS, ...marks },
       free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
         && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
@@ -674,11 +678,17 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   counts.flora = field.plants;
   // Halos: the lamps and the fountain wear the soft glow card a crystal does.
   let townCards: GlowCards | null = null;
+  const flickering: Array<{ i: number; supply: number; h: { x: number; y: number; z: number; size: number }; r: number; g: number; b: number }> = [];
   const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s })), ...signHalos];
   if (halos.length) {
     townCards = buildGlowCards(halos.length);
     const c = new Color();
     halos.forEach((h, i) => { c.set(h.color); townCards!.set(i, h.x, h.y, h.z, h.size, c.r, c.g, c.b, i * 1.7); });
+    // A lit sign's halo sags and dies with its supply: the cards are re-set each frame.
+    halos.forEach((h, i) => {
+      const supply = (h as { supply?: number }).supply;
+      if (supply !== undefined) { c.set(h.color); flickering.push({ i, supply, h, r: c.r, g: c.g, b: c.b }); }
+    });
     townCards.mesh.userData.mqLights = halos.length;
     townCards.mesh.name = 'town-halos';
     group.add(townCards.mesh);
@@ -887,12 +897,17 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     },
     groundAt: stoneGround ?? (() => -Infinity),
     setLedTexts(texts) { setLedTexts(texts); },
+    setSignFlicker(amount) { signFlicker.value = Math.max(0, Math.min(1, amount)); },
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
       bubbleLayer?.setFrame(t, bubbleSurface);
       if (fog) horizonFog.value.copy(fog.color);
       geodeGlow.value = glow; geodePulse.value = pulse;
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
+      for (const f of flickering) {
+        const k = supplyLevel(f.supply, t, signFlicker.value);
+        townCards?.set(f.i, f.h.x, f.h.y, f.h.z, f.h.size, f.r * k, f.g * k, f.b * k, f.i * 1.7);
+      }
       if (townCards && fog) townCards.commit(Number(townCards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
       // to draw (fog is the card pass's business): a caller that only asks

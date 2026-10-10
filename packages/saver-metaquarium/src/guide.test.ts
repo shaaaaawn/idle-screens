@@ -88,6 +88,8 @@ describe('agent guide', () => {
     expect(paths({ spotStrength: 0.9, spotColor: '#ffffff' })).toEqual(['spotStrength', 'spotColor']);
     expect(paths({ fishMix: 'dori:2', spotRig: '0, 1', spotColor: '#ffffff', spotStrength: 0.9 })).toEqual(['spotColor']);
     expect(paths({ followSpot: 0, spotColor: '#ffffff' })).toEqual([]);
+    expect(paths({ signFlicker: 0.8 })).toEqual(['signFlicker']);
+    expect(paths({ signFlicker: 0.8, signs: 'neon:OPEN' })).toEqual([]);
     expect(paths({ shoalKind: 'ember', shoalSpeed: 1 })).toEqual(['shoalKind', 'shoalSpeed']);
     expect(paths({ shoal: 0.6, shoalKind: 'ember' })).toEqual([]);
     expect(paths({ shoal: 0.01, shoalKind: 'ember' })).toEqual(['shoalKind']);
