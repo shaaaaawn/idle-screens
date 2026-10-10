@@ -208,6 +208,15 @@ function siteOf(e: SignEntry, i: number, ctx: SignContext, width: number, taken:
     }
   }
   const rng = ctx.rng.fork(100 + i);
+  // In the open, a sign also keeps its own lane across the front: two clear
+  // on the ground can still stand one behind the other as the camera sees
+  // them, and the near one hides the far one's words.
+  // Depth does not help: seen from the front, any two in one lane overlap.
+  const ownLane = (x: number): boolean => !taken.some((t) => Math.abs(x - t.x) < t.r + r);
+  for (let k = 0; k < 64; k++) {
+    const x = rng.range(-150, 150) * s, z = rng.range(15, 85) * s;
+    if (clear(x, z) && ownLane(x)) return { x, z };
+  }
   for (let k = 0; k < 48; k++) {
     const x = rng.range(-110, 110) * s, z = rng.range(15, 85) * s;
     if (clear(x, z)) return { x, z };

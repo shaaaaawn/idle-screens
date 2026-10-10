@@ -45,6 +45,14 @@ describe('buildSigns', () => {
     expect(Math.hypot(o.x - 0, o.z + 40)).toBeGreaterThan(12);
   });
 
+  it('gives signs in the open their own lanes across the front, so none hides another', () => {
+    const built = buildSigns(parseSignMix('plank:Welcome, arrow:Castle, neon:SURF, porthole:BAR').entries, ctx());
+    const o = built.obstacles;
+    for (let a = 0; a < o.length; a++) for (let b = a + 1; b < o.length; b++) {
+      expect(Math.abs(o[a]!.x - o[b]!.x)).toBeGreaterThan(Math.min(o[a]!.r, o[b]!.r));
+    }
+  });
+
   it('skips a sign when nothing is clear, rather than stacking it on another', () => {
     expect(buildSigns(parseSignMix('plank:Hi').entries, ctx({ free: () => false })).obstacles).toHaveLength(0);
   });
