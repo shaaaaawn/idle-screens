@@ -16,7 +16,8 @@ describe('buildSigns', () => {
   it('builds every kind: one baked draw, one lit draw, an LED face each', () => {
     const built = buildSigns(ALL, ctx());
     expect(built.count).toBe(6);
-    expect(built.group.children.map((m) => m.name).sort()).toEqual(['sign-led', 'signs', 'signs-lit']);
+    // The LED board has a face on each side: it reads from behind too.
+    expect(built.group.children.map((m) => m.name).sort()).toEqual(['sign-led', 'sign-led', 'signs', 'signs-lit']);
     for (const m of built.group.children as Mesh[]) {
       expect(m.geometry.userData.mqOwned).toBe(true);
       expect((m.material as MeshBasicMaterial).userData.mqOwned).toBe(true);
@@ -27,7 +28,8 @@ describe('buildSigns', () => {
     const lit = built.group.children.filter((m) => m.name !== 'signs') as Mesh[];
     for (const m of lit) expect((m.material as MeshBasicMaterial).userData.mqNoCaustic).toBe(true);
     // Fish go round every sign; the porthole, neon and LED light the floor.
-    expect(built.obstacles).toHaveLength(6);
+    // Fish go round every sign — and a fingerpost's finger, a bracket sign's post.
+    expect(built.obstacles).toHaveLength(8);
     expect(built.lights).toHaveLength(3);
     expect(built.halos).toHaveLength(3);
   });
@@ -46,7 +48,7 @@ describe('buildSigns', () => {
   });
 
   it('gives signs in the open their own lanes across the front, so none hides another', () => {
-    const built = buildSigns(parseSignMix('plank:Welcome, arrow:Castle, neon:SURF, porthole:BAR').entries, ctx());
+    const built = buildSigns(parseSignMix('plank:Welcome, plank:Castle, ring:SURF, porthole:BAR').entries, ctx());
     const o = built.obstacles;
     for (let a = 0; a < o.length; a++) for (let b = a + 1; b < o.length; b++) {
       expect(Math.abs(o[a]!.x - o[b]!.x)).toBeGreaterThan(Math.min(o[a]!.r, o[b]!.r));
@@ -90,7 +92,7 @@ describe('live LED text', () => {
       (m.material as MeshBasicMaterial).onBeforeCompile(shader as never, undefined as never);
       return shader.uniforms as Record<string, { value: { x: number; z: number; dispose?: () => void } }>;
     };
-    const u0 = uniformsOf(faces[0]!), u1 = uniformsOf(faces[1]!);
+    const u0 = uniformsOf(faces[0]!), u1 = uniformsOf(faces[2]!); // faces come in front/back pairs
     const before = u0.uLedText!.value, other = u1.uLedText!.value;
     clocks.forEach((c) => (c.value = 30));
     built.setLedTexts(['NOW A LONG LINE THAT HAS TO SCROLL ACROSS', 'ANOTHER BOARD']);
@@ -99,7 +101,7 @@ describe('live LED text', () => {
     expect(u0.uLedInfo!.value.z).toBe(1);   // longer than the board: a marquee
     expect(u0.uLedSwap!.value.x).toBe(30);  // entering from the right edge now
     expect(u1.uLedText!.value).toBe(other); // unchanged words: untouched
-    expect(built.group.children).toHaveLength(3); // the plank's draw and two faces, as built
+    expect(built.group.children).toHaveLength(5); // the cubes' draw and two faces a board, as built
   });
 });
 

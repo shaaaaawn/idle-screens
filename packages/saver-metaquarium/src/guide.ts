@@ -177,6 +177,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'geode-harbor', label: 'Geode harbor', what: 'A village at night: three geode homes, chimneys bubbling, lanterns overhead, a far horizon.',
     params: { ...ALIVE, ...NIGHT, floorColor: '#2a1a2a', paths: 0.7, geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
       propMix: 'crystal:2@spire/orange,crystal:2@druse/hotpink,crystal:1@lotus/purple', crystalTint: 0.6, fishMix: '100:2,257:2,seahorse:2', swimStyle: 'drift', swimSpeed: 0.5,
+      signs: 'plank@hub:"Harbor Row", neon@home1/#ffb347:OPEN, arrow@hub>home3:Lighthouse, porthole@home2',
       cameraDistance: 190, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
@@ -189,6 +190,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'castle', label: 'The castle', what: 'The landmark: voxel walls and crystal-spired towers, a lit gate, a road to a plaza. Orbit it.',
     params: { ...ALIVE, fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900, landmark: 'castle', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
       propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalTint: 0.6, fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5,
+      signs: 'plank@gate:"Welcome to the castle", led@front/#7fdcff:TOURS EVERY HOUR - MIND THE MOAT - NO SWIMMING IN THE KEEP',
       cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5 },
   },
   {
@@ -232,6 +234,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a coral reef: tangs that look back at you, blowfish that puff up and flirt, an octopus that changes colour and inks, a crab on the floor. A slow orbit.',
     params: { ...ALIVE, environment: 'reef', fishMix: 'dori:3,blowfish:2,octopus:1,crab:1', floraDensity: 0.6, marineSnow: 0.3, finish: 0.5, swimSpeed: 0.7,
+      signs: 'plank@left:"Mind the crabs", ring@right:Lifeguard',
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
   },
   {
