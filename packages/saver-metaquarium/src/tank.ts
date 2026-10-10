@@ -1,6 +1,7 @@
 import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWeight, WATER, WATER_INSCATTER_GLSL, waterUniforms } from './water';
 import { buildScenery, type Scenery } from './scenery';
-import { parseFloraMix } from './flora';
+import { parseFloraMix, stemAt } from './flora';
+import { holdCycle, pickStem, seahorseHeld, seahorseHoldAt, type HoldState } from './holdfast';
 import { parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { installFloraLight } from './flora-light';
@@ -674,6 +675,10 @@ interface Fish {
   } | null;
   tint?: Array<{ mat: MeshBasicMaterial; base: Color }>;
   tinted?: boolean;
+  /** A seahorse's stem for its current hold (holdfast.ts): chosen on the bout's first frame, kept for all of it. */
+  holdChoice?: { k: number; stem: number; until: number; hx: number; hz: number; aim: number };
+  /** Where a holding seahorse was pinned last frame (the dodge reads it). */
+  holdAt?: { x: number; y: number; z: number };
 }
 
 /** One fish as `inspect()` reports it — the analytic view of a frame. */
@@ -709,6 +714,8 @@ interface InspectFish {
   puff?: number;
   lids?: [number, number];
   flirt?: string | null;
+  /** A seahorse holding on (holdfast.ts): to a stem, its partner, or resting; how far over (0..1); its tail's wrap; and how far its grasp is off what it holds. */
+  hold?: { kind: 'stem' | 'partner' | 'rest'; phase: string; reach: number; grip: number; err: number };
 }
 
 /** The leader a bonded fish rides: plan, where along it, and the light pull
@@ -726,7 +733,12 @@ interface LeaderFrame {
   pullZ: number;
   /** The leader's body length now — a follower keeps station in ITS lengths. */
   len: number;
+  /** A pair of seahorses' tails, linked: both fish's route places this frame (holdfast.ts). */
+  pair?: PairHold;
 }
+
+/** Two seahorses of a pair this frame: the first's index keys their bouts; a, b where each would swim. */
+interface PairHold { index: number; n: number; ax: number; ay: number; az: number; bx: number; by: number; bz: number; hx: number; hz: number }
 
 // ---------------------------------------------------------------------------
 // TankInstance — the studs: renderer, fog, floor, fish on spline plans.
@@ -989,6 +1001,56 @@ class TankInstance implements SaverInstance {
   /** The partner dance: each dancer's part, and its partner's fish index. */
   private readonly danceRoles = new Map<number, { role: DuetRole; partner: number }>();
   /** A partner dancer's part and its partner's feet (empty outside the partner dance). */
+  private readonly holdTmp = new Vector3();
+  private readonly stemTmp = { x: 0, y: 0, z: 0 };
+
+  /**
+   * What a seahorse holds this bout, and how (holdfast.ts): the point its
+   * tail's grasp goes to, its facing there, which side the loop is on (+1 its
+   * left), how it leans off what it holds, and — one of a pair — where it
+   * looks. A pair link tails side by side, facing the way the first was going,
+   * each leaning away and turned to the other; a lone one takes the nearest
+   * stalk of kelp or sea whip, on whichever side it lies. Null: nothing near
+   * (it rests where it stopped). A pair face each other with their tails
+   * twined between them, each leaning back off the other — the heart two
+   * courting seahorses make.
+   */
+  private holdPlan(f: Fish, hs: HoldState, pair: PairHold | null, role: number, px: number, py: number, pz: number,
+    hx: number, hz: number, L: number, t: number): { kind: 'stem' | 'partner'; tx: number; ty: number; tz: number; hx: number; hz: number; aim: number; roll: number; pitch: number; gaze?: number } | null {
+    if (pair && pair.n === 2) {
+      // Facing each other along the way the first was going when its route paused: their own places circle (the
+      // pair's orbit runs on), so the line between them would turn the pair round as it held.
+      const ex = pair.hx, ez = pair.hz, el = Math.hypot(ex, ez) || 1;
+      const s = role === 0 ? 1 : -1;
+      // Both loops forward, at one point (a hair apart, so the two tails cross rather than coincide), and each leans
+      // back off the other: it is what keeps their bellies and snouts apart.
+      return {
+        kind: 'partner', tx: (pair.ax + pair.bx) / 2, ty: (pair.ay + pair.by) / 2 + s * 0.04 * L, tz: (pair.az + pair.bz) / 2,
+        hx: (s * ex) / el, hz: (s * ez) / el, aim: 0, roll: 0, pitch: -0.34, gaze: 0,
+      };
+    }
+    const stems = this.scenery?.stems;
+    if (!stems?.length) return null;
+    let c = f.holdChoice;
+    if (!c || c.k !== hs.k) {
+      // The plants other seahorses hold now are taken.
+      const taken = new Set<number>();
+      for (const o of this.fish) if (o && o !== f && o.holdChoice && o.holdChoice.stem >= 0 && o.holdChoice.until > t) taken.add(stems[o.holdChoice.stem]!.plant);
+      const stem = pickStem(stems, px, py, pz, L, taken, this.scenery!.clearance);
+      const hl = Math.hypot(hx, hz) || 1;
+      let aim = 1;
+      if (stem >= 0) {
+        // Its left is its heading turned a quarter: (hz, -hx).
+        const sc = stems[stem]!;
+        aim = (sc.x - px) * hz - (sc.z - pz) * hx >= 0 ? 1 : -1;
+      }
+      c = f.holdChoice = { k: hs.k, stem, until: t - hs.into + holdCycle(f.index).length, hx: hx / hl, hz: hz / hl, aim };
+    }
+    if (c.stem < 0) return null;
+    const at = stemAt(stems[c.stem]!, t, this.stemTmp);
+    return { kind: 'stem', tx: at.x, ty: at.y, tz: at.z, hx: c.hx, hz: c.hz, aim: c.aim, roll: 0.3 * c.aim, pitch: 0 };
+  }
+
   private partnerOf(index: number): { role?: DuetRole; partnerX?: number; partnerZ?: number } {
     const r = this.danceRoles.get(index);
     const at = r ? this.danceSpots.get(r.partner) : undefined;
@@ -2710,6 +2772,8 @@ class TankInstance implements SaverInstance {
       // A chaser's extra tail work — kept OUT of `mnv`, which may be the
       // shared idle constant.
       let flurryBoost = 0;
+      // A seahorse pair's shared record, and which of the two this is.
+      let pairRec: PairHold | null = null, pairRole = 0;
 
       // Style + per-fish variation. Both are pure functions of (index, t), so
       // a scene stays frame-addressable no matter how varied it looks.
@@ -2760,7 +2824,9 @@ class TankInstance implements SaverInstance {
       // A dori holds still for a headstand, plays dead without being towed,
       // backs off when wary — then catches up (tang.ts). Before the pose, so a
       // follower behind it stops too.
-      const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold : null;
+      // A seahorse stops on its route to hold on to something (holdfast.ts), and picks up where it stopped.
+      const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold
+        : this.wantBreeds[f.index] === 'seahorse' ? seahorseHeld : null;
       const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
       const d = anchor + effort * style.travel + mnv.along * L - held;
 
@@ -2869,6 +2935,7 @@ class TankInstance implements SaverInstance {
             ox += rxn * R * Math.cos(th);
             oz += rzn * R * Math.cos(th);
             oy = R * 0.5 * Math.sin(th);
+            pairRec = rel.pair ?? null; pairRole = 1;
             pendingPair = null;
           } else {
             // Off the leader's exact line, so a file is not a stack.
@@ -2917,6 +2984,7 @@ class TankInstance implements SaverInstance {
             pullX += (pose.fz / hl) * R * Math.cos(th);
             pullZ += (-pose.fx / hl) * R * Math.cos(th);
             oy = R * 0.5 * Math.sin(th);
+            pairRec = me.pair = { index: f.index, n: 0, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, hx: pose.fx, hz: pose.fz };
             pendingPair = me;
           } else {
             leader = me;
@@ -3021,10 +3089,27 @@ class TankInstance implements SaverInstance {
       // the way, it does not get out of it; nor does an actor, whose script
       // places it. A seated fish gives a little, so the school keeps shape.
       const walker = (f.rig?.crab || f.rig?.starfish || f.rig?.octopus) && !act && !style.formation;
-      const give = act || walker ? 0 : style.formation ? 0.35 : 1;
+      // A seahorse's hold (holdfast.ts): a pair's bouts are the first's, and both note where they would swim.
+      let hs: HoldState | null = null;
+      // Both of a pair must be seahorses to link tails.
+      if (pairRec && (this.wantBreeds[pairRec.index] !== 'seahorse' || this.wantBreeds[f.index] !== 'seahorse')) pairRec = null;
+      if (pairRec) {
+        if (pairRole === 0) { pairRec.ax = px; pairRec.ay = y; pairRec.az = pz; } else { pairRec.bx = px; pairRec.by = y; pairRec.bz = pz; }
+        pairRec.n += 1;
+      }
+      if (this.wantBreeds[f.index] === 'seahorse' && !act && !style.formation) {
+        hs = seahorseHoldAt(pairRec ? pairRec.index : f.index, tSec);
+        if (hs.phase === 'none') hs = null;
+      }
+      if (!hs) f.holdChoice = undefined;
+      // Holding on, it keeps its place: the others swim round it.
+      const give = act || walker || hs ? 0 : style.formation ? 0.35 : 1;
       const k = bodies.length;
       const body = this.avoidPool[k] ?? (this.avoidPool[k] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, len: 0, give: 0 });
       body.x = px; body.y = y; body.z = pz; body.vx = body.vy = body.vz = 0; body.len = L; body.give = give;
+      if (hs && f.holdAt) {
+        body.x += (f.holdAt.x - px) * hs.reach; body.y += (f.holdAt.y - y) * hs.reach; body.z += (f.holdAt.z - pz) * hs.reach;
+      }
       // The seabed a dodge cannot push a fish under (the clamp in the draw half).
       body.floorAt = give > 0 && this.floorHeightAt ? this.fishFloorAt : undefined;
       if (walker) {
@@ -3153,9 +3238,17 @@ class TankInstance implements SaverInstance {
       const turtle = f.rig?.turtle ? turtleFrame(f.rig.turtle, tSec, f.index, beat, {
         pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
       }) : null;
-      // A seahorse (minted, rig/seahorse.py): its fin, its tail's curl, its lean and its moments.
+      // A seahorse (minted, rig/seahorse.py): its fin, its tail's curl, its lean and its moments —
+      // and, holding on (holdfast.ts), the stem or partner it holds, where its tail wraps, and its facing there.
+      const hold = hs && f.rig?.seahorse?.grasp ? this.holdPlan(f, hs, pairRec, pairRole, px, y, pz, lfx, lfz, L, tSec) : null;
+      const reach = hold ? hs!.reach : 0;
+      if (hold) {
+        const hx = lfx + (hold.hx - lfx) * reach, hz = lfz + (hold.hz - lfz) * reach, hl = Math.hypot(hx, hz) || 1;
+        lfx = hx / hl; lfz = hz / hl; lfy *= 1 - reach;
+      }
       const seahorse = f.rig?.seahorse ? seahorseFrame(f.rig.seahorse, tSec, f.index, beat, {
-        pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+        pace: rigPace * (1 - reach), flurry: mnv.flurry + flurryBoost, turn: rigTurn * (1 - reach), viewer: rigViewer,
+        ...(hold ? { hold: { grip: hs!.grip, aim: hold.aim, reach, ...(hold.gaze !== undefined ? { gaze: hold.gaze } : {}) } } : {}),
       }) : null;
       // A betafish (minted, rig/betafish.py): its silk fins, their spread, its displays.
       const beta = f.rig?.beta ? betaFrame(f.rig.beta, tSec, f.index, beat, {
@@ -3179,6 +3272,26 @@ class TankInstance implements SaverInstance {
       const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, { pace: speed * styleSpeed * style.travel }) : null;
       // A hiccuping baby's speed, for the momentum its bubble leaves with.
       if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
+      // Holding on: posed, faced and sized as it will be drawn, then moved so its tail's grasp is on the stem
+      // (all the way once it has arrived, eased in and out on the way). The swaying is about the grasp.
+      let holdErr = NaN;
+      if (hold) {
+        const g = f.group, grasp = f.rig!.seahorse!.grasp!;
+        g.position.set(px, y, pz);
+        g.lookAt(px + lfx, y + lfy, pz + lfz);
+        const sw = 0.06 * Math.sin(tSec * 0.45 + f.index * 1.3), nod = 0.05 * Math.sin(tSec * 0.31 + f.index * 2.1);
+        g.rotateZ(pose.roll * (1 - reach) + (hold.roll + sw) * reach);
+        g.rotateX((hold.pitch + nod) * reach);
+        g.scale.setScalar(f.baseScale * (1 + Math.sin(tSec * 2.1 + f.index) * 0.008) * size);
+        g.updateMatrixWorld(true);
+        grasp.getWorldPosition(this.holdTmp);
+        px += (hold.tx - this.holdTmp.x) * reach; y += (hold.ty - this.holdTmp.y) * reach; pz += (hold.tz - this.holdTmp.z) * reach;
+        g.position.set(px, y, pz);
+        g.updateMatrixWorld(true);
+        grasp.getWorldPosition(this.holdTmp);
+        holdErr = Math.hypot(this.holdTmp.x - hold.tx, this.holdTmp.y - hold.ty, this.holdTmp.z - hold.tz);
+        f.holdAt = { x: px, y, z: pz };
+      } else f.holdAt = undefined;
       f.group.position.set(px, y, pz);
       if (f.index === followSlot) {
         // A standing starfish is where its feet are, ahead of its resting place.
@@ -3205,7 +3318,9 @@ class TankInstance implements SaverInstance {
         }
       }
       if (f.tint || tintAmount > 0) this.tintFish(f, tintAmount, tSec, tintPulse);
-      if (act) {
+      if (hold) {
+        // Already faced (above).
+      } else if (act) {
         f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
         f.group.rotateZ(act.roll);
       } else {
@@ -3402,7 +3517,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100 } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

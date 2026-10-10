@@ -6,8 +6,9 @@
  * fin as three bones down the back (a ripple runs along it), and the
  * prehensile tail as a chain of six along its curve — soft, so it coils into
  * a smooth spiral. Clips swim, hover, burst, ten moments (coil, twirl, dance,
- * snick, bow, bob, lookabout, stretch, wag, tilt) and four dials (curl, lean,
- * lookYaw, lookPitch) on bones of their own. All 40 seahorse tokens are one
+ * snick, bow, bob, lookabout, stretch, wag, tilt) and six dials (curl, grip,
+ * aim, lean, lookYaw, lookPitch) on bones of their own: the grip wraps the
+ * tail's tip round a stem, and holdfast.ts says when, round what. All 40 seahorse tokens are one
  * model in their own paint (minted.ts), so this one rig swims them all.
  * (Until it, a vertex patch rippled the fin and coiled the tail; this module
  * had that job.)
@@ -22,6 +23,9 @@
  *            swims, streaming back in a dart — more coiled for a shy one
  *   look     the head turns into a turn, about the water, and to the viewer
  *            when its eyes hold theirs
+ *   hold     wrapped round a stem or a partner's tail (holdfast.ts): it
+ *            stands, keeps to the moments that leave its tail alone, and
+ *            looks at the one it holds
  *
  * The character: a temperament (dancer, hunter, shy, curious), a favourite
  * move, its own tempo and rhythm of moments.
@@ -36,13 +40,17 @@ import { fishHash } from './swim';
 
 export const SEAHORSE_MOMENTS = ['coil', 'twirl', 'dance', 'snick', 'bow', 'bob', 'lookabout', 'stretch', 'wag', 'tilt'] as const;
 export type SeahorseMoment = (typeof SEAHORSE_MOMENTS)[number];
-export const SEAHORSE_CLIPS = ['swim', 'hover', 'burst', ...SEAHORSE_MOMENTS, 'curl', 'lean', 'lookYaw', 'lookPitch'] as const;
+export const SEAHORSE_CLIPS = ['swim', 'hover', 'burst', ...SEAHORSE_MOMENTS, 'curl', 'grip', 'aim', 'lean', 'lookYaw', 'lookPitch'] as const;
 export type SeahorseClip = (typeof SEAHORSE_CLIPS)[number];
-export type SeahorseDoing = 'swim' | 'hover' | 'burst' | SeahorseMoment;
+export type SeahorseDoing = 'swim' | 'hover' | 'burst' | 'hold' | SeahorseMoment;
+/** What it may still do with its tail wrapped round something: nothing that spins it or works the tail. */
+const HOLDING_MOMENTS: ReadonlySet<SeahorseMoment> = new Set(['snick', 'bow', 'bob', 'lookabout', 'stretch', 'tilt']);
 export type SeahorseTemper = 'dancer' | 'hunter' | 'shy' | 'curious';
 
 export interface SeahorseRig {
   mixer: AnimationMixer;
+  /** The node at the centre of the gripping tail's loop: where the tank pins a stem (holdfast.ts). */
+  grasp: Object3D | null;
   actions: Record<SeahorseClip, AnimationAction>;
   durations: Record<SeahorseClip, number>;
 }
@@ -61,7 +69,7 @@ export function rigSeahorse(body: Object3D, clips: readonly AnimationClip[]): Se
     actions[n] = a;
     durations[n] = clip.duration;
   }
-  return { mixer, actions, durations };
+  return { mixer, actions, durations, grasp: body.getObjectByName('grasp') ?? null };
 }
 
 /** Ripple seconds per unit swum, on top of one a second: the fin beats harder as it swims faster. */
@@ -123,6 +131,9 @@ export interface SeahorseInput {
   turn: number;
   /** Where the viewer is from its head, radians: yaw + to its left, pitch + up. Null: no viewer. */
   viewer: { yaw: number; pitch: number } | null;
+  /** Holding on (holdfast.ts): the tail's wrap 0..1, which side the loop is (+1 its left, -1 its right),
+   *  how far over it has gone 0..1, and — holding a partner — where to look, -1..1 on the yaw dial. */
+  hold?: { grip: number; aim: number; reach: number; gaze?: number };
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -152,6 +163,8 @@ export interface SeahorseState {
   /** The dials' settings, -1..1 each. */
   curl: number;
   lean: number;
+  /** The tail's wrap, 0..1. */
+  grip: number;
   look: { yaw: number; pitch: number };
 }
 
@@ -163,21 +176,27 @@ export function seahorseFrame(rig: SeahorseRig, t: number, index: number, beat: 
   const cruise = smooth((inp.pace - 0.1) / 0.5);
   // A moment, once begun, is finished before a dart takes the body (a twirl
   // cut short would unwind in a frame or two); the dart eases in and out.
-  const m = seahorseMoment(index, t, (n) => D[n]);
-  const dart = smooth(inp.flurry * 1.4);
+  const h = inp.hold, grip = h?.grip ?? 0, reach = h?.reach ?? 0;
+  const m0 = seahorseMoment(index, t, (n) => D[n]);
+  // Wrapped on, it keeps to the moments that leave its tail alone.
+  const m = m0.moment && !HOLDING_MOMENTS.has(m0.moment) ? { ...m0, weight: m0.weight * (1 - grip) } : m0;
+  const dart = smooth(inp.flurry * 1.4) * (1 - reach);
   const burst = dart * (1 - m.weight);
   const stroke = (1 - m.weight) * (1 - dart);
 
   // The tail: coiled at rest (by its nature), let out as it swims, streaming in a dart, breathing slowly.
-  const curl = clamp(p.coil + 0.5 * (1 - cruise) - 0.3 * cruise - 0.6 * dart + 0.15 * Math.sin(t * 0.27 + index * 1.9), -1, 1);
-  const lean = clamp(-0.1 + 0.6 * cruise + 0.3 * dart, -1, 1);
+  // Holding, the tail is the grip's: its own curl lets go, and it stands upright.
+  const curl = clamp(p.coil + 0.5 * (1 - cruise) - 0.3 * cruise - 0.6 * dart + 0.15 * Math.sin(t * 0.27 + index * 1.9), -1, 1) * (1 - grip);
+  const lean = clamp(-0.1 + 0.6 * cruise + 0.3 * dart, -1, 1) * (1 - reach) - 0.08 * reach;
   const turnLead = turnDial(inp.turn, 0.5) * 0.4;
   const wanderYaw = 0.3 * Math.sin(t * 0.33 + index * 1.1) + 0.12 * Math.sin(t * 0.9 + index * 0.4);
   const wanderPitch = 0.25 * Math.sin(t * 0.25 + index * 2.7) - 0.3 * lean;  // it keeps its eyes level as it leans
   const toViewer = inp.viewer ? mintedViewer(index, t - 0.15, 0.5) * p.curiosity * inFront(inp.viewer.yaw) : 0;
   const vYaw = inp.viewer ? clamp(inp.viewer.yaw / SEAHORSE_LOOK.yaw, -1, 1) : 0;
   const vPitch = inp.viewer ? clamp(inp.viewer.pitch / SEAHORSE_LOOK.pitch, -1, 1) : 0;
-  const yaw = clamp((wanderYaw + turnLead) * (1 - toViewer) + vYaw * toViewer, -1, 1);
+  // A partner holds its gaze as the viewer would.
+  const gaze = h?.gaze !== undefined ? reach : 0;
+  const yaw = clamp(((wanderYaw + turnLead) * (1 - toViewer) + vYaw * toViewer) * (1 - gaze) + (h?.gaze ?? 0) * gaze, -1, 1);
   const pitch = clamp(wanderPitch * (1 - toViewer) + vPitch * toViewer, -1, 1);
 
   const weights = {} as Record<SeahorseClip, number>;
@@ -186,7 +205,7 @@ export function seahorseFrame(rig: SeahorseRig, t: number, index: number, beat: 
   weights.hover = stroke * (1 - cruise);
   weights.burst = burst;
   if (m.moment) weights[m.moment] = m.weight;
-  weights.curl = 1; weights.lean = 1; weights.lookYaw = 1; weights.lookPitch = 1;
+  weights.curl = 1; weights.grip = 1; weights.aim = 1; weights.lean = 1; weights.lookYaw = 1; weights.lookPitch = 1;
   const dial = (v: number, d: number): number => clamp((v + 1) * 0.5 * d, 0, d - 1e-4);
   const times = {} as Record<SeahorseClip, number>;
   for (const n of SEAHORSE_CLIPS) times[n] = 0;
@@ -195,6 +214,8 @@ export function seahorseFrame(rig: SeahorseRig, t: number, index: number, beat: 
   times.burst = posMod(t, D.burst);
   if (m.moment) times[m.moment] = clamp(m.into, 0, D[m.moment] - 1e-4);
   times.curl = dial(curl, D.curl);
+  times.grip = clamp(grip, 0, 1) * (D.grip - 1e-4);
+  times.aim = dial(h?.aim ?? 0, D.aim);
   times.lean = dial(lean, D.lean);
   times.lookYaw = dial(yaw, D.lookYaw);
   times.lookPitch = dial(pitch, D.lookPitch);
@@ -204,6 +225,6 @@ export function seahorseFrame(rig: SeahorseRig, t: number, index: number, beat: 
     a.setEffectiveWeight(weights[n]);
   }
   rig.mixer.update(0);
-  const doing: SeahorseDoing = burst > 0.3 ? 'burst' : m.moment && m.weight > 0.3 ? m.moment : cruise > 0.5 ? 'swim' : 'hover';
-  return { doing, temper: p.temper, weights, curl, lean, look: { yaw, pitch } };
+  const doing: SeahorseDoing = burst > 0.3 ? 'burst' : m.moment && m.weight > 0.3 ? m.moment : grip > 0.5 ? 'hold' : cruise > 0.5 ? 'swim' : 'hover';
+  return { doing, temper: p.temper, weights, curl, lean, grip, look: { yaw, pitch } };
 }

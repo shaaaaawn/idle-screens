@@ -41,6 +41,13 @@ so the mixer never averages two — exported as nodes, common.export layered):
     lookY, lookP   the neck's yaw and pitch: the look dials
     c1..c6         one above each tail bone: the curl dial coils the whole
                    tail at once, under any other move
+    a4, g4..g6     the grip: g4..g6 (between each curl and its tail bone)
+                   wrap the tail's last three bones into a horizontal loop, a
+                   stem's width, falling a little as it goes round — the hold
+                   a real one takes on seagrass; a4 swings the whole loop about
+                   the t3/t4 joint's upright (forward, its left, its right)
+    grasp          a node at the loop's centre, riding t4: where the tank pins
+                   the stem (src/holdfast.ts)
 
 Clips (30 fps; the tank sets their times and weights, never update(dt)):
 
@@ -52,17 +59,18 @@ Clips (30 fps; the tank sets their times and weights, never update(dt)):
     moments  one-shots from rest to rest (src/seahorse.ts gives every
              seahorse a temperament and a favourite): coil, twirl, dance,
              snick, bow, bob, lookabout, stretch, wag, tilt
-    curl, lean, lookYaw, lookPitch
+    curl, aim, lean, lookYaw, lookPitch
              DIALS, 2 s each: the time is the setting — 0 one way, 1 at
-             rest, 2 the other (curl + coiled forward, lean + forward,
-             lookYaw + to its left, lookPitch + snout up)
+             rest, 2 the other (curl + coiled forward, aim + the loop to its
+             left, lean + forward, lookYaw + to its left, lookPitch + snout up)
+    grip     a one-sided dial, 2 s: 0 at rest, 2 wrapped
 """
 import math
 import os
 import sys
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Quaternion, Vector
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -135,13 +143,74 @@ def bone_table():
     parent = 'trunk'
     for i, (b, c) in enumerate(zip(TAIL_BONES, CURL)):
         (y0, z0), (y1, z1) = TAIL[i], TAIL[i + 1]
-        t[c] = ((0, y0, z0), (0, y0, z0 - 0.5), parent)
-        t[b] = ((0, y0, z0), (0, y1, z1), c)
+        stub = ((0, y0, z0), (0, y0, z0 - 0.5))
+        t[c] = (*stub, parent)
+        parent = c
+        # The grip's bones, between the curl and the tail bone: aim (t4 only) then grip.
+        for d in ((AIM,) if b == GRIP_FROM else ()) + tuple(g for g, tb in zip(GRIP, GRIP_TAIL) if tb == b):
+            t[d] = (*stub, parent)
+            parent = d
+        t[b] = ((0, y0, z0), (0, y1, z1), parent)
         parent = b
+    head = Vector(GRASP)
+    t['grasp'] = (tuple(head), tuple(head + Vector((0, 0, -0.5))), GRIP_FROM)
     return t
 
 
-NONDEFORM = ('root', 'roll', 'lean', 'lookY', 'lookP') + CURL
+# --- the grip --------------------------------------------------------------
+# The tail's last three bones wrap a horizontal loop round a vertical stem (a
+# kelp stalk, a sea whip, a partner's tail): the curl's coil closes in the
+# body's own plane, which a stem standing beside it can never pass through.
+# Wrapped, t4 leaves the straight tail sideways and t5, t6 go on round, a
+# little lower each turn (the helix a real one makes). `aim` swings the whole
+# loop about the t3/t4 joint's upright: forward at rest, to its left at +1,
+# its right at -1. `grasp`, a node at the loop's centre, is where the tank
+# pins the stem.
+GRIP_FROM = 't4'
+AIM = 'a4'
+GRIP = ('g4', 'g5', 'g6')
+GRIP_TAIL = ('t4', 't5', 't6')
+GRIP_R = 3.8      # the loop's radius, at the tail's centreline (the tail is 6 thick; a whip's stalk ~2.4)
+GRIP_DROP = 3.0   # how far the loop falls over a whole turn
+
+
+def _grip():
+    joints = [Vector((0, y, z)) for y, z in TAIL[3:]]
+    rest = [(b - a).normalized() for a, b in zip(joints, joints[1:])]
+    lengths = [(b - a).length for a, b in zip(joints, joints[1:])]
+    j4 = joints[0]
+    fwd = Vector((0, -1, 0))
+    c = j4 + fwd * GRIP_R
+    e1, e2 = -fwd, Vector((1, 0, 0))
+
+    def at(phi):
+        return c + (e1 * math.cos(phi) + e2 * math.sin(phi)) * GRIP_R + Vector((0, 0, -GRIP_DROP * phi / (2 * math.pi)))
+    phis, prev = [0.0], 0.0
+    for L in lengths:
+        lo, hi = prev, prev + math.pi
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if (at(mid) - at(prev)).length < L:
+                lo = mid
+            else:
+                hi = mid
+        prev = (lo + hi) / 2
+        phis.append(prev)
+    targets = [(at(b) - at(a)).normalized() for a, b in zip(phis, phis[1:])]
+    qs, acc = [], Quaternion()
+    for d, want in zip(rest, targets):
+        q = d.rotation_difference(acc.inverted() @ want)
+        qs.append(q)
+        acc = acc @ q
+    centre = c + Vector((0, 0, -GRIP_DROP * phis[-1] / (4 * math.pi)))
+    # The grasp rides t4: its rest place is wherever the wrapped t4 carries it to the centre.
+    grasp = j4 + qs[0].inverted() @ (centre - j4)
+    return qs, tuple(grasp), math.degrees(phis[-1])
+
+
+GRIP_Q, GRASP, GRIP_WRAP = _grip()
+
+NONDEFORM = ('root', 'roll', 'lean', 'lookY', 'lookP') + CURL + (AIM,) + GRIP + ('grasp',)
 
 
 # --------------------------------------------------------------------------
@@ -340,6 +409,21 @@ def curl(t, T=2.0):
     return p
 
 
+def grip(t, T=2.0):
+    """0 at rest, T wrapped (one-sided: the tank sets time = grip × T)."""
+    p = Pose()
+    s = t / T
+    for g, q in zip(GRIP, GRIP_Q):
+        p.rot[g] = Quaternion().slerp(q, s)
+    return p
+
+
+def aim(t, T=2.0):
+    p = Pose()
+    p.turn(AIM, 'z', 0.5 * math.pi * (t - 1))
+    return p
+
+
 def lean(t, T=2.0):
     p = Pose()
     p.turn('lean', 'x', 0.35 * (t - 1))
@@ -362,7 +446,7 @@ CLIPS = [
     ('swim', swim, 2.0), ('hover', hover, 3.0), ('burst', burst, 1.0),
     ('coil', coil_up, 5.0), ('twirl', twirl, 4.6), ('dance', dance, 5.2), ('snick', snick, 3.0), ('bow', bow, 3.6),
     ('bob', bob, 3.4), ('lookabout', lookabout, 4.4), ('stretch', stretch, 4.0), ('wag', wag, 3.6), ('tilt', tilt, 3.6),
-    ('curl', curl, 2.0), ('lean', lean, 2.0), ('lookYaw', look_yaw, 2.0), ('lookPitch', look_pitch, 2.0),
+    ('curl', curl, 2.0), ('grip', grip, 2.0), ('aim', aim, 2.0), ('lean', lean, 2.0), ('lookYaw', look_yaw, 2.0), ('lookPitch', look_pitch, 2.0),
 ]
 
 
@@ -385,7 +469,7 @@ def main():
         keyed['trunk'].append('location')
         clips = bake(rig, BREED, CLIPS, apply_pose, ('swim', 'hover', 'burst'), keyed)
         out = export(rig, out_path(BREED), {}, layered=True)
-        return {'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
+        return {'grip_wrap_deg': round(GRIP_WRAP), 'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 
 

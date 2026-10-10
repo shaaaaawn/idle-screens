@@ -1,4 +1,4 @@
-import { AnimationClip, Bone, Group, NumberKeyframeTrack, type Object3D } from 'three';
+import { AnimationClip, Bone, Group, NumberKeyframeTrack, Vector3, type Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
@@ -9,7 +9,7 @@ import {
 
 const DUR: Record<string, number> = {
   swim: 2, hover: 3, burst: 1, coil: 5, twirl: 4.6, dance: 5.2, snick: 3, bow: 3.6, bob: 3.4, lookabout: 4.4, stretch: 4,
-  wag: 3.6, tilt: 3.6, curl: 2, lean: 2, lookYaw: 2, lookPitch: 2,
+  wag: 3.6, tilt: 3.6, curl: 2, grip: 2, aim: 2, lean: 2, lookYaw: 2, lookPitch: 2,
 };
 const puppet = (): Group => { const g = new Group(); const b = new Bone(); b.name = 'body'; g.add(b); return g; };
 const clips = (names: readonly string[] = SEAHORSE_CLIPS): AnimationClip[] =>
@@ -35,13 +35,13 @@ describe('seahorse: the seahorse', () => {
     for (let u = 0; u < 120; u += 0.1) expect(seahorseFrame(r, u, 3, u * 5, cruising).weights.burst).toBe(0);
   });
 
-  it('the body clips share one whole; the four dials ride bones of their own', () => {
+  it('the body clips share one whole; the six dials ride bones of their own', () => {
     const r = rigSeahorse(puppet(), clips())!;
     for (let t = 0; t < 120; t += 0.07) {
       const w = seahorseFrame(r, t, 2, t * 7, { ...cruising, pace: 0.5 + 0.5 * Math.sin(t), flurry: Math.max(0, Math.sin(t * 0.3)) }).weights;
       const body = ['swim', 'hover', 'burst', ...SEAHORSE_MOMENTS].reduce((sum, n) => sum + w[n as keyof typeof w], 0);
       expect(body).toBeCloseTo(1, 9);
-      expect([w.curl, w.lean, w.lookYaw, w.lookPitch]).toEqual([1, 1, 1, 1]);
+      expect([w.curl, w.grip, w.aim, w.lean, w.lookYaw, w.lookPitch]).toEqual([1, 1, 1, 1, 1, 1]);
     }
   });
 
@@ -75,6 +75,24 @@ describe('seahorse: the seahorse', () => {
     };
     expect(toward(of('curious'))).toBeGreaterThan(0.05);
     expect(toward(of('curious'))).toBeGreaterThan(toward(of('hunter')));
+  });
+
+  it('holding on, it wraps its tail, stands, keeps to the moments that leave its tail alone, and looks at a partner', () => {
+    const r = rigSeahorse(puppet(), clips())!;
+    for (let t = 0; t < 200; t += 0.13) {
+      const s = seahorseFrame(r, t, 5, t * 3, { ...cruising, flurry: 1, hold: { grip: 1, aim: 1, reach: 1, gaze: -0.7 } });
+      expect(s.weights.burst).toBe(0);
+      for (const m of ['coil', 'twirl', 'dance', 'wag'] as const) expect(s.weights[m]).toBe(0);
+      expect(s.curl).toBeCloseTo(0, 12);
+      expect(s.look.yaw).toBeCloseTo(-0.7, 9);
+      expect(['hold', 'snick', 'bow', 'bob', 'lookabout', 'stretch', 'tilt']).toContain(s.doing);
+      expect(r.actions.grip.time).toBeCloseTo(2, 3);
+      expect(r.actions.aim.time).toBeCloseTo(2, 3);
+    }
+    // Not holding, the grip is at rest and the loop forward.
+    seahorseFrame(r, 3, 5, 3, cruising);
+    expect(r.actions.grip.time).toBe(0);
+    expect(r.actions.aim.time).toBeCloseTo(1, 9);
   });
 
   it('every seahorse its own character: tempers, favourites and tempos spread across the 40', () => {
@@ -125,7 +143,35 @@ describe('seahorse: the real rig', () => {
     const gltf = await load();
     expect(rigSeahorse(gltf.scene, gltf.animations)).not.toBeNull();
     expect(bonesOf(gltf.scene).map((o) => o.name)).toEqual(expect.arrayContaining(
-      ['trunk', 'neck', 'head', 'snout', 'fin1', 'fin2', 'fin3', 't1', 't2', 't3', 't4', 't5', 't6', 'c1', 'c6', 'roll', 'lean', 'lookY', 'lookP']));
+      ['trunk', 'neck', 'head', 'snout', 'fin1', 'fin2', 'fin3', 't1', 't2', 't3', 't4', 't5', 't6', 'c1', 'c6', 'roll', 'lean', 'lookY', 'lookP', 'a4', 'g4', 'g5', 'g6']));
+  });
+
+  it('grips: the tail\'s last bones wrap a loop round its grasp, to whichever side the aim says', async () => {
+    const gltf = await load();
+    const rig = rigSeahorse(gltf.scene, gltf.animations)!;
+    expect(rig.grasp?.name).toBe('grasp');
+    const at = (name: string) => { const v = new Vector3(); gltf.scene.getObjectByName(name)!.getWorldPosition(v); return v; };
+    const pose = (grip: number, aim: number) => {
+      seahorseFrame(rig, 40, 6, 0, { pace: 0, flurry: 0, turn: 0, viewer: null, hold: { grip, aim, reach: 1 } });
+      gltf.scene.updateMatrixWorld(true);
+    };
+    for (const aim of [1, -1]) {
+      pose(1, aim);
+      const g = at('grasp'), t3 = at('t3');
+      // Its left is +x; the grasp beside the straight tail, below where it hangs from.
+      expect(Math.sign(g.x - t3.x)).toBe(aim);
+      expect(g.y).toBeLessThan(t3.y);
+      // t4, t5, t6 each start on the loop, a tail's-centreline radius from the grasp, about its upright.
+      for (const b of ['t4', 't5', 't6']) {
+        const p = at(b);
+        expect(Math.hypot(p.x - g.x, p.z - g.z), b).toBeGreaterThan(3.2);
+        expect(Math.hypot(p.x - g.x, p.z - g.z), b).toBeLessThan(4.4);
+        expect(Math.abs(p.y - g.y), b).toBeLessThan(2.5);
+      }
+    }
+    // At rest the grasp is nowhere near a loop round it.
+    pose(0, 0);
+    expect(Math.hypot(at('t6').x - at('grasp').x, at('t6').z - at('grasp').z)).toBeGreaterThan(4.4);
   });
 
   it('plays every moment alone without a snap', async () => {
