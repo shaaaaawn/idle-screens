@@ -72,12 +72,18 @@ describe('holdfast: what it holds', () => {
       expect(f.stems.length).toBeGreaterThan(20);
       expect(new Set(f.stems.map((s) => s.plant)).size).toBe(f.plants);
       const g = f.parts[0]!, pos = g.getAttribute('position'), sway = g.getAttribute('aSway'), mat = g.getAttribute('aMat');
+      // The vertices by the plant they sway with (root, phase, gust), indexed once.
+      const key = (root: number, phase: number, gust: number): string => `${root.toFixed(3)}|${phase.toFixed(4)}|${gust.toFixed(4)}`;
+      const byPlant = new Map<string, number[]>();
+      for (let v = 0; v < pos.count; v++) {
+        const k = key(sway.getX(v), sway.getY(v), sway.getZ(v));
+        (byPlant.get(k) ?? byPlant.set(k, []).get(k)!).push(v);
+      }
       for (const s of f.stems.filter((_, i) => i % 7 === 0)) {
         let found = 0;
-        for (let v = 0; v < pos.count; v++) {
+        for (const v of byPlant.get(key(Math.fround(s.root), Math.fround(s.phase), Math.fround(s.gust))) ?? []) {
           // Within its cube (faces between cubes are culled, and runs of faces merged, so only some corners are its own).
           if (Math.abs(pos.getX(v) - s.x) > 1.7 || Math.abs(pos.getY(v) - s.y) > 1.7 || Math.abs(pos.getZ(v) - s.z) > 1.7) continue;
-          if (Math.abs(sway.getX(v) - s.root) > 1e-5 || Math.abs(sway.getY(v) - s.phase) > 1e-5 || Math.abs(sway.getZ(v) - s.gust) > 1e-5) continue;
           expect(mat.getX(v)).toBeCloseTo(s.flex, 6);
           found++;
         }
