@@ -45,6 +45,22 @@ describe('buildSigns', () => {
     expect(Math.hypot(o.x - 0, o.z + 40)).toBeGreaterThan(12);
   });
 
+  it('skips a sign when nothing is clear, rather than stacking it on another', () => {
+    expect(buildSigns(parseSignMix('plank:Hi').entries, ctx({ free: () => false })).obstacles).toHaveLength(0);
+  });
+
+  it('grows a porthole so a four-letter word fits inside the glass', () => {
+    const small = buildSigns(parseSignMix('porthole:OK').entries, ctx()).obstacles[0]!;
+    const big = buildSigns(parseSignMix('porthole:OPEN').entries, ctx()).obstacles[0]!;
+    expect(big.r).toBeGreaterThan(small.r);
+  });
+
+  it('frees the LED text texture through the material disposal hook', () => {
+    const built = buildSigns(parseSignMix('led:HELLO').entries, ctx());
+    const face = built.group.children.find((m) => m.name === 'sign-led') as Mesh;
+    expect(typeof (face.material as MeshBasicMaterial).userData.mqDispose).toBe('function');
+  });
+
   it('scrolls an LED board on the scenery clock', () => {
     const clocks: { value: number }[] = [];
     const built = buildSigns(parseSignMix('led:HELLO').entries, ctx({ clocks }));

@@ -622,6 +622,7 @@ function disposeOwned(root: Object3D): void {
       // textures today, so this line waits for one that does.
       const tex = (m as Partial<MeshBasicMaterial>).map;
       if (tex?.userData?.mqOwned) tex.dispose();
+      (m.userData.mqDispose as (() => void) | undefined)?.();
       m.dispose();
     }
   });

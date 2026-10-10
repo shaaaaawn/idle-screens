@@ -144,6 +144,7 @@ function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): M
   const mat = new MeshBasicMaterial({ color, side: FrontSide });
   mat.userData.mqOwned = true;
   mat.userData.mqNoCaustic = true; // a display, not a surface
+  mat.userData.mqDispose = () => tex.dispose(); // the text texture lives in a uniform, not `map`
   mat.userData.mqGlowColor = color.getHex();
   const info = { value: new Vector4(t.w, 0, t.w > LED_COLS ? 1 : 0, 1) };
   const uniforms = { uLedText: { value: tex }, uLedInfo: info, uLedColor: { value: color.clone() } };
@@ -163,7 +164,7 @@ function ledMaterial(t: PixelText, color: Color, clocks: { value: number }[]): M
  * on the doorstep or the gate itself would block it); in the open, a seeded
  * spot across the front of the tank.
  */
-function siteOf(e: SignEntry, i: number, ctx: SignContext, width: number, taken: Array<{ x: number; z: number; r: number }>): { x: number; z: number } {
+function siteOf(e: SignEntry, i: number, ctx: SignContext, width: number, taken: Array<{ x: number; z: number; r: number }>): { x: number; z: number } | null {
   const s = ctx.scale, r = width / 2 + 4 * s;
   const clear = (x: number, z: number): boolean => ctx.free(x, z, r) && !taken.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + r);
   const mark = e.place ? ctx.marks[e.place] : undefined;
@@ -187,7 +188,13 @@ function siteOf(e: SignEntry, i: number, ctx: SignContext, width: number, taken:
     const x = rng.range(-110, 110) * s, z = rng.range(15, 85) * s;
     if (clear(x, z)) return { x, z };
   }
-  return { x: (i % 2 ? 1 : -1) * (40 + 30 * i) * s, z: 40 * s };
+  // A crowded tank: search a wider band, still checked. No clear spot, no sign.
+  const wide = ctx.rng.fork(200 + i);
+  for (let k = 0; k < 96; k++) {
+    const x = wide.range(-260, 260) * s, z = wide.range(10, 130) * s;
+    if (clear(x, z)) return { x, z };
+  }
+  return null;
 }
 
 export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): BuiltSigns {
@@ -206,8 +213,11 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
     const color = new Color(e.color ?? DEFAULT_COLOR[e.kind]);
     // The footprint first, to find a site the sign fits.
     const textW = Math.max(t.w, 1) * px;
-    const width = e.kind === 'led' ? (LED_COLS + 2) * px : e.kind === 'porthole' ? 18 * px : e.kind === 'ring' ? Math.max(22 * px, textW + 4 * px) : textW + 8 * px;
+    // A porthole's glass grows to take its word (a 4-letter word is 23 px wide).
+    const portR = Math.max(7, Math.ceil((t.w + 2) / 2)) * px;
+    const width = e.kind === 'led' ? (LED_COLS + 2) * px : e.kind === 'porthole' ? 2 * portR + 4 * px : e.kind === 'ring' ? Math.max(22 * px, textW + 4 * px) : textW + 8 * px;
     const site = siteOf(e, i, ctx, width, taken);
+    if (!site) return;
     taken.push({ x: site.x, z: site.z, r: width / 2 + 6 * s });
     // Faces the front, turned a little toward the middle so the edge ones read.
     const yaw = Math.max(-0.5, Math.min(0.5, -site.x / Math.max(60 * s, Math.abs(site.z) + 160 * s))) + rng.range(-0.06, 0.06);
@@ -250,7 +260,7 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
       }
       top = cy + R + 3 * px;
     } else if (e.kind === 'porthole') {
-      const R = 7 * px, cy = 8 * s + R + 4 * px;
+      const R = portR, cy = 8 * s + R + 4 * px;
       // A squat stone it is set in.
       c.set('#4a5560'); W.box(0, cy / 2, -1.2 * px, R * 2.4, cy + R, 2.4 * px, c);
       const brass = new Color('#c9963c'), brassDark = new Color('#8a6424');
@@ -320,5 +330,5 @@ export function buildSigns(entries: readonly SignEntry[], ctx: SignContext): Bui
   };
   add(wood, 'signs');
   add(glow, 'signs-lit');
-  return { group, obstacles, halos, lights, count: entries.length };
+  return { group, obstacles, halos, lights, count: obstacles.length };
 }
