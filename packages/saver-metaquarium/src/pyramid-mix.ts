@@ -38,18 +38,21 @@ export const PYRAMID_STONES_BY_ENVIRONMENT: Record<string, Partial<Record<Pyrami
   void: { sandstone: 2, limestone: 2, obsidian: 1, jade: 1, gold: 0.6, lapis: 0.6, crystal: 0.6, nacre: 0.4, coral: 0.4, basalt: 0.4 },
 };
 
-/** `pyramidMix`: shapes and stones, each with an optional weight — `giza:3,mayan,gold:2,obsidian`. */
-export function parsePyramidMix(src: string): { shapes: Partial<Record<PyramidShape, number>>; materials: Partial<Record<PyramidMaterial, number>>; problems: string[] } {
+/** `pyramidMix`: shapes and stones, each with an optional weight — `giza:3,mayan,gold:2,obsidian` — and `trim[:share]`, the
+ *  share (0..1, alone 0.5) of the stone ones that carry lamps on their edges, base and capstone. */
+export function parsePyramidMix(src: string): { shapes: Partial<Record<PyramidShape, number>>; materials: Partial<Record<PyramidMaterial, number>>; trim: number; problems: string[] } {
   const shapes: Partial<Record<PyramidShape, number>> = {}, materials: Partial<Record<PyramidMaterial, number>> = {}, problems: string[] = [];
+  let trim = 0;
   for (const raw of src.split(',')) {
     const part = raw.trim();
     if (!part) continue;
     const m = /^([a-z]+)\s*(?::\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/i.exec(part);
     const name = m?.[1]?.toLowerCase() ?? '';
     const w = m?.[2] !== undefined ? Number(m[2]) : 1;
-    if (m && (PYRAMID_SHAPES as readonly string[]).includes(name)) shapes[name as PyramidShape] = (shapes[name as PyramidShape] ?? 0) + w;
+    if (m && name === 'trim') trim = Math.min(1, m[2] !== undefined ? w : 0.5);
+    else if (m && (PYRAMID_SHAPES as readonly string[]).includes(name)) shapes[name as PyramidShape] = (shapes[name as PyramidShape] ?? 0) + w;
     else if (m && name in PYRAMID_MATERIALS) materials[name as PyramidMaterial] = (materials[name as PyramidMaterial] ?? 0) + w;
-    else problems.push(`"${part}": expected a shape (${PYRAMID_SHAPES.join(', ')}) or a stone (${PYRAMID_MATERIAL_NAMES.join(', ')}), with an optional :weight`);
+    else problems.push(`"${part}": expected a shape (${PYRAMID_SHAPES.join(', ')}) or a stone (${PYRAMID_MATERIAL_NAMES.join(', ')}), with an optional :weight, or trim[:share]`);
   }
-  return { shapes, materials, problems };
+  return { shapes, materials, trim, problems };
 }

@@ -347,6 +347,15 @@ export const METAQUARIUM_PARAMS = {
   pyramids: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Their shapes and stones, `shape|stone[:weight], …` (empty = the room's stone, every shape). */
   pyramidMix: { type: 'string', default: '', ease: 'step' },
+  /** `field` (complexes over the floor) or `stage`: one monumental pyramid in the middle of the camera's orbit — lit if the
+   *  mix has a lit stone, else lit-trimmed — with a small one at each side, the field behind. Needs flat ground there. */
+  pyramidLayout: { type: 'enum', default: 'field', options: ['field', 'stage'], ease: 'step' },
+  /** The lit pyramids' show (led, neon, lit trim): '' or `auto` — the field as one, through every routine in turn, a wave
+   *  rolling across it; `solo` — each its own; a routine (rings beam edges equalizer rainbow twinkle faces rain spiral
+   *  breathe ripple); or a looping cue sheet `8s:rings, 8s:beam, 16s:equalizer`. Steered live: no rebuild. */
+  pyramidShow: { type: 'string', default: '', ease: 'step' },
+  /** The show's tempo (0 = free-running): the motion steps on the beat and each beat lifts the lamps, under a flash. */
+  pyramidBpm: { type: 'number', default: 0, min: 0, max: 140, ease: 'step' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes

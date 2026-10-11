@@ -6,6 +6,9 @@ import {
   buildPyramids, groundUnder, parsePyramidMix, pyramidFlatness, PYRAMID_CUBES, PYRAMID_SHAPES, PYRAMID_VOXEL, pyramidMaterial, pyramidProfile, PyramidWriter, writePyramid, type PyramidOptions,
 } from './pyramids';
 import { buildScenery, type SceneryOptions } from './scenery';
+import { PYRAMID_SHOWS } from './pyramid-show';
+
+const PYRAMID_SHOW_INDEX = (n: string): number => PYRAMID_SHOWS.indexOf(n as (typeof PYRAMID_SHOWS)[number]);
 import { FISH_LENGTH } from './swim';
 
 const flat = (): number => 0;
@@ -220,12 +223,41 @@ describe('pyramids: the lit ones', () => {
     expect(lit.customProgramCacheKey()).not.toEqual(pyramidMaterial().customProgramCacheKey());
   });
 
-  it('its show cuts through the water: the lit material keeps most of its light through the fog chunk', () => {
+  it('its lamps cut through the water: the lit material spares them most of the fog, not the stone or the base', () => {
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>\n#include <fog_fragment>', uniforms: {} as Record<string, unknown> };
     pyramidMaterial({ value: 0 }, true).onBeforeCompile(shader as never, undefined as never);
     // The fog chunk stays (the water patch swaps it by name), bracketed by the save and the restore.
-    expect(shader.fragmentShader).toMatch(/mqPreFog = gl_FragColor\.rgb;\n#include <fog_fragment>\ngl_FragColor\.rgb = mix\(gl_FragColor\.rgb, mqPreFog, 0\.55\)/);
+    // The fog chunk stays (the water patch swaps it by name), bracketed by the save and a restore that spares only
+    // the lit lamps, and only from the third layer up (the base fogs as the floor does).
+    expect(shader.fragmentShader).toContain('vec3 mqPreFog = gl_FragColor.rgb;\n#include <fog_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, mqPreFog, 0.55 * mqPyrLit * smoothstep(0.5, 3.5, vCell.y));');
     expect(shader.fragmentShader).toContain('mqPyrShow(');
+  });
+});
+
+describe('pyramids: the stage', () => {
+  it('raises one monumental pyramid in the middle, a small one at each side — symmetric, standing, lit — and the field behind', () => {
+    const p = buildPyramids(createRng(42), opts({ mix: 'giza:3,step,led:3,obsidian', layout: 'stage' }));
+    const [stage, ...sides] = p.sites.slice(0, 5);
+    expect([stage!.x, stage!.z, stage!.pose, stage!.material, stage!.cube]).toEqual([0, 0, 'stand', 'led', 2]);
+    // On the four axes, all the same distance out.
+    const out = sides.map((s) => Math.hypot(s.x, s.z));
+    expect(sides).toHaveLength(4);
+    for (const r of out) expect(r).toBeCloseTo(out[0]!, 9);
+    expect(sides.every((s) => Math.min(Math.abs(s.x), Math.abs(s.z)) < 1e-9)).toBe(true);
+    expect(sides.every((s) => s.pose === 'stand' && s.material === 'led')).toBe(true);
+    // Nothing else near the middle: the stage is the stage's.
+    expect(p.sites.slice(5).every((s) => s.band !== 'near')).toBe(true);
+    // A stone stage carries lit trim.
+    const stone = buildPyramids(createRng(42), opts({ mix: 'sandstone', layout: 'stage' }));
+    expect(stone.lit).not.toBeNull();
+  });
+
+  it('moves off the very middle when something is there, to the nearest clear spot inside the camera\'s orbit', () => {
+    const p = buildPyramids(createRng(42), opts({ mix: 'led', layout: 'stage', free: (x, z, r) => Math.hypot(x + 40, z) > r + 4 }));
+    const stage = p.sites[0]!;
+    expect(stage.cube).toBe(2);
+    expect(Math.hypot(stage.x, stage.z)).toBeGreaterThan(0);
+    expect(Math.hypot(stage.x, stage.z)).toBeLessThanOrEqual(24);
   });
 });
 
@@ -241,6 +273,15 @@ describe('pyramids: in the world', () => {
     expect(w.group.children.some((c) => c.name === 'pyramids-lit')).toBe(false);
     expect(w.counts.pyramids).toBeGreaterThan(6);
     expect(buffers({ ...base, pyramids: 0 })).toEqual(buffers(base));
+  });
+
+  it('a light show\'s light moves with it: a moving source the frame rewrites', () => {
+    const w = buildScenery([], createRng(9), terrain, { ...base, pyramids: 1, pyramidMix: 'led', pyramidLayout: 'stage' });
+    w.setPyramidShow(PYRAMID_SHOW_INDEX('breathe'), PYRAMID_SHOW_INDEX('breathe'), 0, false, 0);
+    const levels: number[] = [];
+    for (const t of [0, 1.7, 3.5, 5.2]) { w.setFrame(t); levels.push(w.moving.reduce((n, e) => n + e.r + e.g + e.b, 0)); }
+    expect(w.moving.length).toBeGreaterThan(0);
+    expect(Math.max(...levels) - Math.min(...levels)).toBeGreaterThan(0.01);
   });
 
   it('never indoors', () => {

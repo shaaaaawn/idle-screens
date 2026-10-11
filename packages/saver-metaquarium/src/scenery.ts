@@ -16,7 +16,8 @@ import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
-import { buildPyramids, pyramidMaterial } from './pyramids';
+import { buildPyramids, pyramidMaterial, pyramidShowUniforms, type Pyramids } from './pyramids';
+import { pyramidGlowLevel } from './pyramid-show';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
@@ -73,6 +74,8 @@ export interface SceneryOptions {
   pyramids?: number;
   /** Their shapes and stones: `giza:3,mayan,gold:2` (pyramids.ts parsePyramidMix). */
   pyramidMix?: string;
+  /** `field` or `stage` (pyramids.ts). */
+  pyramidLayout?: 'field' | 'stage';
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
   castle?: 0 | 1 | 2;
   /** 0..1 — walks from every door to the village hub, a road to the landmark, trails to the crystals. */
@@ -115,6 +118,8 @@ export interface Scenery {
   groundAt(x: number, z: number): number;
   /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
+  /** The lit pyramids' show this frame (pyramid-show.ts showState): routine a, routine b, the crossfade, solo, the tempo. */
+  setPyramidShow(a: number, b: number, mix: number, solo: boolean, bpm: number): void;
   /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
   setSurface(y: number | null): void;
 }
@@ -435,9 +440,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   keepClear.push(...plaza);
   for (const l of lampSites) obstacles.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, r: 2.5 * s, h: 17 * s });
   // Pyramids, before the geodes and the garden, so both keep off them and the fish go over.
+  const pyramidShow = pyramidShowUniforms();
+  let pyramidLights: Pyramids['shows'] = [];
+  const showNow = { a: 0, b: 1, mix: 0, bpm: 0 };
   if (!opts.interior && (opts.pyramids ?? 0) > 0) {
     const pyr = buildPyramids(rng.fork(14), {
-      amount: opts.pyramids ?? 0, cap: opts.cap, scale: s, environment: opts.environment ?? 'void', mix: opts.pyramidMix, terrain,
+      amount: opts.pyramids ?? 0, cap: opts.cap, scale: s, environment: opts.environment ?? 'void', mix: opts.pyramidMix, layout: opts.pyramidLayout, terrain,
       free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
         && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
         && !doorsteps.some(dd => Math.hypot(x - dd.x, z - dd.z) < r + 8 * s)
@@ -446,10 +454,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     });
     obstacles.push(...pyr.obstacles);
     homeLights.push(...pyr.emitters);
+    // A light show's light moves with the show: a moving source, rewritten each frame (setFrame).
+    pyramidLights = pyr.shows;
     const clock = { value: 0 }; clocks.push(clock);
     for (const [g, lit] of [[pyr.geometry, false], [pyr.lit, true]] as const) {
       if (!g) continue;
-      const mesh = new Mesh(g, pyramidMaterial(clock, lit));
+      const mesh = new Mesh(g, pyramidMaterial(clock, lit, pyramidShow));
       mesh.name = lit ? 'pyramids-lit' : 'pyramids';
       group.add(mesh);
     }
@@ -567,6 +577,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     density: opts.lanterns ?? 0, cap: opts.cap, scale: s, palette: clusters.map(c => c.color), height: opts.lanternHeight ?? 1,
   });
   const moving: Emitter[] = [];
+  // What the tank reads as moving light: the lanterns, then the light shows (rebuilt each frame).
+  const movingOut: Emitter[] = [];
   let skyCards: GlowCards | null = null;
   if (sky?.geometry) {
     sky.geometry.userData.mqOwned = true;
@@ -862,7 +874,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
+    group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     setFish(fish) {
@@ -883,8 +895,17 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       return h;
     },
     groundAt: stoneGround ?? (() => -Infinity),
+    setPyramidShow(a, b, mix, solo, bpm) {
+      pyramidShow.uPyrShow.value.set(a, b, mix, solo ? 1 : 0);
+      pyramidShow.uPyrBpm.value = bpm;
+      showNow.a = solo ? -1 : a; showNow.b = b; showNow.mix = mix; showNow.bpm = bpm;
+    },
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
+      for (const l of pyramidLights) {
+        const k = pyramidGlowLevel(showNow, showNow.bpm, l.phase, l.seed, l.top, t);
+        l.emitter.r = l.base[0] * k; l.emitter.g = l.base[1] * k; l.emitter.b = l.base[2] * k;
+      }
       bubbleLayer?.setFrame(t, bubbleSurface);
       if (fog) horizonFog.value.copy(fog.color);
       geodeGlow.value = glow; geodePulse.value = pulse;
@@ -894,6 +915,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       // to draw (fog is the card pass's business): a caller that only asks
       // for time still gets the lanterns where they are.
       if (sky) lanternEmitters(sky.lanterns, t, moving);
+      movingOut.length = 0;
+      for (const e of moving) movingOut.push(e);
+      for (const l of pyramidLights) movingOut.push(l.emitter);
       if (sky && skyCards && fog) {
         const p = { x: 0, y: 0, z: 0 }, c = new Color();
         sky.lanterns.forEach((l, i) => {
