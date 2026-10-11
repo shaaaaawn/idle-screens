@@ -2,6 +2,7 @@ import { clarityRatio, clarityReach, patchWater, RATIO, setDither, TINT, tintWei
 import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix, stemAt } from './flora';
 import { holdCycle, pickStem, seahorseHeld, seahorseHoldAt, type HoldState } from './holdfast';
+import { parsePyramidShow, showState, type ShowPlan } from './pyramid-show';
 import { parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseSignMix, type SignEntry } from './sign-mix';
@@ -811,6 +812,8 @@ class TankInstance implements SaverInstance {
   // Scenery. Everything below stays null/empty until a scene asks for props.
   private scenery: Scenery | null = null;
   private sceneryKey = "";
+  private pyramidShowSrc: string | null = null;
+  private pyramidShowPlan: ShowPlan = { mode: 'sequence' };
   private crystals: CrystalField | null = null;
   /** The colonies that burst out of the rocks: the same field, fed by the scenery. */
   private rockCrystals: CrystalField | null = null;
@@ -1486,6 +1489,7 @@ class TankInstance implements SaverInstance {
     const flora = this.num('floraDensity');
     const floraMix = this.str('floraMix').trim(), environment = this.str('environment'), floraPalette = this.str('floraPalette').trim(), floraLayout = this.str('floraLayout') === 'gallery' ? 'gallery' as const : 'garden' as const;
     const fountain = this.str('fountain') as 'none' | 'vent' | 'geode', streetLamps = this.num('streetLamps');
+    const pyramids = this.num('pyramids'), pyramidMix = this.str('pyramidMix').trim(), pyramidLayout = this.str('pyramidLayout') === 'stage' ? 'stage' as const : 'field' as const;
     const geodes = this.num('geodes'), geodeMix = this.str('geodeMix').trim(), geodeMineral = this.str('geodeMineral').trim(), geodeLayout = this.str('geodeLayout') === 'gallery' ? 'gallery' as const : 'field' as const;
     const bubbleStyle = this.str('bubbleStyle') === 'live' ? 'live' as const : 'classic' as const;
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
@@ -1504,7 +1508,7 @@ class TankInstance implements SaverInstance {
       };
     }
     const { entries: signEntries, layout: signLayout, led: ledTexts } = this.signsMemo;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signLayout}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${pyramids}|${pyramids > 0 ? `${pyramidMix}|${pyramidLayout}|${environment}` : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signLayout}`;
     if (key === this.sceneryKey) {
       this.scenery?.setLedTexts(ledTexts);
       return;
@@ -1523,10 +1527,10 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs) {
+    if (rocks > 0 || homes > 0 || flora > 0 || pyramids > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
-          fountain, lamps: streetLamps, signs: signEntries.length ? signEntries : undefined,
+          fountain, lamps: streetLamps, pyramids, pyramidMix, pyramidLayout, signs: signEntries.length ? signEntries : undefined,
           geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
@@ -2571,6 +2575,13 @@ class TankInstance implements SaverInstance {
     // The horizon sits on the level, where the in-scatter is half tint.
     if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
     else this.horizonColor.copy(this.fogColor);
+    if (this.scenery && this.num('pyramids') > 0) {
+      // The lit pyramids' show: uniforms only, so steering it never rebuilds the world.
+      const src = this.str('pyramidShow');
+      if (src !== this.pyramidShowSrc) { this.pyramidShowSrc = src; this.pyramidShowPlan = parsePyramidShow(src).plan; }
+      const st = showState(this.pyramidShowPlan, tSec);
+      this.scenery.setPyramidShow(st.a, st.b, st.mix, this.pyramidShowPlan.mode === 'solo', this.num('pyramidBpm'));
+    }
     this.scenery?.setSignFlicker(this.num('signFlicker'));
     this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {

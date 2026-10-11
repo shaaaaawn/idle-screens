@@ -1,0 +1,679 @@
+/**
+ * Pyramids: monuments built of cubes, as the fish are.
+ *
+ * A metaquarium fish is voxel art — a handful of square cubes, a classic token
+ * fourteen of them nose to tail — and a pyramid here is made the same way: a
+ * stack of cubes you can count, a dozen or two across, its cube a whole
+ * multiple of the fish's (FISH_LENGTH / 14 × 1, 2, 3, 4, 6 or 8), so a
+ * knee-high ruin by the glass and a mountain at the back of the floor are cut
+ * from one grid and read as the same kind of thing. The cubes are drawn as
+ * cubes: each its own shade of the stone, a fine seam between it and the next.
+ *
+ * Every one is exactly symmetric: an odd base, so its apex is one cube; each
+ * layer a square, its stairs and temple the same on all four faces; and the
+ * paint keyed on the sorted |x|, |z| of each cube, so the pattern has the
+ * square's eight symmetries too.
+ *
+ * Shapes are integer rise:run sequences:
+ *
+ *   giza    five rises to four insets — 51.3°, the Great Pyramid's angle — a
+ *           gilded pyramidion on many
+ *   step    one in one: 45° stairs all the way
+ *   bent    Dahshur's: steep (four rises to three) then shallow (one to one)
+ *   djoser  six great tiers
+ *   mayan   terraces, a stair up the middle of every face, a temple on top
+ *   frame   only its edges: an open frame of glowing cubes
+ *
+ * They stand on the floor, always — in complexes, as Giza's do: a great
+ * pyramid with its queens' pyramids in a row beside it, all squared to one
+ * another. A few small complexes near the glass, more in the middle of the
+ * floor, the great ones at the back fading into the water — only where the
+ * floor is flat under the whole footprint (on a dune or a mound a square base
+ * would bridge it or bury a corner, so there is none there). How did they get
+ * there? Most stand true; some are half sunk in the sand; one has lost its
+ * capstone, which lies in the sand at its foot.
+ *
+ * Geometry is the stepped faces only (a layer is a square: its four sides and
+ * the ring of its top), so a pyramid is a few hundred quads. The cubes are
+ * drawn in the fragment shader: each fragment knows its cube in the pyramid's
+ * own frame (`aCell`), so the paint stays on the grid however the pyramid
+ * is turned, and fades to its mean where a cube is under a pixel.
+ */
+import { BufferAttribute, BufferGeometry, Color, FrontSide, Matrix4, MeshBasicMaterial, Quaternion, Vector3, Vector4 } from 'three';
+import type { CrystalRng, Emitter } from './crystals';
+import { FISH_LENGTH } from './swim';
+import { BEAT_LIFT, MAX_BPM, PYRAMID_SHOWS, SHOW_FADE, SHOW_GLSL, SHOW_HOLD, WAVE_SPEED } from './pyramid-show';
+import { PYRAMID_MATERIAL_NAMES, PYRAMID_MATERIALS, PYRAMID_SHAPES, PYRAMID_STONES_BY_ENVIRONMENT, parsePyramidMix, type PyramidMaterial, type PyramidShape } from './pyramid-mix';
+
+export { PYRAMID_MATERIAL_NAMES, PYRAMID_MATERIALS, PYRAMID_SHAPES, parsePyramidMix, type PyramidMaterial, type PyramidShape };
+
+/** The fish's cube, in world units at `crystalScale` 1: a classic token is fourteen of them long. */
+export const PYRAMID_VOXEL = FISH_LENGTH / 14;
+/** A pyramid's cube is a whole number of the fish's: these, small to great. */
+export const PYRAMID_CUBES = [1, 2, 3, 4, 5] as const;
+
+export type PyramidPose = 'stand' | 'sunk' | 'capless';
+
+export interface PyramidOptions {
+  /** 0..1: how many. */
+  amount: number;
+  /** The device's prop budget (quality.props.clusters): the low tier gets fewer. */
+  cap: number;
+  /** `crystalScale`. */
+  scale: number;
+  environment: string;
+  mix?: string;
+  terrain: (x: number, z: number) => number;
+  /** Whether a footprint of radius r at (x, z) is clear of everything already placed. */
+  free: (x: number, z: number, r: number) => boolean;
+  /** `field` (complexes over the floor) or `stage`: one monumental pyramid at the middle of the camera's orbit, a small one
+   *  at each of its sides, the field behind. */
+  layout?: 'field' | 'stage';
+}
+
+export interface PyramidSite {
+  x: number; z: number; shape: PyramidShape; material: PyramidMaterial; pose: PyramidPose;
+  /** Half the base, in cubes (the base is 2·half + 1 across), and the cube's size in fish cubes. */
+  half: number; cube: number; layers: number;
+  /** The ground under its base's lowest corner; how far its lowest base corner sits above the ground there (never above: ≤ 0,
+   *  it is set into the sand); its footprint's radius. */
+  ground: number; seat: number; reach: number;
+  band: 'near' | 'mid' | 'far'; complex: number;
+}
+
+export interface Pyramids {
+  /** The stone ones. */
+  geometry: BufferGeometry | null;
+  /** The lit ones (`led`, `neon`): a light show, so the water's caustics never land on them. */
+  lit: BufferGeometry | null;
+  obstacles: Array<{ x: number; y: number; z: number; r: number; h: number }>;
+  /** Static light: a gilded or glowing capstone's. */
+  emitters: Emitter[];
+  /** A light show's light on the floor: rewritten each frame from the show (`level` × `base`). */
+  shows: Array<{ emitter: Emitter; base: [number, number, number]; seed: number; top: number; phase: number }>;
+  sites: PyramidSite[];
+}
+
+/** Half-widths of each layer, in cells: the pyramid's profile, bottom up. */
+export function pyramidProfile(shape: PyramidShape, half: number): number[] {
+  const w: number[] = [];
+  const W = Math.max(1, Math.round(half));
+  const up = (inset: (j: number) => number): void => {
+    for (let j = 0; ; j++) { const v = W - inset(j); if (v < 0) break; w.push(v); if (v === 0) break; }
+  };
+  switch (shape) {
+    case 'step': case 'frame': up((j) => j); break;
+    case 'giza': up((j) => Math.floor((j * 4) / 5)); break;
+    case 'bent': {
+      // Steep to just past half its height, then shallow.
+      const knee = Math.round(W * 0.5);
+      up((j) => { const steep = Math.floor((j * 3) / 4); return steep < knee ? steep : knee + (j - Math.ceil((knee * 4) / 3)); });
+      break;
+    }
+    case 'djoser': {
+      const tier = Math.max(2, Math.round(W * 0.2)), inset = Math.max(1, Math.round(W / 6.5));
+      for (let k = 0; k < 6; k++) { const v = W - k * inset; if (v < 1) break; for (let r = 0; r < tier; r++) w.push(v); }
+      break;
+    }
+    case 'mayan': {
+      const n = Math.max(3, Math.min(8, Math.round(W / 3))), tier = Math.max(2, Math.round(W / n));
+      for (let k = 0; k < n; k++) { const v = W - k * tier; if (v < 2) break; for (let r = 0; r < tier; r++) w.push(v); }
+      break;
+    }
+  }
+  // Never empty: one cube at the least.
+  return w.length ? w : [0];
+}
+
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+
+/** Voxel-art face values, as CubeWriter's: top brightest, the side pairs apart, the underside dark. */
+const SHADE = { top: 1, bottom: 0.42, px: 0.8, nx: 0.62, pz: 0.72, nz: 0.55 } as const;
+
+export class PyramidWriter {
+  readonly pos: number[] = []; readonly col: number[] = []; readonly cell: number[] = [];
+  readonly a: number[] = []; readonly b: number[] = []; readonly face: number[] = [];
+  quads = 0;
+  /** Per pyramid: its frame, voxel, and the attributes every vertex carries. */
+  m = new Matrix4(); V = 1; A: [number, number, number, number] = [0, 0, 0, 0]; B: [number, number, number, number] = [0, 0, 0, 0];
+  private readonly v = new Vector3();
+  /** A quad in the pyramid's cell frame (x, z cell centres on integers, layer j from y = j to j + 1), facing n. */
+  quad(c: ReadonlyArray<readonly [number, number, number]>, n: readonly [number, number, number]): void {
+    const [a, b, d] = [c[0]!, c[1]!, c[2]!];
+    const cross = [(b[1] - a[1]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[1] - a[1]), (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]), (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])];
+    const flip = cross[0]! * n[0] + cross[1]! * n[1] + cross[2]! * n[2] < 0;
+    const order = flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+    const shade = n[1] > 0 ? SHADE.top : n[1] < 0 ? SHADE.bottom : n[0] > 0 ? SHADE.px : n[0] < 0 ? SHADE.nx : n[2] > 0 ? SHADE.pz : SHADE.nz;
+    const f = n[1] > 0 ? 1 : n[1] < 0 ? -1 : 0;
+    for (const i of order) {
+      const p = c[i]!;
+      this.v.set(p[0] * this.V, p[1] * this.V, p[2] * this.V).applyMatrix4(this.m);
+      this.pos.push(this.v.x, this.v.y, this.v.z);
+      this.col.push(shade, shade, shade);
+      // Half a cell in from the face: the cell this face belongs to.
+      this.cell.push(p[0] - n[0] * 0.5, p[1] - n[1] * 0.5, p[2] - n[2] * 0.5);
+      this.a.push(...this.A); this.b.push(...this.B); this.face.push(f);
+    }
+    this.quads += 1;
+  }
+  /** A box of cells: x in [x0, x1], z in [z0, z1] (inclusive cell indices), layers [y0, y1). Faces in `skip` are left out. */
+  box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, skip: ReadonlySet<string> = NONE): void {
+    const X0 = x0 - 0.5, X1 = x1 + 0.5, Z0 = z0 - 0.5, Z1 = z1 + 0.5;
+    if (!skip.has('top')) this.quad([[X0, y1, Z0], [X1, y1, Z0], [X1, y1, Z1], [X0, y1, Z1]], [0, 1, 0]);
+    if (!skip.has('bottom')) this.quad([[X0, y0, Z0], [X1, y0, Z0], [X1, y0, Z1], [X0, y0, Z1]], [0, -1, 0]);
+    if (!skip.has('px')) this.quad([[X1, y0, Z0], [X1, y1, Z0], [X1, y1, Z1], [X1, y0, Z1]], [1, 0, 0]);
+    if (!skip.has('nx')) this.quad([[X0, y0, Z0], [X0, y1, Z0], [X0, y1, Z1], [X0, y0, Z1]], [-1, 0, 0]);
+    if (!skip.has('pz')) this.quad([[X0, y0, Z1], [X1, y0, Z1], [X1, y1, Z1], [X0, y1, Z1]], [0, 0, 1]);
+    if (!skip.has('nz')) this.quad([[X0, y0, Z0], [X1, y0, Z0], [X1, y1, Z0], [X0, y1, Z0]], [0, 0, -1]);
+  }
+  geometry(): BufferGeometry | null {
+    if (!this.quads) return null;
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(new Float32Array(this.pos), 3));
+    g.setAttribute('color', new BufferAttribute(new Float32Array(this.col), 3));
+    g.setAttribute('aCell', new BufferAttribute(new Float32Array(this.cell), 3));
+    g.setAttribute('aPyrA', new BufferAttribute(new Float32Array(this.a), 4));
+    g.setAttribute('aPyrB', new BufferAttribute(new Float32Array(this.b), 4));
+    g.setAttribute('aFace', new BufferAttribute(new Float32Array(this.face), 1));
+    g.computeBoundingSphere();
+    g.userData.mqOwned = true;
+    return g;
+  }
+}
+const NONE: ReadonlySet<string> = new Set();
+const NO_BOTTOM: ReadonlySet<string> = new Set(['bottom']);
+
+/**
+ * Write one pyramid's faces in its cell frame (the writer's matrix places it).
+ * `from`..`to` are the layers drawn (a capless one stops short; its capstone
+ * is the rest, drawn on its own). The base is drawn: a capstone lying on its
+ * side shows it.
+ */
+export function writePyramid(w: PyramidWriter, shape: PyramidShape, prof: readonly number[], from = 0, to = prof.length): void {
+  if (shape === 'frame') {
+    // Only the edges: the four corners of every layer, and the base's rim.
+    for (let j = from; j < to; j++) {
+      const v = prof[j]!;
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) w.box(sx * v, sx * v, j, j + 1, sz * v, sz * v);
+    }
+    const v = prof[from]!;
+    for (let i = -v + 1; i <= v - 1; i++) {
+      w.box(i, i, from, from + 1, v, v); w.box(i, i, from, from + 1, -v, -v);
+      w.box(v, v, from, from + 1, i, i); w.box(-v, -v, from, from + 1, i, i);
+    }
+    return;
+  }
+  // Runs of equal width are one wall, and the ring between a layer and the
+  // one above is its top: four strips, or the whole square on the last.
+  let j = from;
+  const base = prof[from]!;
+  w.quad([[-base - 0.5, from, -base - 0.5], [base + 0.5, from, -base - 0.5], [base + 0.5, from, base + 0.5], [-base - 0.5, from, base + 0.5]], [0, -1, 0]);
+  while (j < to) {
+    const v = prof[j]!;
+    let k = j + 1;
+    while (k < to && prof[k] === v) k++;
+    const E = v + 0.5;
+    w.quad([[E, j, -E], [E, k, -E], [E, k, E], [E, j, E]], [1, 0, 0]);
+    w.quad([[-E, j, -E], [-E, k, -E], [-E, k, E], [-E, j, E]], [-1, 0, 0]);
+    w.quad([[-E, j, E], [E, j, E], [E, k, E], [-E, k, E]], [0, 0, 1]);
+    w.quad([[-E, j, -E], [E, j, -E], [E, k, -E], [-E, k, -E]], [0, 0, -1]);
+    const next = k < to ? prof[k]! : -1;
+    if (next < 0) w.quad([[-E, k, -E], [E, k, -E], [E, k, E], [-E, k, E]], [0, 1, 0]);
+    else {
+      // The ring as four edges and four corners: the same cut on every side, so the faces are as symmetric as the stone.
+      const I = next + 0.5;
+      w.quad([[-I, k, I], [I, k, I], [I, k, E], [-I, k, E]], [0, 1, 0]);
+      w.quad([[-I, k, -E], [I, k, -E], [I, k, -I], [-I, k, -I]], [0, 1, 0]);
+      w.quad([[I, k, -I], [E, k, -I], [E, k, I], [I, k, I]], [0, 1, 0]);
+      w.quad([[-E, k, -I], [-I, k, -I], [-I, k, I], [-E, k, I]], [0, 1, 0]);
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+        w.quad([[sx * I, k, sz * I], [sx * E, k, sz * I], [sx * E, k, sz * E], [sx * I, k, sz * E]], [0, 1, 0]);
+      }
+    }
+    j = k;
+  }
+  if (shape === 'mayan' && to === prof.length) {
+    // A stair up the middle of every face, one in one from a little out at the
+    // foot to the top platform; on the platform, a temple.
+    const H = prof.length, W = prof[0]!, top = prof[H - 1]!;
+    const sw = Math.max(1, Math.round(W * 0.12));
+    for (let j = 0; j < H; j++) {
+      const out = Math.max(prof[j]!, W + 2 - j);
+      if (out <= prof[j]!) continue;
+      const lo = prof[j]! + 1;
+      w.box(lo, out, j, j + 1, -sw, sw, new Set(['nx', 'bottom']));
+      w.box(-out, -lo, j, j + 1, -sw, sw, new Set(['px', 'bottom']));
+      w.box(-sw, sw, j, j + 1, lo, out, new Set(['nz', 'bottom']));
+      w.box(-sw, sw, j, j + 1, -out, -lo, new Set(['pz', 'bottom']));
+    }
+    const wt = Math.max(1, Math.round(top * 0.6)), ht = Math.max(3, Math.round(W * 0.28));
+    w.box(-wt, wt, H, H + ht, -wt, wt, NO_BOTTOM);
+    // Its roof comb: one cell proud along the middle, the same both ways.
+    w.box(-Math.max(0, wt - 2), Math.max(0, wt - 2), H + ht, H + ht + 1, -Math.max(0, wt - 2), Math.max(0, wt - 2), NO_BOTTOM);
+  }
+}
+
+/** The total height of a shape, in layers (the temple and its comb on a Mayan one). */
+export function pyramidHeight(shape: PyramidShape, prof: readonly number[]): number {
+  return shape === 'mayan' ? prof.length + Math.max(3, Math.round(prof[0]! * 0.28)) + 1 : prof.length;
+}
+
+// ---------------------------------------------------------------------------
+// Placement
+// ---------------------------------------------------------------------------
+
+/** Only the entries with a positive weight: `gold:0` names nothing. */
+const positive = <K extends string>(weights: Partial<Record<K, number>>): Partial<Record<K, number>> =>
+  Object.fromEntries(Object.entries(weights).filter(([, w]) => (w as number) > 0)) as Partial<Record<K, number>>;
+const named = <K extends string>(weights: Partial<Record<K, number>>): Partial<Record<K, number>> | null => {
+  const p = positive(weights);
+  return Object.keys(p).length ? p : null;
+};
+/** A weighted choice; callers pass at least one positive weight (`named` makes sure). */
+const pick = <K extends string>(rng: CrystalRng, weights: Partial<Record<K, number>>): K => {
+  const entries = Object.entries(weights).filter(([, w]) => (w as number) > 0) as Array<[K, number]>;
+  if (!entries.length) throw new Error('pyramids: a choice with no positive weight');
+  const total = entries.reduce((s, [, w]) => s + w, 0);
+  let x = rng.next() * total;
+  for (const [k, w] of entries) { x -= w; if (x < 0) return k; }
+  return entries[entries.length - 1]![0];
+};
+
+/** Where complexes stand (distance from the middle), how many at `amount` 1, how big a cube (in fish cubes) and how wide a great pyramid. */
+const BANDS = {
+  // Inside the camera's orbit (110 by default): in front of the lens wherever it goes, never in its path.
+  near: { r: [18, 58] as const, n: 2, cube: [1] as const, half: [3, 6] as const, inner: 0 },
+  mid: { r: [150, 280] as const, n: 4, cube: [2, 2, 3] as const, half: [5, 9] as const, inner: 125 },
+  // Within the fog (fogFar is 500 by default): the great ones stand where the water still shows them.
+  far: { r: [300, 470] as const, n: 5, cube: [3, 4, 5] as const, half: [7, 11] as const, inner: 200 },
+};
+const GREAT: Partial<Record<PyramidShape, number>> = { giza: 4, bent: 1.5, djoser: 2, step: 1.5, mayan: 1.5 };
+const QUEEN: Partial<Record<PyramidShape, number>> = { giza: 3, step: 2, mayan: 1, djoser: 0.5, frame: 0.6 };
+/** The stage's monument and its four small ones: half-widths in cubes, and the monument's cube (in fish cubes). */
+const STAGE = { half: 10, cube: 2, side: 3 } as const;
+/** How far the ground may rise and fall under a footprint: a fifth of its cube and a hair — flat, to the eye. In
+ *  practice a flat floor (a dune, a ridge, a basin's bowl or a rippled tread is not). The base is set in by the low
+ *  point, so it never shows a gap. */
+export const pyramidFlatness = (V: number, s: number): number => 0.2 * V + 0.15 * PYRAMID_VOXEL * s;
+/** The ground's lowest point and its rise and fall over a square footprint (half-width `h`, turned by `q`), on a 7×7 grid. */
+export function groundUnder(ground: (x: number, z: number) => number, x: number, z: number, h: number, q: Quaternion): { lo: number; spread: number } {
+  let lo = Infinity, hi = -Infinity;
+  const p = new Vector3();
+  for (let i = 0; i <= 6; i++) for (let k = 0; k <= 6; k++) {
+    p.set((i / 3 - 1) * h, 0, (k / 3 - 1) * h).applyQuaternion(q);
+    const g = ground(x + p.x, z + p.z);
+    lo = Math.min(lo, g); hi = Math.max(hi, g);
+  }
+  return { lo, spread: hi - lo };
+}
+/** Every footprint stays on the floor (tank.ts builds it 620 to a side; its edge is past the fog). */
+const FLOOR_R = 590;
+/** The camera orbits the middle at `cameraDistance` (110 by default): nothing near reaches past this. */
+const NEAR_R = 72;
+
+export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
+  const out: Pyramids = { geometry: null, lit: null, obstacles: [], emitters: [], shows: [], sites: [] };
+  if (!(opts.amount > 0)) return out;
+  const s = opts.scale;
+  const mix = parsePyramidMix(opts.mix ?? '');
+  const stones = named(mix.materials) ?? (PYRAMID_STONES_BY_ENVIRONMENT[opts.environment] ?? PYRAMID_STONES_BY_ENVIRONMENT.void!);
+  const shapes = named(mix.shapes);
+  const budget = Math.min(1, Math.max(0.4, opts.cap / 10));
+  const stoneW = new PyramidWriter(), litW = new PyramidWriter();
+  let w = stoneW;
+  const placed: Array<{ x: number; z: number; r: number }> = [];
+  const ground = (x: number, z: number): number => opts.terrain(x, z);
+  let capless = false, glowing = 0, seq = 0, complexes = 0;
+  const e = new Vector3();
+
+  /** One pyramid on the floor, squared to `yaw`. Returns false where it will not fit. */
+  const raise = (x: number, z: number, shape: PyramidShape, half: number, cube: number, yaw: number, material: PyramidMaterial,
+    band: PyramidSite['band'], great: boolean, trimmed = false, standing = false): boolean => {
+    const prof = pyramidProfile(shape, half);
+    const W = prof[0]!, H = pyramidHeight(shape, prof), V = PYRAMID_VOXEL * cube * s;
+    const reach = (W + 0.5) * V * Math.SQRT2;
+    // The floor and the camera's orbit are world-sized whatever `crystalScale` is: so are these bounds.
+    if (Math.hypot(x, z) + reach > FLOOR_R) return false;
+    // The near ones and their queens keep inside the camera's orbit; the rest keep well outside it.
+    if (band === 'near' && Math.hypot(x, z) + reach > NEAR_R) return false;
+    if (BANDS[band].inner > 0 && Math.hypot(x, z) - reach < BANDS[band].inner) return false;
+    if (placed.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + reach + V)) return false;
+    if (!opts.free(x, z, reach)) return false;
+    // Only on flat ground: a square base on a dune or a mound would bridge it or bury a corner.
+    const q = new Quaternion().setFromAxisAngle(e.set(0, 1, 0), yaw);
+    const under = groundUnder(ground, x, z, (W + 0.5) * V, q);
+    if (under.spread > pyramidFlatness(V, s)) return false;
+    // And round it, to twice its width: a small one can find a flat spot on top of a dune and sit there like a hat.
+    if (groundUnder(ground, x, z, (W + 0.5) * V * 2, q).spread > 2 * pyramidFlatness(V, s)) return false;
+    const isLit = PYRAMID_MATERIALS[material].led > 0;
+    // A stone one with lit trim: told so (a lit pyramid's queen), or by the mix's share (drawn only when there is one).
+    const trim = !isLit && (trimmed || (mix.trim > 0 && rng.next() < mix.trim));
+    w = isLit || trim ? litW : stoneW;
+    // How did it get there?
+    let pose: PyramidPose = pick<PyramidPose>(rng, great ? { stand: 6, sunk: 2, capless: capless ? 0 : 1 } : { stand: 5, sunk: 2, capless: capless ? 0 : 0.8 });
+    if (pose === 'capless' && shape !== 'giza' && shape !== 'step') pose = 'stand';
+    if (standing) pose = 'stand';
+    // A lost capstone lies at its foot: only where that spot is on the floor and clear, or it stands with its top on.
+    const keep = prof.length - Math.max(2, Math.round(prof.length * 0.22)), cw = prof[Math.min(keep, prof.length - 1)]!;
+    const away = yaw + Math.PI / 4 + (pose === 'capless' ? rng.range(-0.6, 0.6) : 0), capD = (W + cw + 2) * V * 1.1;
+    const capX = x + Math.cos(away) * capD, capZ = z + Math.sin(away) * capD, capR = (cw + 1.5) * V * 1.5;
+    if (pose === 'capless' && (Math.hypot(capX, capZ) + capR > (band === 'near' ? NEAR_R : FLOOR_R) || !opts.free(capX, capZ, capR)
+      || placed.some((p) => Math.hypot(capX - p.x, capZ - p.z) < p.r + capR))) pose = 'stand';
+    if (pose === 'capless') capless = true;
+    const seed = rng.next();
+    const cap = (shape === 'giza' || shape === 'step' || shape === 'bent') && rng.next() < 0.6 ? Math.max(1, Math.round(prof.length * 0.12)) : 0;
+    const eye = trim ? 2 : (shape === 'giza' || shape === 'step') && W >= 7 && rng.next() < 0.3 ? 1 : 0;
+    const lit = (cap > 0 || isLit || trim) && glowing < 3 && band !== 'far';
+    const glow = isLit || trim || shape === 'frame' ? 0.8 : cap ? (lit ? PYRAMID_MATERIALS[material].glow : 0.3) : 0;
+    w.V = V;
+    w.A = [PYRAMID_MATERIAL_NAMES.indexOf(material), ((seq++ * 0.6180339) % 1) + seed * 0.001, 1, glow];
+    // A frame is all light: every edge cube in the capstone's colour.
+    // B: apex layer, first capstone layer, the face (0 plain, 1 the eye, 2 lit trim), and its place in the field's
+    // wave — the show reaches it this many seconds after the middle (pyramid-show.ts WAVE_SPEED).
+    const capFrom = shape === 'frame' ? 0 : cap ? prof.length - cap : trim ? prof.length - Math.max(1, Math.round(prof.length * 0.15)) : 1e4;
+    w.B = [prof.length - 1, capFrom, eye, (x * 0.8 + z * 0.6) / (WAVE_SPEED * s)];
+    const low = under.lo;
+    // Its base never shows a gap over the sand: it sits at the lowest corner, a little in.
+    let y = low - 0.25 * V;
+    if (pose === 'sunk') y = low - H * V * rng.range(0.22, 0.45);
+    w.m.compose(new Vector3(x, y, z), q, new Vector3(1, 1, 1));
+    // How it sits: its deepest base corner against the ground under that corner.
+    let seatGap = Infinity;
+    for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+      const c = new Vector3(cx * (W + 0.5) * V, 0, cz * (W + 0.5) * V).applyQuaternion(q);
+      seatGap = Math.min(seatGap, y + c.y - ground(x + c.x, z + c.z));
+    }
+    if (pose === 'capless') {
+      // It lost its top: the capstone lies at its foot, tipped on its side in the sand (its spot checked above).
+      writePyramid(w, shape, prof, 0, keep);
+      const cx = capX, cz = capZ;
+      const cq = new Quaternion().setFromAxisAngle(e.set(Math.cos(away + Math.PI / 2), 0, Math.sin(away + Math.PI / 2)), rng.range(0.25, 0.45))
+        .multiply(new Quaternion().setFromAxisAngle(e.set(0, 1, 0), yaw));
+      w.m.compose(new Vector3(cx, ground(cx, cz) - keep * V - (cw + 1) * 0.55 * V, cz), cq, new Vector3(1, 1, 1));
+      writePyramid(w, shape, prof, keep, prof.length);
+      out.obstacles.push({ x: cx, y: ground(cx, cz), z: cz, r: capR, h: capR });
+      placed.push({ x: cx, z: cz, r: capR });
+    } else writePyramid(w, shape, prof);
+    out.sites.push({ x, z, shape, material, pose, half: W, cube, layers: H, ground: low, seat: seatGap, reach, band, complex: complexes });
+    placed.push({ x, z, r: reach });
+    out.obstacles.push({ x, y: low, z, r: reach, h: Math.max(V, y + H * V - low) });
+    // A lit capstone throws its light on the floor (a few: the floor's pools are few).
+    if (lit && pose !== 'capless' && glow > 0.45) {
+      glowing++;
+      const c = new Color(isLit || trim ? '#bfe9ff' : PYRAMID_MATERIALS[material].pal[3]);
+      // A show's light on the floor is a soft wash, not a spotlight: the stage stays dark.
+      if (isLit || trim) c.multiplyScalar(0.3);
+      const apex = new Vector3(0, H * V, 0).applyQuaternion(q).add(new Vector3(x, y, z));
+      const e: Emitter = { x: apex.x, y: apex.y, z: apex.z, r: c.r, g: c.g, b: c.b, reach: (isLit || trim ? 0.7 : 1) * (band === 'near' ? 30 : 50) * s, phase: seed * 6.283 };
+      if (isLit || trim) out.shows.push({ emitter: e, base: [c.r, c.g, c.b], seed: w.A[1], top: prof.length - 1, phase: w.B[3] });
+      else out.emitters.push(e);
+    }
+    return true;
+  };
+
+  if (opts.layout === 'stage') {
+    // The stage: one monumental pyramid in the middle, squared to the compass, standing true. Lit if the mix has a lit
+    // stone (its heaviest), else the room's stone with lit trim; a small one at each side, the same, all symmetric.
+    const lits = Object.entries(stones).filter(([k]) => PYRAMID_MATERIALS[k as PyramidMaterial].led > 0).sort((a, b) => (b[1] as number) - (a[1] as number));
+    const stageStone = (lits[0]?.[0] as PyramidMaterial | undefined) ?? pick(rng, stones);
+    const trimmed = PYRAMID_MATERIALS[stageStone].led === 0;
+    const shape = shapes ? pick(rng, shapes) : 'giza';
+    // The middle, or — a crystal colony or a home already there — the nearest clear, flat spot to it, rings outward.
+    // Each small one clear of the monument by a cube, measured as the rest are (footprint radius to radius). At a
+    // large `crystalScale` the monument is cut smaller, so the stage still fits inside the camera's orbit.
+    const sideReach = (STAGE.side + 0.5) * PYRAMID_VOXEL * s * Math.SQRT2;
+    const V = PYRAMID_VOXEL * STAGE.cube * s;
+    const spread = (half: number): number => ((half + 0.5) * V + (STAGE.side + 0.5) * PYRAMID_VOXEL * s) * Math.SQRT2 + V + 1;
+    let stageHalf: number = STAGE.half;
+    while (stageHalf > 3 && spread(stageHalf) + sideReach > NEAR_R) stageHalf -= 1;
+    const d = spread(stageHalf);
+    const stageShape = shape === 'frame' ? 'giza' : shape;
+    const flat = (x: number, z: number, h: number, cubeV: number): boolean => {
+      const q0 = new Quaternion();
+      return groundUnder(ground, x, z, h, q0).spread <= pyramidFlatness(cubeV, s)
+        && groundUnder(ground, x, z, h * 2, q0).spread <= 2 * pyramidFlatness(cubeV, s);
+    };
+    // The spot must hold the monument and its four small ones — clear and flat, all five — before any is raised.
+    const fits = (x: number, z: number): boolean => {
+      if (Math.hypot(x, z) + d + sideReach > NEAR_R) return false;
+      if (!opts.free(x, z, (stageHalf + 0.5) * V * Math.SQRT2) || !flat(x, z, (stageHalf + 0.5) * V, V)) return false;
+      return [[1, 0], [0, 1], [-1, 0], [0, -1]].every(([sx, sz]) => opts.free(x + sx! * d, z + sz! * d, sideReach)
+        && flat(x + sx! * d, z + sz! * d, (STAGE.side + 0.5) * PYRAMID_VOXEL * s, PYRAMID_VOXEL * s));
+    };
+    let at: [number, number] | null = null;
+    for (let r = 0; r <= 24 && !at; r += 6) for (let k = 0; k < (r ? 12 : 1) && !at; k++) {
+      const a = (k / 12) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (fits(x, z)) at = [x, z];
+    }
+    if (at && raise(at[0], at[1], stageShape, stageHalf, STAGE.cube, 0, stageStone, 'near', true, trimmed, true)) {
+      for (const [sx, sz] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+        raise(at[0] + sx * d, at[1] + sz * d, 'step', STAGE.side, 1, 0, stageStone, 'near', false, trimmed, true);
+      }
+    }
+    complexes++;
+  }
+
+  for (const band of ['far', 'mid', 'near'] as const) {
+    // On a stage the middle is the stage's: no near complexes.
+    if (opts.layout === 'stage' && band === 'near') continue;
+    const spec = BANDS[band];
+    const want = Math.max(band === 'far' ? 1 : 0, Math.round(spec.n * opts.amount * budget));
+    const turn = rng.next() * Math.PI * 2;
+    for (let i = 0, tries = 0; i < want && tries < want * 14; tries++) {
+      // Round the floor by the golden angle, so they surround the camera's orbit rather than bunch on one side.
+      const ang = turn + (i + tries * 0.37) * 2.39996 + rng.range(-0.3, 0.3);
+      const cube = spec.cube[Math.floor(rng.next() * spec.cube.length)]!;
+      let half = Math.round(rng.range(spec.half[0], spec.half[1]));
+      // Placed to fit: past the band's inner edge, inside the floor (and, near, inside the camera's orbit).
+      const out = band === 'near' ? NEAR_R : FLOOR_R;
+      const fit = (h: number): number => (h + 0.5) * PYRAMID_VOXEL * cube * s * Math.SQRT2;
+      while (half > 2 && spec.inner + fit(half) * 2 > out - fit(half)) half -= 1;
+      const lo = Math.max(spec.r[0], spec.inner + fit(half) + 1), hi = Math.min(spec.r[1], out - fit(half) - 1);
+      const r = hi > lo ? rng.range(lo, hi) : lo;
+      const cx = Math.cos(ang) * r, cz = Math.sin(ang) * r;
+      const shape = pick(rng, shapes ?? GREAT);
+      const material = pick(rng, stones);
+      // A complex is squared to the compass (Giza is), turned only a little from it.
+      const yaw = rng.range(-0.12, 0.12);
+      if (!raise(cx, cz, shape, half, cube, yaw, material, band, true)) continue;
+      i++;
+      // Its queens: smaller pyramids in a row off one corner, the same stone, each a little smaller than the last.
+      const V = PYRAMID_VOXEL * cube * s;
+      const queens = Math.floor(rng.range(1, 3.99));
+      // Along one of its diagonals, the one that runs most nearly round the floor (never in toward the middle).
+      const side = rng.next() < 0.5 ? 1 : -1;
+      let dir = yaw + Math.PI / 4, best = -Infinity;
+      for (let k = 0; k < 4; k++) {
+        const d = yaw + Math.PI / 4 + k * (Math.PI / 2);
+        const score = side * (Math.cos(d) * -Math.sin(ang) + Math.sin(d) * Math.cos(ang)) + 0.3 * (Math.cos(d) * Math.cos(ang) + Math.sin(d) * Math.sin(ang));
+        if (score > best) { best = score; dir = d; }
+      }
+      let along = (half + 0.5) * V * Math.SQRT2;
+      for (let k = 0; k < queens; k++) {
+        const qh = Math.max(2, Math.round(half * (0.5 - 0.08 * k)));
+        const qShape = shapes ? pick(rng, shapes) : pick(rng, QUEEN);
+        // A lit great pyramid among stone ones: its queens are stone, carrying its light in their trim.
+        const litGreat = PYRAMID_MATERIALS[material].led > 0;
+        const qStones = litGreat ? named(Object.fromEntries(Object.entries(stones).filter(([k]) => PYRAMID_MATERIALS[k as PyramidMaterial].led === 0)) as Partial<Record<PyramidMaterial, number>>) : null;
+        const qMaterial = qStones ? pick(rng, qStones) : material;
+        along += (qh + 0.5) * V * Math.SQRT2 + V * 3;
+        raise(cx + Math.cos(dir) * along, cz + Math.sin(dir) * along, qShape, qh, cube, yaw, qMaterial, band, false, qMaterial !== material);
+        along += (qh + 0.5) * V * Math.SQRT2;
+      }
+      complexes++;
+    }
+  }
+  out.geometry = stoneW.geometry();
+  out.lit = litW.geometry();
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Material
+// ---------------------------------------------------------------------------
+
+const MATS = PYRAMID_MATERIAL_NAMES.map((n) => PYRAMID_MATERIALS[n]);
+
+/** The cubes, drawn per fragment from the cube it lies in. */
+export const PYRAMID_GLSL = /* glsl */ `
+uniform vec3 uPyrPal[${MATS.length * 4}];
+uniform vec4 uPyrMotif[${MATS.length}];
+uniform float uPyrLed[${MATS.length}];
+uniform float uPyrTime;
+// The field's show: routine a, routine b, how far into their crossfade, and 1 when each runs its own (solo).
+uniform vec4 uPyrShow;
+uniform float uPyrBpm;
+varying vec3 vCell;
+varying vec4 vPyrA;
+varying vec4 vPyrB;
+varying float vFace;
+float mqPyrH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+vec3 mqHue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+// A band of light, its crest where fract(x) is 0, w wide (0..0.5).
+float mqBand(float x, float w) { float f = fract(x); return 1.0 - smoothstep(0.0, w, min(f, 1.0 - f)); }
+${SHOW_GLSL}
+// The two routines' hues and how far between them: their COLOURS are crossfaded, not their hues — a hue mixed
+// between two far apart would race round the whole rainbow in the crossfade (a strobe of colour).
+vec3 mqPyrLampHue;
+// How lit this fragment's lamp is (0 for stone): the fog spares the lamps, not the stone.
+float mqPyrLit = 0.0;
+/** A lamp's light in the field's show (pyramid-show.ts lampLevel, the same model): the routine and the next,
+ *  crossfaded; the clock stepped on the beat; a faint outline on a big one; the beat's lift. */
+float mqPyrLamp(vec3 c, float u, float w, float top, float seed, float phase) {
+  float t = uPyrTime - phase, lift = 0.0;
+  if (uPyrBpm > 0.0) {
+    float bps = min(uPyrBpm, ${MAX_BPM}.0) / 60.0, b = t * bps, k = floor(b), f = b - k;
+    t = (k + smoothstep(0.0, 0.5, f)) / bps;
+    lift = ${BEAT_LIFT} * (1.0 - smoothstep(0.0, 0.6, f));
+  }
+  float a = uPyrShow.x, bb = uPyrShow.y, mx = uPyrShow.z;
+  if (uPyrShow.w > 0.5) {
+    // Solo: its own routines, offset by its seed.
+    float tt = uPyrTime + seed * 40.0, slot = floor(tt / ${SHOW_HOLD}.0), into = tt - slot * ${SHOW_HOLD}.0;
+    a = floor(fract(seed * 7.13 + slot * 0.618) * ${PYRAMID_SHOWS.length}.0);
+    bb = floor(fract(seed * 7.13 + (slot + 1.0) * 0.618) * ${PYRAMID_SHOWS.length}.0);
+    mx = smoothstep(${SHOW_HOLD - SHOW_FADE}.0, ${SHOW_HOLD}.0, into);
+  }
+  vec2 sa = mqPyrShow(mqSmallShow(a, top), c, u, w, top, seed, t), sb = mqPyrShow(mqSmallShow(bb, top), c, u, w, top, seed, t);
+  mqPyrLampHue = vec3(sa.y, sb.y, mx);
+  float outline = top >= 8.0 && (u >= w - 0.5 || c.y <= 0.5) ? 0.16 : 0.0;
+  return min(1.0, max(mix(sa.x, sb.x, mx), outline) * (1.0 + lift));
+}
+vec3 mqPyrPaint() {
+  vec3 c = vec3(floor(vCell.x + 0.5), floor(vCell.y), floor(vCell.z + 0.5));
+  // Sorted |x|, |z|: the square's eight symmetries, so the paint is as symmetric as the stone.
+  float ax = abs(c.x), az = abs(c.z);
+  float u = min(ax, az), w = max(ax, az);
+  int m = int(vPyrA.x + 0.5);
+  float seed = vPyrA.y;
+  vec3 mainC = uPyrPal[m * 4], altC = uPyrPal[m * 4 + 1], acc = uPyrPal[m * 4 + 2], capC = uPyrPal[m * 4 + 3];
+  vec4 mo = uPyrMotif[m];
+  float led = uPyrLed[m];
+  // A lit stone, or a stone one's lit trim (its edges, base and capstone): lamps in a dark housing, running the show.
+  bool trim = vPyrB.z > 1.5 && (u >= w - 0.5 || c.y <= 0.5 || c.y >= vPyrB.y);
+  if (led > 0.5 || trim) {
+    float lamp = mqPyrLamp(c, u, w, vPyrB.x, seed, vPyrB.w);
+    vec3 sh = mqPyrLampHue;
+    vec3 toneA = led > 1.5 ? mix(acc, capC, 0.5 + 0.5 * sin(sh.x * 6.2832)) : mix(vec3(1.0), mqHue(sh.x), 0.8);
+    vec3 toneB = led > 1.5 ? mix(acc, capC, 0.5 + 0.5 * sin(sh.y * 6.2832)) : mix(vec3(1.0), mqHue(sh.y), 0.8);
+    vec3 tone = mix(toneA, toneB, sh.z);
+    vec3 fwL = fwidth(vCell);
+    vec3 dL = vec3(0.5 - abs(fract(vCell.x + 0.5) - 0.5), 0.5 - abs(fract(vCell.y) - 0.5), 0.5 - abs(fract(vCell.z + 0.5) - 0.5));
+    vec3 gridL = 1.0 - smoothstep(fwL * 0.5, fwL * 0.5 + 0.09, dL);
+    float housing = max(max(gridL.x, gridL.y), gridL.z);
+    float farL = smoothstep(0.3, 0.8, max(max(fwL.x, fwL.y), fwL.z));
+    float on = lamp * (1.0 - housing * (1.0 - farL));
+    mqPyrLit = max(on, 0.35);
+    // At its peak a lamp runs toward white, for the bloom on the tiers that have it.
+    vec3 glow = mix(tone, vec3(1.0), 0.35 * on * on);
+    vec3 base = led > 0.5 ? mainC * 1.6 : mainC * 0.55;
+    return base + glow * on * 1.7;
+  }
+  float r = mqPyrH(vec3(u, w, c.y) + seed * 17.0);
+  // Each cube its own shade of the stone, as each of a fish's is its own colour.
+  vec3 col = mix(mainC, altC, step(0.64, r)) * (0.86 + 0.24 * mqPyrH(vec3(w, u, c.y * 1.37) + seed * 31.0));
+  vec3 mean = mix(mainC, altC, 0.36);
+  bool side = abs(vFace) < 0.5;
+  // A frieze every few layers: glyphs three cubes wide, mirrored about the face's middle.
+  if (mo.x > 0.0 && side && mod(c.y, mo.x) < 0.5 && c.y > 0.5) {
+    float g = floor(u / 3.0), px = mod(u, 3.0);
+    float bits = floor(mqPyrH(vec3(g, c.y, seed * 7.0)) * 8.0);
+    float lit = mod(floor(bits / pow(2.0, px)), 2.0);
+    col = mix(col, acc, lit * 0.85);
+  }
+  // Growth on the treads: coral, moss.
+  if (mo.y > 0.0 && vFace > 0.5) col = mix(col, acc, step(1.0 - mo.y, mqPyrH(vec3(u + 3.1, w, c.y) + seed * 5.0)));
+  // Veins of light through the stone.
+  float vein = 0.0;
+  if (mo.z > 0.0) vein = step(abs(sin(u * 0.83 + c.y * 0.61 + w * 0.37 + seed * 9.0)), 0.13);
+  col = mix(col, acc * 1.25, vein);
+  // Nacre: the colour wanders from cube to cube, as mother-of-pearl does.
+  if (mo.w > 0.0) {
+    float t = (u + c.y * 0.7 + w * 0.3) * 0.55 + seed * 6.0;
+    col = mix(col, col * vec3(0.92 + 0.12 * sin(t), 0.92 + 0.12 * sin(t + 2.1), 0.94 + 0.12 * sin(t + 4.2)), mo.w);
+  }
+  // The capstone: gilded, or the stone's own light.
+  float capped = step(vPyrB.y, c.y);
+  col = mix(col, capC * (0.9 + 0.14 * r), capped);
+  // The eye, on every face, five layers under the apex.
+  if (vPyrB.z > 0.5 && vPyrB.z < 1.5 && side) {
+    float dy = c.y - (vPyrB.x - 5.0), ady = abs(dy);
+    float rim = (ady == 2.0 && u <= 1.0) || (ady == 1.0 && u == 2.0) || (ady == 0.0 && u == 3.0) ? 1.0 : 0.0;
+    float white = (ady == 1.0 && u <= 1.0) || (ady == 0.0 && (u == 1.0 || u == 2.0)) ? 1.0 : 0.0;
+    float pupil = ady == 0.0 && u == 0.0 ? 1.0 : 0.0;
+    col = mix(col, vec3(0.06, 0.04, 0.03), rim + pupil);
+    col = mix(col, vec3(0.97, 0.95, 0.88), white);
+    vein = max(vein, white * 0.6);
+  }
+  // The seam between one cube and the next: what makes them read as cubes, not a slope.
+  // Distance to the nearest cube edge on this face (along the face's normal the
+  // cell coordinate is mid-cube, so that axis never draws one).
+  vec3 d = vec3(0.5 - abs(fract(vCell.x + 0.5) - 0.5), 0.5 - abs(fract(vCell.y) - 0.5), 0.5 - abs(fract(vCell.z + 0.5) - 0.5));
+  vec3 fw = fwidth(vCell);
+  vec3 seamAxis = 1.0 - smoothstep(fw * 0.5, fw * 0.5 + 0.045, d);
+  float seam = max(max(seamAxis.x, seamAxis.y), seamAxis.z);
+  // Under a pixel, a cube is its mean (and no seam): no shimmer as the camera moves.
+  float f = max(max(fw.x, fw.y), fw.z);
+  float far = smoothstep(0.3, 0.8, f);
+  col = mix(col, mix(mean, capC, capped), far);
+  col *= 1.0 - 0.32 * seam * (1.0 - far);
+  // Lit parts: the capstone and the veins glow (their own light, not the room's). A frame's light runs up its edges.
+  float g = vPyrA.w * max(capped, vein);
+  if (vPyrB.y < 0.5) g *= 0.65 + 0.35 * sin(c.y * 0.6 - uPyrTime * 1.6);
+  return col * (1.0 + 0.9 * g);
+}
+`;
+
+/** The pyramids' material: unlit vertex colour, fogged as every other stone is. `lit` is the light shows' (no
+ *  caustics on a lamp). `clock` is the scene time (the shows, a frame's running light). */
+export interface PyramidShowUniforms { uPyrShow: { value: Vector4 }; uPyrBpm: { value: number } }
+/** The field's show, as uniforms the tank writes each frame (no rebuild): see pyramid-show.ts. */
+export const pyramidShowUniforms = (): PyramidShowUniforms => ({ uPyrShow: { value: new Vector4(0, 1, 0, 0) }, uPyrBpm: { value: 0 } });
+
+export function pyramidMaterial(clock: { value: number } = { value: 0 }, lit = false, show: PyramidShowUniforms = pyramidShowUniforms()): MeshBasicMaterial {
+  const mat = new MeshBasicMaterial({ vertexColors: true, side: FrontSide });
+  mat.userData.mqOwned = true;
+  if (lit) mat.userData.mqNoCaustic = true;
+  const leds = MATS.map((m) => m.led);
+  const pal = MATS.flatMap((m) => m.pal.map((h) => new Color(h)));
+  const motif = MATS.map((m) => new Vector4(m.bands, m.speckle, m.veins, m.nacre));
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uPyrPal = { value: pal };
+    shader.uniforms.uPyrMotif = { value: motif };
+    shader.uniforms.uPyrLed = { value: leds };
+    shader.uniforms.uPyrTime = clock;
+    shader.uniforms.uPyrShow = show.uPyrShow;
+    shader.uniforms.uPyrBpm = show.uPyrBpm;
+    shader.vertexShader = 'attribute vec3 aCell; attribute vec4 aPyrA; attribute vec4 aPyrB; attribute float aFace;\nvarying vec3 vCell; varying vec4 vPyrA; varying vec4 vPyrB; varying float vFace;\n'
+      + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vCell = aCell; vPyrA = aPyrA; vPyrB = aPyrB; vFace = aFace;');
+    shader.fragmentShader = PYRAMID_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= mqPyrPaint();');
+    // A light show cuts through the water: the lit ones keep 45% of the fog (whatever fog the water patch puts in
+    // that chunk), so the shows at the back still read — from the third layer up: the base fogs as the floor
+    // does, so a pyramid at the back still stands on it rather than glowing over a floor the fog has taken.
+    if (lit) shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', 'vec3 mqPreFog = gl_FragColor.rgb;\n#include <fog_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, mqPreFog, 0.55 * mqPyrLit * smoothstep(0.5, 3.5, vCell.y));');
+  };
+  mat.customProgramCacheKey = () => (lit ? 'mq-pyramids-lit-v3' : 'mq-pyramids-v3');
+  return mat;
+}

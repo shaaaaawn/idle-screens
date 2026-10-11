@@ -20,6 +20,8 @@ import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
+import { parsePyramidMix } from './pyramid-mix';
+import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
@@ -107,6 +109,11 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
   signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  pyramids: 'Pyramids built of cubes, as the fish are (0 = none, 1 = about a dozen complexes): each a stack of cubes you can count, the cube a whole multiple of a fish\'s, exactly symmetric. On the floor in complexes — a great pyramid and its queens — small ones near, the great ones at the back. Only on flat ground — use floorKind: flat (none on dunes, ridges or a basin). Standing, half sunk, one missing its capstone. Glyph friezes, gilded or glowing capstones, an eye on some.',
+  pyramidMix: 'Their shapes and stones: `shape|stone[:weight], …`. Shapes giza step bent djoser mayan frame; stones sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit ones led (white and rainbow lamps) and neon (magenta and cyan), every cube a lamp running a light show. Empty = every shape in the room\'s stone.',
+  pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
+  pyramidShow: 'The lit pyramids\' light show (led, neon, or trim in pyramidMix): empty or auto = the whole field as one, through every routine in turn, a wave rolling across it; solo = each its own; a routine name (rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple); or a looping cue sheet like 8s:rings, 8s:beam, 16s:equalizer. Steered live, no rebuild.',
+  pyramidBpm: 'The light show\'s tempo, 0–140 (0 = free-running): the motion steps on the beat and each beat lifts the lamps a little — never a flash.',
   geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
   floraPalette: 'One colour scheme for the garden, the way a No Man\'s Sky planet is magenta grass and orange trees: `world` grows a hero hue, a neighbour and an accent from the seed; or give up to six `#rrggbb`. Each colony is pulled most of the way to one of them. Empty = every species its own colours.',
@@ -142,6 +149,10 @@ propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@drus
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+pyramidMix  shape|stone[:weight], …   giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt led neon
+          giza:3, mayan, gold:2, obsidian   (empty = every shape in the room's stone)
+pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 16s:equalizer
+          rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple · pyramidMix trim[:share] lights stone ones' edges
 geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
 geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
@@ -267,6 +278,8 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('floraMix')) push('floraMix', parseFloraMix(str('floraMix')).problems);
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
   if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
+  if (str('pyramidMix')) push('pyramidMix', parsePyramidMix(str('pyramidMix')).problems);
+  if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
