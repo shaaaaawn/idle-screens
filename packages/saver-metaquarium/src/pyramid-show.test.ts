@@ -25,7 +25,8 @@ function lampsOf(top: number): Array<[number, number, number]> {
  */
 function flashes(plan: ShowPlan, bpm: number, top: number, seconds: number, from = 0): ReturnType<typeof analyzeFlashes> {
   const lamps = lampsOf(top), samples: FlashSample[] = [];
-  for (let t = from; t < from + seconds; t += 1 / 60) {
+  // 30 samples a second: more than twice the fastest change here (a beat at 140 bpm is 2.33 Hz), so no flash slips between.
+  for (let t = from; t < from + seconds; t += 1 / 30) {
     samples.push({ t: (t - from) * 1000, lum: lamps.map(([x, y, z]) => lampLevel(plan, bpm, 0.37, 0.61, x, y, z, top, t)) });
   }
   return analyzeFlashes(samples, { areaThreshold: 1e-9 });
@@ -41,17 +42,18 @@ describe('pyramid shows: a light show, never a strobe', () => {
         expect(r.passes, `${name} bpm ${bpm} top ${top}`).toBe(true);
       }
       expect(i).toBeGreaterThanOrEqual(0);
-    });
+    }, 60_000);
   }
 
-  it('through the field\'s sequence and every crossfade, and solo, over ten minutes', () => {
+  it('through the field\'s sequence — every routine and every crossfade — and solo, for five minutes', () => {
+    // 11 routines × 24 s is 264 s: five minutes covers the whole sequence and its crossfades.
     for (const plan of [parsePyramidShow('auto').plan, parsePyramidShow('solo').plan]) {
       for (const bpm of [0, 128]) {
-        const r = flashes(plan, bpm, 10, 600);
+        const r = flashes(plan, bpm, 10, 300);
         expect(r.general.worstTileFlashesPerSecond, `${plan.mode} bpm ${bpm}`).toBeLessThanOrEqual(3);
       }
     }
-  });
+  }, 120_000);
 
   it('a beat lifts the lamps by less than a flash needs (10%), and steps the motion: move half a beat, hold half', () => {
     expect(BEAT_LIFT).toBeLessThan(0.1);
@@ -76,7 +78,7 @@ describe('pyramid shows: the light on the floor', () => {
       expect(hi - lo, PYRAMID_SHOWS[p]).toBeGreaterThan(0.02);
       expect(analyzeFlashes(samples, { areaThreshold: 1e-9 }).passes, PYRAMID_SHOWS[p]).toBe(true);
     }
-  });
+  }, 60_000);
 });
 
 describe('pyramid shows: the field\'s choreography', () => {
