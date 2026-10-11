@@ -515,6 +515,13 @@ def drop_buried_faces(meshes, pitch, eyes_only=False):
     soft rig: two cubes' shared corners take the same weights (they come from
     position), so a face between them stays buried as the body bends.
     Returns how many faces went.
+
+    Check the pixels before using it on another breed. Its cube test (faces
+    on two axes) is right for the seahorse (verified from five angles), but
+    on the sea turtle it took shell cells for cubes and cut holes in the
+    shell. Dropping only back-to-back twin pairs is safe everywhere, but not
+    enough for the seahorse: its single buried faces draw the lines too. The
+    angelfish and turtle had no such seams to fix (checked 2026-10-11).
     """
     q = pitch / 4
     key = lambda v: (round(v[0] / q), round(v[1] / q), round(v[2] / q))  # noqa: E731
