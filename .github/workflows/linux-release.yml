@@ -92,7 +92,7 @@ jobs:
           SKIP_SRC: ${{ matrix.skip_src }}
         run: ./scripts/make-release.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.arch }}
           path: apps/linux/dist/
