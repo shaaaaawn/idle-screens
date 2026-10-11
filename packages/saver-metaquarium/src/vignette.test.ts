@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
+import { DANCES, GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
 
 /** duet and trio are written for the open stage; the rest for the geode room. */
 const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
@@ -113,5 +113,41 @@ describe('vignettes', () => {
     expect(all).toMatch(/marks: centre, left/);
     expect(all).toContain(GESTURES[0]);
     expect(parseVignette('', OPEN_MARKS)).toMatchObject({ actors: 0, duration: 0, problems: [] });
+  });
+
+  it('dances: reported to the fish that dances them itself, done with the whole body by any other', () => {
+    const v = parseVignette('4s: a =centre | 4s: a windmill | 4s: a headspin', OPEN_MARKS);
+    expect(v.problems).toEqual([]);
+    const plain = poseOf(v, 0, 6)!, own = poseOf(v, 0, 6, (g) => g === 'windmill')!;
+    expect(plain.doing).toBe('windmill');
+    expect(plain.gesture?.name).toBe('windmill');
+    expect(own.gesture).toEqual(plain.gesture);
+    expect(Math.abs(plain.roll - own.roll)).toBeGreaterThan(0.1); // the whole-body roll, left to the clip
+    expect(own.x).toBeCloseTo(plain.x, 6);
+    expect(poseOf(v, 0, 10)!.gesture?.name).toBe('headspin');
+  });
+
+  it('a gesture\'s clocks are real seconds, and a dance\'s bar is its beat\'s', () => {
+    // Standing (the actor has arrived) and travelled-in beats both: the beat starts at 4 s.
+    for (const script of ['4s: a =centre | 4s: a windmill', '4s: a =left | 4s: a >right windmill']) {
+      const v = parseVignette(script, OPEN_MARKS);
+      const a = poseOf(v, 0, 7)!.gesture!, b = poseOf(v, 0, 7.5)!.gesture!;
+      expect(b.at - a.at, script).toBeCloseTo(0.5, 6);
+      expect(a.bar, script).toBeCloseTo(3, 6);
+      expect(b.bar, script).toBeCloseTo(3.5, 6);
+      expect(a.at, script).toBeLessThan(a.bar);
+    }
+  });
+
+  it('every dance moves a fish with no clips for it', () => {
+    for (const d of DANCES) {
+      const v = parseVignette(`4s: a =centre | 4s: a ${d}`, OPEN_MARKS);
+      const still = poseOf(v, 0, 3.9)!, at = (t: number) => poseOf(v, 0, t)!;
+      const moved = [4.6, 5.3, 6.1, 6.9].some((t) => {
+        const p = at(t);
+        return Math.abs(p.y - still.y) > 0.3 || Math.abs(p.roll - still.roll) > 0.05 || Math.hypot(p.fx - still.fx, p.fy - still.fy, p.fz - still.fz) > 0.05;
+      });
+      expect(moved, d).toBe(true);
+    }
   });
 });

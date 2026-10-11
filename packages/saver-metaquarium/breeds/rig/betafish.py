@@ -7,7 +7,9 @@ breeds/rig/betafish.glb out.
 The source is the MINTED breed's one model (breeds/minted.mjs), cut into paint
 regions MINT-R<n>: all 256 betafish tokens are this model, each painted by
 its own texture atlas through the model's UVs — so the UVs are kept, and the
-model is never edited. It arrives with an authored four-bone skin and a
+model is never edited. (Each eye cell is a whole voxel: the buried side faces
+between neighbouring cells meet the front at the seams — src/beta-eyes.ts
+paints them the cells' own colours, so they never show as hairlines.) It arrives with an authored four-bone skin and a
 Swim clip (a tail wag); both go — this rig replaces them — and with a
 hidden icosphere inside the body (never seen; dropped).
 
@@ -23,11 +25,14 @@ Read off the occupancy (nose -Y):
     dorsal   a one-cell fin on the centre line, y -4.25 .. 3.75, z 6 .. 10
     caudal   the fan: a one-cell sheet on the centre line from the peduncle
              (y 7.75 .. 9.75, z -2 .. 2) out to y 17.75, z -6 .. 10, jagged
-    pectoral a plate off each flank (x beyond the walls), y -6.25 .. -0.25,
-             z -2 .. 4
+    eyes     a 3×3 block of 2-unit cells proud of each flank (x beyond the
+             walls), y -6.25 .. -0.25, z -2 .. 4: the token paints its eye
+             here (src/beta-eyes.ts). Once mistaken for a pectoral fin and
+             hinged like a door, so the eyes flapped off the head with every
+             stroke; now each cell rides the head skin under it.
     ventral  a long fin off each flank, sweeping back and down, y 1.75 ..
              9.75, z -6 .. 0
-    gills    the body's outer walls at the front: the gill covers
+    gills    the body's outer walls just BEHIND the eyes: the gill covers
 
 Soft throughout (common.soften): every vertex's weights come from where it
 lies, so the skin bends and never cracks. The spine (head, body, rear,
@@ -35,7 +40,7 @@ peduncle) blends along y. The caudal fan is three RAYS (upper, middle,
 lower), weighted by angle about the peduncle, each a chain of two weighted
 by distance out — so the tail fans, folds, billows and whips like silk. The
 dorsal is two bones up its height; each ventral two along its length; each
-pectoral one; each gill cover one, pivoting at its front edge so it flares
+each gill cover one, pivoting at its front edge (behind the eye) so it flares
 open — the betta's display.
 
 Bones only a dial or a moment moves (non-deforming, exported as nodes so
@@ -50,12 +55,15 @@ each layers on its own — common.export layered):
 Clips (30 fps; the tank sets their times and weights, never update(dt)):
 
     swim     1.6 s loop: a wave down the body into the fan, the rays
-             following one after another, the pectorals beating twice
-    hover    3 s loop: the pectorals sculling, the fins billowing slow
+             following one after another, the ventrals trailing
+    hover    3 s loop: the fins billowing slow
     burst    0.8 s loop: hard strokes, the fins laid back
     moments  one-shots from rest to rest (src/beta.ts gives every fish a
              temperament and a favourite): flare, spin, gulp, shimmy, rest,
              dance, flick, bow, billow, curl
+    dances   break-dance moves a vignette calls by name (src/vignette.ts):
+             toprock, footwork, windmill and headspin (loops on a 120 bpm
+             grid), freeze and drop (one-shots)
     bend, lookYaw, lookPitch, spread
              DIALS, 2 s each: the time is the setting — 0 one way, 1 at
              rest, 2 the other (bend + to its left, lookYaw + to its left,
@@ -80,13 +88,18 @@ PITCH = 2.0
 CX = -0.38  # the centre line
 MID = -0.04  # the body's middle height
 WALL_R, WALL_L = -7.38, 6.62  # the flanks
-SPINE = ((-5.0, 'head'), (-1.5, 'body'), (2.5, 'body'), (6.0, 'rear'), (8.75, 'ped'))
+# The skull is rigid back to the gill line, eyes and all: a head that blended
+# into the body across the eye sheared the eye block into columns when it looked.
+SPINE = ((-0.25, 'head'), (2.5, 'body'), (6.0, 'rear'), (8.75, 'ped'))
 FAN_FROM = 9.75  # the fan starts beyond the peduncle
 PIVOT = (9.75, -1.0)  # the fan's root (y, z): its rays radiate from here
 RAYS = ((-30.0, 'cL'), (0.0, 'cM'), (35.0, 'cU'))  # by angle above the fish's axis, degrees
 RAY_LEN = 5.0  # each ray: inner bone to here, outer beyond
 DORSAL_BASE = 5.93
-SIDE = ((-0.25, 'pec'), (1.75, 'ven1'), (4.0, 'ven1'), (8.0, 'ven2'))  # along a flank, by y
+SIDE = ((1.75, 'ven1'), (4.0, 'ven1'), (8.0, 'ven2'))  # along a flank, by y
+EYE_Y = (-6.25, -0.25)  # the eye blocks, along a flank
+EYE_Z = (-2.07, 3.93)  # and up it
+GILL = (-0.25, 2.75)  # the gill covers: from just behind the eye
 
 
 def weights_at(co, eye):
@@ -104,14 +117,20 @@ def weights_at(co, eye):
     # only over the body (the fan's upper ray rises as high, behind it).
     if z > DORSAL_BASE and y < FAN_FROM - 3:
         w = blend(w, knots(z, ((7.0, 'd1'), (9.0, 'd2'))), ease((z - DORSAL_BASE) / 2))
-    # The gill covers: the outer walls at the front, pivoting at the face.
+    # The gill covers: the outer walls just behind the eye, pivoting at their
+    # front edge. Never under the eye — a cover flaring there took the eye with it.
     off = abs(x - CX)
-    if off > 5.0 and y < -1.5:
+    if off > 5.0 and GILL[0] < y < GILL[1] + 1.0:
         side = 'gillR' if x < CX else 'gillL'
-        w = blend(w, {side: 1.0}, ease((off - 5.0) / 2) * (1 - ease((y + 3.5) / 2)))
-    # The flank fins: beyond the walls, pectoral ahead and ventral behind.
+        w = blend(w, {side: 1.0}, ease((off - 5.0) / 2) * ease((y - GILL[0]) / 1.0) * (1 - ease((y - GILL[1]) / 1.0)))
     if x < WALL_R or x > WALL_L:
         s = 'R' if x < CX else 'L'
+        # The eye blocks: each cell moves as the head skin right under it, so it
+        # stays where it is painted however the body bends.
+        if y < EYE_Y[1] + 1.0:
+            # (a hair inside the wall: a float32 Vector at exactly -7.38 reads as beyond it)
+            return weights_at(type(co)((WALL_R + 0.01 if s == 'R' else WALL_L - 0.01, y, z)), eye)
+        # The flank fins: the ventrals, beyond the walls behind the eyes.
         f = ease((WALL_R - x) / 2) if s == 'R' else ease((x - WALL_L) / 2)
         w = blend(w, {f'{k}{s}': v for k, v in knots(y, SIDE).items()}, f)
     return w
@@ -124,7 +143,7 @@ def bone_of(x, y, z, mat):
 
 def bone_table():
     up = lambda p, d=0.5: (p[0], p[1], p[2] + d)  # noqa: E731 — a stub bone above a point
-    neck = (CX, -2.5, MID)
+    neck = (CX, 0.75, MID)  # mid-blend, behind the gill line: the skull turns from there
     t = {
         'root': ((CX, 0, -30), (CX, 0, -27), None),
         'roll': ((CX, 0, MID), (CX, 0.5, MID), 'root'),
@@ -153,9 +172,8 @@ def bone_table():
         t[f'{ray}2'] = (p1, p2, f'{ray}1')
     for s, wall in (('R', WALL_R), ('L', WALL_L)):
         out = -2.0 if s == 'R' else 2.0
-        t[f'g{s}'] = ((wall, -8.25, MID), up((wall, -8.25, MID)), 'head')
-        t[f'gill{s}'] = ((wall, -8.25, MID), (wall, -3.0, MID), f'g{s}')
-        t[f'pec{s}'] = ((wall, -6.25, 1.0), (wall, -0.25, 1.0), 'body')
+        t[f'g{s}'] = ((wall, GILL[0], MID), up((wall, GILL[0], MID)), 'body')
+        t[f'gill{s}'] = ((wall, GILL[0], MID), (wall, GILL[1], MID), f'g{s}')
         t[f'ven1{s}'] = ((wall, 2.75, -1.0), (wall + out / 2, 6.75, -4.0), 'body')
         t[f'ven2{s}'] = ((wall + out / 2, 6.75, -4.0), (wall + out / 2, 9.75, -5.0), f'ven1{s}')
     return t
@@ -209,13 +227,6 @@ def dorsal(p, sway=0.0, raise_=0.0):
     p.turn('d2', 'x', 0.2 * raise_)
 
 
-def pecs(p, beat=0.0, sweep=0.0):
-    """Both pectorals — plates along the flanks, hinged at their front edge
-    like doors: beat and sweep both swing the rear edge out (+)."""
-    p.turn('pecR', 'z', beat + sweep)
-    p.turn('pecL', 'z', -(beat + sweep))
-
-
 def ventrals(p, sway=0.0, spread=0.0, lag=0.6):
     """The long ventral fins: sway (both alike, + to its left) and spread (+ out)."""
     for s, sg in (('R', 1), ('L', -1)):
@@ -236,7 +247,6 @@ def swim(t, T=1.6):
     wave(p, w, (0.03, 0.08, 0.1))
     fan(p, w, 0.12, 0.15)
     dorsal(p, sway=0.08 * math.sin(w - 1.2))
-    pecs(p, beat=0.17 * math.sin(2 * w))
     ventrals(p, sway=0.12 * math.sin(w - 1.6))
     p.turn('head', 'z', -0.02 * math.sin(w))
     return p
@@ -245,7 +255,6 @@ def swim(t, T=1.6):
 def hover(t, T=3.0):
     p = Pose()
     w = 2 * math.pi * t / T
-    pecs(p, beat=0.16 * math.sin(4 * w), sweep=0.08)
     wave(p, w, (0.0, 0.02, 0.04))
     fan(p, w, 0.06, 0.12, lag=0.9)
     spread_fan(p, 0.08 * math.sin(w + 1.0))
@@ -262,7 +271,6 @@ def burst(t, T=0.8):
     fan(p, w, 0.2, 0.22, lag=0.8)
     spread_fan(p, -0.3)
     dorsal(p, raise_=-0.6, sway=0.05 * math.sin(w - 1))
-    pecs(p, beat=-0.25, sweep=-0.1)
     ventrals(p, sway=0.08 * math.sin(w - 1.6), spread=-0.15)
     return p
 
@@ -280,7 +288,6 @@ def flare(t, T=4.2):
     fan(p, 2 * math.pi * t / 1.2, 0.04 * a, 0.06 * a)
     dorsal(p, raise_=0.6 * a, sway=0.03 * quiver)
     ventrals(p, spread=0.35 * a, sway=0.04 * quiver)
-    pecs(p, sweep=0.25 * a, beat=0.08 * quiver)
     p.turn('rear', 'z', 0.1 * a)
     p.turn('ped', 'z', 0.12 * a)
     p.turn('head', 'x', -0.1 * a)
@@ -299,7 +306,6 @@ def spin(t, T=4.4):
         p.turn(f'{ray}2', 'z', 0.2 * speed)
     ventrals(p, sway=0.2 * speed)
     dorsal(p, sway=-0.12 * speed)
-    pecs(p, beat=0.15 * speed)
     return p
 
 
@@ -311,7 +317,6 @@ def gulp(t, T=3.8):
     p.turn('roll', 'x', -0.55 * up)
     p.turn('head', 'x', 0.08 * gulps)
     gills(p, 0.1 * gulps)
-    pecs(p, beat=0.18 * up * math.sin(2 * math.pi * t / 0.76))
     fan(p, 2 * math.pi * t / 1.9, 0.08 * up, 0.1 * up)
     spread_fan(p, -0.15 * up)
     return p
@@ -344,7 +349,6 @@ def rest(t, T=6.0):
     p.turn('roll', 'y', 0.12 * a)
     p.turn('roll', 'x', 0.08 * a)
     gills(p, 0.05 * a * (1 + breathe))
-    pecs(p, beat=0.06 * a * breathe)
     return p
 
 
@@ -385,7 +389,6 @@ def bow(t, T=3.6):
     p.turn('roll', 'x', 0.5 * a)
     spread_fan(p, 0.35 * a)
     dorsal(p, raise_=0.3 * a)
-    pecs(p, beat=0.2 * a * math.sin(2 * math.pi * t / 0.9))
     ventrals(p, spread=0.2 * a)
     return p
 
@@ -401,7 +404,6 @@ def billow(t, T=4.0):
     fan(p, w, 0.08 * on, 0.14 * on, lag=0.9)
     dorsal(p, sway=0.15 * on * math.sin(w - 0.5), raise_=0.15 * on)
     ventrals(p, sway=0.2 * on * math.sin(w - 1.0), spread=0.12 * on * math.sin(w))
-    pecs(p, beat=0.1 * on * math.sin(2 * w))
     return p
 
 
@@ -419,6 +421,129 @@ def curl(t, T=4.0):
     dorsal(p, raise_=0.4 * a)
     gills(p, 0.2 * a)
     ventrals(p, spread=0.2 * a)
+    return p
+
+
+# --- dances ---------------------------------------------------------------
+# Break-dance moves, called by name from a vignette (src/vignette.ts): the
+# loops are on a 120 bpm grid (a beat is 0.5 s), so a battle scripted in
+# 2-second beats stays on the music. The fish's own position is the script's;
+# these are what its body does there.
+
+BEAT = 0.5
+
+
+def toprock(t, T=2.0):
+    """Standing up and talking to the floor: a rock side to side on every beat,
+    the head bobbing on the off-beat, the tail kicking out, the dorsal pumping."""
+    p = Pose()
+    b = 2 * math.pi * t / (2 * BEAT)  # one rock a beat, side to side over two
+    hit = math.sin(b)
+    snap = math.copysign(abs(hit) ** 0.6, hit)  # sharp on the beat, not a sine sway
+    p.turn('roll', 'y', 0.22 * snap)
+    p.turn('roll', 'z', 0.12 * snap)
+    p.turn('head', 'x', 0.12 * math.sin(2 * b + math.pi / 2))
+    p.turn('rear', 'z', -0.18 * snap)
+    p.turn('ped', 'z', -0.3 * snap)
+    for ray in ('cU', 'cM', 'cL'):
+        p.turn(f'{ray}1', 'z', -0.25 * snap)
+        p.turn(f'{ray}2', 'z', -0.3 * math.sin(b - 0.6))
+    dorsal(p, raise_=0.3 + 0.3 * abs(math.sin(2 * b)), sway=-0.1 * snap)
+    ventrals(p, spread=0.2 + 0.15 * abs(hit), sway=0.15 * snap)
+    gills(p, 0.12 * abs(math.sin(2 * b)))
+    return p
+
+
+def footwork(t, T=2.0):
+    """Six-step on the floor: the body low and level, the tail sweeping a full
+    circle round it once a bar, the ventrals kicking through on each step."""
+    p = Pose()
+    a = 2 * math.pi * t / T
+    p.turn('roll', 'x', 0.1 * math.sin(2 * a))
+    p.turn('rear', 'z', 0.32 * math.sin(a))
+    p.turn('ped', 'z', 0.4 * math.sin(a - 0.5))
+    p.turn('rear', 'x', -0.22 * math.cos(a))
+    p.turn('ped', 'x', -0.3 * math.cos(a - 0.5))
+    for i, ray in enumerate(('cU', 'cM', 'cL')):
+        p.turn(f'{ray}1', 'z', 0.3 * math.sin(a - 0.9 - 0.2 * i))
+        p.turn(f'{ray}2', 'z', 0.35 * math.sin(a - 1.4 - 0.2 * i))
+    kick = math.sin(3 * a)
+    for s, sg in (('R', 1), ('L', -1)):
+        p.turn(f'ven1{s}', 'y', sg * (0.25 + 0.3 * max(0.0, sg * kick)))
+        p.turn(f'ven2{s}', 'z', -0.3 * kick)
+    p.turn('head', 'z', -0.12 * math.sin(a))
+    dorsal(p, sway=0.15 * math.sin(a + 1.0))
+    return p
+
+
+def windmill(t, T=2.0):
+    """Rolling over and over along its own length, two full turns a bar, the
+    fan and the ventrals thrown wide like legs in a V."""
+    p = Pose()
+    turns = t / T  # one roll a bar... two beats a roll
+    p.turn('roll', 'y', 2 * math.pi * 2 * turns)
+    p.turn('roll', 'x', 0.18 * math.sin(4 * math.pi * turns))
+    spread_fan(p, 0.7)
+    for ray in ('cU', 'cM', 'cL'):
+        p.turn(f'{ray}2', 'z', 0.12 * math.sin(4 * math.pi * turns))
+    ventrals(p, spread=0.55)
+    dorsal(p, raise_=0.5)
+    p.turn('rear', 'x', -0.12)
+    p.turn('head', 'x', 0.1)
+    gills(p, 0.2)
+    return p
+
+
+def headspin(t, T=2.0):
+    """Nose down, tail up, spinning about its own length: two turns a bar, the
+    fan flying open round it."""
+    p = Pose()
+    p.turn('roll', 'x', 0.5 * math.pi * 0.95)  # nose down, standing on its head
+    p.turn('roll', 'z', 2 * math.pi * 2 * t / T)  # then the spin, about the vertical
+    spread_fan(p, 0.8)
+    ventrals(p, spread=0.6)
+    dorsal(p, raise_=0.6)
+    for i, ray in enumerate(('cU', 'cM', 'cL')):
+        p.turn(f'{ray}2', 'z', -0.2)  # trailing the spin
+    p.turn('ped', 'z', -0.1)
+    return p
+
+
+def freeze(t, T=2.0):
+    """Pop into a chair freeze and hold it: up on its tail, bent into a C, the
+    head tipped to the crowd, every fin out stiff — then out on the last beat."""
+    p = Pose()
+    a = env(t, 0.0, 0.2, T - 0.35, T)  # it POPS in, holds, lets go
+    p.turn('roll', 'x', -0.5 * math.pi * 0.85 * a)  # nose up, on its tail
+    p.turn('body', 'z', 0.15 * a)
+    p.turn('rear', 'z', 0.32 * a)
+    p.turn('ped', 'z', 0.32 * a)
+    p.turn('head', 'z', -0.3 * a)
+    p.turn('head', 'x', 0.15 * a)
+    spread_fan(p, 0.75 * a)
+    dorsal(p, raise_=0.7 * a)
+    ventrals(p, spread=0.5 * a)
+    gills(p, 0.35 * a)
+    # Held still — but alive: the faintest tremor in the fan.
+    for ray in ('cU', 'cM', 'cL'):
+        p.turn(f'{ray}2', 'z', 0.03 * a * math.sin(2 * math.pi * t / 0.18))
+    return p
+
+
+def drop(t, T=1.5):
+    """The drop to the floor: a dive nose-first, crumpling into a tuck, and
+    springing back level ready to go down."""
+    p = Pose()
+    dive = env(t, 0.0, 0.35, 0.55, 1.1)
+    tuck = env(t, 0.25, 0.5, 0.8, 1.3)
+    spring = env(t, 0.9, 1.1, 1.2, T)
+    p.turn('roll', 'x', 0.75 * dive - 0.15 * spring)
+    p.turn('body', 'x', -0.12 * tuck)
+    p.turn('rear', 'x', -0.25 * tuck)
+    p.turn('ped', 'x', -0.3 * tuck)
+    spread_fan(p, -0.5 * tuck + 0.5 * spring)
+    dorsal(p, raise_=-0.6 * tuck + 0.4 * spring)
+    ventrals(p, spread=-0.2 * tuck + 0.3 * spring)
     return p
 
 
@@ -461,6 +586,8 @@ CLIPS = [
     ('swim', swim, 1.6), ('hover', hover, 3.0), ('burst', burst, 0.8),
     ('flare', flare, 4.2), ('spin', spin, 4.4), ('gulp', gulp, 3.8), ('shimmy', shimmy, 2.6), ('rest', rest, 6.0),
     ('dance', dance, 5.0), ('flick', flick, 2.4), ('bow', bow, 3.6), ('billow', billow, 4.0), ('curl', curl, 4.0),
+    ('toprock', toprock, 2.0), ('footwork', footwork, 2.0), ('windmill', windmill, 2.0), ('headspin', headspin, 2.0),
+    ('freeze', freeze, 2.0), ('drop', drop, 1.5),
     ('bend', bend, 2.0), ('lookYaw', look_yaw, 2.0), ('lookPitch', look_pitch, 2.0), ('spread', spread, 2.0),
 ]
 
@@ -502,7 +629,7 @@ def main():
         blended = soften(meshes, weights_at)
         rig = build_armature('Betafish', meshes, bone_table(), nondeform=NONDEFORM)
         keyed = {pb.name: ['rotation_quaternion'] for pb in rig.pose.bones if pb.name != 'root'}
-        clips = bake(rig, BREED, CLIPS, apply_pose, ('swim', 'hover', 'burst'), keyed)
+        clips = bake(rig, BREED, CLIPS, apply_pose, ('swim', 'hover', 'burst', 'toprock', 'footwork', 'windmill', 'headspin'), keyed)
         out = export(rig, out_path(BREED), {}, layered=True, uv=True)
         return {'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
