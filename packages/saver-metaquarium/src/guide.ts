@@ -165,6 +165,7 @@ vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
           [<sec>s:] actor =mark       start there           actor >mark       swim there
           actor @mark | @actor        face it               a b circle mark   circle it together
           actor follow actor                                gestures: talk nod shake hop spin wiggle rest peek bow
+          dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
           home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).

@@ -94,7 +94,7 @@ import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { chordPose, chordTurn, dodgeClimb, dodgeTurn } from './heading';
 import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
-import { BETA_LOOK_STYLE, betaFrame, rigBeta, type BetaRig } from './beta';
+import { BETA_DANCES, BETA_LOOK_STYLE, betaFrame, rigBeta, type BetaDance, type BetaRig } from './beta';
 import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
@@ -3043,7 +3043,9 @@ class TankInstance implements SaverInstance {
       // floor, and on `ridges` it can sit inside a hill. Terrain only — not
       // the scenery domes — because a script sends a fish INTO a home's
       // throat or under a gate on purpose, and a dome would lift it out.
-      const act = this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
+      // A betafish dances a vignette's dances with its own clips, so the script leaves its body alone for those.
+      const ownMoves = f.rig?.beta ? (g: string): boolean => (BETA_DANCES as readonly string[]).includes(g) : undefined;
+      const act = this.vignette ? poseOf(this.vignette, f.index, tSec, ownMoves) : null;
       if (act) {
         px = act.x; y = act.y; pz = act.z;
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
@@ -3069,7 +3071,7 @@ class TankInstance implements SaverInstance {
       } else if (act) {
         // A script's actor holds its ground in the dodge but keeps walking: its
         // velocity is its next scripted pose, so swimmers see it coming.
-        const nx = poseOf(this.vignette!, f.index, tSec + 0.25);
+        const nx = poseOf(this.vignette!, f.index, tSec + 0.25, ownMoves);
         if (nx) { body.vx = (nx.x - act.x) * 4; body.vy = (nx.y - act.y) * 4; body.vz = (nx.z - act.z) * 4; }
       } else {
         // Where its route takes it over the next half second, as a chord: a
@@ -3192,6 +3194,7 @@ class TankInstance implements SaverInstance {
       // A betafish (minted, rig/betafish.py): its silk fins, their spread, its displays.
       const beta = f.rig?.beta ? betaFrame(f.rig.beta, tSec, f.index, beat, {
         pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
+        dance: act?.gesture && ownMoves?.(act.gesture.name) ? { move: act.gesture.name as BetaDance, at: act.gesture.at, bar: act.gesture.bar, weight: act.gesture.weight } : null,
       }) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
       const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;
