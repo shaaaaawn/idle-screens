@@ -218,15 +218,41 @@ export function lampLevel(plan: ShowPlan, bpm: number, phase: number, seed: numb
 
 /** `lampLevel` for a known show state (a, b, mix; a -1 for solo, as the shader's uniforms carry it). */
 export function lampLevelIn(state: { a: number; b: number; mix: number }, bpm: number, phase: number, seed: number, cx: number, cy: number, cz: number, top: number, t: number): number {
+  return lampLightIn(state, bpm, phase, seed, cx, cy, cz, top, t)[0];
+}
+
+/** A lamp's light, and the two routines' hues and their crossfade, as the shader's mqPyrLamp has them (the colours
+ *  are crossfaded, `lampColor`, not the hues). */
+export function lampLightIn(state: { a: number; b: number; mix: number }, bpm: number, phase: number, seed: number, cx: number, cy: number, cz: number, top: number, t: number): [number, number, number, number] {
   const st = state.a < 0 ? soloState(seed, t) : state;
   const u = Math.min(Math.abs(cx), Math.abs(cz)), w = Math.max(Math.abs(cx), Math.abs(cz));
   const clock = showTime(t - phase, bpm);
-  const a = showLamp(smallShow(st.a, top), cx, cy, cz, u, w, top, seed, clock.t)[0];
-  const b = showLamp(smallShow(st.b, top), cx, cy, cz, u, w, top, seed, clock.t)[0];
-  const v = a + (b - a) * st.mix;
+  const [av, ah] = showLamp(smallShow(st.a, top), cx, cy, cz, u, w, top, seed, clock.t);
+  const [bv, bh] = showLamp(smallShow(st.b, top), cx, cy, cz, u, w, top, seed, clock.t);
+  const v = av + (bv - av) * st.mix;
   // A big one keeps its outline faintly lit, so its shape holds in a show's dark phase.
   const outline = top >= 8 && (u >= w - 0.5 || cy <= 0.5) ? 0.16 : 0;
-  return Math.min(1, Math.max(v, outline) * (1 + clock.lift));
+  return [Math.min(1, Math.max(v, outline) * (1 + clock.lift)), ah, bh, st.mix];
+}
+
+const hueRgb = (h: number): [number, number, number] => [0, 4, 2].map((k) => clamp01(Math.abs(((h * 6 + k) % 6 + 6) % 6 - 3) - 1)) as [number, number, number];
+
+/**
+ * The colour a lamp shows at its centre (linear RGB, clamped as the display clamps it): the shader's lamp branch —
+ * its tone (white-and-rainbow for `led`, the two tubes for `neon`; in a crossfade the two routines' tones, `hue`
+ * and `hueB`, mixed by `mix`), running toward white at its peak, times the gain, over the dark housing — at a
+ * face's shade (`shade`, 0.42 underside .. 1 top). `pal` is the stone's main, accent and capstone colours, linear.
+ */
+export function lampColor(level: number, hue: number, led: 1 | 2, pal: { main: number[]; acc: number[]; cap: number[] }, shade = 1, hueB = hue, mix = 0): [number, number, number] {
+  const toneOf = (h: number): number[] => {
+    const rainbow = hueRgb(h), k = 0.5 + 0.5 * Math.sin(h * 6.2832);
+    return [0, 1, 2].map((i) => (led === 2 ? pal.acc[i]! + (pal.cap[i]! - pal.acc[i]!) * k : 1 + (rainbow[i]! - 1) * 0.8));
+  };
+  // The two routines' colours crossfaded, as the shader does — never their hues.
+  const ta = toneOf(hue), tb = toneOf(hueB);
+  const tone = [0, 1, 2].map((i) => ta[i]! + (tb[i]! - ta[i]!) * mix);
+  const white = 0.35 * level * level;
+  return [0, 1, 2].map((i) => clamp01(shade * (pal.main[i]! * 1.6 + (tone[i]! + (1 - tone[i]!) * white) * level * 1.7))) as [number, number, number];
 }
 
 /** How brightly a whole lit pyramid shines at `t`: its lamps' mean over a spread of them (its light on the floor). */

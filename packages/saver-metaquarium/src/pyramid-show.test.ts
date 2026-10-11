@@ -1,7 +1,9 @@
-import { analyzeFlashes, type FlashSample } from '@idle-screens/validator';
+import { analyzeFlashes, redness, relativeLuminance, type FlashSample } from '@idle-screens/validator';
+import { Color } from 'three';
+import { PYRAMID_MATERIALS } from './pyramid-mix';
 import { describe, expect, it } from 'vitest';
 import {
-  BEAT_LIFT, lampLevel, MAX_BPM, pyramidGlowLevel, parsePyramidShow, PYRAMID_SHOWS, SHOW_FADE, SHOW_GLSL, SHOW_HOLD, showLamp, showState, showTime, smallShow,
+  BEAT_LIFT, lampColor, lampLevel, lampLightIn, MAX_BPM, pyramidGlowLevel, soloState, parsePyramidShow, PYRAMID_SHOWS, SHOW_FADE, SHOW_GLSL, SHOW_HOLD, showLamp, showState, showTime, smallShow,
   type ShowPlan,
 } from './pyramid-show';
 
@@ -15,6 +17,33 @@ function lampsOf(top: number): Array<[number, number, number]> {
     }
   }
   return out;
+}
+
+/** A stone's palette, linear, as the shader has it (three's Color takes the hex as sRGB). */
+const paletteOf = (stone: 'led' | 'neon'): { main: number[]; acc: number[]; cap: number[] } => {
+  const [main, , acc, cap] = PYRAMID_MATERIALS[stone].pal.map((h) => new Color(h).toArray());
+  return { main: main!, acc: acc!, cap: cap! };
+};
+/** Linear 0..1 → the display's sRGB 8-bit, which is what the validator reads. */
+const toSrgb8 = (c: number): number => 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+
+/**
+ * The colour viewers see — hue, palette, gain, the display's clamp — through the validator's WCAG rule, luminance and
+ * redness both, every lamp a tile judged as if it filled the frame. Lit faces at full (top) shade, the brightest.
+ */
+function displayedFlashes(plan: ShowPlan, bpm: number, top: number, seconds: number, stone: 'led' | 'neon'): ReturnType<typeof analyzeFlashes> {
+  const lamps = lampsOf(top), samples: FlashSample[] = [], pal = paletteOf(stone), led = stone === 'led' ? 1 : 2;
+  for (let t = 0; t < seconds; t += 1 / 30) {
+    const lum: number[] = [], red: number[] = [];
+    for (const [x, y, z] of lamps) {
+      const st = plan.mode === 'solo' ? soloState(0.61, t) : showState(plan, t);
+      const [level, hueA, hueB, mix] = lampLightIn(plan.mode === 'solo' ? { a: -1, b: -1, mix: 0 } : st, bpm, 0.37, 0.61, x, y, z, top, t);
+      const [r, g, b] = lampColor(level, hueA, led, pal, 1, hueB, mix).map(toSrgb8) as [number, number, number];
+      lum.push(relativeLuminance(r, g, b)); red.push(redness(r, g, b));
+    }
+    samples.push({ t: t * 1000, lum, red });
+  }
+  return analyzeFlashes(samples, { areaThreshold: 1e-9 });
 }
 
 /**
@@ -62,6 +91,42 @@ describe('pyramid shows: a light show, never a strobe', () => {
     expect(a.t).toBeLessThan(b.t);
     expect(showTime(10, 0)).toEqual({ t: 10, lift: 0 });
     expect(showTime(10, 400).t).toBeCloseTo(showTime(10, MAX_BPM).t, 9);
+  });
+});
+
+describe('pyramid shows: the colour a viewer sees', () => {
+  it('no lamp flashes in luminance or in red — led and neon, every routine, at the fastest beat, large and small', () => {
+    for (const stone of ['led', 'neon'] as const) for (const name of PYRAMID_SHOWS) for (const top of [4, 14]) {
+      const r = displayedFlashes(parsePyramidShow(name).plan, MAX_BPM, top, 20, stone);
+      expect(r.general.worstTileFlashesPerSecond, `${stone} ${name} top ${top}`).toBeLessThanOrEqual(3);
+      expect(r.red.worstTileFlashesPerSecond, `${stone} ${name} top ${top} red`).toBeLessThanOrEqual(3);
+      expect(r.passes, `${stone} ${name} top ${top}`).toBe(true);
+    }
+  }, 120_000);
+
+  it('through the whole sequence and its crossfades, and solo, in the colour shown', () => {
+    for (const stone of ['led', 'neon'] as const) for (const plan of [parsePyramidShow('auto').plan, parsePyramidShow('solo').plan]) {
+      expect(displayedFlashes(plan, 128, 10, 280, stone).passes, `${stone} ${plan.mode}`).toBe(true);
+    }
+  }, 120_000);
+
+  it('crossfades colours, not hues: halfway between two hues a full turn apart, the colour is their blend, not a third', () => {
+    const pal = paletteOf('led');
+    // Hue 0.25 and hue 5.25 are the same colour: their blend is that colour, whatever the mix.
+    for (const mix of [0, 0.3, 0.5, 0.9]) expect(lampColor(0.8, 0.25, 1, pal, 1, 5.25, mix)).toEqual(lampColor(0.8, 0.25, 1, pal));
+  });
+
+  it('the colour model is the shader\'s: a dark lamp is the housing, a full one runs toward white, neon between its tubes', () => {
+    const pal = paletteOf('led');
+    expect(lampColor(0, 0.3, 1, pal).map((c, i) => c / (pal.main[i]! * 1.6 || 1))).toEqual([1, 1, 1]);
+    // Full red: its own channel clamps at 1, the others lifted toward white by the peak (0.2 → 0.48 of the tone).
+    const full = lampColor(1, 0, 1, pal);
+    expect(full[0]).toBe(1);
+    expect(Math.min(full[1], full[2])).toBeGreaterThan(0.8);
+    const neon = paletteOf('neon');
+    const tubeA = lampColor(0.5, 0.75, 2, neon), tubeB = lampColor(0.5, 0.25, 2, neon);
+    expect(tubeA[0]).toBeGreaterThan(tubeA[1]); // toward the magenta tube
+    expect(tubeB[2]).toBeGreaterThan(tubeB[0]); // toward the cyan
   });
 });
 

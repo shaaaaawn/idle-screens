@@ -264,8 +264,17 @@ export function pyramidHeight(shape: PyramidShape, prof: readonly number[]): num
 // Placement
 // ---------------------------------------------------------------------------
 
+/** Only the entries with a positive weight: `gold:0` names nothing. */
+const positive = <K extends string>(weights: Partial<Record<K, number>>): Partial<Record<K, number>> =>
+  Object.fromEntries(Object.entries(weights).filter(([, w]) => (w as number) > 0)) as Partial<Record<K, number>>;
+const named = <K extends string>(weights: Partial<Record<K, number>>): Partial<Record<K, number>> | null => {
+  const p = positive(weights);
+  return Object.keys(p).length ? p : null;
+};
+/** A weighted choice; callers pass at least one positive weight (`named` makes sure). */
 const pick = <K extends string>(rng: CrystalRng, weights: Partial<Record<K, number>>): K => {
   const entries = Object.entries(weights).filter(([, w]) => (w as number) > 0) as Array<[K, number]>;
+  if (!entries.length) throw new Error('pyramids: a choice with no positive weight');
   const total = entries.reduce((s, [, w]) => s + w, 0);
   let x = rng.next() * total;
   for (const [k, w] of entries) { x -= w; if (x < 0) return k; }
@@ -309,8 +318,8 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
   if (!(opts.amount > 0)) return out;
   const s = opts.scale;
   const mix = parsePyramidMix(opts.mix ?? '');
-  const stones = Object.keys(mix.materials).length ? mix.materials : (PYRAMID_STONES_BY_ENVIRONMENT[opts.environment] ?? PYRAMID_STONES_BY_ENVIRONMENT.void!);
-  const named = Object.keys(mix.shapes).length ? mix.shapes : null;
+  const stones = named(mix.materials) ?? (PYRAMID_STONES_BY_ENVIRONMENT[opts.environment] ?? PYRAMID_STONES_BY_ENVIRONMENT.void!);
+  const shapes = named(mix.shapes);
   const budget = Math.min(1, Math.max(0.4, opts.cap / 10));
   const stoneW = new PyramidWriter(), litW = new PyramidWriter();
   let w = stoneW;
@@ -325,10 +334,11 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     const prof = pyramidProfile(shape, half);
     const W = prof[0]!, H = pyramidHeight(shape, prof), V = PYRAMID_VOXEL * cube * s;
     const reach = (W + 0.5) * V * Math.SQRT2;
-    if (Math.hypot(x, z) + reach > FLOOR_R * s) return false;
+    // The floor and the camera's orbit are world-sized whatever `crystalScale` is: so are these bounds.
+    if (Math.hypot(x, z) + reach > FLOOR_R) return false;
     // The near ones and their queens keep inside the camera's orbit; the rest keep well outside it.
-    if (band === 'near' && Math.hypot(x, z) + reach > NEAR_R * s) return false;
-    if (BANDS[band].inner > 0 && Math.hypot(x, z) - reach < BANDS[band].inner * s) return false;
+    if (band === 'near' && Math.hypot(x, z) + reach > NEAR_R) return false;
+    if (BANDS[band].inner > 0 && Math.hypot(x, z) - reach < BANDS[band].inner) return false;
     if (placed.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + reach + V)) return false;
     if (!opts.free(x, z, reach)) return false;
     // Only on flat ground: a square base on a dune or a mound would bridge it or bury a corner.
@@ -345,6 +355,12 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     let pose: PyramidPose = pick<PyramidPose>(rng, great ? { stand: 6, sunk: 2, capless: capless ? 0 : 1 } : { stand: 5, sunk: 2, capless: capless ? 0 : 0.8 });
     if (pose === 'capless' && shape !== 'giza' && shape !== 'step') pose = 'stand';
     if (standing) pose = 'stand';
+    // A lost capstone lies at its foot: only where that spot is on the floor and clear, or it stands with its top on.
+    const keep = prof.length - Math.max(2, Math.round(prof.length * 0.22)), cw = prof[Math.min(keep, prof.length - 1)]!;
+    const away = yaw + Math.PI / 4 + (pose === 'capless' ? rng.range(-0.6, 0.6) : 0), capD = (W + cw + 2) * V * 1.1;
+    const capX = x + Math.cos(away) * capD, capZ = z + Math.sin(away) * capD, capR = (cw + 1.5) * V * 1.5;
+    if (pose === 'capless' && (Math.hypot(capX, capZ) + capR > (band === 'near' ? NEAR_R : FLOOR_R) || !opts.free(capX, capZ, capR)
+      || placed.some((p) => Math.hypot(capX - p.x, capZ - p.z) < p.r + capR))) pose = 'stand';
     if (pose === 'capless') capless = true;
     const seed = rng.next();
     const cap = (shape === 'giza' || shape === 'step' || shape === 'bent') && rng.next() < 0.6 ? Math.max(1, Math.round(prof.length * 0.12)) : 0;
@@ -370,16 +386,15 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
       seatGap = Math.min(seatGap, y + c.y - ground(x + c.x, z + c.z));
     }
     if (pose === 'capless') {
-      // It lost its top: the capstone lies at its foot, tipped on its side in the sand.
-      const keep = prof.length - Math.max(2, Math.round(prof.length * 0.22));
+      // It lost its top: the capstone lies at its foot, tipped on its side in the sand (its spot checked above).
       writePyramid(w, shape, prof, 0, keep);
-      const cw = prof[keep]!, away = yaw + Math.PI / 4 + rng.range(-0.6, 0.6), d = (W + cw + 2) * V * 1.1;
-      const cx = x + Math.cos(away) * d, cz = z + Math.sin(away) * d;
+      const cx = capX, cz = capZ;
       const cq = new Quaternion().setFromAxisAngle(e.set(Math.cos(away + Math.PI / 2), 0, Math.sin(away + Math.PI / 2)), rng.range(0.25, 0.45))
         .multiply(new Quaternion().setFromAxisAngle(e.set(0, 1, 0), yaw));
       w.m.compose(new Vector3(cx, ground(cx, cz) - keep * V - (cw + 1) * 0.55 * V, cz), cq, new Vector3(1, 1, 1));
       writePyramid(w, shape, prof, keep, prof.length);
-      out.obstacles.push({ x: cx, y: ground(cx, cz), z: cz, r: (cw + 1.5) * V * 1.5, h: (cw + 1.5) * V * 1.5 });
+      out.obstacles.push({ x: cx, y: ground(cx, cz), z: cz, r: capR, h: capR });
+      placed.push({ x: cx, z: cz, r: capR });
     } else writePyramid(w, shape, prof);
     out.sites.push({ x, z, shape, material, pose, half: W, cube, layers: H, ground: low, seat: seatGap, reach, band, complex: complexes });
     placed.push({ x, z, r: reach });
@@ -404,23 +419,35 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     const lits = Object.entries(stones).filter(([k]) => PYRAMID_MATERIALS[k as PyramidMaterial].led > 0).sort((a, b) => (b[1] as number) - (a[1] as number));
     const stageStone = (lits[0]?.[0] as PyramidMaterial | undefined) ?? pick(rng, stones);
     const trimmed = PYRAMID_MATERIALS[stageStone].led === 0;
-    const shape = named ? pick(rng, named) : 'giza';
+    const shape = shapes ? pick(rng, shapes) : 'giza';
     // The middle, or — a crystal colony or a home already there — the nearest clear, flat spot to it, rings outward.
-    // Each small one clear of the monument by a cube, measured as the rest are (footprint radius to radius).
-    const V = PYRAMID_VOXEL * STAGE.cube * s, d = ((STAGE.half + 0.5) * V + (STAGE.side + 0.5) * PYRAMID_VOXEL * s) * Math.SQRT2 + V + 1;
+    // Each small one clear of the monument by a cube, measured as the rest are (footprint radius to radius). At a
+    // large `crystalScale` the monument is cut smaller, so the stage still fits inside the camera's orbit.
+    const sideReach = (STAGE.side + 0.5) * PYRAMID_VOXEL * s * Math.SQRT2;
+    const V = PYRAMID_VOXEL * STAGE.cube * s;
+    const spread = (half: number): number => ((half + 0.5) * V + (STAGE.side + 0.5) * PYRAMID_VOXEL * s) * Math.SQRT2 + V + 1;
+    let stageHalf: number = STAGE.half;
+    while (stageHalf > 3 && spread(stageHalf) + sideReach > NEAR_R) stageHalf -= 1;
+    const d = spread(stageHalf);
     const stageShape = shape === 'frame' ? 'giza' : shape;
-    // The spot must hold the monument and its four small ones: test them all before raising any.
+    const flat = (x: number, z: number, h: number, cubeV: number): boolean => {
+      const q0 = new Quaternion();
+      return groundUnder(ground, x, z, h, q0).spread <= pyramidFlatness(cubeV, s)
+        && groundUnder(ground, x, z, h * 2, q0).spread <= 2 * pyramidFlatness(cubeV, s);
+    };
+    // The spot must hold the monument and its four small ones — clear and flat, all five — before any is raised.
     const fits = (x: number, z: number): boolean => {
-      const sideReach = (STAGE.side + 0.5) * PYRAMID_VOXEL * s * Math.SQRT2;
-      return opts.free(x, z, (STAGE.half + 0.5) * V * Math.SQRT2) && [[1, 0], [0, 1], [-1, 0], [0, -1]].every(([sx, sz]) => opts.free(x + sx! * d, z + sz! * d, sideReach))
-        && Math.hypot(x, z) + d + (STAGE.side + 0.5) * PYRAMID_VOXEL * s * Math.SQRT2 <= NEAR_R * s;
+      if (Math.hypot(x, z) + d + sideReach > NEAR_R) return false;
+      if (!opts.free(x, z, (stageHalf + 0.5) * V * Math.SQRT2) || !flat(x, z, (stageHalf + 0.5) * V, V)) return false;
+      return [[1, 0], [0, 1], [-1, 0], [0, -1]].every(([sx, sz]) => opts.free(x + sx! * d, z + sz! * d, sideReach)
+        && flat(x + sx! * d, z + sz! * d, (STAGE.side + 0.5) * PYRAMID_VOXEL * s, PYRAMID_VOXEL * s));
     };
     let at: [number, number] | null = null;
     for (let r = 0; r <= 24 && !at; r += 6) for (let k = 0; k < (r ? 12 : 1) && !at; k++) {
-      const a = (k / 12) * Math.PI * 2, x = Math.cos(a) * r * s, z = Math.sin(a) * r * s;
+      const a = (k / 12) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r;
       if (fits(x, z)) at = [x, z];
     }
-    if (at && raise(at[0], at[1], stageShape, STAGE.half, STAGE.cube, 0, stageStone, 'near', true, trimmed, true)) {
+    if (at && raise(at[0], at[1], stageShape, stageHalf, STAGE.cube, 0, stageStone, 'near', true, trimmed, true)) {
       for (const [sx, sz] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
         raise(at[0] + sx * d, at[1] + sz * d, 'step', STAGE.side, 1, 0, stageStone, 'near', false, trimmed, true);
       }
@@ -442,11 +469,11 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
       // Placed to fit: past the band's inner edge, inside the floor (and, near, inside the camera's orbit).
       const out = band === 'near' ? NEAR_R : FLOOR_R;
       const fit = (h: number): number => (h + 0.5) * PYRAMID_VOXEL * cube * s * Math.SQRT2;
-      while (half > 2 && spec.inner * s + fit(half) * 2 > out * s - fit(half)) half -= 1;
-      const lo = Math.max(spec.r[0] * s, spec.inner * s + fit(half) + 1), hi = Math.min(spec.r[1] * s, out * s - fit(half) - 1);
+      while (half > 2 && spec.inner + fit(half) * 2 > out - fit(half)) half -= 1;
+      const lo = Math.max(spec.r[0], spec.inner + fit(half) + 1), hi = Math.min(spec.r[1], out - fit(half) - 1);
       const r = hi > lo ? rng.range(lo, hi) : lo;
       const cx = Math.cos(ang) * r, cz = Math.sin(ang) * r;
-      const shape = pick(rng, named ?? GREAT);
+      const shape = pick(rng, shapes ?? GREAT);
       const material = pick(rng, stones);
       // A complex is squared to the compass (Giza is), turned only a little from it.
       const yaw = rng.range(-0.12, 0.12);
@@ -466,11 +493,11 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
       let along = (half + 0.5) * V * Math.SQRT2;
       for (let k = 0; k < queens; k++) {
         const qh = Math.max(2, Math.round(half * (0.5 - 0.08 * k)));
-        const qShape = named ? pick(rng, named) : pick(rng, QUEEN);
+        const qShape = shapes ? pick(rng, shapes) : pick(rng, QUEEN);
         // A lit great pyramid among stone ones: its queens are stone, carrying its light in their trim.
         const litGreat = PYRAMID_MATERIALS[material].led > 0;
-        const qStones = litGreat ? Object.fromEntries(Object.entries(stones).filter(([k]) => PYRAMID_MATERIALS[k as PyramidMaterial].led === 0)) as Partial<Record<PyramidMaterial, number>> : null;
-        const qMaterial = qStones && Object.keys(qStones).length ? pick(rng, qStones) : material;
+        const qStones = litGreat ? named(Object.fromEntries(Object.entries(stones).filter(([k]) => PYRAMID_MATERIALS[k as PyramidMaterial].led === 0)) as Partial<Record<PyramidMaterial, number>>) : null;
+        const qMaterial = qStones ? pick(rng, qStones) : material;
         along += (qh + 0.5) * V * Math.SQRT2 + V * 3;
         raise(cx + Math.cos(dir) * along, cz + Math.sin(dir) * along, qShape, qh, cube, yaw, qMaterial, band, false, qMaterial !== material);
         along += (qh + 0.5) * V * Math.SQRT2;
@@ -507,7 +534,9 @@ vec3 mqHue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) -
 // A band of light, its crest where fract(x) is 0, w wide (0..0.5).
 float mqBand(float x, float w) { float f = fract(x); return 1.0 - smoothstep(0.0, w, min(f, 1.0 - f)); }
 ${SHOW_GLSL}
-vec2 mqPyrLampHue;
+// The two routines' hues and how far between them: their COLOURS are crossfaded, not their hues — a hue mixed
+// between two far apart would race round the whole rainbow in the crossfade (a strobe of colour).
+vec3 mqPyrLampHue;
 // How lit this fragment's lamp is (0 for stone): the fog spares the lamps, not the stone.
 float mqPyrLit = 0.0;
 /** A lamp's light in the field's show (pyramid-show.ts lampLevel, the same model): the routine and the next,
@@ -528,9 +557,9 @@ float mqPyrLamp(vec3 c, float u, float w, float top, float seed, float phase) {
     mx = smoothstep(${SHOW_HOLD - SHOW_FADE}.0, ${SHOW_HOLD}.0, into);
   }
   vec2 sa = mqPyrShow(mqSmallShow(a, top), c, u, w, top, seed, t), sb = mqPyrShow(mqSmallShow(bb, top), c, u, w, top, seed, t);
-  mqPyrLampHue = mix(sa, sb, mx);
+  mqPyrLampHue = vec3(sa.y, sb.y, mx);
   float outline = top >= 8.0 && (u >= w - 0.5 || c.y <= 0.5) ? 0.16 : 0.0;
-  return min(1.0, max(mqPyrLampHue.x, outline) * (1.0 + lift));
+  return min(1.0, max(mix(sa.x, sb.x, mx), outline) * (1.0 + lift));
 }
 vec3 mqPyrPaint() {
   vec3 c = vec3(floor(vCell.x + 0.5), floor(vCell.y), floor(vCell.z + 0.5));
@@ -546,8 +575,10 @@ vec3 mqPyrPaint() {
   bool trim = vPyrB.z > 1.5 && (u >= w - 0.5 || c.y <= 0.5 || c.y >= vPyrB.y);
   if (led > 0.5 || trim) {
     float lamp = mqPyrLamp(c, u, w, vPyrB.x, seed, vPyrB.w);
-    vec2 sh = mqPyrLampHue;
-    vec3 tone = led > 1.5 ? mix(acc, capC, 0.5 + 0.5 * sin(sh.y * 6.2832)) : mix(vec3(1.0), mqHue(sh.y), 0.8);
+    vec3 sh = mqPyrLampHue;
+    vec3 toneA = led > 1.5 ? mix(acc, capC, 0.5 + 0.5 * sin(sh.x * 6.2832)) : mix(vec3(1.0), mqHue(sh.x), 0.8);
+    vec3 toneB = led > 1.5 ? mix(acc, capC, 0.5 + 0.5 * sin(sh.y * 6.2832)) : mix(vec3(1.0), mqHue(sh.y), 0.8);
+    vec3 tone = mix(toneA, toneB, sh.z);
     vec3 fwL = fwidth(vCell);
     vec3 dL = vec3(0.5 - abs(fract(vCell.x + 0.5) - 0.5), 0.5 - abs(fract(vCell.y) - 0.5), 0.5 - abs(fract(vCell.z + 0.5) - 0.5));
     vec3 gridL = 1.0 - smoothstep(fwL * 0.5, fwL * 0.5 + 0.09, dL);

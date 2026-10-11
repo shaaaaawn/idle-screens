@@ -261,6 +261,66 @@ describe('pyramids: the stage', () => {
   });
 });
 
+describe('pyramids: review fixes', () => {
+  it('a mix of zero weights names nothing: the room\'s stones and every shape, never a crash', () => {
+    for (const mix of ['gold:0', 'giza:0', 'gold:0,giza:0', 'led:0,trim', 'giza:0,led']) {
+      for (const layout of ['field', 'stage'] as const) {
+        expect(() => buildPyramids(createRng(5), opts({ mix, layout })), `${mix} ${layout}`).not.toThrow();
+      }
+    }
+    const p = buildPyramids(createRng(5), opts({ mix: 'gold:0', environment: 'ice' }));
+    expect(p.sites.length).toBeGreaterThan(0);
+    expect(p.sites.every((s) => ['crystal', 'nacre', 'limestone'].includes(s.material))).toBe(true);
+  });
+
+  it('stays on the floor and out of the camera\'s path at any crystalScale: the bounds are the world\'s, not scaled', () => {
+    for (const scale of [0.5, 1, 2.5]) for (let seed = 1; seed <= 6; seed++) for (const layout of ['field', 'stage'] as const) {
+      const p = buildPyramids(createRng(seed), opts({ scale, layout }));
+      for (const site of p.sites) {
+        expect(Math.hypot(site.x, site.z) + site.reach, `scale ${scale}`).toBeLessThanOrEqual(590 + 1e-6);
+        if (site.band === 'near') expect(Math.hypot(site.x, site.z) + site.reach, `near at scale ${scale}`).toBeLessThanOrEqual(72 + 1e-6);
+      }
+      for (const o of p.obstacles) expect(Math.hypot(o.x, o.z) + o.r, `obstacle at scale ${scale}`).toBeLessThanOrEqual(590 + 1e-6);
+    }
+    // A big scale still gets its stage, cut to fit.
+    const big = buildPyramids(createRng(42), opts({ scale: 2.5, mix: 'led', layout: 'stage' }));
+    expect(big.sites[0]!.band).toBe('near');
+    expect(big.sites[0]!.cube).toBe(2);
+  });
+
+  it('a lost capstone lies only where there is room: never on what is already there, never over the floor\'s edge', () => {
+    // Something in the way: a disc nothing may cover.
+    const blocked = (x: number, z: number, r: number): boolean => Math.hypot(x - 300, z) < r + 60;
+    let capless = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const p = buildPyramids(createRng(seed), opts({ free: (x, z, r) => !blocked(x, z, r) }));
+      capless += p.sites.filter((s) => s.pose === 'capless').length;
+      for (const o of p.obstacles) expect(blocked(o.x, o.z, o.r), `seed ${seed}`).toBe(false);
+      // Every footprint, capstones too, clear of every other.
+      for (let i = 0; i < p.obstacles.length; i++) for (let j = i + 1; j < p.obstacles.length; j++) {
+        const a = p.obstacles[i]!, b = p.obstacles[j]!;
+        if (a.x === b.x && a.z === b.z) continue;
+        expect(Math.hypot(a.x - b.x, a.z - b.z), `seed ${seed}`).toBeGreaterThan(Math.min(a.r, b.r));
+      }
+    }
+    expect(capless).toBeGreaterThan(0);
+  });
+
+  it('a stage is all five or none: uneven ground beside a clear middle moves it, or keeps it out — never half a stage', () => {
+    // Flat, but for a ridge just east of the middle, under where a side pyramid would stand.
+    const ridge = (x: number, z: number): number => (x > 32 && x < 48 && Math.abs(z) < 12 ? 6 : 0);
+    const p = buildPyramids(createRng(42), opts({ mix: 'led', layout: 'stage', terrain: ridge }));
+    const stage = p.sites.filter((s) => s.complex === 0);
+    expect([0, 5]).toContain(stage.length);
+    if (stage.length === 5) {
+      for (const s of stage) {
+        const V = PYRAMID_VOXEL * s.cube;
+        expect(groundUnder(ridge, s.x, s.z, (s.half + 0.5) * V, new Quaternion()).spread).toBeLessThanOrEqual(pyramidFlatness(V, 1) + 1e-9);
+      }
+    }
+  });
+});
+
 describe('pyramids: in the world', () => {
   const base: SceneryOptions = { rocks: 1, veins: 0.7, homes: 2, flora: 1, bubbles: 0, snow: 0, cap: 8, scale: 1 };
   const terrain = (): number => 0;
