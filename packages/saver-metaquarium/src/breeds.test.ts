@@ -124,9 +124,9 @@ describe('bundled breeds (breeds/README.md)', () => {
     },
     seahorse: {
       joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
-      layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
-      dials: ['curl', 'lean', 'lookPitch', 'lookYaw'],
-      clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
+      layers: ['a4', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'g4', 'g5', 'g6', 'grasp', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['aim', 'curl', 'grip', 'lean', 'lookPitch', 'lookYaw'],
+      clips: ['aim', 'bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'grip', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
       head: 'head', soft: true,
     },
   };
@@ -208,8 +208,10 @@ describe('bundled breeds (breeds/README.md)', () => {
 
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.
+  // The minted rigs that drop the faces buried between their cubes (they z-fought the outer faces into hairlines).
+  const DROPS_BURIED = new Set(['seahorse']);
   const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!], betafish: ([x, y, z]) => [-z!, y!, x!] };
-  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
+  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never moves the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
     const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
     const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {
       const out = new Map<string, string[]>();
@@ -233,8 +235,26 @@ describe('bundled breeds (breeds/README.md)', () => {
       return out;
     };
     const src = await tris(`../breeds/source/${breed}.glb`, turn), rig = await tris(`../breeds/rig/${breed}.glb`);
+    // Every region stays (a token's paint is matched by its place in the list).
     expect([...rig.keys()].sort()).toEqual([...src.keys()].sort());
-    for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
+    if (!DROPS_BURIED.has(breed)) {
+      for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
+      return;
+    }
+    // A rig that drops the faces buried between cubes (common.drop_buried_faces): what is left is the
+    // source's, triangle for triangle, in its own region — fewer, never new, never moved.
+    let dropped = 0;
+    for (const [m, list] of src) {
+      const have = new Map<string, number>();
+      for (const t of list) have.set(t, (have.get(t) ?? 0) + 1);
+      for (const t of rig.get(m)!) {
+        expect(have.get(t) ?? 0, `${m}: ${t}`).toBeGreaterThan(0);
+        have.set(t, have.get(t)! - 1);
+      }
+      expect(rig.get(m)!.length, `${m} keeps a face`).toBeGreaterThan(0);
+      dropped += list.length - rig.get(m)!.length;
+    }
+    expect(dropped).toBeGreaterThan(1000);
   });
 
   it('glowfish: the angler rig survives the intake — eight bones, four clips, each part on its own', async () => {
