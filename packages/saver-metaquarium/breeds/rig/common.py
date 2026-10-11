@@ -499,6 +499,77 @@ def eyes_pure(meshes, weights_at, bone):
                 assert set(w) == {bone}, (tuple(o.data.vertices[i].co), w)
 
 
+def drop_buried_faces(meshes, pitch, eyes_only=False):
+    """Delete every face buried between two cubes.
+
+    A minted model keeps every cube's faces (it is taken as-is: the intake's
+    own cull never sees it), so between any two neighbouring cubes stand two
+    faces back to back, buried — and their front edges meet the outer faces
+    exactly at the seams, where they z-fight them: pale or dark hairlines along
+    every seam, the cubes looking cut apart (worst on an eye, a block of cubes
+    each its own paint; the betta's had the same, fixed at draw time). Here
+    they go at the source: any face with a cube on BOTH sides of it (with
+    `eyes_only`, only where one of the two is an eye cube). A face with water
+    beyond it stays. A cube is known by its faces: one with faces on two axes
+    is a cube, not a lone plate (a fin's sheet keeps both its sides). Safe on a
+    soft rig: two cubes' shared corners take the same weights (they come from
+    position), so a face between them stays buried as the body bends.
+    Returns how many faces went.
+    """
+    q = pitch / 4
+    key = lambda v: (round(v[0] / q), round(v[1] / q), round(v[2] / q))  # noqa: E731
+    cubes, eye_cubes, faces = {}, set(), []
+    for o in meshes:
+        mats = list(o['rigMaterials'])
+        for f in o.data.polygons:
+            n = f.normal
+            ax = max(range(3), key=lambda i: abs(n[i]))
+            if abs(n[ax]) < 0.999:
+                continue
+            # The square a face (a triangle of one, as imported) covers: its corners' box.
+            pts = [o.matrix_world @ o.data.vertices[v].co for v in f.vertices]
+            lo = Vector([min(p[i] for p in pts) for i in range(3)])
+            hi = Vector([max(p[i] for p in pts) for i in range(3)])
+            span = [hi[i] - lo[i] for i in range(3) if i != ax]
+            if any(abs(d - pitch) > pitch * 0.02 for d in span):
+                continue
+            c = (lo + hi) / 2
+            inward = Vector((0, 0, 0)); inward[ax] = -math.copysign(pitch / 2, n[ax])
+            own = key(c + inward)
+            cubes.setdefault(own, set()).add(ax)
+            if 'EYE' in mats[f.material_index]:
+                eye_cubes.add(own)
+            faces.append((o, f.index, own, key(c - inward)))
+    real = {k for k, axes in cubes.items() if len(axes) >= 2}
+    doomed = {}
+    for o, i, own, across in faces:
+        if own in real and across in real and (not eyes_only or own in eye_cubes or across in eye_cubes):
+            doomed.setdefault(o.name, (o, set()))[1].add(i)
+    # A paint region is a token's palette slot, matched by its place in the list: one that lost every face
+    # would shift every region after it onto the wrong colour. A region wholly buried keeps its faces.
+    for o, idx in doomed.values():
+        mats = list(o['rigMaterials'])
+        by_mat = {}
+        for f in o.data.polygons:
+            by_mat.setdefault(f.material_index, []).append(f.index)
+        for m, polys in by_mat.items():
+            if all(i in idx for i in polys):
+                print(f'drop_buried_faces: {mats[m]} is wholly buried; kept so the paint table keeps its order')
+                idx.difference_update(polys)
+    gone = 0
+    for o, idx in doomed.values():
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        bm.faces.ensure_lookup_table()
+        # Their corners go too where nothing else uses them: a loose vertex has no weights (the exporter adds a bone for it).
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in sorted(idx)], context='FACES')
+        bm.to_mesh(o.data)
+        bm.free()
+        o.data.update()
+        gone += len(idx)
+    return gone
+
+
 def turn_about(p, bone, axis, angle):
     """Like Pose.turn, about any world axis (a Vector)."""
     p.rot[bone] = Quaternion(axis, angle) @ p.rot.get(bone, Quaternion())

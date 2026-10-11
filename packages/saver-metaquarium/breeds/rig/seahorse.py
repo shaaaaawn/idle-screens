@@ -75,7 +75,7 @@ from mathutils import Matrix, Quaternion, Vector
 sys.dont_write_bytecode = True  # no __pycache__ beside the scripts
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, along, apply_pose, arc_centres, bake, begin, blend, build_armature, ease, env, export, eyes_pure, hat,
+    Pose, along, apply_pose, drop_buried_faces, arc_centres, bake, begin, blend, build_armature, ease, env, export, eyes_pure, hat,
     in_scene, knots, lattice, load_source, out_path, segment, soften, track,
 )
 
@@ -461,6 +461,8 @@ def main():
             o.data.transform(turn)
         pitch, phase = lattice(meshes)
         assert pitch == PITCH and tuple(round(v, 2) for v in phase) == (1.0, 0.63, 0.81), (pitch, phase)
+        # Buried faces between cubes z-fought the outer ones into hairlines at every seam (common.drop_buried_faces).
+        seams = drop_buried_faces(meshes, pitch)
         segment(meshes, bone_of, pitch, phase, by_point=True)
         eyes_pure(meshes, weights_at, 'head')
         blended = soften(meshes, weights_at)
@@ -469,7 +471,7 @@ def main():
         keyed['trunk'].append('location')
         clips = bake(rig, BREED, CLIPS, apply_pose, ('swim', 'hover', 'burst'), keyed)
         out = export(rig, out_path(BREED), {}, layered=True)
-        return {'grip_wrap_deg': round(GRIP_WRAP), 'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
+        return {'buried_faces_dropped': seams, 'grip_wrap_deg': round(GRIP_WRAP), 'blended_vertices': blended, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 
 
