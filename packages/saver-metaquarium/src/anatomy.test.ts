@@ -99,6 +99,13 @@ describe('describeMetaquarium', () => {
   });
 });
 
+describe('signs in the anatomy', () => {
+  it('lists each sign, its words and where it stands', () => {
+    const world = describeMetaquarium({ signs: 'plank@gate:"Welcome to the reef", arrow@hub>gate:Castle, porthole' }).sections.find((x) => x.name === 'World');
+    expect(world?.items).toEqual(['3 signs: plank "Welcome to the reef" at gate, arrow "Castle" at hub → gate, porthole']);
+  });
+});
+
 describe('metaquariumParamsFromTrack', () => {
   it('folds what is in force at mount and keeps the choreography apart', () => {
     const { params, timed } = metaquariumParamsFromTrack([

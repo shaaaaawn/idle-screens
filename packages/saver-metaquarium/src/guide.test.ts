@@ -88,6 +88,8 @@ describe('agent guide', () => {
     expect(paths({ spotStrength: 0.9, spotColor: '#ffffff' })).toEqual(['spotStrength', 'spotColor']);
     expect(paths({ fishMix: 'dori:2', spotRig: '0, 1', spotColor: '#ffffff', spotStrength: 0.9 })).toEqual(['spotColor']);
     expect(paths({ followSpot: 0, spotColor: '#ffffff' })).toEqual([]);
+    expect(paths({ signFlicker: 0.8 })).toEqual(['signFlicker']);
+    expect(paths({ signFlicker: 0.8, signs: 'neon:OPEN' })).toEqual([]);
     expect(paths({ shoalKind: 'ember', shoalSpeed: 1 })).toEqual(['shoalKind', 'shoalSpeed']);
     expect(paths({ shoal: 0.6, shoalKind: 'ember' })).toEqual([]);
     expect(paths({ shoal: 0.01, shoalKind: 'ember' })).toEqual(['shoalKind']);
@@ -102,7 +104,19 @@ describe('agent guide', () => {
     expect(p?.also).toEqual(['fishMix']);
   });
 
+  it('says when a sign\'s place is not in the scene, or the scene is indoors', () => {
+    const at = (p: Record<string, unknown>): string[] => validateMetaquariumParams(p).filter((x) => x.path === 'signs').map((x) => x.message);
+    expect(at({ signs: 'plank@gate:Hi, arrow@hub>home2:Home, neon@left:OPEN' })).toEqual([
+      'no "gate" in this scene (needs landmark castle or citadel) — that sign stands in the open',
+      'no "hub" in this scene (needs paths > 0) — that sign stands in the open',
+      'no "home2" in this scene (needs geodeHomes ≥ 2) — that sign stands in the open',
+    ]);
+    expect(at({ signs: 'plank@gate:Hi, arrow@hub>home2:Home', landmark: 'castle', paths: 0.5, geodeHomes: 2 })).toEqual([]);
+    expect(at({ signs: 'plank:Hi', interior: 'geode' })[0]).toMatch(/outdoors/);
+    expect(at({ signs: 'billboard:Hi' })[0]).toMatch(/not a sign/);
+  });
+
   it('the grammar names every DSL and lists the marks', () => {
-    for (const word of ['fishMix', 'propMix', 'spotRig', 'spotCues', 'vignette', 'home1', 'gate', 'table']) expect(GRAMMAR).toContain(word);
+    for (const word of ['fishMix', 'propMix', 'spotRig', 'spotCues', 'vignette', 'signs', 'porthole', 'home1', 'gate', 'table']) expect(GRAMMAR).toContain(word);
   });
 });

@@ -3,6 +3,7 @@ import { buildScenery, type Scenery } from './scenery';
 import { parseFloraMix } from './flora';
 import { parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
+import { parseSignMix, type SignEntry } from './sign-mix';
 import { installFloraLight } from './flora-light';
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import {
@@ -621,6 +622,7 @@ function disposeOwned(root: Object3D): void {
       // textures today, so this line waits for one that does.
       const tex = (m as Partial<MeshBasicMaterial>).map;
       if (tex?.userData?.mqOwned) tex.dispose();
+      (m.userData.mqDispose as (() => void) | undefined)?.();
       m.dispose();
     }
   });
@@ -1411,6 +1413,8 @@ class TankInstance implements SaverInstance {
     return parsed.mix;
   }
 
+  /** The `signs` string as last parsed: its entries, its layout key (LED words blanked), the LED words. */
+  private signsMemo: { raw: string; entries: SignEntry[]; layout: string; led: string[] } = { raw: '', entries: [], layout: '[]', led: [] };
   private buildScenery(): void {
     const rocks = this.num('rockDensity');
     const homes = this.num('geodeHomes');
@@ -1424,8 +1428,24 @@ class TankInstance implements SaverInstance {
     const pearling = this.num('pearling'), mist = this.num('co2Mist');
     const bubbles = this.num('bubbleVents'), snow = this.num('marineSnow'), lanterns = this.num('skyLanterns'), lanternHeight = this.num('skyHeight'), horizon = this.num('horizon'), paths = this.num('paths'), pathMaterial = this.str('pathMaterial') as 'auto' | 'algae' | 'pebble' | 'sand';
     const castle = ({ castle: 1, citadel: 2 } as Record<string, 0 | 1 | 2>)[this.str('landmark')] ?? 0;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
-    if (key === this.sceneryKey) return;
+    const signs = this.str('signs').trim();
+    // An LED board's words are live data: when nothing but them changed, swap
+    // them on the boards in place. The world (and every sign's site) depends
+    // only on the layout, so it is keyed without them.
+    if (signs !== this.signsMemo.raw) {
+      const entries = signs ? parseSignMix(signs).entries : [];
+      this.signsMemo = {
+        raw: signs, entries,
+        layout: JSON.stringify(entries.map((e) => (e.kind === 'led' ? { ...e, text: '' } : e))),
+        led: entries.filter((e) => e.kind === 'led').map((e) => e.text),
+      };
+    }
+    const { entries: signEntries, layout: signLayout, led: ledTexts } = this.signsMemo;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signLayout}`;
+    if (key === this.sceneryKey) {
+      this.scenery?.setLedTexts(ledTexts);
+      return;
+    }
     this.sceneryKey = key;
     if (this.scenery) {
       this.scene.remove(this.scenery.group);
@@ -1438,10 +1458,10 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior) {
+    if (rocks > 0 || homes > 0 || flora > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs) {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
-          fountain, lamps: streetLamps,
+          fountain, lamps: streetLamps, signs: signEntries.length ? signEntries : undefined,
           geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
@@ -2486,6 +2506,7 @@ class TankInstance implements SaverInstance {
     // The horizon sits on the level, where the in-scatter is half tint.
     if (tint) this.horizonColor.copy(this.fogColor).lerp(this.tintColor.set(tint), tintWeight(0.03));
     else this.horizonColor.copy(this.fogColor);
+    this.scenery?.setSignFlicker(this.num('signFlicker'));
     this.scenery?.setFrame(tSec, { color: this.horizonColor, near: fog.near, far: fog.far }, this.num('crystalGlow'), this.num('crystalPulse'));
     this.crystals?.setFrame(tSec, this.num('crystalGlow'), this.num('crystalPulse'), {
       color: this.fogColor, near: fog.near, far: fog.far,

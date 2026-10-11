@@ -341,6 +341,15 @@ export const METAQUARIUM_PARAMS = {
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Underwater signage: `kind[@place][>target][/#color][*size][:text]`, comma-separated
+   *  (plank arrow ring porthole neon led). Each stands beside its place (gate plaza hub
+   *  fountain home1…, or centre left right front back), facing the front; an LED board
+   *  scrolls a long line. Empty = none. */
+  signs: { type: 'string', default: '', ease: 'step' },
+  /** How unstable the lit signs' power is (neon and LED boards): 0 steady; higher, more
+   *  hum, stutters, a dead row or tube, a slipped row, now and then a reboot. Each sign
+   *  has its own supply — most steady, some dodgy. Flash-safe at any setting. */
+  signFlicker: { type: 'number', default: 0.4, min: 0, max: 1, ease: 'smooth' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
@@ -526,6 +535,7 @@ export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, typ
 export * from './environments';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { parseSignMix, SIGN_KINDS, SIGN_PLACES, SIGN_TEXT_MAX, MAX_SIGNS, type SignEntry, type SignKind } from './sign-mix';
 export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';
 export { parseVignette, resolveVignette, VIGNETTES, VIGNETTE_CUES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {
