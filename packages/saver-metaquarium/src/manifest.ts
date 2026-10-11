@@ -342,7 +342,8 @@ export const METAQUARIUM_PARAMS = {
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Pyramids built of cubes, as the fish are (0 = none): on the floor in complexes — a great pyramid and its queens —
-   *  small ones near, the great ones at the back; standing, half sunk, leaning, one missing its capstone. */
+   *  small ones near, the great ones at the back — only on flat ground (a flat floor: none on dunes, ridges or a basin);
+   *  standing, half sunk, one missing its capstone. */
   pyramids: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** Their shapes and stones, `shape|stone[:weight], …` (empty = the room's stone, every shape). */
   pyramidMix: { type: 'string', default: '', ease: 'step' },

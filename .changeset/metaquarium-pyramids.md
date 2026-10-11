@@ -9,5 +9,6 @@ Pyramids: `pyramids` (0–1) and `pyramidMix` raise pyramids built of cubes, the
 - **Shapes:** Giza, step, bent, Djoser, Mayan and frame.
 - **Stones:** ten, chosen by the room unless `pyramidMix` names some.
 - **Details:** glyph friezes, gilded or glowing capstones that light the floor, and an eye on some.
-- **Poses:** standing, half sunk, leaning where the ground gave, or missing a capstone that lies at its foot.
+- **Ground:** only where the floor is flat under the whole footprint and around it. In practice that means `floorKind: flat`: none on dunes, ridges, a basin's bowl or a rippled tread.
+- **Poses:** standing, half sunk, or missing a capstone that lies at its foot.
 - **Cost:** one draw.

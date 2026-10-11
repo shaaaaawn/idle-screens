@@ -27,16 +27,17 @@
  * They stand on the floor, always — in complexes, as Giza's do: a great
  * pyramid with its queens' pyramids in a row beside it, all squared to one
  * another. A few small complexes near the glass, more in the middle of the
- * floor, the great ones at the back fading into the water. How did they get
- * there? Most stand true; some are half sunk in the sand; some lean where the
- * ground settled under them; one has lost its capstone, which lies in the
- * sand at its foot.
+ * floor, the great ones at the back fading into the water — only where the
+ * floor is flat under the whole footprint (on a dune or a mound a square base
+ * would bridge it or bury a corner, so there is none there). How did they get
+ * there? Most stand true; some are half sunk in the sand; one has lost its
+ * capstone, which lies in the sand at its foot.
  *
  * Geometry is the stepped faces only (a layer is a square: its four sides and
  * the ring of its top), so a pyramid is a few hundred quads. The cubes are
  * drawn in the fragment shader: each fragment knows its cube in the pyramid's
  * own frame (`aCell`), so the paint stays on the grid however the pyramid
- * leans, and fades to its mean where a cube is under a pixel.
+ * is turned, and fades to its mean where a cube is under a pixel.
  */
 import { BufferAttribute, BufferGeometry, Color, FrontSide, Matrix4, MeshBasicMaterial, Quaternion, Vector3, Vector4 } from 'three';
 import type { CrystalRng, Emitter } from './crystals';
@@ -50,7 +51,7 @@ export const PYRAMID_VOXEL = FISH_LENGTH / 14;
 /** A pyramid's cube is a whole number of the fish's: these, small to great. */
 export const PYRAMID_CUBES = [1, 2, 3, 4, 5] as const;
 
-export type PyramidPose = 'stand' | 'sunk' | 'lean' | 'capless';
+export type PyramidPose = 'stand' | 'sunk' | 'capless';
 
 export interface PyramidOptions {
   /** 0..1: how many. */
@@ -177,8 +178,8 @@ const NO_BOTTOM: ReadonlySet<string> = new Set(['bottom']);
 /**
  * Write one pyramid's faces in its cell frame (the writer's matrix places it).
  * `from`..`to` are the layers drawn (a capless one stops short; its capstone
- * is the rest, drawn on its own). The base is drawn: a leaning one, or a
- * capstone lying on its side, shows it.
+ * is the rest, drawn on its own). The base is drawn: a capstone lying on its
+ * side shows it.
  */
 export function writePyramid(w: PyramidWriter, shape: PyramidShape, prof: readonly number[], from = 0, to = prof.length): void {
   if (shape === 'frame') {
@@ -271,6 +272,21 @@ const BANDS = {
 };
 const GREAT: Partial<Record<PyramidShape, number>> = { giza: 4, bent: 1.5, djoser: 2, step: 1.5, mayan: 1.5 };
 const QUEEN: Partial<Record<PyramidShape, number>> = { giza: 3, step: 2, mayan: 1, djoser: 0.5, frame: 0.6 };
+/** How far the ground may rise and fall under a footprint: a fifth of its cube and a hair — flat, to the eye. In
+ *  practice a flat floor (a dune, a ridge, a basin's bowl or a rippled tread is not). The base is set in by the low
+ *  point, so it never shows a gap. */
+export const pyramidFlatness = (V: number, s: number): number => 0.2 * V + 0.15 * PYRAMID_VOXEL * s;
+/** The ground's lowest point and its rise and fall over a square footprint (half-width `h`, turned by `q`), on a 7×7 grid. */
+export function groundUnder(ground: (x: number, z: number) => number, x: number, z: number, h: number, q: Quaternion): { lo: number; spread: number } {
+  let lo = Infinity, hi = -Infinity;
+  const p = new Vector3();
+  for (let i = 0; i <= 6; i++) for (let k = 0; k <= 6; k++) {
+    p.set((i / 3 - 1) * h, 0, (k / 3 - 1) * h).applyQuaternion(q);
+    const g = ground(x + p.x, z + p.z);
+    lo = Math.min(lo, g); hi = Math.max(hi, g);
+  }
+  return { lo, spread: hi - lo };
+}
 /** Every footprint stays on the floor (tank.ts builds it 620 to a side; its edge is past the fog). */
 const FLOOR_R = 590;
 /** The camera orbits the middle at `cameraDistance` (110 by default): nothing near reaches past this. */
@@ -302,8 +318,14 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     if (Math.hypot(x, z) - reach < BANDS[band].inner * s) return false;
     if (placed.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + reach + V)) return false;
     if (!opts.free(x, z, reach)) return false;
+    // Only on flat ground: a square base on a dune or a mound would bridge it or bury a corner.
+    const q = new Quaternion().setFromAxisAngle(e.set(0, 1, 0), yaw);
+    const under = groundUnder(ground, x, z, (W + 0.5) * V, q);
+    if (under.spread > pyramidFlatness(V, s)) return false;
+    // And round it, to twice its width: a small one can find a flat spot on top of a dune and sit there like a hat.
+    if (groundUnder(ground, x, z, (W + 0.5) * V * 2, q).spread > 2 * pyramidFlatness(V, s)) return false;
     // How did it get there?
-    let pose: PyramidPose = pick<PyramidPose>(rng, great ? { stand: 6, sunk: 2, capless: capless ? 0 : 1 } : { stand: 5, sunk: 2, lean: 2, capless: capless ? 0 : 0.8 });
+    let pose: PyramidPose = pick<PyramidPose>(rng, great ? { stand: 6, sunk: 2, capless: capless ? 0 : 1 } : { stand: 5, sunk: 2, capless: capless ? 0 : 0.8 });
     if (pose === 'capless' && shape !== 'giza' && shape !== 'step') pose = 'stand';
     if (pose === 'capless') capless = true;
     const seed = rng.next();
@@ -315,26 +337,10 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     w.A = [PYRAMID_MATERIAL_NAMES.indexOf(material), ((seq++ * 0.6180339) % 1) + seed * 0.001, 1, glow];
     // A frame is all light: every edge cube in the capstone's colour.
     w.B = [prof.length - 1, shape === 'frame' ? 0 : cap ? prof.length - cap : 1e4, eye, 0];
-    const q = new Quaternion().setFromAxisAngle(e.set(0, 1, 0), yaw);
-    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([cx, cz]) => {
-      const c = new Vector3(cx! * (W + 0.5) * V, 0, cz! * (W + 0.5) * V).applyQuaternion(q);
-      return ground(x + c.x, z + c.z);
-    });
-    const low = Math.min(...corners);
+    const low = under.lo;
     // Its base never shows a gap over the sand: it sits at the lowest corner, a little in.
     let y = low - 0.25 * V;
     if (pose === 'sunk') y = low - H * V * rng.range(0.22, 0.45);
-    if (pose === 'lean') {
-      // The ground gave under one side: tilted about a level axis, seated by its lowest corner, a little in.
-      const axis = rng.next() * Math.PI * 2;
-      q.premultiply(new Quaternion().setFromAxisAngle(e.set(Math.cos(axis), 0, Math.sin(axis)), rng.range(0.08, 0.2)));
-      let seat = -Infinity;
-      for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
-        const c = new Vector3(cx * (W + 0.5) * V, 0, cz * (W + 0.5) * V).applyQuaternion(q);
-        seat = Math.max(seat, ground(x + c.x, z + c.z) - c.y);
-      }
-      y = seat - rng.range(0.6, 1.4) * V;
-    }
     w.m.compose(new Vector3(x, y, z), q, new Vector3(1, 1, 1));
     // How it sits: its deepest base corner against the ground under that corner.
     let seatGap = Infinity;

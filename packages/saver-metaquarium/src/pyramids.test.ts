@@ -1,9 +1,9 @@
 import { createRng } from '@idle-screens/core';
-import type { Mesh } from 'three';
+import { Quaternion, type Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { validateMetaquariumParams } from './guide';
 import {
-  buildPyramids, parsePyramidMix, PYRAMID_CUBES, PYRAMID_SHAPES, PYRAMID_VOXEL, pyramidMaterial, pyramidProfile, PyramidWriter, writePyramid, type PyramidOptions,
+  buildPyramids, groundUnder, parsePyramidMix, pyramidFlatness, PYRAMID_CUBES, PYRAMID_SHAPES, PYRAMID_VOXEL, pyramidMaterial, pyramidProfile, PyramidWriter, writePyramid, type PyramidOptions,
 } from './pyramids';
 import { buildScenery, type SceneryOptions } from './scenery';
 import { FISH_LENGTH } from './swim';
@@ -88,7 +88,8 @@ describe('pyramids: on the fish\'s own grid, perfectly symmetric', () => {
 });
 
 describe('pyramids: where they stand, and how', () => {
-  const hill = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
+  // A terrace's tread: flat, with a slight ripple.
+  const hill = (x: number, z: number): number => Math.sin(x * 0.04) * 0.2 + Math.cos(z * 0.03) * 0.2;
 
   it('is pure in its seed, and nothing at all at amount 0', () => {
     const a = buildPyramids(createRng(5), opts()), b = buildPyramids(createRng(5), opts());
@@ -108,7 +109,25 @@ describe('pyramids: where they stand, and how', () => {
         expect(Math.hypot(site.x, site.z) + site.reach).toBeLessThanOrEqual(590 + 1e-6);
       }
     }
-    expect([...poses].sort()).toEqual(['capless', 'lean', 'stand', 'sunk']);
+    expect([...poses].sort()).toEqual(['capless', 'stand', 'sunk']);
+  });
+
+  it('stands only where the floor is flat under all of it: none on a dune or a mound', () => {
+    // Rolling dunes, with a flat plain to the east of x = 150.
+    const dunes = (x: number, z: number): number => (x > 150 ? 2 : Math.sin(x * 0.05) * 9 + Math.cos(z * 0.04) * 9);
+    let placed = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      for (const site of buildPyramids(createRng(seed), opts({ terrain: dunes })).sites) {
+        placed++;
+        const V = PYRAMID_VOXEL * site.cube;
+        // (Squared to the compass give or take a few degrees: measured square-on, a hair of slack.)
+        expect(groundUnder(dunes, site.x, site.z, (site.half + 0.5) * V * 0.97, new Quaternion()).spread).toBeLessThanOrEqual(pyramidFlatness(V, 1) + 1e-9);
+        expect(site.x).toBeGreaterThan(150);
+      }
+    }
+    expect(placed).toBeGreaterThan(0);
+    // Flat ground everywhere: they fill the floor.
+    expect(buildPyramids(createRng(1), opts()).sites.length).toBeGreaterThan(8);
   });
 
   it('is built of cubes a whole number of the fish\'s: one near the glass, bigger at the back', () => {
@@ -190,7 +209,7 @@ describe('pyramids: where they stand, and how', () => {
 
 describe('pyramids: in the world', () => {
   const base: SceneryOptions = { rocks: 1, veins: 0.7, homes: 2, flora: 1, bubbles: 0, snow: 0, cap: 8, scale: 1 };
-  const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3 + Math.cos(z * 0.03) * 4;
+  const terrain = (): number => 0;
   const buffers = (o: SceneryOptions) => buildScenery([], createRng(9), terrain, o).group.children
     .filter((c) => c.name !== 'pyramids').map((c) => [c.name, ...Array.from((c as Mesh).geometry.getAttribute('position').array)]);
 
