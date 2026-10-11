@@ -3183,7 +3183,7 @@ class TankInstance implements SaverInstance {
       // A betafish (minted, rig/betafish.py): its silk fins, their spread, its displays.
       const beta = f.rig?.beta ? betaFrame(f.rig.beta, tSec, f.index, beat, {
         pace: rigPace, flurry: mnv.flurry + flurryBoost, turn: rigTurn, viewer: rigViewer,
-        dance: act?.gesture && ownMoves?.(act.gesture.name) ? { move: act.gesture.name as BetaDance, at: act.gesture.at, weight: act.gesture.weight } : null,
+        dance: act?.gesture && ownMoves?.(act.gesture.name) ? { move: act.gesture.name as BetaDance, at: act.gesture.at, bar: act.gesture.bar, weight: act.gesture.weight } : null,
       }) : null;
       // A hackerfish's clips and its face: what the screen shows, and how bright it throws.
       const hacker = f.rig?.hacker ? hackerFrame(f.rig.hacker, tSec, f.index, beat) : null;

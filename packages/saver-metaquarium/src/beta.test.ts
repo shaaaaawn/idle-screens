@@ -190,11 +190,21 @@ describe('betafish: the real rig', () => {
     // A loop's time wraps on its bar; a one-shot's holds at its end.
     betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'windmill', at: 4.5, weight: 1 } });
     expect(rig.actions.windmill.time).toBeCloseTo(0.5, 5);
+    // ... phased on its beat, when the vignette says where that is: on the bar.
+    betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'windmill', at: 4.5, bar: 6.25, weight: 1 } });
+    expect(rig.actions.windmill.time).toBeCloseTo(0.25, 5);
     betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'freeze', at: 9, weight: 1 } });
     expect(rig.actions.freeze.time).toBeLessThan(rig.durations.freeze);
     // Half in: the swim gives way by half, nothing snaps.
     const half = betaFrame(rig, 30, 3, 10, { ...cruising, dance: { move: 'toprock', at: 0.2, weight: 0.5 } });
     expect(half.weights.toprock).toBe(0.5);
     expect(half.weights.swim).toBeCloseTo(0.5 * betaFrame(rig, 30, 3, 10, cruising).weights.swim, 5);
+    // Mid-moment and mid-dart, at any share: the body's clips and the dance still sum to one.
+    const body = ['swim', 'hover', 'burst', ...BETA_MOMENTS] as const;
+    for (let t = 0; t < 120; t += 0.7) for (const flurry of [0, 0.4, 1]) for (const weight of [-1, 0, 0.2, 0.5, 0.8, 1]) {
+      const dance = weight < 0 ? null : { move: 'footwork' as const, at: 0.3, weight };
+      const w = betaFrame(rig, t, 3, t * 5, { ...cruising, flurry, dance }).weights;
+      expect(body.reduce((s, n) => s + w[n], 0) + w.footwork, `t ${t} flurry ${flurry} dance ${weight}`).toBeCloseTo(1, 6);
+    }
   });
 });

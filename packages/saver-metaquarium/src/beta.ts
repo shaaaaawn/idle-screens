@@ -145,8 +145,9 @@ export interface BetaInput {
   turn: number;
   /** Where the viewer is from its head, radians: yaw + to its left, pitch + up. Null: no viewer. */
   viewer: { yaw: number; pitch: number } | null;
-  /** A dance a vignette has it doing: which move, seconds into it, its envelope (0..1). */
-  dance?: { move: BetaDance; at: number; weight: number } | null;
+  /** A dance a vignette has it doing: which move, seconds into it, seconds into
+   *  its beat (a loop is phased on this, to stay on the bar), its envelope (0..1). */
+  dance?: { move: BetaDance; at: number; bar?: number; weight: number } | null;
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -189,12 +190,17 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   const cruise = smooth((inp.pace - 0.1) / 0.5);
   // A moment, once begun, is finished before a dart takes the body; the dart eases in and out.
   // A dance takes the body over: its own moments and strokes give way to it.
+  // The body's own mix (moment, dart, stroke) sums to one; a dance takes its
+  // share and the whole mix makes room, so the weights still sum to one.
   const dw = inp.dance ? clamp(inp.dance.weight, 0, 1) : 0;
+  const room = 1 - dw;
   const mm = betaMoment(index, t, (n) => D[n]);
-  const m = { ...mm, weight: mm.weight * (1 - dw) };
-  const dart = smooth(inp.flurry * 1.4) * (1 - dw);
-  const burst = dart * (1 - m.weight);
-  const stroke = (1 - m.weight) * (1 - dart) * (1 - dw);
+  const dart0 = smooth(inp.flurry * 1.4);
+  const mix = { moment: mm.weight, burst: dart0 * (1 - mm.weight), stroke: (1 - mm.weight) * (1 - dart0) };
+  const m = { ...mm, weight: mix.moment * room };
+  const dart = dart0 * room;
+  const burst = mix.burst * room;
+  const stroke = mix.stroke * room;
   const bend = turnDial(inp.turn, BETA_BEND);
 
   const wanderYaw = 0.25 * Math.sin(t * 0.41 + index * 1.3) + 0.12 * Math.sin(t * 0.97 + index * 0.6);
@@ -224,7 +230,7 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   if (m.moment) times[m.moment] = clamp(m.into, 0, D[m.moment] - 1e-4);
   if (inp.dance) {
     const d = inp.dance.move;
-    times[d] = DANCE_LOOPS.has(d) ? posMod(inp.dance.at, D[d]) : clamp(inp.dance.at, 0, D[d] - 1e-4);
+    times[d] = DANCE_LOOPS.has(d) ? posMod(inp.dance.bar ?? inp.dance.at, D[d]) : clamp(inp.dance.at, 0, D[d] - 1e-4);
   }
   times.bend = dial(bend, D.bend);
   times.lookYaw = dial(yaw, D.lookYaw);

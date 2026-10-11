@@ -127,6 +127,18 @@ describe('vignettes', () => {
     expect(poseOf(v, 0, 10)!.gesture?.name).toBe('headspin');
   });
 
+  it('a gesture\'s clocks are real seconds, and a dance\'s bar is its beat\'s', () => {
+    // Standing (the actor has arrived) and travelled-in beats both: the beat starts at 4 s.
+    for (const script of ['4s: a =centre | 4s: a windmill', '4s: a =left | 4s: a >right windmill']) {
+      const v = parseVignette(script, OPEN_MARKS);
+      const a = poseOf(v, 0, 7)!.gesture!, b = poseOf(v, 0, 7.5)!.gesture!;
+      expect(b.at - a.at, script).toBeCloseTo(0.5, 6);
+      expect(a.bar, script).toBeCloseTo(3, 6);
+      expect(b.bar, script).toBeCloseTo(3.5, 6);
+      expect(a.at, script).toBeLessThan(a.bar);
+    }
+  });
+
   it('every dance moves a fish with no clips for it', () => {
     for (const d of DANCES) {
       const v = parseVignette(`4s: a =centre | 4s: a ${d}`, OPEN_MARKS);
