@@ -1035,7 +1035,7 @@ class TankInstance implements SaverInstance {
     if (!c || c.k !== hs.k) {
       // The plants other seahorses hold now are taken.
       const taken = new Set<number>();
-      for (const o of this.fish) if (o && o !== f && o.holdChoice && o.holdChoice.stem >= 0 && o.holdChoice.until > t) taken.add(stems[o.holdChoice.stem]!.plant);
+      for (const o of this.fish) if (o && o !== f && o.holdChoice && o.holdChoice.stem >= 0 && o.holdChoice.until > t) { const st = stems[o.holdChoice.stem]; if (st) taken.add(st.plant); }
       const stem = pickStem(stems, px, py, pz, L, taken, this.scenery!.clearance);
       const hl = Math.hypot(hx, hz) || 1;
       let aim = 1;
@@ -1046,8 +1046,9 @@ class TankInstance implements SaverInstance {
       }
       c = f.holdChoice = { k: hs.k, stem, until: t - hs.into + holdCycle(f.index).length, hx: hx / hl, hz: hz / hl, aim };
     }
-    if (c.stem < 0) return null;
-    const at = stemAt(stems[c.stem]!, t, this.stemTmp);
+    const stem = c.stem >= 0 ? stems[c.stem] : undefined;
+    if (!stem) return null;
+    const at = stemAt(stem, t, this.stemTmp);
     return { kind: 'stem', tx: at.x, ty: at.y, tz: at.z, hx: c.hx, hz: c.hz, aim: c.aim, roll: 0.3 * c.aim, pitch: 0 };
   }
 
@@ -1489,6 +1490,8 @@ class TankInstance implements SaverInstance {
     const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}`;
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
+    // A seahorse's held stem is an index into the old garden's stems: forget them all with it.
+    for (const o of this.fish) if (o) o.holdChoice = undefined;
     if (this.scenery) {
       this.scene.remove(this.scenery.group);
       disposeOwned(this.scenery.group);
@@ -3243,8 +3246,11 @@ class TankInstance implements SaverInstance {
       const hold = hs && f.rig?.seahorse?.grasp ? this.holdPlan(f, hs, pairRec, pairRole, px, y, pz, lfx, lfz, L, tSec) : null;
       const reach = hold ? hs!.reach : 0;
       if (hold) {
-        const hx = lfx + (hold.hx - lfx) * reach, hz = lfz + (hold.hz - lfz) * reach, hl = Math.hypot(hx, hz) || 1;
-        lfx = hx / hl; lfz = hz / hl; lfy *= 1 - reach;
+        // Blend the heading as an angle: as vectors, a partner facing the opposite way cancels at reach 0.5 and flips.
+        const la = Math.atan2(lfz, lfx);
+        let da = Math.atan2(hold.hz, hold.hx) - la;
+        da -= Math.PI * 2 * Math.round(da / (Math.PI * 2));
+        lfx = Math.cos(la + da * reach); lfz = Math.sin(la + da * reach); lfy *= 1 - reach;
       }
       const seahorse = f.rig?.seahorse ? seahorseFrame(f.rig.seahorse, tSec, f.index, beat, {
         pace: rigPace * (1 - reach), flurry: mnv.flurry + flurryBoost, turn: rigTurn * (1 - reach), viewer: rigViewer,
