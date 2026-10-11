@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
+import { DANCES, GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
 
 /** duet and trio are written for the open stage; the rest for the geode room. */
 const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
@@ -125,5 +125,17 @@ describe('vignettes', () => {
     expect(Math.abs(plain.roll - own.roll)).toBeGreaterThan(0.1); // the whole-body roll, left to the clip
     expect(own.x).toBeCloseTo(plain.x, 6);
     expect(poseOf(v, 0, 10)!.gesture?.name).toBe('headspin');
+  });
+
+  it('every dance moves a fish with no clips for it', () => {
+    for (const d of DANCES) {
+      const v = parseVignette(`4s: a =centre | 4s: a ${d}`, OPEN_MARKS);
+      const still = poseOf(v, 0, 3.9)!, at = (t: number) => poseOf(v, 0, t)!;
+      const moved = [4.6, 5.3, 6.1, 6.9].some((t) => {
+        const p = at(t);
+        return Math.abs(p.y - still.y) > 0.3 || Math.abs(p.roll - still.roll) > 0.05 || Math.hypot(p.fx - still.fx, p.fy - still.fy, p.fz - still.fz) > 0.05;
+      });
+      expect(moved, d).toBe(true);
+    }
   });
 });

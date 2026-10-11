@@ -86,7 +86,7 @@ describe('betafish: the painted eyes', () => {
     });
     const rig = rigBetaEyes(scene)!;
     expect(rig.cells).toEqual([9, 9]);
-    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v3');
+    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v4');
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <map_pars_fragment>\n#include <map_fragment>', uniforms: {} as Record<string, { value: unknown }> };
     mats[0]!.onBeforeCompile(shader as never, undefined as never);
     expect(shader.vertexShader).toContain('vBetaP = position');

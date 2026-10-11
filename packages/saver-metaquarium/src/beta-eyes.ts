@@ -142,11 +142,12 @@ const PARS = /* glsl */ `
 /**
  * Each eye cell is a whole voxel, so the side faces BETWEEN neighbouring cells
  * are buried — but they reach the block's front exactly at the seams, where
- * they z-fought the front faces: a dark pupil showed grey hairlines (its
- * sheen on those side faces) across it, on every token, painted by atlas or by
- * flat colour. At draw time their front edge sinks a hair toward the flank;
- * the rim's side faces stay, so the block keeps its sides. Bind-space,
- * before skinning: the model's data is untouched.
+ * they z-fought the front faces: grey hairlines (those faces' own shading)
+ * cut the eye into sections, on every token, painted by atlas or by flat
+ * colour. Sunk a hair (0.08) they still showed; so at draw time each one
+ * folds flat — its front edge down onto its back edge at the flank — and,
+ * zero-area, never draws. The rim's side faces stay, so the block keeps its
+ * sides. Bind-space, before skinning: the model's data is untouched.
  */
 const SEAMS = /* glsl */ `
   for (int mqE = 0; mqE < 2; mqE++) {
@@ -157,7 +158,7 @@ const SEAMS = /* glsl */ `
       float mqGy = (position.y - ${BETA_EYE_BLOCKS[0].y0.toFixed(3)}) / ${CELL.toFixed(1)};
       if (mqGz > -0.01 && mqGz < ${N}.01 && mqGy > -0.01 && mqGy < ${N}.01) {
         bool mqRim = abs(normal.z) > 0.5 ? (mqGz < 0.01 || mqGz > ${N - 1}.99) : (mqGy < 0.01 || mqGy > ${N - 1}.99);
-        if (!mqRim) transformed.x += mqIn * 0.08;
+        if (!mqRim) transformed.x += mqIn * ${CELL.toFixed(1)};
       }
     }
   }
@@ -193,7 +194,7 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
     const prev = m.onBeforeCompile;
     m.onBeforeCompile = (shader, renderer) => {
       prev.call(m, shader, renderer);
-      // Every material: the eye blocks' buried side faces sink a hair behind the front (SEAMS).
+      // Every material: the eye blocks' buried side faces fold flat, out of sight (SEAMS).
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${SEAMS}`);
       if (!mapped) return;
       Object.assign(shader.uniforms, uniforms);
@@ -203,7 +204,7 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
         ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, mqBetaEyeUv( vMapUv ) )'));
     };
     const key = m.customProgramCacheKey.bind(m);
-    m.customProgramCacheKey = () => `${key()}|mq-beta-eyes-v3${mapped ? '' : '-seams'}`;
+    m.customProgramCacheKey = () => `${key()}|mq-beta-eyes-v4${mapped ? '' : '-seams'}`;
     m.needsUpdate = true;
   }
   const counts = found.map((c) => c.filter(Boolean).length);

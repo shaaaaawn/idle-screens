@@ -134,7 +134,7 @@ describe('betafish: the real rig', () => {
     expect(bonesOf(gltf.scene).some((o) => /^pec/.test(o.name))).toBe(false);
   });
 
-  it('keeps the eyes on the head: no gill cover or fin moves an eye cell', async () => {
+  it('keeps each eye one rigid piece on the head: no gill cover, fin or neck blend moves a cell alone', async () => {
     const gltf = await load();
     const meshes: SkinnedMesh[] = [];
     gltf.scene.traverse((o) => { if ((o as SkinnedMesh).isSkinnedMesh) meshes.push(o as SkinnedMesh); });
@@ -150,10 +150,12 @@ describe('betafish: the real rig', () => {
         const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
         if (Math.abs(Math.abs(x + 0.38) - 9.0) > 0.05 || z < 0.2 || z > 6.3 || y < -2.1 || y > 4) continue; // the blocks' outer faces
         cells++;
+        // All head: a skull blending into the body across the block sheared
+        // its rear column off the rest whenever the fish looked.
         for (let k = 0; k < 4; k++) {
           if (sw.getComponent(i, k) < 0.01) continue;
-          const bone = names[si.getComponent(i, k)]!;
-          expect(['head', 'body'], `eye vertex ${i} on ${bone}`).toContain(bone);
+          expect(names[si.getComponent(i, k)], `eye vertex ${i}`).toBe('head');
+          expect(sw.getComponent(i, k), `eye vertex ${i}`).toBeGreaterThan(0.99);
         }
       }
     }

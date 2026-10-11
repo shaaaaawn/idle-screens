@@ -88,7 +88,9 @@ PITCH = 2.0
 CX = -0.38  # the centre line
 MID = -0.04  # the body's middle height
 WALL_R, WALL_L = -7.38, 6.62  # the flanks
-SPINE = ((-5.0, 'head'), (-1.5, 'body'), (2.5, 'body'), (6.0, 'rear'), (8.75, 'ped'))
+# The skull is rigid back to the gill line, eyes and all: a head that blended
+# into the body across the eye sheared the eye block into columns when it looked.
+SPINE = ((-0.25, 'head'), (2.5, 'body'), (6.0, 'rear'), (8.75, 'ped'))
 FAN_FROM = 9.75  # the fan starts beyond the peduncle
 PIVOT = (9.75, -1.0)  # the fan's root (y, z): its rays radiate from here
 RAYS = ((-30.0, 'cL'), (0.0, 'cM'), (35.0, 'cU'))  # by angle above the fish's axis, degrees
@@ -141,7 +143,7 @@ def bone_of(x, y, z, mat):
 
 def bone_table():
     up = lambda p, d=0.5: (p[0], p[1], p[2] + d)  # noqa: E731 — a stub bone above a point
-    neck = (CX, -2.5, MID)
+    neck = (CX, 0.75, MID)  # mid-blend, behind the gill line: the skull turns from there
     t = {
         'root': ((CX, 0, -30), (CX, 0, -27), None),
         'roll': ((CX, 0, MID), (CX, 0.5, MID), 'root'),
