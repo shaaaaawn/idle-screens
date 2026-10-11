@@ -78,7 +78,10 @@ export interface PyramidSite {
 }
 
 export interface Pyramids {
+  /** The stone ones. */
   geometry: BufferGeometry | null;
+  /** The lit ones (`led`, `neon`): a light show, so the water's caustics never land on them. */
+  lit: BufferGeometry | null;
   obstacles: Array<{ x: number; y: number; z: number; r: number; h: number }>;
   emitters: Emitter[];
   sites: PyramidSite[];
@@ -293,14 +296,15 @@ const FLOOR_R = 590;
 const NEAR_R = 72;
 
 export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
-  const out: Pyramids = { geometry: null, obstacles: [], emitters: [], sites: [] };
+  const out: Pyramids = { geometry: null, lit: null, obstacles: [], emitters: [], sites: [] };
   if (!(opts.amount > 0)) return out;
   const s = opts.scale;
   const mix = parsePyramidMix(opts.mix ?? '');
   const stones = Object.keys(mix.materials).length ? mix.materials : (PYRAMID_STONES_BY_ENVIRONMENT[opts.environment] ?? PYRAMID_STONES_BY_ENVIRONMENT.void!);
   const named = Object.keys(mix.shapes).length ? mix.shapes : null;
   const budget = Math.min(1, Math.max(0.4, opts.cap / 10));
-  const w = new PyramidWriter();
+  const stoneW = new PyramidWriter(), litW = new PyramidWriter();
+  let w = stoneW;
   const placed: Array<{ x: number; z: number; r: number }> = [];
   const ground = (x: number, z: number): number => opts.terrain(x, z);
   let capless = false, glowing = 0, seq = 0, complexes = 0;
@@ -324,6 +328,8 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     if (under.spread > pyramidFlatness(V, s)) return false;
     // And round it, to twice its width: a small one can find a flat spot on top of a dune and sit there like a hat.
     if (groundUnder(ground, x, z, (W + 0.5) * V * 2, q).spread > 2 * pyramidFlatness(V, s)) return false;
+    const isLit = PYRAMID_MATERIALS[material].led > 0;
+    w = isLit ? litW : stoneW;
     // How did it get there?
     let pose: PyramidPose = pick<PyramidPose>(rng, great ? { stand: 6, sunk: 2, capless: capless ? 0 : 1 } : { stand: 5, sunk: 2, capless: capless ? 0 : 0.8 });
     if (pose === 'capless' && shape !== 'giza' && shape !== 'step') pose = 'stand';
@@ -331,8 +337,8 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
     const seed = rng.next();
     const cap = (shape === 'giza' || shape === 'step' || shape === 'bent') && rng.next() < 0.6 ? Math.max(1, Math.round(prof.length * 0.12)) : 0;
     const eye = (shape === 'giza' || shape === 'step') && W >= 7 && rng.next() < 0.3 ? 1 : 0;
-    const lit = cap > 0 && glowing < 3 && band !== 'far';
-    const glow = shape === 'frame' ? 0.8 : cap ? (lit ? PYRAMID_MATERIALS[material].glow : 0.3) : 0;
+    const lit = (cap > 0 || isLit) && glowing < 3 && band !== 'far';
+    const glow = isLit || shape === 'frame' ? 0.8 : cap ? (lit ? PYRAMID_MATERIALS[material].glow : 0.3) : 0;
     w.V = V;
     w.A = [PYRAMID_MATERIAL_NAMES.indexOf(material), ((seq++ * 0.6180339) % 1) + seed * 0.001, 1, glow];
     // A frame is all light: every edge cube in the capstone's colour.
@@ -368,7 +374,7 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
       glowing++;
       const c = new Color(PYRAMID_MATERIALS[material].pal[3]);
       const apex = new Vector3(0, H * V, 0).applyQuaternion(q).add(new Vector3(x, y, z));
-      out.emitters.push({ x: apex.x, y: apex.y, z: apex.z, r: c.r, g: c.g, b: c.b, reach: (band === 'near' ? 30 : 50) * s, phase: seed * 6.283 });
+      out.emitters.push({ x: apex.x, y: apex.y, z: apex.z, r: c.r, g: c.g, b: c.b, reach: (isLit ? 1.6 : 1) * (band === 'near' ? 30 : 50) * s, phase: seed * 6.283 });
     }
     return true;
   };
@@ -417,7 +423,8 @@ export function buildPyramids(rng: CrystalRng, opts: PyramidOptions): Pyramids {
       complexes++;
     }
   }
-  out.geometry = w.geometry();
+  out.geometry = stoneW.geometry();
+  out.lit = litW.geometry();
   return out;
 }
 
@@ -431,11 +438,34 @@ const MATS = PYRAMID_MATERIAL_NAMES.map((n) => PYRAMID_MATERIALS[n]);
 export const PYRAMID_GLSL = /* glsl */ `
 uniform vec3 uPyrPal[${MATS.length * 4}];
 uniform vec4 uPyrMotif[${MATS.length}];
+uniform float uPyrLed[${MATS.length}];
+uniform float uPyrTime;
 varying vec3 vCell;
 varying vec4 vPyrA;
 varying vec4 vPyrB;
 varying float vFace;
 float mqPyrH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+vec3 mqHue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+// A band of light, its crest where fract(x) is 0, w wide (0..0.5).
+float mqBand(float x, float w) { float f = fract(x); return 1.0 - smoothstep(0.0, w, min(f, 1.0 - f)); }
+/** One of the lit pyramid's shows, at time t: how lit this cube is (x) and its hue (y). Every cube's light changes
+ *  at most about once a second (the fastest is 0.65 Hz), smoothly — a light show, never a strobe. */
+vec2 mqPyrShow(float p, vec3 c, float u, float w, float top, float seed, float t) {
+  float ang = atan(c.z, c.x) / 6.2832 + 0.5, y = c.y / max(top, 1.0);
+  if (p < 0.5) return vec2(mqBand(y * 1.5 - t * 0.25, 0.14), y * 0.5 + t * 0.03);                       // rings rising
+  if (p < 1.5) return vec2(max(mqBand(ang - t * 0.16, 0.1), 0.6 * mqBand(ang + 0.5 - t * 0.16, 0.08)), ang + t * 0.02); // a beam round the faces
+  if (p < 2.5) {                                                                                            // its edges
+    float edge = max(step(w - 0.5, u), step(c.y, 0.5));
+    return vec2(edge * (0.6 + 0.4 * sin(t * 2.0 - c.y * 0.5)), 0.55 + 0.05 * sin(t * 0.3));
+  }
+  if (p < 3.5) {                                                                                            // an equalizer up every face
+    float h = top * (0.3 + 0.35 * (0.5 + 0.5 * sin(t * 1.3 + u * 0.9 + seed * 5.0)) + 0.3 * (0.5 + 0.5 * sin(t * 0.7 + u * 0.37)));
+    return vec2(step(c.y, h) * (0.55 + 0.45 * c.y / max(h, 1.0)), 0.33 - 0.33 * y);
+  }
+  if (p < 4.5) return vec2(0.7 + 0.3 * sin(t * 1.1 + (u + c.y) * 0.5), fract(c.y * 0.04 + u * 0.03 - t * 0.06)); // rainbow wash
+  float r = mqPyrH(c + seed);                                                                               // twinkle
+  return vec2(pow(0.5 + 0.5 * sin(t * (2.0 + 2.0 * mqPyrH(c * 1.7 + seed)) + r * 6.2832), 3.0), r);
+}
 vec3 mqPyrPaint() {
   vec3 c = vec3(floor(vCell.x + 0.5), floor(vCell.y), floor(vCell.z + 0.5));
   // Sorted |x|, |z|: the square's eight symmetries, so the paint is as symmetric as the stone.
@@ -445,6 +475,22 @@ vec3 mqPyrPaint() {
   float seed = vPyrA.y;
   vec3 mainC = uPyrPal[m * 4], altC = uPyrPal[m * 4 + 1], acc = uPyrPal[m * 4 + 2], capC = uPyrPal[m * 4 + 3];
   vec4 mo = uPyrMotif[m];
+  float led = uPyrLed[m];
+  if (led > 0.5) {
+    // A lamp in every cube: the housing dark, the lamp lit by the show. The show changes every 24 s, crossfading over 3.
+    float t = uPyrTime, slot = floor((t + seed * 40.0) / 24.0), into = mod(t + seed * 40.0, 24.0);
+    float pa = floor(fract(seed * 7.13 + slot * 0.618) * 6.0), pb = floor(fract(seed * 7.13 + (slot + 1.0) * 0.618) * 6.0);
+    vec2 a = mqPyrShow(pa, c, u, w, vPyrB.x, seed, t), b = mqPyrShow(pb, c, u, w, vPyrB.x, seed, t);
+    vec2 sh = mix(a, b, smoothstep(21.0, 24.0, into));
+    vec3 lamp = led < 1.5 ? mix(vec3(1.0), mqHue(sh.y), 0.8) : mix(acc, capC, 0.5 + 0.5 * sin(sh.y * 6.2832));
+    vec3 fwL = fwidth(vCell);
+    vec3 dL = vec3(0.5 - abs(fract(vCell.x + 0.5) - 0.5), 0.5 - abs(fract(vCell.y) - 0.5), 0.5 - abs(fract(vCell.z + 0.5) - 0.5));
+    vec3 gridL = 1.0 - smoothstep(fwL * 0.5, fwL * 0.5 + 0.09, dL);
+    float housing = max(max(gridL.x, gridL.y), gridL.z);
+    float farL = smoothstep(0.3, 0.8, max(max(fwL.x, fwL.y), fwL.z));
+    float on = sh.x * (1.0 - housing * (1.0 - farL));
+    return mainC * 1.6 + lamp * on * 1.7;
+  }
   float r = mqPyrH(vec3(u, w, c.y) + seed * 17.0);
   // Each cube its own shade of the stone, as each of a fish's is its own colour.
   vec3 col = mix(mainC, altC, step(0.64, r)) * (0.86 + 0.24 * mqPyrH(vec3(w, u, c.y * 1.37) + seed * 31.0));
@@ -493,25 +539,34 @@ vec3 mqPyrPaint() {
   float far = smoothstep(0.3, 0.8, f);
   col = mix(col, mix(mean, capC, capped), far);
   col *= 1.0 - 0.32 * seam * (1.0 - far);
-  // Lit parts: the capstone and the veins glow (their own light, not the room's).
+  // Lit parts: the capstone and the veins glow (their own light, not the room's). A frame's light runs up its edges.
   float g = vPyrA.w * max(capped, vein);
+  if (vPyrB.y < 0.5) g *= 0.65 + 0.35 * sin(c.y * 0.6 - uPyrTime * 1.6);
   return col * (1.0 + 0.9 * g);
 }
 `;
 
-/** The pyramids' one material: unlit vertex colour, fogged and lit by the room as every other stone is. */
-export function pyramidMaterial(): MeshBasicMaterial {
+/** The pyramids' material: unlit vertex colour, fogged as every other stone is. `lit` is the light shows' (no
+ *  caustics on a lamp). `clock` is the scene time (the shows, a frame's running light). */
+export function pyramidMaterial(clock: { value: number } = { value: 0 }, lit = false): MeshBasicMaterial {
   const mat = new MeshBasicMaterial({ vertexColors: true, side: FrontSide });
   mat.userData.mqOwned = true;
+  if (lit) mat.userData.mqNoCaustic = true;
+  const leds = MATS.map((m) => m.led);
   const pal = MATS.flatMap((m) => m.pal.map((h) => new Color(h)));
   const motif = MATS.map((m) => new Vector4(m.bands, m.speckle, m.veins, m.nacre));
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uPyrPal = { value: pal };
     shader.uniforms.uPyrMotif = { value: motif };
+    shader.uniforms.uPyrLed = { value: leds };
+    shader.uniforms.uPyrTime = clock;
     shader.vertexShader = 'attribute vec3 aCell; attribute vec4 aPyrA; attribute vec4 aPyrB; attribute float aFace;\nvarying vec3 vCell; varying vec4 vPyrA; varying vec4 vPyrB; varying float vFace;\n'
       + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vCell = aCell; vPyrA = aPyrA; vPyrB = aPyrB; vFace = aFace;');
     shader.fragmentShader = PYRAMID_GLSL + shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= mqPyrPaint();');
+    // A light show cuts through the water: the lit ones keep 45% of the fog (whatever fog the water patch puts in
+    // that chunk), so the shows at the back still read, set on a floor the fog has taken.
+    if (lit) shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', 'vec3 mqPreFog = gl_FragColor.rgb;\n#include <fog_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, mqPreFog, 0.55);');
   };
-  mat.customProgramCacheKey = () => 'mq-pyramids-v2';
+  mat.customProgramCacheKey = () => (lit ? 'mq-pyramids-lit-v3' : 'mq-pyramids-v3');
   return mat;
 }

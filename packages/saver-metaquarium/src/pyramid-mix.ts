@@ -6,18 +6,22 @@
 export const PYRAMID_SHAPES = ['giza', 'step', 'bent', 'djoser', 'mayan', 'frame'] as const;
 export type PyramidShape = (typeof PYRAMID_SHAPES)[number];
 
-/** Materials: main, alt, accent (glyphs, speckle, veins) and the capstone's colour; and the motif. */
+/** Materials: main, alt, accent (glyphs, speckle, veins) and the capstone's colour; the motif; and, for the lit stones, which show. */
 export const PYRAMID_MATERIALS = {
-  sandstone: { pal: ['#d4ab6a', '#b98f50', '#6e4426', '#ffd86b'], bands: 6, speckle: 0, veins: 0, nacre: 0, glow: 0.5 },
-  limestone: { pal: ['#e8e1cc', '#d2c9ae', '#9a8b62', '#ffe08a'], bands: 0, speckle: 0, veins: 0, nacre: 0, glow: 0.6 },
-  obsidian: { pal: ['#2a2238', '#191424', '#a17bff', '#c9a6ff'], bands: 5, speckle: 0, veins: 1, nacre: 0, glow: 0.9 },
-  jade: { pal: ['#3e9e78', '#2b7a5a', '#c6f5dc', '#9ff0c8'], bands: 4, speckle: 0, veins: 0, nacre: 0, glow: 0.5 },
-  gold: { pal: ['#e2ad36', '#c48c1e', '#7a4a0e', '#fff3b0'], bands: 7, speckle: 0, veins: 0, nacre: 0, glow: 0.8 },
-  lapis: { pal: ['#2a4aa8', '#1d347d', '#e8c25a', '#ffd86b'], bands: 3, speckle: 0, veins: 0, nacre: 0, glow: 0.6 },
-  coral: { pal: ['#c9a37a', '#a9825a', '#ff6f61', '#ff9ad5'], bands: 0, speckle: 0.32, veins: 0, nacre: 0, glow: 0.4 },
-  crystal: { pal: ['#49cfff', '#2b8fd6', '#e6fbff', '#bff3ff'], bands: 0, speckle: 0, veins: 1, nacre: 0.35, glow: 1 },
-  nacre: { pal: ['#efe6f0', '#d8cfe8', '#ffd1f0', '#ffffff'], bands: 0, speckle: 0, veins: 0, nacre: 1, glow: 0.7 },
-  basalt: { pal: ['#3b3f45', '#2c3035', '#5fae55', '#8fd16a'], bands: 0, speckle: 0.42, veins: 0, nacre: 0, glow: 0.3 },
+  sandstone: { pal: ['#d4ab6a', '#b98f50', '#6e4426', '#ffd86b'], bands: 6, speckle: 0, veins: 0, nacre: 0, glow: 0.5, led: 0 },
+  limestone: { pal: ['#e8e1cc', '#d2c9ae', '#9a8b62', '#ffe08a'], bands: 0, speckle: 0, veins: 0, nacre: 0, glow: 0.6, led: 0 },
+  obsidian: { pal: ['#2a2238', '#191424', '#a17bff', '#c9a6ff'], bands: 5, speckle: 0, veins: 1, nacre: 0, glow: 0.9, led: 0 },
+  jade: { pal: ['#3e9e78', '#2b7a5a', '#c6f5dc', '#9ff0c8'], bands: 4, speckle: 0, veins: 0, nacre: 0, glow: 0.5, led: 0 },
+  gold: { pal: ['#e2ad36', '#c48c1e', '#7a4a0e', '#fff3b0'], bands: 7, speckle: 0, veins: 0, nacre: 0, glow: 0.8, led: 0 },
+  lapis: { pal: ['#2a4aa8', '#1d347d', '#e8c25a', '#ffd86b'], bands: 3, speckle: 0, veins: 0, nacre: 0, glow: 0.6, led: 0 },
+  coral: { pal: ['#c9a37a', '#a9825a', '#ff6f61', '#ff9ad5'], bands: 0, speckle: 0.32, veins: 0, nacre: 0, glow: 0.4, led: 0 },
+  crystal: { pal: ['#49cfff', '#2b8fd6', '#e6fbff', '#bff3ff'], bands: 0, speckle: 0, veins: 1, nacre: 0.35, glow: 1, led: 0 },
+  nacre: { pal: ['#efe6f0', '#d8cfe8', '#ffd1f0', '#ffffff'], bands: 0, speckle: 0, veins: 0, nacre: 1, glow: 0.7, led: 0 },
+  basalt: { pal: ['#3b3f45', '#2c3035', '#5fae55', '#8fd16a'], bands: 0, speckle: 0.42, veins: 0, nacre: 0, glow: 0.3, led: 0 },
+  // Lit stones: every cube a lamp in a dark housing, running a light show (an arena's pyramid of light).
+  // led: white and rainbow bulbs; neon: two tubes' colours, magenta and cyan.
+  led: { pal: ['#14141c', '#1c1c28', '#ffffff', '#ffffff'], bands: 0, speckle: 0, veins: 0, nacre: 0, glow: 1, led: 1 },
+  neon: { pal: ['#120a1c', '#1a1026', '#ff2bd6', '#36f9ff'], bands: 0, speckle: 0, veins: 0, nacre: 0, glow: 1, led: 2 },
 } as const;
 export type PyramidMaterial = keyof typeof PYRAMID_MATERIALS;
 export const PYRAMID_MATERIAL_NAMES = Object.keys(PYRAMID_MATERIALS) as PyramidMaterial[];

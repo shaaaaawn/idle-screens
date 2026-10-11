@@ -446,9 +446,11 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     });
     obstacles.push(...pyr.obstacles);
     homeLights.push(...pyr.emitters);
-    if (pyr.geometry) {
-      const mesh = new Mesh(pyr.geometry, pyramidMaterial());
-      mesh.name = 'pyramids';
+    const clock = { value: 0 }; clocks.push(clock);
+    for (const [g, lit] of [[pyr.geometry, false], [pyr.lit, true]] as const) {
+      if (!g) continue;
+      const mesh = new Mesh(g, pyramidMaterial(clock, lit));
+      mesh.name = lit ? 'pyramids-lit' : 'pyramids';
       group.add(mesh);
     }
     counts.pyramids = pyr.sites.length;

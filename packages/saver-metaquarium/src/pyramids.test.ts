@@ -198,7 +198,7 @@ describe('pyramids: where they stand, and how', () => {
 
   it('draws its cubes as cubes: one material, a seam between every cube and the next', () => {
     const m = pyramidMaterial();
-    expect(m.customProgramCacheKey()).toBe('mq-pyramids-v2');
+    expect(m.customProgramCacheKey()).toBe('mq-pyramids-v3');
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>', uniforms: {} as Record<string, unknown> };
     m.onBeforeCompile(shader as never, undefined as never);
     expect(shader.fragmentShader).toContain('mqPyrPaint()');
@@ -207,15 +207,38 @@ describe('pyramids: where they stand, and how', () => {
   });
 });
 
+describe('pyramids: the lit ones', () => {
+  it('a lit stone (led, neon) goes in its own mesh — no caustics on a lamp — and lights the floor', () => {
+    const p = buildPyramids(createRng(2), opts({ mix: 'giza,step,led,neon,sandstone' }));
+    expect(p.geometry).not.toBeNull();
+    expect(p.lit).not.toBeNull();
+    expect(p.sites.some((s) => s.material === 'led' || s.material === 'neon')).toBe(true);
+    const stone = buildPyramids(createRng(2), opts({ mix: 'sandstone' }));
+    expect(stone.lit).toBeNull();
+    const lit = pyramidMaterial({ value: 0 }, true);
+    expect(lit.userData.mqNoCaustic).toBe(true);
+    expect(lit.customProgramCacheKey()).not.toEqual(pyramidMaterial().customProgramCacheKey());
+  });
+
+  it('its show cuts through the water: the lit material keeps most of its light through the fog chunk', () => {
+    const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <color_fragment>\n#include <fog_fragment>', uniforms: {} as Record<string, unknown> };
+    pyramidMaterial({ value: 0 }, true).onBeforeCompile(shader as never, undefined as never);
+    // The fog chunk stays (the water patch swaps it by name), bracketed by the save and the restore.
+    expect(shader.fragmentShader).toMatch(/mqPreFog = gl_FragColor\.rgb;\n#include <fog_fragment>\ngl_FragColor\.rgb = mix\(gl_FragColor\.rgb, mqPreFog, 0\.55\)/);
+    expect(shader.fragmentShader).toContain('mqPyrShow(');
+  });
+});
+
 describe('pyramids: in the world', () => {
   const base: SceneryOptions = { rocks: 1, veins: 0.7, homes: 2, flora: 1, bubbles: 0, snow: 0, cap: 8, scale: 1 };
   const terrain = (): number => 0;
   const buffers = (o: SceneryOptions) => buildScenery([], createRng(9), terrain, o).group.children
-    .filter((c) => c.name !== 'pyramids').map((c) => [c.name, ...Array.from((c as Mesh).geometry.getAttribute('position').array)]);
+    .filter((c) => !c.name.startsWith('pyramids')).map((c) => [c.name, ...Array.from((c as Mesh).geometry.getAttribute('position').array)]);
 
   it('adds one draw and moves nothing else: the rest of the world is the same with or without them', () => {
     const w = buildScenery([], createRng(9), terrain, { ...base, pyramids: 1 });
     expect(w.group.children.filter((c) => c.name === 'pyramids')).toHaveLength(1);
+    expect(w.group.children.some((c) => c.name === 'pyramids-lit')).toBe(false);
     expect(w.counts.pyramids).toBeGreaterThan(6);
     expect(buffers({ ...base, pyramids: 0 })).toEqual(buffers(base));
   });
