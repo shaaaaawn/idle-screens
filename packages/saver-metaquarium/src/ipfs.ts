@@ -76,6 +76,8 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 610, name: 'Octopus', breed: 'octopus', ipfs3d: `${BUNDLED_BREED_SCHEME}octopus`, localGlb: '' },
   // The third, a floor creature (breeds/rig/snail-model.mjs).
   { id: 611, name: 'Snail', breed: 'snail', ipfs3d: `${BUNDLED_BREED_SCHEME}snail`, localGlb: '' },
+  // The first character (experimental): Dot, the courier (breeds/rig/dot-model.mjs).
+  { id: 612, name: 'Dot', breed: 'dot', ipfs3d: `${BUNDLED_BREED_SCHEME}dot`, localGlb: '' },
 ];
 
 /** The default catalog's lookup: minted samples first, then the bundled breeds. */

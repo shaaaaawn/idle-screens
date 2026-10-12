@@ -14,5 +14,6 @@ export const BUNDLED_BREEDS: Readonly<Record<string, () => Promise<{ default: st
   starfish: () => import('./starfish'),
   octopus: () => import('./octopus'),
   snail: () => import('./snail'),
+  dot: () => import('./dot'),
   shark: () => import('./shark'),
 };

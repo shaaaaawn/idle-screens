@@ -527,6 +527,45 @@ describe('bundled breeds (breeds/README.md)', () => {
     for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
   });
 
+  it('dot: the rig survives the intake — a full character, its screen with its own phosphor, every clip', async () => {
+    const doc = await bundledDoc('dot');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    const limbs = ['L', 'R'].flatMap((s) => [`arm.${s}.1`, `arm.${s}.2`, `hand.${s}`, `leg.${s}.1`, `leg.${s}.2`, `foot.${s}`]);
+    expect([...joints].sort()).toEqual(['antenna.1', 'antenna.2', 'bag', 'body', 'cap', 'pelvis', 'tail', ...limbs].sort());
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual([
+      'bow', 'clap', 'cheer', 'dance', 'deliver', 'facepalm', 'glitch', 'hop', 'idle', 'jump', 'laugh', 'nod', 'peek', 'point', 'rest',
+      'run', 'salute', 'search', 'shake', 'shrug', 'skid', 'sneak', 'spin', 'stretch', 'talk', 'trip', 'walk', 'wave', 'wiggle',
+    ].sort());
+    const extras = root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras();
+    expect(extras.mqRunStride).toBeGreaterThan(extras.mqStride as number);
+    expect(extras.mqSneakStride).toBeLessThan(extras.mqStride as number);
+    const names = root.listMaterials().map((m) => m.getName());
+    expect(names).toContain('SCREEN-Face#4fd8ff');
+    // A character keeps its colours: no coat roles the tank would re-roll.
+    for (const n of names) expect(n).toMatch(/^(PAINT-#[0-9a-f]{6}|SCREEN-|GLOW-)/);
+    // The screen rides the body (rigScreen reads it in the bind pose).
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      if (!p.getMaterial()!.getName().startsWith('SCREEN-')) continue;
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      expect([...bones]).toEqual(['body']);
+    }
+  });
+
+  it('dot: the committed source is what its generator draws (breeds/rig/dot-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/dot-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    const doc = await new NodeIO().read(here('../breeds/source/dot.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    // It stands on the floor: no voxel below k 0.
+    expect(Math.min(...model.voxels().map((v) => v[2]))).toBe(0);
+  });
+
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', async () => {
     let tris = 0;
     const json = gltfJson(await bundled('shark'));
