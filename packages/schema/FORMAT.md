@@ -697,7 +697,9 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
 ```
 
 - A key glides `path` from wherever it is at `t` to `value` over `dur` ms
-  (default 1000, the live-steer default; `0` is a cut), eased `smooth`
+  (default 1000, the live-steer default; `0` is a cut; at most 30000 — a
+  longer `dur` fails validation for the whole spec, so split a slower glide
+  into consecutive keys of ≤ 30 s each), eased `smooth`
   (default), `linear` or `step` (holds, then switches at the glide's end).
   Keys address the same dot-paths as `setParam` — index or `key` form — and a
   path must already exist on the spec (a key cannot add a field). The spec must

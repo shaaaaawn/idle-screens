@@ -135,7 +135,7 @@ seed (nothing fetched); the world layers that stand on it are under
 | environment | enum | `void` | The ROOM: `void` (exactly the pre-environment scene), `abyss`, `reef`, `kelp`, `ice`, `vent`, `lagoon`, `universe`. Adds terrain and light shafts, plus a water ceiling for the rooms that have one (reef, kelp, ice, lagoon); never overrides your palette params |
 | floorKind | enum | `auto` | Override the environment's terrain: `auto`, `flat`, `dunes`, `ridges`, `basin`, `shelf` (town on a plateau), `trench` (a channel across the front), `terraces` (tiers behind the town) |
 | waterY | number | −1 | Water-ceiling height, −1–220. −1 follows the environment (step, not smooth — the sentinel can't be interpolated through) |
-| rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason) |
+| rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason). Shafts cost device budget: 5 on the high tier, 2 on standard, none on the lowest tier in a room with a water surface (abyss, vent and universe keep 2); `room.rayStrength` reads 0 where they were dropped |
 
 ### Palette
 
