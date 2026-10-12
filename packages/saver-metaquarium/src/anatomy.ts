@@ -65,12 +65,13 @@ export interface MetaquariumAnatomy {
 }
 
 const CAST_CAP = 24;
-const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus']);
+const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus', 'snail']);
 const BREED_NOUN: Record<string, [string, string]> = {
   dori: ['tang', 'tangs'],
   babyfish: ['baby fish', 'baby fish'],
   blowfish: ['blowfish', 'blowfish'],
   octopus: ['octopus', 'octopuses'],
+  snail: ['snail', 'snails'],
   starfish: ['starfish', 'starfish'],
   crab: ['crab', 'crabs'],
   shark: ['shark', 'sharks'],
