@@ -347,6 +347,11 @@ export const METAQUARIUM_PARAMS = {
    *  each a vignette mark mailbox1…), bench[:n] (round the fountain or hub; shell stone), sock[:n] (a current sock).
    *  Fences and mailboxes need geodeHomes. Empty = none. */
   townProps: { type: 'string', default: '', ease: 'step' },
+  /** What the village lays on its floor, `kind[/style], …`: lawn (a mown lawn in every yard; stripes checks), mosaic
+   *  (the square tiled in a compass rose; stone shell glass), mat (a doormat at every door; kelp stripe), steps (stepping
+   *  stones down the paths; slate sand moss), ripples (sand combed by the current; fine broad). Lawns and mats need
+   *  geodeHomes, steps need paths. Empty = none. */
+  floorCover: { type: 'string', default: '', ease: 'step' },
   /** Pyramids built of cubes, as the fish are (0 = none): on the floor in complexes — a great pyramid and its queens —
    *  small ones near, the great ones at the back — only on flat ground (a flat floor: none on dunes, ridges or a basin);
    *  standing, half sunk, one missing its capstone. */
