@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, entityScales, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
@@ -40,6 +40,29 @@ const READ_LEGIBILITY_FLOOR = 4.5;
 const READ_SAFE_AREA = 0.05;
 
 /**
+ * Alpha-weighted area (in viewport-areas) that additive `lighter`/`screen`
+ * layers stack onto the frame before the analytic model is warned that it can
+ * no longer see what it is measuring. The analytic luminance/dominance model
+ * sums glow splats with no saturation ceiling, so a stack that clips to white
+ * on a real canvas reports tame numbers and zero advisories (F35 — a
+ * 250-entity white/cream `lighter` stack came back coverage 0.25, meanLuminance
+ * 0.25, advisories []). Measured: the brightest shipped examples (`aurora`,
+ * `warp-tunnel`) sit at 0.1, the recommended "80 tiny soft circles at alpha
+ * 0.2" atmosphere at 0.0, and that stack at 2.0 — so 1.0 is an order of
+ * magnitude above anything shipped and still half of the known blowout.
+ */
+const ADDITIVE_INK_CEILING = 1.0;
+
+/** True when a region window is butted against an edge on the given axis and
+ *  is a band rather than the whole axis — the shape of a deliberate anchor
+ *  (a skyline along the bottom, a ceiling of stars along the top). */
+function edgeAnchored(range: [number, number] | undefined): boolean {
+  if (!range) return false;
+  const [a, b] = range;
+  return (a <= 0.02 || b >= 0.98) && b - a <= 0.6;
+}
+
+/**
  * Non-blocking advisory warnings for a valid spec. Does NOT replace validateSpec —
  * call advise only on specs that have already passed validation.
  */
@@ -72,22 +95,9 @@ export function adviseSpec(
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
-  const scale = spec.units === 'px' ? 1 : Math.min(w, h);
-  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  // Mirror buildScene's maxTotal clamp: without it a dense scene above the
-  // reference viewport is advised on more entities than the renderer will
-  // build, and `perceiveScene` would pair a `form` channel counted one way
-  // with an `overlap-seams` advisory counted the other. (Part of F49, which
-  // tracks the same divergence for describeScene.)
-  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  if (countScale > 1) {
-    const rawTotal = spec.layers.reduce((sum, l) => sum + Math.round(l.count * countScale), 0);
-    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
-  }
+  const { scale, countScale } = entityScales(spec, w, h);
   const rng = createRng(opts.seed ?? spec.seed ?? 42);
   const allEntities = spec.layers.map((l) => buildEntities(l, rng, w, h, scale, countScale));
-  const bgLuma = backgroundLuma(spec);
-  const bgRgb = backgroundRgb(spec);
 
   // Do overlapping layers actually merge? Computed once from the entities we
   // already built; the advisory below fires only on the case where the author
@@ -142,11 +152,13 @@ export function adviseSpec(
       });
     }
 
-    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static') {
+    // A spinning streak has an orientation of its own (a rotor, a clock hand),
+    // so "no heading" is not a problem for it (F34.5).
+    if ((layer.sprite.kind === 'streak' || (layer.sprite.kind === 'stroke' && layer.sprite.orient)) && layer.motion.type === 'static' && !layer.spin) {
       warnings.push({
         path: `layers[${li}].sprite`,
         code: 'streak-on-static',
-        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing${layer.spin ? ' (spin still rotates the mark)' : ' and it renders at angle 0'}`,
+        message: `${layer.sprite.kind === 'streak' ? 'streak sprites orient' : 'an oriented stroke turns'} along the motion heading — static entities have none, so the heading contributes nothing and it renders at angle 0`,
       });
     }
 
@@ -175,13 +187,22 @@ export function adviseSpec(
     // above only measures radius × alpha, so a full-strength layer in a
     // background-matched colour passes every other check in this file.
     if (entities.length > 0 && layer.sprite.kind !== 'emoji') {
+      // Judge against the plate the layer actually sits on: a gradient is
+      // sampled across the layer's vertical extent (its region window, or its
+      // pinned position), not averaged over a sky the layer never touches. A
+      // layer is visible if it separates ANYWHERE in that extent (F19).
+      const [y0, y1] = layer.position ? [layer.position.y, layer.position.y] : (layer.region?.y ?? [0, 1]);
+      const plates = [y0, (y0 + y1) / 2, y1].map((y) => {
+        const rgb = backgroundRgbAt(spec, y * h, h, scale, undefined, undefined, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+        return { rgb, luma: 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b };
+      });
       // A palette layer is visible if ANY of its colours separates — flag only
       // when every colour it can paint with disappears into the plate.
       const seps = entities.map((e) => {
         const hex = spriteHex(layer, e);
         if (hex === null) return Infinity;
         const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
-        const sep = colourSeparation(layer, ink, { rgb: bgRgb, luma: bgLuma });
+        const sep = Math.max(...plates.map((bg) => colourSeparation(layer, ink, bg)));
         if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
         // Close to the page colour — but the page may not be what is behind
         // it. A dark key plate on an opaque yellow panel is judged against the
@@ -206,6 +227,7 @@ export function adviseSpec(
 
   // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled"
   let totalCoverage = 0;
+  let additiveInk = 0;
   for (let li = 0; li < spec.layers.length; li++) {
     if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
@@ -218,6 +240,7 @@ export function adviseSpec(
     // as both "the scene is empty" and "the text runs 33 000 px off-screen").
     const map = paintMap(spec, layer, w, h, scale);
     const areaScale = map ? paintSize(spec, layer) ** 2 : 1;
+    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
     for (const e of entities) {
       const r = e.size / 2;
       let pixArea: number;
@@ -257,7 +280,9 @@ export function adviseSpec(
         const g2 = (ga * ga + ga * gb + gb * gb) / 3;
         duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
       }
-      totalCoverage += paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
+      const ink = paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
+      totalCoverage += ink;
+      if (additive) additiveInk += ink;
     }
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {
@@ -281,6 +306,14 @@ export function adviseSpec(
       path: 'layers',
       code: 'sparse-scene',
       message: `alpha-weighted coverage is ${(totalCoverage * 100).toFixed(4)}% — scene will look empty on most displays`,
+    });
+  }
+
+  if (additiveInk > ADDITIVE_INK_CEILING) {
+    warnings.push({
+      path: 'layers',
+      code: 'additive-saturation',
+      message: `"lighter"/"screen" layers stack ${additiveInk.toFixed(1)}× the frame's area in alpha-weighted light — overlapping additive sprites clip to white on a real canvas, and the analytic perception model sums them without a ceiling so its coverage/luminance/dominance numbers cannot see it. Thin the count, lower alpha (summed additive alpha at any point ≲ 0.5), or drop blend on the densest layer`,
     });
   }
 
@@ -372,7 +405,17 @@ export function adviseSpec(
     const positions = composed.flatMap(({ ents }) => ents.map((e) => positionAt(e, 0, w, h)));
     const px = positions.reduce((s, p) => s + p.x, 0) / positions.length / w;
     const py = positions.reduce((s, p) => s + p.y, 0) / positions.length / h;
-    if (Math.abs(px - 0.5) > 0.2 || Math.abs(py - 0.5) > 0.2) {
+    // A skyline sits low on purpose. When the offset is along ONE axis and most
+    // of the composed entities come from layers whose region is butted against
+    // an edge on that axis, the offset is the composition, not a mistake (F20).
+    const offX = Math.abs(px - 0.5);
+    const offY = Math.abs(py - 0.5);
+    const anchoredOn = (axis: 'x' | 'y'): number =>
+      composed.reduce((n, { l, ents }) => n + (edgeAnchored(l.region?.[axis]) ? ents.length : 0), 0) / composedCount;
+    const intentional =
+      (offY > 0.2 && offX <= 0.2 && anchoredOn('y') >= 0.5) ||
+      (offX > 0.2 && offY <= 0.2 && anchoredOn('x') >= 0.5);
+    if ((offX > 0.2 || offY > 0.2) && !intentional) {
       // Where the entities are is only a suspicion; where the ink is decides.
       // Confirmed on the same luminance grid — the same rule, cells weighted
       // by how far they sit from the background — that perception reports

@@ -32,6 +32,7 @@ import {
   sizeAt,
   textBlockAnchorOffset,
   textMetricsClassFor,
+  entityScales,
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
@@ -125,13 +126,7 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   // matching the renderer, and this same normalized value is reused for field
   // background sampling (see `luminanceGrid`) so both agree on one seed.
   const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
-  const scale = spec.units === 'px' ? 1 : Math.min(w, h);
-  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  if (countScale > 1) {
-    const rawTotal = spec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
-    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
-  }
+  const { scale, countScale } = entityScales(spec, w, h);
   const rng = createRng(seed);
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
