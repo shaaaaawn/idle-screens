@@ -47,7 +47,10 @@ export function parseFloorCover(src: string): { cover: FloorCover; problems: str
     const part = raw.trim().toLowerCase();
     if (!part) continue;
     const bad = (why: string): void => { problems.push(`"${raw.trim()}": ${why}`); };
-    const m = /^([a-z]+)\s*(?::\s*([0-9]+))?\s*(?:\/\s*([a-z]+))?$/.exec(part);
+    // No `\s*` runs in the pattern: two adjacent ones backtrack quadratically
+    // on a long run of spaces (8.5 s for 50 000), and this string is steerable
+    // by any agent (CodeQL js/polynomial-redos; same fix as town-mix.ts).
+    const m = /[a-z0-9]\s+[a-z0-9]/.test(part) ? null : /^([a-z]+)(?::([0-9]+))?(?:\/([a-z]+))?$/.exec(part.replace(/\s+/g, ''));
     if (!m) { bad('expected kind[/style] — lawn mosaic mat steps ripples'); continue; }
     const kind = m[1]!, style = m[3];
     if (!(kind in KINDS)) { bad('kinds: lawn mosaic mat steps ripples'); continue; }
