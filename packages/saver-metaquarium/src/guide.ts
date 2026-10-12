@@ -22,6 +22,7 @@ import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
 import { parsePyramidMix } from './pyramid-mix';
 import { parseTownProps } from './town-mix';
+import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
@@ -112,6 +113,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
   townProps: 'The village\'s small things, comma-separated kind[:count][/style]: fence (a yard round every home, a gate where its path leaves; styles driftwood coral stone crystal, none = each home its own), mailbox (by every gate: post — its flag goes up when the mail comes — clam that opens, bottle that rocks; each a vignette mark mailbox1…), bench[:n] (round the fountain or hub, facing in; shell stone), sock[:n] (a striped current sock swinging with the current). Fences and mailboxes need geodeHomes.',
+  floorCover: 'What the village lays on its floor, comma-separated kind[/style]: lawn (a mown lawn in every home\'s yard, fenced or not; stripes checks), mosaic (the square tiled in a compass rose round the fountain, or at the hub with none; stone shell glass), mat (a woven doormat at every door; kelp stripe), steps (stepping stones down every walk; slate sand moss, none = each walk\'s own ground), ripples (the open sand combed into ripples across the current the socks stream down; fine broad). Lawns and mats need geodeHomes, steps need paths, a mosaic needs a fountain, paths or homes. Mats and stones only lie on flat ground.',
   pyramids: 'Pyramids built of cubes, as the fish are (0 = none, 1 = about a dozen complexes): each a stack of cubes you can count, the cube a whole multiple of a fish\'s, exactly symmetric. On the floor in complexes — a great pyramid and its queens — small ones near, the great ones at the back. Only on flat ground — use floorKind: flat (none on dunes, ridges or a basin). Standing, half sunk, one missing its capstone. Glyph friezes, gilded or glowing capstones, an eye on some.',
   pyramidMix: 'Their shapes and stones: `shape|stone[:weight], …`. Shapes giza step bent djoser mayan frame; stones sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit ones led (white and rainbow lamps) and neon (magenta and cyan), every cube a lamp running a light show. Empty = every shape in the room\'s stone.',
   pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
@@ -154,6 +156,8 @@ floraMix  species[:weight], …                              kelp:3, whip, seape
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
 townProps  kind[:count][/style], …   fence/coral, mailbox/post, bench:4/shell, sock:2
           fence: driftwood coral stone crystal · mailbox: post clam bottle · bench: shell stone · sock (needs geodeHomes for fence and mailbox)
+floorCover  kind[/style], …   lawn/stripes, mosaic/shell, mat/kelp, steps, ripples/broad
+          lawn: stripes checks · mosaic: stone shell glass · mat: kelp stripe · steps: slate sand moss · ripples: fine broad
 pyramidMix  shape|stone[:weight], …   giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt led neon
           giza:3, mayan, gold:2, obsidian   (empty = every shape in the room's stone)
 pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 16s:equalizer
@@ -295,6 +299,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
   if (str('pyramidMix')) push('pyramidMix', parsePyramidMix(str('pyramidMix')).problems);
   if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
+  if (str('floorCover')) push('floorCover', parseFloorCover(str('floorCover')).problems);
   if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
@@ -324,6 +329,13 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     const t = parseTownProps(str('townProps')).props;
     const homes = Math.round(Number(params.geodeHomes ?? 0));
     if ((t.fence || t.mailbox) && !(homes > 0)) out.push({ path: 'townProps', also: ['geodeHomes'], message: 'fences and mailboxes stand round homes: set geodeHomes ≥ 1' });
+  }
+  if (str('floorCover')) {
+    const c = parseFloorCover(str('floorCover')).cover;
+    const homes = Math.round(Number(params.geodeHomes ?? 0)), walks = Number(params.paths ?? 0) > 0;
+    if ((c.lawn || c.mat) && !(homes > 0)) out.push({ path: 'floorCover', also: ['geodeHomes'], message: 'lawns and doormats belong to homes: set geodeHomes ≥ 1' });
+    if (c.steps && !walks) out.push({ path: 'floorCover', also: ['paths'], message: 'stepping stones go down the paths: set paths > 0' });
+    if (c.mosaic && !walks && !(homes > 0) && (params.fountain ?? 'none') === 'none') out.push({ path: 'floorCover', also: ['fountain', 'paths', 'geodeHomes'], message: 'a mosaic tiles the square: set a fountain, paths or geodeHomes' });
   }
   out.push(...dependencyProblems(params));
   return out;

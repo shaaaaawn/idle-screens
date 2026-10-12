@@ -18,6 +18,8 @@ import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
 import { buildTown, townMaterial, type TownYard } from './town';
 import type { TownProps } from './town-mix';
+import { buildFloorCover, type CoverPaint } from './floor-cover';
+import { hasCover, type FloorCover } from './floor-cover-mix';
 import { buildPyramids, pyramidMaterial, pyramidShowUniforms, type Pyramids } from './pyramids';
 import { pyramidGlowLevel } from './pyramid-show';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
@@ -86,6 +88,8 @@ export interface SceneryOptions {
   pyramidLayout?: 'field' | 'stage';
   /** The village's small things: fences, mailboxes, benches, current socks (town.ts, `townProps`). */
   town?: TownProps;
+  /** What the village lays on its floor: lawns, a mosaic, doormats, stepping stones, ripples (floor-cover.ts, `floorCover`). */
+  floorCover?: FloorCover;
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
   castle?: 0 | 1 | 2;
   /** 0..1 — walks from every door to the village hub, a road to the landmark, trails to the crystals. */
@@ -123,6 +127,8 @@ export interface Scenery {
   marks: Record<string, { x: number; y: number; z: number }>;
   /** What the floor should paint: the path network, as segments. */
   paths: PathSegment[];
+  /** And the lawns, the square's mosaic and the sand's ripples (floor-cover.ts `writeCover`); null: none. */
+  cover: CoverPaint | null;
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -461,12 +467,15 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // The village's small things — fences, mailboxes, benches, socks — once its homes, paths, lamps and square have
   // their places; before the pyramids, signs, geodes and garden, which keep off them.
   const townAt = opts.town && !opts.interior && (opts.town.fence || opts.town.mailbox || opts.town.bench || opts.town.sock) ? opts.town : null;
+  // The square: the fountain, the hub, or the village green in front of the homes.
+  const centre = fountainAt ? { x: fountainAt.x, z: fountainAt.z, r: 23 * s }
+    : marks.hub ? { x: marks.hub.x, z: marks.hub.z, r: 12 * s }
+      : yards.length ? { x: yards.reduce((a, y) => a + y.x, 0) / yards.length, z: yards.reduce((a, y) => a + y.z, 0) / yards.length + 40 * s, r: 10 * s } : null;
+  // The village's current: the socks stream down it and the sand is combed across it.
+  const current = rng.fork(16).next() * Math.PI * 2;
   if (townAt) {
-    const centre = fountainAt ? { x: fountainAt.x, z: fountainAt.z, r: 23 * s }
-      : marks.hub ? { x: marks.hub.x, z: marks.hub.z, r: 12 * s }
-        : yards.length ? { x: yards.reduce((a, y) => a + y.x, 0) / yards.length, z: yards.reduce((a, y) => a + y.z, 0) / yards.length + 40 * s, r: 10 * s } : null;
     const town = buildTown(townAt, {
-      rng: rng.fork(15), scale: s, terrain, yards, centre,
+      rng: rng.fork(15), scale: s, terrain, yards, centre, current,
       // `own`: a fence's own home, whose round footprint its yard (fitted to the shell) stands inside.
       free: (x, z, r, own) => !obstacles.some(o => !(own && o.x === own.x && o.z === own.z) && Math.hypot(x - o.x, z - o.z) < o.r + r)
         && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
@@ -491,6 +500,30 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       group.add(mesh);
     }
     counts.fences = town.counts.fences; counts.mailboxes = town.counts.mailboxes; counts.benches = town.counts.benches; counts.socks = town.counts.socks;
+  }
+  // What the village lays on its floor, once everything standing on it has its place; before the pyramids, signs,
+  // geodes and garden, which keep off the lawns and the mosaic.
+  let coverPaint: CoverPaint | null = null;
+  if (hasCover(opts.floorCover) && !opts.interior) {
+    const cover = buildFloorCover(opts.floorCover, {
+      rng: rng.fork(17), scale: s, terrain, yards, current, walks: network?.segments ?? [],
+      // The mosaic is laid over the fountain's paving, round its basin; with none, it IS the square, at the hub.
+      square: fountainAt ? { x: fountainAt.x, z: fountainAt.z, inner: 19 * s, r: 44 * s } : centre ? { x: centre.x, z: centre.z, inner: 0, r: 18 * s } : null,
+      free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < 3 * s + r)
+        && !(fountainAt && Math.hypot(x - fountainAt.x, z - fountainAt.z) < 18 * s + r),
+    });
+    keepClear.push(...cover.keepClear);
+    if (cover.fixed) {
+      const material = new MeshBasicMaterial({ vertexColors: true, side: FrontSide });
+      material.userData.mqOwned = true;
+      const mesh = new Mesh(cover.fixed, material);
+      mesh.name = 'floor-cover';
+      group.add(mesh);
+    }
+    coverPaint = cover.paint;
+    Object.assign(counts, { lawns: cover.counts.lawns, mosaics: cover.counts.mosaics, mats: cover.counts.mats, stones: cover.counts.stones, ripples: cover.counts.ripples });
   }
   // Pyramids, before the geodes and the garden, so both keep off them and the fish go over.
   const pyramidShow = pyramidShowUniforms();
@@ -956,7 +989,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
+    group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], cover: coverPaint, rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     setFish(fish) {

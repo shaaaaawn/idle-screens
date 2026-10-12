@@ -46,6 +46,20 @@ export interface TownYard {
   tint: string;
 }
 
+/**
+ * A yard's rectangle: centred on its home, `d` toward the door and `r` across it, half-widths `Rd` (front to back)
+ * and `Rr` (across) — fitted to the shell, two cubes clear of it and three in front of the door. The fence stands on
+ * its edge; a lawn (floor-cover.ts) fills it.
+ */
+export function yardFrame(y: TownYard, V: number): { d: { x: number; z: number }; r: { x: number; z: number }; Rd: number; Rr: number } {
+  const dl = Math.hypot(y.door.x - y.x, y.door.z - y.z) || 1;
+  const d = { x: (y.door.x - y.x) / dl, z: (y.door.z - y.z) / dl };
+  return { d, r: { x: d.z, z: -d.x }, Rd: Math.max(y.along, dl) + 3 * V, Rr: y.across + 2 * V };
+}
+
+/** Which way a heading (radians, CubeWriter's yaw) points on the floor: the sock's +x turned by it. */
+export const currentFlow = (heading: number): { x: number; z: number } => ({ x: Math.cos(heading), z: -Math.sin(heading) });
+
 export interface TownContext {
   rng: CrystalRng;
   scale: number;
@@ -57,6 +71,9 @@ export interface TownContext {
   free: (x: number, z: number, r: number, own?: { x: number; z: number }) => boolean;
   /** How far (x, z) is from the nearest path's edge; `onSquare`: the square's paving does not count (a bench stands on it). */
   pathClear: (x: number, z: number, onSquare?: boolean) => number;
+  /** The village's current (radians, as `currentFlow`): every sock streams down it, give or take, and the sand is
+   *  combed across it (floor-cover.ts). Absent: each sock its own way. */
+  current?: number;
 }
 
 export interface Town {
@@ -134,11 +151,7 @@ export function buildTown(props: TownProps, ctx: TownContext): Town {
 
   // The yards first: a rectangle round each home fitted to its shell (two cubes clear of it, three in front of the
   // door), turned to face its door, a gate on the door's side.
-  const yards = ctx.yards.map((y) => {
-    const dl = Math.hypot(y.door.x - y.x, y.door.z - y.z) || 1;
-    const d = { x: (y.door.x - y.x) / dl, z: (y.door.z - y.z) / dl }, r = { x: d.z, z: -d.x };
-    return { ...y, d, r, Rd: Math.max(y.along, dl) + 3 * V, Rr: y.across + 2 * V };
-  });
+  const yards = ctx.yards.map((y) => ({ ...y, ...yardFrame(y, V) }));
   const gateHalf = 2.5 * V;
   const inYard = (px: number, pz: number, k: number): boolean => {
     const y = yards[k]!, ox = px - y.x, oz = pz - y.z;
@@ -386,7 +399,7 @@ export function buildTown(props: TownProps, ctx: TownContext): Town {
   }
 
   function sock(x: number, z: number): void {
-    const y0 = g(x, z), h = 7 * V, phase = rng.next(), base = rng.next() * Math.PI * 2;
+    const y0 = g(x, z), h = 7 * V, phase = rng.next(), u = rng.next(), base = ctx.current !== undefined ? ctx.current + (u - 0.5) * 0.5 : u * Math.PI * 2;
     fixed.cube(x, y0 + h / 2, z, 0.45 * V, h, 0.45 * V, col('#c9ccd2'), 0);
     fixed.cube(x, y0 + h + 0.2 * V, z, 0.7 * V, 0.4 * V, 0.7 * V, col('#e8e4dc'), 0);
     // The sock, built along +x from the pole's top: the shader droops it, then swings it round.
