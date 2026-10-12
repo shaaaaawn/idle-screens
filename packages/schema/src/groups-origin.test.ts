@@ -181,7 +181,10 @@ describe('perception', () => {
 
 // ---------------------------------------------------------------------------
 describe('advisories honour paint opacity (#80)', () => {
-  const dim = (x: Partial<LayerSpec> = {}): LayerSpec => dot({ key: 'dim', sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#010101' }, ...x });
+  // Off the white `lit` dot: on it, a near-black dot is plainly visible and
+  // low-contrast-layer rightly stays quiet (X388) — these tests are about
+  // paint opacity, so `dim` sits on the bare black page.
+  const dim = (x: Partial<LayerSpec> = {}): LayerSpec => dot({ key: 'dim', sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#010101' }, position: { x: 0.2, y: 0.5 }, ...x });
   const codes = (s: SaverSpec) => adviseSpec(s).map((w) => `${w.code}@${w.path}`);
 
   it('a layer held at opacity 0 is not judged; the same layer visible is', () => {
@@ -206,7 +209,7 @@ describe('advisories honour paint opacity (#80)', () => {
 // ---------------------------------------------------------------------------
 describe('review fixes', () => {
   it('a layer visible only between key boundaries is still judged (value-based hidden check)', () => {
-    const dim = dot({ key: 'dim', sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#010101' }, opacity: 0 });
+    const dim = dot({ key: 'dim', sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#010101' }, position: { x: 0.2, y: 0.5 }, opacity: 0 });
     const s = scene({ timeline: { keys: [{ t: 1000, path: 'dim.opacity', value: 1, dur: 400 }, { t: 1400, path: 'dim.opacity', value: 0, dur: 0 }] } }, [dot({ key: 'lit' }), dim]);
     expect(adviseSpec(s).map((w) => `${w.code}@${w.path}`)).toContain('low-contrast-layer@layers[1].sprite');
   });

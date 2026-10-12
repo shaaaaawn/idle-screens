@@ -4,7 +4,8 @@ import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
-import { groupOf, mapBox, paintMap, paintOpacity } from './paint';
+import { luminanceGrid } from './perceive';
+import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
@@ -113,13 +114,23 @@ export function adviseSpec(
 
     const coh = cohesion[li]!;
     if (seamsWorthWarning(layer, coh, entities.length)) {
+      // A soft or feathered edge has no edge to paint: overlaps pool into
+      // smooth lumps, which is a cloud or a haze, not a seam. Measured live
+      // (X423): the hard-edged control showed every overlap as an outline,
+      // the soft storm showed none. What soft cannot do is make ONE solid
+      // shape — say that, and leave clouds to the author.
+      const s = layer.sprite;
+      const softEdged = ((s.kind === 'circle' || s.kind === 'polygon') && s.soft) || (s.kind === 'rect' && !!s.feather);
       warnings.push({
         path: `layers[${li}]`,
         code: 'overlap-seams',
-        message:
-          `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
-          + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
-          + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
+        message: softEdged
+          ? `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, but ${coh.seamCause}: `
+            + 'overlaps pool into soft lumps rather than one solid silhouette (no hard edges — a cloud, smoke or haze reads well this way). '
+            + 'If this layer is meant to be ONE solid shape, make it one flat colour at alpha 1, hard-edged, with no blend and no pulse.'
+          : `entities bury ${Math.round((coh.overlap ?? 0) * 100)}% of each other's outlines, so this layer is drawn as one shape — `
+            + `but ${coh.seamCause}, so every overlap paints a visible edge and it will read as a pile of sprites instead. `
+            + 'A layer merges into a single silhouette only when it is one flat colour at alpha 1, hard-edged, with no blend and no pulse.',
       });
     }
 
@@ -169,7 +180,14 @@ export function adviseSpec(
       const seps = entities.map((e) => {
         const hex = spriteHex(layer, e);
         if (hex === null) return Infinity;
-        return colourSeparation(layer, { rgb: hexRgb(hex), luma: hexLuma(hex) }, { rgb: bgRgb, luma: bgLuma });
+        const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
+        const sep = colourSeparation(layer, ink, { rgb: bgRgb, luma: bgLuma });
+        if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
+        // Close to the page colour — but the page may not be what is behind
+        // it. A dark key plate on an opaque yellow panel is judged against the
+        // panel, which is what the eye (and perception's dominance) sees (X388).
+        const under = groundUnder(spec, allEntities, li, hidden, positionAt(e, 0, w, h), w, h);
+        return under ? colourSeparation(layer, ink, under) : sep;
       });
       const best = Math.max(...seps);
       if (best < LOW_CONTRAST_FLOOR) {
@@ -179,7 +197,7 @@ export function adviseSpec(
           code: 'low-contrast-layer',
           message: additive
             ? `additive layer adds almost no light (luma ${best.toFixed(3)}) — a "lighter"/"screen" layer is only as visible as it is bright`
-            : `layer colour is within ${best.toFixed(3)} of the background (floor ${LOW_CONTRAST_FLOOR}) — it will read as background, not as content`,
+            : `layer colour is within ${best.toFixed(3)} of the background, or of the solid layer under it (floor ${LOW_CONTRAST_FLOOR}) — it will read as background, not as content`,
         });
       }
     }
@@ -194,6 +212,12 @@ export function adviseSpec(
     const entities = allEntities[li]!;
     // Paint opacity weighs coverage like alpha does (unset ⇒ exactly as before).
     const paintA = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
+    // A layer/group transform scales what is painted, so it scales the area
+    // too — the text boxes below already land where the transform puts them,
+    // and coverage must judge the same picture (X418: a word zoomed 8× read
+    // as both "the scene is empty" and "the text runs 33 000 px off-screen").
+    const map = paintMap(spec, layer, w, h, scale);
+    const areaScale = map ? paintSize(spec, layer) ** 2 : 1;
     for (const e of entities) {
       const r = e.size / 2;
       let pixArea: number;
@@ -211,9 +235,17 @@ export function adviseSpec(
         const maxWPx = layer.sprite.maxWidth * scale;
         const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
         pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
+      } else if (layer.sprite.kind === 'text') {
+        // The renderer's own box (a px `font` wins over the seeded size), at
+        // the ~55 % ink fill a textBlock line is credited with.
+        const b = textBoxAt(layer.sprite, e, positionAt(e, 0, w, h), spec, w, h);
+        pixArea = (b.x1 - b.x0) * (b.y1 - b.y0) * 0.55;
       } else {
-        pixArea = e.size * e.size; // text/emoji: approximate as square of font size
+        pixArea = e.size * e.size; // emoji: approximate as square of its size
       }
+      // Scaled by the transform, and never more than the frame it lands in.
+      if (areaScale !== 1) pixArea *= areaScale;
+      if (pixArea > w * h) pixArea = w * h;
       // Sparse-event layers are lit only for `life` of every `every` ms, at a
       // mean envelope of ~½, and at a mean grown size — judge their coverage
       // by that duty, not by whichever instant we happen to sample.
@@ -338,16 +370,25 @@ export function adviseSpec(
   const composedCount = composed.reduce((s, c) => s + c.ents.length, 0);
   if (composedCount >= 8) {
     const positions = composed.flatMap(({ ents }) => ents.map((e) => positionAt(e, 0, w, h)));
-    const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
-    const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
-    const offX = Math.abs(cx / w - 0.5);
-    const offY = Math.abs(cy / h - 0.5);
-    if (offX > 0.2 || offY > 0.2) {
-      warnings.push({
-        path: 'layers',
-        code: 'off-center',
-        message: `centroid at (${(cx / w).toFixed(2)}, ${(cy / h).toFixed(2)}) — composition is heavily offset from center`,
-      });
+    const px = positions.reduce((s, p) => s + p.x, 0) / positions.length / w;
+    const py = positions.reduce((s, p) => s + p.y, 0) / positions.length / h;
+    if (Math.abs(px - 0.5) > 0.2 || Math.abs(py - 0.5) > 0.2) {
+      // Where the entities are is only a suspicion; where the ink is decides.
+      // Confirmed on the same luminance grid — the same rule, cells weighted
+      // by how far they sit from the background — that perception reports
+      // beside it, so the two can no longer disagree in one response (X384:
+      // 24 overlapping slivers in one half outweighed a full-height stripe in
+      // the other, 0.73 counted vs 0.58 seen). It can only silence the head
+      // count, never add a warning, and costs a grid only when it fires.
+      const grid = luminanceGrid({ ...spec, layers: composed.map(({ l }) => l) }, { viewport: { width: w, height: h }, t: opts.t ?? COHESION_T, seed: opts.seed });
+      const c = grid.centroid;
+      if (c && (Math.abs(c.x - 0.5) > 0.2 || Math.abs(c.y - 0.5) > 0.2)) {
+        warnings.push({
+          path: 'layers',
+          code: 'off-center',
+          message: `centroid at (${c.x.toFixed(2)}, ${c.y.toFixed(2)}) — composition is heavily offset from center`,
+        });
+      }
     }
   }
 
@@ -378,7 +419,8 @@ export function adviseSpec(
       // `role: 'read'` text can't hide behind an unmeasured alpha.
       const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
       const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
-      textBoxes.push({ li, label, alpha, ...box });
+      const str = s.kind === 'textBlock' ? s.text : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
+      textBoxes.push({ li, label, alpha, str, ...box });
     }
   }
   const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
@@ -426,6 +468,7 @@ export function adviseSpec(
       if (smaller <= 0) continue;
       const share = (ix * iy) / smaller;
       if (share <= 0.1) continue;
+      if (isOutlineStack(a, b)) continue;
       pairFlagged.add(pair);
       const [first, second] = a.li < b.li ? [a, b] : [b, a];
       warnings.push({
@@ -565,6 +608,71 @@ function brightestAdditivePlate(
   return best ? { rgb: best.rgb, label: best.label } : null;
 }
 
+/**
+ * What an earlier layer has painted at `pt` (t = 0), composited over the
+ * page colour, or null when nothing solid sits there. Conservative on
+ * purpose: only static, transform-free, normal-blend, hard-edged shapes
+ * count, with exact containment for circles, axis-aligned (or quarter-turned)
+ * rects and unrotated polygons — so the low-contrast check can only be
+ * talked out of firing by a plate that is really there.
+ */
+function groundUnder(
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  li: number,
+  hidden: boolean[] | null,
+  pt: { x: number; y: number },
+  w: number,
+  h: number,
+): { rgb: Rgb; luma: number } | null {
+  let plate: Rgb = backgroundRgb(spec);
+  let covered = false;
+  for (let lj = 0; lj < li; lj++) {
+    if (hidden?.[lj]) continue;
+    const layer = spec.layers[lj]!;
+    const sp = layer.sprite;
+    if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
+    if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
+    const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
+    for (const e of allEntities[lj]!) {
+      if (e.spinSpeed !== 0 || e.alpha * a <= 0) continue;
+      const hex = spriteHex(layer, e);
+      if (hex === null) continue;
+      const c = positionAt(e, 0, w, h);
+      const dx = pt.x - c.x;
+      const dy = pt.y - c.y;
+      let inside = false;
+      if (sp.kind === 'circle') inside = Math.hypot(dx, dy) <= e.size / 2;
+      else if (sp.kind === 'rect') {
+        const rot = ((e.rotate ?? 0) % Math.PI + Math.PI) % Math.PI;
+        const quarter = Math.abs(rot - Math.PI / 2) < 0.01;
+        if (rot > 0.01 && rot < Math.PI - 0.01 && !quarter) continue;
+        const hx = (quarter ? (e.size2 ?? e.size) : e.size) / 2;
+        const hy = (quarter ? e.size : (e.size2 ?? e.size)) / 2;
+        inside = Math.abs(dx) <= hx && Math.abs(dy) <= hy;
+      } else {
+        if (e.rotate) continue;
+        inside = pointInPolygon(dx, dy, polygonPoints(sp, e.size / 2));
+      }
+      if (!inside) continue;
+      plate = sourceOverPlate(plate, hexRgb(hex), Math.min(1, e.alpha * a));
+      covered = true;
+    }
+  }
+  return covered ? { rgb: plate, luma: 0.2126 * plate.r + 0.7152 * plate.g + 0.0722 * plate.b } : null;
+}
+
+function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i]!;
+    const b = pts[j]!;
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 /** Whether an entity's disc of half-extent `r` can overlap `box` (see `brightestAdditivePlate`). */
 function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: number): boolean {
   if (e.motion === 'static') {
@@ -578,9 +686,28 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
   return true;
 }
 
+/**
+ * The outline / drop-shadow idiom (X416): the SAME string painted twice at the
+ * same size, nudged a few px — a dark copy under the fill. That is one title,
+ * not two labels colliding. "A few px" is judged against the glyph height, so
+ * it holds at every viewport: centres within 15 % of it, sizes within 10 %.
+ */
+const OUTLINE_STACK_OFFSET = 0.15;
+
+function isOutlineStack(a: TextBoxAt, b: TextBoxAt): boolean {
+  if (a.str !== b.str || a.str.trim() === '') return false;
+  const fs = Math.min(a.fs, b.fs);
+  if (fs <= 0 || Math.abs(a.fs - b.fs) > 0.1 * Math.max(a.fs, b.fs)) return false;
+  const dx = (a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2;
+  const dy = (a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2;
+  return Math.hypot(dx, dy) <= OUTLINE_STACK_OFFSET * fs;
+}
+
 interface TextBoxAt {
   li: number;
   label: string;
+  /** The painted string — two boxes of one string offset a hair are an outline, not a clash. */
+  str: string;
   /**
    * Worst case, not "at rest": base alpha minus its pulse trough (never the
    * `emit` envelope, whose on/off duty cycle is excluded on purpose) times a
@@ -691,9 +818,17 @@ export function adviseSequence(
   const warnings: SpecWarning[] = [];
 
   for (let i = 0; i < seq.segments.length; i++) {
-    const segWarnings = adviseSpec(seq.segments[i]!.scene, viewport);
+    const seg = seq.segments[i]!;
+    // A timed segment changes as it plays, so its advisories describe ONE
+    // stated moment of it — never a moment past its end. The default sample
+    // (COHESION_T, 5 s) used to land beyond a 2 s segment and judge its
+    // timeline's final frame while the request asked about another (X418).
+    const timed = !!seg.scene.timeline && seg.duration !== undefined;
+    const tSample = timed ? Math.min(COHESION_T, seg.duration!) : undefined;
+    const segWarnings = adviseSpec(seg.scene, viewport, tSample === undefined ? {} : { t: tSample });
+    const at = tSample === undefined ? '' : ` (judged ${(tSample / 1000).toFixed(1)} s into this ${(seg.duration! / 1000).toFixed(1)} s segment)`;
     for (const w of segWarnings) {
-      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message, boxes: w.boxes });
+      warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message + at, boxes: w.boxes });
     }
   }
 

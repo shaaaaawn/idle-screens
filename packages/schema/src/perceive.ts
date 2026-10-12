@@ -1289,6 +1289,10 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  // motionStats gets the spec WITH its timeline: it resolves t and t + dt
+  // itself, and a pre-resolved spec has no timeline left to differ between
+  // them — every layer moved only by timeline keys read 0 px/s (X437).
+  const timed = spec;
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
@@ -1301,7 +1305,7 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     rowProfile: grid.rowProfile,
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
-    motion: motionStats(spec, opts),
+    motion: motionStats(timed, opts),
     form: layerCohesion(spec, opts),
     text: textSprites(spec, opts),
     advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
