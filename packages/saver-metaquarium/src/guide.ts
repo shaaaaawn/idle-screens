@@ -42,7 +42,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. A snail glides the floor very slowly and stops to look about, look at you, graze, stretch up tall, or pull into its shell and peek back out. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -65,6 +65,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
+  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat.',
   starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own.',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
@@ -143,7 +144,7 @@ export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab dori glowfish babyfish hackerfish blowfish starfish octopus. *size scales that token over its
+          crab dori glowfish babyfish hackerfish blowfish starfish octopus snail. *size scales that token over its
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
@@ -253,6 +254,16 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
+  },
+  {
+    id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they stop to graze, stretch, look at you, or hide in their shells, a few baby fish overhead.',
+    params: { ...ALIVE, environment: 'lagoon', fishMix: 'snail:5,babyfish:4', floraDensity: 0.7, marineSnow: 0.2, finish: 0.5, swimSpeed: 0.6,
+      cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
+  },
+  {
+    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',
+    params: { ...ALIVE, ...NIGHT, fogColor: '#060612', floorColor: '#141020', fishMix: 'snail:6', snailShell: 'glow', floraDensity: 0.2, marineSnow: 0.3, finish: 0.6,
+      cameraFollow: 1, followDistance: 40, followAngle: 140 },
   },
 ];
 

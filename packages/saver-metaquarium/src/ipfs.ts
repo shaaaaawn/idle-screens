@@ -57,7 +57,7 @@ export const BUNDLED_BREED_SCHEME = 'mq-breed:';
  * fetch. `fishMix` takes their breed name or id in the default catalog.
  *
  * The original NPCs are clip-less and unrigged — they swim on the body wave;
- * the breeds drawn in-house (starfish, octopus) are rigged with clips. Their
+ * the breeds drawn in-house (starfish, octopus, snail) are rigged with clips. Their
  * materials carry the role names (PrimaryColor, SecondaryColor, EYES-,
  * GLOW-, KEEP-), so every instance gets the seeded two-tone coat, glow
  * halos, and its authored colour where the intake said to keep it.
@@ -74,6 +74,8 @@ export const NPC_CATALOG: FishEntry[] = [
   { id: 609, name: 'Starfish', breed: 'starfish', ipfs3d: `${BUNDLED_BREED_SCHEME}starfish`, localGlb: '' },
   // The second drawn in-house (breeds/rig/octopus-model.mjs).
   { id: 610, name: 'Octopus', breed: 'octopus', ipfs3d: `${BUNDLED_BREED_SCHEME}octopus`, localGlb: '' },
+  // The third, a floor creature (breeds/rig/snail-model.mjs).
+  { id: 611, name: 'Snail', breed: 'snail', ipfs3d: `${BUNDLED_BREED_SCHEME}snail`, localGlb: '' },
 ];
 
 /** The default catalog's lookup: minted samples first, then the bundled breeds. */

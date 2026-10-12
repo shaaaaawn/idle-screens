@@ -90,6 +90,10 @@ import {
   type OctopusRig, type OctopusSkin,
 } from './octopus';
 import { InkLayer } from './ink';
+import {
+  dressSnail, rigSnail, SNAIL_BLOOM, snailFrame, snailIdle, snailLook, snailShellLight, snailShellOf, snailSpot, snailStart,
+  type SnailOutput, type SnailRig,
+} from './snail';
 import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from './babyfish';
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
@@ -670,7 +674,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin; snail?: SnailRig;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -806,6 +810,7 @@ class TankInstance implements SaverInstance {
   /** Who touched whom in the last frame, with and without the dodge — `inspect().crowding`. */
   private lastCrowding: (Crowding & { without: number }) | null = null;
   private readonly crabOut: CrabOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'walk' };
+  private readonly snailOut: SnailOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, doing: 'glide' };
   private readonly starOut: StarfishOutput = { x: 0, y: 0, z: 0, quaternion: new Quaternion(), fx: 0, fz: 1, tx: 1, tz: 0, trailX: 0, trailZ: 0, focusX: 0, focusZ: 0, doing: 'crawl', bloom: 0 };
   /** The bare terrain, before any cluster stands on it (null = flat at 0). */
   private terrainAt: ((x: number, z: number) => number) | null = null;
@@ -2341,6 +2346,7 @@ class TankInstance implements SaverInstance {
     let puffer: PufferRig | null = null;
     let octopus: OctopusRig | null = null;
     let octoSkin: OctopusSkin | null = null;
+    let snail: SnailRig | null = null;
     let screen: ScreenRig | null = null;
 
     if (tpl) {
@@ -2362,6 +2368,7 @@ class TankInstance implements SaverInstance {
       if (rigged === 'dori') tang = rigTang(body, tpl.clips);
       if (rigged === 'blowfish') puffer = rigPuffer(body, tpl.clips);
       if (rigged === 'octopus') octopus = rigOctopus(body, tpl.clips, tpl.norm, index);
+      if (rigged === 'snail') snail = rigSnail(body, tpl.clips, tpl.norm);
       if (octopus && !this.ink) {
         this.ink = new InkLayer(this.scene);
         if (this.waterInstalled) patchWater(this.ink.mesh.material as Material, this.str('dither') === 'on');
@@ -2388,7 +2395,7 @@ class TankInstance implements SaverInstance {
       body.rotation.y = tpl.yaw;
       group.add(body);
       bodyNode = body;
-      const walker = crab ?? starfish ?? octopus;
+      const walker = crab ?? starfish ?? octopus ?? snail;
       if (walker) {
         // Front along the group's +z, feet on the group's origin: crab.ts (starfish.ts, octopus.ts) aims and stands the group.
         body.rotation.y = 0;
@@ -2435,7 +2442,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
-      baseYaw: tpl && !crab && !starfish && !octopus ? tpl.yaw : 0,
+      baseYaw: tpl && !crab && !starfish && !octopus && !snail ? tpl.yaw : 0,
       group,
       plan,
       body: bodyNode,
@@ -2444,8 +2451,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), lights: {} }
+      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus || snail
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), ...(snail ? { snail } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2766,7 +2773,8 @@ class TankInstance implements SaverInstance {
       const d = danceSpots.get(f.index);
       const s = d ? { x: d[0], z: d[1] } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
         : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index))
-        : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index)) : null;
+        : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index))
+        : f.rig.snail ? snailSpot(f.index, tSec, f.plan, snailStart(f.plan, f.index)) : null;
       if (s) crabSpots.push(f.index, s.x, s.z);
     }
     // The camera a crab turns to face — known for THIS t before any fish moves:
@@ -2776,9 +2784,10 @@ class TankInstance implements SaverInstance {
     let crabCamX = this.camera.position.x, crabCamZ = this.camera.position.z;
     if (followSlot >= 0) {
       const ff = this.fish[followSlot];
-      if ((ff?.rig?.crab || ff?.rig?.starfish || ff?.rig?.octopus) && !followPov) {
+      if ((ff?.rig?.crab || ff?.rig?.starfish || ff?.rig?.octopus || ff?.rig?.snail) && !followPov) {
         const s = ff.rig.crab ? crabSpot(ff.index, tSec, ff.plan, crabStart(ff.plan, ff.index))
           : ff.rig.starfish ? starfishSpot(ff.index, tSec, ff.plan, starfishStart(ff.plan, ff.index))
+          : ff.rig.snail ? snailSpot(ff.index, tSec, ff.plan, snailStart(ff.plan, ff.index))
           : octopusSpot(ff.index, tSec, ff.plan, octopusStart(ff.plan, ff.index));
         const turn = (this.num('followAngle') * Math.PI) / 180, c = Math.cos(turn), sn = Math.sin(turn);
         crabCamX = s.x - (s.fx * c - s.fz * sn) * followBack; crabCamZ = s.z - (s.fx * sn + s.fz * c) * followBack;
@@ -3125,7 +3134,7 @@ class TankInstance implements SaverInstance {
       // floor creature walks its own spot (crab.ts) and keeps it — it is in
       // the way, it does not get out of it; nor does an actor, whose script
       // places it. A seated fish gives a little, so the school keeps shape.
-      const walker = (f.rig?.crab || f.rig?.starfish || f.rig?.octopus) && !act && !style.formation;
+      const walker = (f.rig?.crab || f.rig?.starfish || f.rig?.octopus || f.rig?.snail) && !act && !style.formation;
       // A seahorse's hold (holdfast.ts): a pair's bouts are the first's, and both note where they would swim.
       let hs: HoldState | null = null;
       // Both of a pair must be seahorses to link tails.
@@ -3247,7 +3256,18 @@ class TankInstance implements SaverInstance {
         : null;
       if (octo) { px = octo.x; y = octo.y; pz = octo.z; f.rig!.lights['GLOW-Rings'] = octo.mood.rings; f.rig!.bloom = 0.35 + 0.65 * octo.lift; }
       else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.lights['GLOW-Rings'] = 0.3; f.rig!.bloom = 0.35; }
-      const floor = crab ?? star ?? octo;
+      // A snail glides it, slowly, and stops to look, graze, stretch or hide in its shell (snail.ts).
+      const snailRig = f.rig?.snail;
+      const snl = snailRig && !act && !style.formation
+        ? snailFrame(snailRig, {
+            t: tSec, index: f.index, plan: f.plan, start: snailStart(f.plan, f.index), len: L,
+            scale: snailRig.norm * f.baseScale * size, ground: this.crabGround,
+            camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+          }, this.snailOut)
+        : null;
+      if (snl) { px = snl.x; y = snl.y; pz = snl.z; } else if (snailRig) snailIdle(snailRig, tSec, f.index);
+      if (snailRig) f.rig!.bloom = snailRig.shell.style === 'glow' ? 0.5 : SNAIL_BLOOM;
+      const floor = crab ?? star ?? octo ?? snl;
       // A glowfish swims where the tank puts it; its module sets its clips and its light.
       const angler = f.rig?.angler ? anglerFrame(f.rig.angler, tSec, f.index, beat) : null;
       if (angler) { f.rig!.lights['GLOW-Lure'] = angler.lure; f.rig!.lights['GLOW-Orbs'] = angler.orbs; }
@@ -3391,6 +3411,15 @@ class TankInstance implements SaverInstance {
           this.ink.emit(oState.ink.key, oState.ink.t, this.burpAt.x, this.burpAt.y, this.burpAt.z, L * 0.16);
         }
       }
+      // A snail, now it is placed: its shell as `snailShell` dresses it (a glowing
+      // spiral breathes), and its pupils slide to look — at you, at its food, about (snail.ts).
+      if (f.rig?.snail) {
+        const sr = f.rig.snail;
+        dressSnail(sr, snailShellOf(this.str('snailShell'), f.index), this.str('fishLighting') !== 'flat' && !this.thumbnail, this.str('fishLook') === 'neon');
+        snailShellLight(sr, tSec, f.index);
+        f.group.updateMatrixWorld(true);
+        snailLook(sr, tSec, f.index, snl ? snl.doing : 'idle', followPov && f.index === followSlot ? null : this.viewer(followSlot));
+      }
       // A dori's eyes, now the fish is placed: who it is looking at (tang.ts).
       // Not the camera it is riding in.
       let look: ReturnType<typeof tangLook> | null = null;
@@ -3448,7 +3477,7 @@ class TankInstance implements SaverInstance {
       // eye on its own gaze, and never blinks.
       const minted = !!(angel || turtle || seahorse);
       // A betafish's eyes are painted into its atlas and live below (beta-eyes.ts), not here.
-      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta) {
+      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta && !f.rig?.snail) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
