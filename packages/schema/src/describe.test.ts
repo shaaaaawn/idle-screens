@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeScene } from './describe';
-import type { SaverSpec } from './types';
+import { LIMITS, type SaverSpec } from './types';
 
 const spec = (referenceViewport?: number): SaverSpec => ({
   schemaVersion: 1,
@@ -30,6 +30,27 @@ describe('describeScene', () => {
     // Same 2160 viewport, but referenceViewport: 2160 means no density scaling.
     const d = describeScene(spec(2160), { viewport: { width: 2160, height: 2160 } });
     expect(d.snapshots[0]!.layers[0]!.count).toBe(10);
+  });
+
+  it('treats an omitted `units` as viewport, like every other builder (F48)', () => {
+    // Every shipped example omits `units`; describeScene used to build them at
+    // scale 1 — roughly 1/1080th of the rendered size — so its coverage read 0.
+    const noUnits: SaverSpec = { ...spec() };
+    delete (noUnits as { units?: string }).units;
+    const d = describeScene(noUnits, { viewport: { width: 1920, height: 1080 } });
+    const explicit = describeScene(spec(), { viewport: { width: 1920, height: 1080 } });
+    expect(d.snapshots[0]!.layers[0]!.coverage).toBeGreaterThan(0);
+    expect(d.snapshots[0]!.layers[0]!.coverage).toBe(explicit.snapshots[0]!.layers[0]!.coverage);
+    expect(d.spec.units).toBe('viewport');
+  });
+
+  it('clamps scaled counts to LIMITS.maxTotal like the renderer (F49)', () => {
+    // 5120×2880 (a 5K display) scales two 200-entity layers ×2.67 → 1067
+    // projected; the renderer clamps the total back to 800 and so must this.
+    const dense: SaverSpec = { ...spec(), layers: [{ ...spec().layers[0]!, count: 200 }, { ...spec().layers[0]!, key: 'more', count: 200 }] };
+    const d = describeScene(dense, { viewport: { width: 5120, height: 2880 } });
+    const total = d.snapshots[0]!.layers.reduce((s, l) => s + l.count, 0);
+    expect(total).toBe(LIMITS.maxTotal);
   });
 
   it('measures polygon coverage by the outline area', () => {

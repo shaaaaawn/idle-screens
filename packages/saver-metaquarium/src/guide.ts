@@ -21,6 +21,8 @@ import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
 import { parsePyramidMix } from './pyramid-mix';
+import { parseTownProps } from './town-mix';
+import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
@@ -86,7 +88,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
   floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
-  rayStrength: 'Light shafts from the surface.',
+  rayStrength: 'Light shafts from the surface. They cost device budget: 5 shafts on the high tier, 2 on standard, and none on the lowest tier in a room with a water surface (reef, kelp, ice or lagoon), where the surface takes that budget — abyss, vent and universe keep 2. Where they were dropped, perceiveChannel reads room.rayStrength 0.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',
@@ -110,6 +112,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
   signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  townProps: 'The village\'s small things, comma-separated kind[:count][/style]: fence (a yard round every home, a gate where its path leaves; styles driftwood coral stone crystal, none = each home its own), mailbox (by every gate: post — its flag goes up when the mail comes — clam that opens, bottle that rocks; each a vignette mark mailbox1…), bench[:n] (round the fountain or hub, facing in; shell stone), sock[:n] (a striped current sock swinging with the current). Fences and mailboxes need geodeHomes.',
+  floorCover: 'What the village lays on its floor, comma-separated kind[/style]: lawn (a mown lawn in every home\'s yard, fenced or not; stripes checks), mosaic (the square tiled in a compass rose round the fountain, or at the hub with none; stone shell glass), mat (a woven doormat at every door; kelp stripe), steps (stepping stones down every walk; slate sand moss, none = each walk\'s own ground), ripples (the open sand combed into ripples across the current the socks stream down; fine broad). Lawns and mats need geodeHomes, steps need paths, a mosaic needs a fountain, paths or homes. Mats and stones only lie on flat ground.',
   pyramids: 'Pyramids built of cubes, as the fish are (0 = none, 1 = about a dozen complexes): each a stack of cubes you can count, the cube a whole multiple of a fish\'s, exactly symmetric. On the floor in complexes — a great pyramid and its queens — small ones near, the great ones at the back. Only on flat ground — use floorKind: flat (none on dunes, ridges or a basin). Standing, half sunk, one missing its capstone. Glyph friezes, gilded or glowing capstones, an eye on some.',
   pyramidMix: 'Their shapes and stones: `shape|stone[:weight], …`. Shapes giza step bent djoser mayan frame; stones sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit ones led (white and rainbow lamps) and neon (magenta and cyan), every cube a lamp running a light show. Empty = every shape in the room\'s stone.',
   pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
@@ -150,6 +154,10 @@ propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@drus
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+townProps  kind[:count][/style], …   fence/coral, mailbox/post, bench:4/shell, sock:2
+          fence: driftwood coral stone crystal · mailbox: post clam bottle · bench: shell stone · sock (needs geodeHomes for fence and mailbox)
+floorCover  kind[/style], …   lawn/stripes, mosaic/shell, mat/kelp, steps, ripples/broad
+          lawn: stripes checks · mosaic: stone shell glass · mat: kelp stripe · steps: slate sand moss · ripples: fine broad
 pyramidMix  shape|stone[:weight], …   giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt led neon
           giza:3, mayan, gold:2, obsidian   (empty = every shape in the room's stone)
 pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 16s:equalizer
@@ -296,6 +304,8 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
   if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
   if (str('pyramidMix')) push('pyramidMix', parsePyramidMix(str('pyramidMix')).problems);
+  if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
+  if (str('floorCover')) push('floorCover', parseFloorCover(str('floorCover')).problems);
   if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
@@ -321,6 +331,18 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
       }
     }
   }
+  if (str('townProps')) {
+    const t = parseTownProps(str('townProps')).props;
+    const homes = Math.round(Number(params.geodeHomes ?? 0));
+    if ((t.fence || t.mailbox) && !(homes > 0)) out.push({ path: 'townProps', also: ['geodeHomes'], message: 'fences and mailboxes stand round homes: set geodeHomes ≥ 1' });
+  }
+  if (str('floorCover')) {
+    const c = parseFloorCover(str('floorCover')).cover;
+    const homes = Math.round(Number(params.geodeHomes ?? 0)), walks = Number(params.paths ?? 0) > 0;
+    if ((c.lawn || c.mat) && !(homes > 0)) out.push({ path: 'floorCover', also: ['geodeHomes'], message: 'lawns and doormats belong to homes: set geodeHomes ≥ 1' });
+    if (c.steps && !walks) out.push({ path: 'floorCover', also: ['paths'], message: 'stepping stones go down the paths: set paths > 0' });
+    if (c.mosaic && !walks && !(homes > 0) && (params.fountain ?? 'none') === 'none') out.push({ path: 'floorCover', also: ['fountain', 'paths', 'geodeHomes'], message: 'a mosaic tiles the square: set a fountain, paths or geodeHomes' });
+  }
   out.push(...dependencyProblems(params));
   return out;
 }
@@ -328,7 +350,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
 /** What turns each world mark on. */
 const MARK_NEEDS: Record<string, string> = {
   gate: 'needs landmark castle or citadel', plaza: 'needs landmark castle or citadel', courtyard: 'needs landmark castle or citadel',
-  hub: 'needs paths > 0', fountain: 'needs a fountain', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
+  hub: 'needs paths > 0', fountain: 'needs a fountain', mailbox1: 'needs townProps mailbox and geodeHomes ≥ 1', mailbox2: 'needs townProps mailbox and geodeHomes ≥ 2', mailbox3: 'needs townProps mailbox and geodeHomes 3', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
 };
 
 /** The marks this scene's world adds (positions are placeholders: only the names matter here). */
@@ -337,6 +359,8 @@ function worldMarks(params: Readonly<Record<string, unknown>>): Record<string, {
   const world: Record<string, { x: number; y: number; z: number }> = {};
   const at = { x: 0, y: 0, z: 0 };
   for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
+  // A mailbox by every home's gate (townProps): a fish sent there has come with the post.
+  if (typeof params.townProps === 'string' && parseTownProps(params.townProps).props.mailbox) for (let i = 1; i <= Math.min(3, homes); i++) world[`mailbox${i}`] = at;
   if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
   // Paths meet at a hub: the mark `paths` documents itself as adding.
   if (Number(params.paths ?? 0) > 0) world.hub = at;

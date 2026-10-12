@@ -471,9 +471,11 @@ and configured the second.
 - `{ "type": "bounce", "speed": [0.12, 0.24] }` — diagonal, reflecting off edges
 - `{ "type": "static" }` — stays exactly where placed (use with `position` for HUD text)
 - `{ "type": "orbit", "speed": [10, 40], "radius": [0.05, 0.2], "center": { "x": 0.5, "y": 0.5 } }`
-  — angular speed in deg/sec; `center` may instead be `{ "layer": "planet" }`
-  to orbit a single-entity parent layer (moons around a wandering planet;
-  strictly one level deep)
+  — angular speed in deg/sec; a **negative** speed orbits the other way
+  (counter-rotating rings, meshing gears); `center` may instead be
+  `{ "layer": "planet" }` to orbit a single-entity parent layer (moons around a
+  wandering planet; strictly one level deep — and the parent must have
+  `count: 1`)
 - `{ "type": "wander", "speed": [0.004, 0.012], "angle": 0, "meander": 0.1, "coherence": 0.7 }`
   — organic harmonic drift: base velocity plus 3 seeded sine octaves per axis.
   Flowing curved paths with zero simulation state. `meander` scales the
@@ -486,7 +488,10 @@ and configured the second.
 - `{ "type": "path", "points": [{"x":0.1,"y":0.7}, ...], "duration": 30000, "curve": "smooth", "closed": true, "scatter": 0.02 }`
   — choreographed spline (Catmull-Rom, or `linear`); 2..24 waypoints, lap time
   ≥ 2 s; `closed` loops (default), open paths ping-pong; `scatter` offsets
-  entities sharing the path; each entity gets a seeded phase along it
+  entities sharing the path (**must be > 0** — omit it for an exact path
+  rather than writing `0`); each entity gets a seeded phase along it. A single
+  entity cannot show a curve — use `count` ≥ 12 (plus `trail`/`ghosting`) to
+  make the whole path read
 
 All speeds are ranges; each entity draws its own value (seeded).
 
@@ -697,7 +702,9 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
 ```
 
 - A key glides `path` from wherever it is at `t` to `value` over `dur` ms
-  (default 1000, the live-steer default; `0` is a cut), eased `smooth`
+  (default 1000, the live-steer default; `0` is a cut; at most 30000 — a
+  longer `dur` fails validation for the whole spec, so split a slower glide
+  into consecutive keys of ≤ 30 s each), eased `smooth`
   (default), `linear` or `step` (holds, then switches at the glide's end).
   Keys address the same dot-paths as `setParam` — index or `key` form — and a
   path must already exist on the spec (a key cannot add a field). The spec must
@@ -890,6 +897,27 @@ Known approximations (deliberate): trails and ghosting are not sampled, text ink
 is estimated from font size × string length. Good enough to perceive
 composition, focus, balance, and motion — not a substitute for a human (or VLM)
 judgement of beauty.
+
+**Motion comes in both units.** `motion[].meanSpeed` / `maxSpeed` are px per
+second at the perceived size; `meanSpeedVp` / `maxSpeedVp` are the same speeds
+in viewport units per second (fractions of `min(w,h)` — the unit specs are
+authored in), which do not change with the preview size; `1.0` crosses the
+short side of the screen every second. `moving` is judged in viewport units,
+so it gives the same answer at every size. Each layer also carries `heading` (screen degrees: 0 right, 90 down) and
+`headingSpread` (0 = a conveyor, everything moving the same way — the
+"screen-wipe" to avoid; 1 = scattered). Sampling a centroid over time gives the
+WRONG sign for a wrapping full-viewport scatter, which is why heading is
+reported directly.
+
+**Colour is its own channel.** `perceiveScene(...).colour` and
+`diffScenes(...).colour` carry the hue / saturation / warmth (red minus blue,
+−1 cold … 1 warm) of the alpha × area weighted sprite mass and of the
+background plate. Judge "warmer / cooler" on `colour.warmthDelta`, not on
+`meanLuminance` — plausible cool tones weigh MORE under luma than the reds they
+replace, so a calming edit pushes luminance up. `diffScenes` also reports a
+`motion` channel (overall and per-layer speed deltas with headings) and
+advises at the diff's own viewport, so its `advisories.added/removed` agree
+with `adviseSpec` at that size.
 
 ## Sequence envelope (`idle-sequence`)
 

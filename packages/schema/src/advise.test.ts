@@ -236,6 +236,74 @@ describe('adviseSpec', () => {
     expect(w.some((x) => x.code === 'link-starvation')).toBe(true);
   });
 
+  it('does not flag a bottom-anchored skyline as off-center (F20)', () => {
+    // Towers along the bottom, sky deliberately empty — the vertical offset IS
+    // the composition. Every composed entity comes from an edge-anchored band.
+    const skyline: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      layers: [
+        { key: 'towers', count: 24, region: { x: [0, 1], y: [0.62, 1] }, sprite: { kind: 'rect', width: [0.02, 0.05], aspect: [2, 5], color: '#080d16' }, motion: { type: 'static' } },
+        { key: 'rain', count: 40, region: { x: [0, 1], y: [0.6, 1] }, sprite: { kind: 'streak', length: [0.01, 0.02], color: '#8fa3c8', width: 0.002 }, motion: { type: 'rise', speed: [0.1, 0.2] } },
+      ],
+    };
+    expect(adviseSpec(skyline).map((w) => w.code)).not.toContain('off-center');
+    // The same offset from a layer that merely SPAWNED low with no anchor
+    // still reads as an accident.
+    const accidental: SaverSpec = {
+      ...skyline,
+      layers: [{ key: 'blob', count: 30, region: { x: [0.3, 0.7], y: [0.75, 0.95] }, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#fff' }, motion: { type: 'drift', speed: [0.01, 0.02] } }],
+    };
+    expect(adviseSpec(accidental).map((w) => w.code)).toContain('off-center');
+  });
+
+  it('judges contrast against the plate under the layer, not the gradient mean (F19)', () => {
+    // Near-black silhouettes in a warm bottom band: invisible against the
+    // gradient's average, clearly readable against the ground they sit on.
+    const silhouettes: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      background: { type: 'gradient', stops: [{ at: 0, color: '#05070d' }, { at: 0.55, color: '#0b0f1a' }, { at: 1, color: '#371a07' }] },
+      layers: [
+        { key: 'towers', count: 20, region: { x: [0, 1], y: [0.6, 1] }, sprite: { kind: 'rect', width: [0.02, 0.05], aspect: [2, 5], color: '#080d16' }, motion: { type: 'static' } },
+      ],
+    };
+    expect(adviseSpec(silhouettes).map((w) => w.code)).not.toContain('low-contrast-layer');
+    // Pinned in the sky instead, the same colour really does vanish.
+    const lost: SaverSpec = { ...silhouettes, layers: [{ ...silhouettes.layers[0]!, region: { x: [0, 1], y: [0, 0.3] } }] };
+    expect(adviseSpec(lost).map((w) => w.code)).toContain('low-contrast-layer');
+  });
+
+  it('exempts a spinning streak from streak-on-static (F34.5)', () => {
+    const rotor: SaverSpec = {
+      ...base,
+      layers: [{ count: 1, position: { x: 0.5, y: 0.5 }, spin: 20, sprite: { kind: 'streak', length: [60, 60], color: '#fff', width: 2 }, motion: { type: 'static' } }],
+    };
+    expect(adviseSpec(rotor).map((w) => w.code)).not.toContain('streak-on-static');
+    const plain: SaverSpec = { ...rotor, layers: [{ ...rotor.layers[0]!, spin: undefined }] };
+    expect(adviseSpec(plain).map((w) => w.code)).toContain('streak-on-static');
+  });
+
+  it('warns when additive layers stack past the saturation ceiling (F35)', () => {
+    // The stack the analytic model rated healthy: 250 large bright "lighter"
+    // discs that clip to white on a real canvas.
+    const blown: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      layers: [
+        { count: 150, blend: 'lighter', alpha: [0.6, 0.9], sprite: { kind: 'circle', radius: [0.05, 0.1], color: '#ffffff', soft: true }, motion: { type: 'drift', speed: [0.01, 0.02] } },
+        { count: 100, blend: 'lighter', alpha: [0.6, 0.9], sprite: { kind: 'circle', radius: [0.05, 0.1], color: '#fff5dd', soft: true }, motion: { type: 'drift', speed: [0.01, 0.02] } },
+      ],
+    };
+    expect(adviseSpec(blown).map((w) => w.code)).toContain('additive-saturation');
+    // The recommended atmosphere ("80 tiny soft circles at alpha 0.2") is fine.
+    const atmosphere: SaverSpec = {
+      ...blown,
+      layers: [{ count: 80, blend: 'lighter', alpha: [0.15, 0.25], sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff', soft: true }, motion: { type: 'drift', speed: [0.01, 0.02] } }],
+    };
+    expect(adviseSpec(atmosphere).map((w) => w.code)).not.toContain('additive-saturation');
+  });
+
   it('warns on uniform motion', () => {
     const uniform: SaverSpec = {
       ...base,
