@@ -342,6 +342,11 @@ export const METAQUARIUM_PARAMS = {
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** The village's small things, `kind[:count][/style], …`: fence (round every home's yard, a gate where its path leaves;
+   *  driftwood coral stone crystal), mailbox (by every gate; post — its flag goes up when the mail comes — clam, bottle;
+   *  each a vignette mark mailbox1…), bench[:n] (round the fountain or hub; shell stone), sock[:n] (a current sock).
+   *  Fences and mailboxes need geodeHomes. Empty = none. */
+  townProps: { type: 'string', default: '', ease: 'step' },
   /** Pyramids built of cubes, as the fish are (0 = none): on the floor in complexes — a great pyramid and its queens —
    *  small ones near, the great ones at the back — only on flat ground (a flat floor: none on dunes, ridges or a basin);
    *  standing, half sunk, one missing its capstone. */

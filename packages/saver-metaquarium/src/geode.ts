@@ -61,6 +61,8 @@ export interface GeodeParts {
   /** The foot of the front steps, on the floor: where a path to this door begins. */
   doorstep: { x: number; z: number };
   radius: number;
+  /** The shell's half-widths on the floor: across its front, and along its door's axis (front to back). */
+  extent: { across: number; along: number };
   triangles: number;
 }
 
@@ -296,6 +298,7 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
     obstacle: { x: spec.x, y: cy, z: spec.z, r: r * Math.max(sx, sz), h: Math.max(r * sy, ventP.y - cy) },
     doorstep: { x: foot.x, z: foot.z },
     radius: r,
+    extent: { across: r * sx, along: r * sz },
     triangles,
   };
 }
