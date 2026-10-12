@@ -42,6 +42,15 @@ describe('floorCover: the string', () => {
     expect(parseFloorCover('lawn/plaid, carpet, steps/marble, mat:3').problems).toHaveLength(4);
   });
 
+  it('allows spaces around : and /, rejects them inside a word, and stays linear on a long run of spaces (CodeQL js/polynomial-redos)', () => {
+    expect(parseFloorCover('lawn / checks').cover.lawn).toEqual({ style: 'checks' });
+    expect(parseFloorCover('la wn').problems).toHaveLength(1);
+    const t0 = performance.now();
+    const { problems } = parseFloorCover(`a${' '.repeat(50_000)}!`);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(problems).toHaveLength(1);
+  });
+
   it('asks for what each lies on: homes for lawns and mats, paths for steps, a square for a mosaic', () => {
     const problems = (p: Record<string, unknown>) => validateMetaquariumParams(p).filter((x) => x.path === 'floorCover').map((x) => x.message);
     expect(problems({ floorCover: 'lawn, mat' }).join()).toMatch(/geodeHomes/);
