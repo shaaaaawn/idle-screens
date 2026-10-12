@@ -259,3 +259,18 @@ describe('floorCover: in the world', () => {
     expect(w.group.children.some((c) => c.name === 'floor-cover')).toBe(false);
   });
 });
+
+describe('parseFloorCover input safety', () => {
+  it('stays linear on a long run of spaces (CodeQL js/polynomial-redos)', () => {
+    const t0 = performance.now();
+    const { problems } = parseFloorCover(`a${' '.repeat(50_000)}!`);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(problems).toHaveLength(1);
+  });
+
+  it('still allows spaces around / and rejects one inside a word', () => {
+    expect(parseFloorCover('lawn / checks, steps').problems).toEqual([]);
+    expect(parseFloorCover('lawn / checks').cover.lawn).toEqual({ style: 'checks' });
+    expect(parseFloorCover('la wn').problems).toHaveLength(1);
+  });
+});
