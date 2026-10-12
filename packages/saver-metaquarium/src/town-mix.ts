@@ -38,7 +38,11 @@ export function parseTownProps(src: string): { props: TownProps; problems: strin
   for (const raw of src.split(',')) {
     const part = raw.trim().toLowerCase();
     if (!part) continue;
-    const m = /^([a-z]+)\s*(?::\s*([0-9]+))?\s*(?:\/\s*([a-z]+))?$/.exec(part);
+    // Whitespace is allowed only around `:` and `/`. Reject it inside a word
+    // or number, then drop the rest, so the pattern below has no `\s*` runs:
+    // two adjacent ones (as this had) backtrack quadratically on a long run of
+    // spaces, and the string is steerable by any agent (CodeQL js/polynomial-redos).
+    const m = /[a-z0-9]\s+[a-z0-9]/.test(part) ? null : /^([a-z]+)(?::([0-9]+))?(?:\/([a-z]+))?$/.exec(part.replace(/\s+/g, ''));
     const kind = m?.[1], count = m?.[2] !== undefined ? Number(m[2]) : undefined, style = m?.[3];
     const bad = (why: string): void => { problems.push(`"${raw.trim()}": ${why}`); };
     if (!m) { bad('expected kind[:count][/style] — fence mailbox bench sock'); continue; }
