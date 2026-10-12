@@ -1,0 +1,26 @@
+---
+'@idle-screens/saver-metaquarium': minor
+---
+
+Pyramids: `pyramids` (0–1) and `pyramidMix` raise pyramids built of cubes, the way the fish are built.
+- **The cubes:** each pyramid is a stack of cubes you can count, a dozen or two across. Its cube is a whole multiple of a fish's (FISH_LENGTH/14 × 1–5). Every cube is drawn as a cube, in its own shade of the stone with a seam beside the next.
+- **Symmetry:** every pyramid is exactly symmetric, with an odd base and a single-cube apex.
+- **Placement:** they stand on the floor in complexes, as Giza's do: a great pyramid with its queens in a row beside it. Small ones sit inside the camera's orbit, larger ones across the middle of the floor, and the great ones at the back.
+- **Shapes:** Giza, step, bent, Djoser, Mayan and frame.
+- **Stones:** ten, chosen by the room unless `pyramidMix` names some.
+- **Details:** glyph friezes, gilded or glowing capstones that light the floor, and an eye on some.
+- **Ground:** only where the floor is flat under the whole footprint and around it. In practice that means `floorKind: flat`: none on dunes, ridges, a basin's bowl or a rippled tread.
+- **Poses:** standing, half sunk, or missing a capstone that lies at its foot.
+- **Lit stones:** `led` (white and rainbow lamps) and `neon` (magenta and cyan) make every cube a lamp running a light show, a pyramid of light. The shows are rings rising, a beam round the faces, glowing edges, an equalizer, a rainbow wash and twinkling, changing every 24 s with a crossfade.
+  - Each lamp changes at most about once a second, smoothly, never a strobe.
+  - They keep 45% of the fog, so the shows at the back still read.
+  - Glowing frames run a pulse of light up their edges.
+- **The show** (`pyramidShow`, live, no rebuild) has eleven routines: rings, beam, edges, equalizer, rainbow, twinkle, faces, rain, spiral, breathe, ripple.
+  - The whole field plays as one, with a wave rolling across it. Other modes: `solo`, one named routine, or a looping cue sheet (`8s:rings, 8s:beam`).
+  - `pyramidBpm` steps the motion on the beat and lifts the lamps by under 10% on each beat.
+  - Small pyramids run the routines that read on a few cubes; big ones keep a faint outline lit.
+  - The lamps cut through the fog, but the stone and the base don't. The light on the floor moves with the show.
+- **The stage:** `pyramidLayout: stage` raises one monumental pyramid in the middle of the camera's orbit, with a small one at each side, all symmetric. It is lit, or stone with lit trim.
+- **Lit trim:** `pyramidMix` `trim[:share]` lights stone pyramids' edges, base and capstone. A lit great pyramid's queens are stone, carrying its light in their trim.
+- **Flash safety:** one model, written in both JS and GLSL from one table, is checked through the validator's WCAG rule. Every lamp counts as the whole frame, every routine is tested free-running and at 140 bpm, large and small, plus ten minutes of the sequence and solo. Real pixels pass in the playground's validate mode too (worst tile: 2 flashes a second).
+- **Cost:** one draw, and a second when any lit stone is present.

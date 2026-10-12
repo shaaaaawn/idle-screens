@@ -35,7 +35,11 @@
 export interface Mark { x: number; y: number; z: number }
 export type Marks = Readonly<Record<string, Mark>>;
 
-export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow'] as const;
+/** Break-dance moves: a fish with the clips for them (a betafish, beta.ts) dances them
+ *  with its own body; any other fish gets the whole-body version below. */
+export const DANCES = ['toprock', 'footwork', 'windmill', 'headspin', 'freeze', 'drop'] as const;
+export type Dance = (typeof DANCES)[number];
+export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow', ...DANCES] as const;
 export type Gesture = (typeof GESTURES)[number];
 
 /** Marks any open tank has, for vignettes played outside a room. */
@@ -216,6 +220,10 @@ export interface ActorPose {
   doing: string;
   /** What the actor is facing this beat — another actor, a mark — for its EYES. */
   lookAt: Mark | null;
+  /** The gesture under way: which, seconds into it, seconds into its beat (a
+   *  loop phased on that stays on the bar: beats are whole seconds), and its
+   *  envelope (0..1) — for a rigged fish that plays the move with clips of its own. */
+  gesture?: { name: Gesture; at: number; bar: number; weight: number };
 }
 
 const smoother = (u: number): number => { const c = Math.min(1, Math.max(0, u)); return c * c * c * (c * (c * 6 - 15) + 10); };
@@ -262,7 +270,12 @@ function placeOf(v: Vignette, actor: number, tSec: number, depth = 0): Mark {
 }
 
 /** Full pose. Pure in (vignette, actor, t). */
-export function poseOf(v: Vignette, actor: number, tSec: number): ActorPose | null {
+/**
+ * `own`: gestures this actor performs with its own body (a betafish's dance
+ * clips). Their whole-body version is left out — the clip moves the body, and
+ * both would turn it twice — but the gesture is still reported in `gesture`.
+ */
+export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gesture) => boolean): ActorPose | null {
   if (actor >= v.actors || !v.duration) return null;
   const t = ((tSec % v.duration) + v.duration) % v.duration;
   let bi = v.beats.findIndex((b) => t < b.t0 + b.dur);
@@ -300,6 +313,7 @@ export function poseOf(v: Vignette, actor: number, tSec: number): ActorPose | nu
   y += Math.sin(tSec * 1.25 + actor * 2.4) * 0.9;
   let roll = Math.sin(tSec * 0.8 + actor) * 0.03;
   let doing = speed > 2.5 ? 'moving' : 'idle';
+  let gesture: ActorPose['gesture'];
 
   // The gesture plays once the actor has arrived (or for the whole beat, if
   // it did not travel), under an envelope so it starts and stops softly.
@@ -307,10 +321,14 @@ export function poseOf(v: Vignette, actor: number, tSec: number): ActorPose | nu
     const g0 = me.moved ? 0.64 : 0.06;
     const gu = (u - g0) / (1 - g0 - 0.04);
     if (gu > 0 && gu < 1) {
-      const e = bell(gu) ** 0.6, gt = gu * (beat.dur * (1 - g0));
+      // Real seconds: into the gesture, and into its beat. (Scaled to span the
+      // envelope's shortened window, a gesture's clock ran 4–12 % fast, and a
+      // dance slid off the bar.)
+      const e = bell(gu) ** 0.6, gt = (u - g0) * beat.dur, bt = u * beat.dur;
       let yaw = 0, pitch = 0;
       doing = me.gesture;
-      switch (me.gesture) {
+      gesture = { name: me.gesture, at: gt, bar: bt, weight: e };
+      switch (own?.(me.gesture) ? null : me.gesture) {
         case 'talk': pitch = Math.sin(gt * 8.5) * 0.11 * e; y += Math.abs(Math.sin(gt * 4.25)) * 1.4 * e; break;
         case 'nod': pitch = Math.sin(gt * 5.5) * 0.3 * e; break;
         case 'shake': yaw = Math.sin(gt * 9) * 0.38 * e; break;
@@ -320,12 +338,19 @@ export function poseOf(v: Vignette, actor: number, tSec: number): ActorPose | nu
         case 'bow': pitch = -bell(gu) * 0.55; y -= bell(gu) * 2; break;
         case 'peek': { const k = Math.sin(gt * 2.4) * e; x += -fz * k * 7; z += fx * k * 7; roll += k * 0.18; break; }
         case 'rest': y -= 5 * e; roll += 0.22 * e; pitch = -0.08 * e; break;
+        // The dances, for a fish with no clips for them: the whole body does what it can.
+        case 'toprock': roll += Math.sin(bt * Math.PI * 2) * 0.3 * e; y += Math.abs(Math.sin(bt * Math.PI * 2)) * 1.5 * e; break;
+        case 'footwork': yaw = Math.sin(bt * Math.PI) * 0.5 * e; y -= 3 * e; roll += Math.sin(bt * Math.PI * 3) * 0.15 * e; break;
+        case 'windmill': roll += smoother(gu) * Math.PI * 2 * Math.max(1, Math.round(beat.dur / 1.5)); break;
+        case 'headspin': pitch = -1.2 * e; yaw = gu * Math.PI * 2 * Math.max(1, Math.round(beat.dur)); break;
+        case 'freeze': pitch = 0.9 * Math.min(1, gu * 6) * (1 - smoother((gu - 0.85) / 0.15)); roll += 0.3 * e; break;
+        case 'drop': pitch = -bell(Math.min(1, gu * 1.6)) * 0.7; y -= bell(gu) * 6; break;
       }
       if (yaw) { const c = Math.cos(yaw), s = Math.sin(yaw); const nx = fx * c - fz * s; fz = fx * s + fz * c; fx = nx; }
       if (pitch) { fy += Math.tan(pitch) * Math.hypot(fx, fz); fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl; }
     }
   }
-  return { x, y: Math.max(9, y), z, fx, fy, fz, roll, doing, lookAt: target ?? null };
+  return { x, y: Math.max(9, y), z, fx, fy, fz, roll, doing, lookAt: target ?? null, ...(gesture ? { gesture } : {}) };
 }
 
 /** Where a fish hovers to be "at" each thing in the geode interior — a body

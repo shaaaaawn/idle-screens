@@ -35,9 +35,14 @@ import { fishHash } from './swim';
 
 export const BETA_MOMENTS = ['flare', 'spin', 'gulp', 'shimmy', 'rest', 'dance', 'flick', 'bow', 'billow', 'curl'] as const;
 export type BetaMoment = (typeof BETA_MOMENTS)[number];
-export const BETA_CLIPS = ['swim', 'hover', 'burst', ...BETA_MOMENTS, 'bend', 'lookYaw', 'lookPitch', 'spread'] as const;
+/** Break-dance moves a vignette calls by name (vignette.ts DANCES): the rig's own clips. */
+export const BETA_DANCES = ['toprock', 'footwork', 'windmill', 'headspin', 'freeze', 'drop'] as const;
+export type BetaDance = (typeof BETA_DANCES)[number];
+/** The dances that loop (on a 120 bpm grid: a 2 s bar); freeze and drop play once. */
+const DANCE_LOOPS: ReadonlySet<BetaDance> = new Set(['toprock', 'footwork', 'windmill', 'headspin']);
+export const BETA_CLIPS = ['swim', 'hover', 'burst', ...BETA_MOMENTS, ...BETA_DANCES, 'bend', 'lookYaw', 'lookPitch', 'spread'] as const;
 export type BetaClip = (typeof BETA_CLIPS)[number];
-export type BetaDoing = 'swim' | 'hover' | 'burst' | BetaMoment;
+export type BetaDoing = 'swim' | 'hover' | 'burst' | BetaMoment | BetaDance;
 export type BetaTemper = 'fighter' | 'dreamer' | 'showoff' | 'curious';
 
 export interface BetaRig {
@@ -140,6 +145,9 @@ export interface BetaInput {
   turn: number;
   /** Where the viewer is from its head, radians: yaw + to its left, pitch + up. Null: no viewer. */
   viewer: { yaw: number; pitch: number } | null;
+  /** A dance a vignette has it doing: which move, seconds into it, seconds into
+   *  its beat (a loop is phased on this, to stay on the bar), its envelope (0..1). */
+  dance?: { move: BetaDance; at: number; bar?: number; weight: number } | null;
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -181,10 +189,18 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   const phase = (t + beat * BETA_STROKE) * p.tempo;
   const cruise = smooth((inp.pace - 0.1) / 0.5);
   // A moment, once begun, is finished before a dart takes the body; the dart eases in and out.
-  const m = betaMoment(index, t, (n) => D[n]);
-  const dart = smooth(inp.flurry * 1.4);
-  const burst = dart * (1 - m.weight);
-  const stroke = (1 - m.weight) * (1 - dart);
+  // A dance takes the body over: its own moments and strokes give way to it.
+  // The body's own mix (moment, dart, stroke) sums to one; a dance takes its
+  // share and the whole mix makes room, so the weights still sum to one.
+  const dw = inp.dance ? clamp(inp.dance.weight, 0, 1) : 0;
+  const room = 1 - dw;
+  const mm = betaMoment(index, t, (n) => D[n]);
+  const dart0 = smooth(inp.flurry * 1.4);
+  const mix = { moment: mm.weight, burst: dart0 * (1 - mm.weight), stroke: (1 - mm.weight) * (1 - dart0) };
+  const m = { ...mm, weight: mix.moment * room };
+  const dart = dart0 * room;
+  const burst = mix.burst * room;
+  const stroke = mix.stroke * room;
   const bend = turnDial(inp.turn, BETA_BEND);
 
   const wanderYaw = 0.25 * Math.sin(t * 0.41 + index * 1.3) + 0.12 * Math.sin(t * 0.97 + index * 0.6);
@@ -203,6 +219,7 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   weights.hover = stroke * (1 - cruise);
   weights.burst = burst;
   if (m.moment) weights[m.moment] = m.weight;
+  if (inp.dance && dw > 0) weights[inp.dance.move] = dw;
   weights.bend = 1; weights.lookYaw = 1; weights.lookPitch = 1; weights.spread = 1;
   const dial = (v: number, d: number): number => clamp((v + 1) * 0.5 * d, 0, d - 1e-4);
   const times = {} as Record<BetaClip, number>;
@@ -211,6 +228,10 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
   times.hover = posMod(phase, D.hover);
   times.burst = posMod(t, D.burst);
   if (m.moment) times[m.moment] = clamp(m.into, 0, D[m.moment] - 1e-4);
+  if (inp.dance) {
+    const d = inp.dance.move;
+    times[d] = DANCE_LOOPS.has(d) ? posMod(inp.dance.bar ?? inp.dance.at, D[d]) : clamp(inp.dance.at, 0, D[d] - 1e-4);
+  }
   times.bend = dial(bend, D.bend);
   times.lookYaw = dial(yaw, D.lookYaw);
   times.lookPitch = dial(pitch, D.lookPitch);
@@ -221,7 +242,7 @@ export function betaFrame(rig: BetaRig, t: number, index: number, beat: number, 
     a.setEffectiveWeight(weights[n]);
   }
   rig.mixer.update(0);
-  const doing: BetaDoing = burst > 0.3 ? 'burst' : m.moment && m.weight > 0.3 ? m.moment : cruise > 0.5 ? 'swim' : 'hover';
+  const doing: BetaDoing = inp.dance && dw > 0.3 ? inp.dance.move : burst > 0.3 ? 'burst' : m.moment && m.weight > 0.3 ? m.moment : cruise > 0.5 ? 'swim' : 'hover';
   const lock = p.display >= 0.5 ? Math.max(weights.flare, weights.curl) : 0;
   return { doing, temper: p.temper, weights, bend, spread, lock, look: { yaw, pitch } };
 }
