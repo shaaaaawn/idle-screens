@@ -1,7 +1,33 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SpriteSpec, TextBlockAnchor } from './types';
+import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor } from './types';
 import { LIMITS } from './types';
 import { isShapedSprite } from './shapes';
+
+/**
+ * The two scale factors every entity builder must agree on, computed in ONE
+ * place. `scale` turns viewport-unit dimensions into px (1 for `units: "px"`,
+ * min(w,h) otherwise — the default is viewport, so an omitted `units` scales);
+ * `countScale` thins or thickens scatter density against `referenceViewport`
+ * and is clamped so the projected total never exceeds LIMITS.maxTotal.
+ *
+ * Four callers (compile, perceive, advise, describe) each carried their own
+ * copy of this arithmetic and they drifted twice: describeScene inverted the
+ * units default and built every shipped example at scale 1 (F48), and
+ * advise/describe skipped the maxTotal clamp so above ~4.6K they measured a
+ * scene the renderer never draws — and because the RNG stream is shared across
+ * layers, one early layer's different count shifts every later layer's
+ * positions too (F49).
+ */
+export function entityScales(spec: SaverSpec, w: number, h: number): { scale: number; countScale: number } {
+  const scale = spec.units === 'px' ? 1 : Math.min(w, h);
+  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
+  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
+  if (countScale > 1) {
+    const rawTotal = spec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
+    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
+  }
+  return { scale, countScale };
+}
 
 /** Near plane for warp motion. z lives in [WARP_NEAR, 1]; screen scale is 1/z. */
 export const WARP_NEAR = 0.08;

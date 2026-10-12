@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap } from './perceive';
 import type { IdleSequence } from './types';
+import { adviseSpec } from './advise';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
 import { LIMITS, type SaverSpec } from './types';
 
@@ -440,7 +441,35 @@ describe('motionStats', () => {
     ]);
     const stats = motionStats(s);
     expect(stats.find((m) => m.key === 'still')!.meanSpeed).toBe(0);
-    expect(stats.find((m) => m.key === 'runner')!.meanSpeed).toBeCloseTo(100, 0);
+    // 100 px/s on the default 1920×1080 viewport = 100/1080 viewport units/s.
+    expect(stats.find((m) => m.key === 'runner')!.meanSpeedVp).toBeCloseTo(100 / 1080, 4);
+  });
+
+  it('reports speed in viewport units, so the number does not change with the preview size', () => {
+    const s = spec([
+      { key: 'runner', count: 5, sprite: { kind: 'circle', radius: [5, 5], color: '#ffffff' }, motion: { type: 'drift', speed: [100, 100] } },
+    ]);
+    // A px-unit spec authored at 100 px/s is a different fraction of a
+    // different viewport — but a VIEWPORT-unit spec reads identically anywhere.
+    const vu: SaverSpec = { ...s, units: 'viewport', layers: [{ ...s.layers[0]!, sprite: { kind: 'circle', radius: [0.005, 0.005], color: '#ffffff' }, motion: { type: 'drift', speed: [0.1, 0.1] } }] };
+    const small = motionStats(vu, { viewport: { width: 960, height: 540 } })[0]!;
+    const large = motionStats(vu, { viewport: { width: 3840, height: 2160 } })[0]!;
+    expect(small.meanSpeedVp).toBeCloseTo(0.1, 3);
+    expect(large.meanSpeedVp).toBeCloseTo(0.1, 3);
+    expect(small.moving).toBe(true);
+    expect(large.moving).toBe(true);
+  });
+
+  it('reports heading and spread — a conveyor vs a scatter', () => {
+    const conveyor = spec([
+      { key: 'belt', count: 30, sprite: { kind: 'circle', radius: [5, 5], color: '#ffffff' }, motion: { type: 'drift', speed: [50, 50], angle: 0 } },
+    ]);
+    const belt = motionStats(conveyor)[0]!;
+    expect(belt.heading).not.toBeNull();
+    expect(Math.min(Math.abs(belt.heading!), 360 - Math.abs(belt.heading!))).toBeLessThan(5);
+    expect(belt.headingSpread!).toBeLessThan(0.05);
+    const still = motionStats(spec([{ key: 's', count: 5, sprite: { kind: 'circle', radius: [5, 5], color: '#fff' }, motion: { type: 'static' } }]))[0]!;
+    expect(still.heading).toBeNull();
   });
 });
 
@@ -470,6 +499,51 @@ describe('diffScenes', () => {
     ]);
     const diff = diffScenes(sparse, healthy);
     expect(diff.advisories.removed).toContain('sparse-scene');
+  });
+
+  it('has a hue channel: a colour-only swap moves colour, not the luminance channels (P2 F3)', () => {
+    const red: SaverSpec = spec([
+      { key: 'field', count: 60, sprite: { kind: 'circle', radius: [20, 40], color: '#d04040' }, alpha: [0.8, 0.9], motion: { type: 'static' } },
+    ]);
+    const cyan: SaverSpec = { ...red, layers: [{ ...red.layers[0]!, sprite: { kind: 'circle', radius: [20, 40], color: '#40b0d0' } }] };
+    const diff = diffScenes(red, cyan);
+    expect(diff.colour.a.hue).not.toBeNull();
+    expect(Math.abs(diff.colour.hueShift!)).toBeGreaterThan(90);
+    expect(diff.colour.warmthDelta).toBeLessThan(-0.5);
+    expect(diff.colour.b.hex).toBe('#40b0d0');
+    // Geometry is untouched, so the geometric channels barely move.
+    expect(Math.abs(diff.coverage.delta)).toBeLessThan(0.01);
+    expect(diff.dominance[0]!.shareA).toBeCloseTo(diff.dominance[0]!.shareB, 3);
+  });
+
+  it('has a motion channel: halving every speed shows up (P2 F4)', () => {
+    const fast: SaverSpec = spec([
+      { key: 'a', count: 20, sprite: { kind: 'circle', radius: [5, 5], color: '#ffffff' }, motion: { type: 'drift', speed: [100, 100] } },
+      { key: 'b', count: 20, sprite: { kind: 'circle', radius: [5, 5], color: '#ffffff' }, motion: { type: 'drift', speed: [40, 40] } },
+    ]);
+    const slow: SaverSpec = { ...fast, layers: fast.layers.map((l) => ({ ...l, motion: { type: 'drift', speed: [(l.motion as { speed: [number, number] }).speed[0] / 2, (l.motion as { speed: [number, number] }).speed[1] / 2] } })) as SaverSpec['layers'] };
+    const diff = diffScenes(fast, slow);
+    expect(diff.motion.overall.delta).toBeLessThan(0);
+    expect(diff.motion.overall.b).toBeCloseTo(diff.motion.overall.a / 2, 4);
+    expect(diff.motion.layers[0]!.key).toBe('a');
+    expect(diff.motion.layers[0]!.delta).toBeLessThan(diff.motion.layers[1]!.delta);
+  });
+
+  it('advises at the diff viewport, so previewScene and previewDiff agree (P3 F6)', () => {
+    const s: SaverSpec = spec([
+      { count: 300, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, motion: { type: 'drift', speed: [0.01, 0.02] } },
+      { count: 300, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#8fd0ff' }, motion: { type: 'static' } },
+    ]);
+    const vu: SaverSpec = { ...s, units: 'viewport' };
+    // 600 declared entities: dense-scene at 1080p, not at 540p (countScale 0.5).
+    const vp = { width: 960, height: 540 };
+    const own = new Set(adviseSpec(vu, vp).map((w) => w.code));
+    const diff = diffScenes(vu, vu, { viewport: vp });
+    expect(diff.advisories.added).toEqual([]);
+    expect(diff.advisories.removed).toEqual([]);
+    const big = diffScenes(vu, { ...vu, layers: [vu.layers[0]!] }, { viewport: { width: 1920, height: 1080 } });
+    expect(big.advisories.removed).toContain('dense-scene');
+    expect(own.has('dense-scene')).toBe(false);
   });
 });
 

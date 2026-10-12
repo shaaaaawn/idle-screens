@@ -116,17 +116,17 @@ describe('bundled breeds (breeds/README.md)', () => {
       head: 'head', soft: true,
     },
     betafish: {
-      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'pecL', 'pecR', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
+      joints: ['body', 'cL1', 'cL2', 'cM1', 'cM2', 'cU1', 'cU2', 'd1', 'd2', 'gillL', 'gillR', 'head', 'ped', 'rear', 'ven1L', 'ven1R', 'ven2L', 'ven2R'],
       layers: ['flexP', 'flexR', 'gL', 'gR', 'lookP', 'lookY', 'roll', 'root', 'sD', 'sL', 'sU'],
       dials: ['bend', 'lookPitch', 'lookYaw', 'spread'],
-      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'flare', 'flick', 'gulp', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim'],
+      clips: ['bend', 'billow', 'bow', 'burst', 'curl', 'dance', 'drop', 'flare', 'flick', 'footwork', 'freeze', 'gulp', 'headspin', 'hover', 'lookPitch', 'lookYaw', 'rest', 'shimmy', 'spin', 'spread', 'swim', 'toprock', 'windmill'],
       head: 'head', soft: true,
     },
     seahorse: {
       joints: ['fin1', 'fin2', 'fin3', 'head', 'neck', 'snout', 't1', 't2', 't3', 't4', 't5', 't6', 'trunk'],
-      layers: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'lean', 'lookP', 'lookY', 'roll', 'root'],
-      dials: ['curl', 'lean', 'lookPitch', 'lookYaw'],
-      clips: ['bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
+      layers: ['a4', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'g4', 'g5', 'g6', 'grasp', 'lean', 'lookP', 'lookY', 'roll', 'root'],
+      dials: ['aim', 'curl', 'grip', 'lean', 'lookPitch', 'lookYaw'],
+      clips: ['aim', 'bob', 'bow', 'burst', 'coil', 'curl', 'dance', 'grip', 'hover', 'lean', 'lookPitch', 'lookYaw', 'lookabout', 'snick', 'stretch', 'swim', 'tilt', 'twirl', 'wag'],
       head: 'head', soft: true,
     },
   };
@@ -208,8 +208,10 @@ describe('bundled breeds (breeds/README.md)', () => {
 
   // How each minted rig faces the convention: the angelfish swims along +X and
   // is turned a quarter; the turtle's source is already square, facing +Z.
+  // The minted rigs that drop the faces buried between their cubes (they z-fought the outer faces into hairlines).
+  const DROPS_BURIED = new Set(['seahorse']);
   const FACING: Record<string, (p: number[]) => number[]> = { angelfish: ([x, y, z]) => [-z!, y!, x!], seaturtle: (p) => p, seahorse: ([x, y, z]) => [z!, y!, -x!], betafish: ([x, y, z]) => [-z!, y!, x!] };
-  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never edits the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
+  for (const [breed, turn] of Object.entries(FACING)) it(`${breed}: the rig never moves the model — at bind, every triangle is the source's (facing +Z), in its own region`, async () => {
     const draco = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() });
     const tris = async (file: string, f: (p: number[]) => number[] = (p) => p): Promise<Map<string, string[]>> => {
       const out = new Map<string, string[]>();
@@ -233,8 +235,26 @@ describe('bundled breeds (breeds/README.md)', () => {
       return out;
     };
     const src = await tris(`../breeds/source/${breed}.glb`, turn), rig = await tris(`../breeds/rig/${breed}.glb`);
+    // Every region stays (a token's paint is matched by its place in the list).
     expect([...rig.keys()].sort()).toEqual([...src.keys()].sort());
-    for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
+    if (!DROPS_BURIED.has(breed)) {
+      for (const [m, list] of src) expect(rig.get(m), m).toEqual(list);
+      return;
+    }
+    // A rig that drops the faces buried between cubes (common.drop_buried_faces): what is left is the
+    // source's, triangle for triangle, in its own region — fewer, never new, never moved.
+    let dropped = 0;
+    for (const [m, list] of src) {
+      const have = new Map<string, number>();
+      for (const t of list) have.set(t, (have.get(t) ?? 0) + 1);
+      for (const t of rig.get(m)!) {
+        expect(have.get(t) ?? 0, `${m}: ${t}`).toBeGreaterThan(0);
+        have.set(t, have.get(t)! - 1);
+      }
+      expect(rig.get(m)!.length, `${m} keeps a face`).toBeGreaterThan(0);
+      dropped += list.length - rig.get(m)!.length;
+    }
+    expect(dropped).toBeGreaterThan(1000);
   });
 
   it('glowfish: the angler rig survives the intake — eight bones, four clips, each part on its own', async () => {
@@ -451,6 +471,99 @@ describe('bundled breeds (breeds/README.md)', () => {
     expect(got).toEqual(want);
     // No glow named for an eye: isEyes() would take it for an eye display.
     for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
+  });
+
+  it('snail: the rig survives the intake — shell, soft body, stalks, eyes, feelers; each glowing feeler its own light', async () => {
+    const doc = await bundledDoc('snail');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['eye.L', 'eye.R', 'feeler.L', 'feeler.R', 'foot', 'head', 'neck', 'pupil.L', 'pupil.R', 'shell', 'stalk.L', 'stalk.R', 'tail']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['blink', 'glide', 'idle', 'look', 'munch', 'retract', 'stretch']);
+    expect(root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras().mqStride).toBe(6);
+    const feelers: string[] = [];
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      if (name === 'GLOW-Feelers') { expect(bones.size).toBe(1); feelers.push(...bones); }
+      // The whites ride the eyes, and each pupil's catchlight its pupil.
+      if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R', 'pupil.L', 'pupil.R']);
+      if (name === 'PrimaryColor' || name === 'SecondaryColor') expect([...bones]).toEqual(['shell']);
+    }
+    expect(feelers.sort()).toEqual(['feeler.L', 'feeler.R']);
+    // Clean eyes (common.py clean_eyes): each pupil ONE quad, so a slide shows no seam; the smile stays on the head.
+    expect(cleanEyes(root, joints, 'EYES-White', 'EYES-Black')).toEqual({ white: 24 + 4, pupil: 4 });
+    // The blink moves the eyes and nothing else, so it layers over the glide and the munch.
+    const blink = root.listAnimations().find((a) => a.getName() === 'blink')!;
+    expect(new Set(blink.listChannels().map((c) => c.getTargetNode()!.getName()))).toEqual(new Set(['eye.L', 'eye.R']));
+    for (const name of ['glide', 'munch']) {
+      const a = root.listAnimations().find((x) => x.getName() === name)!;
+      expect(a.listChannels().some((c) => c.getTargetNode()!.getName().startsWith('eye.'))).toBe(false);
+    }
+  });
+
+  it('snail: its loops close and its one-shots end where they began', async () => {
+    const doc = await bundledDoc('snail');
+    for (const a of doc.getRoot().listAnimations()) {
+      for (const ch of a.listChannels()) {
+        const v = ch.getSampler()!.getOutput()!, n = v.getCount();
+        const first = v.getElement(0, []) as number[], last = v.getElement(n - 1, []) as number[];
+        const d = Math.max(...first.map((x, i) => Math.abs(x - last[i]!)));
+        const flipped = ch.getTargetPath() === 'rotation' ? Math.max(...first.map((x, i) => Math.abs(x + last[i]!))) : Infinity;
+        expect(Math.min(d, flipped), `${a.getName()} ${ch.getTargetNode()!.getName()}.${ch.getTargetPath()}`).toBeLessThan(2e-3);
+      }
+    }
+  });
+
+  it('snail: the committed source is what its generator draws (breeds/rig/snail-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/snail-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    const doc = await new NodeIO().read(here('../breeds/source/snail.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
+  });
+
+  it('dot: the rig survives the intake — a full character, its screen with its own phosphor, every clip', async () => {
+    const doc = await bundledDoc('dot');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    const limbs = ['L', 'R'].flatMap((s) => [`arm.${s}.1`, `arm.${s}.2`, `hand.${s}`, `leg.${s}.1`, `leg.${s}.2`, `foot.${s}`]);
+    expect([...joints].sort()).toEqual(['antenna.1', 'antenna.2', 'bag', 'body', 'cap', 'pelvis', 'tail', ...limbs].sort());
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual([
+      'bow', 'clap', 'cheer', 'dance', 'deliver', 'facepalm', 'glitch', 'hop', 'idle', 'jump', 'laugh', 'nod', 'peek', 'point', 'rest',
+      'run', 'salute', 'search', 'shake', 'shrug', 'skid', 'sneak', 'spin', 'stretch', 'talk', 'trip', 'walk', 'wave', 'wiggle',
+    ].sort());
+    const extras = root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras();
+    expect(extras.mqRunStride).toBeGreaterThan(extras.mqStride as number);
+    expect(extras.mqSneakStride).toBeLessThan(extras.mqStride as number);
+    const names = root.listMaterials().map((m) => m.getName());
+    expect(names).toContain('SCREEN-Face#4fd8ff');
+    // A character keeps its colours: no coat roles the tank would re-roll.
+    for (const n of names) expect(n).toMatch(/^(PAINT-#[0-9a-f]{6}|SCREEN-|GLOW-)/);
+    // The screen rides the body (rigScreen reads it in the bind pose).
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      if (!p.getMaterial()!.getName().startsWith('SCREEN-')) continue;
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      expect([...bones]).toEqual(['body']);
+    }
+  });
+
+  it('dot: the committed source is what its generator draws (breeds/rig/dot-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/dot-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    const doc = await new NodeIO().read(here('../breeds/source/dot.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    // It stands on the floor: no voxel below k 0.
+    expect(Math.min(...model.voxels().map((v) => v[2]))).toBe(0);
   });
 
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', async () => {

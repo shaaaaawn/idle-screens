@@ -8,7 +8,7 @@ import {
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
-import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
+import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, type FloraStem, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_PARS, GEODE_SHADE, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
 import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
@@ -16,11 +16,21 @@ import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
 import { buildPaths, pathClearance, type PathMaterial, type PathSegment } from './paths';
+import { buildTown, townMaterial, type TownYard } from './town';
+import type { TownProps } from './town-mix';
+import { buildFloorCover, type CoverPaint } from './floor-cover';
+import { hasCover, type FloorCover } from './floor-cover-mix';
+import { buildPyramids, pyramidMaterial, pyramidShowUniforms, type Pyramids } from './pyramids';
+import { pyramidGlowLevel } from './pyramid-show';
 import { buildSky, LANTERN_COLOR, LANTERN_FRAGMENT, LANTERN_PARS, LANTERN_VERTEX, lanternAt, lanternBeat, lanternEmitters, lanternLight } from './sky';
 import { breach, buildRock, FISSURE_FLOW, paintStone, type RockCrystal, type Tri } from './rocks';
 import { buildBubbles, pearlSites, type BubbleLayer } from './bubbles';
 import { swayReach, type CanopyTip } from './canopy';
 import { stoneTop } from './ground';
+import { buildSigns } from './signs';
+import { supplyLevel } from './sign-supply';
+import type { SignEntry } from './sign-mix';
+import { OPEN_MARKS } from './vignette';
 
 export interface SceneryOptions {
   rocks: number;
@@ -55,6 +65,8 @@ export interface SceneryOptions {
   fountain?: 'none' | 'vent' | 'geode';
   /** 0..1 — crystal streetlamps along the paths (needs paths). */
   lamps?: number;
+  /** Signs (the `signs` DSL, parsed): beside the world's marks, or in the open. */
+  signs?: readonly SignEntry[];
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -68,6 +80,16 @@ export interface SceneryOptions {
   lanternHeight?: number;
   /** 0..1 — silhouettes standing past the fog line. */
   horizon?: number;
+  /** 0..1 — pyramids of cubes on the floor, in complexes near and far (pyramids.ts). */
+  pyramids?: number;
+  /** Their shapes and stones: `giza:3,mayan,gold:2` (pyramids.ts parsePyramidMix). */
+  pyramidMix?: string;
+  /** `field` or `stage` (pyramids.ts). */
+  pyramidLayout?: 'field' | 'stage';
+  /** The village's small things: fences, mailboxes, benches, current socks (town.ts, `townProps`). */
+  town?: TownProps;
+  /** What the village lays on its floor: lawns, a mosaic, doormats, stepping stones, ripples (floor-cover.ts, `floorCover`). */
+  floorCover?: FloorCover;
   /** The landmark: a voxel castle with crystal spires round a grand geode keep. */
   castle?: 0 | 1 | 2;
   /** 0..1 — walks from every door to the village hub, a road to the landmark, trails to the crystals. */
@@ -89,6 +111,8 @@ export interface Scenery {
   moving: Emitter[];
   /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
   canopyTips: CanopyTip[];
+  /** Kelp and sea-whip stalk a seahorse's tail can hold (flora.ts `stemAt` says where each is at t). */
+  stems: FloraStem[];
   /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
   floraMaterials: Material[];
   /** The wild geodes' material, which takes the light field too. */
@@ -103,6 +127,8 @@ export interface Scenery {
   marks: Record<string, { x: number; y: number; z: number }>;
   /** What the floor should paint: the path network, as segments. */
   paths: PathSegment[];
+  /** And the lawns, the square's mosaic and the sand's ripples (floor-cover.ts `writeCover`); null: none. */
+  cover: CoverPaint | null;
   drawCalls: number;
   triangles: number;
   clearance(x: number, z: number): number;
@@ -110,6 +136,12 @@ export interface Scenery {
   groundAt(x: number, z: number): number;
   /** `glow` and `pulse` are the crystals' (`crystalGlow`, `crystalPulse`): the room's cards breathe with them. */
   setFrame(t: number, fog?: { color: Color; near: number; far: number }, glow?: number, pulse?: number): void;
+  /** The lit pyramids' show this frame (pyramid-show.ts showState): routine a, routine b, the crossfade, solo, the tempo. */
+  setPyramidShow(a: number, b: number, mix: number, solo: boolean, bpm: number): void;
+  /** Swap the LED boards' text in place (in sign order), no rebuild: for live data. */
+  setLedTexts(texts: readonly string[]): void;
+  /** `signFlicker` 0..1: how unstable the lit signs' supply is. Live, no rebuild. */
+  setSignFlicker(amount: number): void;
   /** The water surface over the live bubbles (null: open water). Cheap; call per frame. */
   setSurface(y: number | null): void;
 }
@@ -248,6 +280,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   const homeLights: Emitter[] = [];
   const marks: Record<string, { x: number; y: number; z: number }> = {};
   const doorsteps: { x: number; z: number }[] = [];
+  // Each home's yard, for its fence and mailbox (town.ts).
+  const yards: TownYard[] = [];
   const homeRng = rng.fork(3);
   const homeCount = Math.min(Math.round(opts.homes), opts.cap >= 8 ? 3 : 2);
   for (let i = 0; i < homeCount; i++) {
@@ -291,6 +325,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       marks[`home${i + 1}in`] = { x: m.x - (dx / dl) * 5 * s, y: m.y, z: m.z - (dz / dl) * 5 * s };
     }
     obstacles.push(home.obstacle);
+    yards.push({ x, z, y: terrain(x, z), across: home.extent.across, along: home.extent.along, door: home.doorstep, tint: anchors[i % anchors.length]!.color });
     counts.homes!++;
   }
   // The landmark. It stands behind the village, gate toward the camera, and
@@ -429,6 +464,116 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   // Plants keep off the plaza; fish and plants go round the lamp posts.
   keepClear.push(...plaza);
   for (const l of lampSites) obstacles.push({ x: l.x, y: terrain(l.x, l.z), z: l.z, r: 2.5 * s, h: 17 * s });
+  // The village's small things — fences, mailboxes, benches, socks — once its homes, paths, lamps and square have
+  // their places; before the pyramids, signs, geodes and garden, which keep off them.
+  const townAt = opts.town && !opts.interior && (opts.town.fence || opts.town.mailbox || opts.town.bench || opts.town.sock) ? opts.town : null;
+  // The square: the fountain, the hub, or the village green in front of the homes.
+  const centre = fountainAt ? { x: fountainAt.x, z: fountainAt.z, r: 23 * s }
+    : marks.hub ? { x: marks.hub.x, z: marks.hub.z, r: 12 * s }
+      : yards.length ? { x: yards.reduce((a, y) => a + y.x, 0) / yards.length, z: yards.reduce((a, y) => a + y.z, 0) / yards.length + 40 * s, r: 10 * s } : null;
+  // The village's current: the socks stream down it and the sand is combed across it.
+  const current = rng.fork(16).next() * Math.PI * 2;
+  if (townAt) {
+    const town = buildTown(townAt, {
+      rng: rng.fork(15), scale: s, terrain, yards, centre, current,
+      // `own`: a fence's own home, whose round footprint its yard (fitted to the shell) stands inside.
+      free: (x, z, r, own) => !obstacles.some(o => !(own && o.x === own.x && o.z === own.z) && Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < 3 * s + r)
+        && !(fountainAt && Math.hypot(x - fountainAt.x, z - fountainAt.z) < 18 * s + r),
+      // `onSquare`: the plaza's paving is a path to a fence, but where a bench or a mailbox belongs.
+      pathClear: (x, z, onSquare) => pathClearance(onSquare ? keepClear.filter(seg => !plaza.includes(seg)) : keepClear, x, z),
+    });
+    obstacles.push(...town.obstacles);
+    Object.assign(marks, town.marks);
+    if (town.fixed) {
+      const material = new MeshBasicMaterial({ vertexColors: true, side: FrontSide });
+      material.userData.mqOwned = true;
+      const mesh = new Mesh(town.fixed, material);
+      mesh.name = 'town-props';
+      group.add(mesh);
+    }
+    if (town.moving) {
+      const clock = { value: 0 }; clocks.push(clock);
+      const mesh = new Mesh(town.moving, townMaterial(clock));
+      mesh.name = 'town-props-moving';
+      group.add(mesh);
+    }
+    counts.fences = town.counts.fences; counts.mailboxes = town.counts.mailboxes; counts.benches = town.counts.benches; counts.socks = town.counts.socks;
+  }
+  // What the village lays on its floor, once everything standing on it has its place; before the pyramids, signs,
+  // geodes and garden, which keep off the lawns and the mosaic.
+  let coverPaint: CoverPaint | null = null;
+  if (hasCover(opts.floorCover) && !opts.interior) {
+    const cover = buildFloorCover(opts.floorCover, {
+      rng: rng.fork(17), scale: s, terrain, yards, current, walks: network?.segments ?? [],
+      // The mosaic is laid over the fountain's paving, round its basin; with none, it IS the square, at the hub.
+      square: fountainAt ? { x: fountainAt.x, z: fountainAt.z, inner: 19 * s, r: 44 * s } : centre ? { x: centre.x, z: centre.z, inner: 0, r: 18 * s } : null,
+      free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < 3 * s + r)
+        && !(fountainAt && Math.hypot(x - fountainAt.x, z - fountainAt.z) < 18 * s + r),
+    });
+    keepClear.push(...cover.keepClear);
+    if (cover.fixed) {
+      const material = new MeshBasicMaterial({ vertexColors: true, side: FrontSide });
+      material.userData.mqOwned = true;
+      const mesh = new Mesh(cover.fixed, material);
+      mesh.name = 'floor-cover';
+      group.add(mesh);
+    }
+    coverPaint = cover.paint;
+    Object.assign(counts, { lawns: cover.counts.lawns, mosaics: cover.counts.mosaics, mats: cover.counts.mats, stones: cover.counts.stones, ripples: cover.counts.ripples });
+  }
+  // Pyramids, before the geodes and the garden, so both keep off them and the fish go over.
+  const pyramidShow = pyramidShowUniforms();
+  let pyramidLights: Pyramids['shows'] = [];
+  const showNow = { a: 0, b: 1, mix: 0, bpm: 0 };
+  if (!opts.interior && (opts.pyramids ?? 0) > 0) {
+    const pyr = buildPyramids(rng.fork(14), {
+      amount: opts.pyramids ?? 0, cap: opts.cap, scale: s, environment: opts.environment ?? 'void', mix: opts.pyramidMix, layout: opts.pyramidLayout, terrain,
+      free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !doorsteps.some(dd => Math.hypot(x - dd.x, z - dd.z) < r + 8 * s)
+        && pathClearance(keepClear, x, z) > r + 2 * s
+        && !(fountainAt && Math.hypot(x - fountainAt.x, z - fountainAt.z) < r + 34 * s),
+    });
+    obstacles.push(...pyr.obstacles);
+    homeLights.push(...pyr.emitters);
+    // A light show's light moves with the show: a moving source, rewritten each frame (setFrame).
+    pyramidLights = pyr.shows;
+    const clock = { value: 0 }; clocks.push(clock);
+    for (const [g, lit] of [[pyr.geometry, false], [pyr.lit, true]] as const) {
+      if (!g) continue;
+      const mesh = new Mesh(g, pyramidMaterial(clock, lit, pyramidShow));
+      mesh.name = lit ? 'pyramids-lit' : 'pyramids';
+      group.add(mesh);
+    }
+    counts.pyramids = pyr.sites.length;
+  }
+  // Signs, once everything they stand beside has a place: off the paths, the
+  // doorsteps and the lamps, beside their mark. Fish go round them.
+  let signHalos: Array<{ x: number; y: number; z: number; color: string; size: number }> = [];
+  let setLedTexts: (texts: readonly string[]) => void = () => {};
+  const signFlicker = { value: 0 };
+  if (opts.signs?.length && !opts.interior) {
+    const built = buildSigns(opts.signs, {
+      rng: rng.fork(41), terrain, scale: s, clocks, flicker: signFlicker,
+      marks: { ...OPEN_MARKS, ...marks },
+      free: (x, z, r) => !obstacles.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)
+        && !clusters.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + r)
+        && !doorsteps.some(dd => Math.hypot(x - dd.x, z - dd.z) < 10 * s + r)
+        && !lampSites.some(l => Math.hypot(x - l.x, z - l.z) < 4 * s + r)
+        && pathClearance(keepClear, x, z) > r * 0.4,
+    });
+    // Flat into the world's group: its draw and triangle counts see every sign mesh.
+    for (const m of [...built.group.children]) group.add(m);
+    obstacles.push(...built.obstacles);
+    homeLights.push(...built.lights);
+    signHalos = built.halos;
+    setLedTexts = built.setLedTexts;
+    counts.signs = built.count;
+  }
   let fountainMouth: { x: number; y: number; z: number; color: string } | null = null;
   let lampLights: { x: number; y: number; z: number; color: string }[] = [];
   if (((opts.geodes ?? 0) > 0 || fountainAt || lampSites.length) && !opts.interior) {
@@ -541,6 +686,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     density: opts.lanterns ?? 0, cap: opts.cap, scale: s, palette: clusters.map(c => c.color), height: opts.lanternHeight ?? 1,
   });
   const moving: Emitter[] = [];
+  // What the tank reads as moving light: the lanterns, then the light shows (rebuilt each frame).
+  const movingOut: Emitter[] = [];
   let skyCards: GlowCards | null = null;
   if (sky?.geometry) {
     sky.geometry.userData.mqOwned = true;
@@ -645,11 +792,17 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   counts.flora = field.plants;
   // Halos: the lamps and the fountain wear the soft glow card a crystal does.
   let townCards: GlowCards | null = null;
-  const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s }))];
+  const flickering: Array<{ i: number; supply: number; h: { x: number; y: number; z: number; size: number }; r: number; g: number; b: number }> = [];
+  const halos = [...(fountainMouth ? [{ ...fountainMouth, size: 26 * s }] : []), ...lampLights.map(l => ({ ...l, size: 17 * s })), ...signHalos];
   if (halos.length) {
     townCards = buildGlowCards(halos.length);
     const c = new Color();
     halos.forEach((h, i) => { c.set(h.color); townCards!.set(i, h.x, h.y, h.z, h.size, c.r, c.g, c.b, i * 1.7); });
+    // A lit sign's halo sags and dies with its supply: the cards are re-set each frame.
+    halos.forEach((h, i) => {
+      const supply = (h as { supply?: number }).supply;
+      if (supply !== undefined) { c.set(h.color); flickering.push({ i, supply, h, r: c.r, g: c.g, b: c.b }); }
+    });
     townCards.mesh.userData.mqLights = halos.length;
     townCards.mesh.name = 'town-halos';
     group.add(townCards.mesh);
@@ -836,7 +989,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let bubbleSurface: number | null = null;
   return {
     setSurface(y) { bubbleSurface = y; },
-    group, counts, vents, emitters: homeLights, moving, marks, paths: [...(network?.segments ?? []), ...plaza], rockClusters,
+    group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], cover: coverPaint, rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     setFish(fish) {
@@ -844,6 +997,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);
       floraFishN.value = n;
     },
+    stems: field.stems,
     canopyTips: field.tips.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) * Math.max(1, l.flex) })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
@@ -857,17 +1011,35 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       return h;
     },
     groundAt: stoneGround ?? (() => -Infinity),
+    setPyramidShow(a, b, mix, solo, bpm) {
+      pyramidShow.uPyrShow.value.set(a, b, mix, solo ? 1 : 0);
+      pyramidShow.uPyrBpm.value = bpm;
+      showNow.a = solo ? -1 : a; showNow.b = b; showNow.mix = mix; showNow.bpm = bpm;
+    },
+    setLedTexts(texts) { setLedTexts(texts); },
+    setSignFlicker(amount) { signFlicker.value = Math.max(0, Math.min(1, amount)); },
     setFrame(t, fog, glow = 1, pulse = 0.35) {
       for (const clock of clocks) clock.value = t;
+      for (const l of pyramidLights) {
+        const k = pyramidGlowLevel(showNow, showNow.bpm, l.phase, l.seed, l.top, t);
+        l.emitter.r = l.base[0] * k; l.emitter.g = l.base[1] * k; l.emitter.b = l.base[2] * k;
+      }
       bubbleLayer?.setFrame(t, bubbleSurface);
       if (fog) horizonFog.value.copy(fog.color);
       geodeGlow.value = glow; geodePulse.value = pulse;
       if (cards && fog) cards.commit(Number(cards.mesh.userData.mqLights), t, glow, pulse, fog);
+      for (const f of flickering) {
+        const k = supplyLevel(f.supply, t, signFlicker.value);
+        townCards?.set(f.i, f.h.x, f.h.y, f.h.z, f.h.size, f.r * k, f.g * k, f.b * k, f.i * 1.7);
+      }
       if (townCards && fog) townCards.commit(Number(townCards.mesh.userData.mqLights), t, glow, pulse, fog);
       // The light field is kept current whether or not there is a card pass
       // to draw (fog is the card pass's business): a caller that only asks
       // for time still gets the lanterns where they are.
       if (sky) lanternEmitters(sky.lanterns, t, moving);
+      movingOut.length = 0;
+      for (const e of moving) movingOut.push(e);
+      for (const l of pyramidLights) movingOut.push(l.emitter);
       if (sky && skyCards && fog) {
         const p = { x: 0, y: 0, z: 0 }, c = new Color();
         sky.lanterns.forEach((l, i) => {

@@ -497,7 +497,8 @@ private struct ChannelCard: View {
                                           onRefresh: { await app.loadGallery() })) {
             VStack(alignment: .leading, spacing: 8) {
                 ChannelPreviewTile(channel: channel)
-                    .frame(width: width, height: width * 9 / 16)
+                    // Portrait, the shape the scene plays in on this phone.
+                    .frame(width: width, height: width * 4 / 3)
                     .overlay(alignment: .topLeading) {
                         if let viewers = channel.viewers, viewers > 0 {
                             Label("\(viewers)", systemImage: "eye.fill")

@@ -46,8 +46,6 @@ struct ClassicSaverView: View {
     /// Steered scene params (classic track) — the aquarium reads
     /// `environment` and `fishMix`; the line-field savers ignore them.
     var params: [String: String] = [:]
-    /// The aquarium only: fish gather into a ring while a 3D tank loads.
-    var gather: AquariumField.Gather? = nil
 
     /// Poster frame time: far enough in that the field looks populated
     /// rather than caught mid-spawn.
@@ -64,7 +62,7 @@ struct ClassicSaverView: View {
                         // a screensaver's (indefinite) run.
                         let t = timeline.date.timeIntervalSinceReferenceDate
                             .truncatingRemainder(dividingBy: 100_000) * 1000
-                        draw(&ctx, size, t, gather: gather?.amount(at: timeline.date) ?? 0)
+                        draw(&ctx, size, t)
                     }
                 }
             } else {
@@ -73,7 +71,7 @@ struct ClassicSaverView: View {
         }
     }
 
-    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double, gather: Double = 0) {
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double) {
         let seed32 = UInt32(truncatingIfNeeded: seed)
         switch kind {
         case .warp:
@@ -91,7 +89,7 @@ struct ClassicSaverView: View {
             AquariumField.shared(seed: seed32, tier: tier,
                                  environment: params["environment"],
                                  fishMix: params["fishMix"])
-                .draw(in: &ctx, size: size, t: t, tier: tier, gather: gather)
+                .draw(in: &ctx, size: size, t: t, tier: tier)
         }
     }
 }

@@ -110,6 +110,13 @@ extension GalleryClient {
     /// It also means `intent` text is world-readable — see
     /// `docs/ios-client-roadmap.md` §3.
     func fetchHistory(channelId: String, limit: Int = 40) async throws -> [ChannelEvent] {
+        try await fetchHistoryPage(channelId: channelId, limit: limit).events
+    }
+
+    /// One page of the log, newest first. `before` is an event id: the page
+    /// holds only older events (the server's exact cursor — ids are monotonic,
+    /// timestamps are not unique). `hasMore` says whether to ask again.
+    func fetchHistoryPage(channelId: String, limit: Int = 40, before: Int? = nil) async throws -> ChannelHistoryPage {
         var components = URLComponents(
             url: baseURL
                 .appendingPathComponent("c")
@@ -117,6 +124,7 @@ extension GalleryClient {
                 .appendingPathComponent("history"),
             resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+            + (before.map { [URLQueryItem(name: "before", value: String($0))] } ?? [])
         guard let url = components?.url else { throw GalleryError.invalidResponse }
 
         let (data, http) = try await transport.data(for: URLRequest(url: url))
@@ -127,6 +135,6 @@ extension GalleryClient {
         guard let page = try? JSONDecoder().decode(ChannelHistoryPage.self, from: data) else {
             throw GalleryError.invalidResponse
         }
-        return page.events
+        return page
     }
 }

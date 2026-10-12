@@ -140,7 +140,7 @@ struct MyChannelsView: View {
                                    startPoint: .top, endPoint: .bottom)
                 }
             }
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .topLeading) {
                 if channel?.sleeping == true {

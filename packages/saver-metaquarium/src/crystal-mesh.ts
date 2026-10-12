@@ -12,6 +12,7 @@
  */
 
 import { WATER_FOG_GLSL, waterUniforms } from './water';
+import { COVER_LAST, COVER_OVER, COVER_PARS, COVER_UNDER, coverUniforms } from './floor-cover';
 import { MAX_PATH_SEGMENTS, PATH_FRAGMENT, PATH_MATERIALS, PATH_PARS, type PathSegment } from './paths';
 import {
   AdditiveBlending,
@@ -404,6 +405,8 @@ export function emptyPoolUniforms(): Uniforms {
     uMqPathT: { value: 1 },
     uMqPathA: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
     uMqPathB: { value: Array.from({ length: MAX_PATH_SEGMENTS }, () => new Vector4()) },
+    // What the village lays on its floor (floor-cover.ts): lawns, the square's mosaic, the sand's ripples.
+    ...coverUniforms(),
   };
 }
 
@@ -457,7 +460,7 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
   if (mat.userData.mqPools) return;
   mat.userData.mqPools = true;
   // Stacked, like every other patch: water and caustics ride the same floor.
-  stackPatch(mat, 'mq-floor-pools-v7', (shader) => {
+  stackPatch(mat, 'mq-floor-pools-v8', (shader) => {
     Object.assign(shader.uniforms, pools, causticUniforms());
     shader.vertexShader = `varying vec3 vMqW;\n${shader.vertexShader.replace(
       '#include <project_vertex>',
@@ -477,12 +480,21 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
       uniform vec4 uMqSpotShade[3];
       uniform float uMqSpotSoft[3];
       ${PATH_PARS}
+      ${COVER_PARS}
       ${CAUSTIC_FUNCS}
       ${shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        // Paths first: they are ground, so every light below falls on them too.
+        // The ground first — the sand's ripples, the lawns, the paths, the square's mosaic — so every light below
+        // falls on it too. Each takes the BARE floor's brightness: a dark ocean has dark paths and a dark lawn.
+        float mqFloorLum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+        // 1 on bare floor; laid ground (a lawn, a path, the mosaic) sets it to 0.
+        float mqBare = 1.0;
+        // A lawn or the mosaic: its colour before the light, and what it reflects of it (floor-cover.ts COVER_LAST).
+        vec3 mqGround = vec3(0.0), mqAlbedo = vec3(-1.0);
+        ${COVER_UNDER}
         ${PATH_FRAGMENT}
+        ${COVER_OVER}
         for (int i = 0; i < ${MAX_POOLS}; i++) {
           if (i >= uMqPoolN) break;
           vec3 dv = vMqW - uMqPoolPos[i].xyz;
@@ -521,7 +533,8 @@ export function installFloorPools(mat: Material, pools: Uniforms): void {
             }
             diffuseColor.rgb += uMqSpotColor[k] * (edge * uMqSpot[k].w * (0.2 + 1.5 * web) * (1.0 - 0.82 * shade));
           }
-        }`,
+        }
+        ${COVER_LAST}`,
       )}`;
   });
 }

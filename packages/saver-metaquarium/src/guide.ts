@@ -20,6 +20,11 @@ import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
+import { parsePyramidMix } from './pyramid-mix';
+import { parseTownProps } from './town-mix';
+import { parseFloorCover } from './floor-cover-mix';
+import { parsePyramidShow } from './pyramid-show';
+import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
@@ -39,7 +44,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. A snail glides the floor very slowly and stops to look about, look at you, graze, stretch up tall, or pull into its shell and peek back out. `dot` is a character (experimental): Dot, the town courier, a box on two legs whose face is a screen; it walks, runs and sneaks the floor, stops to wave, cheer, think, tip its cap, deliver a letter, dance, laugh and more, and as a vignette actor plays the gestures with its own body. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -62,6 +67,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
+  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat.',
   starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own.',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
@@ -82,7 +88,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
   floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
-  rayStrength: 'Light shafts from the surface.',
+  rayStrength: 'Light shafts from the surface. They cost device budget: 5 shafts on the high tier, 2 on standard, and none on the lowest tier in a room with a water surface (reef, kelp, ice or lagoon), where the surface takes that budget — abyss, vent and universe keep 2. Where they were dropped, perceiveChannel reads room.rayStrength 0.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',
@@ -103,7 +109,16 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
   fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
+  signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
+  signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  townProps: 'The village\'s small things, comma-separated kind[:count][/style]: fence (a yard round every home, a gate where its path leaves; styles driftwood coral stone crystal, none = each home its own), mailbox (by every gate: post — its flag goes up when the mail comes — clam that opens, bottle that rocks; each a vignette mark mailbox1…), bench[:n] (round the fountain or hub, facing in; shell stone), sock[:n] (a striped current sock swinging with the current). Fences and mailboxes need geodeHomes.',
+  floorCover: 'What the village lays on its floor, comma-separated kind[/style]: lawn (a mown lawn in every home\'s yard, fenced or not; stripes checks), mosaic (the square tiled in a compass rose round the fountain, or at the hub with none; stone shell glass), mat (a woven doormat at every door; kelp stripe), steps (stepping stones down every walk; slate sand moss, none = each walk\'s own ground), ripples (the open sand combed into ripples across the current the socks stream down; fine broad). Lawns and mats need geodeHomes, steps need paths, a mosaic needs a fountain, paths or homes. Mats and stones only lie on flat ground.',
+  pyramids: 'Pyramids built of cubes, as the fish are (0 = none, 1 = about a dozen complexes): each a stack of cubes you can count, the cube a whole multiple of a fish\'s, exactly symmetric. On the floor in complexes — a great pyramid and its queens — small ones near, the great ones at the back. Only on flat ground — use floorKind: flat (none on dunes, ridges or a basin). Standing, half sunk, one missing its capstone. Glyph friezes, gilded or glowing capstones, an eye on some.',
+  pyramidMix: 'Their shapes and stones: `shape|stone[:weight], …`. Shapes giza step bent djoser mayan frame; stones sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit ones led (white and rainbow lamps) and neon (magenta and cyan), every cube a lamp running a light show. Empty = every shape in the room\'s stone.',
+  pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
+  pyramidShow: 'The lit pyramids\' light show (led, neon, or trim in pyramidMix): empty or auto = the whole field as one, through every routine in turn, a wave rolling across it; solo = each its own; a routine name (rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple); or a looping cue sheet like 8s:rings, 8s:beam, 16s:equalizer. Steered live, no rebuild.',
+  pyramidBpm: 'The light show\'s tempo, 0–140 (0 = free-running): the motion steps on the beat and each beat lifts the lamps a little — never a flash.',
   geodeLayout: '`field` (default) scatters them; `gallery` is a lineup to examine them all — a row per kind (aura morphs, thunder eggs, hollow geodes, clusters, cathedrals), a column per mineral, the mega geode behind. Frame it with cameraDistance 400, elevation ~26, and nothing else in the scene.',
   floraLayout: '`garden` (default) grows the plants round the crystals; `gallery` plants one of each species in its own plot, in two rows across the front (low ones before tall), so every kind can be seen at once. With `floraMix` set, only the species it names. Frame it with `shot: front` or `cameraDistance` ~260.',
   floraPalette: 'One colour scheme for the garden, the way a No Man\'s Sky planet is magenta grass and orange trees: `world` grows a hero hue, a neighbour and an accent from the seed; or give up to six `#rrggbb`. Each colony is pulled most of the way to one of them. Empty = every species its own colours.',
@@ -133,21 +148,33 @@ export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab dori glowfish babyfish hackerfish blowfish starfish octopus. *size scales that token over its
+          crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot. *size scales that token over its
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+townProps  kind[:count][/style], …   fence/coral, mailbox/post, bench:4/shell, sock:2
+          fence: driftwood coral stone crystal · mailbox: post clam bottle · bench: shell stone · sock (needs geodeHomes for fence and mailbox)
+floorCover  kind[/style], …   lawn/stripes, mosaic/shell, mat/kelp, steps, ripples/broad
+          lawn: stripes checks · mosaic: stone shell glass · mat: kelp stripe · steps: slate sand moss · ripples: fine broad
+pyramidMix  shape|stone[:weight], …   giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt led neon
+          giza:3, mayan, gold:2, obsidian   (empty = every shape in the room's stone)
+pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 16s:equalizer
+          rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple · pyramidMix trim[:share] lights stone ones' edges
 geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
 geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
+signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
+          kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
+          an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
 vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
           [<sec>s:] actor =mark       start there           actor >mark       swim there
           actor @mark | @actor        face it               a b circle mark   circle it together
           actor follow actor                                gestures: talk nod shake hop spin wiggle rest peek bow
+          dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
           home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).
@@ -172,6 +199,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'geode-harbor', label: 'Geode harbor', what: 'A village at night: three geode homes, chimneys bubbling, lanterns overhead, a far horizon.',
     params: { ...ALIVE, ...NIGHT, floorColor: '#2a1a2a', paths: 0.7, geodeHomes: 3, rockDensity: 0.35, rockVeins: 0.6, floraDensity: 0.25, bubbleVents: 0.9, marineSnow: 0.45, skyLanterns: 0.8, horizon: 1,
       propMix: 'crystal:2@spire/orange,crystal:2@druse/hotpink,crystal:1@lotus/purple', crystalTint: 0.6, fishMix: '100:2,257:2,seahorse:2', swimStyle: 'drift', swimSpeed: 0.5,
+      signs: 'plank@hub:"Harbor Row", neon@home1/#ffb347:OPEN, arrow@hub>home3:Lighthouse, porthole@home2',
       cameraDistance: 190, cameraElevation: 12, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
@@ -184,6 +212,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'castle', label: 'The castle', what: 'The landmark: voxel walls and crystal-spired towers, a lit gate, a road to a plaza. Orbit it.',
     params: { ...ALIVE, fogColor: '#060818', floorColor: '#101830', fogNear: 160, fogFar: 900, landmark: 'castle', horizon: 0.8, skyLanterns: 0.5, floraDensity: 0.3, bubbleVents: 0.4,
       propMix: 'crystal:2@spire/cyan,crystal:2@druse/purple,crystal:1@lotus/hotpink', crystalTint: 0.6, fishMix: '100:3,257:2', swimStyle: 'drift', swimSpeed: 0.5,
+      signs: 'plank@gate:"Welcome to the castle", led@front/#7fdcff:TOURS EVERY HOUR - MIND THE MOAT - NO SWIMMING IN THE KEEP',
       cameraDistance: 300, cameraElevation: 14, cameraAzimuth: 12, autoRotate: 1.5 },
   },
   {
@@ -227,11 +256,28 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a coral reef: tangs that look back at you, blowfish that puff up and flirt, an octopus that changes colour and inks, a crab on the floor. A slow orbit.',
     params: { ...ALIVE, environment: 'reef', fishMix: 'dori:3,blowfish:2,octopus:1,crab:1', floraDensity: 0.6, marineSnow: 0.3, finish: 0.5, swimSpeed: 0.7,
+      signs: 'plank@left:"Mind the crabs", ring@right:Lifeguard',
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
   },
   {
     id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
+  },
+  {
+    id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they stop to graze, stretch, look at you, or hide in their shells, a few baby fish overhead.',
+    params: { ...ALIVE, environment: 'lagoon', fishMix: 'snail:5,babyfish:4', floraDensity: 0.7, marineSnow: 0.2, finish: 0.5, swimSpeed: 0.6,
+      cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
+  },
+  {
+    id: 'dot-delivers', label: 'Dot delivers', what: 'Dot, the courier, walks from the fountain to a neighbour\'s door and knocks; a blowfish comes out, they bow and chat, Dot thinks it over, gets the idea, spins for joy and walks home. The camera rides beside it.',
+    params: { ...ALIVE, geodeHomes: 3, paths: 0.6, fountain: 'geode', streetLamps: 0.5, floraDensity: 0.08, fishMix: 'dot:1,blowfish:1,babyfish:3',
+      vignette: '3s: a =fountain, b =home1in | 7s: a >home1 @home1 | 4s: a @home1 hop | 5s: b >home1 @a, a @b | 5s: a @b bow, b @a nod | 6s: a @b talk, b @a nod | 6s: b @a talk, a @b peek | 4s: a @b spin | 5s: a @b wiggle, b @a hop | 5s: b >home1in, a @b nod | 7s: a >fountain',
+      cameraFollow: 0, followDistance: 55, followAngle: 130 },
+  },
+  {
+    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',
+    params: { ...ALIVE, ...NIGHT, fogColor: '#060612', floorColor: '#141020', fishMix: 'snail:6', snailShell: 'glow', floraDensity: 0.2, marineSnow: 0.3, finish: 0.6,
+      cameraFollow: 1, followDistance: 40, followAngle: 140 },
   },
 ];
 
@@ -257,6 +303,10 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('floraMix')) push('floraMix', parseFloraMix(str('floraMix')).problems);
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
   if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
+  if (str('pyramidMix')) push('pyramidMix', parsePyramidMix(str('pyramidMix')).problems);
+  if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
+  if (str('floorCover')) push('floorCover', parseFloorCover(str('floorCover')).problems);
+  if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
@@ -265,20 +315,57 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     if (!spots) out.push({ path: 'spotCues', message: 'a cue sheet needs a spotRig (or followSpot) to cue' });
     else push('spotCues', parseSpotCues(str('spotCues'), spots).problems);
   }
+  const world = worldMarks(params);
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
-    const homes = Math.round(Number(params.geodeHomes ?? 0));
-    const world: Record<string, { x: number; y: number; z: number }> = {};
-    const at = { x: 0, y: 0, z: 0 };
-    for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
-    if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
-    // Paths meet at a hub: the mark `paths` documents itself as adding.
-    if (Number(params.paths ?? 0) > 0) world.hub = at;
-    if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
+  }
+  if (str('signs')) {
+    const signs = parseSignMix(str('signs'));
+    push('signs', signs.problems);
+    if (params.interior === 'geode') out.push({ path: 'signs', also: ['interior'], message: 'signs stand outdoors — none are built inside a geode home' });
+    else {
+      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !(m in OPEN_MARKS) && !(m in world)))];
+      for (const m of missing) {
+        out.push({ path: 'signs', also: ['landmark', 'geodeHomes', 'paths', 'fountain'], message: `no "${m}" in this scene (${MARK_NEEDS[m] ?? 'its world part is off'}) — that sign stands in the open` });
+      }
+    }
+  }
+  if (str('townProps')) {
+    const t = parseTownProps(str('townProps')).props;
+    const homes = Math.round(Number(params.geodeHomes ?? 0));
+    if ((t.fence || t.mailbox) && !(homes > 0)) out.push({ path: 'townProps', also: ['geodeHomes'], message: 'fences and mailboxes stand round homes: set geodeHomes ≥ 1' });
+  }
+  if (str('floorCover')) {
+    const c = parseFloorCover(str('floorCover')).cover;
+    const homes = Math.round(Number(params.geodeHomes ?? 0)), walks = Number(params.paths ?? 0) > 0;
+    if ((c.lawn || c.mat) && !(homes > 0)) out.push({ path: 'floorCover', also: ['geodeHomes'], message: 'lawns and doormats belong to homes: set geodeHomes ≥ 1' });
+    if (c.steps && !walks) out.push({ path: 'floorCover', also: ['paths'], message: 'stepping stones go down the paths: set paths > 0' });
+    if (c.mosaic && !walks && !(homes > 0) && (params.fountain ?? 'none') === 'none') out.push({ path: 'floorCover', also: ['fountain', 'paths', 'geodeHomes'], message: 'a mosaic tiles the square: set a fountain, paths or geodeHomes' });
   }
   out.push(...dependencyProblems(params));
   return out;
+}
+
+/** What turns each world mark on. */
+const MARK_NEEDS: Record<string, string> = {
+  gate: 'needs landmark castle or citadel', plaza: 'needs landmark castle or citadel', courtyard: 'needs landmark castle or citadel',
+  hub: 'needs paths > 0', fountain: 'needs a fountain', mailbox1: 'needs townProps mailbox and geodeHomes ≥ 1', mailbox2: 'needs townProps mailbox and geodeHomes ≥ 2', mailbox3: 'needs townProps mailbox and geodeHomes 3', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
+};
+
+/** The marks this scene's world adds (positions are placeholders: only the names matter here). */
+function worldMarks(params: Readonly<Record<string, unknown>>): Record<string, { x: number; y: number; z: number }> {
+  const homes = Math.round(Number(params.geodeHomes ?? 0));
+  const world: Record<string, { x: number; y: number; z: number }> = {};
+  const at = { x: 0, y: 0, z: 0 };
+  for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
+  // A mailbox by every home's gate (townProps): a fish sent there has come with the post.
+  if (typeof params.townProps === 'string' && parseTownProps(params.townProps).props.mailbox) for (let i = 1; i <= Math.min(3, homes); i++) world[`mailbox${i}`] = at;
+  if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
+  // Paths meet at a hub: the mark `paths` documents itself as adding.
+  if (Number(params.paths ?? 0) > 0) world.hub = at;
+  if (params.fountain === 'vent' || params.fountain === 'geode') world.fountain = at;
+  return world;
 }
 
 /** The tank's fish cap on the best devices; smaller ones swim fewer. */
@@ -352,6 +439,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   } else if (rig.length && set('spotColor')) {
     out.push({ path: 'spotColor', also: ['spotRig'], message: 'colours the single followSpot; a spotRig gives each of its spots its own colour (slot/#rrggbb)' });
   }
+  if (set('signFlicker') && !str('signs')) out.push({ path: 'signFlicker', also: ['signs'], message: 'does nothing with no signs' });
   if (Math.round(num('shoal', 0) * CAST_CAP * 2.5) < 3) {  // the tank builds no school under 3 fish
     for (const k of ['shoalKind', 'shoalSpeed']) if (set(k)) out.push({ path: k, also: ['shoal'], message: 'does nothing while shoal is too low to make a school (under 3 fish; 0 is off)' });
   }

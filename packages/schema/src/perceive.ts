@@ -16,7 +16,7 @@
 import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
-import { backgroundLuma, hexLuma, spriteLuma } from './luma';
+import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
 import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import {
@@ -32,6 +32,7 @@ import {
   sizeAt,
   textBlockAnchorOffset,
   textMetricsClassFor,
+  entityScales,
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
@@ -125,13 +126,7 @@ function buildScene(spec: SaverSpec, opts: PerceiveOptions): BuiltScene {
   // matching the renderer, and this same normalized value is reused for field
   // background sampling (see `luminanceGrid`) so both agree on one seed.
   const seed = normalizeSeed(opts.seed ?? spec.seed ?? 42);
-  const scale = spec.units === 'px' ? 1 : Math.min(w, h);
-  const refVp = spec.referenceViewport ?? LIMITS.referenceViewport;
-  let countScale = scale > 1 ? Math.min(w, h) / refVp : 1;
-  if (countScale > 1) {
-    const rawTotal = spec.layers.reduce((s, l) => s + Math.round(l.count * countScale), 0);
-    if (rawTotal > LIMITS.maxTotal) countScale *= LIMITS.maxTotal / rawTotal;
-  }
+  const { scale, countScale } = entityScales(spec, w, h);
   const rng = createRng(seed);
   const layers = spec.layers.map((layer) => ({ layer, entities: buildEntities(layer, rng, w, h, scale, countScale) }));
   const byKey = new Map<string, Entity[]>();
@@ -1124,11 +1119,41 @@ export function layerCohesion(spec: SaverSpec, opts: PerceiveOptions = {}): Laye
 export interface LayerMotionStats {
   layerIndex: number;
   key: string | undefined;
-  /** Mean / max on-screen speed in px per second (wrap jumps excluded). */
+  /** Mean / max on-screen speed in px per second at the perceived size (wrap jumps excluded). */
   meanSpeed: number;
   maxSpeed: number;
+  /**
+   * The same speeds in **viewport units per second** — fractions of
+   * min(w, h), the unit a spec's `speed` is authored in — so they do not
+   * change with the size the scene is perceived at. 1.0 crosses the short side
+   * of the screen every second.
+   */
+  meanSpeedVp: number;
+  maxSpeedVp: number;
+  /** meanSpeedVp above MOVING_FLOOR — the same answer at every preview size. */
   moving: boolean;
+  /**
+   * Direction the layer's mass is going, in screen degrees (0 = right,
+   * 90 = down, 180 = left, 270 = up), or null when nothing moves. Sampling a
+   * centroid over time gives the WRONG sign for a wrapping full-viewport
+   * scatter, which is why this is reported directly.
+   */
+  heading: number | null;
+  /**
+   * 0 = every entity moves the same way (a conveyor — the "screen-wipe" the
+   * schema warns about), 1 = headings cancel out (a scatter, an orbit, a
+   * bounce field). |mean unit vector| inverted.
+   */
+  headingSpread: number | null;
 }
+
+/**
+ * Below this many viewport units per second a layer reads as still (half a
+ * pixel per second on a 1080 display — what the old px/s threshold of 0.5
+ * meant at that one resolution).
+ */
+const MOVING_FLOOR = 0.0005;
+
 
 /**
  * Per-layer displacement between t and t+dt — choreography as numbers.
@@ -1145,25 +1170,137 @@ export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: numb
   const scene0 = buildScene(resolveTimelineAt(spec, t), opts);
   const scene1 = spec.timeline ? buildScene(resolveTimelineAt(spec, t + dt), opts) : scene0;
   const { w, h } = scene0;
+  const unit = Math.min(w, h);
   return scene0.layers.map(({ layer, entities }, layerIndex) => {
     const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
     let acc = 0;
     let max = 0;
     let n = 0;
+    let ux = 0;
+    let uy = 0;
+    let moversN = 0;
     entities.forEach((e, i) => {
       const p0 = posOf(scene0, e, t);
       const p1 = posOf(scene1, entities1[i] ?? e, t + dt);
       const dx = p1.x - p0.x;
       const dy = p1.y - p0.y;
       if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
-      const speed = (Math.sqrt(dx * dx + dy * dy) / dt) * 1000;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const speed = (dist / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
+      if (dist > 0) {
+        ux += dx / dist;
+        uy += dy / dist;
+        moversN++;
+      }
     });
     const meanSpeed = n ? acc / n : 0;
-    return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, moving: meanSpeed > 0.5 };
+    const meanSpeedVp = meanSpeed / unit;
+    const maxSpeedVp = max / unit;
+    const moving = meanSpeedVp > MOVING_FLOOR;
+    let heading: number | null = null;
+    let headingSpread: number | null = null;
+    if (moving && moversN > 0) {
+      const mx = ux / moversN;
+      const my = uy / moversN;
+      const mag = Math.sqrt(mx * mx + my * my);
+      headingSpread = 1 - mag;
+      heading = mag > 0.05 ? ((Math.atan2(my, mx) * 180) / Math.PI + 360) % 360 : null;
+    }
+    return { layerIndex, key: layer.key, meanSpeed, maxSpeed: max, meanSpeedVp, maxSpeedVp, moving, heading, headingSpread };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Colour — the channel edits are usually about
+// ---------------------------------------------------------------------------
+
+export interface SceneColour {
+  /** Hue of the visible sprite mass in degrees (0 red, 120 green, 240 blue), null when unsaturated. */
+  hue: number | null;
+  /** HSL saturation 0..1 of the sprite mass. */
+  saturation: number;
+  /** red minus blue of the mean sprite colour, -1 (cold) .. 1 (warm). The "cooler/warmer" axis. */
+  warmth: number;
+  /** Mean sprite colour as hex, for a model that reads hex better than angles. */
+  hex: string;
+  /** The same three numbers for the background plate. */
+  background: { hue: number | null; saturation: number; warmth: number; hex: string };
+}
+
+function rgbToHsl(c: { r: number; g: number; b: number }): { h: number | null; s: number; l: number } {
+  const max = Math.max(c.r, c.g, c.b);
+  const min = Math.min(c.r, c.g, c.b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d < 1e-6) return { h: null, s: 0, l };
+  const sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === c.r) h = ((c.g - c.b) / d + (c.g < c.b ? 6 : 0)) * 60;
+  else if (max === c.g) h = ((c.b - c.r) / d + 2) * 60;
+  else h = ((c.r - c.g) / d + 4) * 60;
+  return { h: sat < 0.05 ? null : h, s: sat, l };
+}
+
+function toHex(c: { r: number; g: number; b: number }): string {
+  const q = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return `#${q(c.r)}${q(c.g)}${q(c.b)}`;
+}
+
+function describeColour(c: { r: number; g: number; b: number }): { hue: number | null; saturation: number; warmth: number; hex: string } {
+  const hsl = rgbToHsl(c);
+  return { hue: hsl.h === null ? null : Math.round(hsl.h), saturation: +hsl.s.toFixed(3), warmth: +(c.r - c.b).toFixed(3), hex: toHex(c) };
+}
+
+/**
+ * What colour the scene IS — the alpha × area weighted mean of every hex a
+ * sprite paints with, beside the background plate. A luminance map cannot
+ * carry this: a luma-matched red→cyan swap moves every other channel by
+ * ~0.001 (comprehension eval 2026-07-28, P2 F3), and `meanLuminance` reads
+ * plausible cool tones as *brighter* than the reds they replace, so "make it
+ * cooler" pushed the only number an agent had in the wrong direction. Emoji
+ * carry their own palette and are excluded; a scene of only emoji reports the
+ * background.
+ */
+export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneColour {
+  const t = opts.t ?? 5000;
+  // A timeline can animate colour: read the scene as it is at t.
+  spec = resolveTimelineAt(spec, t);
+  const scene = buildScene(spec, opts);
+  let wr = 0;
+  let wg = 0;
+  let wb = 0;
+  let wsum = 0;
+  for (const { layer, entities } of scene.layers) {
+    // Paint opacity (layer × group) weighs like alpha: a hidden prop adds no colour.
+    const lifeA = lifeAlphaAt(layer.life, t) * (layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer));
+    for (const e of entities) {
+      const hex = spriteHex(layer, e);
+      if (hex === null) continue;
+      const sz = sizeAt(e, t);
+      const weight = alphaAt(e, t) * lifeA * (layer.sprite.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2) : sz * sz);
+      if (weight <= 0) continue;
+      const c = hexRgb(hex);
+      wr += c.r * weight;
+      wg += c.g * weight;
+      wb += c.b * weight;
+      wsum += weight;
+    }
+  }
+  const bg = backgroundRgb(spec);
+  const sprites = wsum > 0 ? { r: wr / wsum, g: wg / wsum, b: wb / wsum } : bg;
+  return { ...describeColour(sprites), background: describeColour(bg) };
+}
+
+/** Signed shortest hue difference b − a in degrees (−180..180), null when either is unsaturated. */
+function hueShift(a: number | null, b: number | null): number | null {
+  if (a === null || b === null) return null;
+  let d = b - a;
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return Math.round(d);
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,6 +1340,30 @@ export interface SceneDiff {
   regions: Array<{ region: (typeof REGION_NAMES)[number]; a: number; b: number; delta: number }>;
   /** Dominance changes, matched by layer key (falls back to index). Sorted by |share delta|. */
   dominance: Array<{ key: string; rankA: number | null; rankB: number | null; shareA: number; shareB: number }>;
+  /**
+   * The hue channel. `hueShift` is the signed shortest rotation A→B in
+   * degrees; `warmthDelta` is the cooler/warmer axis (negative = B is cooler)
+   * — read THIS for "cooler", not `meanLuminance`, which weights cool tones
+   * brighter than the reds they replace.
+   */
+  colour: {
+    a: SceneColour;
+    b: SceneColour;
+    hueShift: number | null;
+    saturationDelta: number;
+    warmthDelta: number;
+    background: { hueShift: number | null; warmthDelta: number };
+  };
+  /**
+   * The motion channel, in viewport units per second. `overall` is the
+   * entity-weighted mean across layers; `layers` lists every layer whose speed
+   * changed, largest change first. Halving every speed used to leave the diff
+   * bit-identical (comprehension eval 2026-07-28, P2 F4).
+   */
+  motion: {
+    overall: { a: number; b: number; delta: number };
+    layers: Array<{ key: string; a: number; b: number; delta: number; headingA: number | null; headingB: number | null }>;
+  };
   advisories: { added: string[]; removed: string[] };
 }
 
@@ -1235,8 +1396,40 @@ export function diffScenes(a: SaverSpec, b: SaverSpec, opts: LuminanceGridOption
     };
   }).sort((x, y) => Math.abs(y.shareB - y.shareA) - Math.abs(x.shareB - x.shareA));
 
-  const codesA = new Set(adviseSpec(a).map((w) => w.code));
-  const codesB = new Set(adviseSpec(b).map((w) => w.code));
+  // Advise at the diff's OWN viewport. This used to run at the 1920×1080
+  // default while the caller previewed at 960×540, so the two tools disagreed
+  // about the same spec's advisories (comprehension eval 2026-07-28, P3 F6).
+  const vp = opts.viewport ?? { width: 1920, height: 1080 };
+  const codesA = new Set(adviseSpec(a, vp).map((w) => w.code));
+  const codesB = new Set(adviseSpec(b, vp).map((w) => w.code));
+
+  const colA = sceneColour(a, opts);
+  const colB = sceneColour(b, opts);
+  const motA = motionStats(a, opts);
+  const motB = motionStats(b, opts);
+  const weighted = (stats: LayerMotionStats[], dom: DominanceEntry[]): number => {
+    let acc = 0;
+    let n = 0;
+    for (const m of stats) {
+      const c = dom.find((d) => d.layerIndex === m.layerIndex)?.entityCount ?? 1;
+      acc += m.meanSpeedVp * c;
+      n += c;
+    }
+    return n ? acc / n : 0;
+  };
+  const motNameOf = (m: LayerMotionStats): string => m.key ?? `layer-${m.layerIndex}`;
+  const motionLayers = [...new Set([...motA.map(motNameOf), ...motB.map(motNameOf)])]
+    .map((key) => {
+      const ma = motA.find((m) => motNameOf(m) === key);
+      const mb = motB.find((m) => motNameOf(m) === key);
+      const va = ma?.meanSpeedVp ?? 0;
+      const vb = mb?.meanSpeedVp ?? 0;
+      return { key, a: va, b: vb, delta: vb - va, headingA: ma?.heading ?? null, headingB: mb?.heading ?? null };
+    })
+    .filter((m) => Math.abs(m.delta) > 1e-9 || m.headingA !== m.headingB)
+    .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  const overallA = weighted(motA, domA);
+  const overallB = weighted(motB, domB);
 
   return {
     t,
@@ -1247,6 +1440,21 @@ export function diffScenes(a: SaverSpec, b: SaverSpec, opts: LuminanceGridOption
       : null,
     regions: REGION_NAMES.map((region, i) => ({ region, a: regsA[i]!, b: regsB[i]!, delta: regsB[i]! - regsA[i]! })),
     dominance,
+    colour: {
+      a: colA,
+      b: colB,
+      hueShift: hueShift(colA.hue, colB.hue),
+      saturationDelta: +(colB.saturation - colA.saturation).toFixed(3),
+      warmthDelta: +(colB.warmth - colA.warmth).toFixed(3),
+      background: {
+        hueShift: hueShift(colA.background.hue, colB.background.hue),
+        warmthDelta: +(colB.background.warmth - colA.background.warmth).toFixed(3),
+      },
+    },
+    motion: {
+      overall: { a: overallA, b: overallB, delta: overallB - overallA },
+      layers: motionLayers,
+    },
     advisories: {
       added: [...codesB].filter((c) => !codesA.has(c)),
       removed: [...codesA].filter((c) => !codesB.has(c)),
@@ -1277,6 +1485,8 @@ export interface ScenePerception {
   motion: LayerMotionStats[];
   /** Per layer: merged silhouette, seamed overlap, or separate marks. */
   form: LayerCohesion[];
+  /** What colour the scene is — hue/saturation/warmth of the sprite mass and the plate. */
+  colour: SceneColour;
   /** Literal strings + sizes of any text layers (glyphs don't show in the maps). */
   text: TextSpriteInfo[];
   advisories: ReturnType<typeof adviseSpec>;
@@ -1289,6 +1499,10 @@ export interface ScenePerception {
  * Intended as the payload behind an MCP previewScene.
  */
 export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}): ScenePerception {
+  // motionStats gets the spec WITH its timeline: it resolves t and t + dt
+  // itself, and a pre-resolved spec has no timeline left to differ between
+  // them — every layer moved only by timeline keys read 0 px/s (X437).
+  const timed = spec;
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const grid = luminanceGrid(spec, opts);
   return {
@@ -1301,8 +1515,9 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     rowProfile: grid.rowProfile,
     colProfile: grid.colProfile,
     dominance: dominanceRanking(spec, opts),
-    motion: motionStats(spec, opts),
+    motion: motionStats(timed, opts),
     form: layerCohesion(spec, opts),
+    colour: sceneColour(spec, opts),
     text: textSprites(spec, opts),
     advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
   };
@@ -1406,6 +1621,9 @@ export function perceiveSequenceFrame(seq: IdleSequence, T: number, opts: Percei
     motion: [...motionStats(seq.bed, bedOpts).map(prefix), ...motionStats(ink, segOpts).map(shift)],
     form: [...layerCohesion(seq.bed, bedOpts).map(prefix), ...layerCohesion(ink, segOpts).map(shift)],
     text: [...textSprites(seq.bed, bedOpts).map(prefix), ...textSprites(ink, segOpts).map(shift)],
+    // The segment's sprite mass over the bed's plate — what the screen shows
+    // in front of the bed. The bed's own sprites are a slow constant beneath.
+    colour: sceneColour(inkOverBed, segOpts),
     advisories: [
       ...adviseSpec(seq.bed, viewport, { t: T, seed: bedOpts.seed }).map((w) => ({ ...w, path: `bed.${w.path}` })),
       // inkOverBed's layers are the segment's (seed: segOpts.seed) but its

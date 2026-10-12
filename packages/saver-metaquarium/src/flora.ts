@@ -91,11 +91,16 @@ export interface FloraField {
   lights: { x: number; y: number; z: number; root: number; phase: number; gust: number; color: string; flex: number }[];
   /** Every plant's crown, lit or not, and how freely its stiffest-to-limpest part sways: what the shoal keeps above (canopy.ts). */
   tips: { x: number; y: number; z: number; root: number; flex: number }[];
+  /** Stalk a seahorse's tail can hold (kelp, sea whips): each cell's centre at rest and its sway, as its
+   *  vertices have it (\`floraSwayAt\` moves it as the shader does). `plant` numbers the plant it is on. */
+  stems: FloraStem[];
   /** Plants of a rare morph (nacreous, iridescent): about one colony in thirty. */
   rare: number;
   /** Colonies founded: each founder's siblings share its species and genes. */
   colonies: number;
 }
+
+export interface FloraStem { x: number; y: number; z: number; root: number; phase: number; gust: number; flex: number; plant: number }
 
 /** Voxel-art face values: top brightest, the two side pairs apart, bottom dark. */
 const FACES: ReadonlyArray<readonly [number, number, number, number]> = [
@@ -272,6 +277,8 @@ interface Plot {
   ramp(c: Color, h: number, k?: number): Color;
   /** A colour from the species' own list — pulled toward the world palette when the garden has one (`floraPalette`). */
   paint(list: readonly string[]): Color;
+  /** The body cell just drawn is stalk: something a seahorse's tail can wrap. */
+  stalk(): void;
 }
 
 interface SpeciesDef {
@@ -403,7 +410,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
     near: 24, far: 46, share: 0.14, colony: [2, 5], spread: 6,
     // Green, and the golds and olives of real kelp.
     leaf: [LEAF_GREEN, '#8a6a2a', '#5f7d2e', '#3a8f6a'],
-    grow({ x, z, root, V, rng, light, lx, lz, phase, body, lamp, tone }) {
+    grow({ x, z, root, V, rng, light, lx, lz, phase, body, lamp, tone, stalk }) {
       // Kelp: a stalk that meanders on the grid and leans to the light, with
       // blades that CLIMB away from it in two-cube stair-steps.
       // One in ten is a giant, reaching for the surface.
@@ -417,6 +424,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
         tz = z + (lz * off + lx * Math.round(Math.cos(j * wander * 0.7 + phase) * 0.8)) * V * 0.55;
         const y = root + (j + 0.5) * V;
         body.cube(tx, y, tz, V * (1 - h * 0.3), V, V * (1 - h * 0.3), tone(h), 0);
+        stalk();
         if (j > 2 && j < n - 1 && j % 3 === 0) {
           const dir = (j / 3) % 2 ? 1 : -1;
           const sxv = -lz * dir, szv = lx * dir;
@@ -522,7 +530,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
   },
   whip: {
     near: 18, far: 40, share: 0.08, colony: [1, 3], spread: 5,
-    grow({ x, z, root, V, s, rng, light, lx, lz, body, lamp, ramp, paint }) {
+    grow({ x, z, root, V, s, rng, light, lx, lz, body, lamp, ramp, paint, stalk }) {
       // Sea whips: a stand of thin, bright rods. They are all height, so the
       // sway (which grows with height²) makes them the liveliest thing here.
       const hue = light.clone().lerp(paint(['#ff4a3d', '#ff9f1c', '#ffd23f', '#c77dff', '#ff5c8a']), 0.82);
@@ -537,6 +545,7 @@ const SPECIES: Readonly<Record<FloraSpecies, SpeciesDef>> = {
           const h = (j + 0.5) / n, off = Math.round(h * h * lean * n);
           tx = bx + ex * off * V * 0.5; tz = bz + ez * off * V * 0.5;
           body.cube(tx, root + (j + 0.5) * V, tz, V * 0.5, V, V * 0.5, ramp(hue, h, 0.4 + 0.6 * h), 0);
+          stalk();
         }
         if (n > tallest) { tallest = n; tip = [tx, root + (n + 0.35) * V, tz]; }
       }
@@ -857,7 +866,8 @@ export function buildFlora(
   const want = Math.round(opts.density * opts.cap * 9);
   const lights: FloraField['lights'] = [];
   const tips: FloraField['tips'] = [];
-  const empty = (): FloraField => ({ parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips, rare: 0, colonies: 0 });
+  const stems: FloraStem[] = [];
+  const empty = (): FloraField => ({ parts: [], lamps: [], plants: 0, voxels: 0, bySpecies, lights, tips, stems, rare: 0, colonies: 0 });
   if (!want || (!anchors.length && !gallery)) return empty();
   const V = 1.7 * s; // the voxel
   const weights = weightsOf(opts.mix, opts.environment);
@@ -899,8 +909,11 @@ export function buildFlora(
     // A rare morph is nacreous all through, its lamps too.
     body.pearl = lamp.pearl = isRare ? 0.5 : 0;
     const lampsBefore = lamp.count, bodyFrom = body.pos.length / 3, lampFrom = lamp.pos.length / 3;
+    const stalkCells: number[] = [];
+    const bodyCellsFrom = body.cells.length / 3;
     def.grow({
       x, z, root, V, s, rng, gene, light, stem, lx: dx / dl, lz: dz / dl, phase, body, lamp,
+      stalk: () => { stalkCells.push(body.cells.length / 3 - 1); },
       tone: (h, k = 1) => ramp(stem, h, (0.34 + 0.62 * h) * k * vigour),
       ramp: (c, h, k = 1) => ramp(c, h, k * vigour), paint,
     });
@@ -908,7 +921,7 @@ export function buildFlora(
     // of its species, the same plant cut at a smaller voxel.
     if (sibling && def.max === undefined && rng.next() < 0.3) {
       const k = rng.range(0.45, 0.68);
-      body.shrink(bodyFrom, x, root, z, k);
+      body.shrink(bodyFrom, x, root, z, k, bodyCellsFrom);
       lamp.shrink(lampFrom, x, root, z, k, lampsBefore);
     }
     const flex = Math.max(body.maxFlex, lamp.maxFlex);
@@ -922,6 +935,11 @@ export function buildFlora(
       lights.push({ x: lamp.cells[c * 3]!, y: lamp.cells[c * 3 + 1]!, z: lamp.cells[c * 3 + 2]!, root: lamp.cellSway[w]!, phase: lamp.cellSway[w + 1]!, gust: lamp.cellSway[w + 2]!, color: near.color, flex: lamp.cellSway[w + 3]! });
     }
     tips.push({ x, z, y: Math.max(body.top, lamp.top), root, flex });
+    // Read after a small form's shrink, which moves the cells.
+    for (const c of stalkCells) {
+      const w = c * 4;
+      stems.push({ x: body.cells[c * 3]!, y: body.cells[c * 3 + 1]!, z: body.cells[c * 3 + 2]!, root: body.cellSway[w]!, phase: body.cellSway[w + 1]!, gust: body.cellSway[w + 2]!, flex: body.cellSway[w + 3]!, plant: plants });
+    }
     bySpecies[species] += 1;
     plants += 1;
     if (isRare) rare += 1;
@@ -947,7 +965,7 @@ export function buildFlora(
         founded += 1;
       });
     });
-    return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, rare, colonies: founded };
+    return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, stems, rare, colonies: founded };
   }
 
   // Plants grow in colonies, the way a reef does: a founder, then siblings of
@@ -990,7 +1008,7 @@ export function buildFlora(
     }
     growOne(species, x, z, genes, isRare, sibling);
   }
-  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, rare, colonies: founded };
+  return { parts: body.geometry(), lamps: lamp.geometry(), plants, voxels: body.count + lamp.count, bySpecies, lights, tips, stems, rare, colonies: founded };
 }
 
 /** The sway, as shader text — one function shared by the plants, their lamps
@@ -1010,6 +1028,23 @@ export const FLORA_SWAY = /* glsl */ `
       (cos(t * 0.6 + sw.y - h * 0.13) * 0.6 + gust * 0.8) * reach * 0.7);
   }
 `;
+/** FLORA_SWAY in JS: how far a point `h` above its root has swayed at `t` — before its flex. */
+export function floraSwayAt(h: number, phase: number, gust: number, t: number): [number, number] {
+  const reach = Math.min(h * h * 0.0042, 9) + Math.min(h, 6) * 0.06;
+  const g = Math.pow(Math.sin(t * 0.27 - gust) * 0.5 + 0.5, 3);
+  const wave = Math.sin(t * 0.85 + phase - h * 0.16);
+  const slow = Math.sin(t * 0.23 + phase * 1.7);
+  return [(wave * 0.7 + slow * 0.5 + g * 2.1) * reach, (Math.cos(t * 0.6 + phase - h * 0.13) * 0.6 + g * 0.8) * reach * 0.7];
+}
+
+/** Where a stalk cell is at `t`, as FLORA_VERTEX moves its vertices (a stalk never startles: kelp and whips do not react). */
+export function stemAt(c: FloraStem, t: number, out: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  const [sx, sz] = floraSwayAt(Math.max(0, c.y - c.root), c.phase, c.gust, t);
+  const x = sx * c.flex, z = sz * c.flex;
+  out.x = c.x + x; out.z = c.z + z; out.y = c.y - (x * x + z * z) * 0.012;
+  return out;
+}
+
 export const FLORA_VERTEX = /* glsl */ `
   #include <begin_vertex>
   float h = max(0.0, position.y - aSway.x);

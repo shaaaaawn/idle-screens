@@ -169,6 +169,9 @@ importers:
       '@idle-screens/core':
         specifier: workspace:*
         version: link:../core
+      '@idle-screens/validator':
+        specifier: workspace:^
+        version: link:../validator
       '@types/three':
         specifier: ^0.186.0
         version: 0.186.0

@@ -188,6 +188,7 @@ export const PATH_FRAGMENT = /* glsl */ `
     // Ragged by whole tiles: the odd one missing inside, the odd one straying out.
     float laid = step(best + (r1 - 0.5) * T * 0.9, 0.0) * step(0.06, r2 + step(best, -hw * 0.5));
     if (laid > 0.5) {
+      mqBare = 0.0;
       float worn = 1.0 - smoothstep(-hw, -hw * 0.25, best); // 1 down the middle, where it is walked
       // A tile has an edge: a dark joint round it, a lit top-left lip.
       float joint = min(min(in01.x, 1.0 - in01.x), min(in01.y, 1.0 - in01.y));
@@ -207,8 +208,7 @@ export const PATH_FRAGMENT = /* glsl */ `
         col = mix(vec3(0.62, 0.54, 0.38), vec3(0.78, 0.7, 0.5), r1);
       }
       // As bright as the floor it lies on: a path in a dark ocean is a dark path.
-      float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-      col *= clamp(0.34 + lum * 2.6, 0.34, 1.0);
+      col *= clamp(0.34 + mqFloorLum * 2.6, 0.34, 1.0);
       col = col * (0.45 + 0.55 * seam) + lipL * 0.07;
       diffuseColor.rgb = mix(diffuseColor.rgb, col, 0.96);
     }

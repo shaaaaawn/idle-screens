@@ -169,8 +169,8 @@ describe('finish is luminance-neutral to the analytic tools, and steerable', () 
   });
 
   it('describeScene mentions the finish only when declared', () => {
-    expect(describeScene(spec()).spec).toEqual({ id: 'fin', label: 'Finish', units: 'px' });
-    expect(describeScene(spec({ finish: { grain: 0.5 } })).spec).toEqual({ id: 'fin', label: 'Finish', units: 'px', finish: { grain: 0.5 } });
+    expect(describeScene(spec()).spec).toEqual({ id: 'fin', label: 'Finish', units: 'viewport' });
+    expect(describeScene(spec({ finish: { grain: 0.5 } })).spec).toEqual({ id: 'fin', label: 'Finish', units: 'viewport', finish: { grain: 0.5 } });
   });
 
   it('finish.grain / finish.dither are numeric paint paths; absent finish exposes none and is not structural', () => {

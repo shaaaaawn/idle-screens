@@ -247,6 +247,7 @@ export const METAQUARIUM_PARAMS = {
    *  `spotRig` on slots 0 and 1 for the couple's spotlights.
    *  `off` (default): they live their own lives. */
   starfishDance: { type: 'enum', default: 'off', options: ['off', 'aerobics', 'freestyle', 'duet'], ease: 'step' },
+  snailShell: { type: 'enum', default: 'mix', options: ['mix', 'banded', 'pearl', 'gold', 'glow'], ease: 'step' },
   /** The dance's tempo, beats per minute. Every move is a bar of four beats.
    *  Integrated when steered, so a glide speeds the class up on the beat. */
   danceTempo: { type: 'number', default: 128, min: 60, max: 180, ease: 'smooth' },
@@ -341,6 +342,40 @@ export const METAQUARIUM_PARAMS = {
   /** Crystal streetlamps along the paths (0 = none; needs `paths` — with none there is nothing to line): a slate post with a
    *  crystal crown in its nearest crystal's colour, a halo, light on the floor. */
   streetLamps: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** The village's small things, `kind[:count][/style], …`: fence (round every home's yard, a gate where its path leaves;
+   *  driftwood coral stone crystal), mailbox (by every gate; post — its flag goes up when the mail comes — clam, bottle;
+   *  each a vignette mark mailbox1…), bench[:n] (round the fountain or hub; shell stone), sock[:n] (a current sock).
+   *  Fences and mailboxes need geodeHomes. Empty = none. */
+  townProps: { type: 'string', default: '', ease: 'step' },
+  /** What the village lays on its floor, `kind[/style], …`: lawn (a mown lawn in every yard; stripes checks), mosaic
+   *  (the square tiled in a compass rose; stone shell glass), mat (a doormat at every door; kelp stripe), steps (stepping
+   *  stones down the paths; slate sand moss), ripples (sand combed by the current; fine broad). Lawns and mats need
+   *  geodeHomes, steps need paths. Empty = none. */
+  floorCover: { type: 'string', default: '', ease: 'step' },
+  /** Pyramids built of cubes, as the fish are (0 = none): on the floor in complexes — a great pyramid and its queens —
+   *  small ones near, the great ones at the back — only on flat ground (a flat floor: none on dunes, ridges or a basin);
+   *  standing, half sunk, one missing its capstone. */
+  pyramids: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
+  /** Their shapes and stones, `shape|stone[:weight], …` (empty = the room's stone, every shape). */
+  pyramidMix: { type: 'string', default: '', ease: 'step' },
+  /** `field` (complexes over the floor) or `stage`: one monumental pyramid in the middle of the camera's orbit — lit if the
+   *  mix has a lit stone, else lit-trimmed — with a small one at each side, the field behind. Needs flat ground there. */
+  pyramidLayout: { type: 'enum', default: 'field', options: ['field', 'stage'], ease: 'step' },
+  /** The lit pyramids' show (led, neon, lit trim): '' or `auto` — the field as one, through every routine in turn, a wave
+   *  rolling across it; `solo` — each its own; a routine (rings beam edges equalizer rainbow twinkle faces rain spiral
+   *  breathe ripple); or a looping cue sheet `8s:rings, 8s:beam, 16s:equalizer`. Steered live: no rebuild. */
+  pyramidShow: { type: 'string', default: '', ease: 'step' },
+  /** The show's tempo (0 = free-running): the motion steps on the beat and each beat lifts the lamps, under a flash. */
+  pyramidBpm: { type: 'number', default: 0, min: 0, max: 140, ease: 'step' },
+  /** Underwater signage: `kind[@place][>target][/#color][*size][:text]`, comma-separated
+   *  (plank arrow ring porthole neon led). Each stands beside its place (gate plaza hub
+   *  fountain home1…, or centre left right front back), facing the front; an LED board
+   *  scrolls a long line. Empty = none. */
+  signs: { type: 'string', default: '', ease: 'step' },
+  /** How unstable the lit signs' power is (neon and LED boards): 0 steady; higher, more
+   *  hum, stutters, a dead row or tube, a slipped row, now and then a reboot. Each sign
+   *  has its own supply — most steady, some dodgy. Flash-safe at any setting. */
+  signFlicker: { type: 'number', default: 0.4, min: 0, max: 1, ease: 'smooth' },
   bubbleVents: { type: 'number', default: 0, min: 0, max: 1, ease: 'step' },
   /** `live` puts the vents on a real bubble life: each one grows at the mouth,
    *  lets go, rises, sits at the water surface and pops; a vent coughs and goes
@@ -526,6 +561,7 @@ export { parseFishMix, expandFishMix, expandFishMixSlots, type FishMixEntry, typ
 export * from './environments';
 export { parseSpotRig, parseSpotCues, spotLevels, MAX_SPOTS, type SpotSpec, type SpotSheet } from './spots';
 export { PARAM_DOCS, RECIPES, GRAMMAR, recipe, recipeTrack, validateMetaquariumParams, type Recipe, type ParamProblem } from './guide';
+export { parseSignMix, SIGN_KINDS, SIGN_PLACES, SIGN_TEXT_MAX, MAX_SIGNS, type SignEntry, type SignKind } from './sign-mix';
 export { describeMetaquarium, metaquariumParamsFromTrack, type MetaquariumAnatomy, type AnatomyCastRow, type AnatomySection } from './anatomy';
 export { parseVignette, resolveVignette, VIGNETTES, VIGNETTE_CUES, INTERIOR_MARKS, OPEN_MARKS, GESTURES, type Vignette, type Marks } from './vignette';
 export {

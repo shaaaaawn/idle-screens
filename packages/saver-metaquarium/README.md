@@ -135,7 +135,7 @@ seed (nothing fetched); the world layers that stand on it are under
 | environment | enum | `void` | The ROOM: `void` (exactly the pre-environment scene), `abyss`, `reef`, `kelp`, `ice`, `vent`, `lagoon`, `universe`. Adds terrain and light shafts, plus a water ceiling for the rooms that have one (reef, kelp, ice, lagoon); never overrides your palette params |
 | floorKind | enum | `auto` | Override the environment's terrain: `auto`, `flat`, `dunes`, `ridges`, `basin`, `shelf` (town on a plateau), `trench` (a channel across the front), `terraces` (tiers behind the town) |
 | waterY | number | −1 | Water-ceiling height, −1–220. −1 follows the environment (step, not smooth — the sentinel can't be interpolated through) |
-| rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason) |
+| rayStrength | number | −1 | Light-shaft strength, −1–1. −1 follows the environment, 0 = off (step, same sentinel reason). Shafts cost device budget: 5 on the high tier, 2 on standard, none on the lowest tier in a room with a water surface (abyss, vent and universe keep 2); `room.rayStrength` reads 0 where they were dropped |
 
 ### Palette
 
@@ -197,6 +197,13 @@ Every one of them defaults to off — 0, `none`, −1 for `followSpot`, empty fo
 | `geodeLayout` | `field` \| `gallery` | Scattered, or one of each kind in rows. |
 | `fountain` | `none` \| `vent` \| `geode` | The town square's fountain: a hot-vent chimney or a geode basin, with a bubble column, a pebble plaza and its own light; adds a `fountain` vignette mark. |
 | `streetLamps` | 0–1 | Crystal streetlamps round the plaza and along the paths (needs `paths`). |
+| `townProps` | string | The village's small things, `kind[:count][/style], …`: `fence` (driftwood coral stone crystal) round every home's yard, `mailbox` (post, clam, bottle) by every gate, `bench[:n]` (shell stone) round the square, `sock[:n]` current socks. Fences and mailboxes need `geodeHomes`. |
+| `floorCover` | string | What the village lays on its floor, `kind[/style], …`: `lawn` (stripes checks) mown in every yard, `mosaic` (stone shell glass) a compass rose tiled round the fountain, `mat` (kelp stripe) a doormat at every door, `steps` (slate sand moss) stepping stones down the paths, `ripples` (fine broad) sand combed by the current. Lawns and mats need `geodeHomes`, steps need `paths`. |
+| `pyramids` | 0–1 | Pyramids built of cubes, as the fish are: on the floor in complexes (a great pyramid and its queens), small ones near, great ones at the back, only on flat ground (`floorKind: flat`). Standing, half sunk, one missing its capstone. |
+| `pyramidMix` | string | Their shapes and stones, `shape\|stone[:weight], …`: giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit `led` and `neon`, every cube a lamp running a light show. |
+| `pyramidLayout` | `field` \| `stage` | `stage`: one monumental pyramid in the middle of the orbit (lit, or stone with lit trim), a small one at each side, the field behind. |
+| `pyramidShow` | string | The lit pyramids' light show: `auto` (the field as one, through every routine), `solo`, a routine (rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple), or a cue sheet `8s:rings, 8s:beam`. Live, no rebuild. |
+| `pyramidBpm` | 0–140 | The show's tempo (0 = free): the motion steps on the beat, each beat lifts the lamps under a flash. |
 | `floraLayout` | `garden` \| `gallery` | Grow round the crystals, or one plot per species to see them all. |
 | `floraMix` | string | Which plants grow: `species[:weight]`, comma-separated, e.g. `kelp:3, whip, seapen`. Bad entries are dropped with one console warning. Empty = the room's own garden. |
 | `bubbleVents` | 0–1 | Bubbles in puffs from geode chimneys, fissure crowns and crystal bases; they quicken, swell and wander as they rise. |
@@ -232,6 +239,25 @@ parameters change. The complete world adds at most eight batched draws, no
 textures, downloads, shadow maps or additional lights. Flora, shards, snow and
 bubbles scale with the existing device prop budget. `inspect().props.scenery`
 reports actual populations; prop draw-call/triangle totals include the world.
+
+## Signs
+
+`signs` puts underwater signage in the world, one entry a sign: `kind[@place][>target][/#color][*size][:text]`, comma-separated, up to eight.
+
+| kind | what stands there |
+| --- | --- |
+| `plank` | weathered boards nailed to a post, the lettering painted on (≤ 24 characters) |
+| `arrow` | a board cut to a point, aimed at `>target` (≤ 16) |
+| `ring` | a striped life-ring hung on a post, a name plaque under it (≤ 10) |
+| `porthole` | a brass porthole set in a stone, its glass lit; a word (≤ 4) or, with none, a fish |
+| `neon` | glowing tube lettering on a dark board, a halo and light on the floor (≤ 14) |
+| `led` | a dot-matrix board in the hackerfish's pixels; a line longer than the board scrolls (≤ 64) |
+
+A sign stands beside its place — `gate`, `plaza`, `courtyard`, `hub`, `fountain`, `home1`–`home3`, or the open tank's `centre`, `left`, `right`, `front`, `back` — never on it, and faces the front. With no place it finds a clear spot across the front of the tank. Lettering is a 5×7 pixel font (capitals, digits, common punctuation, `° ♥ ★`); `/#color` colours the lettering, tubes, LEDs, glass or stripes. Signs stay outdoors (not in `interior: geode`), and fish swim round them. Lit signs (neon, LED) run on old wiring: `signFlicker` (0–1, default 0.4) sets how unstable it is — a slow hum, two-dip stutters, a dead row or tube, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply (most steady, a few bad); events are one per four-second slot at most, so it stays under WCAG's three flashes a second at any setting.
+
+```ts
+signs: 'plank@gate:"Welcome to the reef", arrow@hub>gate:Castle, neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M - WATER 24°'
+```
 
 ## Reading a scene back
 

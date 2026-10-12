@@ -92,7 +92,7 @@ jobs:
           SKIP_SRC: ${{ matrix.skip_src }}
         run: ./scripts/make-release.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.arch }}
           path: apps/linux/dist/
@@ -103,7 +103,7 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           merge-multiple: true

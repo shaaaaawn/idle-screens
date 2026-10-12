@@ -26,6 +26,7 @@ import { breedOf, isMintedId } from './farm';
 import { environmentOf } from './environments';
 import { validateMetaquariumParams, type ParamProblem } from './guide';
 import { expandFishMixSlots, parseFishMix } from './ipfs';
+import { parseSignMix } from './sign-mix';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { parseSpotCues, parseSpotRig } from './spots';
 import { VIGNETTES } from './vignette';
@@ -64,12 +65,14 @@ export interface MetaquariumAnatomy {
 }
 
 const CAST_CAP = 24;
-const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus']);
+const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus', 'snail', 'dot']);
 const BREED_NOUN: Record<string, [string, string]> = {
   dori: ['tang', 'tangs'],
   babyfish: ['baby fish', 'baby fish'],
   blowfish: ['blowfish', 'blowfish'],
   octopus: ['octopus', 'octopuses'],
+  snail: ['snail', 'snails'],
+  dot: ['Dot', 'Dots'],
   starfish: ['starfish', 'starfish'],
   crab: ['crab', 'crabs'],
   shark: ['shark', 'sharks'],
@@ -175,6 +178,10 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (num('paths') > 0) world.push(`paths${has('pathMaterial') && str('pathMaterial') !== 'auto' ? ` (${str('pathMaterial')})` : ''}`);
   if (str('fountain') !== 'none') world.push(`${str('fountain')} fountain`);
   if (num('streetLamps') > 0) world.push('street lamps');
+  if (has('townProps')) world.push(`town: ${str('townProps')}`);
+  if (has('floorCover')) world.push(`floor: ${str('floorCover')}`);
+  if (num('pyramids') > 0) world.push(`pyramids ${pct('pyramids')}${has('pyramidMix') ? `: ${str('pyramidMix')}` : ''}`);
+  if (num('pyramids') > 0 && (has('pyramidShow') || num('pyramidBpm') > 0)) world.push(`a light show${has('pyramidShow') ? ` (${str('pyramidShow')})` : ''}${num('pyramidBpm') > 0 ? ` at ${num('pyramidBpm')} bpm` : ''}`);
   if (num('floraDensity') > 0) world.push(`plants ${pct('floraDensity')}${has('floraMix') ? `: ${str('floraMix')}` : ''}`);
   if (num('rockDensity') > 0) world.push(`rocks ${pct('rockDensity')}`);
   if (num('geodes') > 0) world.push(`wild geodes ${pct('geodes')}`);
@@ -182,6 +189,12 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
     const props = parsePropMix(str('propMix')).entries;
     const n = props.reduce((k, e) => k + e.count, 0);
     if (n) world.push(`${n} crystal${n === 1 ? '' : 's'}: ${props.map((e) => `${e.count > 1 ? `${e.count} ` : ''}${e.palette === 'env' ? '' : `${e.palette} `}${e.habit}${e.size > 1 ? ` ×${e.size}` : ''}`).join(', ')}`);
+  }
+  if (has('signs') && str('interior') !== 'geode') {
+    const signs = parseSignMix(str('signs')).entries;
+    if (signs.length) {
+      world.push(`${signs.length} sign${signs.length === 1 ? '' : 's'}: ${signs.map((e) => `${e.kind}${e.text ? ` "${e.text}"` : ''}${e.place ? ` at ${e.place}` : ''}${e.target ? ` → ${e.target}` : ''}`).join(', ')}`);
+    }
   }
   if (num('skyLanterns') > 0) world.push('jellyfish lanterns overhead');
   if (num('horizon') > 0) world.push('a far horizon');
@@ -238,6 +251,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (has('fishGlow')) look.push(`glow ${pct('fishGlow')}`);
   if (num('fishAmbient') > 0) look.push(`fish ambient ${pct('fishAmbient')}`);
   if (str('dither') === 'on') look.push('dither');
+  if (has('signFlicker') && has('signs')) look.push(num('signFlicker') > 0 ? `sign flicker ${pct('signFlicker')}` : 'steady signs');
 
   const sections: AnatomySection[] = (
     [['Room', room], ['World', world], ['Stage', stage], ['Camera', camera], ['Motion', motion], ['Look', look]] as const
