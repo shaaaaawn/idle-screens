@@ -1,5 +1,46 @@
 # @idle-screens/schema
 
+## 3.12.0
+
+### Minor Changes
+
+- fec653b: Perception gains the two channels edits are usually about. They come from the MCP comprehension eval of 2026-07-28 (P2 F3/F4/F6, P3 F5/F6). They were written on 2026-09-05 (`ae85cc2`), but the commit never reached `develop` until now.
+  
+  - **`motionStats` (additive):**
+    - `meanSpeed`/`maxSpeed` stay px/s.
+    - New `meanSpeedVp`/`maxSpeedVp` give the same speeds in viewport units/s, which don't change with preview size.
+    - `moving` is judged in viewport units, so it gives the same answer at every size. It used to be a 0.5 px/s floor.
+    - Each layer also reports `heading` (screen degrees) and `headingSpread` (0 = conveyor, 1 = scattered).
+  - **New `sceneColour()` / `perceiveScene().colour`:**
+    - Hue, saturation, warmth and hex for the alpha × area weighted sprite mass and for the background plate.
+    - Resolved at `t` through the timeline, and weighted by paint opacity.
+    - Sequence frames report the segment's sprites over the bed's plate.
+  - **`diffScenes`:**
+    - New `colour` channel: `hueShift`, `saturationDelta`, and `warmthDelta`, the cooler/warmer axis that `meanLuminance` gets backwards.
+    - New `motion` channel: overall and per-layer speed deltas with headings, in viewport units.
+    - Advisories run at the diff's own viewport.
+- a3dde3d: Advisory and analysis fixes from the MCP feedback log (F19, F20, F34.5, F35, F48, F49). They were written on 2026-09-05, but the commit never reached `develop` until now.
+  
+  - **`low-contrast-layer` (F19):** a layer is judged against the background sampled across its own vertical extent (region or position), not the gradient's mean. Bottom-anchored silhouettes over a warm ground no longer trip it.
+  - **`off-center` (F20):** suppressed when the offset is along one axis and most composed entities come from layers region-anchored to an edge on that axis. A skyline along the bottom is the composition.
+  - **New `additive-saturation` advisory (F35):** fires when `lighter`/`screen` layers stack more than 1.0 viewport-areas of alpha-weighted light. The analytic model sums glow with no ceiling and cannot see this. No shipped or prod example reaches it.
+  - **`streak-on-static` (F34.5):** no longer fires for a layer with `spin`.
+  - **`describeScene` (F48, F49):** an omitted `units` now means viewport, matching `compileSaver`/`perceiveScene`/`adviseSpec`. Every shipped example was being described at 1/1080th scale. Scaled counts are clamped to `LIMITS.maxTotal` like the renderer. All four builders share one `entityScales()` helper.
+  - **FORMAT.md:** a negative orbit speed reverses direction, and an orbit parent layer must have `count: 1`. A path `scatter` must be > 0, and a single entity cannot show a path's curve.
+
+### Patch Changes
+
+- dab5e5d: Advisories no longer contradict the perception returned beside them. Each case was reproduced on idlescreens.com before the fix, and each one only removes false warnings.
+  - **`low-contrast-layer`** compares a layer against the solid, static layer underneath it, not only the page background. A near-black key plate on an opaque yellow panel is content (X388).
+  - **`off-center`** needs two things to agree. The entity head count must be off-centre, and so must the ink, measured on the same luminance grid perception reports. Two dozen overlapping slivers no longer outweigh one full-height stripe (X384).
+  - **`text-overlap`** stays quiet for the outline / drop-shadow idiom: the same string at the same size, nudged within 15% of its glyph height (X416).
+  - **Sequences:** a timed segment is judged at one moment inside it, and the message says which. Coverage now sizes text from its px `font` and scales with layer and group transforms, so one word is no longer both "empty" and "33 000 px off-screen" (X418).
+  - **`perceiveScene` motion** measures layers moved only by `timeline` keys. They read 0 px/s because the timeline was resolved before motion was sampled (X437).
+  - **`overlap-seams`** on a soft or feathered layer says what is true. Overlaps pool into soft lumps, which suit clouds and haze, but can never form one solid shape. It no longer claims every overlap paints a visible edge (X423, checked in pixels against a hard-edged control).
+- bb581f9: Docs only.
+  - **FORMAT.md Timeline:** a key's `dur` is capped at 30000 ms. A longer one fails validation for the whole spec, so split a slower glide into consecutive keys (X436).
+  - **metaquarium `rayStrength`:** the guide and README now say which devices draw light shafts. The high tier draws 5 and standard draws 2. The lowest tier draws none in a room with a water surface (reef, kelp, ice or lagoon), because the surface takes that budget. Abyss, vent and universe keep 2. `perceiveChannel` reads `room.rayStrength` 0 where shafts were dropped (X442).
+
 ## 3.11.1
 
 ### Patch Changes

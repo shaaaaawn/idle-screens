@@ -1,5 +1,76 @@
 # @idle-screens/saver-metaquarium
 
+## 0.17.0
+
+### Minor Changes
+
+- 408d6c7: Floor covers (`floorCover`): what the village lays on its floor. `lawn` mows a striped (or checked) lawn into every home's yard; `mosaic` tiles the square in a compass rose round the fountain (stone, shell or sea-glass); `mat` puts a woven doormat at every door; `steps` lays stepping stones down the paths; `ripples` combs the open sand into ripples across the current. Lawns, mosaic and ripples are painted by the floor's shader (any terrain, no triangles); mats and stones are cubes, on flat ground only. Current socks now stream down one shared current, the one the ripples follow.
+- 0235438: Pyramids: `pyramids` (0–1) and `pyramidMix` raise pyramids built of cubes, the way the fish are built.
+  - **The cubes:** each pyramid is a stack of cubes you can count, a dozen or two across. Its cube is a whole multiple of a fish's (FISH_LENGTH/14 × 1–5). Every cube is drawn as a cube, in its own shade of the stone with a seam beside the next.
+  - **Symmetry:** every pyramid is exactly symmetric, with an odd base and a single-cube apex.
+  - **Placement:** they stand on the floor in complexes, as Giza's do: a great pyramid with its queens in a row beside it. Small ones sit inside the camera's orbit, larger ones across the middle of the floor, and the great ones at the back.
+  - **Shapes:** Giza, step, bent, Djoser, Mayan and frame.
+  - **Stones:** ten, chosen by the room unless `pyramidMix` names some.
+  - **Details:** glyph friezes, gilded or glowing capstones that light the floor, and an eye on some.
+  - **Ground:** only where the floor is flat under the whole footprint and around it. In practice that means `floorKind: flat`: none on dunes, ridges, a basin's bowl or a rippled tread.
+  - **Poses:** standing, half sunk, or missing a capstone that lies at its foot.
+  - **Lit stones:** `led` (white and rainbow lamps) and `neon` (magenta and cyan) make every cube a lamp running a light show, a pyramid of light. The shows are rings rising, a beam round the faces, glowing edges, an equalizer, a rainbow wash and twinkling, changing every 24 s with a crossfade.
+    - Each lamp changes at most about once a second, smoothly, never a strobe.
+    - They keep 45% of the fog, so the shows at the back still read.
+    - Glowing frames run a pulse of light up their edges.
+  - **The show** (`pyramidShow`, live, no rebuild) has eleven routines: rings, beam, edges, equalizer, rainbow, twinkle, faces, rain, spiral, breathe, ripple.
+    - The whole field plays as one, with a wave rolling across it. Other modes: `solo`, one named routine, or a looping cue sheet (`8s:rings, 8s:beam`).
+    - `pyramidBpm` steps the motion on the beat and lifts the lamps by under 10% on each beat.
+    - Small pyramids run the routines that read on a few cubes; big ones keep a faint outline lit.
+    - The lamps cut through the fog, but the stone and the base don't. The light on the floor moves with the show.
+  - **The stage:** `pyramidLayout: stage` raises one monumental pyramid in the middle of the camera's orbit, with a small one at each side, all symmetric. It is lit, or stone with lit trim.
+  - **Lit trim:** `pyramidMix` `trim[:share]` lights stone pyramids' edges, base and capstone. A lit great pyramid's queens are stone, carrying its light in their trim.
+  - **Flash safety:** one model, written in both JS and GLSL from one table, is checked through the validator's WCAG rule. Every lamp counts as the whole frame, every routine is tested free-running and at 140 bpm, large and small, plus ten minutes of the sequence and solo. Real pixels pass in the playground's validate mode too (worst tile: 2 flashes a second).
+  - **Cost:** one draw, and a second when any lit stone is present.
+- c40cdbd: `townProps`: the small things a lived-in village has, as `kind[:count][/style], …`. Each is built from cubes on the fish's grid (one cube is two of a classic token's pixels), sized for fish.
+  
+  - **fence**: a yard round every home, fitted to its shell, with a gate where its path leaves. The fence keeps off paths, the square, crystals, lamps and the next yard, and leaves a gap wherever something is in the way. Styles:
+    - `driftwood`: weathered pickets and a rail;
+    - `coral`: coral posts strung with sagging kelp rope;
+    - `stone`: a low dry-stone wall;
+    - `crystal`: slate posts capped with glowing crystals in the home's colour.
+  
+    With no style, each home takes the next one in turn.
+  - **mailbox**: one by every gate, beside the path, facing it.
+    - `post`: its flag goes up when the mail comes;
+    - `clam`: it opens;
+    - `bottle`: it rocks on its cradle.
+  
+    Each is a vignette mark `mailbox1…`, so a fish sent there has come with the post.
+  - **bench[:n]** (shell, stone): round the fountain, the hub or the village green, facing in.
+  - **sock[:n]**: a striped current sock on a pole that swings round as the current turns.
+  
+  The moving parts (flags, lids, bottles, socks) are one draw, turned in the vertex shader and closed-form in the scene clock. Fences and mailboxes need `geodeHomes`. An empty `townProps` leaves the world byte-identical.
+- c51f306: Seahorses hold on. Every so often a minted seahorse pauses its route, swims to the nearest stalk of kelp or sea whip, wraps its tail round it and sways with the plant: feeding, looking about, then letting go and picking up where it stopped. A `@pair` of seahorses link tails instead, facing each other and leaning back into the heart courting seahorses make. A hunter or a shy one holds longest. The rig gains a `grip` dial that wraps the tail's last three bones into a loop, an `aim` dial that swings the loop to either side, and a `grasp` node at its centre that the tank pins to the stem. Flora now records the kelp and whip stalk cells, each with its own sway. The tank exposes `stemAt`, a JS mirror of the plant sway shader, and `inspect()` reports each hold's kind, phase and pin error. A plant's dimorphic small form now shrinks its body cells along with its vertices.
+
+### Patch Changes
+
+- bb581f9: Docs only.
+  - **FORMAT.md Timeline:** a key's `dur` is capped at 30000 ms. A longer one fails validation for the whole spec, so split a slower glide into consecutive keys (X436).
+  - **metaquarium `rayStrength`:** the guide and README now say which devices draw light shafts. The high tier draws 5 and standard draws 2. The lowest tier draws none in a room with a water surface (reef, kelp, ice or lagoon), because the surface takes that budget. Abyss, vent and universe keep 2. `perceiveChannel` reads `room.rayStrength` 0 where shafts were dropped (X442).
+- af22ba8: `floorCover` parsing no longer backtracks quadratically on a long run of spaces. A 50 000-character value froze a viewer for about 8.5 s (CodeQL js/polynomial-redos), the same pattern as `townProps`. The other mix parsers (flora, geode, pyramid) use a single anchored `\s*` and stay linear.
+- e611593: Betafish break-dance, and betafish eyes that stay on their heads.
+  
+  - **Dances.** Six new clips on the betafish rig — `toprock`, `footwork`, `windmill`, `headspin` (loops on a 120 bpm bar), `freeze` and `drop` — and the same six as vignette gestures (`a windmill`, `b headspin`, …). A betafish dances them with its own body (the move takes it over, its swim and moments give way); any other fish gets a whole-body version.
+  - **Eyes, attached.** The rig had taken each eye block (a 3×3 of cells proud of the flank) for a pectoral fin and hinged it like a door, so the eyes flapped off the head with every stroke and flared with the gill covers. The eye cells now ride the head skin under them, the gill covers sit behind the eye, and the "pectoral" bones are gone.
+  - **Eyes, seamless.** Each eye cell is a whole voxel; the buried side faces between cells reached the front and z-fought it into hairlines across the pupil. They now sink a hair behind the front at draw time (the model's data is untouched).
+  - **Eyes, alive.** `beta-eyes` read the flank wall hidden behind the eye blocks, so the pupils it glided were never seen; it now reads the blocks' visible faces.
+- e098d2e: Dot, the first CHARACTER (experimental): Geode Hollow's courier, castable as `dot` (id 612). A box on two legs whose face is a screen, in a mail cap with a glowing antenna, blue sleeves and white gloves, red sneakers, a mailbag on its back and a little fish tail — drawn in the designer's voxel style but in fixed colours (every part `PAINT-#rrggbb`; a `SCREEN-…#rrggbb` material keeps its own phosphor). Rigged in Blender (`breeds/rig/dot.py`): hips, a torso that bows, arms with elbows and wrists, legs posed by two-bone IK that never let a sole under the floor (checked over every frame of every clip at build time), a cap and antenna that follow through; 29 clips — walk, run, sneak, idle, talk, nod, shake, hop, wiggle, wave, cheer, rest, spin, think, bow, deliver, point, glitch, skid, clap, shrug, facepalm, laugh, salute, search, stretch, jump for joy, trip and the twist. `src/dot.ts` walks it on the floor the crab's way — its own route, walk/run/sneak bouts, feet in step with the ground, its stance lifted so no foot sinks into a curved slope — and gives it 18 moments, turning to you for the friendly ones, each with a face on its screen (moods, blinks, a question then an idea, a letter, stars, a laugh, a glitch and reboot; new glyphs). In a vignette it is an actor on its feet, playing talk, nod, shake, hop, spin, wiggle, peek, bow and rest with its own clips (talking flaps a mouth on its screen). New recipe `dot-delivers`.
+- 050987e: Underwater signage. A new `signs` param puts up to eight voxel signs in the world: a painted `plank` on a post, an `arrow` aimed at another place, a life-`ring` with a name plaque, a lit brass `porthole` (a word or a fish), glowing `neon` lettering with a halo and light on the floor, and an `led` dot-matrix board in the hackerfish's pixels that scrolls a long line. `kind[@place][>target][/#color][*size][:text]`: each stands beside its place (the castle's gate and plaza, the paths' hub, the fountain, a home's door, or the open tank's marks), facing the front, and fish swim round it. Lettering is a new 5×7 pixel font. The validator reports a sign whose place is not in the scene, the guide documents the grammar, the anatomy lists each sign, and the playground's world panel has presets.
+  
+  An LED board's words are live data: when a `signs` change touches nothing but LED text, the boards swap their text in place (a new texture, the line entering from the right edge) instead of rebuilding the world. `parseSignMix` and the sign constants are exported from `./manifest`.
+  
+  Each kind has its own form and wears its age: a crooked hand-cut `plank` with chipped paint between end posts, a fingerpost `arrow` that points at its place in 3D, a barnacled dock piling with a rope coil for the `ring`, a `porthole` in a torn wreck plate half in the sand, a `neon` shop sign hung from a bracket on chains whose letters hum and now and then hiccup (flash-safe), and an `led` board with a face on each side. Lettering reads from behind too. Three recipes now carry signs: `geode-harbor`, `castle` and `reef-characters`.
+  
+  Neon and LED signs run on unstable power: `signFlicker` (0–1, default 0.4) adds a hum, stutters, a dead row or tube, a slipped row and the odd reboot that wakes row by row — each sign its own supply, the halo sagging with it, flash-safe by construction (one event per 4 s slot; tested against the validator's WCAG rule). Commas inside a sign's unquoted words stay in its words.
+- 37e867d: A snail, our third in-house breed and a floor creature (`snail`, id 611; experimental). Drawn voxel by voxel in the designer's style (`breeds/rig/snail-model.mjs`): a big round shell in the fish's coat with a spiral on each flank, a sea-green body with a smile, eyes on stalks, and two feelers whose tips glow. Rigged in Blender (`breeds/rig/snail.py`): a rigid shell over a soft body that stretches and draws in without cracking, stalks that roll in, blinking eyes. `src/snail.ts` drives it the crab's way: it glides the floor very slowly at its own pace (the wave down its foot keeps time with the ground), and stops to look about, turn and look at you, graze, stretch up tall, or pull into its shell and peek back out. Its eyes are its own: big 3×3 eyes on the stalks, each pupil one sliding quad with a catchlight, aimed every frame — at you when it stops to look, down at its food when it grazes, ahead as it glides, about in saccades — and they blink and squint (the shared `eyeLife` display leaves them be). A new `snailShell` param dresses the shells: `banded` (the coat and spiral as drawn), `pearl` (iridescent nacre), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light, a 7 s breath); `mix` (default) gives each snail its own, and a live steer takes on the next frame. New recipes `snail-garden` and `snail-night`.
+- 67c58c3: `townProps` parsing no longer backtracks quadratically on a long run of spaces. Two adjacent `\s*` runs made a 50 000-character value freeze a viewer for about 7 s (CodeQL js/polynomial-redos). Whitespace is still allowed around `:` and `/`; a space inside a word or number is rejected, as it effectively was before.
+
 ## 0.16.0
 
 ### Minor Changes
