@@ -44,7 +44,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. A snail glides the floor very slowly and stops to look about, look at you, graze, stretch up tall, or pull into its shell and peek back out. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. A snail glides the floor very slowly and stops to look about, look at you, graze, stretch up tall, or pull into its shell and peek back out. `dot` is a character (experimental): Dot, the town courier, a box on two legs whose face is a screen; it walks, runs and sneaks the floor, stops to wave, cheer, think, tip its cap, deliver a letter, dance, laugh and more, and as a vignette actor plays the gestures with its own body. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -148,7 +148,7 @@ export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab dori glowfish babyfish hackerfish blowfish starfish octopus snail. *size scales that token over its
+          crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot. *size scales that token over its
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
@@ -267,6 +267,12 @@ export const RECIPES: readonly Recipe[] = [
     id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they stop to graze, stretch, look at you, or hide in their shells, a few baby fish overhead.',
     params: { ...ALIVE, environment: 'lagoon', fishMix: 'snail:5,babyfish:4', floraDensity: 0.7, marineSnow: 0.2, finish: 0.5, swimSpeed: 0.6,
       cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
+  },
+  {
+    id: 'dot-delivers', label: 'Dot delivers', what: 'Dot, the courier, walks from the fountain to a neighbour\'s door and knocks; a blowfish comes out, they bow and chat, Dot thinks it over, gets the idea, spins for joy and walks home. The camera rides beside it.',
+    params: { ...ALIVE, geodeHomes: 3, paths: 0.6, fountain: 'geode', streetLamps: 0.5, floraDensity: 0.08, fishMix: 'dot:1,blowfish:1,babyfish:3',
+      vignette: '3s: a =fountain, b =home1in | 7s: a >home1 @home1 | 4s: a @home1 hop | 5s: b >home1 @a, a @b | 5s: a @b bow, b @a nod | 6s: a @b talk, b @a nod | 6s: b @a talk, a @b peek | 4s: a @b spin | 5s: a @b wiggle, b @a hop | 5s: b >home1in, a @b nod | 7s: a >fountain',
+      cameraFollow: 0, followDistance: 55, followAngle: 130 },
   },
   {
     id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',

@@ -262,7 +262,9 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
     if (!mesh.isMesh || !mesh.material) return;
     const replaced = materialsOf(mesh).map((m) => {
       if (isScreen(m)) {
-        phosphor ??= new Color(rng.pick(PHOSPHORS));
+        // A character's screen keeps its own phosphor, named on it (`SCREEN-Face#4fd8ff`, Dot's); a breed's is drawn per fish.
+        const own = /#([0-9a-f]{6})$/i.exec(m.name);
+        phosphor ??= new Color(own ? `#${own[1]}` : rng.pick(PHOSPHORS));
         return screenMaterial(m.name, phosphor);
       }
       if (isEyes(m) && neonColor) {

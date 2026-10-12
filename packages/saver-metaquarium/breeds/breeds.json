@@ -69,6 +69,11 @@
       "kind": "voxel", "size": 0.8, "motion": "snail", "roles": {}, "splitByBone": ["GLOW-Feelers"],
       "notes": "Experimental. Our third in-house breed, a floor creature: rig/snail-model.mjs writes source/snail.glb voxel by voxel in the designer's style (already role-named): a coat-tinted shell (PrimaryColor) with a SecondaryColor spiral on each flank, a sea-green body (PAINT-#6f9a62), eyes on stalks, a smile, and lower feelers whose tips glow (GLOW-Feelers, split one primitive per feeler). Rigged in Blender by rig/snail.py: a rigid shell; the head, neck, foot and tail one soft skin weighted by how far along the body each vertex lies, so it stretches and draws in without cracking; two stalks that roll in (scale); eyes rebuilt as one white box each with a pupil quad that slides and a catchlight riding it, eyes that blink and squint; two feelers. Clips glide, idle, look, retract, stretch, munch, blink. src/snail.ts drives them, aims the pupils (the tank's shared eye display leaves them be) and dresses the shell (snailShell: banded, pearl, gold, glow)."
     },
+    "dot": {
+      "source": "rig/dot.glb", "delivered": "source/dot.glb", "rig": "rig/dot.py",
+      "kind": "voxel", "size": 1.2, "motion": "dot", "roles": {},
+      "notes": "Experimental: the first CHARACTER, Geode Hollow's courier. rig/dot-model.mjs draws it in the designer's style but in fixed colours (every part PAINT-#rrggbb, the screen's phosphor named on it: SCREEN-Face#4fd8ff): a box on two legs in red sneakers, arms in blue sleeves and white gloves, a mail cap with a glowing antenna bulb (GLOW-Antenna), a mailbag on its back, a little fish tail. Rigged in Blender by rig/dot.py: hips, a torso that bows, arms with elbows and wrists, legs posed by two-bone IK, a cap and antenna that follow through; eighteen clips (idle walk run talk nod shake hop wiggle wave cheer rest spin peek bow deliver point glitch skid). src/dot.ts walks it on the floor, runs its moments, plays vignette gestures with its own clips, and draws its face on the screen (src/screen.ts)."
+    },
     "shark": {
       "source": "rig/shark.glb", "delivered": "source/shark.glb", "rig": "rig/shark.py",
       "kind": "voxel", "size": 2.2, "motion": "shark",
