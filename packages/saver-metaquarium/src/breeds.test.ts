@@ -473,6 +473,60 @@ describe('bundled breeds (breeds/README.md)', () => {
     for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
   });
 
+  it('snail: the rig survives the intake — shell, soft body, stalks, eyes, feelers; each glowing feeler its own light', async () => {
+    const doc = await bundledDoc('snail');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['eye.L', 'eye.R', 'feeler.L', 'feeler.R', 'foot', 'head', 'neck', 'pupil.L', 'pupil.R', 'shell', 'stalk.L', 'stalk.R', 'tail']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(['blink', 'glide', 'idle', 'look', 'munch', 'retract', 'stretch']);
+    expect(root.listNodes().find((n) => n.getExtras().mqStride !== undefined)!.getExtras().mqStride).toBe(6);
+    const feelers: string[] = [];
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      if (name === 'GLOW-Feelers') { expect(bones.size).toBe(1); feelers.push(...bones); }
+      // The whites ride the eyes, and each pupil's catchlight its pupil.
+      if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R', 'pupil.L', 'pupil.R']);
+      if (name === 'PrimaryColor' || name === 'SecondaryColor') expect([...bones]).toEqual(['shell']);
+    }
+    expect(feelers.sort()).toEqual(['feeler.L', 'feeler.R']);
+    // Clean eyes (common.py clean_eyes): each pupil ONE quad, so a slide shows no seam; the smile stays on the head.
+    expect(cleanEyes(root, joints, 'EYES-White', 'EYES-Black')).toEqual({ white: 24 + 4, pupil: 4 });
+    // The blink moves the eyes and nothing else, so it layers over the glide and the munch.
+    const blink = root.listAnimations().find((a) => a.getName() === 'blink')!;
+    expect(new Set(blink.listChannels().map((c) => c.getTargetNode()!.getName()))).toEqual(new Set(['eye.L', 'eye.R']));
+    for (const name of ['glide', 'munch']) {
+      const a = root.listAnimations().find((x) => x.getName() === name)!;
+      expect(a.listChannels().some((c) => c.getTargetNode()!.getName().startsWith('eye.'))).toBe(false);
+    }
+  });
+
+  it('snail: its loops close and its one-shots end where they began', async () => {
+    const doc = await bundledDoc('snail');
+    for (const a of doc.getRoot().listAnimations()) {
+      for (const ch of a.listChannels()) {
+        const v = ch.getSampler()!.getOutput()!, n = v.getCount();
+        const first = v.getElement(0, []) as number[], last = v.getElement(n - 1, []) as number[];
+        const d = Math.max(...first.map((x, i) => Math.abs(x - last[i]!)));
+        const flipped = ch.getTargetPath() === 'rotation' ? Math.max(...first.map((x, i) => Math.abs(x + last[i]!))) : Infinity;
+        expect(Math.min(d, flipped), `${a.getName()} ${ch.getTargetNode()!.getName()}.${ch.getTargetPath()}`).toBeLessThan(2e-3);
+      }
+    }
+  });
+
+  it('snail: the committed source is what its generator draws (breeds/rig/snail-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/snail-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    const doc = await new NodeIO().read(here('../breeds/source/snail.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
+    for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
+  });
+
   it('buried faces are culled: the shark (whole cubes, 28.8k faces) ships a fraction of them', async () => {
     let tris = 0;
     const json = gltfJson(await bundled('shark'));

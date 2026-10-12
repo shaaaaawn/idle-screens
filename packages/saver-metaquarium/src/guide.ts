@@ -21,6 +21,7 @@ import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
 import { parseFishMix } from './ipfs';
 import { parsePyramidMix } from './pyramid-mix';
+import { parseTownProps } from './town-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
@@ -42,7 +43,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   fishUrl: 'The single model used when `fishMix` is empty. ipfs:// or https.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated. `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures (shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail). A hackerfish\'s face is a screen (faces, code rain, crash and reboot); a glowfish fishes with its lure. A crab walks the seabed on its own legs at its own pace (swimSpeed does not hurry it), climbs the rocks, and stops to forage, pinch, wave and cheer. A starfish crawls the floor too, walks some of the way upright on its front arms, and stops to curl up, wave, or stand facing you; with `starfishDance` it dances. A snail glides the floor very slowly and stops to look about, look at you, graze, stretch up tall, or pull into its shell and peek back out. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -65,6 +66,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
+  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat.',
   starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own.',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
@@ -85,7 +87,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
   floorKind: 'Floor shape: `auto` follows the environment, `flat` is level, or terrain: `dunes`, `ridges`, `basin`; `shelf` (the town raised on a plateau with a terraced lip), `trench` (a meandering channel across the front, deep enough to hide in), `terraces` (tiers stepping up behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
-  rayStrength: 'Light shafts from the surface.',
+  rayStrength: 'Light shafts from the surface. They cost device budget: 5 shafts on the high tier, 2 on standard, and none on the lowest tier in a room with a water surface (reef, kelp, ice or lagoon), where the surface takes that budget — abyss, vent and universe keep 2. Where they were dropped, perceiveChannel reads room.rayStrength 0.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',
@@ -109,6 +111,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   signs: 'Underwater signage, `kind[@place][>target][/#color][*size][:text]`: a painted `plank` on a post, an `arrow` pointing at another place, a life-`ring` with a name plaque, a lit `porthole` (a word or a fish), glowing `neon` lettering, an `led` dot-matrix board that scrolls a long line. Each stands beside its place, facing the front; with no @place, in the open. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
   signFlicker: 'How unstable the lit signs\' power is (neon and LED boards), 0–1, default 0.4: a slow hum, two-dip stutters, a dead row or tube for a couple of seconds, a row slipping sideways, now and then a reboot that wakes row by row. Each sign has its own supply, most steady. 0 is steady; flash-safe at any setting.',
   streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  townProps: 'The village\'s small things, comma-separated kind[:count][/style]: fence (a yard round every home, a gate where its path leaves; styles driftwood coral stone crystal, none = each home its own), mailbox (by every gate: post — its flag goes up when the mail comes — clam that opens, bottle that rocks; each a vignette mark mailbox1…), bench[:n] (round the fountain or hub, facing in; shell stone), sock[:n] (a striped current sock swinging with the current). Fences and mailboxes need geodeHomes.',
   pyramids: 'Pyramids built of cubes, as the fish are (0 = none, 1 = about a dozen complexes): each a stack of cubes you can count, the cube a whole multiple of a fish\'s, exactly symmetric. On the floor in complexes — a great pyramid and its queens — small ones near, the great ones at the back. Only on flat ground — use floorKind: flat (none on dunes, ridges or a basin). Standing, half sunk, one missing its capstone. Glyph friezes, gilded or glowing capstones, an eye on some.',
   pyramidMix: 'Their shapes and stones: `shape|stone[:weight], …`. Shapes giza step bent djoser mayan frame; stones sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and the lit ones led (white and rainbow lamps) and neon (magenta and cyan), every cube a lamp running a light show. Empty = every shape in the room\'s stone.',
   pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
@@ -143,12 +146,14 @@ export const GRAMMAR = `
 fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, shark:1@patrol*1.5
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
-          crab dori glowfish babyfish hackerfish blowfish starfish octopus. *size scales that token over its
+          crab dori glowfish babyfish hackerfish blowfish starfish octopus snail. *size scales that token over its
           breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
           grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (empty = the room's garden)
+townProps  kind[:count][/style], …   fence/coral, mailbox/post, bench:4/shell, sock:2
+          fence: driftwood coral stone crystal · mailbox: post clam bottle · bench: shell stone · sock (needs geodeHomes for fence and mailbox)
 pyramidMix  shape|stone[:weight], …   giza step bent djoser mayan frame · sandstone limestone obsidian jade gold lapis coral crystal nacre basalt led neon
           giza:3, mayan, gold:2, obsidian   (empty = every shape in the room's stone)
 pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 16s:equalizer
@@ -254,6 +259,16 @@ export const RECIPES: readonly Recipe[] = [
     id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
   },
+  {
+    id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they stop to graze, stretch, look at you, or hide in their shells, a few baby fish overhead.',
+    params: { ...ALIVE, environment: 'lagoon', fishMix: 'snail:5,babyfish:4', floraDensity: 0.7, marineSnow: 0.2, finish: 0.5, swimSpeed: 0.6,
+      cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
+  },
+  {
+    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',
+    params: { ...ALIVE, ...NIGHT, fogColor: '#060612', floorColor: '#141020', fishMix: 'snail:6', snailShell: 'glow', floraDensity: 0.2, marineSnow: 0.3, finish: 0.6,
+      cameraFollow: 1, followDistance: 40, followAngle: 140 },
+  },
 ];
 
 export const recipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
@@ -279,6 +294,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('floraPalette')) push('floraPalette', parseFloraPalette(str('floraPalette')).problems);
   if (str('geodeMix')) push('geodeMix', parseGeodeMix(str('geodeMix')).problems);
   if (str('pyramidMix')) push('pyramidMix', parsePyramidMix(str('pyramidMix')).problems);
+  if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
   if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
@@ -304,6 +320,11 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
       }
     }
   }
+  if (str('townProps')) {
+    const t = parseTownProps(str('townProps')).props;
+    const homes = Math.round(Number(params.geodeHomes ?? 0));
+    if ((t.fence || t.mailbox) && !(homes > 0)) out.push({ path: 'townProps', also: ['geodeHomes'], message: 'fences and mailboxes stand round homes: set geodeHomes ≥ 1' });
+  }
   out.push(...dependencyProblems(params));
   return out;
 }
@@ -311,7 +332,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
 /** What turns each world mark on. */
 const MARK_NEEDS: Record<string, string> = {
   gate: 'needs landmark castle or citadel', plaza: 'needs landmark castle or citadel', courtyard: 'needs landmark castle or citadel',
-  hub: 'needs paths > 0', fountain: 'needs a fountain', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
+  hub: 'needs paths > 0', fountain: 'needs a fountain', mailbox1: 'needs townProps mailbox and geodeHomes ≥ 1', mailbox2: 'needs townProps mailbox and geodeHomes ≥ 2', mailbox3: 'needs townProps mailbox and geodeHomes 3', home1: 'needs geodeHomes ≥ 1', home2: 'needs geodeHomes ≥ 2', home3: 'needs geodeHomes 3',
 };
 
 /** The marks this scene's world adds (positions are placeholders: only the names matter here). */
@@ -320,6 +341,8 @@ function worldMarks(params: Readonly<Record<string, unknown>>): Record<string, {
   const world: Record<string, { x: number; y: number; z: number }> = {};
   const at = { x: 0, y: 0, z: 0 };
   for (let i = 1; i <= Math.min(3, homes); i++) { world[`home${i}`] = at; world[`home${i}in`] = at; }
+  // A mailbox by every home's gate (townProps): a fish sent there has come with the post.
+  if (typeof params.townProps === 'string' && parseTownProps(params.townProps).props.mailbox) for (let i = 1; i <= Math.min(3, homes); i++) world[`mailbox${i}`] = at;
   if (params.landmark === 'castle' || params.landmark === 'citadel') for (const m of ['gate', 'plaza', 'courtyard']) world[m] = at;
   // Paths meet at a hub: the mark `paths` documents itself as adding.
   if (Number(params.paths ?? 0) > 0) world.hub = at;

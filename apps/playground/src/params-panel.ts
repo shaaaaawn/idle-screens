@@ -126,6 +126,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['light', ['caustics', 'causticScale', 'surfaceMirror']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     ['dance', ['starfishDance', 'danceTempo']],
+    ['snails', ['snailShell']],
     // The renderer's look: on by default, listed so it can be turned off.
     ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
@@ -133,7 +134,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
     ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'envProps']],
-    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'pyramids', 'pyramidMix', 'pyramidLayout', 'pyramidShow', 'pyramidBpm', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial', 'signs', 'signFlicker']],
+    ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'townProps', 'pyramids', 'pyramidMix', 'pyramidLayout', 'pyramidShow', 'pyramidBpm', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial', 'signs', 'signFlicker']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'waterClarity', 'waterTint', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
   ],

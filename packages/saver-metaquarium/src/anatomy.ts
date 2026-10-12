@@ -65,12 +65,13 @@ export interface MetaquariumAnatomy {
 }
 
 const CAST_CAP = 24;
-const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus']);
+const FLOOR_BREEDS = new Set(['crab', 'starfish', 'octopus', 'snail']);
 const BREED_NOUN: Record<string, [string, string]> = {
   dori: ['tang', 'tangs'],
   babyfish: ['baby fish', 'baby fish'],
   blowfish: ['blowfish', 'blowfish'],
   octopus: ['octopus', 'octopuses'],
+  snail: ['snail', 'snails'],
   starfish: ['starfish', 'starfish'],
   crab: ['crab', 'crabs'],
   shark: ['shark', 'sharks'],
@@ -176,6 +177,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   if (num('paths') > 0) world.push(`paths${has('pathMaterial') && str('pathMaterial') !== 'auto' ? ` (${str('pathMaterial')})` : ''}`);
   if (str('fountain') !== 'none') world.push(`${str('fountain')} fountain`);
   if (num('streetLamps') > 0) world.push('street lamps');
+  if (has('townProps')) world.push(`town: ${str('townProps')}`);
   if (num('pyramids') > 0) world.push(`pyramids ${pct('pyramids')}${has('pyramidMix') ? `: ${str('pyramidMix')}` : ''}`);
   if (num('pyramids') > 0 && (has('pyramidShow') || num('pyramidBpm') > 0)) world.push(`a light show${has('pyramidShow') ? ` (${str('pyramidShow')})` : ''}${num('pyramidBpm') > 0 ? ` at ${num('pyramidBpm')} bpm` : ''}`);
   if (num('floraDensity') > 0) world.push(`plants ${pct('floraDensity')}${has('floraMix') ? `: ${str('floraMix')}` : ''}`);
