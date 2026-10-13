@@ -450,7 +450,8 @@ def point(t, T=2.0):
 def glitch(t, T=0.8):
     p = Pose()
     e = env(t, 0.0, 0.1, 0.6, T)
-    j = lambda k: math.sin(t * 97.0 + k * 13.1) * math.sin(t * 41.0 + k)  # noqa: E731 - a deterministic jitter
+    # A deterministic shiver, ~5 Hz against ~2 Hz: fast enough to read as a glitch, slow enough to read as a body.
+    j = lambda k: math.sin(t * 31.0 + k * 13.1) * math.sin(t * 13.0 + k)  # noqa: E731
     stand(p, 0.4 + 0.3 * e * abs(j(9)))
     body(p, turn=0.12 * e * j(1), lean=0.1 * e * j(2))
     for side, s in SIDES:

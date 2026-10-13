@@ -93,7 +93,7 @@ import {
   type OctopusRig, type OctopusSkin,
 } from './octopus';
 import { InkLayer } from './ink';
-import { DOT_GESTURES, dotFrame, dotSpot, dotStart, newDotOutput, rigDot, type DotRig } from './dot';
+import { actorTravel, DOT_GESTURES, dotFrame, dotSpot, dotStart, newDotOutput, rigDot, type DotRig } from './dot';
 import {
   dressSnail, rigSnail, SNAIL_BLOOM, snailFrame, snailIdle, snailLook, snailShellLight, snailShellOf, snailSpot, snailStart,
   type SnailOutput, type SnailRig,
@@ -3292,6 +3292,7 @@ class TankInstance implements SaverInstance {
             scale: dotRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
             act, next: act && this.vignette ? poseOf(this.vignette, f.index, tSec + 0.25, ownMoves) : null,
+            ...(act && this.vignette ? { travel: actorTravel(this.vignette, f.index, tSec, ownMoves) } : {}),
           }, this.dotOut)
         : null;
       if (dotO) {
