@@ -285,7 +285,7 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
 | `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** tvOS reads `spin` only ⇒ 0 |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
+| `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}`). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
@@ -327,7 +327,8 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "rect", "width": [0.012, 0.02], "aspect": [1.3, 1.7], "color": "#ffb347", "feather": 0.6 }` —
   rectangle; `aspect` is the height/width ratio range (rotates with `spin`);
   `feather` 0..1 softens the edges — that fraction of the half-size fades out
-  toward the border (Rothko's block at 0.5–0.8)
+  toward the border in one smooth linear falloff on each axis (Rothko's block
+  at 0.5–0.8)
 - `{ "kind": "bar", "values": [82, 64, 91], "max": 100, "length": 0.5, "thickness": 0.02, "color": "#17e8c8", "direction": "right" }` —
   a data bar: entity *i* draws `length × values[i] / max` (viewport units),
   `thickness` thick, growing from its position toward `direction` (`right`
@@ -354,7 +355,8 @@ with distance, removing pop-in at the cutoff.
   unit box spans the seeded `length`, stroked `width` wide with round joins.
   `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
   `taper` thins the mark to almost nothing at both ends (a brush stroke rather
-  than a line); `orient: true` turns the path's +x along the entity's heading,
+  than a line; it paints as one filled mark, so a translucent stroke has no
+  overlap beads); `orient: true` turns the path's +x along the entity's heading,
   like `streak`. Rotates with `spin`. Van Gogh's stroke, Hokusai's contour,
   O'Keeffe's petal, Basquiat's scrawl
 - `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef", "anchor": "top-left", "font": "system-ui, sans-serif", "opacity": 1 }` —

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '@idle-screens/core';
 import { buildEntities } from './simulate';
-import { barBox, barFraction, featherAlphas, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper } from './shapes';
+import { barBox, barFraction, featherRamp, pathLength, polygonArea, polygonFill, polygonPoints, strokeOutline, strokeSamples, strokeTaper } from './shapes';
 import { dominanceRanking, luminanceGrid, perceiveScene } from './perceive';
 import type { LayerSpec, SaverSpec } from './types';
 
@@ -72,16 +72,53 @@ describe('stroke geometry', () => {
   });
 });
 
-describe('feather alphas', () => {
-  it('composite to a linear ramp under source-over and sum to one under additive blends', () => {
-    const so = featherAlphas(6, false);
-    let composited = 0;
-    so.forEach((a, k) => {
-      composited = 1 - (1 - composited) * (1 - a);
-      expect(composited).toBeCloseTo((k + 1) / 6, 9);
-    });
-    const add = featherAlphas(6, true);
-    expect(add.reduce((s, a) => s + a, 0)).toBeCloseTo(1, 9);
+describe('feather ramp (X383)', () => {
+  it('falls off smoothly: 0 at the edge, 1 past the band, no step anywhere', () => {
+    const f = 0.5;
+    expect(featherRamp(0, f)).toBe(0);
+    expect(featherRamp(1, f)).toBe(0);
+    expect(featherRamp(0.5, f)).toBe(1);
+    expect(featherRamp(f / 2, f)).toBeCloseTo(1, 9); // the band is feather × half-size
+    let maxStep = 0;
+    const N = 2000;
+    for (let i = 1; i <= N; i++) maxStep = Math.max(maxStep, Math.abs(featherRamp(i / N, f) - featherRamp((i - 1) / N, f)));
+    // A linear ramp over a quarter of the width moves 4/N per sample; a six-step
+    // staircase jumped ~1/6 at once.
+    expect(maxStep).toBeLessThan(5 / N);
+  });
+
+  it('integrates to the (1 − feather/2)² weight perception gives a feathered rect', () => {
+    for (const f of [0.1, 0.5, 1]) {
+      const N = 400;
+      let sum = 0;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) sum += featherRamp((x + 0.5) / N, f) * featherRamp((y + 0.5) / N, f);
+      expect(sum / (N * N)).toBeCloseTo((1 - f / 2) ** 2, 3);
+    }
+  });
+});
+
+describe('stroke outline (X386)', () => {
+  const pts = strokeSamples({ kind: 'stroke', length: [100, 100], points: [[-0.9, -0.2], [-0.5, -0.4], [0, -0.5], [0.5, -0.4], [0.9, -0.2]], color: '#000', curve: 'smooth' }, 500);
+  it('is one closed outline that encloses every sample, as wide as the taper there', () => {
+    const out = strokeOutline(pts, 40);
+    expect(out.length).toBe(pts.length * 2 + 2 * 5);
+    const inside = (p: { x: number; y: number }): boolean => {
+      let wn = 0;
+      for (let i = 0; i < out.length; i++) {
+        const a = out[i]!;
+        const b = out[(i + 1) % out.length]!;
+        if (a.y <= p.y) { if (b.y > p.y && (b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y) > 0) wn++; }
+        else if (b.y <= p.y && (b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y) < 0) wn--;
+      }
+      return wn !== 0;
+    };
+    for (const p of pts) expect(inside(p)).toBe(true);
+    // Mid-stroke the outline is the full width across; at the ends, the taper floor.
+    const mid = Math.floor(pts.length / 2);
+    const l = out[mid]!;
+    const r = out[out.length - 5 - 1 - mid]!;
+    expect(Math.hypot(l.x - r.x, l.y - r.y)).toBeCloseTo(40 * strokeTaper(mid / (pts.length - 1)), 0);
+    expect(Math.hypot(out[0]!.x - out[out.length - 6]!.x, out[0]!.y - out[out.length - 6]!.y)).toBeCloseTo(40 * 0.15, 1);
   });
 });
 

@@ -18,7 +18,8 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, isShapedSprite, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
   breakTextBlock,
@@ -432,34 +433,30 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     else cells[idx] = cur * (1 - a) + lum * a;
   };
 
-  // Afterglow dots behind a moving entity — the analytic mirror of the
-  // renderer's drawTrail: past positions sampled with decaying alpha and
-  // shrinking radius, stopping at wrap seams.
-  const splatTrail = (layer: LayerSpec, e: Entity, tPass: number, lifeA: number, alphaScale: number): void => {
+  // Afterglow behind a moving entity — the analytic mirror of the renderer's
+  // drawTrail, from the same sampler (`trailEchoes`): past positions with
+  // decaying alpha and shrinking radius, gap-filled where a fast mover's
+  // echoes would part, stopping at wrap seams. A large polygon echoes as its
+  // own outline (as the wall paints it); everything else splats a disc.
+  const splatTrail = (layer: LayerSpec, e: Entity, tPass: number, lifeA: number, alphaScale: number, layerCount: number): void => {
     const trail = layer.trail;
     if (!trail) return;
-    const fade = trail.fade ?? 1;
-    const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
-    const headAlpha = alphaAt(e, tPass) * lifeA;
+    const headAlpha = alphaAt(e, tPass) * lifeA * alphaScale;
     const headSize = sizeAt(e, tPass);
     const lum = spriteLuma(layer, e);
     const soft = layer.sprite.kind === 'circle' && !!layer.sprite.soft;
-    const wrapOn = layer.wrap !== false;
-    const head = posOf(scene, e, tPass);
-    let prevX = head.x;
-    let prevY = head.y;
-    for (let s = 1; s <= n; s++) {
-      const k = s / n;
-      const pastT = tPass - k * trail.length;
-      if (pastT < 0) break;
-      const pos = posOf(scene, e, pastT);
-      if (wrapOn && (Math.abs(pos.x - prevX) > w / 2 || Math.abs(pos.y - prevY) > h / 2)) break;
-      prevX = pos.x;
-      prevY = pos.y;
-      const a = headAlpha * (1 - k * fade) * alphaScale;
-      if (a <= 0.004) break;
-      const rad = (headSize / 2) * (1 - k * 0.7);
-      if (rad < 0.2) break;
+    const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false,
+      // As the renderer: a shape echoes at its time samples only; circles fill
+      // (a hard circle's ribbon reads, on the coarse grid, as filled discs).
+      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
+    for (const ec of echoes) {
+      const a = ec.alpha;
+      const rad = ec.r;
+      if (layer.sprite.kind === 'polygon' && rad * 2 >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+        splatPolygonOutline(layer, layer.sprite, e, ec, rad * 2, Math.min(1, a), lum, ec.t);
+        continue;
+      }
+      const pos = ec;
       const c0 = Math.max(0, Math.floor((pos.x - rad) / cellW));
       const c1 = Math.min(cols - 1, Math.floor((pos.x + rad) / cellW));
       const r0 = Math.max(0, Math.floor((pos.y - rad) / cellH));
@@ -549,7 +546,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     if (lifeA <= 0) continue;
 
     for (const e of entities) {
-      splatTrail(layer, e, tPass, lifeA, alphaScale);
+      splatTrail(layer, e, tPass, lifeA, alphaScale, entities.length);
       const a = Math.min(1, alphaAt(e, tPass) * lifeA) * alphaScale;
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
