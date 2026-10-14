@@ -893,7 +893,7 @@ describe('layout-text-overlap: list / table cells narrower than their labels (X2
       size: [0.03, 0.03],
       motion: { type: 'static' },
       position: { x: 0.5, y: 0.5 },
-      layout: type === 'table' ? { type: 'table', columns: 3, gap } : { type: 'list', gap },
+      layout: type === 'table' ? { type: 'table', columns: 3, gap } : { type: 'list', gap: gap as number },
     }],
   });
   const vp = { width: 1600, height: 900 };
