@@ -106,6 +106,7 @@ export function section(s) {
 
 /** Whether cell (i, n, k) is inside the body (the section's ellipse, at the cell's centre). */
 export function inBody(i, n, k) {
+  if (n < BEAK_N) return BEAK[n]?.[k]?.includes(Math.abs(i)) ?? false;
   const s = n + 0.5;
   if (s < 0 || s > LENGTH) return false;
   const { zc, h, w } = section(s);
@@ -119,21 +120,32 @@ export function outer(n, k) {
   return -1;
 }
 
-/** The smile's height (cube units) at s: along the beak, curving up to the eye's front corner. */
-export function smileZ(s) {
-  const along = section(Math.min(s, 4.5)).zc - 0.35;
-  const u = Math.max(0, Math.min(1, (s - 4.5) / 2.5));
-  return along + (EYE.k[0] - 0.4 - along) * u * u;
-}
+/**
+ * The beak, drawn by hand cube by cube: at one to three cubes across, an ellipse sampled per cube comes
+ * out ragged (holes in its ridge, a lip line that steps). Per row n (0 the tip), per layer k, the |i|
+ * it fills: a rounded tip, a pale lower jaw three wide, the lips (the mouth's row: dark on the outside,
+ * the tongue hidden inside), the blue upper beak, and its ridge rising into the melon.
+ */
+export const BEAK_N = 5;
+export const BEAK = [
+  { 3: [0], 4: [0] },
+  { 2: [0], 3: [0, 1], 4: [0, 1], 5: [0] },
+  { 2: [0, 1], 3: [0, 1], 4: [0, 1], 5: [0, 1] },
+  { 2: [0, 1], 3: [0, 1], 4: [0, 1], 5: [0, 1] },
+  { 2: [0, 1], 3: [0, 1], 4: [0, 1], 5: [0, 1] },
+];
+/** The mouth's row on the beak (the lips, the jaw's top), and the smile's cubes up the cheek to the eye: [n, k]. */
+export const MOUTH_K = 3;
+const SMILE = [[5, 3], [6, 4]];
+/** The jaw: the beak's cubes at and below the mouth's row; it hinges at the beak's root. */
+const isJaw = (n, k) => n < BEAK_N && k <= MOUTH_K;
 /** Where the belly's pale meets the back's blue: centre + o·half-height, o by s. */
-const BELLY_LINE = [[6.5, -0.25], [8, -0.3], [10, -0.3], [13, -0.5], [17, -0.15], [22, -0.3], [27, -0.65], [31, -1.2]];
+const BELLY_LINE = [[5, -0.25], [8, -0.3], [10, -0.3], [13, -0.5], [17, -0.15], [22, -0.3], [27, -0.65], [31, -1.2]];
 const bellyO = (s) => spline(BELLY_LINE.map(([a, o]) => [a, o]), s, 1);
 
 /** The eye: white cells (n × k) flush with the side of the head; the pupil front and low on them. */
 export const EYE = { n: [7, 9], k: [5, 8] };
 export const PUPIL = { n: [7, 8], k: [5, 6] };
-/** The mouth's corner, and the end of the jaw: the jaw is the cells below the smile up to here. */
-export const JAW_END = 6.5;
 /** The dorsal fin: [k above the back, n from, n to] — one cube thin, its tip swept back past its base. */
 const DORSAL = [[1, 14, 21], [2, 16, 22], [3, 18, 22], [4, 20, 23], [5, 22, 23]];
 /** Each flipper: [|i| beyond the skin, n, k] — out from the chest, back, and a little down. */
@@ -159,16 +171,18 @@ export function draw() {
   for (let n = 0; n < N; n++) for (let i = -6; i <= 6; i++) for (let k = 0; k <= 13; k++) {
     if (!inBody(i, n, k)) continue;
     const s = n + 0.5, z = k + 0.5, { zc, h } = section(s);
-    const jaw = s < JAW_END && z < smileZ(s);
-    const pale = s < JAW_END ? jaw : z < zc + bellyO(s) * h;
+    const jaw = isJaw(n, k);
+    // The jaw and the cheek under the smile are pale; then the belly, below its line.
+    const smileK = SMILE.find(([sn]) => sn === n)?.[1];
+    const pale = n < BEAK_N ? k < MOUTH_K || (n === 0 && k === MOUTH_K) : smileK !== undefined ? k < smileK : z < zc + bellyO(s) * h;
     put(i, n, k, pale ? BELLY : CAPE, jaw ? 'jaw' : null);
   }
   for (const side of [-1, 1]) {
     // The smile: on the skin, a line along the beak curving up toward the eye.
-    for (let s = 1.0; s < JAW_END + 0.6; s += 0.125) {
-      const n = Math.floor(s), k = Math.floor(smileZ(s)), o = outer(n, k);
-      if (o > 0) { const c = get(side * o, n, k); if (c) { c[3] = LINE; delete parts[key(side * o, n, k)]; } }
-    }
+    // The lips along the beak (the mouth's row, outside), then the smile up the cheek in one clean diagonal.
+    for (let n = 2; n < BEAK_N; n++) { const o = outer(n, MOUTH_K); if (o > 0) get(side * o, n, MOUTH_K)[3] = LINE; }
+    get(0, 1, MOUTH_K)[3] = LINE; // across the front, behind the tip: a closed mouth, head on
+    for (const [n, k] of SMILE) { const o = outer(n, k); if (o > 0) get(side * o, n, k)[3] = LINE; }
     // The eye: white cells on the skin (the head is upright there, so it lies flush), the pupil on them.
     let ei = 0;
     for (let n = EYE.n[0]; n <= EYE.n[1]; n++) for (let k = EYE.k[0]; k <= EYE.k[1]; k++) ei = Math.max(ei, outer(n, k));
@@ -186,10 +200,7 @@ export function draw() {
     }
   }
   // The tongue: the jaw's top row, inside (seen when it opens its mouth).
-  for (let n = 1; n < JAW_END; n++) for (let i = -1; i <= 1; i++) {
-    const k = Math.floor(smileZ(n + 0.5)) - 1, c = get(i, n, k);
-    if (c && parts[key(i, n, k)] === 'jaw' && Math.abs(i) < outer(n, k)) c[3] = TONGUE;
-  }
+  for (let n = 2; n < BEAK_N; n++) { const c = get(0, n, MOUTH_K); if (c) c[3] = TONGUE; }
   // The blowhole, on top behind the melon.
   { const n = 12; let k = 13; while (k > 0 && !get(0, n, k)) k--; get(0, n, k)[3] = LINE; parts[key(0, n, k)] = 'blowhole'; }
   // The dorsal fin, on the back: its rows stand on the back's height at the fin's middle; where the back
@@ -217,7 +228,7 @@ export function draw() {
       head: [Y(11), Z(11)], body: [Y(15), Z(15)], tail1: [Y(20), Z(20)], tail2: [Y(25.5), Z(25.5)], flukes: [Y(30), Z(30)],
       tip: [Y(0), Z(0)], end: [Y(LENGTH + 4), Z(LENGTH)],
     },
-    hinge: [Y(JAW_END), 2 * smileZ(JAW_END) - 1],
+    hinge: [Y(BEAK_N), 2 * (MOUTH_K + 1)],
   };
   return { cells: [...cells.values()], anatomy };
 }
