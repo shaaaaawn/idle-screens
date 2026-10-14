@@ -2,12 +2,12 @@ import { createRng } from '@idle-screens/core';
 import { AnimationClip, BoxGeometry, Group, Mesh, MeshBasicMaterial, Quaternion, Vector3, VectorKeyframeTrack } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  DOT_CLIPS, DOT_GESTURES, GAIT_PACE, MOMENT_LENGTH, dotCycle, dotFace, dotFrame, dotGait, dotMoment, dotMomentAt, dotSpot, dotStart,
+  actorTravel, DOT_CLIPS, DOT_GESTURES, GAIT_PACE, MOMENT_LENGTH, dotCycle, dotFace, dotFrame, dotGait, dotMoment, dotMomentAt, dotSpot, dotStart,
   gestureFace, momentFace, newDotOutput, rigDot, type DotInput, type DotMoment, type DotRig,
 } from './dot';
 import { compileSwimPlan } from './plan';
 import { GLYPHS } from './screen';
-import type { ActorPose } from './vignette';
+import { OPEN_MARKS, parseVignette, poseOf, type ActorPose } from './vignette';
 
 const PLAN = compileSwimPlan(createRng(3).fork(1), { radius: 120, yMin: 15, yMax: 72 });
 
@@ -156,5 +156,57 @@ describe('dot: the frame', () => {
       for (const n of DOT_CLIPS) expect(b.actions[n].time).toBe(a.actions[n].time);
     }
     expect(new Quaternion().equals(newDotOutput().quaternion)).toBe(true);
+  });
+});
+
+describe('dot: its feet keep step at any hour', () => {
+  it('as an actor, its stride rate follows how fast the script walks it — at mount and hours later alike', () => {
+    const v = parseVignette('3s: a =left | 6s: a >right | 3s: a hop | 6s: a >left', OPEN_MARKS);
+    const rig = rigged(), D = 1.5, strideW = 11 * 0.4 * 1.2, dt = 1 / 30;
+    let worst = 0;
+    for (const base of [5, 10_000.25, 36_000.5]) {
+      for (let t = base; t < base + v.duration; t += dt) {
+        const a = poseOf(v, 0, t), b = poseOf(v, 0, t + dt);
+        if (!a || !b) continue;
+        const speed = Math.hypot(b.x - a.x, b.z - a.z) / dt;
+        const step = (x: number): number => (x / strideW) * D;
+        const rate = (step(actorTravel(v, 0, t + dt)) - step(actorTravel(v, 0, t))) / dt;
+        // The leg clip's rate is the walking speed over the stride — never t-scaled.
+        worst = Math.max(worst, Math.abs(rate - (speed / strideW) * D));
+      }
+    }
+    expect(worst).toBeLessThan(0.15);
+    // And the frame plays that phase.
+    const t = 10_000.25 + 4.2;
+    const act = poseOf(v, 0, t)!;
+    dotFrame(rig, input(t, 0, { act, next: poseOf(v, 0, t + 0.25), travel: actorTravel(v, 0, t) }), newDotOutput());
+    // That beat is a run (140 units in 6 s): the run clip plays the run stride's phase of the same distance.
+    expect(weight(rig, 'run')).toBeGreaterThan(0.5);
+    expect(rig.actions.run.time).toBeCloseTo(((actorTravel(v, 0, t) / (18 * 0.4 * 1.2)) * D) % D, 6);
+  });
+
+  it('walks forward through a turn on the spot, never back, and with the walk (not a run) whatever the bout was', () => {
+    const rig = rigged();
+    let checked = 0;
+    for (let index = 0; index < 30 && checked < 6; index++) {
+      const c = dotCycle(index);
+      for (let k = 1; k < 12; k++) {
+        if (!['wave', 'clap', 'tip', 'deliver', 'cheer'].includes(dotMomentAt(index, k))) continue;
+        let prev = -Infinity, wrapped = 0, last = 0, moved = false;
+        for (let u = c.walk; u < c.walk + 0.8; u += 1 / 30) {
+          dotFrame(rig, input(at(index, k, u), index), newDotOutput());
+          expect(weight(rig, 'run')).toBeLessThan(1e-6);
+          const time = rig.actions.walk.time;
+          if (time + 0.5 < last) wrapped += 1.5;
+          last = time;
+          const phase = time + wrapped;
+          if (weight(rig, 'walk') > 0.05) { expect(phase).toBeGreaterThanOrEqual(prev - 1e-9); moved ||= phase > prev + 1e-6; }
+          prev = phase;
+        }
+        checked++;
+        break;
+      }
+    }
+    expect(checked).toBeGreaterThan(3);
   });
 });

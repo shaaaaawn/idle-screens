@@ -120,3 +120,11 @@ describe('agent guide', () => {
     for (const word of ['fishMix', 'propMix', 'spotRig', 'spotCues', 'vignette', 'signs', 'porthole', 'home1', 'gate', 'table']) expect(GRAMMAR).toContain(word);
   });
 });
+
+describe('vignette ink (X440)', () => {
+  it('is an octopus gesture: on another breed it is a named problem', () => {
+    expect(validateMetaquariumParams({ fishMix: 'octopus:1, dori:1', vignette: '5s: a =centre | 3s: a ink' })).toEqual([]);
+    const p = validateMetaquariumParams({ fishMix: 'octopus:1, dori:1', vignette: '5s: a =centre, b =left | 3s: a ink, b ink' });
+    expect(p).toEqual([{ path: 'vignette', also: ['fishMix'], message: '"b ink" does nothing: ink is the octopus\'s own, and actor b (slot 1) is a dori' }]);
+  });
+});

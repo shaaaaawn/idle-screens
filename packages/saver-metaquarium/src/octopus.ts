@@ -512,6 +512,30 @@ function set(rig: OctopusRig, name: OctopusClip, time: number, weight: number): 
   a.setEffectiveWeight(weight);
 }
 
+/**
+ * A vignette's `ink` cue (X440), for an octopus the script is placing: it
+ * squirts — the ink clip over its idle, pale with its rings bright, the way an
+ * inked jet starts — and lets go a cloud (`ink`, for the tank's InkLayer), but
+ * stays on its mark. `at` is seconds into the gesture, `weight` its envelope;
+ * `key` names this cue's cloud (one per beat per loop). Pure in its input.
+ */
+export function octopusInkCue(rig: OctopusRig | null, out: OctopusOutput, t: number, index: number, at: number, weight: number, key: string): OctopusOutput {
+  out.doing = 'ink';
+  const inking = env(at, 0.3, 0.5, 0.9, 1.4) * Math.min(1, weight * 2);
+  out.mood.pale = Math.max(out.mood.pale, inking);
+  out.mood.rings = Math.max(out.mood.rings, inking);
+  out.ink = at >= 0.55 && at < 2.5 ? { key, t: t - (at - 0.55) } : null;
+  if (rig) {
+    const D = rig.durations;
+    const w = env(at, 0, 0.15, INK_LEAD - 0.1, INK_LEAD + 0.15);
+    for (const n of OCTOPUS_CLIPS) set(rig, n, 0, 0);
+    set(rig, 'ink', Math.min(Math.max(0, at), D.ink), w);
+    set(rig, 'idle', posMod(t + fishHash(index, 1717) * D.idle, D.idle), 1 - w);
+    rig.mixer.update(0);
+  }
+  return out;
+}
+
 /** An octopus the tank is placing itself (a script's actor, a formation's seat): idle on the spot. */
 export function octopusIdle(rig: OctopusRig, t: number, index: number): void {
   const D = rig.durations;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickLandmark, SHOT_NAMES, shotPose, type ShotInput, type ShotPose } from './shots';
+import { pickLandmark, SHOT_NAMES, shotBearing, shotPose, type ShotInput, type ShotPose } from './shots';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { PARAM_DOCS } from './guide';
 
@@ -53,5 +53,16 @@ describe('shots', () => {
     expect(METAQUARIUM_PARAMS.shot).toMatchObject({ type: 'enum', default: 'orbit' });
     expect((METAQUARIUM_PARAMS.shot as { options: string[] }).options).toEqual([...SHOT_NAMES]);
     expect(PARAM_DOCS.shot).toBeTruthy();
+  });
+});
+
+describe('shotBearing (X438)', () => {
+  it('is the param while nothing turns, and turns with autoRotate', () => {
+    expect(shotBearing('orbit', 0, 0)).toBe(0);
+    expect(shotBearing('orbit', 300, 0)).toBe(300);
+    expect(shotBearing('orbit', 0, 4 * 12)).toBe(48); // autoRotate 4 °/s, 12 s in
+    expect(shotBearing('orbit', 350, 20)).toBe(10); // wraps
+    expect(shotBearing('orbit', 0, -30)).toBe(330);
+    expect(shotBearing('hero', 0, 0)).toBe(332); // the hero shot swings 28° off
   });
 });

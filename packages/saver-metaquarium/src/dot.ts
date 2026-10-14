@@ -31,7 +31,7 @@ import { boutDistance, boutSpeed, type CrabInput } from './crab';
 import { swimPoseAtDistance, type SwimPlan } from './plan';
 import type { Glyph, ScreenState } from './screen';
 import { fishHash } from './swim';
-import type { ActorPose, Gesture } from './vignette';
+import { poseOf, snapBetween, type ActorPose, type Gesture, type Vignette } from './vignette';
 
 export const DOT_CLIPS = [
   'idle', 'walk', 'run', 'talk', 'nod', 'shake', 'hop', 'wiggle', 'wave', 'cheer', 'rest',
@@ -260,6 +260,48 @@ export interface DotInput extends CrabInput {
   /** Its vignette pose, when it is an actor this frame; and where the script has it a quarter second on (its pace). */
   act?: ActorPose | null;
   next?: ActorPose | null;
+  /** As an actor: how far its script has walked it by now (`actorTravel`) — what its feet keep step with. */
+  travel?: number;
+}
+
+/** Each script's walked distance per actor over one loop, sampled at 30 Hz: built once, a pure function of the script.
+ *  Keyed by actor, and by actor + SOLID for the distance through the water (`solid`). */
+const TRAVEL = new WeakMap<Vignette, Map<number, Float64Array>>();
+const SOLID = 1 << 16;
+const TRAVEL_HZ = 30;
+
+/**
+ * How far a vignette actor has walked across the floor by `t` (world units), a
+ * closed form: whole loops of the script plus the way into this one. Its feet
+ * take their step from this, never from t × speed — that product races the
+ * legs whenever the pace changes, and the later in the day the faster
+ * (`d/dt (t·v) = v + t·v'`). `solid`: through the water, height and all — a
+ * swimmer's (the dolphin's) strokes cover its climbs and dives too; a walker's
+ * feet only the floor.
+ */
+export function actorTravel(v: Vignette, actor: number, t: number, own?: (g: Gesture) => boolean, solid = false): number {
+  if (!v.duration) return 0;
+  let byActor = TRAVEL.get(v);
+  if (!byActor) TRAVEL.set(v, (byActor = new Map()));
+  const key = solid ? actor + SOLID : actor;
+  let table = byActor.get(key);
+  if (!table) {
+    const n = Math.max(2, Math.ceil(v.duration * TRAVEL_HZ));
+    table = new Float64Array(n + 1);
+    let prev = poseOf(v, actor, 0, own);
+    for (let i = 1; i <= n; i++) {
+      const p = poseOf(v, actor, (i / n) * v.duration, own);
+      // A `=` cut is not walked (or swum): no steps for the jump (vignette.ts snapBetween).
+      const cut = snapBetween(v, actor, ((i - 1) / n) * v.duration, (i / n) * v.duration);
+      table[i] = table[i - 1]! + (p && prev && !cut ? Math.hypot(p.x - prev.x, solid ? p.y - prev.y : 0, p.z - prev.z) : 0);
+      prev = p;
+    }
+    byActor.set(key, table);
+  }
+  const n = table.length - 1, loop = table[n]!;
+  const laps = Math.floor(t / v.duration), u = ((t - laps * v.duration) / v.duration) * n;
+  const i = Math.min(n - 1, Math.floor(u)), f = u - i;
+  return laps * loop + table[i]! + (table[i + 1]! - table[i]!) * f;
 }
 
 export interface DotOutput {
@@ -309,14 +351,16 @@ export function dotFrame(rig: DotRig, inp: DotInput, out: DotOutput): DotOutput 
     yaw = Math.atan2(act.fx, act.fz);
     const n = inp.next;
     const speed = n ? Math.hypot(n.x - act.x, n.z - act.z) / 0.25 : 0;
+    // The step: from the distance walked, not t × speed (actorTravel says why).
+    const walked = inp.travel ?? 0;
     const going = smooth((speed - 1.5) / 3);
     const running = smooth((speed - DOT_PACE * 1.4) / (DOT_PACE * 0.4));
     tx = Math.sin(yaw); tz = Math.cos(yaw);
     trailX = x - tx * len * 2; trailZ = z - tz * len * 2;
     const g = act.gesture;
     const w = g && (DOT_GESTURES as readonly string[]).includes(g.name) ? g.weight * (1 - going) : 0;
-    play('walk', (t * speed / strideW) * rig.durations.walk, going * (1 - running) * (1 - w));
-    play('run', (t * speed / runW) * rig.durations.run, going * running * (1 - w));
+    play('walk', (walked / strideW) * rig.durations.walk, going * (1 - running) * (1 - w));
+    play('run', (walked / runW) * rig.durations.run, going * running * (1 - w));
     play('idle', t + fishHash(index, 1617) * rig.durations.idle, (1 - going) * (1 - w));
     doing = going > 0.5 ? (running > 0.5 ? 'run' : 'walk') : 'idle';
     screen = going > 0.5 ? face('happy', 'happy', 1) : dotFace(index, t);
@@ -351,7 +395,7 @@ export function dotFrame(rig: DotRig, inp: DotInput, out: DotOutput): DotOutput 
     trailX = trail.x + (x - pose.x); trailZ = trail.z + (z - pose.z);
     doing = gait;
     screen = gait === 'sneak' ? face('neutral', 'focus', 1) : dotFace(index, t);
-    let turning = 0, actT = 0, actW = 0, moment: DotMoment | null = null;
+    let turning = 0, turned = 0, actT = 0, actW = 0, moment: DotMoment | null = null;
     if (m.intoStop >= 0) {
       moment = dotMomentAt(index, m.k);
       const faceCam = FOR_YOU.has(moment) && Number.isFinite(inp.camX);
@@ -360,6 +404,8 @@ export function dotFrame(rig: DotRig, inp: DotInput, out: DotOutput): DotOutput 
       yaw = travel + dIn * smooth(a) - dIn * smooth(b);
       const effort = (u: number): number => Math.sin(Math.PI * Math.min(1, Math.max(0, u))) * Math.min(1, Math.abs(dIn) / 0.4);
       turning = a < 1 ? effort(a) : b > 0 ? effort(b) : 0;
+      // How far round it has turned so far this stop: only ever grows, so its feet step forward through a turn, never back.
+      turned = Math.abs(dIn) * (smooth(a) + smooth(b));
       const into = m.intoStop - TURN_IN, len2 = MOMENT_LENGTH[moment];
       actT = into;
       actW = smooth(into / 0.3) * smooth((len2 + 0.3 - into) / 0.3);
@@ -367,11 +413,13 @@ export function dotFrame(rig: DotRig, inp: DotInput, out: DotOutput): DotOutput 
       if (actW > 0) screen = momentFace(moment, into);
       if (moment === 'think') bulb = into > 2.0 && into < 2.8 ? 1.6 : 0.45;
     }
-    // The gait: its phase from this bout's distance, so the feet keep step with the ground; a turn steps it round.
-    const moved = boutDistance(m.u, c.walk) * DOT_PACE * GAIT_PACE[gait] + turning * len * 0.2;
-    const gaitW = Math.max(m.speed, turning) * (1 - actW);
+    // The gait: its phase from this bout's distance, so the feet keep step with the ground.
+    const moved = boutDistance(m.u, c.walk) * DOT_PACE * GAIT_PACE[gait];
     const gStride = gait === 'run' ? runW : gait === 'sneak' ? rig.sneakStride * inp.scale : strideW;
-    play(gait, (moved / gStride) * rig.durations[gait], gaitW);
+    play(gait, (moved / gStride) * rig.durations[gait], m.speed * (1 - actW));
+    // A turn on the spot is walked round, whatever the bout was: a step per ~half a turn of arc under its feet.
+    play('walk', ((turned * len * 0.35) / strideW) * rig.durations.walk, turning * (1 - actW));
+    const gaitW = Math.max(m.speed, turning) * (1 - actW);
     if (moment && actW > 0) {
       const clip = MOMENT_CLIP[moment];
       if (moment === 'crash') {

@@ -21,6 +21,7 @@ function stubGradient() {
 function stub2dContext(): CanvasRenderingContext2D {
   return {
     fillRect: vi.fn(),
+    clearRect: vi.fn(),
     fillText: vi.fn(),
     measureText: vi.fn((s: string) => ({ width: s.length * 8 })),
     beginPath: vi.fn(),
@@ -574,40 +575,133 @@ describe('shape glyphs draw (#46)', () => {
     expect(calls(mockCtx.createRadialGradient)).toBeGreaterThanOrEqual(2);
   });
 
-  it('stroke: a single stroked path, or one segment per sample when tapered', () => {
+  it('stroke: a single stroked path; tapered, one filled outline — never a stroke per segment (X386)', () => {
     render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3 }));
     const plain = calls(mockCtx.stroke);
     expect(plain).toBe(FRAMES * 2);
+    const fills = calls(mockCtx.fill);
     render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3, taper: true, orient: true }));
-    expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
+    expect(calls(mockCtx.stroke) - plain).toBe(0);
+    expect(calls(mockCtx.fill) - fills).toBe(FRAMES * 2);
   });
 
-  it('feathered rect paints outside-in: the full-size fill faintest first, the core at full alpha last', () => {
-    const seen: Array<{ w: number; a: number }> = [];
-    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number, h: number) => void }).fillRect = (_x, _y, w) => {
-      seen.push({ w, a: (mockCtx as unknown as { globalAlpha: number }).globalAlpha });
-    };
+  it('feathered rect is one smooth mask draw stretched to the rect, not stepped nested fills (X383)', () => {
+    const fills: number[] = [];
+    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number) => void }).fillRect = (_x, _y, w) => { fills.push(w); };
+    const draws: unknown[][] = [];
+    (mockCtx as unknown as { drawImage: (...a: unknown[]) => void }).drawImage = (...a) => { draws.push(a); };
+    let mask: Uint8ClampedArray | null = null;
+    (mockCtx as unknown as { putImageData: (img: { data: Uint8ClampedArray }) => void }).putImageData = (img) => { mask = img.data; };
     const spec: SaverSpec = {
       schemaVersion: 1, id: 'f', label: 'F', units: 'px',
-      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], color: '#fff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], aspect: [0.5, 0.5], color: '#ffffff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
     };
     const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
-    const fills = seen.slice(1); // drop the background
-    expect(fills).toHaveLength(6);
-    expect(fills[0]!.w).toBeCloseTo(60, 9); // full size first …
-    expect(fills[0]!.a).toBeCloseTo(1 / 6, 9); // … at the faintest alpha
-    expect(fills[5]!.w).toBeCloseTo(60 * (1 - 0.5 * 5 / 6), 9); // the core last …
-    expect(fills[5]!.a).toBeCloseTo(1, 9); // … at full alpha
-    for (let i = 1; i < 6; i++) expect(fills[i]!.w).toBeLessThan(fills[i - 1]!.w);
+    // The mock context is shared by every canvas, so the one-off tint of the
+    // white mask (a 128² fill + a 3-arg drawImage) shows up here too.
+    expect(fills.filter((w) => w !== 128)).toHaveLength(1); // the background only — no nested fills
+    const rectDraws = draws.filter((d) => d.length === 5);
+    expect(rectDraws).toHaveLength(1);
+    expect(rectDraws[0]!.slice(1)).toEqual([-30, -15, 60, 30]);
+    // The mask's alpha along its middle row is a smooth ramp: 0 → 255 with no jump over 255 / 32 + 1.
+    const N = 128;
+    const row = Array.from({ length: N }, (_, x) => mask![(64 * N + x) * 4 + 3]!);
+    expect(row[0]).toBeLessThan(8);
+    expect(row[64]).toBe(255);
+    let maxJump = 0;
+    for (let x = 1; x < N; x++) maxJump = Math.max(maxJump, Math.abs(row[x]! - row[x - 1]!));
+    expect(maxJump).toBeLessThanOrEqual(9);
     inst.dispose();
   });
 
-  it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
+  it('feathered rect: one draw per entity where a hard rect makes one fill, under any blend', () => {
     render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
     const hard = calls(mockCtx.fillRect);
     expect(hard).toBe(FRAMES * (1 + 2)); // background + two entities per frame
+    const before = calls(mockCtx.drawImage);
     render(scene({ kind: 'rect', width: [20, 30], color: '#fff', feather: 0.5 }, 'lighter'));
-    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
+    // Per frame: the background fill and one mask draw per entity. Once per
+    // mount: the colour's tint of the white mask (one fill, one draw).
+    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * 1 + 1);
+    expect(calls(mockCtx.drawImage) - before).toBe(FRAMES * 2 + 1);
+  });
+
+  it('trail on a polygon echoes the polygon, not discs (X387)', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'tp', label: 'TP', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'polygon', radius: [40, 40], color: '#ffb02e', sides: 5 }, trail: { length: 1200, fade: 0.8 }, motion: { type: 'drift', speed: [60, 60] } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const arcs = calls(mockCtx.arc);
+    const closes = calls(mockCtx.closePath);
+    inst.renderFrame!(3000, 42);
+    expect(calls(mockCtx.arc) - arcs).toBe(0); // no disc echoes
+    expect(calls(mockCtx.closePath) - closes).toBe(1 + 24); // the head + 24 polygon echoes
+    inst.dispose();
+  });
+});
+
+describe('trail and feather costs stay bounded (#278 perf review)', () => {
+  const calls = (fn: unknown): number => (fn as { mock: { calls: unknown[] } }).mock.calls.length;
+  it('a fast hard-circle trail is one ribbon of at most 24 fills, not hundreds of discs (X469)', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'rb', label: 'RB', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'circle', radius: [6, 6], color: '#e7ff7a' }, blend: 'lighter', trail: { length: 5000, fade: 0.15 }, motion: { type: 'drift', speed: [600, 600] }, wrap: false }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const arcs = calls(mockCtx.arc);
+    const closes = calls(mockCtx.closePath);
+    inst.renderFrame!(6000, 42);
+    expect(calls(mockCtx.arc) - arcs).toBe(1); // the head only
+    // Spans of near-equal alpha merge into one fill: fade 0.15 over 24 echoes
+    // is ~4 fills, never more than one per echo.
+    const fills = calls(mockCtx.closePath) - closes;
+    expect(fills).toBeGreaterThan(1);
+    expect(fills).toBeLessThanOrEqual(24);
+    inst.dispose();
+  });
+
+  it('a layer whose ribbons would cover over a tenth of the screen falls back to dots, with hysteresis', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'rbb', label: 'RBB', units: 'px',
+      // 640×480 (saverCtx): 60 trails of ~1800 px × ~10 px ≈ 10× the 31k px² budget.
+      layers: [{ count: 60, sprite: { kind: 'circle', radius: [5, 5], color: '#e7ff7a' }, blend: 'lighter', trail: { length: 3000, fade: 0.5 }, motion: { type: 'drift', speed: [600, 600] }, wrap: false }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    inst.renderFrame!(5000, 42); // measures
+    const arcs = calls(mockCtx.arc);
+    inst.renderFrame!(5016, 42);
+    expect(calls(mockCtx.arc) - arcs).toBeGreaterThan(60 * 10); // dots: the heads + their time-sample echoes
+    inst.dispose();
+  });
+
+  it('a still feathered rect is baked once, then copied 1:1 at whole pixels every frame', () => {
+    const draws: unknown[][] = [];
+    (mockCtx as unknown as { drawImage: (...a: unknown[]) => void }).drawImage = (...a) => { draws.push(a); };
+    (mockCtx as unknown as { getTransform: () => DOMMatrix }).getTransform = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) as DOMMatrix;
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'fb', label: 'FB', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [300, 300], aspect: [0.5, 0.5], color: '#3a4d68', feather: 0.5 }, rotate: 10, motion: { type: 'drift', speed: [7, 7] } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    for (let i = 0; i < 5; i++) inst.renderFrame!(1000 + i * 333, 42);
+    expect(draws.filter((d) => d.length === 5)).toHaveLength(1); // the one-off rotated bake
+    const blits = draws.filter((d) => d.length === 3 && !(d[1] === 0 && d[2] === 0));
+    expect(blits.length).toBe(6); // the mount frame + five renders
+    for (const d of blits) { expect(Number.isInteger(d[1])).toBe(true); expect(Number.isInteger(d[2])).toBe(true); }
+    inst.dispose();
+  });
+
+  it('a feathered colour glide re-tints the one white mask; it never rebuilds pixels per colour', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'fg', label: 'FG', units: 'px',
+      layers: [{ key: 'r', count: 30, sprite: { kind: 'rect', width: [40, 80], color: '#3a4d68', feather: 0.5 }, motion: { type: 'static' } }],
+      timeline: { keys: [{ t: 0, path: 'r.sprite.color', value: '#ff2040', dur: 9000, ease: 'linear' }] },
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    for (let i = 0; i < 40; i++) inst.renderFrame!(100 + i * 200, 42);
+    expect(calls(mockCtx.createImageData)).toBe(1); // one white ramp for feather 0.5
+    inst.dispose();
   });
 });
 

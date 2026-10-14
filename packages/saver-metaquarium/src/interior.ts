@@ -66,6 +66,13 @@ export const ROOM_HEIGHT = 132;
  *  interior clamps to this. */
 export const ROOM_MIN_SCALE = 0.85;
 
+/** The scale the room is built at for a `crystalScale`: never below
+ *  ROOM_MIN_SCALE. Everything placed in the room (the vignette's marks) scales
+ *  by this too, or below 0.85 the marks drift off the furniture. */
+export function roomScale(crystalScale: number): number {
+  return Math.max(crystalScale, ROOM_MIN_SCALE);
+}
+
 const linear = (hex: string): [number, number, number] => {
   const c = new Color(hex);
   return [c.r, c.g, c.b];

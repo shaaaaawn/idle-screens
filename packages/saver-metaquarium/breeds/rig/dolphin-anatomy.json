@@ -1,0 +1,105 @@
+{
+ "$comment": "Written by rig/dolphin-model.mjs: the parts rig/dolphin.py cuts and where its joints sit (model units, Blender axes). Do not edit.",
+ "parts": {
+  "0,-18,3": "jaw",
+  "-1,-17,3": "jaw",
+  "0,-17,2": "jaw",
+  "0,-17,3": "jaw",
+  "1,-17,3": "jaw",
+  "-1,-16,2": "jaw",
+  "-1,-16,3": "jaw",
+  "0,-16,2": "jaw",
+  "0,-16,3": "jaw",
+  "1,-16,2": "jaw",
+  "1,-16,3": "jaw",
+  "-1,-15,2": "jaw",
+  "-1,-15,3": "jaw",
+  "0,-15,2": "jaw",
+  "0,-15,3": "jaw",
+  "1,-15,2": "jaw",
+  "1,-15,3": "jaw",
+  "-1,-14,2": "jaw",
+  "-1,-14,3": "jaw",
+  "0,-14,2": "jaw",
+  "0,-14,3": "jaw",
+  "1,-14,2": "jaw",
+  "1,-14,3": "jaw",
+  "-4,-7,4": "flipper.R",
+  "-4,-6,4": "flipper.R",
+  "-5,-6,3": "flipper.R",
+  "-5,-5,3": "flipper.R",
+  "-6,-5,3": "flipper.R",
+  "-6,-4,2": "flipper.R",
+  "-7,-4,2": "flipper.R",
+  "-7,-3,2": "flipper.R",
+  "4,-7,4": "flipper.L",
+  "4,-6,4": "flipper.L",
+  "5,-6,3": "flipper.L",
+  "5,-5,3": "flipper.L",
+  "6,-5,3": "flipper.L",
+  "6,-4,2": "flipper.L",
+  "7,-4,2": "flipper.L",
+  "7,-3,2": "flipper.L",
+  "0,-6,11": "blowhole"
+ },
+ "knots": [
+  [
+   -19,
+   "head"
+  ],
+  [
+   -11,
+   "body"
+  ],
+  [
+   -1,
+   "body"
+  ],
+  [
+   8,
+   "tail1"
+  ],
+  [
+   19,
+   "tail2"
+  ],
+  [
+   26,
+   "flukes"
+  ]
+ ],
+ "joints": {
+  "head": [
+   -15,
+   12.957324263038549
+  ],
+  "body": [
+   -7,
+   12.984
+  ],
+  "tail1": [
+   3,
+   11.727571428571427
+  ],
+  "tail2": [
+   14,
+   9.352619791666667
+  ],
+  "flukes": [
+   23,
+   6.854755555555556
+  ],
+  "tip": [
+   -37,
+   9
+  ],
+  "end": [
+   39,
+   4.4
+  ]
+ },
+ "hinge": [
+  -27,
+  8
+ ]
+}

@@ -38,6 +38,7 @@ import {
 import { boutDistance, boutSpeed, type CrabInput } from './crab';
 import { swimPoseAtDistance, type SwimPlan } from './plan';
 import { fishHash } from './swim';
+import type { ActorPose } from './vignette';
 
 export const SNAIL_CLIPS = ['glide', 'idle', 'look', 'retract', 'stretch', 'munch', 'blink'] as const;
 export type SnailClip = (typeof SNAIL_CLIPS)[number];
@@ -210,8 +211,64 @@ const ROOM = 1.1;
 const GESTURES = ['look', 'retract', 'stretch', 'munch'] as const;
 type Gesture = (typeof GESTURES)[number];
 
+export interface SnailInput extends CrabInput {
+  /** Its vignette pose, when it is an actor this frame; and where the script has it a quarter second on (its pace). */
+  act?: ActorPose | null;
+  next?: ActorPose | null;
+  /** As an actor: how far its script has walked it by now (`actorTravel`) — what its foot's wave keeps time with. */
+  travel?: number;
+}
+
+/**
+ * On the ground at (x, z), facing `yaw`: the footprint's highest reading (a
+ * long foot, a narrow one), tilted with the slope within reason — a snail
+ * climbs a rock's flank.
+ */
+function stand(inp: CrabInput, x: number, z: number, yaw: number, out: SnailOutput): void {
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  const rx = fz, rz = -fx;
+  const g = inp.ground, len = inp.len;
+  const lf = len * 0.38, ls = len * 0.18;
+  const hc = g(x, z);
+  const hf = g(x + fx * lf, z + fz * lf), hb = g(x - fx * lf, z - fz * lf);
+  const hr = g(x + rx * ls, z + rz * ls), hl = g(x - rx * ls, z - rz * ls);
+  const y = Math.max(hc, (hf + hb) / 2, (hr + hl) / 2);
+  const lim = 0.7;
+  const pitch = Math.max(-lim, Math.min(lim, Math.atan2(hf - hb, 2 * lf)));
+  const roll = Math.max(-lim, Math.min(lim, Math.atan2(hr - hl, 2 * ls)));
+  euler.set(-pitch, yaw, roll);
+  out.quaternion.setFromEuler(euler);
+  out.x = x; out.y = y; out.z = z; out.fx = fx; out.fz = fz;
+}
+
+/**
+ * A vignette's actor: the script's place and facing, its foot on the floor
+ * whatever height the script's mark was written at (an open-stage mark is a
+ * swimmer's, y ≈ 34); gliding while the script walks it, resting at a mark.
+ * Dot's way (dot.ts): the wave keeps time with the distance the script walked.
+ */
+function snailActorFrame(rig: SnailRig, inp: SnailInput, act: ActorPose, out: SnailOutput): SnailOutput {
+  const { index, t, len } = inp;
+  const yaw = Math.atan2(act.fx, act.fz);
+  stand(inp, act.x, act.z, yaw, out);
+  out.tx = out.fx; out.tz = out.fz;
+  out.trailX = act.x - out.fx * len * 2; out.trailZ = act.z - out.fz * len * 2;
+  const n = inp.next;
+  const speed = n ? Math.hypot(n.x - act.x, n.z - act.z) / 0.25 : 0;
+  const going = smooth((speed - 1.5) / 3);
+  out.doing = going > 0.5 ? 'glide' : 'idle';
+  const D = rig.durations;
+  setAction(rig, 'glide', posMod(((inp.travel ?? 0) / (rig.stride * inp.scale)) * D.glide, D.glide), going);
+  for (const g of GESTURES) setAction(rig, g, 0, 0);
+  setAction(rig, 'blink', 0, 0);
+  setAction(rig, 'idle', posMod(t + fishHash(index, 1417) * D.idle, D.idle), 1 - going);
+  rig.mixer.update(0);
+  return out;
+}
+
 /** Places the snail and sets its clips for time `t`. Pure in its input. */
-export function snailFrame(rig: SnailRig, inp: CrabInput, out: SnailOutput): SnailOutput {
+export function snailFrame(rig: SnailRig, inp: SnailInput, out: SnailOutput): SnailOutput {
+  if (inp.act) return snailActorFrame(rig, inp, inp.act, out);
   const { index, t, len } = inp;
   const c = snailCycle(index);
   const m = snailMoment(index, t);
@@ -250,23 +307,8 @@ export function snailFrame(rig: SnailRig, inp: CrabInput, out: SnailOutput): Sna
     doing = Math.abs(dIn) > 0.05 && (a < 1 || b > 0) ? 'turn' : did;
     if (did !== 'idle') gesture = did as Gesture;
   }
-  const fx = Math.sin(yaw), fz = Math.cos(yaw);
-  const rx = fz, rz = -fx;
-
-  // On the ground: the footprint's highest reading (a long foot, a narrow one),
-  // tilted with the slope within reason — a snail climbs a rock's flank.
-  const g = inp.ground;
-  const lf = len * 0.38, ls = len * 0.18;
-  const hc = g(x, z);
-  const hf = g(x + fx * lf, z + fz * lf), hb = g(x - fx * lf, z - fz * lf);
-  const hr = g(x + rx * ls, z + rz * ls), hl = g(x - rx * ls, z - rz * ls);
-  const y = Math.max(hc, (hf + hb) / 2, (hr + hl) / 2);
-  const lim = 0.7;
-  const pitch = Math.max(-lim, Math.min(lim, Math.atan2(hf - hb, 2 * lf)));
-  const roll = Math.max(-lim, Math.min(lim, Math.atan2(hr - hl, 2 * ls)));
-  euler.set(-pitch, yaw, roll);
-  out.quaternion.setFromEuler(euler);
-  out.x = x; out.y = y; out.z = z; out.fx = fx; out.fz = fz;
+  // On the ground (`stand`).
+  stand(inp, x, z, yaw, out);
   out.tx = pose.fx; out.tz = pose.fz;
   const trail = snailSpot(index, t, inp.plan, inp.start, len * 2);
   out.trailX = trail.x + (x - pose.x); out.trailZ = trail.z + (z - pose.z);

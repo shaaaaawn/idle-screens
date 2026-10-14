@@ -28,7 +28,8 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isShapedSprite, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx } from './shapes';
+import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -304,6 +305,23 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
   return true;
 }
 
+type Canvas2D = { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D };
+/** One entity's pre-rendered feathered rect: the rotated white mask, and its tint. */
+interface FeatherBlit {
+  shapeKey: string;
+  w: number;
+  h: number;
+  white: Canvas2D;
+  tint: Canvas2D;
+  tintKey: string;
+  tintAt: number;
+  /** Phase offset for the first re-tint, spreading a layer's re-tints over frames. */
+  stagger?: number;
+  /** The shape key seen most recently, and the paintSeq it was first seen at. */
+  seenKey: string;
+  seenAt: number;
+}
+
 class SpecInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly ownsCanvas: boolean;
@@ -358,6 +376,15 @@ class SpecInstance implements SaverInstance {
   private readonly fieldShortSide: number;
   /** The `field` background's cached raster; null until a field is first painted. */
   private field: FieldRaster | null = null;
+  private readonly featherWhite = new Map<number, HTMLCanvasElement | OffscreenCanvas>();
+  /** Per-entity pre-rendered feathered rects (see `blitFeather`), and the device pixels they hold. */
+  private readonly featherBlits = new WeakMap<Entity, FeatherBlit>();
+  private featherBlitPx = 0;
+  private featherBlitN = 0;
+  private paintSeq = 0;
+  /** Per layer: ribbon area painted this frame (px²), and whether its trails ribbon (see ribbonAllowed). */
+  private readonly ribbonBudget = new WeakMap<Built, { seq: number; area: number; ribbon: boolean }>();
+  private readonly featherTints = new Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D }>();
   /**
    * The presentation pass when this instance applies a `finish`: the
    * visible canvas plus the cached screen tiles. When set, `this.canvas` is
@@ -609,43 +636,96 @@ class SpecInstance implements SaverInstance {
     const trail = built.layer.trail;
     if (!trail) return;
     const { ctx, w, h } = this;
-    const fade = trail.fade ?? 1;
-    const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
     const headAlpha = alphaAt(e, t) * lifeA;
     const headSize = sizeAt(e, t);
     const sprite = built.layer.sprite;
+    const shaped = isShapedSprite(sprite) && sprite.kind !== 'circle';
+    const isSoft = sprite.kind === 'circle' && !!sprite.soft;
+    const hardCircle = sprite.kind === 'circle' && !sprite.soft;
+    const ribbon = hardCircle && this.ribbonAllowed(built);
+    const posAt = (pt: number): { x: number; y: number } => this.entityPos(e, pt, parentE);
+    // Only soft discs (and glyph trails) are gap-filled: a hard circle's
+    // echoes are joined into a ribbon, and a shape's echoes stay at their
+    // time samples — so neither draws more than the 24 echoes it always did.
+    const fill = shaped || hardCircle ? 0 : trailFillBudget(built.entities.length);
+    const echoes = trailEchoes(trail, t, headAlpha, headSize, posAt, w, h, built.layer.wrap !== false, fill, 0, built.layer.blend === 'lighter');
+    if (echoes.length === 0) return;
+    const head = posAt(t);
+    if (hardCircle) {
+      // The area this trail's ribbon covers (whether or not it is drawn as one), for the layer's ribbon budget.
+      const rb = this.ribbonBudget.get(built)!;
+      let prev = head;
+      let r0 = headSize / 2;
+      for (const ec of echoes) {
+        rb.area += Math.hypot(ec.x - prev.x, ec.y - prev.y) * (r0 + ec.r);
+        prev = ec;
+        r0 = ec.r;
+      }
+    }
+    // A shaped sprite's afterglow is echoes of its own shape (X387: a polygon
+    // or stroke used to trail fat discs), at the echo's own time — so a
+    // spinning or heading-oriented mark echoes the way it was turned then.
+    if (shaped) {
+      for (const ec of echoes) this.drawEntity(built, e, ec.t, 1, parentE, undefined, { x: ec.x, y: ec.y, size: ec.r * 2, alpha: ec.alpha });
+      return;
+    }
     const resolvedColor = isShapedSprite(sprite)
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
       : sprite.kind === 'text' || sprite.kind === 'textBlock' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
-    const isSoft = sprite.kind === 'circle' && sprite.soft;
-    const wrap = built.layer.wrap !== false;
-
-    const head = this.entityPos(e, t, parentE);
-    let prevX = head.x;
-    let prevY = head.y;
-
-    for (let s = 1; s <= n; s++) {
-      const k = s / n;
-      const pastT = t - k * trail.length;
-      if (pastT < 0) break;
-      const pos = this.entityPos(e, pastT, parentE);
-
-      if (wrap) {
-        const dx = pos.x - prevX;
-        const dy = pos.y - prevY;
-        if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) break;
+    if (ribbon) {
+      // X469: one continuous ribbon from the head back through every echo,
+      // tapering with the echoes' radii — each span a quad between two
+      // shared cross-sections, so nothing overlaps (no beads under a blend)
+      // and a fast mover draws a line, not dots, for the same 24 fills.
+      // Spans whose alphas sit within 4 % of the head's are merged into one
+      // fill, so a gently fading trail costs a handful of fills, not 24.
+      // Each span is subdivided at its own times (≤ ~12 px chords, ≤ 8 per
+      // span) so a curving path stays a curve, not 24 straight chords; the
+      // extra points are vertices, not fills.
+      const pts: Array<{ x: number; y: number }> = [head];
+      const radii: number[] = [headSize / 2];
+      const alphas: number[] = [headAlpha];
+      let prevT = t;
+      for (const ec of echoes) {
+        const p0 = pts[pts.length - 1]!;
+        const r0 = radii[radii.length - 1]!;
+        const a0 = alphas[alphas.length - 1]!;
+        const sub = Math.max(1, Math.min(8, Math.ceil(Math.hypot(ec.x - p0.x, ec.y - p0.y) / 12)));
+        for (let j = 1; j < sub; j++) {
+          const f = j / sub;
+          pts.push(posAt(prevT + (ec.t - prevT) * f));
+          radii.push(r0 + (ec.r - r0) * f);
+          alphas.push(a0 + (ec.alpha - a0) * f);
+        }
+        pts.push(ec);
+        radii.push(ec.r);
+        alphas.push(ec.alpha);
+        prevT = ec.t;
       }
-      prevX = pos.x;
-      prevY = pos.y;
-
-      const a = headAlpha * (1 - k * fade);
-      if (a <= 0) break;
-      const r = (headSize / 2) * (1 - k * 0.7);
-      if (r < 0.2) break;
-
-      ctx.globalAlpha = a;
+      const { left, right } = ribbonSides(pts, radii);
+      ctx.fillStyle = resolvedColor;
+      const tol = Math.max(0.004, headAlpha * 0.04);
+      let from = 0; // first cross-section of the current chunk
+      while (from < pts.length - 1) {
+        const a0 = alphas[from + 1]!;
+        let to = from + 1;
+        let sum = a0;
+        while (to < pts.length - 1 && Math.abs(alphas[to + 1]! - a0) <= tol) { sum += alphas[to + 1]!; to++; }
+        ctx.globalAlpha = sum / (to - from);
+        ctx.beginPath();
+        ctx.moveTo(left[from]!.x, left[from]!.y);
+        for (let i = from + 1; i <= to; i++) ctx.lineTo(left[i]!.x, left[i]!.y);
+        for (let i = to; i >= from; i--) ctx.lineTo(right[i]!.x, right[i]!.y);
+        ctx.closePath();
+        ctx.fill();
+        from = to;
+      }
+      return;
+    }
+    for (const ec of echoes) {
+      ctx.globalAlpha = ec.alpha;
       if (isSoft) {
-        const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
+        const g = ctx.createRadialGradient(ec.x, ec.y, 0, ec.x, ec.y, ec.r);
         g.addColorStop(0, resolvedColor);
         g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
         g.addColorStop(1, hexToRgba(resolvedColor, 0));
@@ -654,19 +734,211 @@ class SpecInstance implements SaverInstance {
         ctx.fillStyle = resolvedColor;
       }
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.arc(ec.x, ec.y, ec.r, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass): void {
+  /**
+   * Whether this layer's hard-circle trails draw as ribbons this frame. A
+   * ribbon paints its trail's whole length, so a layer of many fast, long
+   * trails can paint far more pixels than its dots did — under `lighter` on
+   * a CPU rasteriser that was 2.4× the frame time (60 trails, 3 s, 0.4/s).
+   * Past a tenth of the viewport's area in ribbon (measured on the
+   * previous frame) the layer falls back to the time-sample discs it always
+   * drew; it returns to ribbons below 70 % of that, so a layer near the line
+   * does not flicker between the two.
+   */
+  private ribbonAllowed(built: Built): boolean {
+    let rb = this.ribbonBudget.get(built);
+    if (!rb) {
+      rb = { seq: this.paintSeq, area: 0, ribbon: true };
+      this.ribbonBudget.set(built, rb);
+    }
+    if (rb.seq !== this.paintSeq) {
+      const budget = 0.1 * this.w * this.h;
+      if (rb.ribbon && rb.area > budget) rb.ribbon = false;
+      else if (!rb.ribbon && rb.area < 0.7 * budget) rb.ribbon = true;
+      rb.seq = this.paintSeq;
+      rb.area = 0;
+    }
+    return rb.ribbon;
+  }
+
+  /** A fresh 2D canvas (DOM or Offscreen), or null where none can be made. */
+  private makeCanvas(n: number): { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } | null {
+    try {
+      const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : new OffscreenCanvas(n, n);
+      canvas.width = n;
+      canvas.height = n;
+      const c = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      return c ? { canvas, ctx: c } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A feathered rect from a per-entity bitmap of it, pre-rendered at device
+   * resolution with its rotation baked in, copied 1:1 at a whole-pixel
+   * offset. A smooth falloff is a sampled image draw — on a CPU rasteriser
+   * (a Raspberry Pi wall) ~3× the six flat fills it replaced, ~10× when
+   * rotated and stretched — while a 1:1 integer copy costs about one flat
+   * fill. The bitmap is rebuilt only when the rect's size, rotation or
+   * feather changes (in device pixels, to a quarter pixel / 0.06°), and
+   * re-tinted (one copy + one flat fill) only when its colour changes, so a
+   * drifting block or a colour glide stays cheap. A rect whose shape
+   * changes every frame (`grow`, `spin`), a canvas under a rotating or
+   * mirroring transform, or a scene past the 8 Mpx cache budget draws the
+   * stretched mask directly instead. Returns false when it did not draw.
+   */
+  private blitFeather(e: Entity, p: { x: number; y: number }, sz: number, rh: number, rot: number, color: string, feather: number): boolean {
+    const ctx = this.ctx;
+    const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null;
+    if (!m || m.b !== 0 || m.c !== 0 || m.a <= 0 || m.d <= 0) return false;
+    const cos = Math.abs(Math.cos(rot));
+    const sin = Math.abs(Math.sin(rot));
+    const bw = Math.ceil((cos * sz + sin * rh) * m.a) + 2;
+    const bh = Math.ceil((sin * sz + cos * rh) * m.d) + 2;
+    const shapeKey = `${feather}|${Math.round(sz * m.a * 4)}|${Math.round(rh * m.d * 4)}|${Math.round(rot * 1000)}|${bw}x${bh}`;
+    let b = this.featherBlits.get(e);
+    if (!b || b.shapeKey !== shapeKey) {
+      // A shape that changed since the previous frame is animating: draw it
+      // directly rather than rebuild a bitmap every frame. Rebuild once it
+      // has held still for a frame (or on first sight, so a static rect is
+      // cached from its first paint).
+      if (b) {
+        if (b.seenKey !== shapeKey) { b.seenKey = shapeKey; b.seenAt = this.paintSeq; }
+        if (b.seenAt === this.paintSeq) return false;
+      }
+      const px = bw * bh;
+      const reuse = b && b.w === bw && b.h === bh;
+      if (!reuse && this.featherBlitPx + px - (b ? b.w * b.h : 0) > 8_000_000) return false;
+      const white = this.featherWhite.get(feather);
+      if (!white) return false; // featherMask builds it; it ran just before this
+      const wc = reuse ? b!.white : this.makeCanvas(1);
+      const tc = reuse ? b!.tint : this.makeCanvas(1);
+      if (!wc || !tc) return false;
+      if (!reuse) {
+        wc.canvas.width = bw; wc.canvas.height = bh;
+        tc.canvas.width = bw; tc.canvas.height = bh;
+        this.featherBlitPx += px - (b ? b.w * b.h : 0);
+      }
+      const w2 = wc.ctx;
+      w2.setTransform(1, 0, 0, 1, 0, 0);
+      w2.clearRect(0, 0, bw, bh);
+      w2.translate(bw / 2, bh / 2);
+      w2.scale(m.a, m.d);
+      if (rot) w2.rotate(rot);
+      w2.imageSmoothingEnabled = true;
+      w2.drawImage(white, -sz / 2, -rh / 2, sz, rh);
+      w2.setTransform(1, 0, 0, 1, 0, 0);
+      b = { shapeKey, w: bw, h: bh, white: wc, tint: tc, tintKey: '', tintAt: 0, stagger: this.featherBlitN++ % 8, seenKey: shapeKey, seenAt: this.paintSeq };
+      this.featherBlits.set(e, b);
+    }
+    // Re-tint on a colour change — at most every 8th frame mid-glide (a
+    // ≤ 133 ms colour lag on a glide that takes seconds), immediately for a
+    // new bitmap; entities are staggered across those 8 frames so a layer's
+    // re-tints never land on one frame together.
+    if (b.tintKey !== color && (b.tintKey === '' || this.paintSeq - b.tintAt >= 8)) {
+      const t2 = b.tint.ctx;
+      t2.setTransform(1, 0, 0, 1, 0, 0);
+      t2.globalCompositeOperation = 'copy';
+      t2.drawImage(b.white.canvas, 0, 0);
+      t2.globalCompositeOperation = 'source-in';
+      t2.fillStyle = color;
+      t2.fillRect(0, 0, b.w, b.h);
+      t2.globalCompositeOperation = 'source-over';
+      b.tintKey = color;
+      b.tintAt = this.paintSeq - (b.stagger ?? 0);
+      b.stagger = 0;
+    }
+    const cx = m.a * p.x + m.e;
+    const cy = m.d * p.y + m.f;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(b.tint.canvas, Math.round(cx - b.w / 2), Math.round(cy - b.h / 2));
+    ctx.restore();
+    return true;
+  }
+
+  /**
+   * A feathered rect's mask in `color`: FEATHER_MASK_SIZE² texels of
+   * `featherRamp(u) × featherRamp(v)`, drawn stretched to the rect with
+   * smoothing on, so the falloff is continuous at any size (X383).
+   *
+   * The ramp itself is built ONCE per feather (a white alpha mask, the only
+   * per-pixel work). A colour is a cheap tint of it — clear, draw the mask,
+   * `source-in` fill — into a pooled canvas, cached per colour × feather.
+   * A colour glide or a palette larger than the pool re-tints a pooled
+   * canvas (three GPU draws) rather than rebuilding pixels in JS.
+   */
+  private featherMask(color: string, feather: number): HTMLCanvasElement | OffscreenCanvas | null {
+    const key = `${color}|${feather}`;
+    const hit = this.featherTints.get(key);
+    if (hit) {
+      // Most recently used last, so eviction takes the stalest tint.
+      this.featherTints.delete(key);
+      this.featherTints.set(key, hit);
+      return hit.canvas;
+    }
+    const N = FEATHER_MASK_SIZE;
+    let white = this.featherWhite.get(feather);
+    if (!white) {
+      const made = this.makeCanvas(N);
+      if (!made) return null;
+      const img = made.ctx.createImageData(N, N);
+      const data = img.data;
+      const ramp: number[] = [];
+      for (let i = 0; i < N; i++) ramp.push(featherRamp((i + 0.5) / N, feather));
+      let o = 0;
+      for (let y = 0; y < N; y++) {
+        const ry = ramp[y]!;
+        for (let x = 0; x < N; x++) {
+          data[o++] = 255;
+          data[o++] = 255;
+          data[o++] = 255;
+          data[o++] = Math.round(255 * ry * ramp[x]!);
+        }
+      }
+      made.ctx.putImageData(img, 0, 0);
+      if (this.featherWhite.size >= 8) this.featherWhite.delete(this.featherWhite.keys().next().value!);
+      white = made.canvas;
+      this.featherWhite.set(feather, white);
+    }
+    let slot: { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } | null = null;
+    if (this.featherTints.size >= 48) {
+      const oldest = this.featherTints.keys().next().value!;
+      slot = this.featherTints.get(oldest)!;
+      this.featherTints.delete(oldest);
+    } else {
+      slot = this.makeCanvas(N);
+      if (!slot) return null;
+    }
+    const tctx = slot.ctx;
+    tctx.globalCompositeOperation = 'copy';
+    tctx.drawImage(white, 0, 0);
+    tctx.globalCompositeOperation = 'source-in';
+    tctx.fillStyle = color;
+    tctx.fillRect(0, 0, N, N);
+    tctx.globalCompositeOperation = 'source-over';
+    this.featherTints.set(key, slot);
+    return slot.canvas;
+  }
+
+  /**
+   * Paint one entity at time `t`. `echo` paints a trail echo instead: the
+   * entity as it was at `t` (rotation, heading, values), but at the echo's
+   * position, size and alpha.
+   */
+  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass, echo?: { x: number; y: number; size: number; alpha: number }): void {
     const { ctx } = this;
-    const p = this.entityPos(e, t, parentE);
+    const p = echo ? { x: echo.x, y: echo.y, flip: false } : this.entityPos(e, t, parentE);
     const sprite = paint?.sprite ?? built.layer.sprite;
-    const sz = sizeAt(e, t);
+    const sz = echo ? echo.size : sizeAt(e, t);
     const rot = rotationAt(e, t);
     const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
-    ctx.globalAlpha = alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
+    ctx.globalAlpha = echo ? echo.alpha : alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
     if (sprite.kind === 'ring') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
@@ -699,28 +971,22 @@ class SpecInstance implements SaverInstance {
       const rh = e.size2 !== undefined
         ? e.size2 * (e.size > 0 ? sz / e.size : 1) // grow/warp scale height with width
         : sz;
+      const feather = sprite.feather ?? 0;
+      const mask = feather > 0 ? this.featherMask(resolvedColor, feather) : null;
+      // Drawn from its cached, pre-rotated bitmap when it can be (see blitFeather).
+      if (mask && this.blitFeather(e, p, sz, rh, rot, resolvedColor, feather)) return;
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
       ctx.fillStyle = resolvedColor;
-      const feather = sprite.feather ?? 0;
-      if (feather > 0) {
-        // Soft edge: nested fills from the OUTSIDE IN — the full-size rect
-        // first at the faintest alpha, the core last at full — so the
-        // composited alpha ramps linearly across the feathered band (see
-        // featherAlphas). Only `lighter` sums alphas; `screen` still
-        // composites source-over, so it takes the source-over schedule.
-        const base = ctx.globalAlpha;
-        const additive = built.layer.blend === 'lighter';
-        const alphas = featherAlphas(FEATHER_STEPS, additive);
-        for (let j = 1; j <= FEATHER_STEPS; j++) {
-          const f = 1 - (feather * (j - 1)) / FEATHER_STEPS; // j=1 full size … j=K the core
-          const fw = sz * f;
-          const fh = rh * f;
-          ctx.globalAlpha = base * alphas[j - 1]!;
-          ctx.fillRect(-fw / 2, -fh / 2, fw, fh);
-        }
-        ctx.globalAlpha = base;
+      if (mask) {
+        // Soft edge (X383): one draw of a smooth alpha mask stretched to the
+        // rect — the falloff is continuous, and a single draw composites
+        // under every blend the way a hard rect does.
+        const prevSmooth = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(mask, -sz / 2, -rh / 2, sz, rh);
+        ctx.imageSmoothingEnabled = prevSmooth;
       } else {
         ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
       }
@@ -778,14 +1044,16 @@ class SpecInstance implements SaverInstance {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (sprite.taper) {
-        // A brush mark: each sampled segment at its own width.
-        for (let i = 1; i < pts.length; i++) {
-          ctx.lineWidth = Math.max(0.5, lw * strokeTaper((i - 0.5) / (pts.length - 1)));
-          ctx.beginPath();
-          ctx.moveTo(pts[i - 1]!.x, pts[i - 1]!.y);
-          ctx.lineTo(pts[i]!.x, pts[i]!.y);
-          ctx.stroke();
-        }
+        // A brush mark (X386): its tapered outline, filled once — so a
+        // translucent stroke composites as one mark instead of beading at
+        // every overlapping segment joint.
+        const outline = strokeOutline(pts, lw);
+        ctx.fillStyle = resolvedColor;
+        ctx.beginPath();
+        ctx.moveTo(outline[0]!.x, outline[0]!.y);
+        for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i]!.x, outline[i]!.y);
+        ctx.closePath();
+        ctx.fill();
       } else {
         ctx.lineWidth = lw;
         ctx.beginPath();
@@ -1076,6 +1344,7 @@ class SpecInstance implements SaverInstance {
    *  showing through — the ghosting smear. */
   private paintFrame(t: number, bgAlpha: number): void {
     const { ctx } = this;
+    this.paintSeq++;
     if (this.authored) this.resolveAuthored(t);
     if (!this.transparent) {
       ctx.globalAlpha = bgAlpha;

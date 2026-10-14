@@ -8,8 +8,10 @@ import { compileSwimPlan } from './plan';
 import {
   dressSnail, pupilOffset, PUPIL_TRAVEL, rigSnail, SNAIL_CLIPS, snailBlinkAt, snailCycle, snailFrame, snailGaze, snailGlow, snailIdle, snailLook,
   snailMoment, snailShellLight, snailShellOf, snailSpot, snailStart, snailStopAt,
-  type SnailDoing, type SnailOutput, type SnailRig,
+  type SnailDoing, type SnailInput, type SnailOutput, type SnailRig,
 } from './snail';
+import { actorTravel } from './dot';
+import { OPEN_MARKS, parseVignette, poseOf } from './vignette';
 
 const PLAN = compileSwimPlan(createRng(3).fork(1), { radius: 120, yMin: 15, yMax: 72 });
 const DUR: Record<string, number> = { glide: 2.4, idle: 4, look: 3.5, retract: 5, stretch: 3.5, munch: 3, blink: 0.4 };
@@ -273,5 +275,36 @@ describe('snail: the shell', () => {
     expect(Math.max(...levels) - Math.min(...levels)).toBeGreaterThan(0.5);
     // Dark until lit: its own colour is a fraction of its light, so it reads as glowing, not cream.
     expect(Math.max(spiral.color.r, spiral.color.g, spiral.color.b)).toBeLessThan(0.2);
+  });
+});
+
+describe('snail: a vignette actor (X490)', () => {
+  // `4s: a =left | 30s: a >right`: the script puts its actors at the open stage's
+  // swim height (y ≈ 34); a snail glides the floor all the same.
+  const v = parseVignette('4s: a =left, b =left, c =left | 30s: a >right, b >right, c >right', OPEN_MARKS);
+  const actorInput = (t: number, index = 0): SnailInput => ({
+    ...input(t, index),
+    act: poseOf(v, index, t), next: poseOf(v, index, t + 0.25), travel: actorTravel(v, index, t),
+  });
+
+  it('stands on the floor at its script place, facing the way the script walks it', () => {
+    const rig = rigged();
+    for (const t of [2, 10, 20]) {
+      const act = poseOf(v, 0, t)!;
+      expect(act.y).toBeGreaterThan(25); // the script's own height: mid-water
+      const out = snailFrame(rig, actorInput(t), blank());
+      expect(out.y).toBeCloseTo(2, 6); // the ground (input's ground is 2)
+      expect(out.x).toBeCloseTo(act.x, 6);
+      expect(out.z).toBeCloseTo(act.z, 6);
+      expect(Math.atan2(out.fx, out.fz)).toBeCloseTo(Math.atan2(act.fx, act.fz), 6);
+    }
+  });
+
+  it('glides while the script walks it, rests while it holds a mark', () => {
+    const rig = rigged();
+    expect(snailFrame(rig, actorInput(2), blank()).doing).toBe('idle');
+    expect(weight(rig, 'idle')).toBeCloseTo(1, 6);
+    expect(snailFrame(rig, actorInput(15), blank()).doing).toBe('glide');
+    expect(weight(rig, 'glide')).toBeGreaterThan(0.9);
   });
 });

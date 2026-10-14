@@ -153,15 +153,96 @@ export function strokeWidthPx(s: { width?: number }, scale: number): number {
 }
 
 /**
- * Per-step alphas for a feathered rect drawn as `steps` nested fills from the
- * outside in, so the COMPOSITED alpha ramps linearly from 1/steps at the
- * outer edge to 1 at the core. Under source-over each fill sees the ones
- * before it, so step k needs 1/(steps−k+1); under additive blends the fills
- * simply sum, so each contributes 1/steps.
+ * A feathered rect's opacity at normalised box coordinates `(u, v)` (0..1
+ * across its width and height): a separable linear ramp, `featherRamp(u) ×
+ * featherRamp(v)`, where `feather` of the half-size fades out on every side.
+ * Smooth by construction — no nested fills, so no bands (X383) — and its
+ * integral is exactly the `(1 − feather/2)²` perception weighs a feathered
+ * rect's splat by.
  */
-export function featherAlphas(steps: number, additive: boolean): number[] {
-  const out: number[] = [];
-  for (let k = 1; k <= steps; k++) out.push(additive ? 1 / steps : 1 / (steps - k + 1));
-  return out;
+export function featherRamp(u: number, feather: number): number {
+  const band = Math.max(0, Math.min(1, feather)) / 2; // fraction of the full width, per side
+  const d = Math.min(u, 1 - u);
+  if (band <= 0) return d >= 0 ? 1 : 0;
+  return Math.max(0, Math.min(1, d / band));
 }
-export const FEATHER_STEPS = 6;
+
+/** Side of the square alpha mask a feathered rect is painted from (stretched to the rect, smoothed). */
+export const FEATHER_MASK_SIZE = 128;
+
+/**
+ * The two sides of a ribbon through `pts` with half-width `half[i]` at point
+ * i: each point offset along its joint's bisector normal (mitred so a corner
+ * keeps its width, the miter capped at 2×). `left` is the +normal side
+ * (−ty, tx). Shared by the tapered stroke outline and the trail ribbon.
+ */
+export function ribbonSides(pts: Array<{ x: number; y: number }>, half: readonly number[]): { left: Array<{ x: number; y: number }>; right: Array<{ x: number; y: number }> } {
+  const n = pts.length;
+  const left: Array<{ x: number; y: number }> = [];
+  const right: Array<{ x: number; y: number }> = [];
+  if (n < 2) return { left, right };
+  const dir = (a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l = Math.hypot(dx, dy);
+    return l > 1e-9 ? { x: dx / l, y: dy / l } : { x: 1, y: 0 };
+  };
+  for (let i = 0; i < n; i++) {
+    const tIn = i > 0 ? dir(pts[i - 1]!, pts[i]!) : dir(pts[0]!, pts[1]!);
+    const tOut = i < n - 1 ? dir(pts[i]!, pts[i + 1]!) : tIn;
+    let tx = tIn.x + tOut.x;
+    let ty = tIn.y + tOut.y;
+    const tl = Math.hypot(tx, ty);
+    if (tl < 1e-9) { tx = tOut.x; ty = tOut.y; } else { tx /= tl; ty /= tl; }
+    const hw = half[i]! / Math.max(0.5, tx * tOut.x + ty * tOut.y);
+    const p = pts[i]!;
+    left.push({ x: p.x - ty * hw, y: p.y + tx * hw });
+    right.push({ x: p.x + ty * hw, y: p.y - tx * hw });
+  }
+  return { left, right };
+}
+
+/**
+ * A tapered stroke's filled outline (X386): the sampled path offset by ±half
+ * its tapered width on each side, with round end caps, as one closed polygon.
+ * Filling it once paints every pixel once — the per-segment strokes it
+ * replaces overlapped at every joint, and a translucent mark showed each
+ * overlap as a bead. Widths: `lw × strokeTaper(i / (n − 1))` at sample i,
+ * floored at 0.5 px. Joints are mitred (the offset scaled by 1/cos of the
+ * half-turn, capped at 2×) so a polyline corner keeps its width.
+ */
+export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, taper = true): Array<{ x: number; y: number }> {
+  const n = pts.length;
+  if (n < 2) return [];
+  const half = (i: number): number => Math.max(0.5, taper ? lw * strokeTaper(i / (n - 1)) : lw) / 2;
+  const dir = (a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l = Math.hypot(dx, dy);
+    return l > 1e-9 ? { x: dx / l, y: dy / l } : { x: 1, y: 0 };
+  };
+  const { left, right } = ribbonSides(pts, Array.from({ length: n }, (_, i) => half(i)));
+  // Round caps: half circles about each end, from one side to the other.
+  const cap = (c: { x: number; y: number }, r: number, from: number): Array<{ x: number; y: number }> => {
+    const out: Array<{ x: number; y: number }> = [];
+    const steps = 6;
+    for (let k = 1; k < steps; k++) {
+      const a = from - (Math.PI * k) / steps; // clockwise in screen terms: left side → right side
+      out.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r });
+    }
+    return out;
+  };
+  const endT = dir(pts[n - 2]!, pts[n - 1]!);
+  const startT = dir(pts[0]!, pts[1]!);
+  // Left is +normal (−ty, tx), at heading + 90°. The end cap sweeps from the
+  // left side through the heading to the right side; the start cap from the
+  // right side back round to the left.
+  const endA = Math.atan2(endT.y, endT.x) + Math.PI / 2;
+  const startA = Math.atan2(startT.y, startT.x) - Math.PI / 2;
+  return [
+    ...left,
+    ...cap(pts[n - 1]!, half(n - 1), endA),
+    ...right.reverse(),
+    ...cap(pts[0]!, half(0), startA),
+  ];
+}
