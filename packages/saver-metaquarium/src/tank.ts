@@ -3479,9 +3479,11 @@ class TankInstance implements SaverInstance {
       if (hold) {
         // Already faced (above).
       } else if (act) {
-        // A floor creature stands level: the script's pitch and roll are a swimmer's.
-        f.group.lookAt(px + act.fx, y + (floorActor ? 0 : act.fy), pz + act.fz);
-        if (!floorActor) f.group.rotateZ(act.roll);
+        // A floor creature stands level — the script's travel pitch is a swimmer's —
+        // but still nods, bows and wiggles through a gesture.
+        const level = floorActor && !act.gesture;
+        f.group.lookAt(px + act.fx, y + (level ? 0 : act.fy), pz + act.fz);
+        if (!level) f.group.rotateZ(act.roll);
       } else {
         f.group.lookAt(px + lfx, y + lfy, pz + lfz);
         f.group.rotateZ(pose.roll);
@@ -3798,9 +3800,10 @@ class TankInstance implements SaverInstance {
         follow: this.followState,
         shot: this.str('shot'),
         // The param, as set; `bearing` is where the shot's camera stands now —
-        // the param turned by autoRotate, plus the shot's own swing (X438).
+        // the param turned by autoRotate, plus the shot's own swing (X438);
+        // null while a follow camera rides with a fish (`follow` says where it is).
         azimuth: this.num('cameraAzimuth'),
-        bearing: shotBearing((SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit', this.num('cameraAzimuth'), this.turned),
+        bearing: this.followState ? null : shotBearing((SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit', this.num('cameraAzimuth'), this.turned),
         elevation: this.num('cameraElevation'),
         distance: this.num('cameraDistance'),
         autoRotate: this.num('autoRotate'),
