@@ -36,7 +36,8 @@ describe('trailEchoes (X469)', () => {
     const pos = (t: number) => ({ x: 800 + 400 * Math.cos(t / 100), y: 450 + 400 * Math.sin(t / 100) });
     const ec = trailEchoes({ length: 5000 }, 9000, 1, 4, pos, W, H, true, 50);
     expect(ec.length).toBeLessThanOrEqual(24 + 50);
-    expect(trailFillBudget(1)).toBe(480);
+    expect(trailFillBudget(1)).toBe(1200);
+    expect(trailFillBudget(10)).toBe(480);
     expect(trailFillBudget(400)).toBe(12);
     expect(trailFillBudget(10000)).toBe(8);
   });

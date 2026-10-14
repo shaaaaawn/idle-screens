@@ -34,7 +34,7 @@ export interface TrailSpec {
 
 /** Most extra (gap-filling) echoes one entity may add per frame: the layer shares a budget, bounded either way. */
 export function trailFillBudget(layerCount: number): number {
-  return Math.max(8, Math.min(480, Math.floor(4800 / Math.max(1, layerCount))));
+  return Math.max(8, Math.min(1200, Math.floor(4800 / Math.max(1, layerCount))));
 }
 
 /**
