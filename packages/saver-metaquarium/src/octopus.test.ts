@@ -343,4 +343,15 @@ describe('octopus: a vignette `ink` cue (X440)', () => {
     expect(at(1.8).ink!.t).toBeCloseTo(10.55, 9); // the same cloud, emitted once (InkLayer keys it)
     expect(at(3).ink).toBeNull();
   });
+
+  it('plays the ink clip over its idle, then hands back to the idle', async () => {
+    const { rig } = await rigged();
+    const w = (n: (typeof OCTOPUS_CLIPS)[number]): number => rig.actions[n].getEffectiveWeight();
+    octopusInkCue(rig, octopusPlaced(0, 10.5, newOctopusOutput()), 10.5, 0, 0.5, 1, 'k');
+    expect(w('ink')).toBeCloseTo(1, 6);
+    expect(w('idle')).toBeCloseTo(0, 6);
+    octopusInkCue(rig, octopusPlaced(0, 12, newOctopusOutput()), 12, 0, 2, 1, 'k');
+    expect(w('ink')).toBeCloseTo(0, 6);
+    expect(w('idle')).toBeCloseTo(1, 6);
+  });
 });
