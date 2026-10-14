@@ -616,7 +616,7 @@ class SpecInstance implements SaverInstance {
     const sprite = built.layer.sprite;
     const echoes = trailEchoes(
       trail, t, headAlpha, headSize, (pt) => this.entityPos(e, pt, parentE), w, h,
-      built.layer.wrap !== false, trailFillBudget(built.entities.length),
+      built.layer.wrap !== false, trailFillBudget(built.entities.length), 0, built.layer.blend === 'lighter',
     );
     if (echoes.length === 0) return;
     // A shaped sprite's afterglow is echoes of its own shape (X387: a polygon

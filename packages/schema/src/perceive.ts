@@ -445,7 +445,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const headSize = sizeAt(e, tPass);
     const lum = spriteLuma(layer, e);
     const soft = layer.sprite.kind === 'circle' && !!layer.sprite.soft;
-    const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false, trailFillBudget(layerCount), 0.004);
+    const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false, trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
     for (const ec of echoes) {
       const a = ec.alpha;
       const rad = ec.r;

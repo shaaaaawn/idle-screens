@@ -12,6 +12,12 @@
  * interpolated times, so they follow the curve — until neighbours are at
  * most half a radius apart. A trail whose echoes already touch gets no
  * extras: every such trail draws exactly what it drew before.
+ *
+ * A filled span stands in for the one echo it replaces, so its echoes share
+ * that echo's ink: each one's alpha is scaled so the ~2r/spacing discs that
+ * overlap any point of the ribbon add up to the single echo's alpha (summed
+ * under `lighter`, composited otherwise). Without that, a fast additive dot
+ * saturated to white along its ribbon instead of keeping its colour and fade.
  */
 import { LIMITS } from './types';
 
@@ -55,6 +61,7 @@ export function trailEchoes(
   wrap: boolean,
   fillBudget: number,
   minAlpha = 0,
+  additive = false,
 ): TrailEcho[] {
   const fade = trail.fade ?? 1;
   const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
@@ -100,6 +107,18 @@ export function trailEchoes(
   for (let i = 0; i < base.length; i++) {
     const b = base[i]!;
     const m = Math.floor(need[i]! * scale);
+    if (m === 0) {
+      out.push(b);
+      last = b;
+      continue;
+    }
+    const a = i === 0 ? head : base[i - 1]!;
+    const spacing = Math.hypot(b.x - a.x, b.y - a.y) / (m + 1);
+    // Share of the replaced echo's ink each of the span's echoes carries.
+    const share = (alpha: number, r: number): number => {
+      const k = Math.min(1, spacing / (2 * r));
+      return additive ? alpha * k : 1 - Math.pow(1 - Math.min(1, alpha), k);
+    };
     const t0 = i === 0 ? t : base[i - 1]!.t;
     const k0 = i === 0 ? 0 : base[i - 1]!.k;
     for (let j = 1; j <= m; j++) {
@@ -109,9 +128,10 @@ export function trailEchoes(
       const pos = posAt(tt);
       if (jumps(last, pos)) continue;
       last = pos;
-      out.push({ t: tt, x: pos.x, y: pos.y, k, alpha: alphaAtK(k), r: radiusAtK(k) });
+      const r = radiusAtK(k);
+      out.push({ t: tt, x: pos.x, y: pos.y, k, alpha: share(alphaAtK(k), r), r });
     }
-    out.push(b);
+    out.push({ ...b, alpha: share(b.alpha, b.r) });
     last = b;
   }
   return out;
