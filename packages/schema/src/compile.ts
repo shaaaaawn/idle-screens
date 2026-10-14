@@ -25,10 +25,11 @@ import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
 import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
-import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
+import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime, hexToRgb255 } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_STEPS, barBox, barFraction, featherAlphas, isShapedSprite, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isShapedSprite, polygonPoints, strokeOutline, strokeSamples, strokeWidthPx } from './shapes';
+import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
 
@@ -358,6 +359,7 @@ class SpecInstance implements SaverInstance {
   private readonly fieldShortSide: number;
   /** The `field` background's cached raster; null until a field is first painted. */
   private field: FieldRaster | null = null;
+  private readonly featherMasks = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   /**
    * The presentation pass when this instance applies a `finish`: the
    * visible canvas plus the cached screen tiles. When set, `this.canvas` is
@@ -609,43 +611,29 @@ class SpecInstance implements SaverInstance {
     const trail = built.layer.trail;
     if (!trail) return;
     const { ctx, w, h } = this;
-    const fade = trail.fade ?? 1;
-    const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
     const headAlpha = alphaAt(e, t) * lifeA;
     const headSize = sizeAt(e, t);
     const sprite = built.layer.sprite;
+    const echoes = trailEchoes(
+      trail, t, headAlpha, headSize, (pt) => this.entityPos(e, pt, parentE), w, h,
+      built.layer.wrap !== false, trailFillBudget(built.entities.length),
+    );
+    if (echoes.length === 0) return;
+    // A shaped sprite's afterglow is echoes of its own shape (X387: a polygon
+    // or stroke used to trail fat discs), at the echo's own time — so a
+    // spinning or heading-oriented mark echoes the way it was turned then.
+    if (isShapedSprite(sprite) && sprite.kind !== 'circle') {
+      for (const ec of echoes) this.drawEntity(built, e, ec.t, 1, parentE, undefined, { x: ec.x, y: ec.y, size: ec.r * 2, alpha: ec.alpha });
+      return;
+    }
     const resolvedColor = isShapedSprite(sprite)
       ? (sprite.colors?.[e.colorIndex] ?? sprite.color)
       : sprite.kind === 'text' || sprite.kind === 'textBlock' ? (sprite.color ?? '#e6e8ef') : '#e6e8ef';
     const isSoft = sprite.kind === 'circle' && sprite.soft;
-    const wrap = built.layer.wrap !== false;
-
-    const head = this.entityPos(e, t, parentE);
-    let prevX = head.x;
-    let prevY = head.y;
-
-    for (let s = 1; s <= n; s++) {
-      const k = s / n;
-      const pastT = t - k * trail.length;
-      if (pastT < 0) break;
-      const pos = this.entityPos(e, pastT, parentE);
-
-      if (wrap) {
-        const dx = pos.x - prevX;
-        const dy = pos.y - prevY;
-        if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) break;
-      }
-      prevX = pos.x;
-      prevY = pos.y;
-
-      const a = headAlpha * (1 - k * fade);
-      if (a <= 0) break;
-      const r = (headSize / 2) * (1 - k * 0.7);
-      if (r < 0.2) break;
-
-      ctx.globalAlpha = a;
+    for (const ec of echoes) {
+      ctx.globalAlpha = ec.alpha;
       if (isSoft) {
-        const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
+        const g = ctx.createRadialGradient(ec.x, ec.y, 0, ec.x, ec.y, ec.r);
         g.addColorStop(0, resolvedColor);
         g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
         g.addColorStop(1, hexToRgba(resolvedColor, 0));
@@ -654,19 +642,67 @@ class SpecInstance implements SaverInstance {
         ctx.fillStyle = resolvedColor;
       }
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.arc(ec.x, ec.y, ec.r, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass): void {
+  /**
+   * A feathered rect's alpha mask in `color`: FEATHER_MASK_SIZE² texels of
+   * `featherRamp(u) × featherRamp(v)`, drawn stretched to the rect with
+   * smoothing on, so the falloff is continuous at any size (X383). Cached per
+   * colour × feather (a steered glide makes a few; the cache is small and
+   * evicts oldest-first). Null where no canvas can be made.
+   */
+  private featherMask(color: string, feather: number): HTMLCanvasElement | OffscreenCanvas | null {
+    const key = `${color}|${feather}`;
+    const hit = this.featherMasks.get(key);
+    if (hit) return hit;
+    const N = FEATHER_MASK_SIZE;
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    try {
+      canvas = typeof document !== 'undefined' ? document.createElement('canvas') : new OffscreenCanvas(N, N);
+    } catch {
+      return null;
+    }
+    canvas.width = N;
+    canvas.height = N;
+    const mctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!mctx) return null;
+    const img = mctx.createImageData(N, N);
+    const data = img.data;
+    const [r, g, b] = hexToRgb255(color);
+    const ramp: number[] = [];
+    for (let i = 0; i < N; i++) ramp.push(featherRamp((i + 0.5) / N, feather));
+    let o = 0;
+    for (let y = 0; y < N; y++) {
+      const ry = ramp[y]!;
+      for (let x = 0; x < N; x++) {
+        data[o++] = r;
+        data[o++] = g;
+        data[o++] = b;
+        data[o++] = Math.round(255 * ry * ramp[x]!);
+      }
+    }
+    mctx.putImageData(img, 0, 0);
+    if (this.featherMasks.size >= 32) this.featherMasks.delete(this.featherMasks.keys().next().value!);
+    this.featherMasks.set(key, canvas);
+    return canvas;
+  }
+
+  /**
+   * Paint one entity at time `t`. `echo` paints a trail echo instead: the
+   * entity as it was at `t` (rotation, heading, values), but at the echo's
+   * position, size and alpha.
+   */
+  private drawEntity(built: Built, e: Entity, t: number, lifeA: number, parentE: Entity | null, paint?: PaintPass, echo?: { x: number; y: number; size: number; alpha: number }): void {
     const { ctx } = this;
-    const p = this.entityPos(e, t, parentE);
+    const p = echo ? { x: echo.x, y: echo.y, flip: false } : this.entityPos(e, t, parentE);
     const sprite = paint?.sprite ?? built.layer.sprite;
-    const sz = sizeAt(e, t);
+    const sz = echo ? echo.size : sizeAt(e, t);
     const rot = rotationAt(e, t);
     const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
-    ctx.globalAlpha = alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
+    ctx.globalAlpha = echo ? echo.alpha : alphaAt(e, t) * lifeA * (paint?.alpha ?? 1);
     if (sprite.kind === 'ring') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
@@ -704,23 +740,15 @@ class SpecInstance implements SaverInstance {
       if (rot) ctx.rotate(rot);
       ctx.fillStyle = resolvedColor;
       const feather = sprite.feather ?? 0;
-      if (feather > 0) {
-        // Soft edge: nested fills from the OUTSIDE IN — the full-size rect
-        // first at the faintest alpha, the core last at full — so the
-        // composited alpha ramps linearly across the feathered band (see
-        // featherAlphas). Only `lighter` sums alphas; `screen` still
-        // composites source-over, so it takes the source-over schedule.
-        const base = ctx.globalAlpha;
-        const additive = built.layer.blend === 'lighter';
-        const alphas = featherAlphas(FEATHER_STEPS, additive);
-        for (let j = 1; j <= FEATHER_STEPS; j++) {
-          const f = 1 - (feather * (j - 1)) / FEATHER_STEPS; // j=1 full size … j=K the core
-          const fw = sz * f;
-          const fh = rh * f;
-          ctx.globalAlpha = base * alphas[j - 1]!;
-          ctx.fillRect(-fw / 2, -fh / 2, fw, fh);
-        }
-        ctx.globalAlpha = base;
+      const mask = feather > 0 ? this.featherMask(resolvedColor, feather) : null;
+      if (mask) {
+        // Soft edge (X383): one draw of a smooth alpha mask stretched to the
+        // rect — the falloff is continuous, and a single draw composites
+        // under every blend the way a hard rect does.
+        const prevSmooth = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(mask, -sz / 2, -rh / 2, sz, rh);
+        ctx.imageSmoothingEnabled = prevSmooth;
       } else {
         ctx.fillRect(-sz / 2, -rh / 2, sz, rh);
       }
@@ -778,14 +806,16 @@ class SpecInstance implements SaverInstance {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (sprite.taper) {
-        // A brush mark: each sampled segment at its own width.
-        for (let i = 1; i < pts.length; i++) {
-          ctx.lineWidth = Math.max(0.5, lw * strokeTaper((i - 0.5) / (pts.length - 1)));
-          ctx.beginPath();
-          ctx.moveTo(pts[i - 1]!.x, pts[i - 1]!.y);
-          ctx.lineTo(pts[i]!.x, pts[i]!.y);
-          ctx.stroke();
-        }
+        // A brush mark (X386): its tapered outline, filled once — so a
+        // translucent stroke composites as one mark instead of beading at
+        // every overlapping segment joint.
+        const outline = strokeOutline(pts, lw);
+        ctx.fillStyle = resolvedColor;
+        ctx.beginPath();
+        ctx.moveTo(outline[0]!.x, outline[0]!.y);
+        for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i]!.x, outline[i]!.y);
+        ctx.closePath();
+        ctx.fill();
       } else {
         ctx.lineWidth = lw;
         ctx.beginPath();

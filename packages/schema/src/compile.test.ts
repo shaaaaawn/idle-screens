@@ -574,40 +574,64 @@ describe('shape glyphs draw (#46)', () => {
     expect(calls(mockCtx.createRadialGradient)).toBeGreaterThanOrEqual(2);
   });
 
-  it('stroke: a single stroked path, or one segment per sample when tapered', () => {
+  it('stroke: a single stroked path; tapered, one filled outline — never a stroke per segment (X386)', () => {
     render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3 }));
     const plain = calls(mockCtx.stroke);
     expect(plain).toBe(FRAMES * 2);
+    const fills = calls(mockCtx.fill);
     render(scene({ kind: 'stroke', length: [40, 60], points: [[-1, 0], [0, -1], [1, 0]], color: '#fff', width: 3, taper: true, orient: true }));
-    expect(calls(mockCtx.stroke) - plain).toBe(FRAMES * 2 * 23);
+    expect(calls(mockCtx.stroke) - plain).toBe(0);
+    expect(calls(mockCtx.fill) - fills).toBe(FRAMES * 2);
   });
 
-  it('feathered rect paints outside-in: the full-size fill faintest first, the core at full alpha last', () => {
-    const seen: Array<{ w: number; a: number }> = [];
-    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number, h: number) => void }).fillRect = (_x, _y, w) => {
-      seen.push({ w, a: (mockCtx as unknown as { globalAlpha: number }).globalAlpha });
-    };
+  it('feathered rect is one smooth mask draw stretched to the rect, not stepped nested fills (X383)', () => {
+    const fills: number[] = [];
+    (mockCtx as unknown as { fillRect: (x: number, y: number, w: number) => void }).fillRect = (_x, _y, w) => { fills.push(w); };
+    const draws: unknown[][] = [];
+    (mockCtx as unknown as { drawImage: (...a: unknown[]) => void }).drawImage = (...a) => { draws.push(a); };
+    let mask: Uint8ClampedArray | null = null;
+    (mockCtx as unknown as { putImageData: (img: { data: Uint8ClampedArray }) => void }).putImageData = (img) => { mask = img.data; };
     const spec: SaverSpec = {
       schemaVersion: 1, id: 'f', label: 'F', units: 'px',
-      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], color: '#fff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
+      layers: [{ count: 1, sprite: { kind: 'rect', width: [60, 60], aspect: [0.5, 0.5], color: '#ffffff', feather: 0.5 }, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 } }],
     };
     const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
-    const fills = seen.slice(1); // drop the background
-    expect(fills).toHaveLength(6);
-    expect(fills[0]!.w).toBeCloseTo(60, 9); // full size first …
-    expect(fills[0]!.a).toBeCloseTo(1 / 6, 9); // … at the faintest alpha
-    expect(fills[5]!.w).toBeCloseTo(60 * (1 - 0.5 * 5 / 6), 9); // the core last …
-    expect(fills[5]!.a).toBeCloseTo(1, 9); // … at full alpha
-    for (let i = 1; i < 6; i++) expect(fills[i]!.w).toBeLessThan(fills[i - 1]!.w);
+    expect(fills).toHaveLength(1); // the background only — no nested fills
+    expect(draws).toHaveLength(1);
+    expect(draws[0]!.slice(1)).toEqual([-30, -15, 60, 30]);
+    // The mask's alpha along its middle row is a smooth ramp: 0 → 255 with no jump over 255 / 32 + 1.
+    const N = 128;
+    const row = Array.from({ length: N }, (_, x) => mask![(64 * N + x) * 4 + 3]!);
+    expect(row[0]).toBeLessThan(8);
+    expect(row[64]).toBe(255);
+    let maxJump = 0;
+    for (let x = 1; x < N; x++) maxJump = Math.max(maxJump, Math.abs(row[x]! - row[x - 1]!));
+    expect(maxJump).toBeLessThanOrEqual(9);
     inst.dispose();
   });
 
-  it('feathered rect: six nested fills per entity where a hard rect makes one', () => {
+  it('feathered rect: one draw per entity where a hard rect makes one fill, under any blend', () => {
     render(scene({ kind: 'rect', width: [20, 30], color: '#fff' }));
     const hard = calls(mockCtx.fillRect);
     expect(hard).toBe(FRAMES * (1 + 2)); // background + two entities per frame
+    const before = calls(mockCtx.drawImage);
     render(scene({ kind: 'rect', width: [20, 30], color: '#fff', feather: 0.5 }, 'lighter'));
-    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * (1 + 2 * 6));
+    expect(calls(mockCtx.fillRect) - hard).toBe(FRAMES * 1);
+    expect(calls(mockCtx.drawImage) - before).toBe(FRAMES * 2);
+  });
+
+  it('trail on a polygon echoes the polygon, not discs (X387)', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1, id: 'tp', label: 'TP', units: 'px',
+      layers: [{ count: 1, sprite: { kind: 'polygon', radius: [40, 40], color: '#ffb02e', sides: 5 }, trail: { length: 1200, fade: 0.8 }, motion: { type: 'drift', speed: [60, 60] } }],
+    };
+    const inst = compileSaver(spec).mount(saverCtx({ reducedMotion: true })) as SaverInstance;
+    const arcs = calls(mockCtx.arc);
+    const closes = calls(mockCtx.closePath);
+    inst.renderFrame!(3000, 42);
+    expect(calls(mockCtx.arc) - arcs).toBe(0); // no disc echoes
+    expect(calls(mockCtx.closePath) - closes).toBe(1 + 24); // the head + 24 polygon echoes
+    inst.dispose();
   });
 });
 
