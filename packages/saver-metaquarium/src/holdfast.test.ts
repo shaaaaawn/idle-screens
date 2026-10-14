@@ -24,7 +24,7 @@ describe('holdfast: when a seahorse holds on', () => {
         prev = h;
       }
     }
-  });
+  }, 30_000); // 4 seahorses x 12000 steps of expect(); CI runs the whole suite at once
 
   it('goes over and comes back eased, wraps its tail only as it arrives, and is wholly there while it holds', () => {
     for (const i of [1, 7]) {

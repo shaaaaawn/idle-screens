@@ -102,7 +102,7 @@ describe('flora', () => {
       if (mat[v * 2]! > 2) { expect(sw[v * 3]!).toBeGreaterThan(0); expect(pos[v * 3 + 1]!).toBeGreaterThanOrEqual(sw[v * 3]! - 1e-6); }
     }
     expect(Math.max(...an.tips.map((t) => t.flex))).toBe(2.4); // the canopy knows the crown sways
-  });
+  }, 30_000); // builds every species at the top tier; CI runs the whole suite at once
 
   it('plants grow in colonies that share a colour', () => {
     const f = buildFlora(anchors, flat, createRng(3), { ...opts, cap: 12 });
