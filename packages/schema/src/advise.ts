@@ -463,7 +463,7 @@ export function adviseSpec(
       const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
       const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
       const str = s.kind === 'textBlock' ? s.text : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
-      textBoxes.push({ li, label, alpha, str, ...box });
+      textBoxes.push({ li, label, alpha, str, ...box, rawW: raw.x1 - raw.x0, rawH: raw.y1 - raw.y0 });
     }
   }
   const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
@@ -522,6 +522,51 @@ export function adviseSpec(
         // layout. Additive: the message is unchanged.
         boxes: [asFraction(first), asFraction(second)],
       });
+    }
+  }
+
+  // Cells of ONE list/table layer painting over each other (X214). A data
+  // layout's `gap` is the pitch between cell anchors, not the space between
+  // cells, so a label wider than the column pitch runs into its neighbour.
+  // Only data layouts are judged: scattered text in one layer overlapping is
+  // texture, not a layout bug. Same 10%-of-the-smaller-box rule as above.
+  const cellFlagged = new Set<number>();
+  for (let i = 0; i < textBoxes.length; i++) {
+    const a = textBoxes[i]!;
+    if (cellFlagged.has(a.li)) continue;
+    const layer = spec.layers[a.li]!;
+    const layout = layer.layout;
+    if (layout?.type !== 'list' && layout?.type !== 'table') continue;
+    for (let j = i + 1; j < textBoxes.length; j++) {
+      const b = textBoxes[j]!;
+      if (b.li !== a.li) continue;
+      const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+      const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (ix <= 0 || iy <= 0) continue;
+      const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+      if (smaller <= 0 || (ix * iy) / smaller <= 0.1) continue;
+      cellFlagged.add(a.li);
+      const cells = textBoxes.filter((x) => x.li === a.li);
+      const dflt = scale === 1 ? LIMITS.defaultListGapPx : LIMITS.defaultListGap;
+      const g = layout.gap ?? dflt;
+      const gx = typeof g === 'number' ? g : g.x ?? dflt;
+      const gy = typeof g === 'number' ? g : g.y ?? dflt;
+      const cols = layout.type === 'list' ? 1 : Math.max(1, Math.round(layout.columns));
+      const unitPx = (v: number): number => (scale === 1 ? v : v * scale);
+      const fromPx = (px: number): number => (scale === 1 ? Math.ceil(px) : Math.ceil((px / scale) * 100) / 100);
+      const maxW = cells.reduce((m, c) => Math.max(m, c.rawW), 0);
+      const maxH = cells.reduce((m, c) => Math.max(m, c.rawH), 0);
+      const fixes: string[] = [];
+      const across = cols > 1 && maxW > unitPx(gx);
+      if (across) fixes.push(`its labels are up to ~${Math.round(maxW)}px wide against a ${Math.round(unitPx(gx))}px column pitch (gap${typeof g === 'number' ? '' : '.x'} ${gx}) — raise gap${typeof g === 'number' ? '' : '.x'} to ≥ ${fromPx(maxW * 1.1)}`);
+      if (!across || maxH > unitPx(gy)) fixes.push(`rows are ~${Math.round(maxH)}px tall against a ${Math.round(unitPx(gy))}px row pitch (gap${typeof g === 'number' ? '' : '.y'} ${gy}) — raise gap${typeof g === 'number' ? '' : '.y'} to ≥ ${fromPx(maxH * 1.1)}`);
+      warnings.push({
+        path: `layers[${a.li}].layout.gap`,
+        code: 'layout-text-overlap',
+        message: `${a.label} cells overlap at ${w}×${h}: a ${layout.type}'s \`gap\` is the pitch between cell anchors, not the space between cells; ${fixes.join('; and ')}, or shrink the text`,
+        boxes: [asFraction(a), asFraction(b)],
+      });
+      break;
     }
   }
 
@@ -763,6 +808,9 @@ interface TextBoxAt {
   y1: number;
   /** Glyph height in px — what an additive layer must out-size to sit under a line. */
   fs: number;
+  /** The box's size before the layer `transform` — in the units a layout `gap` is measured in. */
+  rawW: number;
+  rawH: number;
 }
 
 type Box = Pick<TextBoxAt, 'x0' | 'y0' | 'x1' | 'y1' | 'fs'>;

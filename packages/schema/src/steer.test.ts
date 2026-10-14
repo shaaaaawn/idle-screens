@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, sequenceSteerablePaths, steerablePaths, structuralSignature } from './steer';
 import type { SaverSpec } from './types';
+import { validateSpec } from './validate';
+import { resolveTimelineAt } from './timeline';
 
 const spec: SaverSpec = {
   schemaVersion: 1,
@@ -239,5 +241,43 @@ describe('sequenceSteerablePaths', () => {
     const paths = sequenceSteerablePaths({ format: 'idle-sequence', schemaVersion: 1, id: 'q', label: 'Q', loop: false, segments: [{ key: 'a', scene: scene('#222') }] });
     expect(paths.some((p) => p.startsWith('bed.'))).toBe(false);
     expect(paths).toContain('sequence.segment');
+  });
+});
+
+describe('field quantize / octaves glide through whole levels (X477)', () => {
+  const field: SaverSpec = {
+    schemaVersion: 1,
+    id: 'fq',
+    label: 'FQ',
+    background: { type: 'field', scale: 1.6, octaves: 3, warp: 0.35, quantize: 0, bands: ['#101820', '#305070', '#80a0c0', '#f0f0e0'] },
+    layers: [{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#fff' }, motion: { type: 'static' } }],
+  };
+
+  it('a timeline key gliding quantize 0 → 6 validates: every mid-glide state is a whole level', () => {
+    const spec: SaverSpec = { ...field, timeline: { keys: [{ t: 1600, path: 'background.quantize', value: 6, dur: 200, ease: 'linear' }] } };
+    expect(validateSpec(spec).errors).toEqual([]);
+    for (let t = 1600; t <= 1800; t += 5) {
+      const q = (resolveTimelineAt(spec, t).background as { quantize?: number }).quantize!;
+      expect(Number.isInteger(q), `t=${t} q=${q}`).toBe(true);
+      expect(q === 0 || (q >= 2 && q <= 6), `t=${t} q=${q}`).toBe(true);
+    }
+    // 1 is never a resolved level: below 1.5 reads as smooth (0), as the field painter does.
+    expect((resolveTimelineAt(spec, 1625).background as { quantize?: number }).quantize).toBe(0);
+    expect((resolveTimelineAt(spec, 1650).background as { quantize?: number }).quantize).toBe(2);
+  });
+
+  it('octaves round mid-glide, and a steered glide (lerpSpec) rounds both fields the same way', () => {
+    const to: SaverSpec = { ...field, background: { ...(field.background as object), octaves: 1, quantize: 8 } as SaverSpec['background'] };
+    const mid = lerpSpec(field, to, 0.3);
+    const bg = mid.background as { octaves?: number; quantize?: number };
+    expect(bg.octaves).toBe(2); // 3 → 1 at 0.3 = 2.4
+    expect(bg.quantize).toBe(2); // 0 → 8 at 0.3 = 2.4
+    expect(validateSpec(mid).valid).toBe(true);
+    expect((lerpSpec(field, to, 0.1).background as { quantize?: number }).quantize).toBe(0); // 0.8 → smooth, never 1
+  });
+
+  it('authored fractional values are still rejected', () => {
+    expect(validateSpec({ ...field, background: { ...(field.background as object), quantize: 2.5 } as SaverSpec['background'] }).valid).toBe(false);
+    expect(validateSpec({ ...field, background: { ...(field.background as object), octaves: 1.5 } as SaverSpec['background'] }).valid).toBe(false);
   });
 });

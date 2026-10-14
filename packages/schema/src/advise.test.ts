@@ -879,3 +879,51 @@ describe('adviseSequence', () => {
     expect(warnings.some((w) => w.path.startsWith('segments[0].scene.'))).toBe(true);
   });
 });
+
+describe('layout-text-overlap: list / table cells narrower than their labels (X214)', () => {
+  const table = (gap: number | { x?: number; y?: number }, type: 'table' | 'list' = 'table'): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'tbl',
+    label: 'Table',
+    background: { type: 'solid', color: '#101018' },
+    layers: [{
+      key: 'labels',
+      count: 3,
+      sprite: { kind: 'text', strings: ['Temperature', 'Humidity', 'Pressure'], color: '#e6e8ef' },
+      size: [0.03, 0.03],
+      motion: { type: 'static' },
+      position: { x: 0.5, y: 0.5 },
+      layout: type === 'table' ? { type: 'table', columns: 3, gap } : { type: 'list', gap },
+    }],
+  });
+  const vp = { width: 1600, height: 900 };
+
+  it('warns when the column pitch (`gap`) is narrower than the labels, and says what gap clears them', () => {
+    const w = adviseSpec(table(0.1), vp).filter((x) => x.code === 'layout-text-overlap');
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe('layers[0].layout.gap');
+    expect(w[0]!.message).toMatch(/`labels`/);
+    expect(w[0]!.message).toMatch(/pitch/);
+    // The suggested gap really clears the labels.
+    const suggested = Number(/gap(?:\.x)? to ≥ ([0-9.]+)/.exec(w[0]!.message)![1]);
+    expect(suggested).toBeGreaterThan(0.1);
+    expect(adviseSpec(table({ x: suggested, y: 0.06 }), vp).filter((x) => x.code === 'layout-text-overlap')).toEqual([]);
+  });
+
+  it('is silent when the cells clear each other, and for a list whose rows clear', () => {
+    expect(adviseSpec(table(0.3), vp).filter((x) => x.code === 'layout-text-overlap')).toEqual([]);
+    expect(adviseSpec(table(0.06, 'list'), vp).filter((x) => x.code === 'layout-text-overlap')).toEqual([]);
+  });
+
+  it('a list whose row pitch is under the text height warns too', () => {
+    expect(adviseSpec(table(0.01, 'list'), vp).filter((x) => x.code === 'layout-text-overlap')).toHaveLength(1);
+  });
+
+  it('no shipped example fires it', () => {
+    for (const s of EXAMPLE_SPECS) {
+      for (const v of [{ width: 1920, height: 1080 }, { width: 960, height: 540 }, { width: 600, height: 1000 }]) {
+        expect(adviseSpec(s, v).filter((x) => x.code === 'layout-text-overlap'), `${s.id}@${v.width}x${v.height}`).toEqual([]);
+      }
+    }
+  });
+});

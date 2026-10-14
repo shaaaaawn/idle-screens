@@ -192,8 +192,11 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
 
   **Steering.** Every numeric knob and every band is a paint path —
   `background.scale`, `background.warp`, `background.quantize`,
-  `background.bands.2`, `background.drift.amount` — and glides (a fractional
-  `quantize` or `octaves` mid-glide rounds). `background.seed` is not
+  `background.bands.2`, `background.drift.amount` — and glides. `quantize`
+  and `octaves` are level counts, so a glide (`setParam`, a `timeline` key, a
+  `morph`) steps through **whole** levels: the in-between value rounds, and a
+  `quantize` under 1.5 reads `0` (smooth) — so `quantize` 0 → 6 eases smooth,
+  then 2, 3 … 6 bands. Authored values must still be whole. `background.seed` is not
   steerable. The background is paint, not structure, so a `morph` between
   two field segments glides the field; a gradient → field morph steps
   (different shape).
@@ -269,7 +272,7 @@ own `finish` is not steerable; steer a segment's, or republish.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `count` | int 1..400 | — | entities in this layer |
+| `count` | int 1..400 | — | entities in this layer. **At most 800 entities across all layers** (and ≤ 36 layers): the validator rejects a spec whose counts sum past 800, and density scaling never takes a screen past it |
 | `sprite` | SpriteSpec | — | what each entity looks like |
 | `motion` | MotionSpec | — | how entities move |
 | `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites |
@@ -278,13 +281,13 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
-| `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing; `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
-| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
+| `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing: `amp` is **added** to the entity's `alpha` (alpha ± amp, clamped to 0..1), not a fraction of it — a dim layer (`alpha` 0.2, `amp` 0.3) swings through 0 and sits fully dark for part of every period; keep `amp` ≤ the alpha floor for a breath that never blacks out. `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
+| `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
 | `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** tvOS reads `spin` only ⇒ 0 |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean) |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06); text/emoji take `strings[i]` / `glyphs[i]` and palettes `colors[i]` **in order**, so N labels are one layer |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}`). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
@@ -308,13 +311,16 @@ with distance, removing pop-in at the cutoff.
 - `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
   viewport (verbatim only under `units: "px"`); a family/weight only
-  (`"bold monospace"`) composes with the seeded per-entity `size`; `role` is
+  (`"bold monospace"`) composes with the seeded per-entity `size` (faces
+  installed on the viewer only — see `font` under `textBlock`); `role` is
   the legibility opt-in described under `textBlock` below (same field, same
   meaning on both text sprites)
 - `{ "kind": "circle", "radius": [0.001, 0.003], "color": "#ffffff", "soft": true }` —
   `soft` renders a radial-falloff glow orb instead of a hard disc
 - `{ "kind": "ring", "radius": [0.002, 0.005], "color": "#d8f6ff", "width": 0.001 }` —
-  unfilled circle (bubbles, portals, sonar)
+  unfilled circle (bubbles, portals, sonar). The line is **centred on the
+  radius**: half of `width` falls inside, half outside, so the outer edge is
+  `radius + width / 2`
 - `{ "kind": "streak", "length": [0.01, 0.03], "color": "#cfd8ff", "width": 0.002 }` —
   a line oriented along the entity's analytic heading with a faded tail
   (rain that reads as rain, shooting stars, warp stars)
@@ -334,8 +340,15 @@ with distance, removing pop-in at the cutoff.
   6); or `"points": [[-1, 0.9], [0.2, -1], [1, 0.4]]` — 3..24 unit
   coordinates in −1..1 scaled by the radius — for any facet (a Picasso shard,
   a Kandinsky triangle, a Mondrian plane). `soft` feathers the fill from the
-  centre. Rotates with `spin`. `points` are paint, so two polygons with the
-  same point count `morph` into each other
+  centre. Rotates with `spin`. The outline fills with the **nonzero** winding
+  rule: a self-crossing outline paints both lobes, and a hole needs its inner
+  loop traced in the **opposite** direction (a keyhole: outer ring clockwise,
+  then back round the hole counter-clockwise, joined by a zero-width slit). `points` are paint, so two polygons with the
+  same point count `morph` into each other — and a `setParam`, `timeline` key
+  or `morph` target for `sprite.points` is in the **same unit coordinates**,
+  scaled by each entity's seeded radius (not by the keyed shape's own extent):
+  keep every keyed point inside −1..1 (the validator rejects one outside), and
+  shrink a target shape by scaling its points, not by exceeding the box
 - `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
   a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
   unit box spans the seeded `length`, stroked `width` wide with round joins.
@@ -384,6 +397,12 @@ with distance, removing pop-in at the cutoff.
   advance so mono wraps land where the real face puts them; every other
   family uses the proportional table. Default `system-ui, sans-serif`.
   **Native clients fall back to the system face** until a face table exists.
+  `font` names faces **installed on the viewing device** — nothing is
+  bundled and no web font is fetched, so `'Inter'` only appears where Inter
+  is installed and every other screen falls through the stack. End every
+  stack in a generic `sans-serif`, `serif` or `monospace`; avoid ending on
+  `cursive` or `fantasy`, which resolve to a different (sometimes absurd)
+  face on every platform.
 
   `opacity` (0–1, default 1) multiplies the block's paint alpha — the whole
   block, on top of the layer's per-entity `alpha`. It is **paint**, not
@@ -479,7 +498,10 @@ and configured the second.
 - `{ "type": "wander", "speed": [0.004, 0.012], "angle": 0, "meander": 0.1, "coherence": 0.7 }`
   — organic harmonic drift: base velocity plus 3 seeded sine octaves per axis.
   Flowing curved paths with zero simulation state. `meander` scales the
-  curvature; `coherence` 0..1 blends every entity toward a shared harmonic set
+  curvature (it is the harmonics' amplitude, so it also sets how fast an
+  entity sways — keep it ≤ ~0.015 for a slow drift); it is capped at
+  **0.463** (500 px ÷ `referenceViewport`, 1080 by default — 500 under
+  `units: "px"`), and the validator rejects anything above; `coherence` 0..1 blends every entity toward a shared harmonic set
   (1 = the layer undulates as one body — fake flocking)
 - `{ "type": "warp", "speed": [0.1, 0.5], "center": { "x": 0.5, "y": 0.5 } }`
   — perspective starfield: entities stream toward the viewer on a depth axis,
@@ -860,11 +882,14 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   its own × its group's — is 0 in the base scene and at every key boundary of
   its `timeline` never shows, so it is not judged and its entities do not count
   toward `dense-scene`; coverage is weighed by paint opacity) (also on
-  `perceiveScene().advisories`). Two of them are **spatial**, for static text:
+  `perceiveScene().advisories`). Three of them are **spatial**, for static text:
   `text-off-screen` (a text/textBlock box crosses the viewport edge by more
-  than 1%) and `text-overlap` (two static text layers share more than 10% of
+  than 1%), `text-overlap` (two static text layers share more than 10% of
   the smaller box; it carries both boxes as `boxes: [{x, y, w, h}]` in
-  viewport fractions so the fix needs no re-derivation). Boxes come from the
+  viewport fractions so the fix needs no re-derivation) and
+  `layout-text-overlap` (two cells of one `list`/`table` layer do — its
+  `gap` pitch is narrower than its labels; the message names the `gap` that
+  clears them, and it carries the two boxes too). Boxes come from the
   same character-class width table the textBlock line-breaker uses, so they
   are estimates of the renderer's own layout — a caption that fails these
   will look wrong on the wall; one that passes may still sit a few px off.
