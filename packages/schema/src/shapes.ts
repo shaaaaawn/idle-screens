@@ -171,6 +171,38 @@ export function featherRamp(u: number, feather: number): number {
 export const FEATHER_MASK_SIZE = 128;
 
 /**
+ * The two sides of a ribbon through `pts` with half-width `half[i]` at point
+ * i: each point offset along its joint's bisector normal (mitred so a corner
+ * keeps its width, the miter capped at 2×). `left` is the +normal side
+ * (−ty, tx). Shared by the tapered stroke outline and the trail ribbon.
+ */
+export function ribbonSides(pts: Array<{ x: number; y: number }>, half: readonly number[]): { left: Array<{ x: number; y: number }>; right: Array<{ x: number; y: number }> } {
+  const n = pts.length;
+  const left: Array<{ x: number; y: number }> = [];
+  const right: Array<{ x: number; y: number }> = [];
+  if (n < 2) return { left, right };
+  const dir = (a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l = Math.hypot(dx, dy);
+    return l > 1e-9 ? { x: dx / l, y: dy / l } : { x: 1, y: 0 };
+  };
+  for (let i = 0; i < n; i++) {
+    const tIn = i > 0 ? dir(pts[i - 1]!, pts[i]!) : dir(pts[0]!, pts[1]!);
+    const tOut = i < n - 1 ? dir(pts[i]!, pts[i + 1]!) : tIn;
+    let tx = tIn.x + tOut.x;
+    let ty = tIn.y + tOut.y;
+    const tl = Math.hypot(tx, ty);
+    if (tl < 1e-9) { tx = tOut.x; ty = tOut.y; } else { tx /= tl; ty /= tl; }
+    const hw = half[i]! / Math.max(0.5, tx * tOut.x + ty * tOut.y);
+    const p = pts[i]!;
+    left.push({ x: p.x - ty * hw, y: p.y + tx * hw });
+    right.push({ x: p.x + ty * hw, y: p.y - tx * hw });
+  }
+  return { left, right };
+}
+
+/**
  * A tapered stroke's filled outline (X386): the sampled path offset by ±half
  * its tapered width on each side, with round end caps, as one closed polygon.
  * Filling it once paints every pixel once — the per-segment strokes it
@@ -189,24 +221,7 @@ export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, 
     const l = Math.hypot(dx, dy);
     return l > 1e-9 ? { x: dx / l, y: dy / l } : { x: 1, y: 0 };
   };
-  const left: Array<{ x: number; y: number }> = [];
-  const right: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < n; i++) {
-    const tIn = i > 0 ? dir(pts[i - 1]!, pts[i]!) : dir(pts[0]!, pts[1]!);
-    const tOut = i < n - 1 ? dir(pts[i]!, pts[i + 1]!) : tIn;
-    let tx = tIn.x + tOut.x;
-    let ty = tIn.y + tOut.y;
-    const tl = Math.hypot(tx, ty);
-    if (tl < 1e-9) { tx = tOut.x; ty = tOut.y; } else { tx /= tl; ty /= tl; }
-    // Miter: the offset along the bisector normal that keeps the width.
-    const cosHalf = Math.max(0.5, tx * tOut.x + ty * tOut.y);
-    const hw = half(i) / cosHalf;
-    const nx = -ty;
-    const ny = tx;
-    const p = pts[i]!;
-    left.push({ x: p.x + nx * hw, y: p.y + ny * hw });
-    right.push({ x: p.x - nx * hw, y: p.y - ny * hw });
-  }
+  const { left, right } = ribbonSides(pts, Array.from({ length: n }, (_, i) => half(i)));
   // Round caps: half circles about each end, from one side to the other.
   const cap = (c: { x: number; y: number }, r: number, from: number): Array<{ x: number; y: number }> => {
     const out: Array<{ x: number; y: number }> = [];

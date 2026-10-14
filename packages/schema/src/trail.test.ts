@@ -11,7 +11,7 @@ describe('trailEchoes (X469)', () => {
     ec.forEach((e, i) => expect(e.t).toBeCloseTo(5000 - ((i + 1) / 24) * 2400, 9));
   });
 
-  it('a fast mover is gap-filled until neighbouring echoes sit within half a radius', () => {
+  it('a fast mover is gap-filled until neighbouring echoes sit within a radius', () => {
     const pos = (t: number) => ({ x: 800 + 300 * Math.cos(t / 2000), y: 450 + 300 * Math.sin(t / 2000) }); // 150 px/s on a circle
     const ec = trailEchoes({ length: 5000, fade: 0.15 }, 8000, 1, 20, pos, W, H, true, 480);
     expect(ec.length).toBeGreaterThan(24);
@@ -24,7 +24,7 @@ describe('trailEchoes (X469)', () => {
       const p = pos(e.t);
       expect(Math.hypot(p.x - e.x, p.y - e.y)).toBeLessThan(1e-9);
     }
-    expect(worst).toBeLessThanOrEqual(0.5 + 1e-9);
+    expect(worst).toBeLessThanOrEqual(1 + 1e-9);
     // Head-first (k monotone); a filled span's echoes share its ink, so none outshines the head.
     for (let i = 1; i < ec.length; i++) expect(ec[i]!.k).toBeGreaterThan(ec[i - 1]!.k);
     for (const e of ec) expect(e.alpha).toBeLessThanOrEqual(1);
@@ -34,10 +34,11 @@ describe('trailEchoes (X469)', () => {
     const pos = (t: number) => ({ x: 800 + 400 * Math.cos(t / 100), y: 450 + 400 * Math.sin(t / 100) });
     const ec = trailEchoes({ length: 5000 }, 9000, 1, 4, pos, W, H, true, 50);
     expect(ec.length).toBeLessThanOrEqual(24 + 50);
-    expect(trailFillBudget(1)).toBe(1200);
-    expect(trailFillBudget(10)).toBe(480);
-    expect(trailFillBudget(400)).toBe(12);
-    expect(trailFillBudget(10000)).toBe(8);
+    // A layer shares 240 extra echoes, 4..48 per entity (Pi-class budget).
+    expect(trailFillBudget(1)).toBe(48);
+    expect(trailFillBudget(10)).toBe(24);
+    expect(trailFillBudget(400)).toBe(4);
+    expect(trailFillBudget(10000)).toBe(4);
   });
 
   it('stops at a wrap seam', () => {

@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, isShapedSprite, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -445,7 +445,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const headSize = sizeAt(e, tPass);
     const lum = spriteLuma(layer, e);
     const soft = layer.sprite.kind === 'circle' && !!layer.sprite.soft;
-    const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false, trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
+    const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false,
+      // As the renderer: a shape echoes at its time samples only; circles fill
+      // (a hard circle's ribbon reads, on the coarse grid, as filled discs).
+      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
     for (const ec of echoes) {
       const a = ec.alpha;
       const rad = ec.r;

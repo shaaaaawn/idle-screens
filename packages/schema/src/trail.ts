@@ -7,10 +7,12 @@
  * at most `LIMITS.maxTrailSamples`), each fainter (`fade`) and smaller (to
  * 30 % at the tail). A slow mover's echoes overlap into a smear; a fast one's
  * fell apart into separate dots (X469: a 5 s trail on a path circle was 24
- * dots 208 ms apart). So wherever two neighbouring echoes sit further apart
- * than the echo's radius, echoes are added between them — at their own
+ * dots 208 ms apart). The renderer joins a hard circle's echoes into one
+ * ribbon (`ribbonSides`), which needs no extra echoes; for soft discs, and
+ * for perception, wherever two neighbouring echoes sit further apart than
+ * the echo's radius, echoes are added between them — at their own
  * interpolated times, so they follow the curve — until neighbours are at
- * most half a radius apart. A trail whose echoes already touch gets no
+ * most a radius apart, within a small per-layer budget (`trailFillBudget`). A trail whose echoes already touch gets no
  * extras: every such trail draws exactly what it drew before.
  *
  * A filled span stands in for the one echo it replaces, so its echoes share
@@ -38,9 +40,15 @@ export interface TrailSpec {
   fade?: number;
 }
 
-/** Most extra (gap-filling) echoes one entity may add per frame: the layer shares a budget, bounded either way. */
+/**
+ * Most extra (gap-filling) echoes one entity may add per frame. The layer
+ * shares 240 (ten entities' worth of the 24 time samples), at most 48 per
+ * entity, however fast it moves — sized against frame time on a Raspberry
+ * Pi-class (4× throttled CPU) wall: `comets` stays within ~20 % of its
+ * pre-fill cost.
+ */
 export function trailFillBudget(layerCount: number): number {
-  return Math.max(8, Math.min(1200, Math.floor(4800 / Math.max(1, layerCount))));
+  return Math.max(4, Math.min(48, Math.floor(240 / Math.max(1, layerCount))));
 }
 
 /**
@@ -95,7 +103,7 @@ export function trailEchoes(
     const a = i === 0 ? head : base[i - 1]!;
     const b = base[i]!;
     const d = Math.hypot(b.x - a.x, b.y - a.y);
-    const m = d > b.r ? Math.ceil(d / (b.r * 0.5)) - 1 : 0;
+    const m = d > b.r ? Math.ceil(d / b.r) - 1 : 0;
     need.push(m);
     total += m;
   }
