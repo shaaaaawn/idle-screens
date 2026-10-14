@@ -73,6 +73,7 @@ const BREED_NOUN: Record<string, [string, string]> = {
   octopus: ['octopus', 'octopuses'],
   snail: ['snail', 'snails'],
   dot: ['Dot', 'Dots'],
+  dolphin: ['dolphin', 'dolphins'],
   starfish: ['starfish', 'starfish'],
   crab: ['crab', 'crabs'],
   shark: ['shark', 'sharks'],

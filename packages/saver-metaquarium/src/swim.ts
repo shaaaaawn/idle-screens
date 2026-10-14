@@ -105,6 +105,7 @@ export const AUTO_STYLE_BY_BREED: Readonly<Record<string, SwimStyle>> = {
   octopus: 'bottom',
   snail: 'bottom',
   dot: 'bottom',
+  dolphin: 'loop',
   dori: 'school',
 };
 
@@ -230,7 +231,7 @@ export const FISH_LENGTH = 18;
 export const BREED_SIZE: Readonly<Record<string, number>> = {
   betafish: 1, angelfish: 1, seahorse: 0.8, seaturtle: 1.35,
   shark: 2.2, crab: 0.9, dori: 0.9, glowfish: 0.8, babyfish: 0.45, hackerfish: 0.85, blowfish: 0.8,
-  starfish: 1, octopus: 1.2, snail: 0.8, dot: 1.2,
+  starfish: 1, octopus: 1.2, snail: 0.8, dot: 1.2, dolphin: 1.8,
 };
 export function breedSize(breed: string | null | undefined): number {
   return (breed && BREED_SIZE[breed.toLowerCase()]) || 1;

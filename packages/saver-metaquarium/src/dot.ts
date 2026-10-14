@@ -264,8 +264,10 @@ export interface DotInput extends CrabInput {
   travel?: number;
 }
 
-/** Each script's walked distance per actor over one loop, sampled at 30 Hz: built once, a pure function of the script. */
+/** Each script's walked distance per actor over one loop, sampled at 30 Hz: built once, a pure function of the script.
+ *  Keyed by actor, and by actor + SOLID for the distance through the water (`solid`). */
 const TRAVEL = new WeakMap<Vignette, Map<number, Float64Array>>();
+const SOLID = 1 << 16;
 const TRAVEL_HZ = 30;
 
 /**
@@ -273,23 +275,26 @@ const TRAVEL_HZ = 30;
  * closed form: whole loops of the script plus the way into this one. Its feet
  * take their step from this, never from t × speed — that product races the
  * legs whenever the pace changes, and the later in the day the faster
- * (`d/dt (t·v) = v + t·v'`).
+ * (`d/dt (t·v) = v + t·v'`). `solid`: through the water, height and all — a
+ * swimmer's (the dolphin's) strokes cover its climbs and dives too; a walker's
+ * feet only the floor.
  */
-export function actorTravel(v: Vignette, actor: number, t: number, own?: (g: Gesture) => boolean): number {
+export function actorTravel(v: Vignette, actor: number, t: number, own?: (g: Gesture) => boolean, solid = false): number {
   if (!v.duration) return 0;
   let byActor = TRAVEL.get(v);
   if (!byActor) TRAVEL.set(v, (byActor = new Map()));
-  let table = byActor.get(actor);
+  const key = solid ? actor + SOLID : actor;
+  let table = byActor.get(key);
   if (!table) {
     const n = Math.max(2, Math.ceil(v.duration * TRAVEL_HZ));
     table = new Float64Array(n + 1);
     let prev = poseOf(v, actor, 0, own);
     for (let i = 1; i <= n; i++) {
       const p = poseOf(v, actor, (i / n) * v.duration, own);
-      table[i] = table[i - 1]! + (p && prev ? Math.hypot(p.x - prev.x, p.z - prev.z) : 0);
+      table[i] = table[i - 1]! + (p && prev ? Math.hypot(p.x - prev.x, solid ? p.y - prev.y : 0, p.z - prev.z) : 0);
       prev = p;
     }
-    byActor.set(actor, table);
+    byActor.set(key, table);
   }
   const n = table.length - 1, loop = table[n]!;
   const laps = Math.floor(t / v.duration), u = ((t - laps * v.duration) / v.duration) * n;
