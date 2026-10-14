@@ -4,6 +4,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import draco3d from 'draco3dgltf';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { Quaternion } from 'three';
 import { BUNDLED_BREEDS } from './breeds';
 import { NPC_CATALOG } from './ipfs';
 import { ACT_LENGTH } from './puffer';
@@ -525,6 +526,126 @@ describe('bundled breeds (breeds/README.md)', () => {
     for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
     expect(got).toEqual(want);
     for (const name of got.keys()) if (/^GLOW/i.test(name)) expect(name).not.toMatch(/eye/i);
+  });
+
+  it('dolphin: the rig survives the intake — a soft body, jaw, flippers, blowhole, side eyes; every clip', async () => {
+    const doc = await bundledDoc('dolphin');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    expect([...joints].sort()).toEqual(['blowhole', 'body', 'eye.L', 'eye.R', 'flipper.L', 'flipper.R', 'flukes', 'head', 'jaw', 'pupil.L', 'pupil.R', 'tail1', 'tail2']);
+    expect(root.listAnimations().map((a) => a.getName()).sort()).toEqual(
+      ['blink', 'bubble', 'burst', 'chatter', 'flip', 'glide', 'hover', 'nod', 'shake', 'spin', 'swim', 'wave'],
+    );
+    // The schedule's lengths (dolphin.ts MOMENT_LENGTH) are the clips' own.
+    const { MOMENT_LENGTH } = await import('./dolphin');
+    for (const [name, len] of Object.entries(MOMENT_LENGTH)) {
+      const a = root.listAnimations().find((x) => x.getName() === name)!;
+      const end = Math.max(...a.listSamplers().map((sm) => { const inp = sm.getInput()!; return inp.getElement(inp.getCount() - 1, [])[0]!; }));
+      expect(end, name).toBeCloseTo(len, 1);
+    }
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!;
+      const bones = new Set(Array.from({ length: j.getCount() }, (_, i) => joints[(j.getElement(i, []) as number[])[0]!]!));
+      // The whites ride the eyes, and each pupil's catchlight its pupil; the pupils their own bones.
+      if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R', 'pupil.L', 'pupil.R']);
+      if (name === 'EYES-Black') expect([...bones].sort()).toEqual(['pupil.L', 'pupil.R']);
+      // A character's colours are its own, never a coat the tank re-rolls.
+      expect(name).toMatch(/^(PAINT-#[0-9a-f]{6}|EYES-White|EYES-Black)$/);
+    }
+    // Side eyes (rig/dolphin.py side_eyes): each eye one white box and each pupil ONE quad on its OUTER face.
+    const pupils = root.listMeshes().flatMap((m) => m.listPrimitives()).find((p) => p.getMaterial()!.getName() === 'EYES-Black')!;
+    expect(pupils.getIndices()!.getCount() / 3).toBe(4);
+    const n = pupils.getAttribute('NORMAL')!;
+    for (let i = 0; i < n.getCount(); i++) expect(Math.abs((n.getElement(i, []) as number[])[0]!)).toBeGreaterThan(0.99);
+    // The blink moves the eyes and nothing else, so it layers over the strokes; the strokes leave them be.
+    const blink = root.listAnimations().find((a) => a.getName() === 'blink')!;
+    expect(new Set(blink.listChannels().map((c) => c.getTargetNode()!.getName()))).toEqual(new Set(['eye.L', 'eye.R']));
+    for (const name of ['swim', 'glide', 'burst', 'hover']) {
+      const a = root.listAnimations().find((x) => x.getName() === name)!;
+      const moved = new Set(a.listChannels().map((c) => c.getTargetNode()!.getName()));
+      expect([...moved].some((b) => b.startsWith('eye.') || b.startsWith('pupil.')), name).toBe(false);
+      // It strokes with its flukes.
+      expect(moved.has('flukes'), name).toBe(true);
+    }
+  });
+
+  it('dolphin: a pupil slid to any end of its travel (dolphin.ts PUPIL_SLIDE) stays on its eye', async () => {
+    const { PUPIL_SLIDE } = await import('./dolphin');
+    const doc = await bundledDoc('dolphin');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    const prims = root.listMeshes().flatMap((m) => m.listPrimitives());
+    const pts = (name: string, bone: string): number[][] => {
+      const p = prims.find((x) => x.getMaterial()!.getName() === name)!;
+      const pos = p.getAttribute('POSITION')!, j = p.getAttribute('JOINTS_0')!;
+      const out: number[][] = [];
+      for (let i = 0; i < pos.getCount(); i++) if (joints[(j.getElement(i, []) as number[])[0]!] === bone) out.push(pos.getElement(i, []) as number[]);
+      return out;
+    };
+    for (const side of ['L', 'R']) {
+      const box = pts('EYES-White', `eye.${side}`), pupil = pts('EYES-Black', `pupil.${side}`);
+      expect(pupil.length).toBe(4);
+      const lo = (a: number[][], k: number): number => Math.min(...a.map((v) => v[k]!)), hi = (a: number[][], k: number): number => Math.max(...a.map((v) => v[k]!));
+      // glTF axes: y up, z forward. Rest is the front and low corner; it slides up and back.
+      for (const [dy, dz] of [[0, 0], [PUPIL_SLIDE.up, 0], [0, -PUPIL_SLIDE.back], [PUPIL_SLIDE.up, -PUPIL_SLIDE.back]]) {
+        expect(lo(pupil, 1) + dy!).toBeGreaterThanOrEqual(lo(box, 1) - 1e-3);
+        expect(hi(pupil, 1) + dy!).toBeLessThanOrEqual(hi(box, 1) + 1e-3);
+        expect(lo(pupil, 2) + dz!).toBeGreaterThanOrEqual(lo(box, 2) - 1e-3);
+        expect(hi(pupil, 2) + dz!).toBeLessThanOrEqual(hi(box, 2) + 1e-3);
+      }
+      // And its travel reaches every edge: rest is the front and low, the far end the back and high.
+      expect(lo(pupil, 1)).toBeCloseTo(lo(box, 1), 2);
+      expect(hi(pupil, 2)).toBeCloseTo(hi(box, 2), 2);
+      expect(hi(pupil, 1) + PUPIL_SLIDE.up).toBeCloseTo(hi(box, 1), 2);
+      expect(lo(pupil, 2) - PUPIL_SLIDE.back).toBeCloseTo(lo(box, 2), 2);
+    }
+  });
+
+  it('dolphin: it strokes UP AND DOWN — the flukes pitch, never yaw (a shark sweeps side to side)', async () => {
+    const doc = await bundledDoc('dolphin');
+    const swim = doc.getRoot().listAnimations().find((a) => a.getName() === 'swim')!;
+    const ch = swim.listChannels().find((c) => c.getTargetNode()!.getName() === 'flukes' && c.getTargetPath() === 'rotation')!;
+    const out = ch.getSampler()!.getOutput()!;
+    // The flukes' rotation relative to rest, as an axis in the model's (glTF) frame.
+    const node = ch.getTargetNode()!;
+    const world = (q: number[]): Quaternion => {
+      let o: typeof node | null = node.getParentNode();
+      const acc = new Quaternion();
+      while (o) { const r = o.getRotation(); acc.premultiply(new Quaternion(r[0], r[1], r[2], r[3])); o = o.getParentNode(); }
+      return acc.clone().multiply(new Quaternion(q[0], q[1], q[2], q[3])).multiply(acc.clone().multiply(new Quaternion(...node.getRotation())).invert());
+    };
+    let pitch = 0, other = 0;
+    for (let i = 0; i < out.getCount(); i++) {
+      const d = world(out.getElement(i, []) as number[]);
+      pitch = Math.max(pitch, Math.abs(d.x)); other = Math.max(other, Math.abs(d.y), Math.abs(d.z));
+    }
+    expect(pitch).toBeGreaterThan(0.05);
+    expect(other).toBeLessThan(pitch * 0.05);
+  });
+
+  it('dolphin: its loops close and its one-shots end where they began', async () => {
+    const doc = await bundledDoc('dolphin');
+    for (const a of doc.getRoot().listAnimations()) {
+      for (const ch of a.listChannels()) {
+        const v = ch.getSampler()!.getOutput()!, n = v.getCount();
+        const first = v.getElement(0, []) as number[], last = v.getElement(n - 1, []) as number[];
+        const d = Math.max(...first.map((x, i) => Math.abs(x - last[i]!)));
+        const flipped = ch.getTargetPath() === 'rotation' ? Math.max(...first.map((x, i) => Math.abs(x + last[i]!))) : Infinity;
+        expect(Math.min(d, flipped), `${a.getName()} ${ch.getTargetNode()!.getName()}.${ch.getTargetPath()}`).toBeLessThan(2e-3);
+      }
+    }
+  });
+
+  it('dolphin: the committed source is what its generator draws (breeds/rig/dolphin-model.mjs)', async () => {
+    // @ts-expect-error -- a plain ESM script beside the rig, no types
+    const model = await import('../breeds/rig/dolphin-model.mjs') as { voxels: () => [number, number, number, string][] };
+    const want = new Map<string, number>();
+    for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    const doc = await new NodeIO().read(here('../breeds/source/dolphin.glb').pathname);
+    const got = new Map<string, number>();
+    for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
+    expect(got).toEqual(want);
   });
 
   it('dot: the rig survives the intake — a full character, its screen with its own phosphor, every clip', async () => {

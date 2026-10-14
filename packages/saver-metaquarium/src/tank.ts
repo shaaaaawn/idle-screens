@@ -86,6 +86,7 @@ import { angelFrame, rigAngel, type AngelRig } from './angel';
 import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
+import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import {
@@ -678,7 +679,7 @@ interface Fish {
    *  shark patrols and strikes (shark.ts). `lights` are
    *  this frame's levels for its glowing parts, by material name. */
   rig?: {
-    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin; snail?: SnailRig; dot?: DotRig;
+    crab?: CrabRig; starfish?: StarfishRig; angler?: AnglerRig; angel?: AngelRig; turtle?: TurtleRig; seahorse?: SeahorseRig; beta?: BetaRig; hacker?: HackerRig; screen?: ScreenRig | null; shark?: SharkRig; baby?: BabyRig; tang?: TangRig; puffer?: PufferRig; octopus?: OctopusRig; octoSkin?: OctopusSkin; snail?: SnailRig; dot?: DotRig; dolphin?: DolphinRig;
     lights: Record<string, number>;
     /** How much of its glow a rigged breed throws around itself (bloom cards — their size too —, its light, the floor's pool): 1 when unset.
      *  The parts themselves stay as bright — a starfish lying ON the floor would otherwise light it like a lamp. */
@@ -2353,6 +2354,7 @@ class TankInstance implements SaverInstance {
     let hacker: HackerRig | null = null;
     let dot: DotRig | null = null;
     let shark: SharkRig | null = null;
+    let dolphin: DolphinRig | null = null;
     let baby: BabyRig | null = null;
     let tang: TangRig | null = null;
     let puffer: PufferRig | null = null;
@@ -2377,6 +2379,7 @@ class TankInstance implements SaverInstance {
       if (rigged === 'hackerfish') hacker = rigHacker(body, tpl.clips);
       if (rigged === 'dot') dot = rigDot(body, tpl.clips, tpl.norm);
       if (rigged === 'shark') shark = rigShark(body, tpl.clips);
+      if (rigged === 'dolphin') dolphin = rigDolphin(body, tpl.clips);
       if (rigged === 'babyfish') baby = rigBaby(body, tpl.clips);
       if (rigged === 'dori') tang = rigTang(body, tpl.clips);
       if (rigged === 'blowfish') puffer = rigPuffer(body, tpl.clips);
@@ -2386,7 +2389,7 @@ class TankInstance implements SaverInstance {
         this.ink = new InkLayer(this.scene);
         if (this.waterInstalled) patchWater(this.ink.mesh.material as Material, this.str('dither') === 'on');
       }
-      if ((baby || puffer) && !this.burps) {
+      if ((baby || puffer || dolphin) && !this.burps) {
         this.burps = new BurpLayer(this.scene);
         if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
       }
@@ -2414,8 +2417,8 @@ class TankInstance implements SaverInstance {
         body.rotation.y = 0;
         body.position.copy(walker.anchor).multiplyScalar(-tpl.norm);
         mixer = walker.mixer;
-      } else if (angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer) {
-        mixer = (angler ?? angel ?? turtle ?? seahorse ?? beta ?? hacker ?? shark ?? baby ?? tang ?? puffer)!.mixer;
+      } else if (angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || dolphin) {
+        mixer = (angler ?? angel ?? turtle ?? seahorse ?? beta ?? hacker ?? shark ?? baby ?? tang ?? puffer ?? dolphin)!.mixer;
       } else if (tpl.clip) {
         mixer = new AnimationMixer(body);
         mixer.clipAction(tpl.clip).play();
@@ -2464,8 +2467,8 @@ class TankInstance implements SaverInstance {
       clipDuration,
       tail,
       glow: fishGlow,
-      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus || snail || dot
-        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), ...(snail ? { snail } : {}), ...(dot ? { dot, screen } : {}), lights: {} }
+      rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus || snail || dot || dolphin
+        ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), ...(snail ? { snail } : {}), ...(dot ? { dot, screen } : {}), ...(dolphin ? { dolphin } : {}), lights: {} }
         : null,
     };
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
@@ -2885,7 +2888,7 @@ class TankInstance implements SaverInstance {
       // follower behind it stops too.
       // A seahorse stops on its route to hold on to something (holdfast.ts), and picks up where it stopped.
       const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold
-        : this.wantBreeds[f.index] === 'seahorse' ? seahorseHeld : null;
+        : this.wantBreeds[f.index] === 'seahorse' ? seahorseHeld : this.wantBreeds[f.index] === 'dolphin' ? dolphinHold : null;
       const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
       const d = anchor + effort * style.travel + mnv.along * L - held;
 
@@ -3141,7 +3144,8 @@ class TankInstance implements SaverInstance {
       // A betafish dances a vignette's dances with its own clips, so the script leaves its body alone for those.
       // Dot plays the gestures it has clips for with its own body (dot.ts).
       const ownMoves = f.rig?.beta ? (g: string): boolean => (BETA_DANCES as readonly string[]).includes(g)
-        : f.rig?.dot ? (g: string): boolean => (DOT_GESTURES as readonly string[]).includes(g) : undefined;
+        : f.rig?.dot ? (g: string): boolean => (DOT_GESTURES as readonly string[]).includes(g)
+        : f.rig?.dolphin ? (g: string): boolean => (DOLPHIN_GESTURES as readonly string[]).includes(g) : undefined;
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec, ownMoves) : null;
       if (act) {
         px = act.x; y = act.y; pz = act.z;
@@ -3357,6 +3361,21 @@ class TankInstance implements SaverInstance {
         f.rig!.lights['SCREEN-Glass'] = f.rig!.lights['SCREEN-Pixels'] = hacker.screen.level;
       }
       const shark = f.rig?.shark ? sharkFrame(f.rig.shark, tSec, f.index, beat) : null;
+      // A dolphin (dolphin.ts): its strokes keep time with the ground it covers — a vignette
+      // actor's scripted travel, or its own — its moments, its blinks, its gestures.
+      let dolphin: ReturnType<typeof dolphinFrame> | null = null;
+      if (f.rig?.dolphin) {
+        let dPace = rigPace, dBeat = beat;
+        if (act && this.vignette) {
+          dBeat = actorTravel(this.vignette, f.index, tSec, ownMoves, true);
+          const nx = poseOf(this.vignette, f.index, tSec + 0.25, ownMoves);
+          dPace = nx ? (Math.hypot(nx.x - act.x, nx.y - act.y, nx.z - act.z) * 4) / 17 : 0;
+        }
+        dolphin = dolphinFrame(f.rig.dolphin, tSec, f.index, dBeat, {
+          pace: dPace, flurry: act ? 0 : mnv.flurry + flurryBoost, actor: !!act,
+          gesture: act?.gesture && ownMoves?.(act.gesture.name) ? { name: act.gesture.name, at: act.gesture.at, weight: act.gesture.weight } : null,
+        });
+      }
       // A babyfish swims where the tank puts it (it schools); its module sets its clips.
       const baby = f.rig?.baby ? babyFrame(f.rig.baby, tSec, f.index, beat, this.babyLeader) : null;
       // A dori flies on its fins (tang.ts): cruising or holding station by its
@@ -3482,6 +3501,28 @@ class TankInstance implements SaverInstance {
             L * puffer.bubble.size, fishHash(f.index, puffer.bubble.key.length + Math.round(puffer.bubble.t)));
         }
       }
+      // A dolphin eyes you side-on, as a real one does: for a friendly moment it turns
+      // three-quarters to you, its near eye your way; then its pupils (dolphin.ts) and its bubble.
+      if (dolphin && f.rig!.dolphin) {
+        const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
+        if (viewer && dolphin.face > 0.01) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
+          let turn = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
+          turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+          // Not nose-on: the viewer ends up 0.9 rad off its nose, on the side they already are.
+          const want = turn - Math.sign(turn) * 0.9;
+          f.group.rotateOnWorldAxis(Y_AXIS, Math.max(-0.9, Math.min(0.9, Math.abs(turn) > 0.9 ? want : 0)) * dolphin.face);
+        }
+        f.group.updateMatrixWorld(true);
+        const friend = act?.lookAt ? this.burpTmp.set(act.lookAt.x, act.lookAt.y, act.lookAt.z) : null;
+        dolphinLook(f.rig!.dolphin, tSec, f.index, dolphin, viewer, friend);
+        const hole = f.rig!.dolphin.blowhole;
+        if (dolphin.bubble && hole && this.burps) {
+          hole.getWorldPosition(this.burpAt);
+          this.burps.emit(dolphin.bubble.key, dolphin.bubble.t, this.burpAt.x, this.burpAt.y + L * 0.05, this.burpAt.z,
+            L * 0.11, fishHash(f.index, Math.round(dolphin.bubble.t * 10)));
+        }
+      }
       // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
       if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
         const hx = act ? act.fx : lfx, hy = act ? act.fy : lfy, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hy, hz) || 1;
@@ -3512,7 +3553,7 @@ class TankInstance implements SaverInstance {
       // eye on its own gaze, and never blinks.
       const minted = !!(angel || turtle || seahorse);
       // A betafish's eyes are painted into its atlas and live below (beta-eyes.ts), not here.
-      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta && !f.rig?.snail) {
+      if ((eyeLife > 0 || minted) && f.body && !f.rig?.tang && !f.rig?.puffer && !f.rig?.octopus && !f.rig?.beta && !f.rig?.snail && !f.rig?.dolphin) {
         if (f.eyes === undefined) f.eyes = rigEyes(f.group, f.body);
         if (f.eyes) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hz) || 1;
@@ -3622,7 +3663,7 @@ class TankInstance implements SaverInstance {
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });
