@@ -215,7 +215,8 @@ function lerpHex(a: string, b: string, k: number): string {
 /**
  * Interpolate between two structurally-similar specs at progress k (0..1).
  * Numbers lerp, hex colours lerp per channel, everything else steps to the
- * target immediately (k > 0). Layer counts round to integers.
+ * target immediately (k > 0). Layer counts, and a field background's
+ * `octaves` / `quantize`, round to whole values.
  */
 export function lerpSpec(from: SaverSpec, to: SaverSpec, k: number): SaverSpec {
   const kk = Math.max(0, Math.min(1, k));
@@ -237,7 +238,14 @@ export function lerpValue(from: unknown, to: unknown, k: number, specRoot = fals
   const walk = (a: unknown, b: unknown, key?: string | number, root = false): unknown => {
     if (typeof a === 'number' && typeof b === 'number') {
       const v = a + (b - a) * kk;
-      return key === 'count' ? Math.max(1, Math.round(v)) : v;
+      if (key === 'count') return Math.max(1, Math.round(v));
+      // A field background's level counts are integers (X477): a glide steps
+      // through whole levels, as the painter already reads them. `quantize`
+      // below 1.5 is smooth (0) — never the invalid 1 — matching `fieldRgb`,
+      // which paints any level count under 2 as the smooth ramp.
+      if (key === 'octaves') return Math.round(v);
+      if (key === 'quantize') { const q = Math.round(v); return q < 2 ? 0 : q; }
+      return v;
     }
     if (typeof a === 'string' && typeof b === 'string' && HEX.test(a) && HEX.test(b)) {
       return lerpHex(a, b, kk);
