@@ -300,7 +300,7 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
 // ---------------------------------------------------------------------------
 
 /** A pupil's travel on its eye's outer face, model units from where it rests (front and low): back, and up. */
-export const PUPIL_SLIDE = { back: 2, up: 4 } as const;
+export const PUPIL_SLIDE = { back: 2, up: 2 } as const;
 /** How far it can look, pupils only (radians to the face's edge). */
 const REACH_FWD = 0.8, REACH_UP = 0.6;
 /** A saccade slot: on each one the eyes may jump to a new spot. */

@@ -6,9 +6,10 @@ Rig and animate the dolphin: breeds/source/dolphin.glb in, breeds/rig/dolphin.gl
 Dot's friend. The model is drawn by rig/dolphin-model.mjs in our designer's
 style, and this script treats it as it treats theirs: never edited, only cut
 into parts. It faces -Y, its left +X; voxel centres sit at (2i, 2j, 2k + 1),
-its spine runs along y at z 13.
+its spine runs along y at z 8.5. Drawn at the house scale (24 cubes long, the
+dori 17): big cubes, so every joint here is a few cubes, not a dozen.
 
-    head      the beak, the melon, the smile and the cheeks (rigid to y -22)
+    head      the nose, the melon, the smile and the cheeks (rigid to y -9)
     body      the chest and the back, the dorsal fin riding it
     tail1/2   the tail stock
     flukes    the flat tail fin
@@ -62,13 +63,13 @@ from common import (  # noqa: E402
 )
 
 SOFT = '_soft'
-LINE = 'PAINT-#22344a'
-SPINE_Z = 13.0
-# The soft skin's knots along y (model units): the head rigid to y -22, eased
+LINE = 'PAINT-#14243a'  # dolphin-model.mjs LINE
+SPINE_Z = 8.5
+# The soft skin's knots along y (model units): the head rigid to y -9, eased
 # into the body over the neck; the body rigid over the chest; then the tail
 # stock in two links, and the flukes.
-BODY_KNOTS = [(-22.0, 'head'), (-12.0, 'body'), (0.0, 'body'), (12.0, 'tail1'), (22.0, 'tail2'), (34.0, 'flukes')]
-HINGE = (0.0, -30.0, 8.0)   # the jaw's hinge, at the corner of the smile
+BODY_KNOTS = [(-9.0, 'head'), (-3.0, 'body'), (3.0, 'body'), (10.0, 'tail1'), (16.0, 'tail2'), (20.0, 'flukes')]
+HINGE = (0.0, -17.0, 6.0)   # the jaw's hinge, at the corner of the smile
 
 
 def bone_of(x, y, z, mat):
@@ -78,11 +79,11 @@ def bone_of(x, y, z, mat):
         return f'eye.{side}'
     if mat == 'EYES-Black':
         return f'pupil.{side}'
-    if mat == LINE and k >= 9:
+    if mat == LINE and k >= 7:
         return 'blowhole'
-    if abs(i) >= 3 and k <= 3 and -10 <= j <= -5:
+    if abs(i) >= 4 and k <= 1 and -5 <= j <= -3:
         return f'flipper.{side}'
-    if j <= -15 and k <= 3:
+    if j <= -9 and k <= 2:
         return 'jaw'
     return SOFT
 
@@ -138,8 +139,8 @@ def side_eyes(white, black):
 
 
 PUPIL_PROUD = 0.03  # a hair proud of the white, so no renderer z-fights it (the tank's decal bias also holds it)
-CATCH = 1.3       # the catchlight's side (model units)
-CATCH_IN = 0.45   # in from the pupil's top front corner
+CATCH = 1.4       # the catchlight's side (model units)
+CATCH_IN = 0.5    # in from the pupil's top front corner
 CATCH_PROUD = 0.12
 
 
@@ -171,15 +172,15 @@ def catchlights(white, rects):
 def bone_table(eyes):
     t = {
         'root': ((0, 0, 0), (0, 0, 2), None),
-        'body': ((0, -6, SPINE_Z), (0, 4, SPINE_Z), 'root'),
-        'head': ((0, -14, SPINE_Z), (0, -40, SPINE_Z), 'body'),
-        'jaw': (HINGE, (0, -44, 6), 'head'),
-        'blowhole': ((0, -20, 21), (0, -20, 23), 'head'),
-        'tail1': ((0, 4, SPINE_Z), (0, 16, SPINE_Z), 'body'),
-        'tail2': ((0, 16, SPINE_Z), (0, 28, SPINE_Z), 'tail1'),
-        'flukes': ((0, 28, SPINE_Z), (0, 48, SPINE_Z), 'tail2'),
-        'flipper.L': ((6, -19, 7), (13, -12, 3), 'body'),
-        'flipper.R': ((-6, -19, 7), (-13, -12, 3), 'body'),
+        'body': ((0, -4, SPINE_Z), (0, 4, SPINE_Z), 'root'),
+        'head': ((0, -6, SPINE_Z), (0, -22, SPINE_Z), 'body'),
+        'jaw': (HINGE, (0, -24, 4), 'head'),
+        'blowhole': ((0, -12, 15), (0, -12, 17), 'head'),
+        'tail1': ((0, 4, SPINE_Z), (0, 12, SPINE_Z), 'body'),
+        'tail2': ((0, 12, SPINE_Z), (0, 19, SPINE_Z), 'tail1'),
+        'flukes': ((0, 19, SPINE_Z), (0, 26, SPINE_Z), 'tail2'),
+        'flipper.L': ((7, -10, 3), (11, -6, 1), 'body'),
+        'flipper.R': ((-7, -10, 3), (-11, -6, 1), 'body'),
     }
     for s, ((lo, hi), (y0, y1, z0, z1)) in eyes.items():
         side = 'L' if s > 0 else 'R'
@@ -201,7 +202,7 @@ def stroke(p, w, amp=1.0):
     for bone, lag, a in SPINE:
         p.turn(bone, 'x', a * amp * math.sin(w - lag))
     # The body heaves against the flukes, a little.
-    p.move('body', (0, 0, -0.5 * amp * math.sin(w - 2.6)))
+    p.move('body', (0, 0, -0.3 * amp * math.sin(w - 2.6)))
 
 
 def eyes(p, shut):
@@ -261,7 +262,7 @@ def hover(t, T=2.4):
     for side, m in SIDES:
         p.turn(f'flipper.{side}', 'z', -m * (0.25 + 0.2 * math.sin(w + (0 if m > 0 else math.pi))))
         p.turn(f'flipper.{side}', 'x', 0.15 * math.sin(w))
-    p.move('body', (0, 0, 0.6 * math.sin(w)))
+    p.move('body', (0, 0, 0.35 * math.sin(w)))
     return p
 
 
@@ -318,7 +319,7 @@ def flip(t, T=2.8):
     curl = env(t, 0.2, 0.6, 1.9, 2.4)
     for bone, a in (('head', -0.18), ('tail1', -0.12), ('tail2', -0.18), ('flukes', -0.3)):
         p.turn(bone, 'x', a * curl)
-    p.move('body', (0, 0, 6 * env(t, 0.3, 1.25, 1.25, 2.3)))
+    p.move('body', (0, 0, 3 * env(t, 0.3, 1.25, 1.25, 2.3)))
     flippers(p, out=0.4 * curl)
     eyes(p, 0.6 * env(t, 0.9, 1.1, 1.5, 1.8))
     return p
@@ -343,7 +344,7 @@ def bubble(t, T=2.6):
     p.turn('head', 'x', 0.08 * dip)
     puff = track(t, [(0, 0), (0.5, 0), (0.62, 1), (0.9, 1.0), (1.2, 0)])
     p.scale['blowhole'] = (1 + 0.8 * puff, 1 + 0.8 * puff, 1 + 0.5 * puff)
-    p.move('body', (0, 0, -0.6 * puff))
+    p.move('body', (0, 0, -0.35 * puff))
     # Then it looks up after the bubble (the tank lifts its gaze too).
     p.turn('head', 'x', -0.16 * env(t, 1.0, 1.4, 2.0, 2.5))
     eyes(p, blinking(t, 0.55))
