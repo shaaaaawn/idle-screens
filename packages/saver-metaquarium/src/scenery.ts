@@ -11,7 +11,7 @@ import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, type FloraStem, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_PARS, GEODE_SHADE, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
-import { buildGeodeInterior, ROOM_MIN_SCALE } from './interior';
+import { buildGeodeInterior, roomScale } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
 import { buildCastle } from './castle';
 import { buildHorizon, HORIZON_FRAGMENT, HORIZON_VERTEX } from './horizon';
@@ -373,7 +373,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   let cards: GlowCards | null = null;
   if (opts.interior) {
     // The room must hold the swim volume whatever `crystalScale` says.
-    const room = buildGeodeInterior(rng.fork(7), { tint: clusters.length ? anchors[0]!.color : '#8a4dff', scale: Math.max(s, ROOM_MIN_SCALE), floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
+    const room = buildGeodeInterior(rng.fork(7), { tint: clusters.length ? anchors[0]!.color : '#8a4dff', scale: roomScale(s), floorY: terrain(0, 0), detail: opts.cap >= 8 ? 1 : 0.5 });
     shellParts.push(...room.room);
     vents.push(...room.vents);
     homeLights.push(...room.emitters);

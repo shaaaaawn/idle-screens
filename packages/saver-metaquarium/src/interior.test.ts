@@ -1,7 +1,7 @@
 import { createRng } from '@idle-screens/core';
 import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { buildGeodeInterior, ROOM_HEIGHT, ROOM_RADIUS, sideAxisFor } from './interior';
+import { buildGeodeInterior, ROOM_HEIGHT, ROOM_MIN_SCALE, ROOM_RADIUS, roomScale, sideAxisFor } from './interior';
 
 const room = (seed = 4, over = {}) => buildGeodeInterior(createRng(seed), { tint: '#7a3cff', scale: 1, floorY: 0, ...over });
 const pos = (r: ReturnType<typeof room>): number[] => Array.from(r.room[0]!.getAttribute('position').array);
@@ -92,5 +92,13 @@ describe('geode interior', () => {
     expect(Math.abs(out.y)).toBeLessThan(1e-6);
     expect(out.length()).toBeCloseTo(1, 6);
     expect(out.dot(axis)).toBeCloseTo(0, 6);
+  });
+});
+
+describe('room scale (X447)', () => {
+  it('is crystalScale, never below ROOM_MIN_SCALE — what the room and its marks both scale by', () => {
+    expect(roomScale(0.4)).toBe(ROOM_MIN_SCALE);
+    expect(roomScale(0.6)).toBe(ROOM_MIN_SCALE);
+    expect(roomScale(1.3)).toBe(1.3);
   });
 });

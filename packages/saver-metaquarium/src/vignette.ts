@@ -39,7 +39,10 @@ export type Marks = Readonly<Record<string, Mark>>;
  *  with its own body; any other fish gets the whole-body version below. */
 export const DANCES = ['toprock', 'footwork', 'windmill', 'headspin', 'freeze', 'drop'] as const;
 export type Dance = (typeof DANCES)[number];
-export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow', ...DANCES] as const;
+/** `ink` is the octopus's own (it lets go a cloud of ink; the tank does that, not the pose): any other breed ignores it, with a warning. */
+export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow', 'ink', ...DANCES] as const;
+/** Gestures only some breeds can make, and which. */
+export const BREED_GESTURES: Readonly<Partial<Record<Gesture, readonly string[]>>> = { ink: ['octopus'] };
 export type Gesture = (typeof GESTURES)[number];
 
 /** Marks any open tank has, for vignettes played outside a room. */
@@ -62,6 +65,9 @@ interface ActorBeat {
    *  where the beat before ended. */
   from?: Mark;
   moved: boolean;
+  /** A later beat's `=mark`: the actor is AT the mark from the beat's first
+   *  moment (`from` holds it), a cut, not a walk — what `=` means in any beat. */
+  placed?: boolean;
   /** Another actor's index, a fixed point, or nothing. */
   faceActor: number | null;
   facePoint: Mark | null;
@@ -144,6 +150,9 @@ export function parseVignette(script: string, marks: Marks): Vignette {
             if (word[0] === '=') at[i] = dest; // placed, not walked
             else longest = Math.max(longest, Math.hypot(dest.x - at[i]!.x, dest.y - at[i]!.y, dest.z - at[i]!.z) / CRUISE);
             state[i] = { ...state[i]!, to: dest, moved: word[0] === '>', facePoint: state[i]!.facePoint ?? mk };
+            // A later beat's `=` places from the beat's start (the first beat's
+            // opening places are written below, into `from` for every actor).
+            if (word[0] === '=' && bi > 0) state[i] = { ...state[i]!, from: dest, placed: true };
           }
         } else if (word[0] === '@') {
           const tg = target(word.slice(1));
@@ -236,7 +245,8 @@ function placeOf(v: Vignette, actor: number, tSec: number, depth = 0): Mark {
   if (bi < 0) bi = v.beats.length - 1;
   const beat = v.beats[bi]!, me = beat.actors[actor]!;
   const prev = v.beats[(bi + v.beats.length - 1) % v.beats.length]!.actors[actor]!;
-  const from = bi === 0 ? me.from ?? me.to : prev.to;
+  // The first beat starts at the opening places; a later `=` at its mark; any other where the beat before ended.
+  const from = me.from ?? (bi === 0 ? me.to : prev.to);
   const u = (t - beat.t0) / beat.dur;
   if (me.follow !== null && depth < 2) {
     // Behind the leader, a beat late: where they were a moment ago, a little low.
@@ -269,6 +279,28 @@ function placeOf(v: Vignette, actor: number, tSec: number, depth = 0): Mark {
   };
 }
 
+/**
+ * Whether a later beat's `=mark` cuts this actor across the room between `t1`
+ * and `t2` (either order, loop-wrapped). Anything that samples a script a
+ * moment ahead or behind — a heading, a pace, a dodge, a trail — must not read
+ * velocity across a cut.
+ */
+export function snapBetween(v: Vignette, actor: number, t1: number, t2: number): boolean {
+  if (!v.duration || actor >= v.actors) return false;
+  const lo = Math.min(t1, t2), span = Math.abs(t2 - t1);
+  const a = ((lo % v.duration) + v.duration) % v.duration;
+  return v.beats.some((b) => {
+    if (!b.actors[actor]?.placed) return false;
+    const d = (((b.t0 - a) % v.duration) + v.duration) % v.duration;
+    return d > 0 && d <= span;
+  });
+}
+
+/** The pose `dt` seconds on (or back) — or, across a cut, the pose now (no velocity through a snap). */
+export function poseAcross(v: Vignette, actor: number, tSec: number, dt: number, own?: (g: Gesture) => boolean): ActorPose | null {
+  return poseOf(v, actor, snapBetween(v, actor, tSec, tSec + dt) ? tSec : tSec + dt, own);
+}
+
 /** Full pose. Pure in (vignette, actor, t). */
 /**
  * `own`: gestures this actor performs with its own body (a betafish's dance
@@ -283,8 +315,11 @@ export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gestu
   const beat = v.beats[bi]!, me = beat.actors[actor]!;
   const u = (t - beat.t0) / beat.dur;
   const p = placeOf(v, actor, tSec);
-  const ahead = placeOf(v, actor, tSec + 0.12);
-  const tx = ahead.x - p.x, ty = ahead.y - p.y, tz = ahead.z - p.z;
+  // The way it is going: a look a moment ahead — or, with a `=` cut coming, a
+  // moment back, so the heading never swings toward a mark it does not walk to.
+  const cut = snapBetween(v, actor, tSec, tSec + 0.12);
+  const ahead = placeOf(v, actor, tSec + (cut ? -0.12 : 0.12));
+  const tx = (ahead.x - p.x) * (cut ? -1 : 1), ty = (ahead.y - p.y) * (cut ? -1 : 1), tz = (ahead.z - p.z) * (cut ? -1 : 1);
   const speed = Math.hypot(tx, ty, tz) / 0.12;
 
   // Heading: along the path while travelling, toward the target once there.
@@ -301,7 +336,9 @@ export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gestu
     }
   } else if (Math.hypot(fx, fz) < 1e-4) {
     // Standing with nobody to face: keep the heading of the last walk in.
-    const back = placeOf(v, actor, beat.t0 - 0.2), here = placeOf(v, actor, beat.t0);
+    // (Across a `=` cut, the last walk is the one before it.)
+    const end = me.placed ? beat.t0 - 1e-3 : beat.t0;
+    const back = placeOf(v, actor, end - 0.2), here = placeOf(v, actor, end);
     fx = here.x - back.x; fz = here.z - back.z; fy = 0;
     if (Math.hypot(fx, fz) < 1e-4) { fx = -p.x; fz = -p.z - 1e-3; }
   }
@@ -338,6 +375,7 @@ export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gestu
         case 'bow': pitch = -bell(gu) * 0.55; y -= bell(gu) * 2; break;
         case 'peek': { const k = Math.sin(gt * 2.4) * e; x += -fz * k * 7; z += fx * k * 7; roll += k * 0.18; break; }
         case 'rest': y -= 5 * e; roll += 0.22 * e; pitch = -0.08 * e; break;
+        // ink: the body holds still; the octopus squirts its cloud (the tank's InkLayer) and pales.
         // The dances, for a fish with no clips for them: the whole body does what it can.
         case 'toprock': roll += Math.sin(bt * Math.PI * 2) * 0.3 * e; y += Math.abs(Math.sin(bt * Math.PI * 2)) * 1.5 * e; break;
         case 'footwork': yaw = Math.sin(bt * Math.PI) * 0.5 * e; y -= 3 * e; roll += Math.sin(bt * Math.PI * 3) * 0.15 * e; break;
@@ -358,6 +396,20 @@ export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gestu
  *  (zero-dep) beside the scripts that name them; `interior.ts` places the
  *  furniture from the same polar numbers. */
 const polar = (deg: number, r: number, y: number): Mark => ({ x: Math.cos((deg * Math.PI) / 180) * r, y, z: Math.sin((deg * Math.PI) / 180) * r });
+/** The furniture marks as placed round the room: bearing in degrees (0° = +x, 90° = +z),
+ *  distance from the middle, height — at room scale 1 (the room and its marks scale by
+ *  `roomScale(crystalScale)`, never below 0.85). The guide prints this as a table. */
+export const INTERIOR_MARK_POLAR: Readonly<Record<string, { deg: number; r: number; y: number; note?: string }>> = {
+  door: { deg: 28, r: 124, y: 22 },
+  stove: { deg: 88, r: 106, y: 33 },
+  window: { deg: 128, r: 124, y: 46 },
+  table: { deg: 150, r: 46, y: 27, note: 'on the rug' },
+  bed: { deg: 205, r: 104, y: 21 },
+  chest: { deg: 232, r: 110, y: 24 },
+  lamp: { deg: 262, r: 102, y: 32 },
+  armchair: { deg: 271, r: 100, y: 22 },
+  shelf: { deg: 330, r: 110, y: 30 },
+};
 export const INTERIOR_MARKS: Marks = {
   rug: { x: 6, y: 26, z: -4 },
   centre: { x: 6, y: 30, z: -4 },

@@ -31,7 +31,7 @@ import { boutDistance, boutSpeed, type CrabInput } from './crab';
 import { swimPoseAtDistance, type SwimPlan } from './plan';
 import type { Glyph, ScreenState } from './screen';
 import { fishHash } from './swim';
-import { poseOf, type ActorPose, type Gesture, type Vignette } from './vignette';
+import { poseOf, snapBetween, type ActorPose, type Gesture, type Vignette } from './vignette';
 
 export const DOT_CLIPS = [
   'idle', 'walk', 'run', 'talk', 'nod', 'shake', 'hop', 'wiggle', 'wave', 'cheer', 'rest',
@@ -291,7 +291,9 @@ export function actorTravel(v: Vignette, actor: number, t: number, own?: (g: Ges
     let prev = poseOf(v, actor, 0, own);
     for (let i = 1; i <= n; i++) {
       const p = poseOf(v, actor, (i / n) * v.duration, own);
-      table[i] = table[i - 1]! + (p && prev ? Math.hypot(p.x - prev.x, solid ? p.y - prev.y : 0, p.z - prev.z) : 0);
+      // A `=` cut is not walked (or swum): no steps for the jump (vignette.ts snapBetween).
+      const cut = snapBetween(v, actor, ((i - 1) / n) * v.duration, (i / n) * v.duration);
+      table[i] = table[i - 1]! + (p && prev && !cut ? Math.hypot(p.x - prev.x, solid ? p.y - prev.y : 0, p.z - prev.z) : 0);
       prev = p;
     }
     byActor.set(key, table);
